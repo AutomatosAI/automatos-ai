@@ -18,6 +18,12 @@ if the key is lost).
 
 Usage:
     DATABASE_URL=postgres://... python orchestrator/scripts/create_test_workspace.py
+    # a differently named workspace (the simulation harness, PRD-247, names its
+    # throwaway workspaces sim-<pack>-<date> and purges them afterwards):
+    python orchestrator/scripts/create_test_workspace.py --slug sim-smoke-20260918 \
+        --name "SIM smoke 20260918" --key-name "sim key" --purpose sim:smoke
+    # or piped into the backend container, no DATABASE_URL needed on the host:
+    docker exec -i -w /app automatos_backend python - --slug ... < orchestrator/scripts/create_test_workspace.py
 
 Output (stdout):
     WORKSPACE_ID=<uuid>
@@ -29,14 +35,20 @@ Pipe straight into tests/.env if you want:
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
+from typing import Optional
 from uuid import uuid4
 
-# Allow running as `python orchestrator/scripts/create_test_workspace.py`
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Allow running as `python orchestrator/scripts/create_test_workspace.py`, or
+# piped into `python -` from the orchestrator root (no __file__ then).
+_HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
+sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..")) if _HERE else os.getcwd())
 
+from config import config  # noqa: E402
 from core.database.database import SessionLocal  # noqa: E402
+from core.models.core import User  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from core.services.api_key_service import ApiKeyService  # noqa: E402
 
@@ -44,14 +56,59 @@ from core.services.api_key_service import ApiKeyService  # noqa: E402
 WORKSPACE_NAME = "TEST - Nightly Suite"
 WORKSPACE_SLUG = "test-nightly-suite"
 KEY_NAME = "Nightly Test Suite Key"
+PURPOSE = "nightly-test-suite"
 
 
-def main() -> int:
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="create (or find by slug) an isolated test workspace + service key")
+    parser.add_argument("--slug", default=WORKSPACE_SLUG)
+    parser.add_argument("--name", default=WORKSPACE_NAME)
+    parser.add_argument("--key-name", default=KEY_NAME)
+    parser.add_argument("--purpose", default=PURPOSE, help="stored in settings.purpose; the purge script checks it")
+    parser.add_argument("--owner-id", type=int, default=None, help="users.id to own the workspace (default: inferred)")
+    parser.add_argument("--no-key", action="store_true",
+                        help="create/find the workspace only; mint no API key (the simulation harness runs as the "
+                             "anonymous local operator and scopes by X-Workspace-ID)")
+    return parser.parse_args(argv)
+
+
+def _infer_owner_id(db, explicit: Optional[int]) -> Optional[int]:
+    """Who owns the test workspace.
+
+    ``--owner-id`` if given; else the owner of the newest owned workspace; else
+    the local operator's ``users`` row (``LOCAL_OPERATOR_EMAIL``); else the only
+    user there is; else NULL. ``workspaces.owner_id`` is nullable — the local
+    edition's own workspace has none — and the purge path tolerates NULL.
+    """
+    if explicit is not None:
+        return explicit
+    template = (
+        db.query(Workspace)
+        .filter(Workspace.is_active.is_(True), Workspace.owner_id.isnot(None))
+        .order_by(Workspace.created_at.desc())
+        .first()
+    )
+    if template is not None:
+        return template.owner_id
+    operator = db.query(User).filter(User.email == config.LOCAL_OPERATOR_EMAIL).first()
+    if operator is not None:
+        print(f"# owner: local operator {operator.email} (users.id={operator.id})", file=sys.stderr)
+        return operator.id
+    anyone = db.query(User).order_by(User.id).first()
+    if anyone is not None:
+        print(f"# owner: first users row (users.id={anyone.id})", file=sys.stderr)
+        return anyone.id
+    print("# owner: no users row — owner_id left NULL", file=sys.stderr)
+    return None
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
     db = SessionLocal()
     try:
         existing = (
             db.query(Workspace)
-            .filter(Workspace.slug == WORKSPACE_SLUG)
+            .filter(Workspace.slug == args.slug)
             .first()
         )
 
@@ -59,34 +116,18 @@ def main() -> int:
             workspace = existing
             print(f"# Found existing workspace: {workspace.id}", file=sys.stderr)
         else:
-            # owner_id is NOT NULL in DB schema (model is out of date).
-            # Reuse the owner of the most recently created active workspace
-            # so the test workspace is owned by a real user.
-            template = (
-                db.query(Workspace)
-                .filter(
-                    Workspace.is_active.is_(True),
-                    Workspace.owner_id.isnot(None),
-                )
-                .order_by(Workspace.created_at.desc())
-                .first()
-            )
-            if template is None:
-                raise RuntimeError(
-                    "No active workspace with owner_id found — cannot infer owner."
-                )
-
+            owner_id = _infer_owner_id(db, args.owner_id)
             workspace = Workspace(
                 id=uuid4(),
-                name=WORKSPACE_NAME,
-                slug=WORKSPACE_SLUG,
-                owner_id=template.owner_id,
+                name=args.name,
+                slug=args.slug,
+                owner_id=owner_id,
                 plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                 is_personal=False,
                 is_active=True,
                 webhook_key=uuid4().hex,
                 settings={
-                    "purpose": "nightly-test-suite",
+                    "purpose": args.purpose,
                     "managed_by": "create_test_workspace.py",
                     "warning": (
                         "This workspace is mutated nightly by the API test "
@@ -97,10 +138,15 @@ def main() -> int:
             db.add(workspace)
             db.flush()
             print(
-                f"# Created new workspace: {workspace.id} "
-                f"(owner_id={template.owner_id})",
+                f"# Created new workspace: {workspace.id} (owner_id={owner_id})",
                 file=sys.stderr,
             )
+
+        if args.no_key:
+            db.commit()
+            print(f"WORKSPACE_ID={workspace.id}")
+            print("# no API key minted (--no-key)", file=sys.stderr)
+            return 0
 
         # key_type="server" (private/admin). PRD-195 S1: empty/None permissions
         # now grant NOTHING (least privilege, one semantic on every plane) — a
@@ -109,7 +155,7 @@ def main() -> int:
         key_result = ApiKeyService.create_api_key(
             db=db,
             workspace_id=workspace.id,
-            name=KEY_NAME,
+            name=args.key_name,
             key_type="server",
             permissions=["*"],
         )

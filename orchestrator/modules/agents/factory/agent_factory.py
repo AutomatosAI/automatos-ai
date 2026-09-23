@@ -31,6 +31,10 @@ from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
 logger = logging.getLogger(__name__)
 
+# F040: statuses that mean "the owner has switched this agent off". Anything
+# else runs — a new status word should not silently disable a fleet.
+INACTIVE_AGENT_STATUSES = frozenset({"inactive", "disabled", "paused", "archived", "suspended"})
+
 
 # ---------------------------------------------------------------------------
 # Lazy imports (avoid circular deps)
@@ -214,6 +218,23 @@ class AgentFactory:
             self.db_session = SessionLocal()
         self.active_agents: Dict[int, AgentRuntime] = {}
         self.logger = logging.getLogger(__name__)
+
+    async def _call_model(self, agent_runtime: "AgentRuntime", messages: List[Dict[str, Any]],
+                          tools: Optional[List[Dict[str, Any]]] = None):
+        """F105-B: every model call of an agent run goes through here. A
+        transaction that has only read ends first, so the run holds no pool
+        connection while the model thinks (night 3: agent runs sat "idle in
+        transaction" 55–57 s). One that wrote is kept. Dial:
+        chatbot.release_db_between_model_calls, read once per factory."""
+        from core.database.read_release import release_if_read_only
+
+        if getattr(self, "_release_db_dial", None) is None:
+            from config import config as _config
+
+            self._release_db_dial = _config.CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS
+        if self._release_db_dial:
+            release_if_read_only(self.db_session)
+        return await agent_runtime.llm_manager.generate_response(messages, tools=tools)
 
     # ==================================================================
     # LLM Config Resolution
@@ -1039,6 +1060,49 @@ class AgentFactory:
             return RuntimeMismatchError(agent_id, RUNTIME_CLI)
         return None
 
+    def _inactive_refusal(self, agent: Union[int, "AgentRuntime"]) -> Optional[Dict[str, Any]]:
+        """F040: refuse to run an agent the owner has switched OFF.
+
+        Deactivating an agent changed ``agents.status`` and stopped nothing —
+        every execution lane went straight past it, so the one control an owner
+        has over an agent they no longer trust did nothing at all. "We built
+        governance — says who?" This is the same choke point the runtime guard
+        uses, so all eight lanes are covered by one check.
+
+        Returns an executor-shaped error, or ``None`` to proceed. Fail-OPEN on a
+        read problem: an unreadable row must not strand every agent.
+        """
+        agent_id = agent if isinstance(agent, int) else getattr(agent, "agent_id", None)
+        session = getattr(self, "db_session", None)
+        if agent_id is None or session is None or not hasattr(session, "query"):
+            return None
+        try:
+            row = session.query(Agent.status, Agent.name).filter(Agent.id == agent_id).first()
+        except Exception:  # noqa: BLE001
+            self.logger.warning(
+                "[AgentFactory] active guard could not read agent %s — proceeding",
+                agent_id, exc_info=True,
+            )
+            return None
+        if not row:
+            return None
+        status = str(row[0] or "").strip().lower()
+        if status in INACTIVE_AGENT_STATUSES:
+            name = row[1] or f"Agent {agent_id}"
+            self.logger.warning(
+                "[AgentFactory] refusing to execute '%s' (%s): the agent is %s",
+                name, agent_id, status,
+            )
+            return {
+                "status": "error",
+                "error": (
+                    f"'{name}' is {status} and cannot run work. Reactivate the agent "
+                    "in the roster, or assign this to an active agent."
+                ),
+                "refused": "agent_inactive",
+            }
+        return None
+
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -1073,6 +1137,12 @@ class AgentFactory:
         if mismatch is not None:
             self.logger.warning("[AgentFactory] %s", mismatch)
             return mismatch.as_result()
+
+        # F040: an agent the owner switched off does not run. Checked here with
+        # the runtime guard, before any context is built or model client touched.
+        inactive = self._inactive_refusal(agent)
+        if inactive is not None:
+            return inactive
 
         # --- Resolve agent runtime ---
         if isinstance(agent, int):
@@ -1313,7 +1383,7 @@ class AgentFactory:
                     # PRD-201 S5: mark the Anthropic call as a headless run so the
                     # client seam emits context-editing + the memory tool.
                     with headless_run():
-                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        response = await self._call_model(agent_runtime, messages, tool_schemas)
                     execution_time = time.time() - start_time
 
                     # --- Converged tool loop (PRD-142 W3-S4 / G6): same executor as chat ---
@@ -1323,7 +1393,7 @@ class AgentFactory:
                         # PRD-201 S5: keep the headless scope across the tool loop's
                         # re-invocations so every iteration emits context-editing.
                         with headless_run():
-                            return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
+                            return await self._call_model(agent_runtime, msgs, tls)
 
                     # PRD-178 S1 (F020): thread the calling task's field context
                     # so PlatformActionExecutor binds field tools to THIS run's
@@ -1438,12 +1508,20 @@ class AgentFactory:
                     # Synthesize empty response from tool results
                     if response and (not response.content or not response.content.strip()):
                         if tool_results:
+                            from services.result_substance import (
+                                NOTHING_DONE_HEADER, TOOL_RESULTS_HEADER, is_skip_message,
+                            )
+
                             tool_summary = "\n\n".join([
                                 f"**{tr['name']}**: {tr['content'][:500]}"
                                 for tr in tool_results
                                 if tr.get("role") == "tool"
                             ])
-                            response.content = f"Based on the tool results:\n\n{tool_summary}"
+                            # F093: skipped calls are not results — say the run did nothing
+                            header = (NOTHING_DONE_HEADER
+                                      if all(is_skip_message(tr.get("content", "")) for tr in tool_results)
+                                      else TOOL_RESULTS_HEADER)
+                            response.content = f"{header}\n\n{tool_summary}"
 
                     # Handle truncation: continue generating if output was cut off
                     max_continuations = 2
@@ -1467,7 +1545,7 @@ class AgentFactory:
                             "role": "user",
                             "content": "Your response was truncated. Continue exactly where you left off — do not repeat any content.",
                         })
-                        continuation_response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        continuation_response = await self._call_model(agent_runtime, messages, tool_schemas)
                         if continuation_response and continuation_response.content:
                             response.content += continuation_response.content
                             if continuation_response.usage:

@@ -30,6 +30,7 @@ import {
   useUpdateMissionPlan,
 } from '@/hooks/use-missions-api'
 import type { ApprovalGrant } from '@/lib/api-client'
+import { ownerLine } from '@/lib/grant-owner'
 import type { MissionResponse } from '@/types/missions'
 
 const PENDING = 'pending'
@@ -85,6 +86,9 @@ function GrantCard({ grant }: { grant: ApprovalGrant }) {
             {grant.tool_name || grant.subject_type}
             <span className="text-xs text-muted-foreground"> · {grant.subject_type}:{grant.subject_id}</span>
           </p>
+          {ownerLine(grant.owner) && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{ownerLine(grant.owner)}</p>
+          )}
           <p className="text-xs text-muted-foreground mt-0.5">
             Requested {whenLabel(grant.requested_at)}
             {grant.expires_at && <> · expires {whenLabel(grant.expires_at)}</>}

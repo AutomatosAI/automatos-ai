@@ -45,8 +45,8 @@ def _import_vector_field_isolated():
     W2-S2b.)
     """
     _keys = (
-        "qdrant_client", "qdrant_client.models", "config",
-        "core.llm", "core.llm.embedding_manager", "core.ports.context",
+        "qdrant_client", "qdrant_client.models", "qdrant_client.http", "qdrant_client.http.exceptions",
+        "config", "core.llm", "core.llm.embedding_manager", "core.ports.context", "core.qdrant_writes",
     )
     _saved = {k: sys.modules.get(k) for k in _keys}
     try:
@@ -58,8 +58,15 @@ def _import_vector_field_isolated():
                      "PayloadSchemaType", "PointStruct", "VectorParams"):
             setattr(_models_stub, _sym, MagicMock())
         _qdrant_stub.models = _models_stub
+        # ... and the exceptions core.qdrant_writes (the F103 write retry) reads
+        _exceptions_stub = MagicMock()
+        for _exc in ("UnexpectedResponse", "ResponseHandlingException"):
+            setattr(_exceptions_stub, _exc, type(_exc, (Exception,), {}))
+        _qdrant_stub.http.exceptions = _exceptions_stub
         sys.modules.setdefault("qdrant_client", _qdrant_stub)
         sys.modules.setdefault("qdrant_client.models", _models_stub)
+        sys.modules.setdefault("qdrant_client.http", _qdrant_stub.http)
+        sys.modules.setdefault("qdrant_client.http.exceptions", _exceptions_stub)
 
         _fake_config_for_import = MagicMock()
         _fake_config_for_import.QDRANT_URL = "http://localhost:6333"

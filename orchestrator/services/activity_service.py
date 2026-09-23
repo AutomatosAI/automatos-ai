@@ -11,6 +11,9 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+
+# How many agents the reports panel falls back to when the caller pins none.
+RECENT_REPORTING_AGENTS = 12
 from uuid import UUID
 
 from sqlalchemy import desc, exists, func, text
@@ -196,6 +199,11 @@ class ActivityService:
             "channels_live": channels_live,
             "completed_today": completed_today,
             "needs_attention": needs_attention,
+            # The stats-strip, the shell and the Auto rail all read these two
+            # and they were never in the payload — the AGENTS and QUEUE tiles
+            # rendered blank by construction, not because nothing was running.
+            "agents_active": self._count_agents_active(),
+            "tasks_in_queue": self._count_tasks_in_queue(),
             "period": period,
         }
 
@@ -512,7 +520,13 @@ class ActivityService:
     # ── Stats Helpers ─────────────────────────────────────────────
 
     def _count_working_now(self) -> int:
-        """Count currently running executions (recipes + routines)."""
+        """How much work is in flight right now: running recipe executions AND
+        board tickets an agent currently holds.
+
+        Night 1 (2026-09-18): this counted only ``RecipeExecution.running``, so
+        the header read "0 agents working" with six tickets in progress — the
+        whole night's work went through the board, not through recipes.
+        """
         try:
             recipe_running = (
                 self.db.query(func.count(RecipeExecution.id))
@@ -523,9 +537,56 @@ class ActivityService:
                 .scalar()
                 or 0
             )
-            return recipe_running
+            tickets_row = self.db.execute(
+                text("""
+                    SELECT COUNT(*) AS cnt
+                    FROM board_tasks
+                    WHERE workspace_id = :ws_id AND status = 'in_progress'
+                """),
+                {"ws_id": self._ws_str},
+            ).fetchone()
+            tickets_running = tickets_row.cnt if tickets_row else 0
+            return recipe_running + tickets_running
         except Exception as e:
             logger.error("Failed to count working_now: %s", e)
+            return 0
+
+    def _count_agents_active(self) -> int:
+        """Distinct agents holding work right now — what the AGENTS tile means.
+
+        The stats payload never carried this key, so the tile that reads it was
+        structurally blank no matter what the workspace was doing.
+        """
+        try:
+            row = self.db.execute(
+                text("""
+                    SELECT COUNT(DISTINCT assigned_agent_id) AS cnt
+                    FROM board_tasks
+                    WHERE workspace_id = :ws_id
+                      AND status = 'in_progress'
+                      AND assigned_agent_id IS NOT NULL
+                """),
+                {"ws_id": self._ws_str},
+            ).fetchone()
+            return row.cnt if row else 0
+        except Exception as e:
+            logger.error("Failed to count agents_active: %s", e)
+            return 0
+
+    def _count_tasks_in_queue(self) -> int:
+        """Tickets waiting to be picked up — the QUEUE tile, likewise never sent."""
+        try:
+            row = self.db.execute(
+                text("""
+                    SELECT COUNT(*) AS cnt
+                    FROM board_tasks
+                    WHERE workspace_id = :ws_id AND status IN ('inbox', 'assigned')
+                """),
+                {"ws_id": self._ws_str},
+            ).fetchone()
+            return row.cnt if row else 0
+        except Exception as e:
+            logger.error("Failed to count tasks_in_queue: %s", e)
             return 0
 
     def _count_channels_live(self) -> int:
@@ -602,7 +663,23 @@ class ActivityService:
             ).fetchone()
             hb_failed = hb_failed_row.cnt if hb_failed_row else 0
 
-            return recipe_failed + hb_failed
+            # What is actually waiting on the OWNER, not just what broke.
+            # Night 1: ATTENTION read 0 all night while four tickets sat in
+            # review, questions went unanswered and tickets were blocked.
+            waiting_row = self.db.execute(
+                text("""
+                    SELECT
+                      (SELECT COUNT(*) FROM board_tasks
+                        WHERE workspace_id = :ws_id AND status IN ('review', 'blocked')) AS tickets,
+                      (SELECT COUNT(*) FROM approval_grants
+                        WHERE workspace_id = :ws_id AND status = 'pending'
+                          AND (expires_at IS NULL OR expires_at > NOW())) AS grants
+                """),
+                {"ws_id": self._ws_str},
+            ).fetchone()
+            waiting = (waiting_row.tickets + waiting_row.grants) if waiting_row else 0
+
+            return recipe_failed + hb_failed + waiting
         except Exception as e:
             logger.error("Failed to count needs_attention: %s", e)
             return 0
@@ -1109,10 +1186,18 @@ class ActivityService:
 
     # ── Agent Reports Endpoint ─────────────────────────────────
 
-    def get_agent_reports(self, *, agent_ids: List[int]) -> Dict[str, Any]:
-        """Return latest execution summaries for pinned agents."""
+    def get_agent_reports(self, *, agent_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Latest execution summary per agent.
+
+        With ``agent_ids`` the caller picks the agents. Without them, the agents
+        that have reported most recently — night 1 (2026-09-18) ended with twelve
+        reports on the record and this panel blank, because it only ever asked
+        about the three agents localStorage happened to have pinned.
+        """
         reports: List[Dict[str, Any]] = []
 
+        if not agent_ids:
+            agent_ids = self._recently_reporting_agent_ids()
         if not agent_ids:
             return {"reports": reports}
 
@@ -1200,6 +1285,31 @@ class ActivityService:
                 })
 
         return {"reports": reports}
+
+    def _recently_reporting_agent_ids(self) -> List[int]:
+        """The workspace's agents with the most recent heartbeat results."""
+        try:
+            rows = self.db.execute(
+                text("""
+                    SELECT source_id, MAX(created_at) AS latest
+                    FROM heartbeat_results
+                    WHERE workspace_id = :ws_id AND source_type = 'agent'
+                    GROUP BY source_id
+                    ORDER BY latest DESC
+                    LIMIT :limit
+                """),
+                {"ws_id": self._ws_str, "limit": RECENT_REPORTING_AGENTS},
+            ).fetchall()
+        except Exception:  # noqa: BLE001 — an empty panel beats a 500
+            logger.warning("Failed to list recently reporting agents", exc_info=True)
+            return []
+        ids: List[int] = []
+        for row in rows:
+            try:
+                ids.append(int(row.source_id))
+            except (TypeError, ValueError):
+                continue
+        return ids
 
     @staticmethod
     def _recipe_summary(execution: RecipeExecution, recipe_name: str) -> str:

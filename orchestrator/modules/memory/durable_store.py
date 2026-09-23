@@ -43,6 +43,7 @@ from qdrant_client.models import (
 
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
+from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 
 logger = logging.getLogger(__name__)
 
@@ -247,22 +248,27 @@ class DurableMemoryStore:
 
         embedding = await self._embedder.generate_embedding(text)
         point_id = str(uuid.uuid4())
-        await self._client.upsert(
-            collection_name=self._collection,
-            points=[PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={
-                    "namespace": user_id,
-                    "workspace_id": ws,
-                    "subject_id": subject_id,  # PRD-196 S6 (GDPR data-subject tag)
-                    "content": text,
-                    "metadata": metadata or {},
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "content_hash": content_hash,
-                },
-            )],
+        point = PointStruct(
+            id=point_id,
+            vector=embedding,
+            payload={
+                "namespace": user_id,
+                "workspace_id": ws,
+                "subject_id": subject_id,  # PRD-196 S6 (GDPR data-subject tag)
+                "content": text,
+                "metadata": metadata or {},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "content_hash": content_hash,
+            },
         )
+        try:
+            await upsert_retrying_a_timeout_once(self._client, self._collection, [point])
+        except Exception as exc:
+            if not is_timeout(exc):
+                raise
+            # F103: never silently — the log says what was lost, the caller is told it was not saved.
+            logger.warning("memory write lost: %s, %d chars (%r, after one retry)", user_id, len(text), exc)
+            return {"success": False, "error": "the memory store did not answer in time, twice"}
         logger.info("[Durable] Stored memory namespace=%s len=%d", user_id, len(text))
         return {"success": True, "id": point_id}
 

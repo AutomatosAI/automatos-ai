@@ -63,6 +63,27 @@ class ScheduledTaskService:
     # Create
     # ------------------------------------------------------------------
 
+    async def _announce_new_schedule(
+        self, *, task_id: int, message: str, schedule: str, created_by_agent_id: int,
+    ) -> None:
+        """One notification per agent-created schedule. Never fails the create."""
+        try:
+            from core.services.notification_dispatcher import NotificationDispatcher
+
+            await NotificationDispatcher(self.db, str(self.workspace_id)).dispatch(
+                event_type="scheduled_task_created",
+                title="An agent scheduled recurring work",
+                message=f"{message} (schedule: {schedule})",
+                link_type="scheduled_task",
+                link_id=str(task_id),
+                agent_id=created_by_agent_id,
+                status="ok",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[ScheduledTask] could not announce new schedule %s", task_id, exc_info=True,
+            )
+
     async def create_task(
         self,
         created_by_agent_id: Optional[int],
@@ -235,6 +256,16 @@ class ScheduledTaskService:
             message = f"Scheduled {task_type} board task #{task_id} '{payload['title']}' — filed {where} when it fires"
         else:
             message = f"Scheduled {task_type} task #{task_id} for agent '{target_name or 'unknown'}'"
+
+        # Tell the owner. Night 1 (2026-09-18) ended with four 09:00 agent
+        # routines running in the workspace that nobody had been told about —
+        # they were on the Calendar, but nothing announced them. A schedule an
+        # AGENT set up is the one worth saying out loud.
+        if created_by_agent_id:
+            await self._announce_new_schedule(
+                task_id=task_id, message=message, schedule=schedule,
+                created_by_agent_id=created_by_agent_id,
+            )
 
         return {
             "success": True,
@@ -543,6 +574,14 @@ class ScheduledTaskService:
             sla_deadline=sla_deadline_for(priority, now=now),
         )
         db.add(ticket)
+        db.flush()  # the id the notice carries
+        # F119: each notice before the commit that carries it — the loop closes
+        # this session without another commit, which dropped both. The dispatch
+        # wake still goes out only after the D16 consent is committed.
+        notify_board_event(
+            db, workspace_id=str(task.workspace_id), task_id=ticket.id,
+            status=ticket.status, event="task_created",
+        )
         db.commit()
         db.refresh(ticket)
 
@@ -551,12 +590,9 @@ class ScheduledTaskService:
                 db, workspace_id=task.workspace_id, task=ticket,
                 actor=actor_from_user_id(created_by_user_id), why=WHY_SCHEDULED_AND_ASSIGNED,
             )
-        notify_board_event(
-            db, workspace_id=str(task.workspace_id), task_id=ticket.id,
-            status=ticket.status, event="task_created",
-        )
         if ticket.status == "assigned":
             notify_task_available(db, workspace_id=str(task.workspace_id), task_id=ticket.id)
+            db.commit()
         logger.info("[ScheduledTask] Task %d filed board ticket #%s (%s)", task_id, ticket.id, ticket.status)
 
         origin_chat_id = getattr(task, "origin_chat_id", None)

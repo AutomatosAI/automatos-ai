@@ -1,6 +1,7 @@
 """Monitoring/observability ActionDefinitions (Loki, Prometheus, alerts, Railway logs/services)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .handlers_monitoring import loki_available, prometheus_available, railway_api_available
 
 
 def register_monitoring_actions(registry: ActionRegistry) -> None:
@@ -10,6 +11,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_query_loki_logs",
+        available=loki_available,  # F078: never offered where it can only error
         description=(
             "Search centralized application logs across ALL services (7-day retention). "
             "Much more powerful than Railway deploy logs. Use for investigating errors, "
@@ -67,6 +69,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_query_prometheus",
+        available=prometheus_available,  # F078: never offered where it can only error
         description=(
             "Query real-time system metrics via PromQL. "
             "Use for checking uptime, error rates, response times, database connections, "
@@ -155,6 +158,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_get_logs",
+        available=railway_api_available,  # F078: never offered where it can only error
         description=(
             "Fetch Railway deployment logs for a specific service. "
             "For searching across ALL services, use platform_query_loki_logs instead "
@@ -201,6 +205,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_list_services",
+        available=railway_api_available,  # F078: never offered where it can only error
         description=(
             "List all Railway services in the project with names and IDs. "
             "Use before platform_get_logs to discover available service names."

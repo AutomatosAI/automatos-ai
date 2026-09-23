@@ -198,20 +198,13 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
     ? (rawAgents as any[]).map((a: any) => ({ id: a.id, name: a.name, premium_icon: a.premium_icon ?? null }))
     : undefined
   const hasPinned = pinnedIds.length > 0
+  // Pinning is a FILTER, not a precondition. With nothing pinned the endpoint
+  // returns the agents that reported most recently, so the panel shows the
+  // workspace's reports instead of silently showing three agents' worth.
   const { data: reportsData, isLoading: reportsLoading } = useAgentReports(pinnedIds)
   const reports = reportsData?.reports ?? []
 
-  // Only show reports loading when we actually have pinned agents and are fetching
-  const showReportsLoading = hasPinned && reportsLoading
-
-  // Auto-pin first 3 agents if nothing pinned and localStorage was empty
-  useEffect(() => {
-    if (initialized && pinnedIds.length === 0 && allAgents && allAgents.length > 0) {
-      const autoPinned = allAgents.slice(0, Math.min(3, allAgents.length)).map((a) => a.id)
-      setPinnedIds(autoPinned)
-      savePinnedAgents(autoPinned)
-    }
-  }, [allAgents, pinnedIds.length, initialized])
+  const showReportsLoading = reportsLoading
 
   const togglePin = useCallback((id: number) => {
     setPinnedIds((prev) => {
@@ -231,11 +224,13 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-semibold">Agent Reports</h3>
-          {allAgents && (
-            <span className="text-[10px] text-muted-foreground">
-              {pinnedIds.length} of {allAgents.length}
-            </span>
-          )}
+          {/* Say what the number IS. "2 of 12" was pinned agents over all
+              agents, and read as "2 of my 12 reports". */}
+          <span className="text-[10px] text-muted-foreground">
+            {hasPinned
+              ? `${reports.length} pinned of ${allAgents?.length ?? 0} agents`
+              : `${reports.length} most recent`}
+          </span>
         </div>
         <Popover>
           <PopoverTrigger asChild>

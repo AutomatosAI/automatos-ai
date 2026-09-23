@@ -58,6 +58,11 @@ SKIPPED = "skipped"
 INITIAL_STAGE = "not_started"
 ALL_STAGES: frozenset[str] = frozenset(STAGE_ORDER) | {SKIPPED}
 TERMINAL_STAGES: frozenset[str] = frozenset({"completed", SKIPPED})
+# After this long with no advance, a non-terminal stage stops being treated as
+# live onboarding (F031). Long enough that a real onboarding spread over a
+# couple of weekends still counts; short enough that a stuck row does not pin
+# tools into every turn for a fortnight.
+ONBOARDING_STALE_DAYS = 14
 SEGMENT_KEYS: tuple[str, ...] = ("business", "goal", "comfort", "team_size")
 
 
@@ -97,8 +102,72 @@ def current_stage(workspace: Any) -> str:
 
 
 def is_onboarding_active(workspace: Any) -> bool:
-    """True while the spine should run — stage NOT IN (completed, skipped)."""
-    return current_stage(workspace) not in TERMINAL_STAGES
+    """THE definition of "this workspace is onboarding" — the tool router's
+    onboarding prior and AutoBrain's classifier both read this one (F064).
+    True while the stage is a known, non-terminal one and the run is recent
+    enough to still be onboarding.
+
+    A stage nobody ever finishes is not onboarding, it is a stuck row. Gerard's
+    operator workspace has sat on ``powerup`` since 2026-09-02, and the
+    onboarding prior pinned six spine tools into EVERY Auto turn for a
+    fortnight — four of which were never called (F031). Past
+    ``ONBOARDING_STALE_DAYS`` with no advance, the spine stops claiming the
+    turn; the stage itself is left alone, so resuming onboarding still works
+    and nothing about the row is rewritten behind the operator's back.
+    """
+    stage = current_stage(workspace)
+    # Strict: only a KNOWN non-terminal stage is onboarding. A corrupt or
+    # unrecognised stage string classifies normally rather than pinning the
+    # spine onto every turn. (AutoBrain had this rule in its own copy of the
+    # check; F064 unified the two so the age-out applies to both.)
+    if not isinstance(stage, str) or stage not in ALL_STAGES or stage in TERMINAL_STAGES:
+        return False
+    return not _stage_is_stale(workspace)
+
+
+def _stage_is_stale(workspace: Any) -> bool:
+    """True when THIS ONBOARDING RUN has been going longer than
+    ``ONBOARDING_STALE_DAYS`` without reaching a terminal stage.
+
+    Keyed on when the run STARTED, not on when the current stage was entered.
+    The first version used ``stages[<current stage>]`` and was wrong in exactly
+    the case that matters: Gerard's workspace began onboarding on 2 Sep and
+    never completed, and when Auto advanced the stage on 18 Sep — seventeen
+    days in, mid-chat, in a workspace with 60+ tickets — the clock reset and
+    the age-out stopped firing. An advance inside a stuck run is not evidence
+    that onboarding is live; finishing it is.
+
+    A genuine restart DOES reset the clock: ``last_reset_at`` is stamped by
+    ``reset_onboarding`` and wins over the historical stamps.
+    """
+    doc = get_onboarding(workspace)
+    stamp = doc.get("last_reset_at")
+    if not stamp:
+        # The earliest thing we know about this run: when it first advanced, or
+        # the oldest stage stamp if started_at was never written.
+        candidates = [doc.get("started_at")]
+        stages = doc.get("stages")
+        if isinstance(stages, dict):
+            candidates.extend(stages.values())
+        stamps = sorted(str(c) for c in candidates if c)
+        stamp = stamps[0] if stamps else None
+    if not stamp:
+        return False        # never written — treat as freshly started
+    try:
+        moved = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if moved.tzinfo is None:
+        moved = moved.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - moved).days
+    if age_days >= ONBOARDING_STALE_DAYS:
+        logger.info(
+            "[onboarding] this run has been going %d days without completing "
+            "(stage %r) — the spine stops claiming turns; the stage is unchanged",
+            age_days, current_stage(workspace),
+        )
+        return True
+    return False
 
 
 def public_snapshot(workspace: Any) -> dict[str, Any]:

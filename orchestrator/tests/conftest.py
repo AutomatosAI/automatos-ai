@@ -71,6 +71,22 @@ if _orchestrator_root not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+def _reset_composio_deny_list_cache():
+    """PRD-251 S0.6: the Composio deny list is cached per process
+    (core/composio/deny_list.py), so no test may inherit another test's list.
+    Resets only a module that is already imported: importing it here would
+    disturb the tests that stub packages in sys.modules."""
+    def _reset():
+        reset = getattr(sys.modules.get("core.composio.deny_list"), "reset_cache", None)
+        if callable(reset):
+            reset()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _repair_stubbed_package_bindings():
     """Repair parent->child module attribute bindings that sibling tests broke.
 
@@ -108,6 +124,16 @@ def _repair_stubbed_package_bindings():
             except Exception:
                 pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _drain_best_effort_writes():
+    """F105: best-effort writes a test handed to their threads finish before the
+    next test starts, so a late write never lands in the next test's fakes."""
+    yield
+    best_effort = sys.modules.get("core.best_effort")
+    if best_effort is not None and hasattr(best_effort, "drain"):
+        best_effort.drain(timeout=5)
 
 
 def pytest_collectstart(collector):

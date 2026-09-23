@@ -10,7 +10,7 @@ DB / LLM / network:
   * RESUME — once RESUME_KEY is set the held task drops out of the hold and its
     next prompt carries render_resume_block's Q&A + preserved draft.
 
-225's ask_human is stubbed (reuse proof), the event trail is stubbed, and the
+225's shared stage_question is stubbed (reuse proof), the event trail is stubbed, and the
 grant/task are plain namespaces so the JSONB writes are inspected directly.
 """
 from __future__ import annotations
@@ -88,15 +88,27 @@ class _BridgeDB:
 
 
 @pytest.fixture
-def stub_ask_human(monkeypatch):
-    async def _ask(db, workspace_id, params):
+def stub_stage_question(monkeypatch):
+    """Stub 225's SHARED ``stage_question`` — the internals the ladder reaches
+    directly. (It cannot go through the ``platform_ask_human`` tool: that
+    refuses every non-board_task subject, so the park had no question behind
+    it. See test_prd229_escalation_ladder.)"""
+    async def _stage(db, workspace_id, **kwargs):
         return {"success": True, "ask_id": 99, "parked": True}
 
-    monkeypatch.setattr(ha, "ask_human", _ask)
+    monkeypatch.setattr(ha, "stage_question", _stage)
     monkeypatch.setattr(cl, "emit_event", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
 
-def _granted_grant(*, ask_id=99, subject_id="task-9", answer="Ship variant B."):
+# An OrchestrationTask id is a native ``uuid`` column, so a clarification park's
+# subject id is the string form of a UUID. A PRD-193 stored-call grant's is
+# ``"<action>:<32 hex>"`` — not a UUID, which is exactly why the bridge checks
+# before letting Postgres try the comparison (it raises, and an unhandled raise
+# leaves the whole request's transaction aborted).
+PARKED_TASK_ID = "5c1f9a02-7b3e-4a5d-9f11-2c0d4e6a8b37"
+
+
+def _granted_grant(*, ask_id=99, subject_id=PARKED_TASK_ID, answer="Ship variant B."):
     return SimpleNamespace(
         id=ask_id,
         subject_type=SUBJECT_TOOL_CALL,
@@ -114,11 +126,11 @@ def _granted_grant(*, ask_id=99, subject_id="task-9", answer="Ship variant B."):
 
 def test_bridge_resumes_clarification_park():
     task = SimpleNamespace(
-        id="task-9",
+        id=PARKED_TASK_ID,
         input_context={PENDING_KEY: {"ask_id": 99, "question": "Ship A or B?"}},
         output_metadata={DRAFT_KEY: {"partial_output": "half-finished", "question": "Ship A or B?"}},
     )
-    grant = _granted_grant(subject_id="task-9")
+    grant = _granted_grant()
 
     handled = _resume_clarification_if_parked(_BridgeDB(task, grant), grant)
 
@@ -130,18 +142,53 @@ def test_bridge_resumes_clarification_park():
 def test_bridge_declines_non_clarification_tool_call():
     # the subject task is parked on a DIFFERENT ask (7, not this grant's 99) → the
     # bridge declines so the PRD-193 stored-call path handles it.
-    task = SimpleNamespace(id="task-9", input_context={PENDING_KEY: {"ask_id": 7}})
-    grant = _granted_grant(subject_id="task-9")
+    task = SimpleNamespace(id=PARKED_TASK_ID, input_context={PENDING_KEY: {"ask_id": 7}})
+    grant = _granted_grant()
     assert _resume_clarification_if_parked(_BridgeDB(task, grant), grant) is False
     # and a subject with no orchestration task at all → decline
     assert _resume_clarification_if_parked(_BridgeDB(None, grant), grant) is False
+
+
+def test_a_stored_call_subject_never_reaches_the_uuid_comparison():
+    """The bridge asks whether the subject id COULD be an OrchestrationTask
+    before letting Postgres compare it.
+
+    ``OrchestrationTask.id`` is a native ``uuid`` column, so the statement is
+    ``= %(id)s::UUID``. A PRD-193 stored-call grant's subject id is
+    ``"<action>:<32 hex>"``, which raises InvalidTextRepresentation — and the
+    except around it cannot undo that: the transaction is ABORTED, so every
+    later statement in the request fails and the answer route's commit raises.
+    The approver got a 500 for a grant already committed granted, with no
+    re-dispatch. The doubles here never raise, so nothing caught it.
+    """
+    class _Exploding:
+        def query(self, *_a, **_k):
+            raise AssertionError("the bridge must not query on a non-uuid subject id")
+
+    for stored_call in ("board_task_status:0123456789abcdef0123456789abcdef", "board-5", "", None):
+        grant = _granted_grant(subject_id=stored_call)
+        assert _resume_clarification_if_parked(_Exploding(), grant) is False
+
+
+def test_a_failing_subject_query_leaves_the_transaction_usable():
+    """Belt and braces for any other id shape: if the query does raise, the
+    handler rolls back, so the caller's own resume and its commit still work."""
+    class _Failing:
+        def __init__(self): self.rolled_back = False
+        def query(self, *_a, **_k): raise RuntimeError("invalid input syntax for type uuid")
+        def rollback(self): self.rolled_back = True
+
+    db = _Failing()
+    grant = _granted_grant()                      # a uuid id, so the guard lets it through
+    assert _resume_clarification_if_parked(db, grant) is False
+    assert db.rolled_back is True
 
 
 @pytest.mark.asyncio
 async def test_requeue_falls_through_to_resume_tool_call_for_stored_call(monkeypatch):
     # a PRD-193 stored-call grant (no parked task) must still route to
     # _resume_tool_call — the clarification bridge does not hijack it.
-    grant = _granted_grant(subject_id="board-5")
+    grant = _granted_grant(subject_id="board_task_status:0123456789abcdef0123456789abcdef")
     called = {"n": 0}
 
     async def _resume(db, g):
@@ -157,14 +204,14 @@ async def test_requeue_falls_through_to_resume_tool_call_for_stored_call(monkeyp
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_full_loop_park_answer_resume_via_production_bridge(stub_ask_human):
+async def test_full_loop_park_answer_resume_via_production_bridge(stub_stage_question):
     # 1. escalate → park + draft (RVW-5) on the task's EXISTING JSONB
-    task = SimpleNamespace(id="task-9", output="the half-finished section",
+    task = SimpleNamespace(id=PARKED_TASK_ID, output="the half-finished section",
                            input_context=None, output_metadata=None)
     subject = ClarificationSubject(
-        run_id="run-1", workspace_id="ws-1", task_id="task-9", task=task, agent_id=5,
+        run_id="run-1", workspace_id="ws-1", task_id=PARKED_TASK_ID, task=task, agent_id=5,
     )
-    grant = _granted_grant(subject_id="task-9")
+    grant = _granted_grant()
     db = _BridgeDB(task, grant)
 
     await escalate_clarification(db, subject, "Ship A or B?")
@@ -172,7 +219,7 @@ async def test_full_loop_park_answer_resume_via_production_bridge(stub_ask_human
     assert task.output_metadata[DRAFT_KEY]["partial_output"] == "the half-finished section"
 
     # 2. the human answers → the PRODUCTION bridge (225 answer path → _requeue_subject)
-    await _requeue_subject(db, grant)
+    assert await _requeue_subject(db, grant) is True   # a resumed clarification reports "resumed" (PRD-245)
 
     # 3. RESUME_KEY set, PENDING_KEY cleared → the task drops out of dispatch_ready's hold
     assert PENDING_KEY not in task.input_context

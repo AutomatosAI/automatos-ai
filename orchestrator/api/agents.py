@@ -213,7 +213,51 @@ def _normalize_tags(raw_tags) -> List[str]:
     return normalized
 
 
-def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
+def _session_tool_gaps(agent: Agent) -> Optional[List[Dict[str, Any]]]:
+    """PRD-245 S1.5: the platform tools this agent's skills name that a ticket
+    session cannot call. ``None`` for an API agent (its skills' tools all work)
+    and whenever the computation is unavailable — a form field is never worth a
+    500."""
+    try:
+        from core.cli_runtime import is_cli_agent
+        from services.cli_session_prompt import SESSION_TOOLS_AVAILABLE, session_tool_gaps
+
+        if not is_cli_agent(getattr(agent, "configuration", None) or {}):
+            return None
+        return session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE) or []
+    except Exception:  # noqa: BLE001
+        logger.debug("session tool gaps unavailable for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return None
+
+
+def completed_task_counts(db: Session, agent_ids: List[int]) -> Dict[int, int]:
+    """How many board tickets each of these agents actually finished.
+
+    ``agents.performance_metrics`` is a JSON counter somebody has to remember to
+    write, and night 1 (2026-09-18) found it last written on 2026-09-08: the
+    roster showed 0 tasks completed for every agent while ``board_tasks`` held
+    OPS 20, NEWSROOM 13, WRITER 10 and so on for that same night. One query for
+    the whole roster, so the list endpoint stays a single round trip.
+    """
+    if not agent_ids:
+        return {}
+    try:
+        rows = db.execute(
+            text("""
+                SELECT assigned_agent_id AS agent_id, COUNT(*) AS completed
+                FROM board_tasks
+                WHERE assigned_agent_id = ANY(:agent_ids) AND status = 'done'
+                GROUP BY assigned_agent_id
+            """),
+            {"agent_ids": list(agent_ids)},
+        ).fetchall()
+    except Exception:  # noqa: BLE001 — a roster must render without its counts
+        logger.warning("[agents] completed-task counts unavailable", exc_info=True)
+        return {}
+    return {int(row.agent_id): int(row.completed) for row in rows}
+
+
+def _build_agent_response(agent: Agent, db: Session, tasks_completed: Optional[int] = None) -> AgentResponse:
     """Build agent response with skills, tools, and plugins"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
@@ -311,13 +355,19 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         tags=_normalize_tags(agent.tags) if getattr(agent, 'tags', None) else [],
         created_at=agent.created_at,
         updated_at=agent.updated_at or agent.created_at,
-        performance_metrics=agent.performance_metrics or {},
+        # The stale JSON counter, with the real number laid over it when the
+        # caller derived one from board_tasks (CLAUDE.md §5: one source of truth).
+        performance_metrics=(
+            {**(agent.performance_metrics or {}), "tasks_completed": tasks_completed}
+            if tasks_completed is not None else (agent.performance_metrics or {})
+        ),
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
         model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
         # PRD-67: System agent fields
         is_system_agent=getattr(agent, 'is_system_agent', False) or False,
         slug=getattr(agent, 'slug', None),
+        session_tool_gaps=_session_tool_gaps(agent),
         required_role=getattr(agent, 'required_role', None),
         marketplace_category=getattr(agent, 'marketplace_category', None),
 )
@@ -590,7 +640,11 @@ async def list_agents(
         query = query.distinct(Agent.id)
         agents = query.offset(skip).limit(limit).all()
 
-        return [_build_agent_response(agent, db) for agent in agents]
+        completed = completed_task_counts(db, [a.id for a in agents])
+        return [
+            _build_agent_response(agent, db, tasks_completed=completed.get(agent.id, 0))
+            for agent in agents
+        ]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
@@ -1026,11 +1080,57 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
                     logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
                     # Continue for optional tables
         
+        # The agent's live tickets. board_tasks.assigned_agent_id is ON DELETE
+        # SET NULL, so deleting an agent used to leave its work sitting on the
+        # board with no owner and nothing said about it (night 1, 2026-09-18 —
+        # the rescue was a PATCH the operator had to know to make). Send them
+        # back to the inbox, where an unowned ticket belongs, and NAME them in
+        # the response so the deletion is not silent.
+        orphaned = db.execute(
+            text(
+                "SELECT id, title, status FROM board_tasks "
+                "WHERE assigned_agent_id = :agent_id AND workspace_id = :workspace_id "
+                "  AND status NOT IN ('done', 'failed', 'cancelled', 'closed')"
+            ),
+            {"agent_id": agent_id, "workspace_id": ctx.workspace_id},
+        ).fetchall()
+        if orphaned:
+            db.execute(
+                text(
+                    "UPDATE board_tasks "
+                    "SET status = 'inbox', assigned_agent_id = NULL, lease_until = NULL "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": [r.id for r in orphaned]},
+            )
+
+        # F049 (night 1): the agent's spend outlives it. llm_usage.agent_id has no
+        # foreign key, so its rows would keep an id that names nothing — Analytics
+        # showed "Agent #273" for CELLAR. Stamp the name first.
+        db.execute(
+            text(
+                "UPDATE llm_usage SET agent_name = :name "
+                "WHERE agent_id = :agent_id AND workspace_id = :workspace_id AND agent_name IS NULL"
+            ),
+            {"name": agent.name, "agent_id": agent_id, "workspace_id": ctx.workspace_id},
+        )
+
         # Now delete the agent (other relationships have CASCADE)
         db.delete(agent)
         db.commit()
-        
-        return {"message": f"Agent {agent_id} deleted successfully"}
+
+        message = f"Agent {agent_id} deleted successfully"
+        if orphaned:
+            message += (
+                f" — {len(orphaned)} unfinished ticket(s) went back to the inbox "
+                "and need a new owner"
+            )
+        return {
+            "message": message,
+            "returned_to_inbox": [
+                {"id": r.id, "title": r.title, "was": r.status} for r in orphaned
+            ],
+        }
     except HTTPException:
         raise
     except Exception as e:

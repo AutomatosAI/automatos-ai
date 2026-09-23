@@ -41,6 +41,7 @@ from qdrant_client.models import (
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
 from core.ports.context import SharedContextPort
+from core.qdrant_writes import upsert_retrying_a_timeout_once
 from modules.context import field_scoring
 
 logger = logging.getLogger(__name__)
@@ -359,9 +360,11 @@ class VectorFieldSharedContext(SharedContextPort):
         point_id = str(uuid.uuid4())
         prov = provenance or {}
 
-        await self._client.upsert(
-            collection_name=SHARED_COLLECTION,
-            points=[PointStruct(
+        # F103: a write that times out is tried once more; a second timeout is raised.
+        await upsert_retrying_a_timeout_once(
+            self._client,
+            SHARED_COLLECTION,
+            [PointStruct(
                 id=point_id,
                 vector=embedding,
                 payload={

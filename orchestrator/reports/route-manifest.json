@@ -1,5 +1,5 @@
 {
-  "route_count": 806,
+  "route_count": 828,
   "routes": [
     {
       "method": "GET",
@@ -324,6 +324,10 @@
     {
       "method": "GET",
       "path": "/api/analytics/agents/{agent_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/always-failing-actions"
     },
     {
       "method": "POST",
@@ -2043,6 +2047,50 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/posts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/publish-now"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/request-changes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/schedule"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/submit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/unschedule"
+    },
+    {
+      "method": "GET",
       "path": "/api/system-settings/"
     },
     {
@@ -2208,6 +2256,14 @@
     {
       "method": "GET",
       "path": "/api/templates/templates/{agent_type}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/"
     },
     {
       "method": "POST",
@@ -2430,8 +2486,32 @@
       "path": "/api/v1/scheduled-tasks"
     },
     {
+      "method": "DELETE",
+      "path": "/api/v1/scheduled-tasks/{task_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/scheduled-tasks/{task_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/scheduled-tasks/{task_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/scheduled-tasks/{task_id}/resume"
+    },
+    {
       "method": "PATCH",
       "path": "/api/v1/scheduled-tasks/{task_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/session-tools/manifest"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/session-tools/mcp"
     },
     {
       "method": "GET",
@@ -2570,6 +2650,10 @@
       "path": "/api/verticals/{vertical}/gdpr/erase-subject"
     },
     {
+      "method": "GET",
+      "path": "/api/verticals/{vertical}/gdpr/export"
+    },
+    {
       "method": "POST",
       "path": "/api/verticals/{vertical}/provision"
     },
@@ -2588,6 +2672,10 @@
     {
       "method": "POST",
       "path": "/api/voice/retell/events"
+    },
+    {
+      "method": "",
+      "path": "/api/voice/retell/llm-websocket/{call_id}"
     },
     {
       "method": "POST",
@@ -2906,15 +2994,7 @@
       "path": "/api/workflows/cleanup/old"
     },
     {
-      "method": "POST",
-      "path": "/api/workflows/execute"
-    },
-    {
       "method": "GET",
-      "path": "/api/workflows/executions/"
-    },
-    {
-      "method": "POST",
       "path": "/api/workflows/executions/"
     },
     {
@@ -2964,10 +3044,6 @@
     {
       "method": "POST",
       "path": "/api/workflows/{workflow_id}/duplicate"
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflows/{workflow_id}/execute"
     },
     {
       "method": "POST",
@@ -3035,6 +3111,10 @@
     },
     {
       "method": "PUT",
+      "path": "/api/workspaces/current/socials"
+    },
+    {
+      "method": "PUT",
       "path": "/api/workspaces/current/voice-live"
     },
     {
@@ -3044,6 +3124,10 @@
     {
       "method": "POST",
       "path": "/api/workspaces/{workspace_id}/canvas/commit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/canvas/commit-preview"
     },
     {
       "method": "POST",
@@ -3200,6 +3284,10 @@
     {
       "method": "GET",
       "path": "/health/ready"
+    },
+    {
+      "method": "GET",
+      "path": "/metrics"
     },
     {
       "method": "GET",

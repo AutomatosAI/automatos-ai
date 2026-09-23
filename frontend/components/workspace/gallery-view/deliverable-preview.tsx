@@ -55,6 +55,7 @@ interface DeliverablePreviewProps {
  */
 function getPreviewTypeForDeliverable(d: Deliverable) {
   if (d.artifact_type === 'report') return 'markdown' as const
+  if (d.artifact_type === 'video') return 'video' as const
   return inferPreviewType(
     d.file_name || d.file_path || '',
     d.file_type || '',

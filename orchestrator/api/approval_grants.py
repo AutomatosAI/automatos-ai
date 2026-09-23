@@ -121,7 +121,37 @@ async def list_grants(
     if kind:
         q = q.filter(ApprovalGrant.kind == kind)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [_grant_payload(db, g) for g in rows]}
+    # F091-E1: every card says whose job it is — the agent and the ticket.
+    from services.grant_owners import grant_owners
+
+    owners = grant_owners(db, ctx.workspace_id, rows)
+    return {"grants": [{**_grant_payload(db, g), "owner": owners.get(g.id)} for g in rows]}
+
+
+# F091-A2 (night 3): the two kinds keep their own verbs (PRD-225), but a refusal
+# says exactly what to call instead — the real id, the real options. The old text
+# said "approval-grants/{id}/answer" literally.
+_GRANTS_PATH = "/api/v1/approval-grants"
+_DENY_WORDS = ("deny", "no", "refuse", "reject", "decline", "stop", "cancel")
+
+
+def question_not_approval(grant: ApprovalGrant) -> str:
+    """The 422 for /grant on a question: the exact /answer call to make."""
+    options = [str(o) for o in (grant.options or []) if str(o).strip()]
+    body = (f'{{"option": "<one of: {", ".join(options)}>"}}' if options
+            else '{"answer_text": "<your answer>"}')
+    return (f"Grant {grant.id} is a question, not an approval — answer it: "
+            f"POST {_GRANTS_PATH}/{grant.id}/answer with {body}. "
+            "The /grant route is only for approval rows.")
+
+
+def approval_not_question(grant: ApprovalGrant, said: str) -> str:
+    """The 422 for /answer on an approval: the exact /deny or /grant call."""
+    deny = f"to refuse it: POST {_GRANTS_PATH}/{grant.id}/deny"
+    allow = f"to approve it: POST {_GRANTS_PATH}/{grant.id}/grant"
+    first, second = (deny, allow) if said.strip().lower().startswith(_DENY_WORDS) else (allow, deny)
+    return (f"Grant {grant.id} is an approval, not a question — {first}; {second}. "
+            "The /answer route is only for questions.")
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:
@@ -148,10 +178,7 @@ async def grant_approval(
     # PRD-225: a question is answered, never approved — /answer is its only
     # completion path (a yes/no can't stand in for a free-text decision).
     if grant.kind == KIND_QUESTION:
-        raise HTTPException(
-            status_code=422,
-            detail="This is a question — answer it via POST /{id}/answer, not /grant.",
-        )
+        raise HTTPException(status_code=422, detail=question_not_approval(grant))
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
@@ -311,7 +338,7 @@ async def answer_question(
     grant = _load_grant(db, ctx, grant_id)
     if grant.kind != KIND_QUESTION:
         raise HTTPException(
-            status_code=422, detail="This grant is an approval, not a question."
+            status_code=422, detail=approval_not_question(grant, body.answer_text or body.option or ""),
         )
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(
@@ -366,6 +393,8 @@ async def apply_question_answer(
     (the HTTP ``answer_question`` path ignores the tuple entirely and is
     unaffected).
     """
+    from core.services.approval_grants import answer_pending_grant
+
     now = datetime.now(timezone.utc)
 
     # Compare-and-swap the pending→granted flip so two concurrent answers to the
@@ -374,23 +403,10 @@ async def apply_question_answer(
     # answer, and there is no default rate limit — so a reply racing POST /answer,
     # or two '/answer' messages, is reachable. ``UPDATE ... WHERE status='pending'``
     # is atomic in Postgres: the loser's UPDATE matches 0 rows and aborts as a safe
-    # no-op — one human_qa entry, one resume, one confirmation.
-    flipped = (
-        db.query(ApprovalGrant)
-        .filter(
-            ApprovalGrant.id == grant.id,
-            ApprovalGrant.status == GrantStatus.PENDING.value,
-        )
-        .update(
-            {
-                ApprovalGrant.status: GrantStatus.GRANTED.value,
-                ApprovalGrant.answer_text: answer_text,
-                ApprovalGrant.answered_by: answered_by,
-                ApprovalGrant.answered_at: now,
-            },
-            synchronize_session=False,
-        )
-    )
+    # no-op — one human_qa entry, one resume, one confirmation. The statement lives
+    # in the grants lifecycle service; the Canvas path (PRD-245) closes a session
+    # hold's row with the same one.
+    flipped = answer_pending_grant(db, grant.id, answer_text=answer_text, answered_by=answered_by, now=now)
     if not flipped:
         # Lost the race — another answer already won. Record / resume / confirm
         # nothing (no duplicates); return the committed winning state, flagged
@@ -501,10 +517,25 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
       grants -- ``details.watch_action`` discriminates (rerun / replan /
       reassign / spawn_agent); the stored spec launches and the supervising
       watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
+    - a ``board_task`` question carrying PRD-245's session-ASK marker
+      (``details.cli_ask``): a question the session itself asked. The answer is
+      written onto the ticket and the ticket goes ``blocked`` → ``assigned``, so
+      the host claims it and RESUMES the same session with the answer in its
+      prompt. True iff the work actually moved.
+    - a ``board_task`` question carrying PRD-245's session-hold marker
+      (``details.cli_permission``): the ticket is RUNNING, not parked — the
+      answer is the operator's allow/deny for the held command, recorded on the
+      ticket for the host's next event flush; never a re-queue. True iff the
+      hold was still open (a second answer, from the Canvas card or here, is a
+      no-op that says so).
     - anything else (e.g. a ``channel`` trust-gate hold): no resume path,
-      returns False. platform_ask_human refuses tool_call/playbook_run
-      questions up front (handlers_asks, P225-RVW-11), so a question only ever
-      reaches here as a board_task (resumable) or a channel hold (not).
+      returns False. ``platform_ask_human`` refuses tool_call/playbook_run
+      questions up front (handlers_asks, P225-RVW-11) because ITS answer path
+      no-ops for them, so a question reaches here as a board_task (resumable),
+      a PRD-229 clarification park (resumable through the bridge above — filed
+      by the ladder through the shared ``stage_question``, not the tool), a
+      PRD-245 session hold (answered without resuming; the ticket is running),
+      or a channel hold (not resumable).
     """
     from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
@@ -515,7 +546,7 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         # PRD-193 stored-call path — this is the missing production caller of
         # apply_answered_clarification (no parallel resume path).
         if _resume_clarification_if_parked(db, grant):
-            return
+            return True
         await _resume_tool_call(db, grant)
         return _executed_result_succeeded(grant)
     if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
@@ -525,6 +556,16 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         return _executed_result_succeeded(grant)
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return False
+    from services.cli_host_service import (
+        answer_session_ask, answer_session_hold, session_ask_marker, session_hold_marker,
+    )
+
+    if session_hold_marker(grant) is not None:
+        return answer_session_hold(db, grant)
+    # PRD-245 W2: a question the SESSION asked. The answer goes onto the ticket
+    # and re-queues it, so the host resumes that same Claude Code session.
+    if session_ask_marker(grant) is not None:
+        return answer_session_ask(db, grant)
     return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
 
 
@@ -540,6 +581,17 @@ def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:
     except (TypeError, ValueError):
         return False
     if task is None or task.status != "blocked":
+        return False
+    # F036: a grant resumes the park it was for — never a person's stop. Night
+    # 1's ticket 231 was stopped at 23:44 and came back at 23:56 off an approval
+    # granted before the stop; the grant is recorded, the ticket stays put.
+    from services.operator_stop import operator_stop
+
+    if operator_stop(task):
+        logger.info(
+            "[approval_grants.api] grant resolved for ticket %s, but a person stopped it — not re-queued",
+            task.id,
+        )
         return False
     task.status = "assigned"
     task.blocked_at = None
@@ -566,9 +618,23 @@ def _resume_clarification_if_parked(db: Session, grant: ApprovalGrant) -> bool:
     so the held task drops out of dispatch_ready's hold and the next 5s coordinator
     tick re-dispatches it — its prompt then carries render_resume_block's Q&A +
     preserved draft. This is the ONLY production caller; no parallel resume path."""
+    import uuid as _uuid
+
     from core.models.orchestration import OrchestrationTask
     from services.clarification_ladder import apply_answered_clarification, pending_ask_id
 
+    # ``OrchestrationTask.id`` is a native ``uuid`` column, so Postgres receives
+    # ``= %(id)s::UUID``. A PRD-193 stored-call grant's subject_id is
+    # ``"<action>:<32 hex>"``, which raises ``InvalidTextRepresentation`` — and
+    # the except below cannot undo that: the transaction is ABORTED, so
+    # ``_resume_tool_call``'s own queries then fail with InFailedSqlTransaction
+    # and the commit at the end of the answer route raises, returning a 500 to
+    # the approver for a grant that was already committed GRANTED. Ask the
+    # question before the database does.
+    try:
+        _uuid.UUID(str(grant.subject_id))
+    except (TypeError, ValueError, AttributeError):
+        return False
     try:
         task = (
             db.query(OrchestrationTask)
@@ -580,6 +646,12 @@ def _resume_clarification_if_parked(db: Session, grant: ApprovalGrant) -> bool:
             "[approval_grants.api] clarification bridge: subject_id %s is not an orchestration task",
             grant.subject_id,
         )
+        # A failed statement leaves the transaction unusable for everything that
+        # follows — the caller's own resume, and its commit.
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
         return False
     if task is None or str(pending_ask_id(task)) != str(grant.id):
         return False

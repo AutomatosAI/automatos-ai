@@ -27,7 +27,11 @@ from core.models.core import Agent, BoardTask
 
 logger = logging.getLogger(__name__)
 
-OPEN_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked", "review")
+# PRD-245 S0.5 (D7): the statuses under which a lane's re-fire lands on the ticket
+# it already filed. ``review`` is NOT one of them — a ticket in review is finished
+# work awaiting sign-off; the next fire files a new ticket (agent 15's #93 absorbed
+# 236 heartbeats while it sat in review).
+REUSABLE_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked")
 QUEUED_LINE = "queued for your Claude Code session as ticket #{task_id}"
 NO_HOST_REASON = (
     "Waiting for a CLI host — none is online. Start it with `make cli-host`; "
@@ -90,7 +94,8 @@ def is_cli_agent(db: Session, agent_id: Optional[int]) -> bool:
 
 
 def open_ticket_for_source(db: Session, workspace_id: Any, source_type: str, source_id: str) -> Optional[BoardTask]:
-    """The still-open ticket a lane already filed for this source, if any."""
+    """The ticket a lane already filed for this source that can still absorb the
+    fire (``REUSABLE_STATUSES``), if any. A ticket in review is not it."""
     try:
         return (
             db.query(BoardTask)
@@ -98,7 +103,7 @@ def open_ticket_for_source(db: Session, workspace_id: Any, source_type: str, sou
                 BoardTask.workspace_id == workspace_id,
                 BoardTask.source_type == source_type,
                 BoardTask.source_id == source_id,
-                BoardTask.status.in_(list(OPEN_STATUSES)),
+                BoardTask.status.in_(list(REUSABLE_STATUSES)),
             )
             .order_by(BoardTask.id.desc())
             .first()
@@ -197,6 +202,7 @@ def file_cli_ticket(
     else:
         consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=source_type)
     _notify(db, workspace_id, task)
+    db.commit()  # F119: the notices ride this commit (after the consent, for the dispatch wake)
     logger.info("[CliTicketLane] filed ticket #%s for agent %s from %s/%s", task.id, agent_id, source_type, source_id)
     return task
 
@@ -241,7 +247,7 @@ def source_id_for(prefix: str, key: Any, at: Optional[datetime] = None) -> str:
 CHAT_SOURCE_TYPE = "chat"
 RECIPE_SOURCE_TYPE = "recipe"
 MISSION_SOURCE_TYPE = "mission"
-TERMINAL_STATUSES: Sequence[str] = ("done", "review", "failed", "cancelled")
+TERMINAL_STATUSES: Sequence[str] = ("done", "review", "failed", "cancelled", "closed")
 RUNNING_STATUSES: Sequence[str] = ("assigned", "in_progress", "blocked")
 DEFAULT_LANE_POLL_SECONDS = 5
 
@@ -373,6 +379,7 @@ def open_session_ticket(
         notify_board_event(db, workspace_id=str(workspace_id), task_id=task.id, status=task.status, event="task_created")
     except Exception:  # noqa: BLE001
         logger.debug("[CliTicketLane] board notify skipped", exc_info=True)
+    db.commit()  # F119: the notice rides this commit — the route returns without another
     logger.info("[CliTicketLane] opened session ticket #%s for agent %s in chat %s", task.id, agent.id, chat_id)
     return task, True
 
@@ -410,6 +417,46 @@ def exec_result_for(task: Any) -> dict:
     return {"status": "error", "result": "", "error": error, **base}
 
 
+def _ticket_is_alive(task: Any) -> bool:
+    """True when this ticket is still being worked, so giving up on it would
+    leave a session running with nothing watching for its result.
+
+    Alive means: a session holds it on a live lease, or it is parked on a
+    question the operator has not answered yet, or it is waiting to be picked
+    up again. Only a lapsed lease means nobody is on it.
+    """
+    status = getattr(task, "status", None)
+    if status in ("assigned", "blocked"):
+        return True
+    if status != "in_progress":
+        return False
+    lease = getattr(task, "lease_until", None)
+    if lease is None:
+        return True            # in_progress with no lease recorded — assume a live session
+    if lease.tzinfo is None:
+        lease = lease.replace(tzinfo=timezone.utc)
+    return lease > datetime.now(timezone.utc)
+
+
+def is_database_unreachable(exc: BaseException) -> bool:
+    """F114: the database dropped the connection or is restarting (crash recovery,
+    "server closed the connection unexpectedly") — not a fault in the query."""
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+
+    if isinstance(exc, (OperationalError, InterfaceError)):
+        return True
+    return isinstance(exc, DBAPIError) and bool(getattr(exc, "connection_invalidated", False))
+
+
+def _db_outage_grace_s() -> float:
+    try:
+        from config import config
+
+        return float(getattr(config, "CLI_LANE_DB_OUTAGE_GRACE_SECONDS", 180))
+    except Exception:  # noqa: BLE001
+        return 180.0
+
+
 async def run_cli_ticket_and_wait(
     db: Session,
     *,
@@ -420,14 +467,23 @@ async def run_cli_ticket_and_wait(
     source_type: str,
     source_id: str,
     timeout_s: Optional[float] = None,
+    hard_timeout_s: Optional[float] = None,
     poll_s: Optional[float] = None,
     on_poll: Optional[Callable[[Any], None]] = None,
     **file_kwargs: Any,
 ) -> dict:
     """File the ticket a step or mission task owes a session agent and wait for
     it to end (PRD-239 S3). Returns ``exec_result_for`` the ended ticket, or an
-    error result that names the still-running ticket when ``timeout_s`` passes
-    — the session carries on; its result lands on the board.
+    error result that names the still-running ticket when the wait gives up —
+    the session carries on; its result lands on the board.
+
+    Two bounds, because a Claude Code session is not an API turn (night 1,
+    finding 21). ``timeout_s`` is the soft deadline; reaching it only ends the
+    wait if the ticket is NOT alive. A ticket that is genuinely being worked —
+    ``in_progress`` on a live lease, or parked on a question a human has yet to
+    answer — is waited on up to ``hard_timeout_s``. Declaring a 20-minute
+    research session failed at 4 minutes is what re-queued the task and spawned
+    a duplicate beside the session that was still running.
 
     ``on_poll(ticket)`` runs on every poll while waiting (S3b): the caller marks
     progress on its own record so a stall watchdog does not mistake a long
@@ -450,9 +506,33 @@ async def run_cli_ticket_and_wait(
             poll_s = float(DEFAULT_LANE_POLL_SECONDS)
     poll_s = max(0.5, float(poll_s))
     started = time.monotonic()
+    extended = False
+    outage_since: Optional[float] = None
     while True:
-        db.expire_all()  # see the host's writes, not this session's cache
-        current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+        try:
+            db.expire_all()  # see the host's writes, not this session's cache
+            current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+        except Exception as exc:  # noqa: BLE001 — only a lost database is waited out
+            if not is_database_unreachable(exc):
+                raise
+            # F114 (run 4): Postgres crash-restarted mid-wait and every run waiting
+            # on a session died in the same second while its ticket worked on.
+            # The session is not the database: roll back, wait, poll again.
+            outage_since = outage_since if outage_since is not None else time.monotonic()
+            if time.monotonic() - outage_since > _db_outage_grace_s():
+                raise
+            logger.warning("[CliTicketLane] database unreachable while waiting on ticket #%s — polling again: %s",
+                           task_id, str(exc).splitlines()[0][:160])
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001 — the pool replaces the dead connection
+                pass
+            await asyncio.sleep(min(poll_s, 5.0))
+            continue
+        if outage_since is not None:
+            logger.info("[CliTicketLane] database back after %d s — still waiting on ticket #%s",
+                        int(time.monotonic() - outage_since), task_id)
+            outage_since = None
         if current is None:
             return {"status": "error", "error": f"ticket #{task_id} disappeared while the session ran",
                     "runtime": RUNTIME_CLI, "task_id": task_id}
@@ -465,14 +545,25 @@ async def run_cli_ticket_and_wait(
                 logger.debug("[CliTicketLane] on_poll failed for ticket #%s", task_id, exc_info=True)
         waited = time.monotonic() - started
         if timeout_s is not None and waited >= timeout_s:
-            return {
-                "status": "error",
-                "error": (
-                    f"ticket #{task_id} is still running after {int(waited)} s — the Claude Code "
-                    "session carries on and its result lands on the board"
-                ),
-                "runtime": RUNTIME_CLI,
-                "task_id": task_id,
-                "timed_out": True,
-            }
+            ceiling = hard_timeout_s if hard_timeout_s is not None else timeout_s
+            if _ticket_is_alive(current) and waited < float(ceiling):
+                if not extended:
+                    extended = True
+                    logger.info(
+                        "[CliTicketLane] ticket #%s is %s past its %ss deadline — the session is "
+                        "alive, waiting up to %ss rather than re-queuing it",
+                        task_id, current.status, int(timeout_s), int(ceiling),
+                    )
+            else:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"ticket #{task_id} is still running after {int(waited)} s — the Claude Code "
+                        "session carries on and its result lands on the board"
+                    ),
+                    "runtime": RUNTIME_CLI,
+                    "task_id": task_id,
+                    "timed_out": True,
+                    "still_running": _ticket_is_alive(current),
+                }
         await asyncio.sleep(poll_s)

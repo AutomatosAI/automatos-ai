@@ -55,6 +55,15 @@ class SettingCategory(str, Enum):
     # PRD-223: which models may hold the orchestrator (Auto) seat + turn cost governor.
     MODEL_POLICY = "model_policy"
 
+    # PRD-248: the decision engine — route, per-hook modes, confidence floor.
+    DECISION_ENGINE = "decision_engine"
+
+    # PRD-251: the Socials master switch (modules/socials/settings.py).
+    SOCIALS = "socials"
+
+    # PRD-251 S0.6 (D16): the platform-wide Composio deny list (core/composio/deny_list.py).
+    COMPOSIO = "composio"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

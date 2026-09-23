@@ -43,7 +43,7 @@ async def get_database_query_stats(ctx: RequestContext = Depends(get_request_con
             FROM database_query_audit dqa
             JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
             WHERE dqa.created_at > NOW() - INTERVAL '24 hours'
-              AND dks.workspace_id = :workspace_id::uuid
+              AND dks.workspace_id = CAST(:workspace_id AS uuid)
         """), {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if not result:
@@ -94,7 +94,7 @@ async def get_database_performance(ctx: RequestContext = Depends(get_request_con
             FROM database_query_audit dqa
             JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
             WHERE dqa.created_at > NOW() - INTERVAL '24 hours'
-              AND dks.workspace_id = :workspace_id::uuid
+              AND dks.workspace_id = CAST(:workspace_id AS uuid)
             GROUP BY DATE_TRUNC('hour', dqa.created_at)
             ORDER BY hour
         """), {"workspace_id": str(ctx.workspace_id)}).fetchall()
@@ -130,7 +130,7 @@ async def get_top_queries(limit: int = 10, ctx: RequestContext = Depends(get_req
             FROM database_query_audit dqa
             JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
             WHERE dqa.created_at > NOW() - INTERVAL '7 days'
-              AND dks.workspace_id = :workspace_id::uuid
+              AND dks.workspace_id = CAST(:workspace_id AS uuid)
             GROUP BY dqa.natural_language_query, dqa.generated_sql
             ORDER BY execution_count DESC
             LIMIT :limit

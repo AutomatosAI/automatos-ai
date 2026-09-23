@@ -17,10 +17,8 @@ async def execute_platform_tool(
     agent_id: int,
 ) -> Dict[str, Any]:
     """Execute research tools via AgentPlatformTools."""
-    name_map = {'search_documents': 'search_knowledge', 'search_code': 'search_codebase'}
-    canonical_name = name_map.get(tool_name, tool_name)
     return await executor.platform_tools.execute_tool(
-        tool_name=canonical_name,
+        tool_name=tool_name,
         parameters=parameters,
         agent_id=agent_id,
     )

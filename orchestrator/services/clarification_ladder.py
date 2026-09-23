@@ -2,9 +2,9 @@
 
 When Auto cannot answer a mid-run clarification (or the question is a governance
 decision), the ladder escalates VERTICALLY to a human — worker → orchestrator →
-human, never lateral. It reuses PRD-225's SHARED ask internals (``ask_human`` —
-the same function ``platform_ask_human`` dispatches to; no parallel ask
-construction, no HTTP self-call), parks the task by recording a labelled DRAFT of
+human, never lateral. It reuses PRD-225's SHARED ask internals (``stage_question``
+— the function ``platform_ask_human`` itself reaches after validation; no parallel
+ask construction, no HTTP self-call), parks the task by recording a labelled DRAFT of
 its partial output on the task's EXISTING result JSONB, and marks the task as
 awaiting the answer. On the human answer (PRD-225's answer path, UNCHANGED), the
 Q&A is bridged into the task's next-run context so a re-run reads it verbatim.
@@ -31,6 +31,22 @@ DRAFT_KEY = "clarification_draft"          # on output_metadata (the result JSON
 PENDING_KEY = "clarification_pending"      # on input_context (awaiting-answer marker)
 RESUME_KEY = "clarification_resume"        # on input_context (answered Q&A for re-run)
 
+# The grant subject a clarification park is filed under: the parked clarification
+# CALL, carrying the OrchestrationTask id. Not a board_task — the ladder's subject
+# is a mission sub-task, and the answer comes back through
+# ``_resume_clarification_if_parked``, not the board re-queue.
+SUBJECT_TOOL_CALL = "tool_call"
+
+
+class ClarificationAskNotPlaced(RuntimeError):
+    """No question row could be staged, so NOTHING was asked of a human.
+
+    Raised before the task is parked. ``handlers_clarify`` catches it and falls
+    back to proceed-with-assumption: there is no orphaned ask to worry about and a
+    retry files a fresh one. The alternative — parking behind an ask that does not
+    exist — strands the task with no question on any surface.
+    """
+
 
 async def escalate_clarification(
     db: Any,
@@ -43,36 +59,62 @@ async def escalate_clarification(
 ) -> Dict[str, Any]:
     """Escalate a clarification to a human and park the task with a draft.
 
-    Reuses PRD-225 ``ask_human`` to create the question grant (subject_type
-    ``tool_call`` — the parked clarification call — carrying the task id). Returns
+    Reuses PRD-225's SHARED ask internals — ``stage_question``, the function
+    ``platform_ask_human`` itself reaches after validation — to create the
+    ``kind='question'`` grant (subject_type ``tool_call``, the parked
+    clarification call, carrying the OrchestrationTask id). Returns
     ``{parked: True, ask_id}`` so the calling agent stops cleanly.
+
+    ``park=None``: the ladder parks its OWN subject below (an OrchestrationTask
+    draft + awaiting-answer marker, read back by ``apply_answered_clarification``).
+    ``ask_human``'s park flips a BoardTask, which this subject is not.
+
+    Raises when no question row could be staged — the caller's contract for "no
+    ask was placed" (handlers_clarify falls back to proceed-with-assumption).
+    Never park behind an ask that does not exist: the task would wait forever
+    with no question on any surface.
     """
-    from modules.tools.discovery.handlers_asks import ask_human
+    from modules.tools.discovery.handlers_asks import stage_question
 
     # --- create the human ask via 225's SHARED internals (no parallel path) ---
-    # ask_human durably COMMITS the grant (handlers_asks.py:101) — the human sees
-    # the ask / gets the Telegram ping the instant this returns. If it RAISES, no
-    # ask was placed, so we let it propagate (the handler falls back safely).
-    ask_params = {
-        "subject_type": "tool_call",
-        "subject_id": str(subject.task_id),
-        "question": question,
-        "_agent_id": subject.agent_id,
-        "_agent_name": agent_name,
-    }
-    ask_result = await ask_human(db, subject.workspace_id, ask_params)
-    ask_id = ask_result.get("ask_id") if isinstance(ask_result, dict) else None
+    # stage_question durably COMMITS the grant — the human sees it in the
+    # Questions tab (the list route filters on kind alone) and gets the Telegram
+    # ping the instant this returns. If it RAISES, no ask was placed, so we let
+    # it propagate (the handler falls back safely).
+    #
+    # It is reached DIRECTLY, not through ``ask_human``: that tool refuses every
+    # non-``board_task`` subject up front (P225-RVW-11) because ITS answer path
+    # — ``_resume_tool_call``'s stored-call re-dispatch — no-ops for them. A
+    # clarification park has a different, working answer path:
+    # ``_resume_clarification_if_parked`` recognises this grant by
+    # ``pending_ask_id(task) == grant.id`` and bridges the answer into the task's
+    # next run. Routing the ladder through the tool got a refusal dict, a
+    # ``None`` ask id, and a task parked behind a question that was never filed.
+    staged = await stage_question(
+        db, subject.workspace_id,
+        subject_type=SUBJECT_TOOL_CALL,
+        subject_id=str(subject.task_id),
+        question=question,
+        asked_by_agent_id=int(subject.agent_id) if subject.agent_id else None,
+        agent_name=agent_name,
+        park=None,
+    )
+    ask_id = staged.get("ask_id") if isinstance(staged, dict) else None
+    if ask_id is None:
+        raise ClarificationAskNotPlaced(
+            f"the ask internals staged no question row for task {subject.task_id}: {staged!r}"
+        )
 
     # --- park the task + commit it as durably as the ask (P229-RVW-5) ----------
     # The session is SHARED across every task in this mission-run tick
     # (coordinator_service opens ONE SessionLocal at :1521 and runs the concurrent
-    # agents' I/O via asyncio.gather at :1750). ask_human already committed the
-    # grant; the park + draft + trail here are only FLUSHED, so a SIBLING task's
+    # agents' I/O via asyncio.gather at :1750). stage_question already committed
+    # the grant; the park + draft + trail here are only FLUSHED, so a SIBLING task's
     # tool error firing db.rollback() on the shared session (platform_executor.py
     # :1245) would wipe this uncommitted draft while the committed ask survives —
     # an ORPHANED human ask no answer can bridge back to (Gerard's baked
     # draft-on-park decision silently lost). So we COMMIT the park immediately,
-    # mirroring ask_human's own durably-park-first pattern.
+    # mirroring the ask internals' own durably-park-first pattern.
     #
     # Everything past the placed ask is best-effort AND non-raising: the human HAS
     # been asked, so a persistence failure must NOT surface as "escalation failed"

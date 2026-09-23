@@ -56,6 +56,7 @@ class CloudFileResponse(BaseModel):
     modified_at: Optional[str] = None
     is_synced: bool = False
     sync_status: str = "pending"
+    sync_error: Optional[str] = None
     chunk_count: int = 0
     last_synced_at: Optional[str] = None
 

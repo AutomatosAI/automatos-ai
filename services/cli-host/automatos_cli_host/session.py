@@ -33,6 +33,7 @@ import os
 import pty
 import queue
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -46,12 +47,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__
+from . import usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
-from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
+from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
-from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import empty_usage, usage_delta
@@ -67,7 +69,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @dataclass
 class SessionOutcome:
-    status: str                      # success | error | cancelled
+    status: str                      # success | error | cancelled | usage_limit | host_stopped
     result_text: str = ""
     error: Optional[str] = None
     exit_reason: str = ""
@@ -77,6 +79,7 @@ class SessionOutcome:
     session_id: Optional[str] = None
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
+    resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -93,6 +96,7 @@ class SessionOutcome:
             # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
             # the directory `claude --resume` and the editor links must open.
             "effective_cwd": self.effective_cwd,
+            "resets_at": self.resets_at,
         }
 
 
@@ -100,6 +104,8 @@ def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
 
 
+# Stable per agent — no ids, dates or counters (the prompt-cache invariant).
+# PRD-245 S0.6: the session is told what it can and cannot reach, and how to ask.
 SESSION_RULES = (
     "The ticket you are working is described in the file named in your first message; "
     "read it fully before acting.\n"
@@ -107,6 +113,15 @@ SESSION_RULES = (
     "never push, publish or open pull requests — the manager integrates your work; "
     "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
     "reply with a concise summary of what changed, what you verified, and anything left open.\n"
+    "Tools in this session: file tools work only inside the working folder and the ticket "
+    "folder; Bash runs an allowlist of read, build and test verbs, and anything else is held "
+    "for the operator. The Automatos tools you have are listed earlier in this prompt, under "
+    "\"Tools in this session\" — that list is the truth, and it is the only place to read it. "
+    "A platform tool your skills name that is NOT on that list does not exist here: do not call "
+    "it and do not wait for it.\n"
+    "To ask a question: use the ask_human tool if you have it — your ticket parks when your turn "
+    "ends and picks up again with the answer. Without it, state the question in your final "
+    "message and end the turn. Never wait for an answer inside the session.\n"
 )
 
 
@@ -127,11 +142,105 @@ def build_system_prompt(ticket: Dict[str, Any], cli_label: str = "Claude Code") 
     return intro + SESSION_RULES
 
 
-def build_ticket_file(ticket: Dict[str, Any]) -> str:
+def build_ticket_file(ticket: Dict[str, Any], default_root: Optional[str] = None) -> str:
+    """The dispatch contract. With the host's default root known, the ticket names
+    its own deliverables folder (PRD-245 S0.7); without one there is no such line."""
+    folder = session_deliverables_dir(default_root, str(ticket.get("task_id")))
+    deliverables = f"\nDeliverables: save any file you produce under {folder}/\n" if folder else ""
     return (
         f"# Ticket #{ticket.get('task_id')} — {ticket.get('title') or ''}\n\n"
         f"{ticket.get('prompt') or ''}\n"
+        f"{deliverables}"
     )
+
+
+# What the host itself writes into a session folder — never a deliverable.
+HOST_OWNED_SESSION_FILES = frozenset({"ticket.md", "settings.json", "system_prompt.md", TERMINAL_LOG_FILENAME, "mcp.json"})
+# The subset that holds this ticket's own credential in PLAINTEXT. Removed the
+# moment the turn ends — the row's copy is revoked there too, but a file is what
+# gets read later, and every finished ticket used to leave one behind.
+CREDENTIAL_SESSION_FILES = ("mcp.json",)
+# A host-owned file is excluded by CONTENT as well as by name: a session can read
+# one and write it back under another name, and from Wave 1 one of them carries
+# the ticket's own credential. Only small files are compared (the terminal log is
+# bounded but large, and no session hand-copies it).
+MAX_HOST_FILE_COMPARE_BYTES = 256 * 1024
+
+
+def host_owned_blobs(session_dir: Path) -> List[bytes]:
+    """The bytes of the host's own files in this session folder, for the content
+    check below. Unreadable or oversized files are simply not compared."""
+    blobs: List[bytes] = []
+    for name in sorted(HOST_OWNED_SESSION_FILES):
+        path = session_dir / name
+        try:
+            if path.is_file() and path.stat().st_size <= MAX_HOST_FILE_COMPARE_BYTES:
+                blobs = [*blobs, path.read_bytes()]
+        except OSError:
+            continue
+    return blobs
+
+
+def _is_host_copy(path: Path, blobs: Sequence[bytes]) -> bool:
+    """True when this file is one of the host's own under another name."""
+    try:
+        size = path.stat().st_size
+        if size > MAX_HOST_FILE_COMPARE_BYTES:
+            return False
+        candidates = [b for b in blobs if len(b) == size]
+        return bool(candidates) and path.read_bytes() in candidates
+    except OSError:
+        return False
+
+
+def session_deliverables(files_touched: Sequence[str], session_dir: Path, cwd: Path) -> List[Path]:
+    """The files a session wrote inside its own folder, relative to it (PRD-245
+    S0.7) — never the host's own files (by name or by content), each once."""
+    root = session_dir.resolve()
+    blobs = host_owned_blobs(root)
+    found: List[Path] = []
+    for raw in files_touched:
+        path = Path(raw)
+        try:
+            resolved = (path if path.is_absolute() else cwd / path).resolve()
+            rel = resolved.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not rel.parts or str(rel) in HOST_OWNED_SESSION_FILES or rel in found:
+            continue
+        if _is_host_copy(resolved, blobs):
+            log.warning("deliverable %s is a copy of one of the host's own session files — not landed", resolved)
+            continue
+        found = [*found, rel]
+    return found
+
+
+def land_session_deliverables(relatives: Sequence[Path], session_dir: Path, dest: Path) -> List[str]:
+    """Copy each file into the ticket's deliverables folder — created on demand
+    (0o755), names kept, an earlier copy overwritten. One file failing is a
+    warning, never a lost result. Returns the copies' paths."""
+    landed: List[str] = []
+    for rel in relatives:
+        source, target = session_dir / rel, dest / rel
+        try:
+            if not source.is_file():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            shutil.copy2(source, target)
+        except OSError as exc:
+            log.warning("deliverable %s not copied to %s: %s", source, target, exc)
+            continue
+        landed = [*landed, str(target)]
+    return landed
+
+
+def assert_secret_not_in_args(args: Sequence[str], secret: Optional[str]) -> None:
+    """PRD-245 W1: the ticket's own credential rides a 0600 file, never argv —
+    argv is world-readable in ``ps`` and lands in the host log."""
+    if not secret:
+        return
+    if any(secret in str(arg) for arg in args):
+        raise RuntimeError("the session token reached the command line")
 
 
 def assert_args_honour_invariant(args: Sequence[str], forbidden: Sequence[str]) -> None:
@@ -189,6 +298,7 @@ class Session:
             self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.cancel_requested = threading.Event()
+        self.stopped_by_host: Optional[str] = None     # F015: why the HOST stopped this session
         self.stopped = threading.Event()
         self.session_started = threading.Event()
         self.ended = threading.Event()
@@ -196,6 +306,7 @@ class Session:
         self.proc: Optional[subprocess.Popen] = None
         self.pgid: Optional[int] = None
         self.effective_cwd: Optional[Path] = None
+        self.session_dir: Optional[Path] = None
         self.transcript_path: Optional[str] = None
         self._usage_before: Optional[Dict[str, Any]] = None
         self.reported_session_id: Optional[str] = None
@@ -250,7 +361,7 @@ class Session:
             if self._contract_injected:
                 return Reply.none()
             self._contract_injected = True
-            return Reply.with_context(build_ticket_file(self.ticket))
+            return Reply.with_context(build_ticket_file(self.ticket, self.default_root))
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
@@ -352,6 +463,22 @@ class Session:
             log.exception("session for task %s crashed", self.task_id)
             return self._outcome("error", error=f"host error: {exc}", exit_reason="host_error")
 
+    def _session_tools(self) -> Optional[Dict[str, Any]]:
+        """The Automatos tools this ticket may call: the names, the URL built from
+        the host's OWN backend address, and the per-ticket token — or ``None``
+        when the claim offered none (an older backend; the session runs as it did
+        before the bridge existed)."""
+        names = self.ticket.get("session_tools")
+        token = str(self.ticket.get("session_token") or "").strip()
+        path = str(self.ticket.get("session_tools_path") or "").strip()
+        if not names or not token or not path:
+            return None
+        base = str(getattr(self.cfg, "url", "") or "").strip().rstrip("/")
+        if not base:
+            log.warning("task %s: Automatos tools offered but this host has no backend URL", self.task_id)
+            return None
+        return {"names": [str(n) for n in names], "url": f"{base}{path}", "token": token}
+
     def _run(self) -> SessionOutcome:
         # 1. where
         try:
@@ -382,16 +509,37 @@ class Session:
         # 3. files + what the adapter prepares (settings/config home + trust)
         session_dir = self.cfg.sessions_dir / self.task_id
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
-        ticket_path.write_text(build_ticket_file(self.ticket), encoding="utf-8")
+        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root), encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket, preset.label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
 
+        session_tools = self._session_tools()
+        # The ticket file NAMES a deliverables folder, so the session has to be
+        # able to write there. For a folder-less ticket that folder IS the cwd,
+        # but a ticket with its own working directory runs somewhere else — and
+        # the instruction would then point at a path the gate refuses, which is
+        # an instruction that cannot be followed. Named and writable, or neither.
+        deliverables = session_deliverables_dir(self.default_root, str(self.task_id))
+        extra_dirs = (session_dir,)
+        if deliverables is not None and deliverables.resolve() != cwd.resolve():
+            try:
+                deliverables.mkdir(parents=True, exist_ok=True, mode=0o755)
+            except OSError as exc:
+                log.warning("deliverables folder %s not created: %s", deliverables, exc)
+            extra_dirs = (*extra_dirs, deliverables)
         self._policy = PolicyContext(
+            unlisted_bash=getattr(self.cfg, "unlisted_bash", "ask"),
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
-            extra_dirs=(session_dir,),
+            extra_dirs=extra_dirs,
+            session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
+            # F042: the platform's own .env / credential key and this host's state
+            # (its token) are out of reach, whatever folder the ticket runs in.
+            secret_roots=platform_secret_roots(),
+            off_limits=(Path(self.cfg.state_dir).expanduser(),),
         )
 
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
@@ -404,12 +552,14 @@ class Session:
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
+            session_tools=session_tools,
         )
         prepared = self.adapter.prepare(ctx)
 
         # 4. spawn
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
+        assert_secret_not_in_args(args, (session_tools or {}).get("token"))
         package_root = str(Path(__file__).resolve().parents[1])
         inherited_pp = os.environ.get("PYTHONPATH", "")
         env = build_session_env(preset, extra={
@@ -507,7 +657,12 @@ class Session:
             except subprocess.TimeoutExpired:
                 log.error("task %s: process %s survived SIGKILL", self.task_id, self.proc.pid)
 
-    def request_cancel(self) -> None:
+    def request_cancel(self, host_reason: Optional[str] = None) -> None:
+        """Stop the session. ``host_reason`` when the host itself is stopping
+        (F015): the operator did not cancel the ticket, the machine stopped
+        serving it — it goes back to the queue, not to ``cancelled``."""
+        if host_reason and not self.cancel_requested.is_set():
+            self.stopped_by_host = host_reason
         self.cancel_requested.set()
 
     def _collect(self, exit_reason: str, cwd: Path, binary: str) -> SessionOutcome:
@@ -528,6 +683,8 @@ class Session:
         if exit_reason == "completed":
             status = "success"
             error = None
+        elif exit_reason == "cancelled" and self.stopped_by_host:
+            status, error = "host_stopped", self.stopped_by_host
         elif exit_reason == "cancelled":
             status, error = "cancelled", "cancelled by the operator"
         elif exit_reason == "timeout":
@@ -543,18 +700,68 @@ class Session:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None
             status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
-        return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd)
+        resets = None
+        if status == "error":
+            # F083: the CLI's plan window closed. That is a pause — the ticket goes
+            # back to the queue and the host stops claiming for this CLI — not a
+            # failed attempt, and never "check your key".
+            said = bytes(self.output_tail).decode("utf-8", "replace")[-4000:] + "\n" + (text or "")
+            if usage_limit.is_usage_limit(said):
+                until, known = usage_limit.pause(said, _local_now())
+                status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
+        files = [*self.files_touched, *self._land_deliverables(cwd)]
+        self._shred_session_credentials()
+        outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
+                                files_touched=files)
+        outcome.resets_at = resets
+        return outcome
+
+    def _shred_session_credentials(self) -> None:
+        """The turn is over: delete the files holding this ticket's token.
+
+        The backend kills the credential on the row, but the PLAINTEXT is what
+        an attacker copies, and it sat in the session folder indefinitely —
+        every finished ticket leaving one more readable token behind. Deleting
+        it costs nothing: the config is rewritten from the claim on every spawn,
+        so a resume gets a fresh file with a fresh token.
+        """
+        if self.session_dir is None:
+            return
+        for name in CREDENTIAL_SESSION_FILES:
+            try:
+                (self.session_dir / name).unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                log.warning("could not remove %s for task %s: %s", name, self.task_id, exc)
+
+    def _land_deliverables(self, cwd: Path) -> List[str]:
+        """PRD-245 S0.7: what the session wrote in its own folder is copied into the
+        ticket's deliverables folder, where the backend registers it as today.
+        Nothing to do without a default root."""
+        dest = session_deliverables_dir(self.default_root, self.task_id)
+        if dest is None or self.session_dir is None:
+            return []
+        found = session_deliverables(self.files_touched, self.session_dir, self.effective_cwd or cwd)
+        return land_session_deliverables(found, self.session_dir, dest)
 
     def _outcome(self, status: str, *, result_text: str = "", error: Optional[str] = None,
-                 exit_reason: str = "", usage: Optional[Dict[str, Any]] = None, cwd: Optional[Path] = None) -> SessionOutcome:
+                 exit_reason: str = "", usage: Optional[Dict[str, Any]] = None, cwd: Optional[Path] = None,
+                 files_touched: Optional[List[str]] = None) -> SessionOutcome:
         return SessionOutcome(
             status=status, result_text=result_text, error=error, exit_reason=exit_reason,
-            usage=usage or {}, files_touched=list(self.files_touched),
+            usage=usage or {}, files_touched=list(self.files_touched if files_touched is None else files_touched),
             permission_denials=list(self.denials),
             session_id=self.reported_session_id or self.session_id or None,
             transcript_path=self.transcript_path,
             effective_cwd=str(self.effective_cwd or cwd) if (self.effective_cwd or cwd) else None,
         )
+
+
+def _local_now():
+    from datetime import datetime
+
+    return datetime.now().astimezone()
 
 
 def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:

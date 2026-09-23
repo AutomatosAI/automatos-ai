@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from core.composio.client import ComposioClient, get_composio_client
+from core.composio.deny_list import composio_action_denial_async, denied_result
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,15 @@ class ComposioToolExecutor:
         """Delegate to the module-level resolve_file_uploads()."""
         return await resolve_file_uploads(action, params, workspace_id)
 
+    @staticmethod
+    def _refused(denial: str, action: str, start_time: float) -> Dict[str, Any]:
+        """The Composio deny list's refusal (PRD-251 D16) in execute()'s result shape."""
+        return {
+            **denied_result(denial),
+            "action": action,
+            "execution_time_ms": int((time.time() - start_time) * 1000),
+        }
+
     async def execute(
         self,
         action: str,
@@ -377,6 +387,15 @@ class ComposioToolExecutor:
             }
 
         action_upper = action.upper()
+
+        # PRD-251 S0.6 (D16): the platform deny list, first — before access
+        # validation, file uploads, the LinkedIn workaround or any network call,
+        # and whatever the policy plane mode or the capability classifier says.
+        denial = await composio_action_denial_async(action_upper)
+        if denial:
+            return self._refused(denial, action_upper, start_time)
+        requested_action = action_upper
+
         # Prefer explicit app_name passed from composio_execute() call;
         # then try ComposioActionCache (handles multi-word apps like COMPOSIO_SEARCH);
         # last resort: split on first underscore.
@@ -432,21 +451,25 @@ class ComposioToolExecutor:
                     .first()
                 )
                 if not assigned:
-                    # Inheritance fallback: agents with zero active assignments
-                    # inherit workspace-connected apps. Mirrors the contract used
-                    # by ComposioToolService, ComposioHintService and ToolRegistry
-                    # at discovery time so an agent that can SEE an app can also
-                    # EXECUTE it. The workspace connectivity check below still
-                    # gates on whether the app is actually wired up.
-                    has_any_assignment = (
-                        self.db.query(AgentAppAssignment.id)
-                        .filter(
-                            AgentAppAssignment.agent_id == agent_id,
-                            AgentAppAssignment.is_active == True,  # noqa: E712
-                        )
-                        .first()
-                    )
-                    if has_any_assignment:
+                    # Inheritance fallback: an agent with NO assignment rows at all
+                    # inherits workspace-connected apps — the one rule discovery
+                    # uses too (core.composio.agent_apps), so an agent that can SEE
+                    # an app can EXECUTE it and one that cannot, cannot. F040: an
+                    # agent whose apps are all switched off inherits nothing.
+                    from core.composio.agent_apps import inherits_workspace_apps, switched_off
+
+                    if switched_off(self.db, agent_id, app_name):
+                        return {
+                            "success": False,
+                            "error": (
+                                f"'{app_name}' is switched off for agent {agent_id}. Switch it back on "
+                                "in the agent's apps before using it."
+                            ),
+                            "error_type": "composio_app_switched_off",
+                            "data": None,
+                            "execution_time_ms": int((time.time() - start_time) * 1000),
+                        }
+                    if not inherits_workspace_apps(self.db, agent_id):
                         return {
                             "success": False,
                             "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",
@@ -667,7 +690,17 @@ class ComposioToolExecutor:
                     "data": None,
                     "execution_time_ms": int((time.time() - start_time) * 1000)
                 }
-        
+
+        # PRD-251 S0.6 (D16): validation may have resolved the requested name onto
+        # another action (an unprefixed or slug-form match, the auto-map, a
+        # display-name rebuild). The list holds the action that runs — checked
+        # again before the entity lookup, file uploads, the LinkedIn workaround
+        # (which never passes through the checked client) and the SDK.
+        if action_upper != requested_action:
+            denial = await composio_action_denial_async(action_upper)
+            if denial:
+                return self._refused(denial, action_upper, start_time)
+
         # Get entity
         try:
             entity = self.get_entity_for_workspace(workspace_id)

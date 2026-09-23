@@ -846,7 +846,27 @@ class MissionDispatcher:
             current_attempt = (task.attempt_number or 0) + 1
             task.attempt_number = current_attempt
 
-            if current_attempt < max_retries:
+            # A session ticket that outran the wait is NOT a failed attempt: the
+            # Claude Code session is still working and its result still lands on
+            # the board. Re-queuing it launches a SECOND session on the same work
+            # beside the first (night 1, finding 21). Fail the mission task once,
+            # naming the ticket, and never spawn a duplicate.
+            if result.get("timed_out") and result.get("still_running"):
+                task.failure_reason_code = FailureReasonCode.AGENT_ERROR.value
+                task.failure_detail = error_msg[:2000]
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.FAILED,
+                    actor_type=ActorType.AGENT,
+                    actor_id=str(task.assigned_agent_id),
+                    reason=f"Session still running past the wait; not retried: {error_msg[:200]}",
+                )
+                logger.warning(
+                    "Task %s: session ticket still running past the wait — failed without a "
+                    "retry so no second session is spawned: %s", task.id, error_msg[:200],
+                )
+            elif current_attempt < max_retries:
                 # Re-queue for retry
                 task.assigned_agent_id = None
                 task.failure_detail = error_msg[:2000]

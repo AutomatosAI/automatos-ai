@@ -160,6 +160,12 @@ class _FilingDB:
     def add(self, obj):
         self.added.append(obj)
 
+    def flush(self):
+        # a flush gives the new row its id (F119: the card's notice carries it)
+        for obj in self.added:
+            if getattr(obj, "id", None) is None:
+                obj.id = 501
+
     def commit(self):
         self.commits += 1
 

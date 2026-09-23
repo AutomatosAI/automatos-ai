@@ -23,7 +23,8 @@ import logging
 import select
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 # Claimants LISTEN on this channel to skip the poll wait; assign/create NOTIFY it.
 NOTIFY_CHANNEL = "board_task_available"
+MAX_ADOPTED_FILES = 20
 
 # Priority ordering for claim selection — highest urgency, then oldest first.
 # Inlined as data (no hardcoded behaviour elsewhere); mirrors the board's
@@ -255,6 +257,64 @@ def claim_tasks(
     return claimed
 
 
+def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dict[int, List[str]]:
+    """F014 (night 3, #612 and #614): a ticket about to be failed on lease
+    expiry whose session left files in its own folder, ``sessions/<ticket>``,
+    did the work — the worker just never reported, so nothing was registered.
+    Register those files as the ticket's deliverables (the delivered path then
+    sends it to ``review``) and name them in the review note. Night 3 marked
+    both tickets failed while their answers sat in that folder. Returns
+    ``{ticket id: [files]}``. Fail-soft per ticket.
+    """
+    from config import config
+    from services.cli_host_service import DEFAULT_FOLDER_SESSIONS, _register_session_deliverables
+
+    rows = db.execute(
+        text(
+            """
+            SELECT bt.id FROM board_tasks bt
+             WHERE bt.status = 'in_progress'
+               AND bt.lease_until IS NOT NULL
+               AND bt.lease_until < :now
+               AND bt.attempts >= :max_attempts
+               AND NOT EXISTS (
+                     SELECT 1 FROM deliverables d
+                      WHERE d.source_type = 'task'
+                        AND d.source_id = CAST(bt.id AS text)
+                        AND d.deleted_at IS NULL
+                   )
+            """
+        ),
+        {"now": now, "max_attempts": max_attempts},
+    ).fetchall()
+    adopted: Dict[int, List[str]] = {}
+    for (task_id,) in rows:
+        try:
+            task = db.get(BoardTask, task_id)
+            folder = Path(config.WORKSPACE_VOLUME_PATH) / str(task.workspace_id) / DEFAULT_FOLDER_SESSIONS / str(task_id)
+            if not folder.is_dir():
+                continue
+            files = sorted(str(f) for f in folder.rglob("*") if f.is_file() and not f.name.startswith("."))
+            registered = _register_session_deliverables(
+                db, task, files[:MAX_ADOPTED_FILES], agent_id=task.assigned_agent_id, agent_name=None,
+                session_id=(task.runtime_ref or {}).get("session_id"),
+            )
+            if not registered:
+                continue
+            names = [r["file_path"] for r in registered]
+            task.review_feedback = task.review_feedback or (
+                "Finished, worker never reported — its session left " + ", ".join(names)
+                + " (now on the ticket). Sent to review instead of failed."
+            )
+            db.flush()
+            adopted[task_id] = names
+        except Exception:  # noqa: BLE001 — a ticket we cannot adopt still fails as before
+            logger.warning("[dispatch] could not adopt session files for ticket %s", task_id, exc_info=True)
+    if adopted:
+        logger.info("[dispatch] adopted session files for %s", adopted)
+    return adopted
+
+
 def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     """Sweeper — reclaim work whose lease expired (worker crashed or hung).
 
@@ -265,7 +325,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     (Q41: 2) it becomes terminal ``failed`` with a reason, so dead work fails
     loudly instead of looping forever.
 
-    Returns ``{"requeued": [ids...], "failed": [ids...]}``.
+    Returns ``{"requeued": [...], "failed": [...], "delivered": [...]}`` —
+    ``delivered`` are the ones that produced files and went to ``review``.
     """
     now = datetime.now(timezone.utc)
 
@@ -281,6 +342,43 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
                AND lease_until < :now
                AND attempts < :max_attempts
          RETURNING id
+            """
+        ),
+        {"now": now, "max_attempts": max_attempts},
+    ).fetchall()
+
+    # Night 3 (#612, #614): the session wrote its answer into sessions/<ticket>
+    # and never reported, so nothing was registered — adopt those files first.
+    adopt_session_files(db, now=now, max_attempts=max_attempts)
+
+    # A ticket whose worker never reported but which LEFT FILES did the work —
+    # night 1 wrote "no worker completed the task" over six delivered files
+    # (F013). Check the deliverables the run registered before naming it, and
+    # send those to ``review`` for a human verdict instead of ``failed``.
+    delivered = db.execute(
+        text(
+            """
+            UPDATE board_tasks bt
+               SET status        = 'review',
+                   lease_until   = NULL,
+                   completed_at  = :now,
+                   updated_at    = :now,
+                   error_message = NULL,
+                   review_feedback = COALESCE(
+                       bt.review_feedback,
+                       'Finished, worker never reported — its deliverables are on the ticket.'
+                   )
+             WHERE bt.status = 'in_progress'
+               AND bt.lease_until IS NOT NULL
+               AND bt.lease_until < :now
+               AND bt.attempts >= :max_attempts
+               AND EXISTS (
+                     SELECT 1 FROM deliverables d
+                      WHERE d.source_type = 'task'
+                        AND d.source_id = CAST(bt.id AS text)
+                        AND d.deleted_at IS NULL
+                   )
+         RETURNING bt.id
             """
         ),
         {"now": now, "max_attempts": max_attempts},
@@ -307,16 +405,23 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
 
     db.commit()
 
-    result = {"requeued": [r[0] for r in requeued], "failed": [r[0] for r in failed]}
-    if result["requeued"] or result["failed"]:
+    result = {
+        "requeued": [r[0] for r in requeued],
+        "failed": [r[0] for r in failed],
+        "delivered": [r[0] for r in delivered],
+    }
+    if result["delivered"]:
+        _notify_swept(db, result["delivered"], "review", "task_updated")
+    if result["requeued"] or result["failed"] or result["delivered"]:
         # PRD-180 S1 (F090): a crashed task returning to the queue or dying is a
         # real state change the human should see immediately, not on a poll tick.
         _notify_swept(db, result["requeued"], "assigned", "task_requeued")
         _notify_swept(db, result["failed"], "failed", "task_failed")
         logger.info(
-            "[dispatch] sweeper requeued=%s failed=%s",
+            "[dispatch] sweeper requeued=%s failed=%s delivered=%s",
             result["requeued"],
             result["failed"],
+            result["delivered"],
         )
     return result
 

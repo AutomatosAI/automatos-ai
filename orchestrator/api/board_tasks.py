@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -41,7 +42,24 @@ from services.board_events import board_event_stream, notify_board_event
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled"}  # PRD-234 S1a: cancelled
+# "closed" (night 1, 2026-09-18): tidying a board meant marking work "done" or
+# "cancelled" when neither was true — a ticket superseded by another, or simply
+# no longer wanted. Closed is terminal, claims nothing about the work, and keeps
+# the board honest.
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled", "closed"}
+# An operator note is read on a card, not in a document.
+MAX_TASK_NOTE_CHARS = 1000
+# A reviewer's verdict is folded into the next attempt's prompt, so it is read
+# by a model as well as a person — long enough to be specific, bounded so it
+# cannot crowd out the ticket itself.
+MAX_REVIEW_FEEDBACK_CHARS = 4000
+# Exactly what PATCH /api/v1/tasks/{id} stores. Anything else is a 422 rather
+# than a silent 200 (F060).
+PATCHABLE_TASK_FIELDS = frozenset({
+    "title", "description", "status", "blocked_reason", "priority", "review_mode",
+    "assigned_agent_id", "result", "error_message", "tags", "planning_data",
+    "note", "review_feedback",
+})
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
@@ -391,14 +409,17 @@ async def create_task(
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
     )
     db.add(task)
-    db.commit()
-    db.refresh(task)
+    db.flush()  # the id the notice carries
 
     # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
+    # (after it, the request's closing rollback drops it).
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="task_created",
     )
+    db.commit()
+    db.refresh(task)
 
     # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
@@ -410,9 +431,9 @@ async def create_task(
             db, workspace_id=ctx.workspace_id, task=task,
             actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
         )
-        if _note_no_host_for_cli(db, task):
-            db.commit()
+        _note_no_host_for_cli(db, task)
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+        db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task.to_dict()
@@ -523,7 +544,68 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     enriched = _enrich_with_agents([task], db, ctx.workspace_id)
-    return enriched[0]
+    detail = dict(enriched[0])
+    detail["cost"] = ticket_cost(db, task.id)
+    return detail
+
+
+def ticket_cost(db: Session, task_id: int) -> Dict[str, Any]:
+    """What this ticket actually cost, from the ledger (F034).
+
+    Every model call already writes ``llm_usage`` with
+    ``execution_id = 'board_task:<id>'`` — the number existed and was simply
+    never shown on the thing that spent it. A subscription (CLI session) run
+    costs no API money and is labelled as such rather than shown as a bare
+    $0.00 with no explanation.
+    """
+    try:
+        row = db.execute(text("""
+            SELECT COALESCE(SUM(total_cost), 0) AS usd,
+                   COALESCE(SUM(total_tokens), 0) AS tokens,
+                   COUNT(*) AS calls,
+                   -- 'tier' is where a subscription run is actually marked;
+                   -- request_type stays 'board_task' for both lanes.
+                   COALESCE(SUM(total_tokens) FILTER (WHERE tier = 'subscription'), 0) AS sub_tokens,
+                   COUNT(*) FILTER (WHERE tier = 'subscription') AS sub_calls
+            FROM llm_usage
+            WHERE execution_id = :execution_id
+        """), {"execution_id": f"board_task:{task_id}"}).fetchone()
+    except Exception:  # noqa: BLE001 — a cost read-out must not break the ticket
+        logger.warning("[board] cost unavailable for ticket %s", task_id, exc_info=True)
+        return {"available": False}
+
+    usd = float(row.usd or 0.0) if row else 0.0
+    tokens = int(row.tokens or 0) if row else 0
+    calls = int(row.calls or 0) if row else 0
+    sub_tokens = int(row.sub_tokens or 0) if row else 0
+    sub_calls = int(row.sub_calls or 0) if row else 0
+    api_tokens = tokens - sub_tokens
+    api_calls = calls - sub_calls
+
+    if sub_calls and not api_calls:
+        billing, label = "subscription", (
+            f"{sub_tokens:,} tokens on your CLI subscription — no API charge "
+            f"({sub_calls} call{'s' if sub_calls != 1 else ''})"
+        )
+    elif sub_calls:
+        billing, label = "mixed", (
+            f"${usd:.2f} across {api_calls} API call{'s' if api_calls != 1 else ''} "
+            f"({api_tokens:,} tokens), plus {sub_tokens:,} tokens on your subscription"
+        )
+    else:
+        billing, label = "api", f"${usd:.2f} · {tokens:,} tokens · {calls} calls"
+
+    return {
+        "available": True,
+        "usd": round(usd, 4),
+        "tokens": tokens,
+        "calls": calls,
+        "subscription_tokens": sub_tokens,
+        "billing": billing,
+        # "$0.00" on a session run is true and misleading: it cost a seat, not
+        # a dollar, and the card should say which.
+        "label": label,
+    }
 
 
 @router.patch("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -543,6 +625,28 @@ async def update_task(
 
     body = await request.json()
 
+    # F060: this route accepted any key, returned 200 and echoed the task back,
+    # while storing only the eleven fields below. `review_feedback` — the field
+    # a reviewer's verdict travels in — went in and vanished, so a rejection
+    # looked accepted and nothing was rejected. A PATCH that silently drops
+    # what it was given is worse than one that refuses: refuse.
+    unknown = sorted(set(body) - PATCHABLE_TASK_FIELDS)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown field(s) for a board task: {unknown}. "
+                f"This route stores exactly: {sorted(PATCHABLE_TASK_FIELDS)}. "
+                "Nothing was changed."
+            ),
+        )
+
+    if "review_feedback" in body:
+        # The reviewer's verdict. The dispatcher folds it into the prompt of the
+        # next attempt (see _ticket_prompt) and clears it once consumed.
+        feedback = body["review_feedback"]
+        task.review_feedback = str(feedback)[:MAX_REVIEW_FEEDBACK_CHARS] if feedback else None
+
     if "title" in body:
         title = (body["title"] or "").strip()
         if not title:
@@ -558,16 +662,28 @@ async def update_task(
             raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
         old_status = task.status
         task.status = new_status
+        end_session_claim(task, old_status, new_status)
         if new_status == "in_progress" and not task.started_at:
             task.started_at = datetime.now(timezone.utc)
-        if new_status in ("done", "review"):
+        if new_status in ("done", "review", "closed"):
             task.completed_at = datetime.now(timezone.utc)
-        if new_status == "blocked" and task.blocked_at is None:
-            task.blocked_at = datetime.now(timezone.utc)
-            task.blocked_reason = body.get("blocked_reason")
+        if new_status == "blocked":
+            # A person blocking a ticket that a machine had ALREADY parked used to
+            # record nothing — the `blocked_at is None` guard kept the park's
+            # reason, so the person's intent was invisible to everything after.
+            if task.blocked_at is None:
+                task.blocked_at = datetime.now(timezone.utc)
+            if body.get("blocked_reason") or old_status != "blocked":
+                task.blocked_reason = body.get("blocked_reason")
         if new_status != "blocked" and old_status == "blocked":
             task.blocked_at = None
             task.blocked_reason = None
+        # F036: an explicit status change through this route is a person's
+        # decision. A stop is recorded so no answer or grant can quietly undo
+        # it; any other status lifts it.
+        from services.operator_stop import apply_explicit_status
+
+        apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     if "priority" in body:
         if body["priority"] not in VALID_PRIORITIES:
@@ -606,6 +722,22 @@ async def update_task(
     if "planning_data" in body:
         task.planning_data = body["planning_data"]
 
+    # An operator note — a remark on the ticket that is NOT a rejection.
+    # Night 1 (2026-09-18): the only way to say anything to a ticket was to
+    # reject it into a redo, so a correction and a comment were the same gesture.
+    # Notes land beside the session's own progress notes, in the same list the
+    # card already renders.
+    if body.get("note"):
+        note_text = str(body["note"]).strip()[:MAX_TASK_NOTE_CHARS]
+        if note_text:
+            ref = dict(task.runtime_ref or {})
+            ref["session_notes"] = (ref.get("session_notes") or []) + [{
+                "note": note_text,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "by": "you",
+            }]
+            task.runtime_ref = ref   # rebuilt, never mutated in place (JSONB)
+
     # Check if we need to trigger execution
     # PRD-171 F025: only user-owned board tasks self-execute on a status flip.
     # Recipe + mission-mirror rows are driven by their own engines.
@@ -620,14 +752,24 @@ async def update_task(
     if "status" in body and body["status"] == "done":
         await _dispatch_task_complete(db, ctx.workspace_id, task)
 
-    db.commit()
-    db.refresh(task)
-
     # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="task_updated",
     )
+    if (
+        not trigger_execution
+        and "assigned_agent_id" in body
+        and task.status == "assigned"
+        and task.assigned_agent_id
+        and task.source_type != "recipe"
+    ):
+        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
+        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
     if trigger_execution:
         _launch_task_execution(
@@ -638,15 +780,6 @@ async def update_task(
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
         )
-    elif (
-        "assigned_agent_id" in body
-        and task.status == "assigned"
-        and task.assigned_agent_id
-        and task.source_type != "recipe"
-    ):
-        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
-        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
-        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
@@ -787,6 +920,34 @@ async def approve_task(
     }
 
 
+# F092 (night 3): a finished ticket can be sent back, and a re-run says what it
+# replaces. Night 3's #484 re-run overwrote the only evidence of F093.
+SENDABLE_BACK = ("review", "done")
+FINISHED = ("done", "failed", "cancelled", "review")
+PREVIOUS_RUNS_KEPT = 5
+PREVIOUS_RESULT_CHARS = 4000
+
+
+def keep_previous_run(task: Any, *, why: str, by: str, now: Optional[datetime] = None) -> None:
+    """Put a finished ticket's status, result and finish time on record in
+    ``planning_data.previous_runs`` (rebuilt, never mutated in place) before
+    it runs again. Keeps the newest ``PREVIOUS_RUNS_KEPT``."""
+    if task.status not in FINISHED and not task.result:
+        return
+    data = dict(task.planning_data or {})
+    runs = list(data.get("previous_runs") or [])
+    runs.append({
+        "status": task.status,
+        "result": (task.result or "")[:PREVIOUS_RESULT_CHARS],
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "why": why,
+        "by": by,
+        "at": (now or datetime.now(timezone.utc)).isoformat(),
+    })
+    data["previous_runs"] = runs[-PREVIOUS_RUNS_KEPT:]
+    task.planning_data = data
+
+
 @router.post("/{task_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_task(
     task_id: int,
@@ -800,7 +961,8 @@ async def reject_task(
     Returns the task to the SAME agent as 'assigned' — not dumped back to inbox —
     with the feedback carried into the next execution's context (review_feedback),
     so the agent redoes the work with the correction. The dispatch loop picks the
-    re-assigned task up immediately.
+    re-assigned task up immediately. F092: a DONE ticket can be sent back the
+    same way; what it had finished with is kept in its history first.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -809,13 +971,18 @@ async def reject_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if task.status != "review":
-        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+    if task.status not in SENDABLE_BACK:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
+        )
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
     feedback = (body.get("feedback") or "").strip()
+    if task.status == "done":
+        keep_previous_run(task, why="sent back", by=_operator_ref(ctx))
 
     # Q44: back to the same agent for another attempt, feedback in context.
     task.status = "assigned"
@@ -825,12 +992,13 @@ async def reject_task(
     task.lease_until = None
     task.attempts = 0  # a human-driven redo is a fresh attempt cycle
     task.review_feedback = feedback or None
-    db.commit()
-    db.refresh(task)
 
     # Wake the dispatch loop so the redo starts immediately (single spine).
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
                 task.id, task.assigned_agent_id,
@@ -859,11 +1027,11 @@ def _redispatch_task(db: Session, task: BoardTask) -> None:
     task.completed_at = None
     task.started_at = None
     _note_no_host_for_cli(db, task)  # a Claude Code agent's ticket says who it waits for
-    db.commit()
-    db.refresh(task)
-
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
         notify_task_available(db, workspace_id=task.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
 
 @router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
@@ -887,7 +1055,10 @@ async def run_task_now(
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
     if task.status == "in_progress":
-        raise HTTPException(status_code=409, detail="Task is already running")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes.",
+        )
 
     # PRD-234: pressing Run Now is the operator's approval — record it so the
     # gate lets the ticket through instead of parking it behind a grant.
@@ -895,11 +1066,44 @@ async def run_task_now(
         db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
         actor=_operator_ref(ctx), why=WHY_RUN_NOW,
     )
+    was = task.status
+    rerun = was in FINISHED
+    if rerun:
+        keep_previous_run(task, why="run now", by=_operator_ref(ctx))
     _redispatch_task(db, task)
 
-    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
-                task.id, task.assigned_agent_id)
-    return {"success": True, "task_id": task.id, "status": task.status}
+    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
+                task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": task.status,
+        "rerun_of": was if rerun else None,
+        "message": (
+            f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
+            "ticket's history." if rerun else f"Ticket #{task.id} started."
+        ),
+    }
+
+
+def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
+    """A ticket leaving ``in_progress`` by hand ends the run that was claimed on it.
+
+    Drop the lease and the session credential together (PRD-245). Without this a
+    board gesture — drag to Blocked, drag back to In Progress — left the claim's
+    lease live and the token hash on the row, so a credential whose plaintext is
+    still in that session's transcript and config file kept working with no
+    session running. Nothing here touches a ticket that was not running.
+    """
+    from services.cli_host_service import SESSION_TOKEN_HASH_KEY
+
+    if str(old_status) != "in_progress" or str(new_status) == "in_progress":
+        return
+    task.lease_until = None
+    ref = dict(task.runtime_ref or {})
+    if SESSION_TOKEN_HASH_KEY in ref:
+        ref.pop(SESSION_TOKEN_HASH_KEY, None)
+        task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
 
 
 @router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -924,6 +1128,7 @@ async def update_task_status(
 
     old_status = task.status
     task.status = new_status
+    end_session_claim(task, old_status, new_status)
     if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
         task.completed_at = None
@@ -936,19 +1141,24 @@ async def update_task_status(
     if new_status != "blocked" and old_status == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
+    # F036: the dedicated status route is a person's decision too (the board's
+    # drag-and-drop lands here) — same stop rule as PATCH /{task_id}.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     # PRD-128: dispatch task_complete on drag-to-done transitions
     if new_status == "done":
         await _dispatch_task_complete(db, ctx.workspace_id, task)
 
-    db.commit()
-    db.refresh(task)
-
     # PRD-180 S1 (F090): push the drag-and-drop status change to Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="status_changed",
     )
+    db.commit()
+    db.refresh(task)
 
     # Fire-and-forget: trigger agent execution when moved to in_progress.
     # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
@@ -1022,26 +1232,15 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status in ("done", "failed", "cancelled"):
+    if task.status in ("done", "failed", "cancelled", "closed"):
         return {"id": task.id, "status": task.status, "applied": False}
 
+    # F116: one cancel for the board and for a cancelled playbook run's step
+    # tickets — it now also records who cancelled and why.
+    from services.board_cancel import cancel_board_ticket
+
     previous = task.status
-    now = datetime.now(timezone.utc)
-    task.status = "cancelled"
-    task.completed_at = now
-    task.lease_until = None
-    if previous == "blocked":
-        task.blocked_at = None
-        task.blocked_reason = None
-    ref = dict(task.runtime_ref or {})
-    ref["cancel_requested_at"] = now.isoformat()
-    task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
-    db.commit()
-    notify_board_event(
-        db, workspace_id=ctx.workspace_id, task_id=task.id, status="cancelled",
-        event="task_cancelled",
-    )
-    logger.info("[BoardTasks] task %d cancelled (was %s)", task.id, previous)
+    cancel_board_ticket(db, task, by=_operator_ref(ctx), reason="cancelled on the board")
     return {"id": task.id, "status": "cancelled", "applied": True, "previous_status": previous}
 
 
@@ -1299,12 +1498,12 @@ def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: i
     if _note_no_host_for_cli(db, task):
         changed = True
     if changed:
-        db.commit()
         notify_board_event(
             db, workspace_id=workspace_id, task_id=task_id, status="assigned",
             event="task_updated",
         )
     notify_task_available(db, workspace_id=workspace_id, task_id=task_id)
+    db.commit()  # F118: the notices ride this commit
     logger.info(
         "[BoardTasks] task %d belongs to cli agent %d — parked 'assigned' for the CLI host",
         task_id, agent_id,
@@ -1341,6 +1540,28 @@ def ending_summary(task: Any) -> Optional[str]:
     if isinstance(attempt, int) and attempt > 1:
         bits.append(f"attempt {attempt}")
     return "; ".join(bits)[:500] or None
+
+
+# A later turn's result is only an improvement if it says more. Night 1
+# (2026-09-18) lost ticket #255's six delivered files when a re-claim wrote a
+# 488-character "I produced nothing" over the real write-up (F013).
+RESULT_KEEP_RATIO = 0.5
+
+
+def _kept_result(existing: Optional[str], incoming: Optional[str]) -> Optional[str]:
+    """Whichever of the two actually reports the work.
+
+    An incoming result replaces the old one unless it is substantially shorter —
+    then the longer account is kept and the newer one appended beneath it, so
+    nothing is lost either way and the ticket still shows what the last turn said.
+    """
+    if not incoming:
+        return existing
+    if not existing:
+        return incoming
+    if len(incoming) >= len(existing) * RESULT_KEEP_RATIO:
+        return incoming
+    return f"{existing}\n\n---\n\n_A later run reported:_ {incoming}"
 
 
 async def finalize_board_task_run(
@@ -1405,11 +1626,11 @@ async def finalize_board_task_run(
         task.status = "cancelled"
         task.completed_at = datetime.now(timezone.utc)
         task.lease_until = None
-        db.commit()
-        notify_board_event(
+        notify_board_event(  # F118: before the commit it rides
             db, workspace_id=workspace_id, task_id=task_id, status="cancelled",
             event="task_cancelled",
         )
+        db.commit()
         # PRD-238 S5: "supervised — I'll report back when it's done" must hold
         # for EVERY ending. A cancelled session only fired a board event; its
         # watch stayed `watching` forever and the chat never heard. Fail-soft,
@@ -1426,9 +1647,36 @@ async def finalize_board_task_run(
         )
         return task.status
 
-    task.result = str(llm_text) if llm_text else None
+    task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
+    # F014 (night 1, #153): a result that names a file the workspace does not
+    # have is not finished work, however well it reads.
+    from services.result_files import check_named_files
+
+    try:
+        file_check = await check_named_files(
+            task, str(llm_text or ""), workspace_id, db=db,
+            projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
+        logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
+        file_check = None
+    if file_check is not None:
+        task.result = f"{task.result or ''}\n\n{file_check.note}".strip()
+        force_review = force_review or file_check.review
+    # F093 (night 3, #484): a result that is only skipped tool calls did nothing.
+    from services.result_substance import nothing_done_note
+
+    nothing_done = nothing_done_note(str(llm_text or ""))
+    if nothing_done:
+        task.result = f"{task.result or ''}\n\n{nothing_done}".strip()
+        force_review = True
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
+    # A ticket that ends well must not still carry the error of an earlier
+    # attempt: night 1 left four tickets simultaneously "done" and "failed"
+    # depending which field you read, because a retry that succeeded never
+    # cleared error_message.
+    task.error_message = None
     # PRD-128: dispatch task_complete only on terminal 'done'
     if task.status == "done":
         await _dispatch_task_complete(db, workspace_id, task)
@@ -1437,6 +1685,31 @@ async def finalize_board_task_run(
     await _auto_create_task_report(db, workspace_id, task, exec_result)
     db.commit()
     return task.status
+
+
+def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
+    """Hold a ticket that would have started over the day's ceiling.
+
+    ``blocked`` with the reason on it, so the board says why and the ticket
+    comes back on its own once the ceiling is raised or the day rolls over —
+    it is not failed, and nothing it might have produced is lost.
+    """
+    try:
+        task = db.query(BoardTask).get(task_id)
+        if not task or task.status not in ("assigned", "in_progress"):
+            return
+        task.status = "blocked"
+        task.blocked_at = datetime.now(timezone.utc)
+        task.blocked_reason = reason
+        task.lease_until = None
+        notify_board_event(  # F118: before the commit it rides
+            db, workspace_id=str(task.workspace_id), task_id=task.id,
+            status="blocked", event="task_updated",
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 — the guard must not become its own failure
+        logger.error("[spend-guard] could not park ticket %s", task_id, exc_info=True)
+        db.rollback()
 
 
 def _launch_task_execution(
@@ -1461,6 +1734,18 @@ def _launch_task_execution(
             # dollar ceiling), a durable, revocable, expiring approval-grant is
             # created and the task is BLOCKED until a human grants it — not run,
             # not auto-allowed. On grant, the grant API re-queues the task.
+            # F034: the day's ceiling stops NEW autonomous work. Checked here,
+            # where the next dollar would be spent, and never on a path a human
+            # is waiting on. Work already running is untouched.
+            from services.daily_spend_guard import refuse_new_work
+
+            _over_budget = refuse_new_work(db, workspace_id, f"board task {task_id}")
+            if _over_budget:
+                _park_over_budget(db, task_id, _over_budget)
+                heartbeat.cancel()
+                db.close()
+                return
+
             if _board_task_blocked_pending_approval(db, task_id, agent_id, workspace_id):
                 heartbeat.cancel()
                 db.close()

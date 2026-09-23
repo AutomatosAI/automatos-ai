@@ -273,6 +273,108 @@ function useWorkspaceCheck(path: string, enabled: boolean): { check: WorkspaceCh
   return { check, loading }
 }
 
+/* ---------------------------------------------------------------------------
+ * PRD-245 S1.5 — what a ticket session of this agent can call, and what its
+ * skills ask for that a session does not have.
+ * ------------------------------------------------------------------------ */
+
+/** One Automatos tool a ticket session may call (`GET /api/v1/cli-hosts/settings` → `session_tools`). */
+export interface SessionTool {
+  name: string
+  description: string
+}
+
+/**
+ * One active skill of the agent whose body calls platform tools the session does
+ * not have under that name — the agent detail's `session_tool_gaps` (null for an
+ * api agent, [] when its skills need nothing it lacks). `instead` maps the name
+ * the skill body uses → the session tool that does the same job; `tools` are the
+ * ones a session has no equivalent for. Either may be empty.
+ */
+export interface SessionToolGap {
+  skill: string
+  tools?: string[] | null
+  instead?: Record<string, string> | null
+}
+
+const SESSION_TOOLS_LABEL = 'Tickets for this agent can use these Automatos tools:'
+
+/** What a gap names when it arrives without its skill name. */
+const UNNAMED_SKILL = 'A skill'
+
+/**
+ * The tool line's entries: the backend's order kept (it is the order a session is
+ * offered them in), nameless rows dropped, descriptions coerced for the tooltip.
+ * An older backend carries no `session_tools` → [] → the line does not render. Pure.
+ */
+export function normalizeSessionTools(tools: unknown): SessionTool[] {
+  if (!Array.isArray(tools)) return []
+  return tools.flatMap((entry) => {
+    const row = (entry ?? {}) as Record<string, unknown>
+    const name = str(row.name).trim()
+    return name ? [{ name, description: str(row.description).trim() }] : []
+  })
+}
+
+/** `a` · `a` and `b` · `a`, `b` and `c` — backticked, the given order kept. */
+function backticked(names: string[]): string {
+  const quoted = names.map((n) => `\`${n}\``)
+  if (quoted.length <= 1) return quoted.join('')
+  return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
+}
+
+/**
+ * One line of help text for a skill whose body calls tools by the API agents'
+ * names: what the same work is called in a session, and what a session simply
+ * cannot do. Information, not an error — the agent is not broken, it will work
+ * differently as a session. '' when the entry has nothing to say. Pure.
+ */
+export function describeSessionToolGap(gap: SessionToolGap | null | undefined): string {
+  const skill = str(gap?.skill).trim() || UNNAMED_SKILL
+  const swaps = Object.entries((gap?.instead ?? {}) as Record<string, unknown>)
+    .map(([mentioned, replacement]) => [str(mentioned).trim(), str(replacement).trim()] as const)
+    .filter(([mentioned, replacement]) => Boolean(mentioned && replacement))
+  const raw = gap?.tools
+  const missing = (Array.isArray(raw) ? raw : []).map((name) => str(name).trim()).filter(Boolean)
+  const sentences: string[] = []
+  if (swaps.length) {
+    const mentioned = backticked(swaps.map(([name]) => name))
+    const replacements = backticked(swaps.map(([, name]) => name))
+    sentences.push(`${skill} calls ${mentioned} — in a session that work is ${replacements}.`)
+  }
+  if (missing.length) {
+    const lead = swaps.length ? 'It also calls' : `${skill} calls`
+    sentences.push(`${lead} ${backticked(missing)}, which a session cannot use.`)
+  }
+  return sentences.join(' ')
+}
+
+/**
+ * The tools a session may call, from the session-mode settings. [] until the
+ * backend answers, on an older backend that does not carry the field, and when
+ * the call fails — the line simply does not render. Never throws.
+ */
+function useSessionTools(enabled: boolean): SessionTool[] {
+  const [tools, setTools] = useState<SessionTool[]>([])
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { apiClient } = await import('@/lib/api-client')
+        const settings = await apiClient.request<{ session_tools?: unknown }>('/api/v1/cli-hosts/settings')
+        if (!cancelled) setTools(normalizeSessionTools(settings?.session_tools))
+      } catch {
+        if (!cancelled) setTools([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [enabled])
+  return tools
+}
+
 const VERDICT_CLASS: Record<WorkspaceVerdict['tone'], string> = {
   ok: 'text-[hsl(var(--success))]',
   warn: 'text-[hsl(var(--warning))]',
@@ -282,13 +384,26 @@ const VERDICT_CLASS: Record<WorkspaceVerdict['tone'], string> = {
 interface RuntimeSectionProps {
   value: RuntimeFields
   onChange: <K extends keyof RuntimeFields>(field: K, value: RuntimeFields[K]) => void
+  /**
+   * PRD-245 S1.5: the agent detail's `session_tool_gaps`. A server-side fact
+   * about the saved agent, not a form field, so the caller that fetched the
+   * agent hands it over; the create wizard has no agent yet and passes nothing.
+   */
+  sessionToolGaps?: SessionToolGap[] | null
 }
 
-export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
+export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSectionProps) {
+  const sessionMode = isLocal && value.runtime === 'cli'
   // PRD-239 S6: the verdict on the typed working directory, live.
-  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, isLocal && value.runtime === 'cli')
+  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, sessionMode)
   const verdict = check ? describeWorkspaceCheck(check) : null
-  const avail = useCliAvailability(isLocal && value.runtime === 'cli')
+  const avail = useCliAvailability(sessionMode)
+  // PRD-245 S1.5: the Automatos tools a ticket session gets, and one line per
+  // skill of this agent that calls something a session does not have.
+  const sessionTools = useSessionTools(sessionMode)
+  const gapLines = (Array.isArray(sessionToolGaps) ? sessionToolGaps : [])
+    .map((gap) => describeSessionToolGap(gap))
+    .filter(Boolean)
   const provider = value.cli_provider || DEFAULT_CLI_PROVIDER
   const options = providerOptions(avail, provider)
   const entry = avail?.registry.find((e) => e.id === provider) ?? null
@@ -311,12 +426,65 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
           <SelectItem value="cli">CLI session (your own login, on your machine — Claude Code, Codex, …)</SelectItem>
         </SelectContent>
       </Select>
+
+      {/* The difference that actually decides the choice. Night 1 (2026-09-18):
+          every piece of work the owner graded 5/5 came from a cli agent and none
+          from an api agent — because api agents cannot read the owner's files or
+          other tickets, and nothing on this form said so. */}
+      <div className="rounded-md border border-border/40 bg-muted/30 p-3 text-xs" data-testid="runtime-explainer">
+        <p className="mb-2 font-medium text-foreground">What the choice changes</p>
+        <dl className="space-y-2 text-muted-foreground">
+          <div>
+            <dt className="inline font-medium text-foreground">API model — </dt>
+            <dd className="inline">
+              runs here on the platform&apos;s keys, billed per token. It sees this workspace&apos;s
+              documents, memory and its own ticket, and <strong>cannot read files on your machine
+              or look at other tickets</strong>. Best for work the platform already holds the
+              inputs for: writing, summarising, answering from the knowledge base.
+            </dd>
+          </div>
+          <div>
+            <dt className="inline font-medium text-foreground">CLI session — </dt>
+            <dd className="inline">
+              runs on your own machine under your own CLI login, so it costs no API tokens and
+              <strong> can read your files, run commands and follow work across tickets</strong>.
+              Needs a paired host to be online. Best for building, investigating and anything
+              that has to touch a repository.
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       {value.runtime === 'cli' && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
             Tickets for this agent are run by your paired CLI host as interactive sessions of the CLI you pick,
             under your own login. The model settings below do not apply to sessions.
           </p>
+          {/* PRD-245 S1.5: the Automatos tools a session of this agent can call, in the order it is offered them. */}
+          {sessionTools.length > 0 && (
+            <p className="text-xs text-muted-foreground" data-testid="session-tools">
+              {SESSION_TOOLS_LABEL}{' '}
+              {sessionTools.map((tool, index) => (
+                <span key={tool.name}>
+                  {index > 0 ? ', ' : ''}
+                  <code className="rounded bg-muted/50 px-1 py-0.5 font-mono" title={tool.description || undefined}>
+                    {tool.name}
+                  </code>
+                </span>
+              ))}
+            </p>
+          )}
+          {/* PRD-245 S1.5: what this agent's own skills ask for that a session works differently on. */}
+          {gapLines.length > 0 && (
+            <div className="space-y-1" data-testid="session-tool-gaps">
+              {gapLines.map((line, index) => (
+                <p key={`${index}-${line}`} className="text-xs text-muted-foreground">
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="cli-provider" className="text-xs">CLI</Label>

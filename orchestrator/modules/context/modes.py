@@ -127,7 +127,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ContextMode.CHATBOT: ModeConfig(
         sections=[
             "identity", "onboarding", "skills", "composio", "plugins",
-            "platform_actions", "memory", "business_graph",
+            "platform_actions", "documents_inventory", "memory", "business_graph",
             "datetime_context", "conversation",
         ],
         tool_loading="filtered",

@@ -56,6 +56,7 @@ from graphify.serve import (
 from config import config
 from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
+from modules.knowledge.graph_provenance import SOURCE_DOC_ATTR, prune_document_facts, stamp_source_document
 from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
 
 logger = logging.getLogger(__name__)
@@ -838,6 +839,7 @@ class GraphifyService:
 
         from core.database.database import get_db_session
         from core.models.core import Agent, Document
+        from services.knowledge_flywheel import title_is_telemetry
 
         _MAX_DOC_CHARS = 8000  # cap text sent to LLM extraction
 
@@ -882,12 +884,26 @@ class GraphifyService:
                         )
                         full_text = full_text[:_MAX_DOC_CHARS]
 
+                    doc_path = doc.original_filename or doc.filename or f"doc_{doc.id}"
+                    # F024: the platform's own copies of CLI tickets, heartbeat
+                    # logs and no-op passes are telemetry, not business
+                    # knowledge. They are still retrievable via RAG; they just
+                    # do not earn an LLM extraction pass on a full rebuild.
+                    if title_is_telemetry(doc_path):
+                        logger.debug(
+                            "_collect_sources: skipping telemetry doc %s (%s)", doc.id, doc_path,
+                        )
+                        continue
+
                     sources.append({
                         "type": "document",
                         "id": doc.id,
-                        "path": doc.original_filename or doc.filename or f"doc_{doc.id}",
+                        "path": doc_path,
                         "text": full_text,
                         "team_access": list(doc.team_access or []),
+                        # F104: a replaced document (F087) owns the facts
+                        # filed under its name before they carried its id
+                        "replaced": bool((doc.doc_metadata or {}).get("versions")),
                     })
 
                 # --- Agent roster (only on full rebuild) ------------------
@@ -1004,6 +1020,8 @@ class GraphifyService:
                             team_access=source.get("team_access"),
                             llm=llm,
                         )
+                        if source.get("id") is not None:
+                            extraction = stamp_source_document(extraction, source["id"])
                     logger.debug(
                         "_extract_all: %s '%s' → %d nodes, %d edges",
                         source.get("type", "document"),
@@ -1426,6 +1444,21 @@ class GraphifyService:
         # Extract and merge new nodes/edges
         extractions = await self._extract_all(workspace_id, sources)
         merged = self._merge_extractions(extractions)
+
+        # F104: a changed document's earlier facts come out before its new
+        # ones go in — only for a document whose extraction came back.
+        replaced_names = {s["id"]: s["path"] for s in sources if s.get("type") == "document" and s.get("replaced")}
+        for extraction in extractions:
+            doc_id = extraction.get(SOURCE_DOC_ATTR)
+            if doc_id is None:
+                continue
+            removed_edges, removed_nodes = prune_document_facts(
+                existing_graph, doc_id, legacy_source_file=replaced_names.get(doc_id))
+            if removed_edges or removed_nodes:
+                logger.info(
+                    "_incremental_build: document %s's earlier facts removed (%d edges, %d nodes)",
+                    doc_id, removed_edges, removed_nodes,
+                )
 
         # Add new nodes and edges to existing graph
         for node in merged.get("nodes", []):

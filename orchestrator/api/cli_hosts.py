@@ -120,7 +120,9 @@ class SessionModeSettingsRequest(BaseModel):
 
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
-    status: str = Field("success", pattern="^(success|error|cancelled)$")
+    # F083: usage_limit — the CLI's plan window closed mid-turn; a pause, not a failure.
+    # F015: host_stopped — the host itself stopped while the session ran; not the operator's cancel.
+    status: str = Field("success", pattern="^(success|error|cancelled|usage_limit|host_stopped)$")
     result_text: Optional[str] = None
     error: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
@@ -129,6 +131,7 @@ class ResultRequest(BaseModel):
     session_id: Optional[str] = None
     exit_reason: Optional[str] = None
     transcript_path: Optional[str] = None
+    resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (host clock, ISO)
 
 
 # ── operator surface ─────────────────────────────────────────────────────────
@@ -324,7 +327,7 @@ async def events(
     db: Session = Depends(get_db),
 ):
     try:
-        return svc.record_events(db, host, task_id, body.events)
+        return await svc.record_events(db, host, task_id, body.events)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except PermissionError as exc:

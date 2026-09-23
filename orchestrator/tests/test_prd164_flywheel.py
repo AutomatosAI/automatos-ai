@@ -265,9 +265,13 @@ class TestFlywheelIngestTagging:
         manager.upload_document = AsyncMock(return_value=77)
         graph_service = MagicMock()
 
+        # Night 1 put a report's graph pass behind report type, budget and store
+        # checks; with a mocked session those read as "no". This test is about
+        # what the pending carries once it is scheduled, so the gate is opened.
         with patch("api.documents.get_document_manager", return_value=manager), \
              patch("modules.knowledge.graph_service.get_graph_service",
-                   return_value=graph_service):
+                   return_value=graph_service), \
+             patch("services.knowledge_flywheel._kg_extraction_allowed", return_value=True):
             doc_id = await ingest_agent_output(
                 db, uuid.uuid4(),
                 content="ACME Corp migrated to PostgreSQL.",

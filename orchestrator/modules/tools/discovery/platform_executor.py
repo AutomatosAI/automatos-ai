@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -45,6 +45,7 @@ from modules.tools.discovery.handlers_analytics import (
     get_cost_breakdown,
     workspace_stats,
     board_summary,
+    board_snapshot,
 )
 from modules.tools.discovery.handlers_documents import (
     list_documents,
@@ -53,6 +54,7 @@ from modules.tools.discovery.handlers_documents import (
     upload_document,
     read_document,
     grep_documents,
+    search_documents,
     list_templates,
     get_template_schema,
 )
@@ -143,6 +145,7 @@ from modules.tools.discovery.handlers_board_tasks import (
     list_board_tasks,
     get_board_task,
     assign_board_task,
+    update_board_task,
     update_board_task_status,
 )
 from modules.tools.discovery.handlers_scheduling import (
@@ -334,6 +337,7 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
     "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
     # Tasks — target is the assigned agent (resolved via the task row).
     "platform_assign_task":                (TARGET_TASK, "task_id"),
+    "platform_update_task":                (TARGET_TASK, "task_id"),
     "platform_update_task_status":         (TARGET_TASK, "task_id"),
 }
 
@@ -345,6 +349,7 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 OPERATOR_CONSENT_ACTIONS = (
     "platform_create_task",
     "platform_assign_task",
+    "platform_update_task",
     "platform_update_task_status",
     "platform_schedule_task",
 )
@@ -406,6 +411,13 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     return role in ("owner", "admin")
 
 
+def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
+    """PRD-143's super-admin predicate: only a literal system_role ==
+    'super_admin' passes. There is no fallback, and no caller_context refuses.
+    The gate and platform_list_tools' listing (F122) both read this one."""
+    return (caller_context or {}).get("system_role") == "super_admin"
+
+
 def _bind_ask_orchestrator_context(
     params: Dict[str, Any],
     caller_context: Optional[Dict[str, Any]],
@@ -434,6 +446,28 @@ def _bind_ask_orchestrator_context(
     return bound
 
 
+# Params that identify WHAT an action will act on, in the order a person reads
+# them. An approval card that says only "cancel a scheduled task" gives the
+# operator nothing to decide on (night 1, 2026-09-18: the card named neither the
+# id nor the title of the schedule it would cancel).
+_SUBJECT_PARAMS: Tuple[str, ...] = (
+    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
+    "report_id", "id", "app_name", "query",
+)
+
+
+def _subject_line(params: Dict[str, Any]) -> str:
+    """" on <what this will act on>", or "" when nothing identifies it."""
+    if not isinstance(params, dict):
+        return ""
+    named = [
+        f"{key}={params[key]!r}"
+        for key in _SUBJECT_PARAMS
+        if params.get(key) not in (None, "", [], {})
+    ]
+    return f" on {', '.join(named[:3])}" if named else ""
+
+
 class PlatformActionExecutor:
     """
     Executes platform actions using direct database queries.
@@ -457,6 +491,7 @@ class PlatformActionExecutor:
             "platform_list_documents": list_documents,
             "platform_read_document": read_document,
             "platform_grep_documents": grep_documents,
+            "platform_search_documents": search_documents,
             "platform_list_templates": list_templates,
             "platform_get_template_schema": get_template_schema,
             "platform_get_workspace_info": get_workspace_info,
@@ -564,10 +599,12 @@ class PlatformActionExecutor:
             # PRD-72: Board Tasks
             "platform_create_task": create_board_task,
             "platform_list_tasks": list_board_tasks,
+            "platform_board_snapshot": board_snapshot,
             "platform_board_summary": board_summary,
             "platform_get_task": get_board_task,
             "platform_wait_for_task": wait_for_board_task,  # PRD-238 S4
             "platform_assign_task": assign_board_task,
+            "platform_update_task": update_board_task,
             "platform_update_task_status": update_board_task_status,
             # PRD-77: Agent Self-Scheduling
             "platform_schedule_task": schedule_task,
@@ -757,6 +794,27 @@ class PlatformActionExecutor:
         # Plane OFF (or read failure): historical always-fallback behaviour.
         return self._workspace_has_admin_owner()
 
+    def _caller_is_admin(self, caller_context: Optional[Dict[str, Any]], full_autonomy: bool) -> bool:
+        """US-003's admin predicate. The admin gate and platform_list_tools'
+        listing (F122) both read this one."""
+        if full_autonomy:
+            # Workspace dialled to full autonomy — Auto runs as admin.
+            return True
+        if caller_context is not None:
+            # Explicit caller identity — check roles directly.
+            # A dict with no role keys means "known non-admin user".
+            return (
+                caller_context.get("workspace_role") in ("owner", "admin")
+                or caller_context.get("system_role") == "admin"
+            )
+        # No caller_context (heartbeat, agent factory, etc.).
+        # PRD-174 F014: the "agents inherit admin from the workspace
+        # owner" fallback is no longer implicit — under the policy
+        # plane it applies ONLY when the explicit, default-OFF
+        # ``agents_inherit_admin`` workspace policy is set. Plane OFF
+        # keeps the historical always-fallback behaviour.
+        return self._agent_inherits_admin()
+
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
 
@@ -822,7 +880,7 @@ class PlatformActionExecutor:
             # fallback and API keys (system_role='admin') NEVER satisfy it;
             # caller_context=None refuses (no identity resolution).
             if action_def and action_def.super_admin_only:
-                if (caller_context or {}).get("system_role") != "super_admin":
+                if not _caller_is_super_admin(caller_context):
                     logger.warning(
                         "[PlatformExecutor] Super-admin-only action '%s' denied — "
                         "workspace_id=%s, caller_context=%s",
@@ -846,25 +904,7 @@ class PlatformActionExecutor:
 
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
-                if full_autonomy:
-                    # Workspace dialled to full autonomy — Auto runs as admin.
-                    is_admin = True
-                elif caller_context is not None:
-                    # Explicit caller identity — check roles directly.
-                    # A dict with no role keys means "known non-admin user".
-                    is_admin = (
-                        caller_context.get("workspace_role") in ("owner", "admin")
-                        or caller_context.get("system_role") == "admin"
-                    )
-                else:
-                    # No caller_context (heartbeat, agent factory, etc.).
-                    # PRD-174 F014: the "agents inherit admin from the workspace
-                    # owner" fallback is no longer implicit — under the policy
-                    # plane it applies ONLY when the explicit, default-OFF
-                    # ``agents_inherit_admin`` workspace policy is set. Plane OFF
-                    # keeps the historical always-fallback behaviour.
-                    is_admin = self._agent_inherits_admin()
-                if not is_admin:
+                if not self._caller_is_admin(caller_context, full_autonomy):
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "
                         "workspace_id=%s, caller_context=%s",
@@ -930,6 +970,16 @@ class PlatformActionExecutor:
                         action_name, approved_via_grant_id, self.workspace_id,
                     )
                 else:
+                    # F091 (night 3): never ask about something that is not
+                    # there, and name what is on the card.
+                    from modules.tools.execution.subject_targets import (
+                        missing_targets_error, named_subject, resolve_targets,
+                    )
+
+                    found, missing = resolve_targets(self.db, self.workspace_id, params, action_name)
+                    if missing:
+                        return missing_targets_error(action_name, missing)
+                    subject = named_subject(found) or _subject_line(params)
                     ask = {
                         "success": False,
                         "requires_confirmation": True,
@@ -937,7 +987,8 @@ class PlatformActionExecutor:
                         "permission_level": action_def.permission_level,
                         "message": (
                             f"This action ({action_def.permission_level}) requires confirmation. "
-                            f"Action: {action_name} — {action_def.description[:100]}"
+                            f"Action: {action_name}{subject} — "
+                            f"{action_def.description[:100]}"
                         ),
                         "params": params,
                     }
@@ -950,6 +1001,7 @@ class PlatformActionExecutor:
                         permission_level=action_def.permission_level,
                         description=action_def.description,
                         caller_context=caller_context,
+                        subject=subject,
                     )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
@@ -1134,7 +1186,7 @@ class PlatformActionExecutor:
         if (
             action_name.startswith("platform_graph")
             or action_name == "platform_query_graph"
-            or action_name in ("platform_read_document", "platform_grep_documents")
+            or action_name in ("platform_read_document", "platform_grep_documents", "platform_search_documents")
         ):
             if "_agent_id" not in params:
                 # Resolve agent_id from the active mission or caller context
@@ -1273,6 +1325,20 @@ class PlatformActionExecutor:
             _driver = driver_from_caller_context(caller_context)
             if _driver:
                 params = {**params, "_user_id": _driver}
+
+        # F122: platform_list_tools lists what THIS caller may run. Both flags
+        # come from the predicates the gates above read. Strip-then-inject like
+        # the keys around it, so a tool arg can never claim a role.
+        if action_name == "platform_list_tools":
+            params = {
+                k: v for k, v in params.items()
+                if k not in ("_caller_is_super_admin", "_caller_is_admin")
+            }
+            params = {
+                **params,
+                "_caller_is_super_admin": _caller_is_super_admin(caller_context),
+                "_caller_is_admin": self._caller_is_admin(caller_context, full_autonomy),
+            }
 
         # PRD-238 S4: every handler learns which chat turn (if any) it runs in,
         # so a long-running action can narrate progress through

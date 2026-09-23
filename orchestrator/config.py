@@ -420,6 +420,23 @@ class Config:
         return self._required_float_setting("model_policy", "turn_cost_ceiling_usd")
 
     @property
+    def CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS(self) -> bool:
+        """F105-B: before each model call a chat turn ends its read-only
+        transaction, so it holds no pool connection while the model thinks.
+        Dial chatbot.release_db_between_model_calls; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "release_db_between_model_calls", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
+    def CHATBOT_KNOWLEDGE_PREFETCH(self) -> bool:
+        """F085-A: a question in a workspace with documents is searched before
+        the model's first call. Dial chatbot.knowledge_prefetch; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "knowledge_prefetch", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
     def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
         """Retries when a tool returns 'action not mapped'."""
         return self._required_int_setting("chatbot", "action_retry_budget")
@@ -672,6 +689,12 @@ class Config:
     BOARD_DISPATCH_CLAIM_BATCH: int = int(os.getenv("BOARD_DISPATCH_CLAIM_BATCH", "10"))
     # Q41: attempts before a task is terminal 'failed' (crash → requeue until here).
     BOARD_DISPATCH_MAX_ATTEMPTS: int = int(os.getenv("BOARD_DISPATCH_MAX_ATTEMPTS", "2"))
+    # The backstop across EVERY requeue path, not just lease expiry. Night 1
+    # re-dispatched three tickets 188 times between them and one 534 times,
+    # because the paths that send a ticket back to `assigned` (an answered ask,
+    # a resumed session) never consulted a ceiling at all. Single digits by
+    # design: past this a ticket needs a person, not another attempt.
+    BOARD_DISPATCH_HARD_ATTEMPT_CAP: int = int(os.getenv("BOARD_DISPATCH_HARD_ATTEMPT_CAP", "8"))
     # Per-agent concurrency slots: at most this many of an agent's tasks run at
     # once; the rest stay 'assigned' (the DB is the queue — double-texting is
     # queued, never dropped). The claim honours this via in_progress counts.
@@ -684,6 +707,11 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
+    # session may make through the loopback MCP bridge. A bound, not a budget —
+    # the model is on the operator's own plan; this stops a looping session from
+    # hammering the board. 0 = no cap.
+    SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
     # PRD-234 S2 (local edition): the owner's projects folder on the HOST machine, as
     # the CLI host sees it. Only used to map a session's file paths onto the
     # worker's "projects/" view (the folder is bind-mounted read-only into the
@@ -731,6 +759,9 @@ class Config:
     # PRD-239 S3: how often a playbook step or mission task re-reads the ticket it
     # filed for a session agent while it waits for the session to end.
     CLI_LANE_POLL_SECONDS: int = int(os.getenv("CLI_LANE_POLL_SECONDS", "5"))
+    # F114 (run 4): how long that wait keeps polling through a database outage
+    # (Postgres crash-restarted mid-wait; ~10 s in recovery) before giving up.
+    CLI_LANE_DB_OUTAGE_GRACE_SECONDS: int = int(os.getenv("CLI_LANE_DB_OUTAGE_GRACE_SECONDS", "180"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket
@@ -791,6 +822,11 @@ class Config:
     # PRD-176 F068: local-safe defaults (SaaS sets the railway host via env).
     LOKI_URL: str = os.getenv("LOKI_URL", "http://localhost:3100")
     PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
+    # F078: whether an operator actually pointed us at them. The defaults above
+    # only keep a fresh clone off Railway's topology — nothing answers there in
+    # the compose stack — so the monitoring actions are offered only when set.
+    LOKI_CONFIGURED: bool = bool(os.getenv("LOKI_URL"))
+    PROMETHEUS_CONFIGURED: bool = bool(os.getenv("PROMETHEUS_URL"))
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
@@ -1042,6 +1078,49 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
+    # A mission task worked by a Claude Code session is not an API turn: research
+    # or a build routinely runs 10-30 minutes. The power-mode timeout still bounds
+    # API turns; this is the ceiling for a session ticket that is demonstrably
+    # alive (night 1, finding 21 — every mixed mission failed its session tasks at
+    # four minutes and spawned duplicates beside the sessions still running).
+    MISSION_CLI_TICKET_TIMEOUT_SECONDS: int = int(os.getenv("MISSION_CLI_TICKET_TIMEOUT_SECONDS", "3600"))
+    # Graph extraction shares the ``system_llm`` tier, whose max_tokens is 8000.
+    # Night 1 (2026-09-18): the model emitted ~2.4x its input and 311 of 497
+    # calls were cut off MID-JSON at that ceiling — they parsed to nothing and
+    # were billed in full ($9.06 of a $9.60 line). Extraction gets its own,
+    # lower ceiling, and a prompt that fits inside it.
+    GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
+    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
+    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
+    # F051: a call that yields no parseable line is retried ONCE with the
+    # ceiling lifted, rather than discarded after being paid for.
+    GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS", "6000"))
+
+    # The spend guard's own dials (fix-order §4). The first version borrowed
+    # ``llm_cost_audit.daily_budget_alert_usd`` — a key whose name says "alert" —
+    # and counted from date_trunc('day', NOW()), which is wrong three ways for
+    # this workload: an overnight run spans two UTC days, so last night's spend
+    # counted against tonight's ceiling ($10.89 of night 2's $20 before it had
+    # spent anything); the window reset at 00:00Z = 01:00 local, in the MIDDLE of
+    # every run it governs; and NOW() is the server's clock, not the owner's.
+    #
+    # A "spend day" therefore starts at SPEND_DAY_START_HOUR in SPEND_TIMEZONE —
+    # midday by default, so a run from the evening to the small hours sits
+    # wholly inside ONE window and last night sits wholly inside the previous
+    # one. 0 turns the ceiling off, which is the historical behaviour.
+    SPEND_CEILING_USD: float = float(os.getenv("SPEND_CEILING_USD", "0") or 0)
+    SPEND_DAY_START_HOUR: int = int(os.getenv("SPEND_DAY_START_HOUR", "12"))
+    SPEND_TIMEZONE: str = os.getenv("SPEND_TIMEZONE", "Europe/Lisbon")
+
+    # F025 — the prompt-cache prefix. Tools are serialised BEFORE the system
+    # prompt, so a tool block whose bytes move invalidates the whole cached
+    # prefix. Night 1: call 1 of all 77 Auto turns read back only 2,432-3,456
+    # tokens of a ~34k prefix while calls 2+ read ~33k, because the
+    # platform_execute action enum is re-narrowed per query. With this on the
+    # enum is the full eligible set (byte-stable between turns) and the
+    # per-turn ranking is delivered as a late system line instead — the model
+    # keeps the steer, the cache keeps the prefix.
+    TOOL_ENUM_CACHE_STABLE: bool = os.getenv("TOOL_ENUM_CACHE_STABLE", "true").lower() == "true"
     # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
     # caps how many questions Auto ANSWERS per run from retrievable context;
     # once spent, everything escalates (escalations are never budget-limited —
@@ -1310,7 +1389,12 @@ class Config:
 
     # S3 Documents (general storage bucket)
     S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
-    
+    # PRD-251 S0.4c: GET /api/generated-images/{id} streams the S3 body in chunks
+    # of this many bytes (never the whole object in memory).
+    GENERATED_IMAGE_STREAM_CHUNK_BYTES: int = int(
+        os.getenv("GENERATED_IMAGE_STREAM_CHUNK_BYTES", str(64 * 1024))
+    )
+
     # =============================================================================
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
@@ -1404,6 +1488,25 @@ class Config:
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     VECTOR_STORE_DIMENSIONS: int = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
+    # F105: every embedding call has a bound. The OpenAI SDK default is a 600 s
+    # read timeout with 2 retries — one stalled call held a search for minutes.
+    # A single text (a query) is small, so it gets the shorter read bound.
+    EMBEDDING_CONNECT_TIMEOUT_S: float = float(os.getenv("EMBEDDING_CONNECT_TIMEOUT_S", "5"))
+    EMBEDDING_QUERY_TIMEOUT_S: float = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_S", "15"))
+    EMBEDDING_BATCH_TIMEOUT_S: float = float(os.getenv("EMBEDDING_BATCH_TIMEOUT_S", "60"))
+    EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "1"))
+    # F105: best-effort writes (usage rows, telemetry, heartbeat findings, the
+    # NL2SQL audit) run on this many threads of their own, never on the loop.
+    BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
+    # ...and wait at most this long for a free pool connection, then drop the row.
+    BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F085-A: how many passages the automatic search brings, and the relevance
+    # (the retrieval funnel's final score) a passage needs to reach the prompt.
+    KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))
+    KNOWLEDGE_PREFETCH_MIN_SCORE: float = float(os.getenv("KNOWLEDGE_PREFETCH_MIN_SCORE", "0.3"))
+    # F103: a memory write (durable or mission field) that times out is tried
+    # once more after this pause.
+    MEMORY_WRITE_RETRY_PAUSE_S: float = float(os.getenv("MEMORY_WRITE_RETRY_PAUSE_S", "0.5"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)
@@ -1483,6 +1586,20 @@ class Config:
     # Cohere's published list price for rerank-v3.5 (2026): $2.00 / 1k searches.
     COHERE_RERANK_USD_PER_1K_SEARCHES: float = float(os.getenv("COHERE_RERANK_USD_PER_1K_SEARCHES", "2.0"))
 
+    # PRD-248 — the decision seam (TypeSafe Jev direct or through OpenRouter).
+    # Secrets and endpoints are env-only; the operating dials (route, model,
+    # timeout, per-hook modes, confidence floor) live in system_settings
+    # category ``decision_engine`` so a PoC flips from Settings → System with
+    # no restart. A missing key leaves the engine idle — no route errors for it.
+    TYPESAFE_API_KEY: str = os.getenv("TYPESAFE_API_KEY")
+    TYPESAFE_API_URL: str = os.getenv("TYPESAFE_API_URL", "https://api.typesafe.ai/v1/systemone")
+    # OpenRouter serves Jev on its alpha decisions path (2026-09); it may move.
+    OPENROUTER_DECISIONS_URL: str = os.getenv("OPENROUTER_DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions")
+    # TypeSafe list price: $0.042 per million input tokens, output unmetered.
+    DECISION_ENGINE_USD_PER_MTOK_IN: float = float(os.getenv("DECISION_ENGINE_USD_PER_MTOK_IN", "0.042"))
+    # Shadow comparisons, one JSON line each — read by scripts/eval/decision_shadow.
+    DECISION_SHADOW_LOG_PATH: str = os.getenv("DECISION_SHADOW_LOG_PATH", "logs/decision_shadow.jsonl")
+
     @property
     def RAG_HYBRID_ENABLED(self) -> bool:
         """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).
@@ -1515,6 +1632,10 @@ class Config:
             return str(val).lower() == "true" if val else False
         except Exception:
             return os.getenv("RAG_QUERY_ENHANCEMENT_ENABLED", "false").lower() == "true"
+
+    # F086: a document whose stored chunks hold less than this share of its
+    # extracted text is shown to the owner as partial ("partial — 61% kept").
+    RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
 
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
@@ -1713,6 +1834,37 @@ class Config:
         os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
         or "api.automatos.app"
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-251 Socials
+    # =============================================================================
+    # Socials is gated two ways (D1): the platform master switch is the
+    # ``socials.enabled`` system setting, a super-admin toggle in Settings →
+    # System Settings, and each workspace has ``settings['socials'].enabled``
+    # (modules/socials/settings.py). SOCIALS_ENABLED_DEFAULT is only the master
+    # switch's DEFAULT: the prd251_socials migration seeds the row with it, and
+    # it applies wherever no row exists. Every plan gets Socials, so there is no
+    # plan exposure key.
+    SOCIALS_ENABLED_DEFAULT: bool = os.getenv(
+        "SOCIALS_ENABLED_DEFAULT", "false"
+    ).strip().lower() == "true"
+    # D9: the lifetime of the presigned media URL a channel fetches at publish time.
+    SOCIALS_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_URL_TTL_SECONDS", "86400"))
+    # D10: a post whose slot passed while the backend was down still publishes
+    # within this grace; later than that it goes to ``missed``, never posted late.
+    SOCIALS_MISFIRE_GRACE_SECONDS: int = int(os.getenv("SOCIALS_MISFIRE_GRACE_SECONDS", "1800"))
+    # D8: transient-error retries per channel target.
+    SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
+    # D3: the media-render service (Wave 1). Empty = no renderer configured.
+    SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
+    # D9: the local edition's public bucket for channels that fetch media by URL
+    # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
+    # channels show "needs public storage".
+    SOCIALS_PUBLIC_MEDIA_BUCKET: str = os.getenv("SOCIALS_PUBLIC_MEDIA_BUCKET", "").strip()
+    # S0.6 (D16): how long the Composio deny list is cached per process
+    # (core/composio/deny_list.py). A warm cache answers every Composio call from
+    # memory, so no call waits on system_settings; an edit applies within this.
+    COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS: int = int(os.getenv("COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS", "30"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

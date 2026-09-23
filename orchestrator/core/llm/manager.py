@@ -48,10 +48,37 @@ SERVICE_CATEGORY_MAP = {
     "verifier": "system_llm",
     "consistency_verifier": "system_llm",
     "graph_extraction": "system_llm",
+    # PRD-248: the decision seam's LLM-backed baseline answers typed questions
+    # on the cheap tier, never the orchestrator seat.
+    "decision_adapter": "system_llm",
 
     # Embeddings tier — vectorization only.
     "embeddings": "embeddings",
 }
+
+
+def read_system_setting(category: str, key: str) -> Optional[str]:
+    """
+    Read a system setting's stored value, strictly.
+
+    Returns the value as stored, or None when there is no row. Raises when the
+    read cannot complete (the database module, the pool, the connection or the
+    query), so a caller that must tell "not set" apart from "could not read" —
+    a guard that fails closed — can. ``get_system_setting`` is the lenient
+    wrapper: any failure becomes its default.
+    """
+    from core.database.database import SessionLocal
+    from core.models.system_settings import SystemSetting
+
+    db = SessionLocal()
+    try:
+        setting = db.query(SystemSetting).filter(
+            SystemSetting.category == category,
+            SystemSetting.key == key
+        ).first()
+        return setting.value if setting else None
+    finally:
+        db.close()
 
 
 def get_system_setting(
@@ -61,31 +88,18 @@ def get_system_setting(
 ) -> Optional[str]:
     """
     Get a system setting value from database.
-    
+
     Args:
         category: Setting category (e.g., 'orchestrator_llm', 'codegraph')
         key: Setting key (e.g., 'provider', 'model')
         default_value: Default value if setting not found
-        
+
     Returns:
-        Setting value or default
+        Setting value or default — also the default when the read fails
+        (use ``read_system_setting`` to tell the two apart)
     """
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(
-                SystemSetting.category == category,
-                SystemSetting.key == key
-            ).first()
-            
-            if setting and setting.value:
-                return setting.value
-            return default_value
-        finally:
-            db.close()
+        return read_system_setting(category, key) or default_value
     except ImportError:
         # Database module not available yet - return default during startup
         logger.debug(f"Database module not available yet for {category}.{key}")

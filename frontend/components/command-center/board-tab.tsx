@@ -55,9 +55,11 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   done:        { label: 'Done',        color: 'hsl(82 30% 33%)' },
   failed:      { label: 'Failed',      color: 'hsl(0 62% 38%)' },
   cancelled:   { label: 'Cancelled',   color: 'hsl(30 6% 40%)' }, // PRD-234 S1a
+  // Tidied away without a claim about the work (night 1, 2026-09-18).
+  closed:      { label: 'Closed',      color: 'hsl(30 8% 30%)' },
 }
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled', 'closed',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -295,11 +297,15 @@ function KanbanCard({
             {(task.priority === 'urgent' || task.priority === 'high') && (
               <span className="high">· {task.priority.toUpperCase()}</span>
             )}
-            {(task.attempts ?? 0) > 0 && task.status !== 'done' && (
+            {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
+                47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
+                A requeue is only evidence of a missed ack from the second
+                attempt on. */}
+            {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
               <span
                 className="high"
                 style={{ color: 'hsl(0 72% 60%)' }}
-                title={`Agent missed its ack deadline — task requeued ${task.attempts}×`}
+                title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
               >
                 · UNRESPONSIVE
               </span>

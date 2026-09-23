@@ -21,6 +21,7 @@ The ComplexityAssessment flows through the existing wiring:
 where needs_memory and tool_hints drive downstream behavior.
 """
 
+import asyncio
 import logging
 import re
 import json
@@ -32,6 +33,9 @@ from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
+from consumers.chatbot import auto_decisions
+from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
+
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
 # descriptions share ONE dispatch-contract fragment (single source, never copied).
 from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
@@ -42,6 +46,10 @@ logger = logging.getLogger(__name__)
 # full ContextService pack) — the chat hot path can't afford ~80-113s of
 # doc-RAG + graph BFS just to classify. Cap the roster so the prompt stays lean.
 _ROSTER_LIMIT = 40
+
+# PRD-248: shadow decision tasks in flight. asyncio keeps only a weak reference
+# to a running task, so a fire-and-forget shadow must be held here until done.
+_SHADOW_TASKS: set = set()
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +826,13 @@ class AutoBrain:
 
         msg_lower = message.lower().strip()
 
+        # ── PRD-248: in shadow mode the decision engine runs beside every tier,
+        # the onboarding pin included (a workspace stuck mid-onboarding pins
+        # every turn, and the shadow must still see them); it never blocks the
+        # turn — the comparison is written when it lands.
+        started = time.monotonic()
+        shadow = self._start_shadow(message, conversation_length)
+
         # ── Tier 0: onboarding pin (PRD-222) ──
         # The onboarding spine lives ONLY in the full ContextService path (the
         # OnboardingSection + the platform tools that advance the stage). The
@@ -833,28 +848,223 @@ class AutoBrain:
         # see it. A workspace that never ran onboarding reads as not_started and
         # would otherwise pin every turn forever ("ask Bob to…" became a mission).
         if self._onboarding_active() and not self._names_active_agent(message):
-            return ComplexityAssessment(
-                complexity=Complexity.MOLECULE, action=Action.RESPOND,
-                reasoning="Onboarding active — full context path (spine + platform tools)",
-                confidence=1.0, needs_memory=False, tool_hints=["platform"],
-                needs_multi_agent=False,
+            return self._with_shadow(
+                ComplexityAssessment(
+                    complexity=Complexity.MOLECULE, action=Action.RESPOND,
+                    reasoning="Onboarding active — full context path (spine + platform tools)",
+                    confidence=1.0, needs_memory=False, tool_hints=["platform"],
+                    needs_multi_agent=False,
+                ),
+                0, shadow, message, started,
             )
 
         # ── Tier 1: Redis cache lookup (<5ms) ──
         cached = self._cache_lookup(msg_lower)
         if cached:
-            return cached
+            return self._with_shadow(cached, 1, shadow, message, started)
 
         # ── Tier 2: Regex fast-paths (FREE, <5ms) ──
         heur = self._run_fast_heuristics(msg_lower)
         if heur:
             self._cache_store(msg_lower, heur)
-            return heur
+            return self._with_shadow(heur, 2, shadow, message, started)
+
+        # ── Tier 2.5 (PRD-248, live mode only): a typed decision above the
+        # confidence floor replaces the Tier-3 completion; otherwise None.
+        decided = await self._decision_classify(message, conversation_length)
+        if decided is not None:
+            self._cache_store(msg_lower, decided)
+            return decided
 
         # ── Tier 3: LLM classification (~200ms) ──
         llm_result = await self._llm_classify(message, conversation_length)
         self._cache_store(msg_lower, llm_result)
-        return llm_result
+        return self._with_shadow(llm_result, 3, shadow, message, started)
+
+    # ------------------------------------------------------------------
+    # PRD-248: the decision engine — Tier 2.5 live, or a shadow beside any tier
+    # ------------------------------------------------------------------
+
+    def _decision_mode(self) -> str:
+        """The classifier dial, fail-soft to off: a settings hiccup must never
+        change how a turn is classified."""
+        try:
+            return get_decision_engine().dials().classifier_mode
+        except Exception:
+            logger.debug("[AutoBrain] decision dials unavailable — off", exc_info=True)
+            return MODE_OFF
+
+    async def _decision_ask(
+        self,
+        message: str,
+        conversation_length: int,
+        entries: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """One engine call for the classifier questions over the message and
+        the active roster. Returns ``(result, roster)``; result None on a miss.
+
+        The shadow path passes ``entries`` (plain dicts) read on the request's
+        own session BEFORE its task exists, so the task never borrows the
+        caller's session (the PR #618 trap). The live path passes nothing and
+        reads the roster inline; its ORM rows come back for the ASSIGN-lane
+        name match."""
+        roster = None
+        if entries is None:
+            roster = self._active_agents()
+            entries = auto_decisions.roster_entries(roster)
+        questions = auto_decisions.build_questions(e["name"] for e in entries)
+        state = auto_decisions.build_state(message, conversation_length, entries)
+        result = await get_decision_engine().decide(
+            state=state,
+            questions=questions,
+            workspace_id=self._workspace_id,
+            purpose=auto_decisions.PURPOSE,
+        )
+        return result, roster
+
+    def _start_shadow(
+        self, message: str, conversation_length: int
+    ) -> Optional["asyncio.Task"]:
+        """Shadow mode: start the engine call beside the tiers. The task is
+        held in a module-level set so the loop cannot drop it mid-flight."""
+        if self._decision_mode() != MODE_SHADOW:
+            return None
+        # Read the roster now, on the request's session, and hand the task plain
+        # dicts: a fire-and-forget task must never touch the caller's session.
+        entries = auto_decisions.roster_entries(self._active_agents())
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._decision_ask(message, conversation_length, entries=entries)
+            )
+        except RuntimeError:
+            return None
+        _SHADOW_TASKS.add(task)
+        task.add_done_callback(_SHADOW_TASKS.discard)
+        return task
+
+    def _with_shadow(
+        self,
+        assessment: "ComplexityAssessment",
+        tier: int,
+        task: Optional["asyncio.Task"],
+        message: str,
+        started: float,
+    ) -> "ComplexityAssessment":
+        """Return the tier's verdict unchanged; when a shadow call is in flight,
+        attach the comparison that is written once it lands."""
+        if task is None:
+            return assessment
+        verdict = assessment.to_dict()
+        workspace_id = self._workspace_id
+
+        def _record(done: "asyncio.Task") -> None:
+            row: Dict[str, Any] = {
+                "purpose": auto_decisions.PURPOSE,
+                "workspace_id": workspace_id,
+                "tier": tier,
+                "turn_ms": int((time.monotonic() - started) * 1000),
+                "message_chars": len(message or ""),
+                "message_sha": auto_decisions.message_digest(message),
+                "message_preview": (message or "")[: auto_decisions.PREVIEW_CHARS],
+                "verdict": verdict,
+            }
+            try:
+                if done.cancelled():
+                    row["error"] = "cancelled"
+                elif done.exception() is not None:
+                    row["error"] = repr(done.exception())[:200]
+                else:
+                    result, _roster = done.result()
+                    if result is None:
+                        row["error"] = "no_result"
+                    else:
+                        floor = get_decision_engine().dials().min_confidence
+                        row.update(
+                            provider=result.provider,
+                            model=result.model,
+                            latency_ms=result.latency_ms,
+                            input_tokens=result.input_tokens,
+                            answers={k: a.to_dict() for k, a in result.answers.items()},
+                            agree=auto_decisions.compare(verdict, result),
+                            engine_verdict=auto_decisions.verdict_from_result(
+                                result, min_confidence=floor
+                            ),
+                        )
+            except Exception as exc:  # noqa: BLE001 — a shadow must never surface
+                row["error"] = f"compare: {exc!r}"[:200]
+            get_decision_engine().record_shadow(row)
+            logger.info(
+                "[AutoBrain] shadow",
+                extra={
+                    "tier": tier,
+                    "agree": row.get("agree"),
+                    "latency_ms": row.get("latency_ms"),
+                    "error": row.get("error"),
+                    "workspace_id": workspace_id,
+                },
+            )
+
+        task.add_done_callback(_record)
+        return assessment
+
+    async def _decision_classify(
+        self, message: str, conversation_length: int
+    ) -> Optional["ComplexityAssessment"]:
+        """Tier 2.5, live mode only. A calibrated typed decision replaces the
+        Tier-3 completion when it clears the confidence floor; otherwise None
+        and Tier 3 runs exactly as before (fail-open on every miss)."""
+        if self._decision_mode() != MODE_LIVE:
+            return None
+        t0 = time.monotonic()
+        result, roster = await self._decision_ask(message, conversation_length)
+        if result is None:
+            return None
+        floor = get_decision_engine().dials().min_confidence
+        verdict = auto_decisions.verdict_from_result(result, min_confidence=floor)
+        if verdict is None:
+            logger.info(
+                "[AutoBrain] decision below the confidence floor — Tier 3 runs",
+                extra={"workspace_id": self._workspace_id, "floor": floor},
+            )
+            return None
+
+        action = self._normalize_action(verdict["action"])
+        target_agent_id = None
+        target_agent_name = None
+        if action == Action.ASSIGN:
+            proposed = verdict.get("target_agent_name")
+            target_agent_id, target_agent_name = self._match_roster_agent(
+                proposed, roster, message=message
+            )
+            if target_agent_name is None and proposed:
+                target_agent_name = proposed  # keep the name for the ask
+        assessment = ComplexityAssessment(
+            complexity=Complexity(verdict["complexity"]),
+            action=action,
+            reasoning=(
+                f"Decision engine {result.provider}/{result.model} "
+                f"(confidence {verdict['confidence']:.2f})"
+            ),
+            confidence=float(verdict["confidence"]),
+            target_agent_id=target_agent_id,
+            target_agent_name=target_agent_name,
+            needs_memory=bool(verdict["needs_memory"]),
+            tool_hints=list(verdict["tool_hints"]),
+            needs_multi_agent=bool(verdict["needs_multi_agent"]),
+        )
+        logger.info(
+            "[AutoBrain] assessed",
+            extra={
+                "tier": 2.5,
+                "complexity": assessment.complexity.value,
+                "action": assessment.action.value,
+                "confidence": assessment.confidence,
+                "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+                "cache_hit": False,
+                "workspace_id": self._workspace_id,
+            },
+        )
+        return assessment
 
     def _onboarding_active(self) -> bool:
         """True while this workspace's onboarding stage is non-terminal.
@@ -874,14 +1084,14 @@ class AutoBrain:
             )
             if ws is None:
                 return False
-            # Strict: only a KNOWN non-terminal stage string pins the turn — a
-            # corrupt doc (or a non-Workspace object) classifies normally.
-            stage = onboarding_state.current_stage(ws)
-            return (
-                isinstance(stage, str)
-                and stage in onboarding_state.ALL_STAGES
-                and stage not in onboarding_state.TERMINAL_STAGES
-            )
+            # F064: ONE definition, shared with the tool router's onboarding
+            # prior. This used to be its own copy of the stage check, so the
+            # age-out never reached AutoBrain — the operator workspace sat at a
+            # non-terminal stage from 2 Sep and every Auto turn was forced onto
+            # the full-context Tier 0 path, the classifier effectively off. The
+            # strictness that lived here (a corrupt stage classifies normally)
+            # now lives in the shared check too.
+            return onboarding_state.is_onboarding_active(ws)
         except Exception:
             logger.debug(
                 "[AutoBrain] onboarding check failed — classifying normally",

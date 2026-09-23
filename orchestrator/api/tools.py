@@ -571,6 +571,35 @@ async def connect_app(
     }
 
 
+@router.get("")
+@router.get("/")
+async def tools_index(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """The obvious call. ``GET /api/tools`` 404'd on night 1 (2026-09-18) — every
+    sub-path existed and the collection root did not — so anything that tried the
+    natural URL first got nothing and had to guess.
+
+    Returns this workspace's tools, the same shape as ``/workspace``, plus the
+    routes that answer the narrower questions.
+    """
+    payload = await workspace_tools(ctx=ctx, db=db)
+    if isinstance(payload, dict):
+        payload = {
+            **payload,
+            "routes": {
+                "workspace": "/api/tools/workspace",
+                "connected": "/api/tools/connected",
+                "marketplace": "/api/tools/marketplace",
+                "actions": "/api/tools/{app_name}/actions",
+                "triggers": "/api/tools/{app_name}/triggers",
+                "stats": "/api/tools/stats",
+            },
+        }
+    return payload
+
+
 @router.get("/workspace")
 async def workspace_tools(
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -15,7 +15,8 @@ import magic
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body, BackgroundTasks
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
@@ -75,6 +76,36 @@ db_config = {
 }
 
 # Document manager factory - creates instance per request with workspace context
+# The type a document is listed under, by extension. F086: night 3's café sheet
+# was listed as "unknown" — CSV and spreadsheets were missing.
+UPLOAD_FILE_TYPES = {
+    ".pdf": "pdf", ".md": "markdown", ".markdown": "markdown", ".txt": "text",
+    ".doc": "document", ".docx": "document", ".json": "json",
+    ".csv": "csv", ".xlsx": "spreadsheet", ".xls": "spreadsheet",
+}
+
+
+def processing_type(file_type: str):
+    """How ingestion chunks a listed type. F086: DOCX, CSV and spreadsheets were
+    chunked as plain TEXT, so a CSV never reached row-aware chunking."""
+    return {
+        "pdf": DocumentType.PDF, "text": DocumentType.TEXT, "markdown": DocumentType.MARKDOWN,
+        "json": DocumentType.JSON, "document": DocumentType.DOCX, "csv": DocumentType.CSV,
+        "spreadsheet": DocumentType.XLSX,
+    }.get(file_type, DocumentType.TEXT)
+
+
+def _coverage_fields(doc) -> dict:
+    """F086: what the stored chunks hold of the document, for the list and the
+    page — a document under RAG_KEPT_WARN_PCT is shown as partial."""
+    from config import config as _config
+
+    kept = (getattr(doc, "doc_metadata", None) or {}).get("kept_pct")
+    if not isinstance(kept, int):
+        return {}
+    return {"kept_pct": kept, "partial": kept < _config.RAG_KEPT_WARN_PCT}
+
+
 def get_document_manager(workspace_id: str) -> DocumentManager:
     """Get DocumentManager configured for the workspace"""
     use_s3_vectors = config.S3_VECTORS_ENABLED
@@ -105,7 +136,9 @@ ALLOWED_MIME_TYPES = {
 }
 
 # Shared by POST /upload and the platform_upload_document tool (PRD-143 S10).
-UPLOAD_DIR = Path("/tmp/automotas_uploads")
+# Overridable so a compose volume can outlive the container: night 1 lost every
+# uploaded source file on restart, which is what broke /reprocess.
+UPLOAD_DIR = Path(os.getenv("DOCUMENT_UPLOAD_DIR", "/tmp/automotas_uploads"))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
 @router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
@@ -179,17 +212,7 @@ async def handle_request(
             f.write(content)
 
         # Determine file type category from extension
-        file_type = "unknown"
-        if file_extension in ['.pdf']:
-            file_type = "pdf"
-        elif file_extension in ['.md', '.markdown']:
-            file_type = "markdown"
-        elif file_extension in ['.txt']:
-            file_type = "text"
-        elif file_extension in ['.doc', '.docx']:
-            file_type = "document"
-        elif file_extension in ['.json']:
-            file_type = "json"
+        file_type = UPLOAD_FILE_TYPES.get(file_extension, "unknown")
         
         # Parse tags: comma-separated form field → stripped, de-duplicated
         # (order-preserving) list[str]. Persisted to documents.tags (PostgreSQL
@@ -209,6 +232,25 @@ async def handle_request(
         team_access_list: list[str] = []
         if team_access:
             team_access_list = normalize_teams(team_access.split(","))
+
+        # F087: a file uploaded again under the same name replaces that document —
+        # same id, the new text, the old source kept in its history.
+        from services.document_versions import replace_document, replaceable_document, replaced_message
+
+        replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
+        if replaced is not None:
+            version = await replace_document(
+                db, replaced, workspace_id=ctx.workspace_id, file_path=str(file_path), file_size=file_size,
+                content_hash=content_hash, file_type=file_type,
+                replaced_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
+                tags=tag_list, description=description,
+            )
+            return DocumentUploadResponse(
+                document_id=replaced.id,
+                filename=replaced.filename,
+                status=replaced.status,
+                message=replaced_message(replaced.filename, version, replaced.status),
+            )
 
         # Create document record. tags persist to documents.tags — a real PostgreSQL
         # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
@@ -247,12 +289,7 @@ async def handle_request(
             import asyncio
             
             # Determine file type enum
-            file_type_enum = {
-                'pdf': DocumentType.PDF,
-                'text': DocumentType.TEXT,
-                'markdown': DocumentType.MARKDOWN,
-                'json': DocumentType.JSON,
-            }.get(file_type, DocumentType.TEXT)
+            file_type_enum = processing_type(file_type)
             
             # Process document directly
             processing_error = None
@@ -651,6 +688,7 @@ async def list_documents(
                 last_accessed=doc.last_accessed,
                 rag_query_count=doc.rag_query_count or 0,
                 source_type=doc.source_type,
+                **_coverage_fields(doc),
             ) for doc in documents
         ]
         
@@ -786,6 +824,7 @@ async def get_document(
             processed_date=document.processed_date,
             created_by=document.created_by,
             source_type=document.source_type,
+            **_coverage_fields(document),
         )
         
     except HTTPException:
@@ -898,6 +937,54 @@ async def delete_document(
         logger.error(f"Error deleting document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _embedding_is_vector(db: Session) -> bool:
+    """True when ``document_chunks.embedding`` is a real pgvector column."""
+    from modules.search.vector_store.backends.pgvector_local_backend import _column_types
+
+    embedding_type, _ = _column_types(db)
+    return embedding_type not in ("text", "character varying")
+
+
+async def _reembed_document_from_chunks(db: Session, document, workspace_id: str) -> int:
+    """Regenerate embeddings in place from the chunk text already in Postgres.
+
+    Returns the number of chunks embedded (0 when the document has none, which
+    leaves the caller to report the missing source file).
+    """
+    rows = db.execute(text("""
+        SELECT id, content
+        FROM document_chunks
+        WHERE document_id = :document_id AND CAST(workspace_id AS text) = :workspace_id
+        ORDER BY chunk_index
+    """), {"document_id": document.id, "workspace_id": workspace_id}).fetchall()
+
+    chunks = [(row.id, row.content) for row in rows if (row.content or "").strip()]
+    if not chunks:
+        return 0
+
+    from core.llm.embedding_manager import create_embedding_manager
+    embedding_manager = create_embedding_manager()
+
+    embedded = 0
+    for chunk_id, content in chunks:
+        vector = await embedding_manager.generate_embedding(content)
+        values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
+        literal = "[" + ",".join(f"{float(x):.8f}" for x in values) + "]"
+        # document_chunks.embedding is TEXT on the local stack and vector on a
+        # migrated one; the read path (pgvector_local_backend) accepts either
+        # literal form, so write the bare literal and let the column take it.
+        db.execute(text(f"""
+            UPDATE document_chunks
+            SET embedding = {"CAST(:emb AS vector)" if _embedding_is_vector(db) else ":emb"}
+            WHERE id = :chunk_id
+        """), {"emb": literal, "chunk_id": chunk_id})
+        embedded += 1
+
+    db.commit()
+    logger.info(f"Re-embedded {embedded} chunks for document {document.id} from stored chunk text")
+    return embedded
+
+
 @router.post("/{document_id}/reprocess", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_document(
     document_id: int,
@@ -923,12 +1010,32 @@ async def reprocess_document(
             )
         
         if not os.path.exists(document.file_path):
-            # File doesn't exist - check if this is test data
+            # The source file is gone (uploads live in a container-local temp dir
+            # that does not survive a restart — night 1, finding 17). The chunk
+            # text is still in Postgres, so re-embed from that rather than making
+            # the owner re-upload. Only valid in pgvector mode, where the vectors
+            # live beside the chunks; in S3 Vectors mode the source is still needed.
             logger.warning(f"Document {document_id} file not found at {document.file_path}")
+            if not config.S3_VECTORS_ENABLED:
+                reembedded = await _reembed_document_from_chunks(db, document, str(ctx.workspace_id))
+                if reembedded > 0:
+                    document.status = "processed"
+                    document.chunk_count = reembedded
+                    db.commit()
+                    return {
+                        "message": (
+                            "Document re-embedded from its stored chunks "
+                            "(the uploaded source file is no longer on disk)."
+                        ),
+                        "document_id": document_id,
+                        "chunk_count": reembedded,
+                        "status": "processed",
+                        "source": "chunks",
+                    }
             raise HTTPException(
                 status_code=400,
-                detail=f"Document file not found at: {document.file_path}. "
-                       f"This may be test data. To reprocess, please re-upload the document."
+                detail=f"Document file not found at: {document.file_path}, and it has no "
+                       f"stored chunks to rebuild from. Please re-upload the document."
             )
         
         # Update status
@@ -1045,58 +1152,110 @@ async def get_document_content_by_id(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+SEARCH_DEFAULT_LIMIT = 10           # Results returned when the caller names no limit
+SEARCH_MAX_LIMIT = 50               # Hard ceiling, mirrored by the query-param validator
 PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
 PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
 PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
 
 
+class SemanticSearchRequest(BaseModel):
+    """JSON body for POST /api/documents/search.
+
+    Night 1 (2026-09-18): every agent that reached this route sent a JSON body —
+    the natural shape for a POST — and got a 422, because the parameters were
+    query-string only. Both shapes are accepted now; the body wins when both
+    carry a value.
+    """
+    query: Optional[str] = None
+    limit: Optional[int] = None
+    min_similarity: Optional[float] = None
+    document_ids: Optional[List[int]] = None
+    team: Optional[str] = None
+
+
+async def _retrieval_hits(query: str, max_chunks: int, workspace_id: str, team: Optional[str],
+                          *, floor: Optional[float] = None) -> List[Dict[str, Any]]:
+    """The retrieval funnel's chunks as search hits: score, file name, text,
+    chunk index and document id. A chunk's own ``similarity`` is the
+    post-optimisation value; its document's retrieval score lives in
+    ``sources_map`` (the same reading as platform_search_documents)."""
+    from modules.rag.service import RAGService
+
+    result = await RAGService().retrieve(
+        query=query, max_chunks=max_chunks, context_type="agent", workspace_id=workspace_id, team=team,
+    )
+    scores = {
+        str(entry.get("document_id")): entry.get("score")
+        for entry in (result.sources_map or [])
+        if entry.get("document_id") is not None
+    }
+    hits: List[Dict[str, Any]] = []
+    for chunk in result.chunks or []:
+        metadata = chunk.get("metadata") or {}
+        document_id = chunk.get("document_id") or metadata.get("document_id")
+        score = scores.get(str(document_id))
+        score = float(score if score is not None else (chunk.get("similarity") or 0.0))
+        if floor is not None and score < floor:
+            continue
+        hits.append({
+            "score": score,
+            "file_name": chunk.get("source_file") or metadata.get("file_name") or "",
+            "content": chunk.get("content") or "",
+            "chunk_index": chunk.get("chunk_index") or metadata.get("chunk_index") or 0,
+            "metadata": {"document_id": document_id},
+        })
+    return hits
+
+
 @router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def semantic_search(
-    query: str = Query(..., description="Search query"),
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
-    min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
+    body: Optional[SemanticSearchRequest] = Body(None),
+    query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
+    limit: Optional[int] = Query(None, ge=1, le=50, description="Maximum number of results"),
+    min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
     team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
-    Semantic search across document chunks using vector similarity
-    
-    Uses OpenAI embeddings and pgvector for intelligent document search.
-    Returns chunks ranked by semantic similarity to the query.
+    Semantic search across document chunks using vector similarity.
+
+    Accepts its parameters in the JSON body or the query string. Embeddings are
+    read from whichever document-vector backend the edition selects — S3 Vectors
+    on SaaS, pgvector over ``document_chunks.embedding`` locally.
     """
     try:
+        # Body-or-query, body first. A missing query is a 422 either way, but
+        # now it says so instead of rejecting a well-formed JSON POST.
+        if body is not None:
+            query = body.query if body.query is not None else query
+            limit = body.limit if body.limit is not None else limit
+            min_similarity = body.min_similarity if body.min_similarity is not None else min_similarity
+            document_ids = body.document_ids if body.document_ids is not None else document_ids
+            team = body.team if body.team is not None else team
+
+        if not query or not str(query).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="'query' is required — send it in the JSON body or as a query parameter.",
+            )
+        query = str(query).strip()
+        limit = SEARCH_DEFAULT_LIMIT if limit is None else max(1, min(int(limit), SEARCH_MAX_LIMIT))
+        min_similarity = None if min_similarity is None else float(min_similarity)
+
         import time
         start_time = time.time()
         
-        # Generate query embedding using centralized embedding manager
-        # NOTE: import directly from module for compatibility across deployments
-        from core.llm.embedding_manager import create_embedding_manager
-
-        embedding_manager = create_embedding_manager()
-        logger.info(f"Generating embedding for query: {query[:50]}...")
-        
-        # Generate embedding asynchronously
-        query_embedding = await embedding_manager.generate_embedding(query)
-        
-        logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
-
-        # Search via S3 Vectors (embeddings stored there, not in PostgreSQL)
-        from config import config as app_config
-        from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
-
-        s3_backend = S3VectorsBackend(workspace_id=str(ctx.workspace_id))
-        await s3_backend.initialize()
-
-        embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-        s3_results = s3_backend.search(
-            query_embedding=embedding_list,
-            limit=limit * 3,  # Over-fetch to allow grouping by document
-            min_score=min_similarity,
-        )
-
-        logger.info(f"S3 Vectors returned {len(s3_results)} chunks")
+        # F088 (night 3): this route ran its own vector-only search with a 0.70
+        # cosine floor, so exact words stored in three documents each ("The Salt
+        # Loft", "moreish", "Declan Frost") came back as 0 results. It now runs the
+        # ONE retrieval funnel the chat and the agents use — hybrid (vector +
+        # keyword) with reranking, on the edition's backend — and a similarity
+        # floor applies only when the caller asks for one.
+        hits = await _retrieval_hits(query, limit * 3, str(ctx.workspace_id), team, floor=min_similarity)
+        logger.info(f"document search returned {len(hits)} chunks")
 
         # Map S3 results back to document metadata from PostgreSQL
         # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
@@ -1104,19 +1263,35 @@ async def semantic_search(
         grouped_results: Dict[int, Dict[str, Any]] = {}
         doc_order: List[int] = []
 
-        for s3_hit in s3_results:
-            similarity = s3_hit.get("score", 0.0)
-            file_name = s3_hit.get("file_name", "")
-            chunk_text = s3_hit.get("content", "")
-            chunk_index = s3_hit.get("chunk_index", 0)
+        for hit in hits:
+            similarity = hit.get("score", 0.0)
+            file_name = hit.get("file_name", "")
+            chunk_text = hit.get("content", "")
+            chunk_index = hit.get("chunk_index", 0)
 
-            # Look up document in PostgreSQL by filename + workspace
-            doc_row = db.execute(text("""
-                SELECT id, filename, file_type, file_size, upload_date
-                FROM documents
-                WHERE workspace_id = :workspace_id AND filename = :filename
-                LIMIT 1
-            """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
+            # Prefer the hit's own document_id (the pgvector backend carries it,
+            # and it survives two documents sharing a filename); fall back to the
+            # filename lookup the S3 payload allows.
+            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
+            doc_row = None
+            if hit_doc_id is not None:
+                try:
+                    doc_row = db.execute(text("""
+                        SELECT id, filename, file_type, file_size, upload_date
+                        FROM documents
+                        WHERE workspace_id = :workspace_id AND id = :document_id
+                        LIMIT 1
+                    """), {"workspace_id": ctx.workspace_id, "document_id": int(hit_doc_id)}).fetchone()
+                except (TypeError, ValueError):
+                    doc_row = None
+
+            if not doc_row and file_name:
+                doc_row = db.execute(text("""
+                    SELECT id, filename, file_type, file_size, upload_date
+                    FROM documents
+                    WHERE workspace_id = :workspace_id AND filename = :filename
+                    LIMIT 1
+                """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
 
             if not doc_row:
                 continue

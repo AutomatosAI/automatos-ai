@@ -22,6 +22,13 @@ from core.team_access import normalize_team, metadata_team_filter_clause
 
 logger = logging.getLogger(__name__)
 
+# What search_multimodal searches when no type is named: the EXTRACTED knowledge.
+# A document's own knowledge_items row is a catalog entry nothing embeds, so
+# "document" never returned a result here; documents are searched through
+# search_knowledge, over their embedded chunks (F081, Gerard's option A).
+# An explicit "document" is still honoured.
+DEFAULT_KB_TYPES = ("table", "image", "formula", "codegraph")
+
 
 class MultimodalKnowledgeTools:
     """
@@ -70,7 +77,7 @@ class MultimodalKnowledgeTools:
         the canonical PRD-124 clause). Team filter applies only when a team is
         supplied, mirroring ``modules/rag/service.py``.
         """
-        clause = "AND ki.workspace_id = :workspace_id::uuid"
+        clause = "AND ki.workspace_id = CAST(:workspace_id AS uuid)"
         params: Dict[str, Any] = {"workspace_id": str(workspace_id)}
         team_norm = normalize_team(team) if team else None
         if team_norm:
@@ -134,7 +141,7 @@ class MultimodalKnowledgeTools:
                     kt.column_count,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_tables kt ON kt.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -142,7 +149,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -237,7 +244,7 @@ class MultimodalKnowledgeTools:
                     kimg.format,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_images kimg ON kimg.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -245,7 +252,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -342,7 +349,7 @@ class MultimodalKnowledgeTools:
                     kf.complexity_level,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_formulas kf ON kf.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -350,7 +357,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -402,11 +409,12 @@ class MultimodalKnowledgeTools:
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Unified search across all knowledge types.
+        Unified search across the extracted knowledge types.
 
         Args:
             query: Search query
-            kb_types: List of knowledge types to search (default: all)
+            kb_types: Knowledge types to search (default: DEFAULT_KB_TYPES — the
+                extracted types; documents go through search_knowledge)
             limit: Maximum total results
             workspace_id: Tenant scope (mandatory; fails closed if absent)
             team: Optional team scope (PRD-124)
@@ -428,7 +436,7 @@ class MultimodalKnowledgeTools:
                 return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0, "breakdown": {}}
 
             if kb_types is None:
-                kb_types = ["document", "table", "image", "formula", "codegraph"]
+                kb_types = list(DEFAULT_KB_TYPES)
             else:
                 # Normalize common aliases from older UI/tool prompts
                 alias_map = {
@@ -450,7 +458,7 @@ class MultimodalKnowledgeTools:
                     if not tt:
                         continue
                     normalized.append(alias_map.get(tt, tt))
-                kb_types = normalized or ["document", "table", "image", "formula", "codegraph"]
+                kb_types = normalized or list(DEFAULT_KB_TYPES)
             
             if not self.db:
                 from core.database.database import SessionLocal
@@ -475,14 +483,14 @@ class MultimodalKnowledgeTools:
                     ki.quality_score,
                     ki.importance_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = ANY(:kb_types)
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 

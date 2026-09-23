@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 
+SESSIONS_FOLDER = "sessions"   # <root>/sessions/<ticket>: where a folder-less ticket runs and where its deliverables land
+
+
 class NotAllowed(PermissionError):
     """The directory is outside every allowed root."""
 
@@ -100,8 +103,17 @@ def default_session_cwd(default_root: str, workspace_id: str, task_id: str) -> P
     callers; the layout no longer uses it. Created on demand; a hostile id
     cannot escape the root."""
     root = Path(default_root).expanduser().resolve()
-    target = (root / "sessions" / str(task_id)).resolve()
+    target = (root / SESSIONS_FOLDER / str(task_id)).resolve()
     if not is_inside(target, root):
         raise NotAllowed(f"default session directory escapes the root: {target}")
     target.mkdir(parents=True, exist_ok=True)
     return target
+
+
+def session_deliverables_dir(default_root: Optional[str], task_id: str) -> Optional[Path]:
+    """Where a ticket's deliverables land (PRD-245 S0.7): ``<root>/sessions/<task_id>``
+    under the host's default root — the folder the backend already maps into the
+    workspace volume. ``None`` when the host has no default root. Not created here."""
+    if not default_root:
+        return None
+    return Path(default_root).expanduser() / SESSIONS_FOLDER / str(task_id)

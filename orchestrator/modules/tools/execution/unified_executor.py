@@ -14,9 +14,10 @@ Executor methods are extracted into separate modules under
 modules/tools/execution/exec_*.py for maintainability.
 """
 
+import json
 import logging
 import time as _time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -36,6 +37,16 @@ from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
+from core.database.session_health import rollback_if_aborted
+
+# F088 (night 3): names a model reaches for that are not tools. Auto called
+# `search_documents` four times and got "Unknown tool" each time — the registry
+# check ran before the old alias entry could — and told the owner the product's
+# document search was broken. Resolved before anything gates or routes the call.
+TOOL_ALIASES: Dict[str, str] = {
+    "search_documents": "platform_search_documents",   # searches the uploads and names the file
+    "search_code": "search_codebase",
+}
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
@@ -53,6 +64,98 @@ def _get_composio_executor(db):
     return _composio_executor(db) if _composio_executor else None
 
 logger = logging.getLogger(__name__)
+
+
+# Names a model reaches for when it means one of our required params. Only
+# consulted for a param that is MISSING — never to override what was sent.
+_PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "title": ("name", "heading", "subject", "report_title", "task_title"),
+    # The reverse direction too: platform_create_agent requires `name` and was
+    # failing 6/6 with "Missing required parameter: name" from callers that sent
+    # `title` or `agent_name` (surfaced by the always-failing-actions check).
+    "name": ("title", "agent_name", "label", "display_name"),
+    "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
+    "query": ("q", "search", "question", "prompt"),
+    "description": ("desc", "summary", "details"),
+    # F027-C (night 3): the playbook-step actions. add_playbook_step's prompt
+    # arrived under another name 5 times; update_playbook_step's playbook and
+    # step 3 times. ("order" is NOT an alias of step_index: it is update's own
+    # parameter — the step's new position.)
+    "prompt_template": ("prompt", "template", "instructions", "instruction", "step_prompt", "prompt_text",
+                        "text", "content"),
+    "playbook_id": ("recipe_id", "workflow_id", "playbookId"),
+    "step_index": ("step", "index", "step_number", "step_idx", "stepIndex", "step_position"),
+}
+
+# A single dict argument named after the thing itself ({"report": {...}}) is a
+# wrapper the model added, not a parameter.
+_WRAPPER_KEYS: Tuple[str, ...] = ("report", "task", "document", "payload", "params", "input", "data")
+
+
+def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
+    """``params`` with any missing required key filled from an obvious synonym.
+
+    Returns a new dict — the caller's params are never mutated.
+    """
+    if not required or not isinstance(params, dict):
+        return params
+
+    filled = dict(params)
+
+    # Unwrap {"report": {...}} style wrappers first, without losing siblings.
+    for key in _WRAPPER_KEYS:
+        inner = filled.get(key)
+        if isinstance(inner, dict) and any(r in inner for r in required):
+            filled = {**inner, **{k: v for k, v in filled.items() if k != key}}
+            break
+
+    for name in required:
+        if name in filled and filled[name] not in (None, ""):
+            continue
+        for alias in _PARAM_ALIASES.get(name, ()):
+            value = filled.get(alias)
+            if value not in (None, "", [], {}):
+                filled[name] = value
+                break
+    return filled
+
+
+def _placeholder(prop: Dict[str, Any]) -> str:
+    """How a value of this schema type is written in the example call."""
+    if prop.get("enum"):
+        return json.dumps("<one of: " + " | ".join(str(v) for v in prop["enum"]) + ">")
+    kind = prop.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), "string")
+    return {"string": '"<string>"', "integer": "<integer>", "number": "<number>", "boolean": "<true|false>",
+            "array": "[...]", "object": "{...}"}.get(kind, "<value>")
+
+
+def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List[str], sent: Any) -> str:
+    """F027-C (night 3): the call to make, spelled out. 69 of the night's 98
+    failed platform_execute calls were "Missing required params" — models
+    (gemini-2.5-flash: 10 output tokens each) sent params={} and retried the
+    same after a hint. The error now names the exact call, every required key
+    with its type, from the action's own schema."""
+    props = schema.get("properties") or {}
+    example = ", ".join(f'"{key}": {_placeholder(props.get(key) or {})}' for key in (schema.get("required") or []))
+    lines = [
+        f"Missing required params for '{action_name}': {missing}. Pass them inside params={{...}}.",
+        f'Call it exactly like this: {{"action": "{action_name}", "params": {{{example}}}}}',
+    ]
+    if not sent:
+        lines.append("Your params was empty — the values go inside it.")
+    lines += [f"  {p}: {props[p].get('description', props[p].get('type', '?'))}" for p in missing if p in props]
+    return "\n".join(lines)
+
+
+def unknown_action_error(action_name: str, registry: Any) -> str:
+    """F121: the actions an unknown-action error suggests are ones that can
+    run here — never one F078 leaves out of every surface."""
+    from modules.tools.discovery.action_registry import action_is_available
+
+    runnable = [a.name for a in registry.get_all() if action_is_available(a)]
+    return f"Unknown platform action: '{action_name}'. Use one of: {runnable[:20]}..."
 
 
 class UnifiedToolExecutor:
@@ -98,8 +201,6 @@ class UnifiedToolExecutor:
             'search_knowledge': self._execute_platform_tool,
             'semantic_search': self._execute_platform_tool,
             'search_codebase': self._execute_platform_tool,
-            'search_documents': self._execute_platform_tool,  # Alias
-            'search_code': self._execute_platform_tool,  # Alias
 
             # Database tools (natural language SQL)
             'query_database': self._execute_database_tool,
@@ -635,6 +736,12 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
 
+            # F088: a name a model reaches for that is not a tool runs the tool
+            # that does that job — before any gate or route sees it.
+            if tool_name in TOOL_ALIASES:
+                logger.info(f"[tool-trace {trace}] '{tool_name}' is not a tool — running {TOOL_ALIASES[tool_name]}")
+                tool_name = TOOL_ALIASES[tool_name]
+
             # PRD-174 W4 — the single policy chokepoint. When the plane is ON,
             # EVERY tool call (platform, workspace, Composio, registry) is
             # evaluated by one typed gate HERE, so Composio/workspace/registry
@@ -713,31 +820,29 @@ class UnifiedToolExecutor:
                 registry = get_action_registry()
                 action_def = registry.get(action_name)
                 if not action_def:
-                    available = [a.name for a in registry.get_all()]
                     result = {
                         "success": False,
-                        "error": f"Unknown platform action: '{action_name}'. Use one of: {available[:20]}...",
+                        "error": unknown_action_error(action_name, registry),
                         "tool": tool_name,
                     }
                     return result
 
-                # Validate required params
+                # Validate required params — after filling any that the caller
+                # supplied under an obvious other name. Night 1: 18 of 89 failed
+                # platform_execute calls were "Missing required params for
+                # 'platform_submit_report': ['title','content']" from agents that
+                # HAD written a report, under 'body' or nested in 'report'. The
+                # same schema/handler drift as the onboarding blueprint-rules wall:
+                # refuse a call that is genuinely incomplete, not one that used a
+                # synonym.
                 required = action_def.parameters.get("required", [])
+                action_params = _fill_required_from_aliases(action_params, required)
                 missing = [p for p in required if p not in action_params]
                 if missing:
-                    # Include param descriptions so the LLM can self-correct
-                    props = action_def.parameters.get("properties", {})
-                    hints = [
-                        f"  {p}: {props[p].get('description', props[p].get('type', '?'))}"
-                        for p in missing if p in props
-                    ]
-                    hint_str = "\n".join(hints)
+                    # F027-C: the exact call, every required key with its type.
                     result = {
                         "success": False,
-                        "error": (
-                            f"Missing required params for '{action_name}': {missing}. "
-                            f"Pass them inside params={{...}}.\n{hint_str}"
-                        ),
+                        "error": missing_params_error(action_name, action_def.parameters, missing, action_params),
                         "tool": tool_name,
                     }
                     return result
@@ -794,7 +899,7 @@ class UnifiedToolExecutor:
             if not tool_spec:
                 result = {
                     "success": False,
-                    "error": f"Unknown tool: {tool_name}",
+                    "error": self._unknown_tool_error(tool_name),
                     "tool": tool_name,
                 }
                 return result
@@ -843,7 +948,7 @@ class UnifiedToolExecutor:
             else:
                 result = {
                     "success": False,
-                    "error": f"Unknown tool: {tool_name}",
+                    "error": self._unknown_tool_error(tool_name),
                     "tool": tool_name,
                 }
                 return result
@@ -857,6 +962,12 @@ class UnifiedToolExecutor:
             }
             return result
         finally:
+            # F074: every tool in a turn runs on this one request session. A tool
+            # that caught its own failed statement and returned it as data left
+            # the transaction aborted, and every tool after it failed "current
+            # transaction is aborted" (night 1: query_database 7/7). Never hand
+            # the next tool a dead session.
+            rollback_if_aborted(getattr(self, "db", None), f"tool '{tool_name}'")
             # PRD-139: Universal telemetry — fire-and-forget, never fails the tool call
             _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
             fire_telemetry(
@@ -884,16 +995,19 @@ class UnifiedToolExecutor:
             if _is_find_tools:
                 try:
                     _nested = _params.get("params") if isinstance(_params.get("params"), dict) else {}
-                    _gap_query = (
-                        (caller_context or {}).get("user_query")
-                        or _params.get("query")
-                        or _nested.get("query")
-                    )
+                    # F033: the CAPABILITY the model went looking for is the
+                    # gap. This preferred caller_context.user_query — the whole
+                    # user prompt — so every row recorded that find_tools was
+                    # used, not what was missing: 43 rows of prompts, which is
+                    # a usage log wearing a gap's name. The searched term wins;
+                    # the prompt is only the fallback when there isn't one.
+                    _searched = _params.get("query") or _nested.get("query")
+                    _gap_query = _searched or (caller_context or {}).get("user_query")
                     fire_tool_gap(
                         query=_gap_query,
                         workspace_id=workspace_id,
                         agent_id=agent_id,
-                        gap_source="find_tools",
+                        gap_source="find_tools" if _searched else "find_tools_unspecified",
                         caller_context=caller_context,
                     )
                 except Exception:
@@ -925,6 +1039,27 @@ class UnifiedToolExecutor:
     # ------------------------------------------------------------------
     # Delegate methods -- thin wrappers calling extracted modules
     # ------------------------------------------------------------------
+
+    def _unknown_tool_error(self, tool_name: str) -> str:
+        """F088: "Unknown tool" alone came back to the owner as "the document
+        search is broken" — say which real tools are nearest, so the model
+        retries with one instead."""
+        import difflib
+
+        names = set(self.tool_routes)
+        try:
+            names |= {t.name for t in self.tool_registry.get_all_tools()}
+            from modules.tools.discovery.action_registry import action_is_available, get_action_registry
+
+            # F121: never suggest an action that cannot run here (F078)
+            names |= {a.name for a in get_action_registry().get_all() if action_is_available(a)}
+        except Exception:  # noqa: BLE001 — the suggestions are a courtesy, never a failure
+            logger.debug("unknown-tool suggestions unavailable", exc_info=True)
+        near = difflib.get_close_matches(tool_name, sorted(names), n=3, cutoff=0.6)
+        if not near:
+            return f"Unknown tool: {tool_name} — there is no tool by that name; use one from your tool list."
+        return (f"Unknown tool: {tool_name}. Nearest real tools: {', '.join(near)} "
+                "(a platform_* action runs directly or through platform_execute).")
 
     async def _execute_platform_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_platform.execute_platform_tool(self, tool_name, parameters, agent_id)

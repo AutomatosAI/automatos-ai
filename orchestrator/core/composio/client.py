@@ -18,6 +18,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from config import config
+from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
 
@@ -1352,6 +1353,13 @@ class ComposioClient:
         Returns:
             Action execution result
         """
+        # PRD-251 S0.6 (D16): the platform deny list, before any network call and
+        # whatever the policy plane mode. Every SDK execute through this client
+        # passes here.
+        denial = composio_action_denial(action)
+        if denial:
+            return denied_result(denial)
+
         if not self.composio:
             raise ValueError("Composio client not initialized.")
         

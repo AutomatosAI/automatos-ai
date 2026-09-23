@@ -22,6 +22,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from core.composio.client import get_composio_client
+from core.composio.deny_list import composio_action_denial
 from core.composio.entity_manager import EntityManager
 from core.database.database import SessionLocal
 
@@ -34,6 +35,9 @@ logger = logging.getLogger(__name__)
 # scripts/composio-list-configs probe). Created via the Composio dashboard
 # and reused for every merchant connecting via shpat_ token.
 SHARED_API_KEY_AUTH_CONFIG = "ac_wwcaUIBEt9bX"
+
+# The Composio action the post-create probe runs (consulted against the deny list).
+SHOP_DETAILS_PROBE_ACTION = "SHOPIFY_GET_SHOP_DETAILS"
 
 # Mirrors FULL_SCOPES in scripts/composio-setup.mjs — keep in lockstep with
 # shopify.app.toml [access_scopes] when scopes change.
@@ -242,10 +246,15 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
     # catch a wrong token (Storefront vs Admin, expired, etc.) so the merchant
     # gets the failure in the same UI alert instead of a silently-broken setup
     # they only discover when the widget can't list products.
-    if conn_status == "ACTIVE":
+    # PRD-251 S0.6 (D16): the probe is a Composio action like any other; a
+    # deny-listed probe is skipped (it is best-effort), never executed.
+    probe_denial = composio_action_denial(SHOP_DETAILS_PROBE_ACTION) if conn_status == "ACTIVE" else None
+    if probe_denial:
+        logger.warning("[bridge:shopify] post-create probe skipped: %s", probe_denial)
+    elif conn_status == "ACTIVE":
         try:
             probe = composio.tools.execute(
-                "SHOPIFY_GET_SHOP_DETAILS",
+                SHOP_DETAILS_PROBE_ACTION,
                 user_id=entity_id,
                 arguments={},
             )

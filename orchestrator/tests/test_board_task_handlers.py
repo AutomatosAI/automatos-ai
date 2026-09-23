@@ -257,6 +257,11 @@ class _FakeSession:
     def add(self, obj):
         self._task = obj
 
+    def flush(self):
+        # a flush gives a new row its id (F118: create's notice carries it)
+        if self._task is not None and getattr(self._task, "id", None) is None:
+            self._task.id = 4242
+
     def commit(self):
         self.commits += 1
 
@@ -1406,6 +1411,11 @@ class _RosterDB:
     def add(self, obj):
         self._task = obj
 
+    def flush(self):
+        # a flush gives a new row its id (F118: create's notice carries it)
+        if self._task is not None and getattr(self._task, "id", None) is None:
+            self._task.id = 4242
+
     def commit(self):
         self.commits += 1
 
@@ -1681,3 +1691,68 @@ def test_task_tool_schemas_expose_every_board_status_and_the_bulk_form():
     assert upd["properties"]["task_ids"]["type"] == "array"
     assert "blocked_reason" in upd["properties"]
     assert upd["required"] == ["status"]  # task_id OR task_ids, validated by the handler
+
+
+# --- F092 (night 3): a finished ticket can be sent back; a re-run says what it replaces
+
+def test_a_done_ticket_can_be_sent_back_and_keeps_what_it_finished_with(monkeypatch):
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: None)
+
+    task = BoardTask(id=31, workspace_id=_WS_ID, title="t", status="done", assigned_agent_id=5,
+                     source_type="user", result="search_knowledge: Skipped: execution limit (5)",
+                     planning_data={"human_qa": []})
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    result = asyncio.run(bt.reject_task(31, _FakeReq({"feedback": "Use the brand voice guide."}),
+                                        ctx=ctx, db=_FakeSession(agent=_ns(id=5), task=task)))
+
+    assert result["status"] == "assigned" and task.review_feedback == "Use the brand voice guide."
+    kept = task.planning_data["previous_runs"][0]
+    assert (kept["status"], kept["why"]) == ("done", "sent back")
+    assert kept["result"].startswith("search_knowledge: Skipped")
+    assert task.planning_data["human_qa"] == []            # the rest of planning_data is untouched
+
+
+def test_a_failed_ticket_still_cannot_be_sent_back():
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    from fastapi import HTTPException
+    import pytest as _p
+
+    task = BoardTask(id=34, workspace_id=_WS_ID, title="t", status="failed", assigned_agent_id=5)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    with _p.raises(HTTPException) as ei:
+        asyncio.run(bt.reject_task(34, _FakeReq({"feedback": "x"}), ctx=ctx, db=_FakeSession(task=task)))
+    assert ei.value.status_code == 422
+    assert ei.value.detail == "Only a ticket in review or done can be sent back (currently: failed)"
+
+
+def test_run_now_on_a_done_ticket_says_it_is_a_rerun_and_keeps_the_old_result(monkeypatch):
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: None)
+
+    task = BoardTask(id=32, workspace_id=_WS_ID, title="t", status="done", assigned_agent_id=4,
+                     source_type="user", result="The Salt Loft gets coffee on Tuesdays.", attempts=1)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    result = asyncio.run(bt.run_task_now(32, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))
+
+    assert result["status"] == "assigned" and result["rerun_of"] == "done"
+    assert result["message"] == ("Re-running ticket #32 — it was done; its previous result is kept in "
+                                 "the ticket's history.")
+    assert task.planning_data["previous_runs"][0]["result"] == "The Salt Loft gets coffee on Tuesdays."
+
+
+def test_run_now_on_a_running_ticket_says_what_is_happening():
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    from fastapi import HTTPException
+    import pytest as _p
+
+    task = BoardTask(id=33, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    with _p.raises(HTTPException) as ei:
+        asyncio.run(bt.run_task_now(33, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))
+    assert ei.value.status_code == 409
+    assert ei.value.detail == "Ticket #33 is already running — nothing to start; it reports when it finishes."

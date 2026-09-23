@@ -331,9 +331,9 @@ export function SessionModeTab() {
                       onChange={() => saveDefaultFolder('projects')}
                     />
                     <span>
-                      <span className="text-foreground">Your projects folder</span>{settings.data?.local_projects_dir ? '' : ' (set it first)'} — the default. Most
-                      tickets fix something in a repository or start a new one; the session runs at the top of your projects folder
-                      and works from there.
+                      <span className="text-foreground">Your projects folder</span>{settings.data?.local_projects_dir ? '' : ' (set it first)'} — the
+                      session runs at the top of your projects folder and can reach every repository in it, and whatever a
+                      repository&apos;s own scripts load.
                     </span>
                   </label>
                   <label className="flex items-start gap-2">
@@ -346,8 +346,9 @@ export function SessionModeTab() {
                       onChange={() => saveDefaultFolder('sessions')}
                     />
                     <span>
-                      <span className="text-foreground">A fresh folder per ticket</span> — <span className="font-mono">sessions/&lt;ticket&gt;</span> inside your deliverables root.
-                      Keeps experiments apart; whatever the session writes there is registered as the ticket&apos;s deliverables.
+                      <span className="text-foreground">A fresh folder per ticket</span> — the default. <span className="font-mono">sessions/&lt;ticket&gt;</span> inside
+                      your deliverables root: tickets stay apart and out of your repositories, and whatever the session writes there
+                      is registered as the ticket&apos;s deliverables. An agent that works in a repository names it as its folder.
                     </span>
                   </label>
                 </div>

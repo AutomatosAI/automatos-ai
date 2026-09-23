@@ -506,6 +506,9 @@ async def forward_event(
 # GraphifyService.import_graph for clustering + persistence.
 
 # Shopify Admin GraphQL bulk-op query for the catalog.
+# The Composio action both bulk syncs run (consulted against the deny list first).
+SHOPIFY_BULK_QUERY_ACTION = "SHOPIFY_BULK_QUERY_OPERATION"
+
 _SHOPIFY_BULK_CATALOG_QUERY = """{
   products {
     edges {
@@ -676,9 +679,16 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
     import httpx
 
     from core.composio.client import get_composio_client
+    from core.composio.deny_list import composio_action_denial_async
     from core.composio.entity_manager import EntityManager
     from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
+
+    # PRD-251 S0.6 (D16): the platform deny list, before the workspace, the
+    # Composio entity or the bulk query is touched.
+    denial = await composio_action_denial_async(SHOPIFY_BULK_QUERY_ACTION)
+    if denial:
+        raise HTTPException(status_code=403, detail=denial)
 
     # PRD-183 S5: resolve the catalog→graph mapper through the vertical registry
     # (generic "graph source"), not a hardcoded import — a second vertical
@@ -717,7 +727,7 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
         # Python SDK 0.12.0 returns a dict with keys: data, error, successful,
         # logId. NOT an attribute-access object — keep .get() everywhere.
         bulk = client.composio.tools.execute(
-            "SHOPIFY_BULK_QUERY_OPERATION",
+            SHOPIFY_BULK_QUERY_ACTION,
             user_id=entity_id,
             arguments={"query": _SHOPIFY_BULK_CATALOG_QUERY},
         )
@@ -947,9 +957,16 @@ async def _orders_sync_impl(
     import networkx as nx
 
     from core.composio.client import get_composio_client
+    from core.composio.deny_list import composio_action_denial_async
     from core.composio.entity_manager import EntityManager
     from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
+
+    # PRD-251 S0.6 (D16): the platform deny list, before the workspace, the
+    # Composio entity or the bulk query is touched.
+    denial = await composio_action_denial_async(SHOPIFY_BULK_QUERY_ACTION)
+    if denial:
+        raise HTTPException(status_code=403, detail=denial)
 
     # PRD-183 S5: orders→graph mapper via the vertical registry (generic).
     map_shopify_orders = get_graph_source_mapper("shopify", "orders")
@@ -988,7 +1005,7 @@ async def _orders_sync_impl(
 
     try:
         bulk = client.composio.tools.execute(
-            "SHOPIFY_BULK_QUERY_OPERATION",
+            SHOPIFY_BULK_QUERY_ACTION,
             user_id=entity_id,
             arguments={"query": _orders_bulk_query(days=days)},
         )

@@ -56,6 +56,14 @@ _SWEPT_ENV_VARS = (
     "INTERNAL_API_HOSTNAME",
     "INTERNAL_FRONTEND_HOSTNAME",
     "AGENT_OPT_WORKER_URL",
+    # PRD-251 S0.1 — the Socials group, swept so an env value can't mask the
+    # defaults asserted below.
+    "SOCIALS_ENABLED_DEFAULT",
+    "SOCIALS_MEDIA_URL_TTL_SECONDS",
+    "SOCIALS_MISFIRE_GRACE_SECONDS",
+    "SOCIALS_MAX_TARGET_ATTEMPTS",
+    "SOCIALS_RENDER_URL",
+    "SOCIALS_PUBLIC_MEDIA_BUCKET",
 )
 
 
@@ -153,6 +161,8 @@ SWEPT_MODULES = [
     "core/database/database.py",
     "api/wizard.py",
     "api/channels.py",
+    # PRD-251 S0.1: the Socials switches read config, never the environment.
+    "modules/socials/settings.py",
 ]
 
 
@@ -379,6 +389,46 @@ def test_railway_host_still_settable_via_env(monkeypatch, attr, env_name, saas_v
     """SaaS supplies the real Railway host via env — only the default moved."""
     cfg = _reload_config(monkeypatch, {env_name: saas_value})
     assert getattr(cfg.config, attr) == saas_value
+
+
+# ---------------------------------------------------------------------------
+# 2c. PRD-251 S0.1 — the Socials group (defaults + env override)
+# ---------------------------------------------------------------------------
+
+_SOCIALS_DEFAULTS = {
+    "SOCIALS_ENABLED_DEFAULT": False,
+    "SOCIALS_MEDIA_URL_TTL_SECONDS": 86400,
+    "SOCIALS_MISFIRE_GRACE_SECONDS": 1800,
+    "SOCIALS_MAX_TARGET_ATTEMPTS": 3,
+    "SOCIALS_RENDER_URL": "",
+    "SOCIALS_PUBLIC_MEDIA_BUCKET": "",
+}
+
+
+@pytest.mark.parametrize("attr,expected", sorted(_SOCIALS_DEFAULTS.items()))
+def test_socials_defaults(monkeypatch, attr, expected):
+    cfg = _reload_config(monkeypatch, {})
+    value = getattr(cfg.config, attr)
+    assert value == expected
+    assert type(value) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "env_name,raw,expected",
+    [
+        ("SOCIALS_ENABLED_DEFAULT", "true", True),
+        ("SOCIALS_ENABLED_DEFAULT", "TRUE", True),
+        ("SOCIALS_ENABLED_DEFAULT", "yes", False),
+        ("SOCIALS_MEDIA_URL_TTL_SECONDS", "3600", 3600),
+        ("SOCIALS_MISFIRE_GRACE_SECONDS", "600", 600),
+        ("SOCIALS_MAX_TARGET_ATTEMPTS", "5", 5),
+        ("SOCIALS_RENDER_URL", "http://media-render:8080", "http://media-render:8080"),
+        ("SOCIALS_PUBLIC_MEDIA_BUCKET", "socials-public", "socials-public"),
+    ],
+)
+def test_socials_env_override(monkeypatch, env_name, raw, expected):
+    cfg = _reload_config(monkeypatch, {env_name: raw})
+    assert getattr(cfg.config, env_name) == expected
 
 
 # ---------------------------------------------------------------------------

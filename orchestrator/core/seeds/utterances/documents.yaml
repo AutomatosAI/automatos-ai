@@ -291,6 +291,41 @@ actions:
     source: authored
   - text: reprocess document 2 from scratch
     source: authored
+  platform_search_documents:
+  - text: what do the docs say about our refund policy?
+    source: example
+  - text: search the knowledge base for the onboarding steps
+    source: example
+  - text: which document covers the delivery SLA?
+    source: example
+  - text: what does our handbook say about holiday leave?
+    source: authored
+  - text: find the part of the manual that explains returns
+    source: authored
+  - text: look up our wholesale terms in the documents
+    source: authored
+  - text: is there anything in my docs about minimum order quantities?
+    source: authored
+  - text: what do my uploaded files say about shipping to Ireland?
+    source: authored
+  - text: check the documents for how we handle damaged goods
+    source: authored
+  - text: search my documents for the supplier contract terms
+    source: authored
+  - text: according to the docs, how long do refunds take?
+    source: authored
+  - text: what does the brand voice guide say about tone?
+    source: authored
+  - text: dig through the knowledge base for anything on pricing tiers
+    source: authored
+  - text: which file explains the onboarding checklist?
+    source: authored
+  - text: summarise what the documents say about data retention
+    source: authored
+  - text: does any document explain how to reset a password?
+    source: authored
+  - text: "answer from our docs: what is the warranty period?"
+    source: authored
   platform_upload_document:
   - text: add this FAQ to the knowledge base
     source: example

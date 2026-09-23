@@ -347,13 +347,15 @@ def semantic_index():
 
 
 @pytest.mark.parametrize("su_action", _SU_ACTIONS)
-def test_absent_from_semantic_ranking(su_action, semantic_index):
+def test_absent_from_semantic_ranking(su_action, semantic_index, monkeypatch):
     """Ranked with the su action's OWN description (cosine 1.0 — the
     strongest match in the catalogue) over an UNBOUNDED top_k with the
     promoted filter OFF (two su actions are promoted; the sweep must cover
     them on this path too): still never ranked for an operator.
     Counter-proof: include_super_admin=True ranks it, so the negative is
-    not vacuous."""
+    not vacuous. The action is made available first: since F121 nothing
+    that cannot run here is ranked at all, and the gate swept is the su one."""
+    monkeypatch.setattr(_REGISTRY.get(su_action), "available", None)
     query = _REGISTRY.get(su_action).description
 
     ranked = asyncio.run(

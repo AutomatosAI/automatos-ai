@@ -99,8 +99,10 @@ def complete_recipe_board_task(
     success: bool,
     result: Optional[str] = None,
     error_message: Optional[str] = None,
+    review: bool = False,
 ) -> None:
-    """Move the linked BoardTask to done (success) or review (failure)."""
+    """Move the linked BoardTask to done (success) or failed (failure), or to
+    review when a human must look at finished work (``review=True``)."""
     task = db.query(BoardTask).filter(
         BoardTask.source_type == 'recipe',
         BoardTask.source_id == execution_id,
@@ -109,10 +111,16 @@ def complete_recipe_board_task(
     if not task:
         return
 
-    # PRD-185 S4: honor the success flag — a failed playbook must show 'failed',
-    # not silently close 'done' (that hid a ~17-day OpenRouter 402 outage where
-    # the board reported green while every run failed).
-    task.status = 'done' if success else 'failed'
+    if review:
+        # F123 (F014's rule): a run that stopped after finished work puts that
+        # work in front of a human, never under 'failed'. review_feedback stays
+        # the reviewer's channel: a re-run's prompt carries it as their words.
+        task.status = 'review'
+    else:
+        # PRD-185 S4: honor the success flag — a failed playbook must show
+        # 'failed', not silently close 'done' (that hid a ~17-day OpenRouter 402
+        # outage where the board reported green while every run failed).
+        task.status = 'done' if success else 'failed'
     task.completed_at = datetime.now(timezone.utc)
 
     if result:

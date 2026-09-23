@@ -141,6 +141,35 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_board_snapshot",
+        description=(
+            "The whole picture of the board in ONE call: counts by status and "
+            "priority, the open tickets with their agent, what finished recently, "
+            "and what is scheduled. Use this for any 'how are things going / what "
+            "is the status / what is happening' question instead of calling "
+            "platform_list_tasks and platform_board_summary separately."
+        ),
+        category="tasks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum open tickets to list. Defaults to 200.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["tasks", "board", "status", "summary"],
+        examples=[
+            "how are things going?",
+            "what is the status of the board?",
+            "what is everyone working on?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_board_summary",
         description=(
             "Get a summary of the task board: counts by status, by priority, "
@@ -254,6 +283,52 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         examples=[
             "assign task 12 to the researcher",
             "give task 5 to devops",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_task",
+        description=(
+            "Edit a board task's details — title, description, priority, tags, "
+            "review_mode — or add a note to it without rejecting it. Use this to "
+            "correct or refine a ticket. To CHANGE ITS STATUS use "
+            "platform_update_task_status instead; this action never moves a task."
+        ),
+        category="tasks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task to edit."},
+                "title": {"type": "string", "description": "New title."},
+                "description": {"type": "string", "description": "New description."},
+                "priority": {
+                    "type": "string",
+                    "enum": ["urgent", "high", "medium", "low"],
+                    "description": "New priority.",
+                },
+                "review_mode": {
+                    "type": "string",
+                    "enum": ["human", "llm", "auto"],
+                    "description": "Who signs the work off.",
+                },
+                "tags": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Replaces the task's tags.",
+                },
+                "note": {
+                    "type": "string",
+                    "description": "A remark to add to the ticket. Not a rejection.",
+                },
+            },
+            "required": ["task_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["tasks", "write", "edit"],
+        examples=[
+            "rename task 12 to 'Compare three compostable bag suppliers'",
+            "bump task 5 to high priority",
+            "add a note to task 9 that the supplier replied",
         ],
     ))
 

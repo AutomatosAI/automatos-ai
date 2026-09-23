@@ -464,6 +464,32 @@ def seed_system_settings(db: Session):
                 "options": ["rerank-v3.5", "rerank-english-v3.0", "rerank-multilingual-v3.0"]
             },
         },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_upload_prior",
+            "default_value": "0.05",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the owner's own documents get over agents' "
+                "reports (0.05 = 5%), so an upload wins a near tie (F088). Only "
+                "near-equal scores change order. 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_recency_prior",
+            "default_value": "0.02",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the newest document among the hits gets "
+                "over the oldest (0.02 = 2%, scaled in between), so the newer "
+                "copy wins a near tie (F088). 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
     ])
 
     # =========================================================================
@@ -579,6 +605,35 @@ def seed_system_settings(db: Session):
             ),
             "is_required": True,
             "validation_rules": {"min": 5, "max": 100},
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "release_db_between_model_calls",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "Before each model call, a chat turn whose database transaction "
+                "has only read ends it, so the turn holds no pool connection while "
+                "the model thinks (F105, night 3: turns held connections through "
+                "their whole tool loop and the pool ran dry). A transaction that "
+                "wrote is never touched. Set false to hold connections as before."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "knowledge_prefetch",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "When the workspace has documents and the owner asks a question, "
+                "search them before Auto's first model call and put the passages "
+                "that clear the relevance floor in its prompt, cited by file (F085, "
+                "night 3: Auto searched the product's own manual once in 40 "
+                "questions). One embedding and one search per question turn. Set "
+                "false to answer as before."
+            ),
+            "is_required": False,
         },
         {
             "category": SettingCategory.CHATBOT.value,
@@ -743,6 +798,190 @@ def seed_system_settings(db: Session):
             ),
             "is_required": True,
             "validation_rules": {"min": 1, "max": 50},
+        },
+    ])
+
+    # =========================================================================
+    # DECISION ENGINE (PRD-248 — typed decisions beside the classifier / tool router)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "classifier_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "Auto's complexity classifier and the decision engine. off = "
+                "today's tiers only. shadow = the engine runs beside every "
+                "classified turn and logs agreement to DECISION_SHADOW_LOG_PATH "
+                "without changing the verdict. live = a decision above "
+                "min_confidence replaces the Tier-3 LLM call; below it Tier 3 "
+                "runs as before."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow", "live"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "tool_rerank_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "The tool-surface rerank (PRD-248 S4). off = the embedding top-K "
+                "as today. shadow = the engine judges a wider candidate list beside "
+                "every narrowed turn and logs its cut (DECISION_SHADOW_LOG_PATH) "
+                "without changing the surface. live = the reranked cut replaces the "
+                "embedding top-K; any miss keeps the embedding cut."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow", "live"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_candidates",
+            "default_value": "30",
+            "value_type": "number",
+            "description": (
+                "How many embedding candidates the rerank judges per turn (one "
+                "yes/no question each, one call). Wider finds more, costs tokens."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 5, "max": 120},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_min_probability",
+            "default_value": "0.5",
+            "value_type": "number",
+            "description": (
+                "An action stays in the surface when the engine's probability that "
+                "it helps is at least this. Below it for every candidate = the "
+                "'nothing fits' signal in the shadow log."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 1},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_min_keep",
+            "default_value": "5",
+            "value_type": "number",
+            "description": (
+                "The minimum number of actions the rerank keeps (topped up by "
+                "probability) so an unsure turn never strips the surface."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 40},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "ticket_assign_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when the matcher ranks agents for a "
+                "mission task, the engine picks from the same roster beside it and "
+                "logs whether it agreed and where its pick sat in the platform's "
+                "ranking. Never changes the assignment."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "session_end_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a Claude Code session posts its "
+                "result, the engine judges from the final message whether the work "
+                "is complete, whether nothing was done, and whether the owner is "
+                "needed; logged beside what the board did with the ticket."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "hold_risk_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a question or approval is raised "
+                "(a held command, an ask), the engine scores its blast radius on "
+                "five levels, names the intent, and says whether a non-technical "
+                "owner could judge it; logged with the grant id so the human's "
+                "eventual answer can be joined. Never grants or denies."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "report_triage_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a report lands or a heartbeat "
+                "finishes, the engine says whether the owner should act on it "
+                "today and how severe it is; logged beside where the platform "
+                "sent it. Never changes a notification."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": (
+                "Which route answers decisions. openrouter = TypeSafe Jev through "
+                "the platform's OpenRouter key (beta endpoint, nothing new to set). "
+                "typesafe = direct, needs TYPESAFE_API_KEY. llm = the system_llm "
+                "tier through a JSON adapter — the no-cloud-key baseline."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["openrouter", "typesafe", "llm"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "model",
+            "default_value": "",
+            "value_type": "string",
+            "description": (
+                "Model id override for the route. Empty = the pinned default "
+                "(typesafe/jev-1.13 via OpenRouter, jev-1.13.0 direct). Pin a "
+                "version whenever thresholds are tuned against it."
+            ),
+            "is_required": False,
+            "validation_rules": {},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "timeout_seconds",
+            "default_value": "2.5",
+            "value_type": "number",
+            "description": (
+                "Hard wall per decision call: one attempt, then fail-open to "
+                "today's path. Measured from Europe: p50 about 0.35 s, p95 "
+                "above 1 s."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0.2, "max": 30},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "min_confidence",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": (
+                "Live mode only: the confidence a decision must clear to replace "
+                "the LLM classifier; below it Tier 3 runs. Tune it from the "
+                "shadow scorer's agreement-by-confidence table."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 1},
         },
     ])
 

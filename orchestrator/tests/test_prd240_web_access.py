@@ -229,7 +229,8 @@ def test_executor_maps_both_handlers():
 
 def test_rag_hint_points_at_the_native_actions():
     src = (_ORCH / "modules/tools/registry/tool_registry.py").read_text(encoding="utf-8")
-    assert "use platform_web_search / platform_web_fetch" in src
+    # The hint names the native action (F085 reworded it and kept web search); never Tavily.
+    assert "use platform_web_search via platform_execute" in src
     assert "TAVILY_SEARCH" not in src
 
 

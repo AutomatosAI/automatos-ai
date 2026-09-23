@@ -45,6 +45,16 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 from config import config  # noqa: E402
 
+
+@pytest.fixture
+def narrowed_enum(monkeypatch):
+    """F025 ships the enum cache-stable (the full eligible set) by default and
+    delivers the ranking as a late system line. These pins are about the
+    NARROWED enum, so they run with the dial off."""
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: False)
+
 PINS = {p.strip() for p in config.TOOL_ROUTING_PROMOTION_PINS.split(",") if p.strip()}
 
 
@@ -184,7 +194,7 @@ def test_unpinned_unranked_promoted_absent_from_first_class_but_in_enum():
     assert pin not in enum
 
 
-def test_narrowed_steady_state_unranked_promoted_reachable_only_via_find_tools():
+def test_narrowed_steady_state_unranked_promoted_reachable_only_via_find_tools(narrowed_enum):
     """P232-RVW-1 AC4: the reachability contract in the NARROWED steady state —
     the case allowed_names=None (test above) cannot exercise.
 
@@ -235,7 +245,7 @@ def test_ranked_promoted_attaches_first_class_and_leaves_the_enum():
     assert ranked not in enum, "a first-class action must not be duplicated in the enum"
 
 
-def test_narrowed_enum_excludes_first_class_keeps_non_promoted():
+def test_narrowed_enum_excludes_first_class_keeps_non_promoted(narrowed_enum):
     """With a narrowed allowed_names (incl a ranked promoted + a plain action), the
     enum keeps the plain action but drops the first-class (promoted) one."""
     reg = _registry()
@@ -281,7 +291,7 @@ def test_admin_promoted_excluded_for_non_admin_caller():
     assert admin_action not in enum  # excluded from the enum too (role gate first)
 
 
-def test_closed_pins_fallback_keeps_minimal_enum_not_full():
+def test_closed_pins_fallback_keeps_minimal_enum_not_full(narrowed_enum):
     """Regression guard for the closed-pins interaction: the fallback's curated pin
     list is mostly PROMOTED config pins; excluding them from the enum (as US-014
     does normally) would collapse the narrowed enum into the full-enum defensive

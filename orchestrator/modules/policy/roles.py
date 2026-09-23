@@ -115,6 +115,8 @@ class WorkspaceRole(str, Enum):
 #   members/workspace/audit administration.
 # - ``admin`` holds full resource wildcards + member invite/remove; only the
 #   ``owner`` changes member roles, manages/deletes/bills the workspace.
+# - ``socials:approve`` (PRD-251 D6) approves a social post for publishing:
+#   owner, admin and editor hold it; a viewer never does.
 ROLE_PERMISSIONS: Dict[WorkspaceRole, FrozenSet[str]] = {
     WorkspaceRole.OWNER: frozenset({
         "workspace:manage", "workspace:delete", "workspace:billing",
@@ -122,12 +124,14 @@ ROLE_PERMISSIONS: Dict[WorkspaceRole, FrozenSet[str]] = {
         "members:read",
         "agents:*", "missions:*", "playbooks:*", "documents:*", "knowledge:*",
         "audit:view",
+        "socials:approve",
     }),
     WorkspaceRole.ADMIN: frozenset({
         "workspace:manage",
         "members:invite", "members:remove", "members:read",
         "agents:*", "missions:*", "playbooks:*", "documents:*", "knowledge:*",
         "audit:view",
+        "socials:approve",
     }),
     WorkspaceRole.EDITOR: frozenset({
         "members:read",
@@ -136,6 +140,7 @@ ROLE_PERMISSIONS: Dict[WorkspaceRole, FrozenSet[str]] = {
         "playbooks:create", "playbooks:read", "playbooks:update", "playbooks:execute",
         "documents:create", "documents:read", "documents:update",
         "knowledge:create", "knowledge:read", "knowledge:update",
+        "socials:approve",
     }),
     WorkspaceRole.VIEWER: frozenset({
         "members:read",

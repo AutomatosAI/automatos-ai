@@ -60,7 +60,9 @@ def test_files_one_assigned_ticket_in_the_lanes_shape(monkeypatch):
                              source_id="agent:15", priority="low")
     assert t.id == 4242 and t.status == "assigned" and t.assigned_agent_id == 15
     assert t.source_type == "heartbeat" and t.source_id == "agent:15" and t.priority == "low"
-    assert t.created_by_type == "system" and t.blocked_reason is None and db.commits == 1
+    # two commits: the insert, then the notices (F119 — after the consent, so the
+    # dispatch wake follows it; a notice after the last commit was rolled back)
+    assert t.created_by_type == "system" and t.blocked_reason is None and db.commits == 2
     assert lane.queued_line(t) == "queued for your Claude Code session as ticket #4242"
 
 
@@ -144,3 +146,90 @@ def test_run_outcomes_are_read_honestly():
     text, err, _ = read_exec_outcome("plain string")
     assert not err and text == "plain string"
     assert tokens_of({"tokens_used": "12"}) == 12 and tokens_of(None) == 0
+
+
+# ── PRD-245 S0.5 (D7): a ticket in review is finished work, not an open ticket ──
+
+class _RowsQuery:
+    """Equality and ``in_`` filters off SQLAlchemy expressions over plain rows."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def filter(self, *conds):
+        rows = self._rows
+        for cond in conds:
+            key = cond.left.key
+            op = getattr(getattr(cond, "operator", None), "__name__", "")
+            value = getattr(cond.right, "value", None)
+            if op == "in_op":
+                rows = [r for r in rows if getattr(r, key, None) in set(value or [])]
+            else:
+                rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
+        return _RowsQuery(rows)
+
+    def order_by(self, *a):
+        return _RowsQuery(sorted(self._rows, key=lambda r: -r.id))
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _LookupDB(_DB):
+    """The lane's source lookup runs for real over these rows."""
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+
+    def query(self, model):
+        return _RowsQuery(self.rows)
+
+
+def _heartbeat_ticket(status, tid=9):
+    return SimpleNamespace(id=tid, workspace_id="ws", source_type="heartbeat", source_id="agent:57",
+                           status=status, blocked_reason=None)
+
+
+def _quiet_lookup(monkeypatch):
+    """Like ``_quiet`` without stubbing ``open_ticket_for_source`` — that is what is under test."""
+    monkeypatch.setattr(lane, "host_online", lambda db, ws: True)
+    monkeypatch.setattr(lane, "agent_cli_provider", lambda db, agent_id: "claude")
+    monkeypatch.setattr(lane, "no_cli_host_reason_for", lambda db, ws, cli: None)
+    monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
+    import services.board_consent as consent
+
+    monkeypatch.setattr(consent, "consent_for_lane_ticket", lambda db, **kw: "skipped")
+
+
+def test_reusable_statuses_leave_review_out():
+    assert lane.REUSABLE_STATUSES == ("inbox", "assigned", "in_progress", "blocked")
+    assert "review" not in lane.REUSABLE_STATUSES
+    assert not hasattr(lane, "OPEN_STATUSES")   # replaced, not shimmed
+
+
+def test_a_review_ticket_for_the_heartbeat_is_not_reused_a_new_one_is_filed(monkeypatch):
+    """Agent 15's #93 absorbed 236 heartbeats while it sat in review (PRD-245)."""
+    _quiet_lookup(monkeypatch)
+    db = _LookupDB([_heartbeat_ticket("review")])
+    assert lane.open_ticket_for_source(db, "ws", "heartbeat", "agent:57") is None
+    t = lane.file_cli_ticket(db, workspace_id="ws", agent_id=57, title="Heartbeat: RESEARCHER",
+                             prompt="Read the board.", source_type="heartbeat", source_id="agent:57")
+    assert t.id == 4242 and t.status == "assigned" and db.added == [t] and db.commits == 2   # insert + notices (F119)
+
+
+def test_an_in_progress_ticket_for_the_heartbeat_is_reused(monkeypatch):
+    _quiet_lookup(monkeypatch)
+    running = _heartbeat_ticket("in_progress")
+    db = _LookupDB([_heartbeat_ticket("review", tid=8), running])
+    assert lane.open_ticket_for_source(db, "ws", "heartbeat", "agent:57") is running
+    t = lane.file_cli_ticket(db, workspace_id="ws", agent_id=57, title="Heartbeat: RESEARCHER",
+                             prompt="Read the board.", source_type="heartbeat", source_id="agent:57")
+    assert t is running and not db.added and db.commits == 0
+
+
+def test_every_reusable_status_is_reused_and_every_terminal_one_is_not():
+    for status in lane.REUSABLE_STATUSES:
+        assert lane.open_ticket_for_source(_LookupDB([_heartbeat_ticket(status)]), "ws", "heartbeat", "agent:57") is not None, status
+    for status in lane.TERMINAL_STATUSES:
+        assert lane.open_ticket_for_source(_LookupDB([_heartbeat_ticket(status)]), "ws", "heartbeat", "agent:57") is None, status

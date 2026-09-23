@@ -15,7 +15,7 @@ Usage:
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,20 @@ class ActionDefinition:
     promoted: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
+    # F078: whether the action can run on THIS server — a monitoring backend
+    # that is configured, an API with its credentials. None = always. An action
+    # that can only error is never offered (the rule _offerable_candidates
+    # applies to a Composio tool without Composio); calling it still refuses.
+    available: Optional[Callable[[], bool]] = None
+
+    def is_available(self) -> bool:
+        if self.available is None:
+            return True
+        try:
+            return bool(self.available())
+        except Exception as e:  # a broken check hides the action, never the surface
+            logger.warning(f"[ActionRegistry] availability check for {self.name} failed: {e}")
+            return False
 
     def to_openai_schema(self) -> Dict[str, Any]:
         """Convert to OpenAI function calling format."""
@@ -54,6 +68,13 @@ class ActionDefinition:
                 "parameters": self.parameters,
             },
         }
+
+
+def action_is_available(action: Any) -> bool:
+    """F078: whether an action — or any object standing in for one — can run
+    here. Read like the role flags: an object without the check is available."""
+    check = getattr(action, "is_available", None)
+    return check() if callable(check) else True
 
 
 class ActionRegistry:
@@ -124,7 +145,7 @@ class ActionRegistry:
         self._ensure_initialized()
         actions = [
             a for a in self._actions.values()
-            if include_super_admin or not a.super_admin_only
+            if (include_super_admin or not a.super_admin_only) and action_is_available(a)
         ]
         if permission_filter:
             actions = [a for a in actions if a.permission_level == permission_filter]
@@ -162,7 +183,7 @@ class ActionRegistry:
                 action the caller isn't entitled to.
         """
         self._ensure_initialized()
-        promoted = [a for a in self._actions.values() if a.promoted]
+        promoted = [a for a in self._actions.values() if a.promoted and action_is_available(a)]
         if first_class_names is not None:
             promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
@@ -229,6 +250,7 @@ class ActionRegistry:
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
             and a.name not in exclude_set
+            and action_is_available(a)
         )
 
         # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
@@ -252,6 +274,7 @@ class ActionRegistry:
                     if (not exclude_admin or not a.admin_only)
                     and (include_super_admin or not a.super_admin_only)
                     and a.name not in exclude_set
+                    and action_is_available(a)
                 )
             narrowed_actions = [n for n in intersect_pool if n in allow_set]
             # Defensive: if the intersection is empty (e.g. ranker returned
@@ -265,12 +288,21 @@ class ActionRegistry:
                 )
                 narrowed_actions = valid_actions
 
+        # F025: what the model is STEERED to this turn, published for the
+        # caller to render as a late system line, and — when the cache-stable
+        # dial is on — kept OUT of the tool block so its bytes never move.
+        from modules.tools.turn_narrowing import publish_narrowed_actions, enum_is_cache_stable
+
+        if allowed_names and narrowed_actions != valid_actions:
+            publish_narrowed_actions(narrowed_actions)
+        enum_actions = valid_actions if enum_is_cache_stable() else narrowed_actions
+
         action_property: Dict[str, Any] = {
             "type": "string",
             "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
         }
-        if narrowed_actions:
-            action_property["enum"] = narrowed_actions
+        if enum_actions:
+            action_property["enum"] = enum_actions
 
         return {
             "type": "function",
@@ -416,6 +448,8 @@ class ActionRegistry:
         for action in actions:
             if action.name in blocked:
                 continue
+            if not action_is_available(action):
+                continue  # F121: the prompt never describes what cannot run here (F078)
             if action.super_admin_only and not include_super_admin:
                 continue
             if exclude_admin and action.admin_only:

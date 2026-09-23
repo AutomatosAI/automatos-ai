@@ -30,6 +30,10 @@ class ToolClass(Enum):
     SHELL = "shell"
     WEB = "web"
     BENIGN = "benign"
+    # PRD-245 W1: an Automatos tool, reached over the loopback MCP bridge. Allowed
+    # by NAME against the ticket's own list — the backend enforces the scope, the
+    # gate enforces the surface. Every other MCP tool stays UNKNOWN (denied).
+    PLATFORM = "platform"
     UNKNOWN = "unknown"
 
 
@@ -40,6 +44,7 @@ class ToolIntent:
     cls: ToolClass
     paths: Tuple[str, ...] = ()       # everything the call would touch
     command: Optional[str] = None     # the shell command, if any
+    globs: Tuple[str, ...] = ()       # file-name patterns a search reads through (Grep's glob, Glob's pattern)
 
     @property
     def subject(self) -> Optional[str]:
@@ -88,6 +93,11 @@ class LaunchContext:
     agent_id: Optional[str] = None
     state_dir: Optional[Path] = None  # the host's state dir — per-agent config homes live under it
     hook_command: str = ""            # the shim invocation the CLI's hook config points at
+    # PRD-245 W1: the Automatos tools this ticket may call — ``{"names": [...],
+    # "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp", "token": "…"}``, from
+    # the claim. ``None`` = the backend offered none (an older backend, or the
+    # bridge off), and the session runs exactly as it did before.
+    session_tools: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)

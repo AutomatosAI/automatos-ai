@@ -38,6 +38,7 @@ from modules.tools.execution.telemetry import resolve_action_name
 from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
 from config import config
+from core.database.read_release import release_if_read_only
 
 # Import from consumer's own modules
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
@@ -100,6 +101,41 @@ def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optio
     for key in query_keys:
         if key in tool_args and isinstance(tool_args[key], str):
             return tool_args[key]
+    return None
+
+
+NARRATED_ACTIONS_NOTICE = (
+    "No tools ran in this reply, so nothing it describes was "
+    "executed. Tell me to do it and I will make the calls."
+)
+
+
+def unexecuted_claims_notice(
+    reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool, done: Optional[Set[str]] = None,
+) -> Optional[str]:
+    """What to tell the owner when a reply claims work no tool did this turn —
+    a source that did not run (F099: "(Source: search_knowledge …)" repeated
+    from memory), actions told in prose with no tool call (#746), or an action
+    it says is done with no action that does it succeeding this turn (F108:
+    "I've approved the mission. It's now running" — it wasn't). ``done`` is
+    the actions that succeeded. None when the reply claims nothing it did not
+    do. Both reply paths ask this: a turn whose first reply calls no tool never
+    enters the tool loop, and that is exactly where night 3's replayed answer was."""
+    from modules.tools.execution.tool_loop import (
+        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run, claimed_action_not_done,
+        looks_like_narrated_action, offered_tool_names,
+    )
+
+    if not use_tools or not reply:
+        return None
+    cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
+    if cited:
+        return UNRUN_SOURCE_NOTICE.format(tool=cited)
+    if not any_tool_ran and looks_like_narrated_action(reply):
+        return NARRATED_ACTIONS_NOTICE
+    claim = claimed_action_not_done(reply, done)
+    if claim:
+        return CLAIMED_ACTION_NOTICE.format(claim=claim)
     return None
 
 
@@ -207,6 +243,42 @@ def atom_identity_clause(user_name: Optional[str]) -> str:
     """
     name = user_name.strip() if isinstance(user_name, str) else ""
     return f" You're talking to {name}." if name else ""
+
+
+# How many times the same tool may fail the same way in one turn before the
+# loop stops handing it back as if the next attempt might differ (F030).
+MAX_IDENTICAL_TOOL_FAILURES = 2
+
+
+def _same_failure_key(tool_name: str, result: Dict[str, Any]) -> Optional[str]:
+    """A key identifying "this tool, failing this way", or None if it succeeded.
+
+    Keyed on the first line of the error so a retry with different arguments
+    that fails for the SAME reason still counts — a missing backend does not
+    care what you asked it for.
+    """
+    if result.get("success"):
+        return None
+    error = str(result.get("error") or (result.get("raw_result") or {}).get("error") or "").strip()
+    if not error:
+        return None
+    return f"{tool_name}:{error.splitlines()[0][:120]}"
+
+
+
+def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
+    """``RuntimeMismatchError`` when ``agent_id`` is a ``runtime: cli`` agent,
+    else ``None``. Fail-soft: an unreadable row falls back to the generic error."""
+    try:
+        from core.cli_runtime import RUNTIME_CLI, RuntimeMismatchError, is_cli_agent
+        from core.models import Agent as _Agent
+
+        row = db.query(_Agent.configuration).filter(_Agent.id == agent_id).first()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is not None and is_cli_agent(row[0]):
+        return RuntimeMismatchError(agent_id, RUNTIME_CLI, lane="chat")
+    return None
 
 
 class ToolExecutionTracker:
@@ -661,6 +733,15 @@ class StreamingChatService:
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
+
+    def _before_model_call(self) -> None:
+        """F105-B: the turn holds no pool connection while the model thinks —
+        a transaction that has only read ends here; one that wrote is kept.
+        Dial: chatbot.release_db_between_model_calls (read once per turn)."""
+        if getattr(self, "_release_db_dial", None) is None:
+            self._release_db_dial = config.CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS
+        if self._release_db_dial:
+            release_if_read_only(self.db)
 
     def _reset_turn_retrieval(self) -> None:
         """Clear per-turn retrieval provenance at the start of a turn."""
@@ -1489,6 +1570,7 @@ class StreamingChatService:
 
         async def _run():
             try:
+                self._before_model_call()
                 return await llm_manager.generate_response(messages=messages, tools=tools, on_delta=_on_delta)
             finally:
                 await frames.put(END)
@@ -1500,6 +1582,48 @@ class StreamingChatService:
                 break
             yield item
         yield {"_response": await task}
+
+    async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
+                               chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
+        """F085-A: search the documents for a question before the first model
+        call. Yields the activity-trail frames; appends the cited passages to
+        ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, is_question, prefetch
+
+        if not is_question(latest_text):
+            return
+
+        async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
+            result = await self.tool_router.execute_and_format(
+                tool_name=PREFETCH_TOOL,
+                tool_args=args,
+                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
+                workspace_id=self.workspace_id,
+                original_intent=latest_text,
+                caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
+            )
+            self._collect_tool_retrieval(PREFETCH_TOOL, result)
+            return result
+
+        try:
+            found = await prefetch(
+                self.db, self.workspace_id, latest_text, search=_search,
+                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH,
+                limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
+            )
+        except Exception:
+            logger.warning("[F085] retrieval first skipped", exc_info=True)
+            return
+        if found is None:
+            return
+        call_id = f"retrieval-first-{uuid.uuid4().hex[:12]}"
+        yield self.streaming_handler.format_aisdk_tool_start(call_id, PREFETCH_TOOL, {**found.args, "automatic": True})
+        yield self.streaming_handler.format_aisdk_tool_end(
+            call_id, PREFETCH_TOOL, True, duration_ms=found.elapsed_ms, summary=found.summary,
+        )
+        prefetched.append((PREFETCH_TOOL, found.args))
+        if found.message:
+            llm_messages.append(found.message)
 
     async def _stream_tool_loop(
         self,
@@ -1515,6 +1639,7 @@ class StreamingChatService:
         is_super_admin: bool = False,
         streamed_text: Optional[List[str]] = None,
         reasoning_log: Optional[List[str]] = None,
+        prefetched: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1587,6 +1712,13 @@ class StreamingChatService:
         _turn_id: str = uuid.uuid4().hex
         _prior_action: Optional[str] = None
         cumulative_attempts: Dict[str, int] = {}
+        # F120: the model responses (rounds) each tool was called in — eight
+        # searches in ONE response are a batch, not eight retries.
+        _round_index = 0
+        tool_rounds: Dict[str, set] = {}
+        _nudged_rounds: set = set()
+        # Per-turn tally of identical tool failures (F030).
+        repeated_failures: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
 
         _MULTI_STEP_TOOLS = {
@@ -1698,6 +1830,30 @@ class StreamingChatService:
             last_tool_name = name
 
             cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
+            tool_rounds.setdefault(name, set()).add(_round_index)
+
+            # F030: the same tool failing the same way is not worth another go.
+            # Night 1 called store_memory seven times in one turn against an
+            # identical "backend not configured" — a configuration fault cannot
+            # be retried into working, and each attempt cost a full round trip.
+            _repeat_key = _same_failure_key(name, result)
+            if _repeat_key:
+                repeated_failures[_repeat_key] = repeated_failures.get(_repeat_key, 0) + 1
+                if repeated_failures[_repeat_key] >= MAX_IDENTICAL_TOOL_FAILURES:
+                    logger.warning(
+                        "[chat] %s failed identically %dx this turn — not retrying it again",
+                        name, repeated_failures[_repeat_key],
+                    )
+                    result = {
+                        **result,
+                        "llm_context": (
+                            f"{result.get('llm_context') or ''}\n\n"
+                            f"[This is the same failure {repeated_failures[_repeat_key]} times in this turn. "
+                            "It is a configuration problem, not a transient one — do not call "
+                            f"`{name}` again. Tell the user what is not configured and carry on "
+                            "with what you can do without it.]"
+                        ).strip(),
+                    }
 
             llm_context = result.get("llm_context", str(result.get("raw_result", "")))
             # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
@@ -1732,10 +1888,13 @@ class StreamingChatService:
             ))
 
             # Loop-prevention proceed instructions (mutates llm_messages).
-            self._inject_loop_prevention(
+            if self._inject_loop_prevention(
                 llm_messages, name, cumulative_attempts,
                 empty_streak, result, agent_runtime, _MULTI_STEP_TOOLS,
-            )
+                rounds=len(tool_rounds.get(name) or ()),
+                nudged_this_round=(name, _round_index) in _nudged_rounds,
+            ):
+                _nudged_rounds.add((name, _round_index))
 
             # Hand back to executor with the truncated llm_context already prepared
             # so it does not re-truncate.
@@ -1782,7 +1941,8 @@ class StreamingChatService:
         async def _on_round_end(state: RoundState) -> Optional[ToolPostResult]:
             # Flush any Composio follow-up system messages into llm_messages
             # BEFORE the next LLM call (legacy ordering).
-            nonlocal followup_messages
+            nonlocal followup_messages, _round_index
+            _round_index += 1   # F120: the next calls belong to the next model response
             if followup_messages:
                 llm_messages.extend(followup_messages)
                 followup_messages = []
@@ -1848,6 +2008,7 @@ class StreamingChatService:
 
         async def _llm_callback(messages, tools):
             try:
+                self._before_model_call()
                 return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
                     messages=messages, tools=tools, on_delta=_on_delta,
                 )))
@@ -1864,6 +2025,7 @@ class StreamingChatService:
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
+                        self._before_model_call()
                         return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
                             messages=messages_new, tools=tools_new, on_delta=_on_delta,
                         )))
@@ -1880,6 +2042,10 @@ class StreamingChatService:
             max_iterations=max_iterations,
             content_truncate_tokens=2000,
         )
+        # F085-A: a search that already ran this turn (retrieval first) counts —
+        # its repeat is skipped and citing it is no false claim (F099).
+        for _ran_name, _ran_args in prefetched or []:
+            executor.tracker.record_execution(_ran_name, _ran_args)
 
         async def _runner():
             try:
@@ -1950,18 +2116,20 @@ class StreamingChatService:
         # that reads "both created ✅" with nothing executed is a fabrication the
         # UI cannot expose on its own.
         try:
-            if use_tools and not executor.tracker.tool_counts:
-                from modules.tools.execution.tool_loop import looks_like_narrated_action
-                if looks_like_narrated_action(getattr(result.response, "content", "") or ""):
-                    logger.warning("[chat] reply narrates actions but no tool ran — notice emitted")
-                    yield self.streaming_handler.format_aisdk_limit_reached(
-                        limit="no_tool_call",
-                        value=0,
-                        message=(
-                            "No tools ran in this reply, so nothing it describes was "
-                            "executed. Tell me to do it and I will make the calls."
-                        ),
-                    )
+            # F099 / #746: a reply that claims a source or actions no tool gave
+            # it says so where the owner can see it.
+            _notice = unexecuted_claims_notice(
+                getattr(result.response, "content", "") or "", use_tools,
+                {key.split(":", 1)[-1] for key in executor.tracker.tool_counts},
+                # the automatic search (F085-A) is a source, not an action the model took
+                any_tool_ran=sum(executor.tracker.tool_counts.values()) > len(prefetched or []),
+                done=executor.tracker.succeeded,
+            )
+            if _notice:
+                logger.warning("[chat] reply claims work no tool did this turn — notice emitted")
+                yield self.streaming_handler.format_aisdk_limit_reached(
+                    limit="no_tool_call", value=0, message=_notice,
+                )
         except Exception:
             logger.debug("[no-tool-call] notice skipped", exc_info=True)
 
@@ -1977,6 +2145,7 @@ class StreamingChatService:
                     "setting (or the workspace power-mode caps)."
                 ),
             )
+            self._before_model_call()
             final = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=None,
             )
@@ -2210,8 +2379,16 @@ class StreamingChatService:
         result: Dict[str, Any],
         agent_runtime,
         multi_step_tools: set,
-    ) -> None:
-        """Inject system messages to prevent tool loops."""
+        *,
+        rounds: Optional[int] = None,
+        nudged_this_round: bool = False,
+    ) -> bool:
+        """Inject system messages to prevent tool loops. True when the
+        once-per-response "do not call it again" nudge was added.
+
+        F120: that nudge counts the model RESPONSES a tool was called in
+        (``rounds``), not its calls — eight distinct searches in one response
+        are one batch — and it is added once per response, not once per call."""
         # Search spiral: 4+ consecutive empty results from same tool
         if empty_same_tool_streak >= 4 and (
             tool_name.startswith("search_") or tool_name in {"semantic_search"}
@@ -2236,19 +2413,29 @@ class StreamingChatService:
         _attempts = tool_attempts.get(tool_name, 0)
 
         if _is_multi_step and _attempts >= 8:
+            # F031: this is a PER-TOOL cap, and it used to be worded as "this
+            # turn's tool budget is exhausted". The model read that once and
+            # then told the user it had run out of budget — 9 turns on night 1
+            # claimed exhaustion when only 2 had actually hit a limit, and three
+            # follow-up turns were spent undoing the claim. Say exactly what is
+            # capped, and say what is still available.
             llm_messages.append({
                 "role": "system",
                 "content": (
-                    f"STOP: `{tool_name}` has been called {_attempts} times — this turn's "
-                    "tool budget is exhausted. You MUST now synthesize a response from the "
-                    "results you have and call NO more tools. Be exact about completeness: "
-                    "say what was actually done and what remains undone. If the request "
-                    "needed more calls than you could make, say so plainly and offer to "
-                    "continue — never report the request as done."
+                    f"STOP calling `{tool_name}`: you have called it {_attempts} times in "
+                    "this reply, which is its per-tool limit. This is a limit on THAT ONE "
+                    "TOOL, not on the reply — every other tool is still available to you, "
+                    "and you have not run out of any overall budget. Do not tell the user "
+                    "you are out of budget or calls. Use what you have, or a different "
+                    "tool, and be exact about what was done and what remains undone."
                 ),
             })
             logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")
-        elif not _is_multi_step and _attempts >= 2:
+        elif (
+            not _is_multi_step
+            and (rounds if rounds is not None else _attempts) >= 2
+            and not nudged_this_round
+        ):
             llm_messages.append({
                 "role": "system",
                 "content": (
@@ -2259,6 +2446,8 @@ class StreamingChatService:
                 ),
             })
             logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
+            return True
+        return False
 
     # ─────────────────────────────────────────────────────────────────────
     # Main streaming methods
@@ -2382,9 +2571,28 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
             await asyncio.sleep(0)
 
+            # F091-C2 (night 3): a "no" in chat offers to withdraw Auto's request
+            # still waiting on a yes in this conversation — one click, never silent.
+            try:
+                from services.withdraw_offers import withdraw_offer
+
+                _offer = withdraw_offer(self.db, self.workspace_id, chat_id, latest_text)
+                if _offer:
+                    yield self.streaming_handler.format_aisdk_data("withdraw_offer", _offer)
+            except Exception:
+                logger.debug("[chat] withdraw offer skipped", exc_info=True)
+
             # Await agent activation
             agent_runtime = await agent_task
             if not agent_runtime:
+                # F071: a session agent is never activated in the LLM runtime by
+                # design, and saying "Failed to activate agent N" sent the owner
+                # to check a provider key that was fine. Raise the reason the
+                # turn-error mapping already words correctly: it runs as a
+                # session — file a ticket for it.
+                mismatch = _session_agent_mismatch(self.db, agent_id)
+                if mismatch is not None:
+                    raise mismatch
                 raise Exception(f"Failed to activate agent {agent_id}")
 
             logger.info(f"Activating agent {agent_id} for chat {chat_id}")
@@ -2594,6 +2802,25 @@ class StreamingChatService:
                 use_tools = None
                 _composio_result = None
 
+            # F025: this turn's ranked actions go in LAST, after every stable
+            # block. The dispatcher enum is byte-identical between turns so the
+            # cached prefix survives; the steer still reaches the model, it just
+            # costs only its own few hundred tokens instead of a ~34k re-read.
+            if use_tools:
+                from modules.tools.turn_narrowing import narrowed_actions_prompt_line
+
+                _narrow_line = narrowed_actions_prompt_line()
+                if _narrow_line:
+                    llm_messages.append({"role": "system", "content": _narrow_line})
+
+            # F085-A (night 3): retrieval first — a question in a workspace with
+            # documents is searched before the model's first call; the passages
+            # that clear the floor go in last, after every cache-stable block.
+            _prefetched: List[Tuple[str, Dict[str, Any]]] = []
+            if not force_text_only:
+                async for _frame in self._retrieval_first(latest_text, llm_messages, agent_runtime, chat_id, _prefetched):
+                    yield _frame
+
             # Generate LLM response
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
             logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}")
@@ -2620,6 +2847,7 @@ class StreamingChatService:
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
                 logger.warning("[chat] empty completion (no text, no tool calls) — retrying once")
+                self._before_model_call()
                 response = await agent_runtime.llm_manager.generate_response(
                     messages=llm_messages, tools=use_tools,
                 )
@@ -2658,6 +2886,7 @@ class StreamingChatService:
                     is_super_admin=is_super_admin,
                     streamed_text=streamed_text,
                     reasoning_log=reasoning_log,
+                    prefetched=_prefetched,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -2674,12 +2903,27 @@ class StreamingChatService:
                         'role': 'system',
                         'content': 'Based on the tool results above, provide a comprehensive response to the user.',
                     })
+                    self._before_model_call()
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
                     final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
                     final_streamed = False
             else:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
+                # F099 (night 3): the replayed answer was a first reply with no
+                # tool call — it never entered the tool loop, so check it here.
+                try:
+                    _notice = unexecuted_claims_notice(
+                        final_text, use_tools, {name for name, _args in _prefetched}, any_tool_ran=False,
+                        done={name for name, _args in _prefetched},
+                    )
+                    if _notice:
+                        logger.warning("[chat] first reply claims work no tool did — notice emitted")
+                        yield self.streaming_handler.format_aisdk_limit_reached(
+                            limit="no_tool_call", value=0, message=_notice,
+                        )
+                except Exception:
+                    logger.debug("[no-tool-call] first-reply notice skipped", exc_info=True)
 
             # PRD-238 S2: the saved message is exactly what the screen showed —
             # every round's streamed text in order, plus a final answer that the
@@ -2829,6 +3073,7 @@ class StreamingChatService:
                 is_simple = self.prompt_analyzer.is_simple_message(latest_text)
                 use_tools = None if is_simple else tools
 
+                self._before_model_call()
                 response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
 
                 if response.tool_calls:
@@ -2866,6 +3111,7 @@ class StreamingChatService:
                     })
                     llm_messages.extend(tool_results)
 
+                    self._before_model_call()
                     final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
                     response_text = final_response.content or ""
                 else:

@@ -7,7 +7,7 @@ NEW: Additional endpoints for enhanced dashboard metrics and performance analyti
 ADDITIVE: Building on existing statistics.py endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, asc, text
 from typing import Dict, Any, List, Optional
@@ -320,6 +320,73 @@ async def get_selection_health(
         "hit_rate": round(hits / narrowed, 4) if narrowed else 0.0,
         "fallback_rate": round(fallback / selections, 4) if selections else 0.0,
         "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/always-failing-actions")
+async def get_always_failing_actions(
+    window_hours: int = Query(24, ge=1, le=720, description="How far back to look"),
+    min_calls: int = Query(3, ge=2, le=100, description="Ignore anything called fewer times"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Actions that have failed EVERY time they were called (F057).
+
+    This class hides. ``search_multimodal`` failed 40 of 40 across night 1 and
+    ``workspace_read_file`` 9 of 13 across night 2, and neither showed up
+    anywhere: a success RATE averages them away against healthy traffic, and
+    nobody reads a log for a tool they assume works. A tool that has never once
+    succeeded is not a rate, it is a broken tool, and it should be a list.
+
+    Fail-soft: an unreadable ledger returns an empty list rather than a 500 —
+    this is a health read-out, and it must not itself become an outage.
+    """
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT action_name,
+                       COUNT(*) AS calls,
+                       COUNT(*) FILTER (WHERE status = 'error') AS failures,
+                       MAX(error_message) AS sample_error,
+                       MAX(executed_at) AS last_seen
+                FROM tool_execution_logs
+                WHERE workspace_id = :ws
+                  AND executed_at >= NOW() - (:hours * INTERVAL '1 hour')
+                  AND action_name IS NOT NULL
+                  -- exclude the synthetic signal rows (__tool_gap__ etc.);
+                  -- '_' is a LIKE wildcard, so the underscores must be escaped
+                  AND action_name NOT LIKE '!_!_%' ESCAPE '!'
+                GROUP BY action_name
+                HAVING COUNT(*) >= :min_calls
+                   AND COUNT(*) FILTER (WHERE status = 'error') = COUNT(*)
+                ORDER BY COUNT(*) DESC
+                """
+            ),
+            {"ws": str(ctx.workspace_id), "hours": int(window_hours), "min_calls": int(min_calls)},
+        ).fetchall()
+    except Exception:
+        logger.warning("[analytics] always-failing scan unavailable", exc_info=True)
+        return {"window_hours": window_hours, "min_calls": min_calls,
+                "actions": [], "available": False}
+
+    actions = [{
+        "action": r.action_name,
+        "calls": int(r.calls),
+        "failures": int(r.failures),
+        "sample_error": (r.sample_error or "")[:300],
+        "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+    } for r in rows]
+    if actions:
+        logger.warning(
+            "[analytics] %d action(s) have failed every call in the last %dh: %s",
+            len(actions), window_hours, ", ".join(a["action"] for a in actions),
+        )
+    return {
+        "window_hours": window_hours,
+        "min_calls": min_calls,
+        "actions": actions,
+        "available": True,
     }
 
 

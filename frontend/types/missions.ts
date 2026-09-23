@@ -62,6 +62,8 @@ export interface MissionResponse {
 export interface MissionDetailResponse extends MissionResponse {
   tasks: TaskResponse[]
   recent_events: EventResponse[]
+  /** Counts derived server-side from the task rows (see _task_progress). */
+  task_progress?: TaskProgress
 }
 
 export interface TaskResponse {
@@ -166,17 +168,36 @@ export interface MissionStats {
   elapsedMs: number
 }
 
+export interface TaskProgress {
+  total: number
+  done: number
+  active: number
+  verified: number
+  failed: number
+  skipped: number
+  all_terminal: boolean
+}
+
 export function computeMissionStats(mission: MissionDetailResponse): MissionStats {
   const tasks = mission.tasks
+  // The server counts these off the task rows themselves. Prefer them: the
+  // client derivation read 0/9 for a mission that was 2 verified, 1 failed and
+  // 6 skipped. Fall back to deriving when an older response has no counts.
+  const progress = mission.task_progress
 
   return {
-    taskCount: tasks.length,
-    tasksDone: tasks.filter(t => (DONE_TASK_STATES as readonly string[]).includes(t.state)).length,
-    tasksActive: tasks.filter(t => (ACTIVE_TASK_STATES as readonly string[]).includes(t.state)).length,
-    tasksFailed: tasks.filter(t => t.state === 'failed').length,
-    tokensUsed: tasks.reduce((sum, t) => sum + t.tokens_used, 0),
+    taskCount: progress?.total ?? tasks.length,
+    tasksDone: progress?.done ?? tasks.filter(t => (DONE_TASK_STATES as readonly string[]).includes(t.state)).length,
+    tasksActive: progress?.active ?? tasks.filter(t => (ACTIVE_TASK_STATES as readonly string[]).includes(t.state)).length,
+    tasksFailed: progress?.failed ?? tasks.filter(t => t.state === 'failed').length,
+    tokensUsed: mission.tokens_used || tasks.reduce((sum, t) => sum + t.tokens_used, 0),
+    // F062: a finished mission's clock stops when it finished. Counting to
+    // `now` showed 26 h 20 m for a mission that ran 1 h 24 m (13:14 → 14:38 on
+    // 09-19) — a completed thing presented as still running, the same class as
+    // night 1's status lies.
     elapsedMs: mission.started_at
-      ? Date.now() - new Date(mission.started_at).getTime()
+      ? (mission.completed_at ? new Date(mission.completed_at).getTime() : Date.now())
+        - new Date(mission.started_at).getTime()
       : 0,
   }
 }

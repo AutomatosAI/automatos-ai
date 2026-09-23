@@ -18,13 +18,14 @@ import asyncio
 from typing import List, Optional
 
 from config import config
+from .embedding_bounds import client_kwargs, single_text_timeout, timeout_note
 from .embedding_usage import record_embedding_usage
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
-    from openai import AsyncOpenAI
+    from openai import APITimeoutError, AsyncOpenAI
 except ImportError:
-    AsyncOpenAI = None
+    APITimeoutError, AsyncOpenAI = TimeoutError, None
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +137,9 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             self._primary_loop = loop
         if loop is self._primary_loop:
             if self.client is None:
-                self.client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+                self.client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, **client_kwargs())
             return self.client
-        return AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+        return AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, **client_kwargs())
 
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate a single embedding via OpenRouter API"""
@@ -162,6 +163,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                 model=self.config.model,
                 input=text,
                 extra_body=self._extra_body,
+                timeout=single_text_timeout(),
             )
             record_embedding_usage("openrouter", self.config.model, response, [text], started)
             embedding = response.data[0].embedding
@@ -172,6 +174,9 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
 
             return embedding
 
+        except APITimeoutError:
+            logger.error("OpenRouter embedding (%s) %s", self.config.model, timeout_note(started, single=True))
+            raise
         except Exception as e:
             # Use repr(e) — some HTTP errors (e.g. 402 credits exhausted) have empty str()
             status_code = getattr(e, "status_code", "N/A")
@@ -237,8 +242,9 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             return embeddings
 
         except Exception as e:
+            reason = timeout_note(started, single=False) if isinstance(e, APITimeoutError) else str(e)
             logger.warning(
-                f"Batch embedding failed ({e}), falling back to parallel individual calls"
+                f"Batch embedding failed ({reason}), falling back to parallel individual calls"
             )
 
         # Fallback: parallel individual calls with semaphore
@@ -253,6 +259,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                         model=self.config.model,
                         input=text,
                         extra_body=self._extra_body,
+                        timeout=single_text_timeout(),
                     )
                     record_embedding_usage("openrouter", self.config.model, resp, [text], t0)
                     emb = resp.data[0].embedding

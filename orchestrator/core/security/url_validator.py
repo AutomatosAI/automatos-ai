@@ -31,13 +31,31 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("::/128"),
+    # IPv4-compatible (``::127.0.0.1``), deprecated by RFC 4291 — nothing
+    # legitimate resolves to one, so the whole block is refused (F076).
+    ipaddress.ip_network("::/96"),
 ]
+
+# NAT64's well-known prefix (RFC 6052): ``64:ff9b::a.b.c.d`` is a.b.c.d.
+_NAT64_WELL_KNOWN = ipaddress.ip_network("64:ff9b::/96")
 
 _ALLOWED_SCHEMES = {"http", "https"}
 
 # PRD-240: the same list, importable — web access pins its connection to an
 # address it has checked against exactly these ranges.
 BLOCKED_NETWORKS = tuple(_BLOCKED_NETWORKS)
+
+
+def _embedded_ipv4(addr: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
+    """The v4 address an IPv6 literal carries: IPv4-mapped (``::ffff:10.0.0.1``),
+    6to4 (``2002:0a00:0001::``) or NAT64 (``64:ff9b::10.0.0.1``)."""
+    if addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    if addr.sixtofour is not None:
+        return addr.sixtofour
+    if addr in _NAT64_WELL_KNOWN:
+        return ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+    return None
 
 
 def blocked_network_for(ip_str: str) -> str | None:
@@ -47,11 +65,12 @@ def blocked_network_for(ip_str: str) -> str | None:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return "invalid"
-    # An IPv4-mapped IPv6 literal (``::ffff:10.0.0.1``) names a v4 address, and
-    # stdlib containment never crosses families — check the address it maps to.
-    mapped = getattr(addr, "ipv4_mapped", None)
-    if mapped is not None:
-        addr = mapped
+    # An IPv6 literal that carries a v4 address names that address, and stdlib
+    # containment never crosses families — check the address it carries.
+    if addr.version == 6:
+        carried = _embedded_ipv4(addr)
+        if carried is not None:
+            addr = carried
     for network in _BLOCKED_NETWORKS:
         if addr.version == network.version and addr in network:
             return str(network)

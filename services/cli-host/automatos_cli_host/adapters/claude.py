@@ -31,7 +31,10 @@ FILE_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 FILE_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 SHELL_TOOLS = frozenset({"Bash"})
 WEB_TOOLS = frozenset({"WebFetch", "WebSearch"})
-BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion"})
+# ToolSearch only fetches a deferred tool's schema; the tool it loads is still judged
+# per call. Denying it (night 1, 2026-09-18) meant the bridge's own mcp__automatos__*
+# tools could never be loaded — sessions could not submit_report or update_ticket.
+BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion", "ToolSearch"})
 _PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
@@ -66,6 +69,76 @@ def write_settings(preset: CliPreset, path: Path, *, python: Optional[str] = Non
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.write_text(json.dumps(build_settings(preset, python=python), indent=2) + "\n", encoding="utf-8")
     os.chmod(path, 0o600)
+    return path
+
+
+MCP_CONFIG_FILENAME = "mcp.json"
+MCP_SERVER_NAME = "automatos"
+# How Claude Code names a tool from that server, in the model's tool list and in
+# every hook payload the gate reads.
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
+
+def build_mcp_config(session_tools: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Claude Code's MCP config for THIS ticket's Automatos tools, or ``None``
+    when the claim offered none (an older backend — the session runs as before).
+
+    An HTTP server with a static bearer header: the token is the ticket's own,
+    minted at claim and dead when the ticket ends. Never in argv, never in the
+    environment — a file mode 0600 beside the ticket.
+
+    The token is written LITERALLY. Claude Code reads ``${VAR}`` in a header
+    value from the environment and silently substitutes an EMPTY string for any
+    variable whose name looks like a credential (``TOKEN``, ``SECRET``, ``KEY``,
+    ``AUTH``, …) — a ``${SESSION_TOKEN}`` here would arrive as ``Bearer `` and
+    every call would 401 with nothing to show why."""
+    if not isinstance(session_tools, Mapping):
+        return None
+    url = str(session_tools.get("url") or "").strip()
+    token = str(session_tools.get("token") or "").strip()
+    if not url or not token:
+        return None
+    return {
+        "mcpServers": {
+            MCP_SERVER_NAME: {
+                "type": "http",
+                "url": url,
+                "headers": {"Authorization": f"Bearer {token}"},
+            }
+        }
+    }
+
+
+def write_mcp_config(path: Path, session_tools: Optional[Mapping[str, Any]]) -> Optional[Path]:
+    """Write the config and return its path; ``None`` when there is nothing to
+    write (and any file from an earlier attempt is removed, so a stale token
+    cannot linger beside a ticket)."""
+    document = build_mcp_config(session_tools)
+    if document is None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Created 0600, not chmod'd to 0600 afterwards. Writing then chmod'ing leaves
+    # the token world-readable for the window between the two calls, and keeps a
+    # previous file's wider mode until the chmod lands.
+    body = json.dumps(document, indent=2) + "\n"
+    try:
+        path.unlink()            # never inherit an existing file's mode
+    except OSError:
+        pass
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -148,18 +221,37 @@ class ClaudeAdapter(PresetAdapter):
         return out
 
     def prepare(self, ctx: LaunchContext) -> Prepared:
-        """A hooks-only settings.json in the session dir (``--settings``), and the
-        folder-trust decision recorded where Claude reads it."""
+        """A hooks-only settings.json in the session dir (``--settings``), the
+        folder-trust decision recorded where Claude reads it, and — when the
+        claim offered Automatos tools — an ``mcp.json`` beside them (PRD-245 W1).
+
+        The settings file stays HOOKS ONLY: the MCP server is a separate file, so
+        ``--strict-mcp-config`` still means "this server and nothing else" and the
+        operator's own servers never reach an unattended ticket."""
         settings_path = write_settings(self.preset, ctx.session_dir / "settings.json")
         record_directory_trust(ctx.cwd)
-        return Prepared(args=["--settings", str(settings_path)])
+        args = ["--settings", str(settings_path)]
+        mcp_path = write_mcp_config(ctx.session_dir / MCP_CONFIG_FILENAME, ctx.session_tools)
+        if mcp_path is not None and self.preset.mcp_config_flag:
+            args += [self.preset.mcp_config_flag, str(mcp_path)]
+        return Prepared(args=args)
 
     def tool_intent(self, tool_name: str, tool_input: Mapping[str, Any]) -> ToolIntent:
         ti = tool_input if isinstance(tool_input, Mapping) else {}
+        if tool_name.startswith(MCP_TOOL_PREFIX):
+            # ``mcp__automatos__board_summary`` → the bare name the policy checks
+            # against this ticket's own list. Every OTHER mcp__* tool falls
+            # through to UNKNOWN below, which the policy denies.
+            return ToolIntent(tool=tool_name, cls=ToolClass.PLATFORM,
+                              command=tool_name[len(MCP_TOOL_PREFIX):])
         if tool_name in FILE_WRITE_TOOLS or tool_name in FILE_READ_TOOLS:
             paths = tuple(str(ti[k]) for k in _PATH_KEYS if ti.get(k))
             cls = ToolClass.FILE_WRITE if tool_name in FILE_WRITE_TOOLS else ToolClass.FILE_READ
-            return ToolIntent(tool=tool_name, cls=cls, paths=paths)
+            # F042: what a search reads THROUGH — Grep's glob, Glob's pattern — so
+            # a "glob: .env" over a folder holding the platform is judged too.
+            globs = tuple(str(ti[k]) for k in (("glob",) if tool_name == "Grep" else ("pattern",) if tool_name == "Glob" else ())
+                          if ti.get(k))
+            return ToolIntent(tool=tool_name, cls=cls, paths=paths, globs=globs)
         if tool_name in SHELL_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.SHELL, command=str(ti.get("command") or ""))
         if tool_name in WEB_TOOLS:
@@ -182,7 +274,8 @@ class ClaudeAdapter(PresetAdapter):
 
 
 __all__ = [
-    "BENIGN_TOOLS", "ClaudeAdapter", "FILE_READ_TOOLS", "FILE_WRITE_TOOLS", "SHELL_TOOLS", "WEB_TOOLS",
+    "BENIGN_TOOLS", "ClaudeAdapter", "FILE_READ_TOOLS", "FILE_WRITE_TOOLS", "MCP_CONFIG_FILENAME",
+    "MCP_SERVER_NAME", "MCP_TOOL_PREFIX", "SHELL_TOOLS", "WEB_TOOLS", "build_mcp_config", "write_mcp_config",
     "build_settings", "claude_state_path", "has_completed_onboarding", "is_directory_trusted",
     "read_claude_state", "record_directory_trust", "subject_of_input", "write_settings",
 ]

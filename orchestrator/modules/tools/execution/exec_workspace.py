@@ -118,6 +118,49 @@ def _auto_register_deliverable(
         )
 
 
+
+# How many sibling names an error lists before it stops being readable.
+_PATH_HINT_ENTRIES = 25
+
+
+async def _with_directory_hint(client: Any, path: str, result: dict) -> dict:
+    """``result`` plus what actually exists near ``path``.
+
+    Walks up to the nearest directory that lists, and names its entries, so the
+    caller can correct itself in one step instead of guessing again.
+    """
+    from pathlib import PurePosixPath
+
+    try:
+        probe = PurePosixPath(path)
+        for _ in range(4):
+            parent = probe.parent
+            listing = await client.list_dir(str(parent) if str(parent) != "." else ".")
+            if listing.get("success"):
+                entries = listing.get("entries") or listing.get("files") or listing.get("result") or []
+                names = []
+                for entry in entries:
+                    name = entry.get("name") if isinstance(entry, dict) else str(entry)
+                    if name:
+                        names.append(str(name))
+                shown = sorted(names)[:_PATH_HINT_ENTRIES]
+                more = max(0, len(names) - len(shown))
+                where = str(parent) if str(parent) != "." else "the workspace root"
+                hint = (
+                    f" Nothing at {path!r}. {where} contains: "
+                    + (", ".join(shown) + (f" (+{more} more)" if more else "") if shown else "nothing")
+                    + ". Paths are relative to the workspace root — use one of these, "
+                      "or workspace_list_dir to look further."
+                )
+                return {**result, "error": f"{result.get('error', 'read failed')}.{hint}"}
+            if str(parent) in ("", ".", "/"):
+                break
+            probe = parent
+    except Exception:  # noqa: BLE001 — a hint must never replace the real error
+        logger.debug("[workspace] could not build a path hint for %r", path, exc_info=True)
+    return result
+
+
 async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
     """Download a workspace file and upload to public image store.
 
@@ -217,6 +260,14 @@ async def execute_workspace_action(
             if not path:
                 return {"success": False, "error": "path is required", "tool": tool_name}
             result = await client.read_file(path)
+            # F057: workspace_read_file failed 9 of 13 calls across three agents
+            # with a bare "Path is not a file" / "File not found", and they
+            # retried the same guess. A path error should hand back what IS
+            # there — the same lesson as the agent roster in the "Agent not
+            # found" message. Best effort: never turn a read error into a
+            # different error.
+            if not result.get("success"):
+                result = await _with_directory_hint(client, path, result)
 
         elif tool_name == "workspace_write_file":
             path = parameters.get("path", "")

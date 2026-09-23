@@ -28,6 +28,11 @@ from core.seeds.seed_auto_agent import (
     _PERSONALITY_BASE_VOICES,
     compose_persona_with_doctrine,
 )
+from modules.socials.settings import (
+    WORKSPACE_SOCIALS_SETTINGS_KEY,
+    socials_state,
+    validate_socials_update,
+)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -133,6 +138,9 @@ async def get_current_workspace(
         # only consumers (the first-login guard + tour) are gone; the frontend
         # detects a new workspace from onboarding.stage now.
         "onboarding": public_snapshot(workspace),
+        # PRD-251 S0.1 (D1): the two Socials switches — `available` is the
+        # platform master switch, `enabled` this workspace's. Field addition only.
+        "socials": socials_state(workspace.settings),
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
         "settings": settings,
@@ -483,6 +491,42 @@ async def save_voice_live_settings(
 
     logger.info("Updated voice_live settings for workspace %s: %s", workspace.id, merged)
     return {"status": "saved", "voice_live": merged}
+
+
+@router.put("/current/socials", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def save_socials_settings(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-251 S0.1 (D1): the workspace's own Socials switch.
+
+    Body: ``{"socials": {"enabled": bool}}`` — validated fail-closed (unknown
+    keys and a non-boolean ``enabled`` are 400), merged never replace-blind.
+    The platform master switch is a system setting, not this route.
+    """
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    try:
+        normalized = validate_socials_update(payload.get(WORKSPACE_SOCIALS_SETTINGS_KEY))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    settings = dict(workspace.settings or {})
+    existing = settings.get(WORKSPACE_SOCIALS_SETTINGS_KEY)
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(normalized)
+    settings[WORKSPACE_SOCIALS_SETTINGS_KEY] = merged
+    workspace.settings = settings
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    logger.info("Updated socials settings for workspace %s: %s", workspace.id, merged)
+    return {"status": "saved", "socials": socials_state(settings)}
 
 
 # ── Orchestrator Soul & Personality ──────────────────────────────────

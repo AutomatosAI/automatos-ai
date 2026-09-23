@@ -43,3 +43,23 @@ def test_session_section_names_model_files_deliverables_refusals_and_takeover():
     assert "### Refused tool calls" in text and "'cd /tmp'" in text
     assert "### Tool calls (last 1)" in text and "`python3 hello.py`" in text
     assert "cd /w/ws/sessions/68 && claude --resume bc258043" in text
+
+
+def test_refused_calls_are_grouped_by_what_they_mean_holds_first():
+    """PRD-245 S0.3: the report says which refusals put the ticket in review (holds)
+    and which were the guardrail doing its job; an older summary without a kind
+    is listed as unclassified."""
+    from services.session_report import refused_calls_lines
+
+    lines = refused_calls_lines([
+        {"tool": "Read", "reason": "Read outside the session directory: /x/host.json", "kind": "read_outside"},
+        {"tool": "Bash", "reason": "'pip --version' is outside this ticket's Bash allowlist — no answer from the operator within 120 s", "kind": "hold"},
+        {"tool": "ToolSearch", "reason": "tool 'ToolSearch' is not enabled for session tickets", "kind": "unknown_tool"},
+        {"tool": "Bash", "reason": "an older summary without a kind"},
+    ])
+    text = "\n".join(lines)
+    assert lines[0] == "### Refused tool calls"
+    assert text.index("**Held for the operator") < text.index("**Refused (unclassified") \
+        < text.index("**Reads outside the session directory") < text.index("**Tools a session does not have")
+    assert "- Bash: 'pip --version'" in text and "- Read: Read outside" in text and "- Bash: an older summary" in text
+    assert "- ToolSearch: tool 'ToolSearch'" in text

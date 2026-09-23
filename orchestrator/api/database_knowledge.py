@@ -133,6 +133,30 @@ async def create_database_source(
             dialect=source.dialect,
         )
         
+        # F066: the docstring always said creation introspects; it never did.
+        # The response read success with 0 tables and every query then failed
+        # "No schema metadata available. Please run introspection first." — an
+        # instruction nothing on screen offered (probe 2026-09-22: source 34
+        # created with 0 tables; POST /34/introspect then found 8 in 888 ms).
+        # A failed introspection does not throw the owner's source away: it is
+        # saved, and the response says so and how to retry.
+        introspection_error: Optional[str] = None
+        persisted = (
+            db.query(DatabaseKnowledgeSource)
+            .filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id,
+                    DatabaseKnowledgeSource.id == result.id)
+            .first()
+        )
+        if persisted is not None:
+            try:
+                introspect_and_persist(db, persisted)
+                result = persisted
+            except HTTPException as e:
+                introspection_error = str(e.detail)
+                db.rollback()
+        else:
+            introspection_error = "the new source could not be re-read to introspect it"
+
         # Create tools for agents
         created_tools = tools.create_database_tools(result)
         
@@ -146,12 +170,22 @@ async def create_database_source(
         except Exception:
             logger.debug("Graph update skipped — service not available")
 
+        schema_tables = len(result.schema_metadata.get('tables', {}) or {}) if result.schema_metadata else 0
+        message = f"Database source '{source.name}' created and introspected — {schema_tables} table(s)."
+        if introspection_error:
+            message = (
+                f"Database source '{source.name}' was created, but reading its schema failed "
+                f"({introspection_error}). Check the connection's credentials, then run "
+                f"introspection again from the source's page."
+            )
         return {
             "success": True,
             "source_id": result.id,
-            "message": f"Database source '{source.name}' created successfully",
+            "message": message,
             "tools_created": len(created_tools),
-            "schema_tables": len(result.schema_metadata.get('tables', {})) if result.schema_metadata else 0
+            "schema_tables": schema_tables,
+            "introspected": introspection_error is None,
+            "introspection_error": introspection_error,
         }
 
     except Exception as e:
@@ -202,6 +236,38 @@ async def query_database(
         raise HTTPException(status_code=400, detail="Query execution failed")
 
 
+def introspect_and_persist(db: Session, source: DatabaseKnowledgeSource) -> Dict[str, Any]:
+    """Introspect ``source`` and store its schema. THE one implementation —
+    POST /{id}/introspect and source creation both call it (F066).
+
+    Raises ``HTTPException(400)`` naming the step that failed (credentials, or
+    the introspection itself); the caller decides whether that fails its request.
+    """
+    log = logging.getLogger(__name__)
+    cred_store = CredentialStore(db)
+    try:
+        creds = cred_store.get_decrypted_credential(
+            credential_id=source.credential_id,
+            service_name="database_introspection"
+        )
+    except Exception as e:
+        log.error(f"Failed to resolve credentials for source {source.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
+
+    dialect = _map_dialect_to_introspector(source.dialect)
+    try:
+        inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
+        metadata = inspector.introspect(include_samples=True, sample_limit=5)
+    except Exception as e:
+        log.error(f"Introspection failed for source {source.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Schema introspection failed")
+
+    source.schema_metadata = metadata
+    source.last_introspected = datetime.utcnow()
+    db.commit()
+    return metadata
+
+
 @router.post("/{source_id}/introspect", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def introspect_schema(
     source_id: int,
@@ -217,32 +283,9 @@ async def introspect_schema(
     ).first()
     if not source:
         raise HTTPException(status_code=404, detail="Database source not found")
-    
-    # Resolve DB credentials
-    cred_store = CredentialStore(db)
-    try:
-        creds = cred_store.get_decrypted_credential(
-            credential_id=source.credential_id,
-            service_name="database_introspection"
-        )
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
 
-    # Introspect
-    dialect = _map_dialect_to_introspector(source.dialect)
-    try:
-        inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
-        metadata = inspector.introspect(include_samples=True, sample_limit=5)
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Introspection failed for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Schema introspection failed")
-    
-    # Persist
-    source.schema_metadata = metadata
-    source.last_introspected = datetime.utcnow()
-    db.commit()
-    
+    metadata = introspect_and_persist(db, source)
+
     # Return summary
     tables = metadata.get("tables", []) or []
     relationships = metadata.get("relationships", []) or []

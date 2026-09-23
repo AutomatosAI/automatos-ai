@@ -246,3 +246,241 @@ def test_codex_login_probe_reads_the_mode_never_a_value(tmp_path):
     assert a.preflight() is None and a.login_mode() == "chatgpt"
     info = a.detect()
     assert info["served"] is True and info["login_mode"] == "chatgpt" and info["tier"] == "hooks"
+
+
+def test_codex_seeding_drops_the_operators_mcp_servers(tmp_path):
+    """PRD-245 S0.8 (D9): a Codex ticket must not inherit the operator's MCP
+    servers — every ``[mcp_servers.*]`` table goes, every other table stays
+    byte for byte, hooks and trust are still appended."""
+    from automatos_cli_host.adapters.codex import CodexAdapter, strip_mcp_servers
+    base = (
+        'model = "gpt-fake"\n'
+        'mcp_servers.inline.command = "x"\n'
+        '\n'
+        '[mcp_servers]\n'
+        '\n'
+        '[mcp_servers.context7]\n'
+        'command = "npx"\n'
+        'args = ["-y", "@upstash/context7-mcp"]\n'
+        '\n'
+        '[mcp_servers.context7.env]\n'
+        'TOKEN = "fixture"\n'
+        '\n'
+        '[model]\n'
+        'reasoning_effort = "medium"\n'
+        '\n'
+        '[mcp_servers.github]  # a comment\n'
+        'url = "https://example.invalid/mcp"\n'
+        '\n'
+        '[projects."/somewhere/else"]\n'
+        'trust_level = "trusted"\n'
+    )
+    stripped = strip_mcp_servers(base)
+    assert stripped == 'model = "gpt-fake"\n\n[model]\nreasoning_effort = "medium"\n\n[projects."/somewhere/else"]\ntrust_level = "trusted"\n'
+    assert "mcp_servers" not in stripped and "context7" not in stripped and "fixture" not in stripped
+    assert strip_mcp_servers("") == "" and strip_mcp_servers('model = "m"\n') == 'model = "m"\n'
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text(base)
+    text = CodexAdapter(CODEX, home=home)._config_text(tmp_path / "repo")
+    assert text.startswith('model = "gpt-fake"') and "mcp_servers" not in text
+    assert '[model]\nreasoning_effort = "medium"' in text and '[projects."/somewhere/else"]' in text
+    assert "[[hooks.PreToolUse]]" in text and f'[projects.{json.dumps(str(tmp_path / "repo"))}]' in text
+    assert (home / ".codex" / "config.toml").read_text() == base            # the operator's file is never written
+
+
+def test_codex_seeding_drops_an_mcp_table_whose_name_is_quoted():
+    """A TOML table name may be quoted and a quoted segment may hold a ``]``;
+    such a header must still read as one table, or its server survives the strip."""
+    from automatos_cli_host.adapters.codex import strip_mcp_servers
+
+    base = (
+        'model = "gpt-fake"\n'
+        '\n'
+        '[mcp_servers."x]y"]\n'
+        'command = "weird"\n'
+        '\n'
+        "[mcp_servers.'lit]eral']\n"
+        'command = "literal"\n'
+        '\n'
+        '[[mcp_servers.arrayed]]\n'
+        'command = "arrayed"\n'
+        '\n'
+        '[mcp_servers]\n'
+        '\n'
+        '[model_providers.openai]\n'
+        'name = "OpenAI"\n'
+    )
+    stripped = strip_mcp_servers(base)
+    assert "mcp_servers" not in stripped
+    for gone in ("weird", "literal", "arrayed"):
+        assert gone not in stripped
+    assert stripped == 'model = "gpt-fake"\n\n[model_providers.openai]\nname = "OpenAI"\n'
+
+
+# ── PRD-245 W1: the Automatos tools a ticket may call ───────────────────────
+
+def test_claude_writes_an_mcp_config_only_when_the_claim_offered_tools(tmp_path):
+    """The bridge is per ticket: the config file carries the ticket's own token
+    (0600, never argv), and a ticket that was offered nothing gets no file — so a
+    token from an earlier attempt cannot linger beside it."""
+    import json
+    import stat
+
+    from automatos_cli_host.adapters.claude import (
+        MCP_CONFIG_FILENAME, MCP_SERVER_NAME, build_mcp_config, write_mcp_config,
+    )
+
+    session_dir = tmp_path / "sessions" / "200"
+    session_dir.mkdir(parents=True)
+    offered = {"names": ["board_summary"], "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp", "token": "tok"}
+
+    path = write_mcp_config(session_dir / MCP_CONFIG_FILENAME, offered)
+    assert path is not None and stat.S_IMODE(path.stat().st_mode) == 0o600
+    server = json.loads(path.read_text())["mcpServers"][MCP_SERVER_NAME]
+    assert server == {"type": "http", "url": offered["url"], "headers": {"Authorization": "Bearer tok"}}
+
+    # nothing offered → no file, and a stale one is removed
+    assert write_mcp_config(path, None) is None and not path.exists()
+    # half an offer is no offer
+    assert build_mcp_config({"names": ["x"], "url": "", "token": "t"}) is None
+    assert build_mcp_config({"names": ["x"], "url": "http://x", "token": ""}) is None
+    assert build_mcp_config(None) is None
+
+
+def test_claude_launch_carries_the_mcp_config_under_strict_and_never_the_token(tmp_path):
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
+
+    session_dir = tmp_path / "sessions" / "201"
+    session_dir.mkdir(parents=True)
+    adapter = ClaudeAdapter(CLAUDE)
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="201", session_id="sid",
+        session_tools={"names": ["board_summary"], "url": "http://127.0.0.1:8000/x", "token": "tok-secret"},
+    )
+    args = adapter.launch_args(ctx, adapter.prepare(ctx))
+    assert "--strict-mcp-config" in args                      # ours is the ONLY server
+    assert args[args.index("--mcp-config") + 1].endswith(f"/{'mcp.json'}")
+    assert not any("tok-secret" in a for a in args)           # the token rides the file
+    # a ticket with no offer launches exactly as it did before the bridge
+    plain = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="201", session_id="sid",
+    )
+    assert "--mcp-config" not in adapter.launch_args(plain, adapter.prepare(plain))
+
+
+def test_claude_reads_our_mcp_tools_as_platform_and_everyone_elses_as_unknown():
+    from automatos_cli_host.adapters.base import ToolClass
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
+
+    adapter = ClaudeAdapter(CLAUDE)
+    intent = adapter.tool_intent("mcp__automatos__board_summary", {})
+    assert intent.cls is ToolClass.PLATFORM and intent.command == "board_summary"
+    # someone else's server (the operator's own, were one ever loaded) is not ours
+    assert adapter.tool_intent("mcp__notebooklm__notebook_query", {}).cls is ToolClass.UNKNOWN
+    assert adapter.tool_intent("mcp__automatos__", {}).cls is ToolClass.PLATFORM   # empty name → denied by policy
+
+
+# ── PRD-245 W4: the bridge, for Codex ───────────────────────────────────────
+
+def test_codex_writes_the_mcp_table_and_carries_the_token_in_the_environment(tmp_path):
+    """Codex reads a streamable-HTTP server's bearer token from an ENVIRONMENT
+    VARIABLE named in its config, where Claude Code takes a literal header.
+
+    The table below is byte-for-byte what ``codex mcp add --url … 
+    --bearer-token-env-var …`` writes on 0.154.0. The env route is also the right
+    one here rather than merely the available one: a Codex config home is per
+    AGENT, so a token written into that FILE would outlive the ticket that minted
+    it and be read by the agent's next one."""
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.codex import (
+        MCP_SERVER_NAME, MCP_TOKEN_ENV_VAR, CodexAdapter,
+    )
+    from automatos_cli_host.presets import CODEX
+
+    operator = tmp_path / "home" / ".codex"
+    operator.mkdir(parents=True)
+    (operator / "config.toml").write_text(
+        'model = "gpt-5"\n\n[mcp_servers.mine]\ncommand = "npx"\n\n[model_providers.x]\nname = "X"\n')
+    state = tmp_path / "state"
+    session_dir = state / "sessions" / "300"
+    session_dir.mkdir(parents=True)
+    adapter = CodexAdapter(CODEX, home=tmp_path / "home")
+
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="300", session_id="sid",
+        agent_id="264", state_dir=state,
+        session_tools={"names": ["board_summary"],
+                       "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp", "token": "tok-secret"},
+    )
+    prepared = adapter.prepare(ctx)
+    config = (Path(prepared.env["CODEX_HOME"]) / "config.toml").read_text()
+
+    assert f"[mcp_servers.{MCP_SERVER_NAME}]" in config
+    assert 'url = "http://127.0.0.1:8000/api/v1/session-tools/mcp"' in config
+    assert f'bearer_token_env_var = "{MCP_TOKEN_ENV_VAR}"' in config
+    # the token itself is in the ENVIRONMENT (per process), never in the per-agent file
+    assert prepared.env[MCP_TOKEN_ENV_VAR] == "tok-secret"
+    assert "tok-secret" not in config
+    # the operator's own servers are still stripped; everything else of theirs stays
+    assert "[mcp_servers.mine]" not in config and "npx" not in config
+    assert 'model = "gpt-5"' in config and "[model_providers.x]" in config
+    assert "[[hooks." in config and "trust_level" in config
+
+
+def test_codex_without_an_offer_gets_no_table_and_no_variable(tmp_path):
+    """A ticket the backend offered no tools (an older backend, or the bridge
+    off) launches exactly as it did before — and because ``prepare`` REWRITES the
+    config every spawn, a previous ticket's table cannot linger in the agent's
+    shared config home."""
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.codex import MCP_TOKEN_ENV_VAR, CodexAdapter
+    from automatos_cli_host.presets import CODEX
+
+    (tmp_path / "home" / ".codex").mkdir(parents=True)
+    state = tmp_path / "state"
+    session_dir = state / "sessions" / "301"
+    session_dir.mkdir(parents=True)
+    adapter = CodexAdapter(CODEX, home=tmp_path / "home")
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="301", session_id="sid",
+        agent_id="264", state_dir=state,
+    )
+    prepared = adapter.prepare(ctx)
+    config = (Path(prepared.env["CODEX_HOME"]) / "config.toml").read_text()
+    assert "mcp_servers" not in config and MCP_TOKEN_ENV_VAR not in prepared.env
+    # half an offer is no offer
+    half = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="301", session_id="sid",
+        agent_id="264", state_dir=state, session_tools={"names": ["x"], "url": "", "token": "t"},
+    )
+    assert MCP_TOKEN_ENV_VAR not in adapter.prepare(half).env
+
+
+def test_codex_reads_our_mcp_tool_under_every_spelling_it_might_use(tmp_path):
+    """NOT yet observed on a live Codex run (design §6.10): it may name an MCP
+    tool as Claude does, dotted, or slashed. All of them map to the same tool and
+    anything else stays UNKNOWN — which the policy denies. Widening this cannot
+    weaken the gate: the NAME must still be on the ticket's own list."""
+    from automatos_cli_host.adapters.base import ToolClass
+    from automatos_cli_host.adapters.codex import CodexAdapter
+    from automatos_cli_host.presets import CODEX
+
+    adapter = CodexAdapter(CODEX, home=tmp_path)
+    for spelling in ("mcp__automatos__board_summary", "automatos__board_summary",
+                     "automatos.board_summary", "automatos/board_summary",
+                     "mcp.automatos.board_summary"):
+        intent = adapter.tool_intent(spelling, {})
+        assert intent.cls is ToolClass.PLATFORM, spelling
+        assert intent.command == "board_summary", spelling
+    for other in ("mcp__notebooklm__notebook_query", "shell", "apply_patch",
+                  "web_search", "automatos", "otherautomatos__x"):
+        assert adapter.tool_intent(other, {}).cls is not ToolClass.PLATFORM, other

@@ -124,3 +124,57 @@ async def update_task_status(
         status_code = 400 if "must be one of" in error_msg else 404
         raise HTTPException(status_code=status_code, detail=error_msg)
     return result
+
+
+# The obvious routes. Night 1 (2026-09-18): a scheduled task could only be
+# stopped through PATCH /{id}/status with the right word in the body — nothing a
+# caller finds by trying. These are thin aliases onto the same service call, so
+# there is still one implementation of "stop a schedule".
+
+async def _set_status(task_id: int, status: str, ctx: RequestContext, db: Session) -> dict:
+    svc = ScheduledTaskService(db, ctx.workspace_id)
+    result = await svc.update_task_status(task_id, status)
+    if not result.get("success"):
+        error_msg = result.get("error", "")
+        raise HTTPException(status_code=400 if "must be one of" in error_msg else 404, detail=error_msg)
+    return result
+
+
+@router.post("/{task_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def cancel_task(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Stop this schedule for good."""
+    return await _set_status(task_id, "cancelled", ctx, db)
+
+
+@router.post("/{task_id}/pause", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def pause_task(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Stop this schedule firing until it is resumed."""
+    return await _set_status(task_id, "paused", ctx, db)
+
+
+@router.post("/{task_id}/resume", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def resume_task(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Start a paused schedule firing again."""
+    return await _set_status(task_id, "active", ctx, db)
+
+
+@router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def delete_task(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Cancel this schedule. The row is kept so its history stays readable."""
+    return await _set_status(task_id, "cancelled", ctx, db)

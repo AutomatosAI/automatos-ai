@@ -84,17 +84,23 @@ async def get_cost_tracker(
         ]
 
         # Top 3 agents by cost
+        # F049: a deleted agent's spend still counts, under the name stamped on
+        # its rows when it was deleted (an inner join used to drop it entirely).
+        spender = func.coalesce(
+            Agent.name, LLMUsage.agent_name, func.concat("Agent #", LLMUsage.agent_id)
+        ).label("name")
         top_agents_rows = (
             db.query(
-                Agent.name,
+                spender,
                 func.sum(LLMUsage.total_cost).label("cost"),
             )
-            .join(Agent, LLMUsage.agent_id == Agent.id)
+            .outerjoin(Agent, LLMUsage.agent_id == Agent.id)
             .filter(
                 LLMUsage.workspace_id == ctx.workspace_id,
                 LLMUsage.created_at >= since,
+                LLMUsage.agent_id.isnot(None),
             )
-            .group_by(Agent.name)
+            .group_by(spender)
             .order_by(func.sum(LLMUsage.total_cost).desc())
             .limit(3)
             .all()

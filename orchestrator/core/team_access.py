@@ -62,12 +62,12 @@ def metadata_team_filter_clause(
     ``normalize_team``).
 
     >>> metadata_team_filter_clause()
-    "AND (COALESCE(metadata->'team_access', '[]'::jsonb) = '[]'::jsonb OR metadata->'team_access' @> to_jsonb(:team::text))"
+    "AND (COALESCE(metadata->'team_access', '[]'::jsonb) = '[]'::jsonb OR metadata->'team_access' @> to_jsonb(CAST(:team AS text)))"
     """
     col = f"{json_col}->'{key}'"
     return (
         f"AND (COALESCE({col}, '[]'::jsonb) = '[]'::jsonb "
-        f"OR {col} @> to_jsonb(:team::text))"
+        f"OR {col} @> to_jsonb(CAST(:team AS text)))"
     )
 
 

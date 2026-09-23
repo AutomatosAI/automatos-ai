@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 # import pandas as pd
 
 # Automatos imports (from existing system)
+from core.best_effort import awaitable_off_loop
 from core.credentials.resolver import CredentialResolver
 from core.llm import LLMProvider
 from modules.rag import RAGService
@@ -820,45 +821,64 @@ class DatabaseKnowledgeService:
     async def resolve_source_id(
         self,
         workspace_id: str,
-        database_name: Optional[str] = None,
+        database_name: Optional[Any] = None,
         db_session: Optional[Session] = None,
     ) -> Optional[str]:
         """Resolve a workspace's database source to a concrete ``source_id``.
 
-        PRD-160 S1: the agent tool exposes an optional ``database_name`` but
-        the query pipeline addresses a source by id. Resolution is ALWAYS
-        scoped to the caller's workspace so an agent can never reach another
-        workspace's source by guessing a name. When ``database_name`` is
-        provided it is matched case-insensitively within the workspace;
-        otherwise, a workspace with exactly one active source uses it. Zero
-        matches and an ambiguous no-name pick (multiple active sources) both
-        return ``None`` — the caller surfaces a helpful message rather than
-        silently querying the wrong database.
+        PRD-160 S1: the agent tools address a source by reference, the query
+        pipeline by id. Resolution is ALWAYS scoped to the caller's workspace so
+        an agent can never reach another workspace's source by guessing. The
+        reference is a source's id or its name (F077 — ``platform_query_data``
+        was handed "harbourline_shop" as its database_id); see
+        :func:`match_source`. No reference and exactly one active source uses
+        it. Zero matches and an ambiguous no-reference pick both return
+        ``None`` — the caller surfaces a helpful message rather than silently
+        querying the wrong database.
 
         ``db_session`` is opt-in: the in-process executor passes its request
         session (saving a pooled connection); callers that omit it get a
         short-lived one.
         """
+        if not workspace_id:
+            return None
+        sources = await self.active_sources(workspace_id, db_session=db_session)
+        match = match_source(sources, database_name)
+        return str(match) if match is not None else None
+
+    async def active_sources(
+        self,
+        workspace_id: str,
+        db_session: Optional[Session] = None,
+    ) -> List[Tuple[int, str]]:
+        """``(id, name)`` of the workspace's active sources, newest first.
+
+        A borrowed session is rolled back when the read fails: it is the
+        request's session, shared with every other tool in the turn, and an
+        aborted transaction left behind fails all of them (the F074 pattern).
+        """
         from core.database.database import SessionLocal
         from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
 
         if not workspace_id:
-            return None
+            return []
         own_session = db_session is None
         session = db_session or SessionLocal()
         try:
-            q = session.query(DBKSource).filter(
-                DBKSource.workspace_id == str(workspace_id),
-                DBKSource.is_active.is_(True),
+            rows = (
+                session.query(DBKSource.id, DBKSource.name)
+                .filter(
+                    DBKSource.workspace_id == str(workspace_id),
+                    DBKSource.is_active.is_(True),
+                )
+                .order_by(DBKSource.created_at.desc())
+                .all()
             )
-            if database_name and database_name.strip():
-                src = q.filter(DBKSource.name.ilike(database_name.strip())).first()
-                return str(src.id) if src else None
-            sources = q.order_by(DBKSource.created_at.desc()).all()
-            if len(sources) == 1:
-                return str(sources[0].id)
-            # zero or ambiguous (multiple sources, none named) → caller decides
-            return None
+            return [(int(row[0]), str(row[1] or "")) for row in rows]
+        except Exception:
+            if not own_session:
+                session.rollback()
+            raise
         finally:
             if own_session:
                 session.close()
@@ -950,7 +970,8 @@ class DatabaseKnowledgeService:
                 "columns": columns, "row_count": len(rows),
                 "visualization_type": viz}
 
-    async def write_nl_audit(
+    @awaitable_off_loop
+    def write_nl_audit(
         self,
         *,
         source_id,
@@ -966,7 +987,8 @@ class DatabaseKnowledgeService:
         audit row (workspace via the source FK, agent, SQL, outcome). Workspace
         is carried by the workspace-scoped source per the PRD-156 S3 source-join
         audit convention, so no separate column is needed. Best-effort: a failed
-        audit write never breaks the query.
+        audit write never breaks the query, and it runs on the best-effort
+        threads (F105) — a dry connection pool never freezes the event loop.
         """
         from core.database.database import SessionLocal
         from core.models.database_knowledge import DatabaseQueryAudit
@@ -999,6 +1021,31 @@ class DatabaseKnowledgeService:
                 db.close()
         except Exception as e:  # noqa: BLE001 — audit is best-effort
             logger.warning(f"NL2SQL audit write failed (non-fatal): {e}")
+
+
+def match_source(sources: List[Tuple[int, str]], reference: Any = None) -> Optional[int]:
+    """The source a reference names, among one workspace's ``(id, name)`` pairs.
+
+    A reference is a source's id — an int, or a string of digits — or its name,
+    matched exactly and case-insensitively (never as a LIKE pattern: the ``_``
+    in ``harbourline_shop`` is a wildcard there). No reference picks the only
+    source. ``None`` when nothing matches, and when there are several sources
+    and no reference — the caller asks rather than guessing.
+    """
+    if reference is None or (isinstance(reference, str) and not reference.strip()):
+        return sources[0][0] if len(sources) == 1 else None
+    if isinstance(reference, bool):
+        return None
+    if isinstance(reference, int):
+        return reference if any(sid == reference for sid, _ in sources) else None
+    text_ref = str(reference).strip()
+    if text_ref.isdigit() and any(sid == int(text_ref) for sid, _ in sources):
+        return int(text_ref)
+    wanted = text_ref.lower()
+    for sid, name in sources:
+        if name.strip().lower() == wanted:
+            return sid
+    return None
 
 
 # ---------------------------------------------------------------------------

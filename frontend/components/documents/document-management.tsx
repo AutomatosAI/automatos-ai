@@ -84,6 +84,9 @@ interface BackendDocument {
   upload_date?: string;
   processed_date?: string | null;
   team_access?: string[];
+  // F086: how much of the file's text the knowledge base holds
+  kept_pct?: number;
+  partial?: boolean;
 }
 
 // Stats will be calculated dynamically from real data

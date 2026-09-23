@@ -38,7 +38,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -317,6 +317,52 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
+
+
+# A task in one of these states will not run again — it is part of "done", even
+# when what it did was fail or get skipped for a dependency that failed.
+TERMINAL_TASK_STATES = ("verified", "failed", "skipped")
+ACTIVE_TASK_STATES = ("assigned", "running", "completed", "verifying", "retrying")
+
+
+def _task_progress(tasks: List[OrchestrationTask]) -> dict:
+    """Honest counts for the mission header, straight off the task rows."""
+    states = [str(t.state or "") for t in tasks]
+    return {
+        "total": len(states),
+        "done": sum(1 for state in states if state in TERMINAL_TASK_STATES),
+        "active": sum(1 for state in states if state in ACTIVE_TASK_STATES),
+        "verified": states.count("verified"),
+        "failed": states.count("failed"),
+        "skipped": states.count("skipped"),
+        # Every task is terminal but the run has not been told — the tick that
+        # would have reconciled it never came back. The page can say so.
+        "all_terminal": bool(states) and all(state in TERMINAL_TASK_STATES for state in states),
+    }
+
+
+def mission_tokens_from_ledger(db: Session, run_id: Any) -> Optional[int]:
+    """Total tokens this mission really spent, from ``llm_usage``.
+
+    ``orchestration_runs.tokens_used`` is a counter the run has to remember to
+    write, and night 1 showed it reading 0 while the ledger held 28 calls and
+    1.26M tokens for the same mission. ``llm_usage`` is the row every model call
+    writes — the record the analytics and cost pages already trust — so the
+    mission page reads it too. ``None`` means the ledger could not be read, and
+    the caller keeps the counter it had.
+    """
+    try:
+        total = db.execute(
+            sa_text(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage "
+                "WHERE execution_id = :execution_id"
+            ),
+            {"execution_id": f"mission:{run_id}"},
+        ).scalar()
+    except Exception:  # noqa: BLE001 — a read-out must never fail the page
+        logger.warning("[missions] token ledger unreadable for mission %s", run_id, exc_info=True)
+        return None
+    return int(total or 0)
 
 
 def _task_to_response(task: OrchestrationTask, depends_on: Optional[List[str]] = None) -> dict:
@@ -978,6 +1024,16 @@ async def get_mission(
                 _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
 
         result = _run_to_response(run)
+        # The ledger, not the counter (night 1, finding 22): the page showed
+        # "0 / 480,000 ~$0.00" for a mission whose llm_usage rows held 28 calls
+        # and 1.26M tokens. A ledger read that fails leaves the counter alone.
+        ledger_tokens = mission_tokens_from_ledger(db, run.id)
+        if ledger_tokens is not None and ledger_tokens > (run.tokens_used or 0):
+            result["tokens_used"] = ledger_tokens
+        # Progress counted from the rows themselves, so the page never has to
+        # derive it: a mission whose tasks were 2 verified / 1 failed / 6 skipped
+        # read "running · 0/9 tasks".
+        result["task_progress"] = _task_progress(tasks)
         result["tasks"] = [_task_to_response(t, _deps_map.get(str(t.id), [])) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
         result["permission_denials"] = permission_denials

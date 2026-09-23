@@ -25,7 +25,20 @@ async def list_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     if category in ("all", "platform"):
         from modules.tools.discovery import get_action_registry
         registry = get_action_registry()
+        from modules.tools.discovery.action_registry import action_is_available
+
+        # F122: list only what this caller may run. The executor injects both
+        # flags from its own gates; nothing injected means neither (fail-closed,
+        # the catalog's include_super_admin=False default).
+        include_super_admin = params.get("_caller_is_super_admin") is True
+        include_admin = params.get("_caller_is_admin") is True
         for action in registry.get_all():
+            if not action_is_available(action):
+                continue  # F121: never list what cannot run here (F078)
+            if action.super_admin_only and not include_super_admin:
+                continue
+            if action.admin_only and not include_admin:
+                continue
             if search and search not in action.name.lower() and search not in (action.description or "").lower():
                 continue
             results.append({

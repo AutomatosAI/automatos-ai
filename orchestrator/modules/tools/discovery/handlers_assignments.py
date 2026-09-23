@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+# How many agents an error message names before it stops being helpful.
+ROSTER_IN_ERROR = 20
+
+
 def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     """Resolve agent by ID or name within a workspace. Returns (agent, error_dict)."""
     from core.models import Agent
@@ -27,7 +31,28 @@ def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
 
     agent = query.first()
     if not agent:
-        return None, {"success": False, "error": "Agent not found in this workspace"}
+        # Name the roster. Night 1: Auto passed a TICKET number as an agent id
+        # and got a bare "Agent not found" eight times in a row on T64 — with
+        # nothing in the message to tell it what a valid agent looks like, it
+        # simply tried again (F032).
+        roster = [
+            f"{a.id}:{a.name}"
+            for a in db.query(Agent)
+            .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
+            .order_by(Agent.id)
+            .limit(ROSTER_IN_ERROR)
+            .all()
+        ]
+        asked = f"agent_id={agent_id!r}" if agent_id else f"agent_name={agent_name!r}"
+        hint = (
+            f"No agent matches {asked} in this workspace. "
+            "Agent ids and TICKET ids are different numbering — if that number came "
+            "from a task, it is not an agent id. "
+        )
+        hint += f"This workspace's agents are: {', '.join(roster)}." if roster else (
+            "This workspace has no active agents."
+        )
+        return None, {"success": False, "error": hint}
 
     return agent, None
 

@@ -1,5 +1,6 @@
 """PRD-239 S6c — Settings → Session mode: where a ticket runs when its agent
-names no folder (the projects folder by default, else a fresh sessions folder),
+names no folder (a fresh sessions folder by default since F042, the projects
+folder when the operator chooses it),
 stored on the workspace, used by the claim and the Runtime Canvas; the
 projects folder itself stays a .env/Docker mount the tab only explains."""
 from __future__ import annotations
@@ -22,7 +23,8 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from services import cli_host_service as svc  # noqa: E402
+from services import cli_host_service as svc
+from services.session_tools import tool_names as session_tool_names  # noqa: E402
 from services import cli_ticket_lane as lane  # noqa: E402
 
 WS = uuid4()
@@ -82,18 +84,25 @@ def _ws(settings=None):
     return SimpleNamespace(id=WS, settings=settings)
 
 
-def test_the_default_is_the_projects_folder_when_one_is_configured(monkeypatch):
+def test_the_default_is_a_folder_of_its_own_even_with_a_projects_folder_configured(monkeypatch):
+    # F042 (night 1): the projects folder (~/Development) holds the Automatos
+    # checkout; a folder-less ticket that started there sourced the platform's .env.
     monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_DIR", "/Users/me/Development", raising=False)
     monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_MOUNT", "rw", raising=False)
     monkeypatch.setattr(svc, "host_allow_dirs", lambda db, ws: ["/Users/me/Development"])
     out = svc.session_mode_settings(_DB(workspace=_ws(None)), WS)
+    # PRD-245 W1: the tab now also names the Automatos tools a session gets; the
+    # list itself is pinned in test_prd245_session_tools.py.
+    assert [t["name"] for t in out.pop("session_tools")] == list(session_tool_names())
     assert out == {
-        "default_folder": "projects", "default_folder_explicit": False,
+        "default_folder": "sessions", "default_folder_explicit": False,
         "local_projects_dir": "/Users/me/Development", "projects_mount": "rw",
         "workspace_dir": None,
         "host_allowed_roots": ["/Users/me/Development"],
     }
-    assert svc.default_session_folder(_DB(workspace=_ws(None)), WS) == "/Users/me/Development"
+    assert svc.default_session_folder(_DB(workspace=_ws(None)), WS) is None
+    chosen = _ws({"session_mode": {"default_folder": "projects"}})
+    assert svc.default_session_folder(_DB(workspace=chosen), WS) == "/Users/me/Development"
 
 
 def test_without_a_projects_folder_tickets_get_their_own_sessions_folder(monkeypatch):

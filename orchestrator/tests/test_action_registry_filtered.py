@@ -241,13 +241,39 @@ def _enum_of(schema: dict) -> list[str]:
     return schema["function"]["parameters"]["properties"]["action"]["enum"]
 
 
-def test_dispatcher_allowed_names_narrows_enum(registry):
+@pytest.fixture
+def narrowed_enum(monkeypatch):
+    """F025 ships the enum cache-stable (the full eligible set) by default and
+    delivers the ranking as a late system line. These pins are about the
+    narrowing itself, so they run with the dial's other setting: the enum
+    narrowed."""
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: False)
+
+
+def test_dispatcher_allowed_names_narrows_enum(registry, narrowed_enum):
     """AC #1: allowed_names with two known non-admin/non-promoted names yields
     an enum equal to exactly those two names (sorted)."""
     schema = registry.to_dispatcher_schema(
         allowed_names=["platform_list_agents", "platform_create_agent"],
     )
     assert _enum_of(schema) == ["platform_create_agent", "platform_list_agents"]
+
+
+def test_a_cache_stable_enum_stays_full_and_publishes_the_narrowing(registry, monkeypatch):
+    """F025: with the enum cache-stable, the same allowed_names leave the enum
+    byte-identical to the un-narrowed one and publish the narrowing for the
+    late system line instead."""
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: True)
+    turn_narrowing.clear_narrowed_actions()
+    schema = registry.to_dispatcher_schema(
+        allowed_names=["platform_list_agents", "platform_create_agent"],
+    )
+    assert _enum_of(schema) == _enum_of(registry.to_dispatcher_schema())
+    assert turn_narrowing.narrowed_actions() == ["platform_create_agent", "platform_list_agents"]
 
 
 def test_dispatcher_allowed_names_none_matches_legacy(registry):
@@ -295,7 +321,7 @@ def test_dispatcher_admin_passes_when_exclude_admin_false(registry):
     assert "platform_admin_only_action" in enum
 
 
-def test_dispatcher_unknown_names_silently_dropped(registry):
+def test_dispatcher_unknown_names_silently_dropped(registry, narrowed_enum):
     """AC #5: Names in allowed_names that aren't registered are silently skipped,
     not an error. Valid names from the same call still appear."""
     schema = registry.to_dispatcher_schema(

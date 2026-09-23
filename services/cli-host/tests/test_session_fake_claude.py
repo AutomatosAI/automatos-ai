@@ -38,12 +38,12 @@ def _ticket(workdir: Path, **over) -> dict:
     return t
 
 
-def _run(short_tmp, ticket, cfg=None, allow=None):
+def _run(short_tmp, ticket, cfg=None, allow=None, **session_kw):
     cfg = cfg or _cfg(short_tmp)
     hooks = HookServer(cfg.socket_path)
     hooks.start()
     allow = allow or [str(short_tmp / "ws")]
-    s = Session(ticket, cfg, allow, cfg.socket_path, default_root=allow[0])
+    s = Session(ticket, cfg, allow, cfg.socket_path, **{"default_root": allow[0], **session_kw})
     hooks.register(str(ticket["task_id"]), s.handle_hook)
     try:
         return s, s.run()
@@ -134,6 +134,36 @@ def test_cancel_terminates_a_running_session(short_tmp, fake_home, env_clean, mo
         hooks.stop()
 
 
+def test_a_session_the_host_stops_is_not_the_operators_cancel(short_tmp, fake_home, env_clean, monkeypatch):
+    """F015 (night 1): tickets ended by the host shutting down were recorded as
+    cancelled by the operator. The host's stop says so, and why."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "slow")
+    monkeypatch.setenv("FAKE_CLAUDE_SLOW_SECONDS", "60")
+    cfg = _cfg(short_tmp)
+    hooks = HookServer(cfg.socket_path)
+    hooks.start()
+    s = Session(_ticket(workdir), cfg, [str(short_tmp / "ws")], cfg.socket_path, default_root=str(short_tmp / "ws"))
+    hooks.register("42", s.handle_hook)
+    holder = {}
+    t = threading.Thread(target=lambda: holder.setdefault("out", s.run()))
+    t.start()
+    try:
+        deadline = time.time() + 30
+        while s.transcript_path is None and time.time() < deadline:
+            time.sleep(0.1)
+        assert s.transcript_path is not None, "SessionStart never arrived"
+        s.request_cancel(host_reason="the CLI host on mac stopped (SIGTERM)")
+        t.join(timeout=30)
+        out = holder["out"]
+        assert (out.status, out.error, out.exit_reason) == (
+            "host_stopped", "the CLI host on mac stopped (SIGTERM)", "cancelled")
+        assert out.as_result_payload(1)["status"] == "host_stopped"
+    finally:
+        hooks.stop()
+
+
 def test_not_onboarded_claude_is_refused_before_spawn(short_tmp, env_clean, monkeypatch):
     home = short_tmp / "home2"
     home.mkdir()
@@ -153,3 +183,35 @@ def test_a_session_that_never_starts_is_an_error_not_a_four_hour_wait(short_tmp,
     s, out = _run(short_tmp, _ticket(workdir), cfg=cfg)
     assert out.status == "error" and out.exit_reason == "no_session_start"
     assert "login screen" in (out.error or "") and s.proc.poll() is not None
+
+
+def test_a_note_written_in_the_ticket_folder_lands_in_the_deliverables_folder(short_tmp, fake_home, env_clean, monkeypatch):
+    """PRD-245 S0.7: DRG-DEV's note under ~/.automatos/cli-host/sessions/121 was
+    invisible to Deliverables. Now the ticket names the folder, and what the
+    session writes in its own folder is copied there and reported."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SESSION_NOTE", "1")
+    s, out = _run(short_tmp, _ticket(workdir))
+    assert out.status == "success", out
+    sdir = short_tmp / "state" / "sessions" / "42"
+    dest = short_tmp / "ws" / "sessions" / "42"
+    assert f"Deliverables: save any file you produce under {dest}/" in (sdir / "ticket.md").read_text()
+    assert (sdir / "note.md").exists()                                          # where the session put it
+    assert (dest / "note.md").read_text() == (sdir / "note.md").read_text()      # …and the copy beside the ticket
+    assert str(dest / "note.md") in out.files_touched and str(sdir / "note.md") in out.files_touched
+    assert str((workdir / "hello.txt").resolve()) in out.files_touched
+    assert sorted(p.name for p in dest.iterdir()) == ["note.md"]                 # the host's ticket.md never travels
+    assert any(p.endswith("/42/ticket.md") for p in out.files_touched)           # …though the session did touch it
+
+
+def test_without_a_default_root_nothing_is_copied(short_tmp, fake_home, env_clean, monkeypatch):
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SESSION_NOTE", "1")
+    s, out = _run(short_tmp, _ticket(workdir), default_root=None)
+    assert out.status == "success", out
+    sdir = short_tmp / "state" / "sessions" / "42"
+    assert (sdir / "note.md").exists() and not (short_tmp / "ws" / "sessions").exists()
+    assert [p for p in out.files_touched if p.endswith("note.md")] == [str(sdir / "note.md")]
+    assert "Deliverables:" not in (sdir / "ticket.md").read_text()

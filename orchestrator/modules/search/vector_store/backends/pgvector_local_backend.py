@@ -24,11 +24,72 @@ config, never here.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+# ``document_chunks`` is not the same shape in every deployment. On this local
+# stack (verified 2026-09-19) ``embedding`` is TEXT holding a pgvector literal
+# and ``workspace_id`` is TEXT, while ``documents``/``board_tasks`` use uuid and
+# a migrated deployment has ``embedding vector(N)``. Querying either shape with
+# the other's SQL fails outright:
+#   "operator does not exist: text <=> vector"
+#   "operator does not exist: text = uuid"
+# So the column types are read ONCE per process and the SQL is built to match —
+# a real vector column is compared directly (the HNSW index is usable), a text
+# one is cast (no index exists on it to lose).
+_COLUMN_TYPES: Optional[Tuple[str, str]] = None
+
+
+def _column_types(db) -> Tuple[str, str]:
+    """``(embedding_type, workspace_id_type)`` for ``document_chunks``, memoized."""
+    global _COLUMN_TYPES
+    if _COLUMN_TYPES is not None:
+        return _COLUMN_TYPES
+    embedding_type, workspace_type = "USER-DEFINED", "uuid"
+    try:
+        rows = db.execute(
+            text(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = 'document_chunks' "
+                "  AND column_name IN ('embedding', 'workspace_id')"
+            )
+        ).fetchall()
+        found = {r.column_name: r.data_type for r in rows}
+        embedding_type = found.get("embedding", embedding_type)
+        workspace_type = found.get("workspace_id", workspace_type)
+    except Exception:  # noqa: BLE001 — fall back to the migrated shape
+        logger.warning("pgvector-local: could not read document_chunks column types", exc_info=True)
+        return embedding_type, workspace_type
+    _COLUMN_TYPES = (embedding_type, workspace_type)
+    logger.info(
+        "pgvector-local: document_chunks.embedding=%s workspace_id=%s",
+        embedding_type, workspace_type,
+    )
+    return _COLUMN_TYPES
+
+
+def embedding_expr(embedding_type: str, column: str = "dc.embedding") -> str:
+    """The column as a ``vector``, whatever shape it is stored in.
+
+    A real ``vector`` column is used directly (the HNSW index stays usable). A
+    TEXT column is cast — and on this stack the text is a Postgres ARRAY literal
+    ``{0.1,0.2}``, which ``vector`` refuses ("invalid input syntax for type
+    vector"), so the braces are translated to the brackets ``vector`` expects.
+    ``replace`` is a no-op on text already stored as ``[0.1,0.2]``.
+    """
+    if embedding_type not in ("text", "character varying"):
+        return column
+    return f"CAST(replace(replace({column}, '{{', '['), '}}', ']') AS vector)"
+
+
+def workspace_predicate(workspace_type: str, column: str = "dc.workspace_id") -> str:
+    """``<column> = <bind>``, with whichever cast makes the types agree."""
+    if workspace_type in ("text", "character varying"):
+        return f"{column} = :ws"
+    return f"{column} = CAST(:ws AS uuid)"
 
 
 class PgVectorLocalBackend:
@@ -75,21 +136,24 @@ class PgVectorLocalBackend:
 
         db = SessionLocal()
         try:
+            embedding_type, workspace_type = _column_types(db)
+            emb_col = embedding_expr(embedding_type)
+            ws_where = workspace_predicate(workspace_type)
             rows = db.execute(
                 text(
-                    """
+                    f"""
                     SELECT dc.document_id,
                            dc.chunk_index,
                            dc.content,
                            d.filename AS file_name,
                            d.file_path AS file_path,
-                           1 - (dc.embedding <=> CAST(:emb AS vector)) AS similarity
+                           1 - ({emb_col} <=> CAST(:emb AS vector)) AS similarity
                     FROM document_chunks dc
                     JOIN documents d ON d.id = dc.document_id
-                    WHERE dc.workspace_id = CAST(:ws AS uuid)
+                    WHERE {ws_where}
                       AND dc.embedding IS NOT NULL
-                      AND 1 - (dc.embedding <=> CAST(:emb AS vector)) >= :min_score
-                    ORDER BY dc.embedding <=> CAST(:emb AS vector)
+                      AND 1 - ({emb_col} <=> CAST(:emb AS vector)) >= :min_score
+                    ORDER BY {emb_col} <=> CAST(:emb AS vector)
                     LIMIT :limit
                     """
                 ),

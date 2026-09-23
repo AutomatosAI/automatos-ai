@@ -72,6 +72,7 @@ _budget_manager = TokenBudgetManager()
 VOLATILE_SECTIONS = frozenset(
     {
         "datetime_context",
+        "documents_inventory",   # F085-B: counts move every time an agent saves a report
         "memory",
         "business_graph",
         "field_memory",

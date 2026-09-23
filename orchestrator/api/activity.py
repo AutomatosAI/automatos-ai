@@ -161,20 +161,22 @@ async def get_scheduler_health(
 @router.get("/agent-reports")
 async def get_agent_reports(
     agent_ids: str = Query(
-        ...,
-        description="Comma-separated agent IDs to fetch reports for",
+        "",
+        description=(
+            "Comma-separated agent IDs. Omit to get the most recent reports "
+            "across the workspace's agents."
+        ),
     ),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Return latest execution summaries for pinned agents."""
+    """Latest execution summary per agent — pinned, or the most recent."""
     try:
-        ids = [int(x.strip()) for x in agent_ids.split(",") if x.strip().isdigit()]
-        if not ids:
-            return {"reports": []}
+        ids = [int(x.strip()) for x in (agent_ids or "").split(",") if x.strip().isdigit()]
 
         svc = ActivityService(db, ctx.workspace_id)
-        return svc.get_agent_reports(agent_ids=ids)
+        # No ids is not "no reports": it means "whoever reported most recently".
+        return svc.get_agent_reports(agent_ids=ids or None)
     except Exception as e:
         logger.error("Agent reports error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch agent reports")

@@ -173,6 +173,9 @@ class LLMUsage(Base):
 
     # Request details
     agent_id = Column(Integer)
+    # F049: the agent's name, stamped when the agent is deleted (agent_id has no FK
+    # and would otherwise name nothing). Readers prefer the live agents.name.
+    agent_name = Column(String(255), nullable=True)
     execution_id = Column(String(255))
     request_type = Column(String(50))  # chat, agent, recipe, routing, embedding
 
@@ -765,6 +768,12 @@ class AgentResponse(BaseModel):
     slug: Optional[str] = None
     required_role: Optional[str] = None
     marketplace_category: Optional[str] = None  # UI category for icon mapping
+    # PRD-245 S1.5: for a ``runtime: cli`` agent, the platform tools each of its
+    # skills tells it to call that a ticket session cannot — and what to call
+    # instead where the session has an equivalent. Absent for API agents, whose
+    # skills' tools all work. The agent form says this so the operator learns it
+    # from the form, not from a report that came back thin.
+    session_tool_gaps: Optional[List[Dict[str, Any]]] = None
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -894,6 +903,10 @@ class DocumentResponse(BaseModel):
     rag_query_count: Optional[int] = 0
     # PRD-164 S3 (Q58): 'agent_output' rows are the flywheel scope
     source_type: Optional[str] = None
+    # F086: how much of the extracted text the stored chunks hold, and whether
+    # that is under the owner-facing threshold ("partial — 61% kept").
+    kept_pct: Optional[int] = None
+    partial: bool = False
 
 class SystemConfigCreate(BaseModel):
     config_key: str

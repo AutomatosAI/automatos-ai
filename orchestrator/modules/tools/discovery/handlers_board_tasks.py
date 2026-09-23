@@ -238,6 +238,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
             db.commit()
             # PRD-227 US-001: push the create (+immediate done) to Command Centres.
             _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
+            db.commit()  # F119: the notice rides this commit
             return {
                 "success": True,
                 "task_id": task.id,
@@ -270,6 +271,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     result: Dict[str, Any] = {
         "success": True,
@@ -626,6 +628,7 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     return {
         "success": True,
@@ -680,6 +683,90 @@ async def _update_many_board_task_statuses(
         "updated": updated,
         "failed": failed,
     }
+
+
+async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Edit a board task's FIELDS — title, description, priority, tags, review_mode.
+
+    The one real gap in night 1's 43 ``__tool_gap__`` rows (F032): agents could
+    assign a ticket and move its status, and could not correct a title or raise
+    a priority. Status is deliberately NOT here — ``platform_update_task_status``
+    owns that, including the execution it triggers.
+    """
+    from core.models.core import BoardTask
+    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS
+
+    task_id = params.get("task_id")
+    if not task_id:
+        return {"success": False, "error": "task_id is required"}
+
+    task = db.query(BoardTask).filter(
+        BoardTask.id == int(task_id),
+        BoardTask.workspace_id == workspace_id,
+    ).first()
+    if not task:
+        return {"success": False, "error": f"Task {task_id} not found in this workspace"}
+
+    changed: Dict[str, Any] = {}
+
+    title = params.get("title")
+    if title is not None:
+        title = str(title).strip()
+        if not title:
+            return {"success": False, "error": "title cannot be empty"}
+        task.title = title[:500]
+        changed["title"] = task.title
+
+    if params.get("description") is not None:
+        task.description = str(params["description"])
+        changed["description"] = "updated"
+
+    priority = params.get("priority")
+    if priority is not None:
+        if priority not in VALID_PRIORITIES:
+            return {"success": False, "error": f"Invalid priority: {priority}. Must be one of {sorted(VALID_PRIORITIES)}"}
+        task.priority = priority
+        changed["priority"] = priority
+
+    review_mode = params.get("review_mode")
+    if review_mode is not None:
+        if review_mode not in VALID_REVIEW_MODES:
+            return {"success": False, "error": f"Invalid review_mode: {review_mode}. Must be one of {sorted(VALID_REVIEW_MODES)}"}
+        task.review_mode = review_mode
+        changed["review_mode"] = review_mode
+
+    tags = params.get("tags")
+    if tags is not None:
+        if not isinstance(tags, list):
+            return {"success": False, "error": "tags must be a list of strings"}
+        task.tags = [str(t) for t in tags if str(t).strip()]
+        changed["tags"] = task.tags
+
+    note = params.get("note")
+    if note:
+        # The same non-rejecting note the HTTP PATCH takes, so a remark from an
+        # agent and one from the owner land in the same place on the card.
+        from datetime import datetime, timezone
+
+        ref = dict(task.runtime_ref or {})
+        ref["session_notes"] = (ref.get("session_notes") or []) + [{
+            "note": str(note)[:MAX_TASK_NOTE_CHARS],
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by": "an agent",
+        }]
+        task.runtime_ref = ref
+        changed["note"] = "added"
+
+    if not changed:
+        return {
+            "success": False,
+            "error": "Nothing to change. Pass at least one of: title, description, "
+                     "priority, tags, review_mode, note. For status use "
+                     "platform_update_task_status.",
+        }
+
+    db.commit()
+    return {"success": True, "task_id": task.id, "updated": changed}
 
 
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -760,6 +847,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
             # We won the assigned->in_progress transition — the dispatcher did not
             # beat us to this claim. Push the board frame and launch exactly once.
             _notify_board_safe(db, workspace_id, int(task_id), "in_progress", "status_changed")
+            db.commit()  # F119: the frame rides this commit
             from api.board_tasks import _launch_task_execution
 
             _launch_task_execution(
@@ -797,12 +885,20 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).
-    if new_status == "blocked" and task.blocked_at is None:
-        task.blocked_at = datetime.now(timezone.utc)
+    if new_status == "blocked":
+        if task.blocked_at is None:
+            task.blocked_at = datetime.now(timezone.utc)
         task.blocked_reason = blocked_reason
     if new_status != "blocked" and old_status == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
+    # F036: a status set through this tool is an instruction someone gave — on
+    # night 1 the persona stopped tickets by asking Auto, and the stops were
+    # undone by answers and grants meant for other parks. Same rule as the
+    # board API: a stop is recorded, any other status lifts it.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, blocked_reason, by="platform_tool")
 
     db.commit()
 
@@ -816,6 +912,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     return {
         "success": True,

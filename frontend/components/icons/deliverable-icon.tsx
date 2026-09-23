@@ -2,7 +2,7 @@
  * DeliverableIcon — Automatos Deliverable Icon System v1
  * =======================================================
  *
- * 7 deliverable types × 3 sizes = 21 icons.
+ * 8 deliverable types × 3 sizes = 24 icons.
  *
  *   - hero  (200×200) — dark canvas with radial accent glow, baked-in color
  *   - row   (24×24)   — monochrome, currentColor (color via parent text-{x} class)
@@ -26,13 +26,14 @@ export const DELIVERABLE_ACCENTS = {
   slide:       { hex: '#fb923c', tw: 'text-warning',  label: 'Slides'       },
   spreadsheet: { hex: '#4ade80', tw: 'text-success',   label: 'Spreadsheets' },
   blog_post:   { hex: '#22d3ee', tw: 'text-cyan-400',    label: 'Blog Posts'   },
+  video:       { hex: '#f87171', tw: 'text-red-400',     label: 'Videos'       },
 } as const
 
 export type DeliverableType = keyof typeof DELIVERABLE_ACCENTS
 export type DeliverableSize = 'hero' | 'row' | 'badge'
 
 export const DELIVERABLE_TYPES: ReadonlyArray<DeliverableType> = [
-  'report', 'image', 'document', 'code', 'slide', 'spreadsheet', 'blog_post',
+  'report', 'image', 'document', 'code', 'slide', 'spreadsheet', 'blog_post', 'video',
 ] as const
 
 // ── Hero canvas wrapper — 200×200 dark with radial gradient toward accent
@@ -207,6 +208,23 @@ function BlogPostHero({ width, height, uid }: HeroProps) {
   )
 }
 
+function VideoHero({ width, height, uid }: HeroProps) {
+  const a = DELIVERABLE_ACCENTS.video.hex
+  return (
+    <HeroCanvas accent={a} gradientId={`g-video-${uid}`} width={width} height={height}>
+      <rect x="36" y="52" width="128" height="96" rx="8"
+        fill="none" stroke={a} strokeWidth="1.75" />
+      <line x1="36" y1="68"  x2="164" y2="68"  stroke={a} strokeOpacity="0.45" strokeWidth="1.25" />
+      <line x1="36" y1="132" x2="164" y2="132" stroke={a} strokeOpacity="0.45" strokeWidth="1.25" />
+      {[57, 137].flatMap((y) => [43, 64, 85, 107, 128, 149].map((x) => (
+        <rect key={`s${x}-${y}`} x={x} y={y} width="8" height="6" rx="1.5" fill={a} fillOpacity="0.45" />
+      )))}
+      <circle cx="100" cy="100" r="18" fill={a} fillOpacity="0.18" stroke={a} strokeWidth="1.5" />
+      <path d="M94,90 L94,110 L111,100 Z" fill={a} />
+    </HeroCanvas>
+  )
+}
+
 const HERO_COMPONENTS: Record<DeliverableType, React.FC<HeroProps>> = {
   report: ReportHero,
   image: ImageHero,
@@ -215,6 +233,7 @@ const HERO_COMPONENTS: Record<DeliverableType, React.FC<HeroProps>> = {
   slide: SlideHero,
   spreadsheet: SpreadsheetHero,
   blog_post: BlogPostHero,
+  video: VideoHero,
 }
 
 // ── Row icons (24×24) — lucide-grade, currentColor
@@ -305,6 +324,15 @@ function BlogPostRow() {
   )
 }
 
+function VideoRow() {
+  return (
+    <svg {...rowSvgProps}>
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+      <path d="M16 10l5-3v10l-5-3" />
+    </svg>
+  )
+}
+
 const ROW_COMPONENTS: Record<DeliverableType, React.FC> = {
   report: ReportRow,
   image: ImageRow,
@@ -313,6 +341,7 @@ const ROW_COMPONENTS: Record<DeliverableType, React.FC> = {
   slide: SlideRow,
   spreadsheet: SpreadsheetRow,
   blog_post: BlogPostRow,
+  video: VideoRow,
 }
 
 // ── Badge icons (16×16) — redrawn for clarity at small size, currentColor
@@ -403,6 +432,15 @@ function BlogPostBadge() {
   )
 }
 
+function VideoBadge() {
+  return (
+    <svg {...badgeSvgProps}>
+      <rect x="1.5" y="4" width="9.5" height="8" rx="1.5" />
+      <path d="M11 7l3.5-2v6L11 9" />
+    </svg>
+  )
+}
+
 const BADGE_COMPONENTS: Record<DeliverableType, React.FC> = {
   report: ReportBadge,
   image: ImageBadge,
@@ -411,6 +449,7 @@ const BADGE_COMPONENTS: Record<DeliverableType, React.FC> = {
   slide: SlideBadge,
   spreadsheet: SpreadsheetBadge,
   blog_post: BlogPostBadge,
+  video: VideoBadge,
 }
 
 // ── Public API

@@ -119,7 +119,8 @@ def test_nl2sql_tools_present_in_chat_registry():
 def test_analytics_endpoints_scope_by_workspace():
     txt = (ORCH / "api/database_analytics.py").read_text()
     joins = txt.count("JOIN database_knowledge_sources dks ON dks.id = dqa.source_id")
-    filters = txt.count("dks.workspace_id = :workspace_id::uuid")
+    # F074: CAST(:p AS type) — SQLAlchemy never binds :p::type
+    filters = txt.count("dks.workspace_id = CAST(:workspace_id AS uuid)")
     assert joins >= 3 and filters >= 3, f"unscoped analytics query (joins={joins} filters={filters})"
 
 

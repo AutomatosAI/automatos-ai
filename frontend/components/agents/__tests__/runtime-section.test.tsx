@@ -15,6 +15,15 @@ const HEALTH = {
   providers_online: ['claude'],
 }
 
+// PRD-245 S1.5: `GET /api/v1/cli-hosts/settings` → `session_tools`, in the order a session is offered them.
+const SESSION_TOOLS = [
+  { name: 'board_summary', description: "Counts of this workspace's board tasks by status." },
+  { name: 'list_tasks', description: 'The board tasks of this workspace, newest first.' },
+  { name: 'update_ticket', description: 'Move this ticket and add a note; a session never closes it.' },
+  { name: 'submit_report', description: 'Attach a report to this ticket.' },
+  { name: 'search_knowledge', description: "Search this workspace's knowledge." },
+]
+
 async function load(edition: 'local' | 'saas') {
   vi.resetModules()
   vi.doMock('@/lib/auth-edition', () => ({
@@ -174,5 +183,132 @@ describe('worktree per ticket (PRD-239)', () => {
     expect(off.worktree_per_ticket).toBe(false)
     expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w', worktree_per_ticket: false }).cli_worktree).toBe(false)
     expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w' }).cli_worktree).toBe(true)
+  })
+})
+
+// PRD-245 S1.5: the Automatos tools a ticket session may call, as the form says them.
+// The list rides `GET /api/v1/cli-hosts/settings`; an older backend carries no
+// field at all and the line must simply not render.
+describe('normalizeSessionTools', () => {
+  it('renders nothing when the backend does not carry the list', async () => {
+    const { normalizeSessionTools } = await load('local')
+    expect(normalizeSessionTools(undefined)).toEqual([])
+    expect(normalizeSessionTools(null)).toEqual([])
+    expect(normalizeSessionTools([])).toEqual([])
+    expect(normalizeSessionTools('board_summary')).toEqual([])
+  })
+
+  it('keeps the wave-1 tools in the order the API returned them, with their descriptions', async () => {
+    const { normalizeSessionTools } = await load('local')
+    const tools = normalizeSessionTools(SESSION_TOOLS)
+    expect(tools.map((t) => t.name)).toEqual([
+      'board_summary',
+      'list_tasks',
+      'update_ticket',
+      'submit_report',
+      'search_knowledge',
+    ])
+    expect(tools[0].description).toContain('board tasks by status')
+  })
+
+  it('drops a row with no name and accepts one with no description', async () => {
+    const { normalizeSessionTools } = await load('local')
+    expect(normalizeSessionTools([{ name: '  ' }, { description: 'orphan' }, null, { name: ' board_summary ' }])).toEqual([
+      { name: 'board_summary', description: '' },
+    ])
+  })
+})
+
+// PRD-245 S1.5: one line per skill of the agent whose body calls tools by the API
+// agents' names — what the same work is called in a session, and what a session
+// cannot do at all. Help text, never an error: the agent is not broken.
+describe('describeSessionToolGap', () => {
+  it('says nothing when the entry has nothing to say', async () => {
+    const { describeSessionToolGap } = await load('local')
+    expect(describeSessionToolGap(undefined)).toBe('')
+    expect(describeSessionToolGap(null)).toBe('')
+    expect(describeSessionToolGap({ skill: 'web-research', tools: [] })).toBe('')
+    expect(describeSessionToolGap({ skill: 'web-research', tools: [], instead: {} })).toBe('')
+  })
+
+  it('names the session tool that does the same job', async () => {
+    const { describeSessionToolGap } = await load('local')
+    expect(
+      describeSessionToolGap({ skill: 'web-research', tools: [], instead: { platform_submit_report: 'submit_report' } }),
+    ).toBe('web-research calls `platform_submit_report` — in a session that work is `submit_report`.')
+  })
+
+  it('names the tools a session cannot use at all', async () => {
+    const { describeSessionToolGap } = await load('local')
+    expect(describeSessionToolGap({ skill: 'web-research', tools: ['composio_execute'] })).toBe(
+      'web-research calls `composio_execute`, which a session cannot use.',
+    )
+    expect(describeSessionToolGap({ skill: 'web-research', tools: ['composio_execute', 'scratchpad_write'] })).toBe(
+      'web-research calls `composio_execute` and `scratchpad_write`, which a session cannot use.',
+    )
+  })
+
+  it('combines both shapes for one skill into one line, replacements first', async () => {
+    const { describeSessionToolGap } = await load('local')
+    expect(
+      describeSessionToolGap({
+        skill: 'web-research',
+        tools: ['composio_execute'],
+        instead: { platform_submit_report: 'submit_report', platform_board_summary: 'board_summary' },
+      }),
+    ).toBe(
+      'web-research calls `platform_submit_report` and `platform_board_summary` — in a session that work is ' +
+        '`submit_report` and `board_summary`. It also calls `composio_execute`, which a session cannot use.',
+    )
+  })
+
+  it('survives a gap with no skill name and ignores half-written pairs', async () => {
+    const { describeSessionToolGap } = await load('local')
+    expect(describeSessionToolGap({ skill: '', tools: ['composio_execute'] })).toBe(
+      'A skill calls `composio_execute`, which a session cannot use.',
+    )
+    expect(describeSessionToolGap({ skill: 'notes', tools: null, instead: { platform_submit_report: '' } })).toBe('')
+  })
+})
+
+// PRD-245 S1.5: the gap lines come from the agent detail, not the form, so the
+// caller that fetched the agent passes them; the create wizard passes nothing.
+describe('RuntimeSection session tool gaps', () => {
+  const cliFields = {
+    runtime: 'cli' as const,
+    cli_provider: 'claude',
+    cli_model: '',
+    cli_working_directory: '',
+    cli_worktree: true,
+  }
+
+  it('reads one line per skill that calls tools a session works differently on', async () => {
+    const { RuntimeSection } = await load('local')
+    render(
+      <RuntimeSection
+        value={cliFields}
+        onChange={vi.fn()}
+        sessionToolGaps={[
+          { skill: 'web-research', tools: ['composio_execute'], instead: { platform_submit_report: 'submit_report' } },
+          { skill: 'note-taking', tools: [], instead: { platform_board_summary: 'board_summary' } },
+        ]}
+      />,
+    )
+    const gaps = screen.getByTestId('session-tool-gaps')
+    expect(gaps.textContent).toContain('web-research calls `platform_submit_report` — in a session that work is `submit_report`.')
+    expect(gaps.textContent).toContain('It also calls `composio_execute`, which a session cannot use.')
+    expect(gaps.textContent).toContain('note-taking calls `platform_board_summary`')
+  })
+
+  it('says nothing for an api-runtime agent (null), an agent with no gaps ([]), or an older backend', async () => {
+    const { RuntimeSection } = await load('local')
+    const { rerender } = render(<RuntimeSection value={cliFields} onChange={vi.fn()} sessionToolGaps={null} />)
+    expect(screen.queryByTestId('session-tool-gaps')).not.toBeInTheDocument()
+    // the settings response of an older backend carries no `session_tools` at all
+    expect(screen.queryByTestId('session-tools')).not.toBeInTheDocument()
+    rerender(<RuntimeSection value={cliFields} onChange={vi.fn()} sessionToolGaps={[]} />)
+    expect(screen.queryByTestId('session-tool-gaps')).not.toBeInTheDocument()
+    rerender(<RuntimeSection value={cliFields} onChange={vi.fn()} />)
+    expect(screen.queryByTestId('session-tool-gaps')).not.toBeInTheDocument()
   })
 })

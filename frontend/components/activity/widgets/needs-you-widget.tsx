@@ -8,9 +8,10 @@
  * row lands on the Command Centre tab that owns it.
  */
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, Clock, FileText, HelpCircle, Loader2, ShieldCheck, Target } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, FileText, HelpCircle, Loader2, ShieldCheck, Target } from 'lucide-react'
 import { useDecisionsNeeded, useApprovalGates } from '@/hooks/use-kpi-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
+import { useBoardTasksList } from '@/hooks/use-board-tasks-api'
 import { AUTO_NOW_LINKS, questionPreview } from '@/components/chatbot/auto-now-rail'
 import { cn } from '@/lib/utils'
 
@@ -64,14 +65,20 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
   const decisions = useDecisionsNeeded(10)
   const gates = useApprovalGates(period)
   const questions = useQuestions()
+  // Tickets an agent finished and handed BACK for a verdict. They were missing
+  // from this widget entirely: on night 1 four of them waited for the owner all
+  // night on a panel whose whole job is to say what is waiting for the owner.
+  const reviews = useBoardTasksList({ status: 'review', limit: '10' })
 
-  const isLoading = decisions.isLoading || gates.isLoading || questions.isLoading
+  const isLoading = decisions.isLoading || gates.isLoading || questions.isLoading || reviews.isLoading
   const asks = questions.data?.grants ?? []
   const pendingMissions = gates.data?.pending_missions ?? []
   const pendingCount = gates.data?.pending_count ?? 0
   const decisionItems = decisions.data?.items ?? []
   const decisionsTotal = decisions.data?.total ?? 0
-  const total = asks.length + pendingCount + decisionsTotal
+  const reviewTasks = reviews.data?.tasks ?? []
+  const reviewTotal = reviews.data?.total ?? reviewTasks.length
+  const total = asks.length + pendingCount + decisionsTotal + reviewTotal
 
   return (
     <div className={cn('h-full flex flex-col', className)}>
@@ -107,6 +114,21 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
                   <div className="pl-5 text-[10px] text-muted-foreground">
                     {q.asked_by_agent_id ? `Agent #${q.asked_by_agent_id}` : 'An agent'}
                     {q.requested_at && ` · ${formatAge(q.requested_at)} ago`}
+                  </div>
+                </Link>
+              ))}
+            </Section>
+
+            <Section title="In review" count={reviewTotal} href={AUTO_NOW_LINKS.board}>
+              {reviewTasks.slice(0, ROWS).map((t: any) => (
+                <Link key={t.id} href={AUTO_NOW_LINKS.board as any} className={rowClass}>
+                  <div className="flex items-start gap-2">
+                    <ClipboardCheck className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
+                    <span className="text-xs leading-snug line-clamp-2 flex-1">{t.title}</span>
+                  </div>
+                  <div className="pl-5 text-[10px] text-muted-foreground">
+                    {t.agent_name ? t.agent_name : 'An agent'}
+                    {t.completed_at && ` · ${formatAge(t.completed_at)} ago`}
                   </div>
                 </Link>
               ))}

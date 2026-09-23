@@ -43,6 +43,7 @@ modules =
     modules.policy
     modules.rag
     modules.search
+    modules.socials
     modules.voice
     modules.widgets
     modules.workflows

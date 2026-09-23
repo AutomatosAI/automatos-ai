@@ -135,8 +135,10 @@ def issue_tool_grant(
     permission_level: Optional[str] = None,
     description: Optional[str] = None,
     caller_context: Optional[Dict[str, Any]] = None,
+    subject: str = "",
 ) -> Optional[Any]:
     """Create (or reuse) the PENDING ``tool_call`` grant for this exact call.
+    ``subject`` names what the call acts on (" on 'x.csv' (document #716)", F091).
 
     Returns the grant, or ``None`` on any failure — the caller returns the ask
     either way (the ask is the floor). Never raises. Caller owns the txn
@@ -176,7 +178,7 @@ def issue_tool_grant(
             risk_tier=risk_class,
             agent_id=agent_id,
             reason=(
-                f"Confirmation required before running {action}: "
+                f"Confirmation required before running {action}{subject}: "
                 f"{(description or 'gated platform action')[:200]}"
             ),
         )
@@ -268,6 +270,7 @@ def attach_ask_grant(
     permission_level: Optional[str] = None,
     description: Optional[str] = None,
     caller_context: Optional[Dict[str, Any]] = None,
+    subject: str = "",
 ) -> Dict[str, Any]:
     """Issue the grant and return the enriched ask; on ANY failure return the
     ask unchanged. The single fail-safe entry the confirmation gate calls."""
@@ -280,6 +283,7 @@ def attach_ask_grant(
             permission_level=permission_level,
             description=description,
             caller_context=caller_context,
+            subject=subject,
         )
         # A grant without a usable integer id cannot power the card — the
         # grant/deny endpoints key on it. Degraded stores (or fakes) that
