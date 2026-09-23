@@ -9,9 +9,11 @@ caller-supplied one), never a tool parameter.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -25,6 +27,32 @@ _SUBJECTS = ("board_task", "playbook_run", "tool_call")
 # done/failed are the canonical board terminals (board_tasks.VALID_STATUSES);
 # 'cancelled' is included defensively, matching services/ask_cascade.
 _TERMINAL_STATUSES = ("done", "failed", "cancelled")
+
+# F091 (night 3): a question card ended in raw "</question><options>…</invoke>"
+# — the asking model wrote the tool call's own markup into the question text.
+_CALL_MARKUP = re.compile(r"</?(?:question|options?|parameter|invoke|function_calls)\b[^>]*>", re.IGNORECASE)
+_OPTIONS_MARKUP = re.compile(r"<options?\b[^>]*>(?P<body>.*?)(?:</options?>|$)", re.IGNORECASE | re.DOTALL)
+
+
+def clean_question(question: str, options: Optional[list]) -> Tuple[str, Optional[List[str]]]:
+    """The question without any tool-call markup the model wrote into it, and
+    the options that markup carried when none were passed separately."""
+    text = question or ""
+    first = _CALL_MARKUP.search(text)
+    if first is None:
+        return text, options
+    tail = text[first.start():]
+    if not options:
+        found = _OPTIONS_MARKUP.search(tail)
+        if found:
+            body = _CALL_MARKUP.sub("", found.group("body")).strip()
+            try:
+                parsed = json.loads(body)
+            except ValueError:
+                parsed = [line.strip(" -*\t") for line in body.splitlines()]
+            if isinstance(parsed, list):
+                options = [str(o).strip() for o in parsed if str(o).strip()] or None
+    return text[:first.start()].rstrip(), options
 
 
 async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,6 +179,7 @@ async def stage_question(
     from core.services.approval_grants import DEFAULT_TTL_SECONDS, create_grant
     from services.ask_cascade import count_downstream_blocked, is_urgent_cascade
 
+    question, options = clean_question(question, options)
     grant = create_grant(
         db, workspace_id,
         subject_type=subject_type,
