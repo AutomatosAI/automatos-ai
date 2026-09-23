@@ -112,6 +112,10 @@ def test_prometheus_called_anyway_refuses_without_dialing(unconfigured):
     assert result["success"] is False and "PROMETHEUS_URL" in result["error"]
     loki = asyncio.run(mon.query_loki_logs(None, uuid4(), {}))
     assert loki["success"] is False and "LOKI_URL" in loki["error"]
+    # F121 (night 3): the local edition's refusal names no host — five calls
+    # answered "Cannot reach Prometheus at http://prometheus.railway.internal:9090".
+    for refusal in (result["error"], loki["error"]):
+        assert "railway.internal" not in refusal and "http" not in refusal
 
 
 # ── one database: the data tools use it without asking ──────────────────────
