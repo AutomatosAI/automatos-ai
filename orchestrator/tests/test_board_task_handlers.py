@@ -257,6 +257,11 @@ class _FakeSession:
     def add(self, obj):
         self._task = obj
 
+    def flush(self):
+        # a flush gives a new row its id (F118: create's notice carries it)
+        if self._task is not None and getattr(self._task, "id", None) is None:
+            self._task.id = 4242
+
     def commit(self):
         self.commits += 1
 
@@ -1405,6 +1410,11 @@ class _RosterDB:
 
     def add(self, obj):
         self._task = obj
+
+    def flush(self):
+        # a flush gives a new row its id (F118: create's notice carries it)
+        if self._task is not None and getattr(self._task, "id", None) is None:
+            self._task.id = 4242
 
     def commit(self):
         self.commits += 1

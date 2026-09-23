@@ -409,14 +409,17 @@ async def create_task(
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
     )
     db.add(task)
-    db.commit()
-    db.refresh(task)
+    db.flush()  # the id the notice carries
 
     # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
+    # (after it, the request's closing rollback drops it).
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="task_created",
     )
+    db.commit()
+    db.refresh(task)
 
     # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
@@ -428,9 +431,9 @@ async def create_task(
             db, workspace_id=ctx.workspace_id, task=task,
             actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
         )
-        if _note_no_host_for_cli(db, task):
-            db.commit()
+        _note_no_host_for_cli(db, task)
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+        db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task.to_dict()
@@ -749,14 +752,24 @@ async def update_task(
     if "status" in body and body["status"] == "done":
         await _dispatch_task_complete(db, ctx.workspace_id, task)
 
-    db.commit()
-    db.refresh(task)
-
     # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="task_updated",
     )
+    if (
+        not trigger_execution
+        and "assigned_agent_id" in body
+        and task.status == "assigned"
+        and task.assigned_agent_id
+        and task.source_type != "recipe"
+    ):
+        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
+        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
     if trigger_execution:
         _launch_task_execution(
@@ -767,15 +780,6 @@ async def update_task(
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
         )
-    elif (
-        "assigned_agent_id" in body
-        and task.status == "assigned"
-        and task.assigned_agent_id
-        and task.source_type != "recipe"
-    ):
-        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
-        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
-        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
@@ -988,12 +992,13 @@ async def reject_task(
     task.lease_until = None
     task.attempts = 0  # a human-driven redo is a fresh attempt cycle
     task.review_feedback = feedback or None
-    db.commit()
-    db.refresh(task)
 
     # Wake the dispatch loop so the redo starts immediately (single spine).
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
                 task.id, task.assigned_agent_id,
@@ -1022,11 +1027,11 @@ def _redispatch_task(db: Session, task: BoardTask) -> None:
     task.completed_at = None
     task.started_at = None
     _note_no_host_for_cli(db, task)  # a Claude Code agent's ticket says who it waits for
-    db.commit()
-    db.refresh(task)
-
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
         notify_task_available(db, workspace_id=task.workspace_id, task_id=task.id)
+    db.commit()
+    db.refresh(task)
 
 
 @router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
@@ -1146,14 +1151,14 @@ async def update_task_status(
     if new_status == "done":
         await _dispatch_task_complete(db, ctx.workspace_id, task)
 
-    db.commit()
-    db.refresh(task)
-
     # PRD-180 S1 (F090): push the drag-and-drop status change to Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     notify_board_event(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="status_changed",
     )
+    db.commit()
+    db.refresh(task)
 
     # Fire-and-forget: trigger agent execution when moved to in_progress.
     # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
@@ -1493,12 +1498,12 @@ def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: i
     if _note_no_host_for_cli(db, task):
         changed = True
     if changed:
-        db.commit()
         notify_board_event(
             db, workspace_id=workspace_id, task_id=task_id, status="assigned",
             event="task_updated",
         )
     notify_task_available(db, workspace_id=workspace_id, task_id=task_id)
+    db.commit()  # F118: the notices ride this commit
     logger.info(
         "[BoardTasks] task %d belongs to cli agent %d — parked 'assigned' for the CLI host",
         task_id, agent_id,
@@ -1621,11 +1626,11 @@ async def finalize_board_task_run(
         task.status = "cancelled"
         task.completed_at = datetime.now(timezone.utc)
         task.lease_until = None
-        db.commit()
-        notify_board_event(
+        notify_board_event(  # F118: before the commit it rides
             db, workspace_id=workspace_id, task_id=task_id, status="cancelled",
             event="task_cancelled",
         )
+        db.commit()
         # PRD-238 S5: "supervised — I'll report back when it's done" must hold
         # for EVERY ending. A cancelled session only fired a board event; its
         # watch stayed `watching` forever and the chat never heard. Fail-soft,
@@ -1697,11 +1702,11 @@ def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
         task.blocked_at = datetime.now(timezone.utc)
         task.blocked_reason = reason
         task.lease_until = None
-        db.commit()
-        notify_board_event(
+        notify_board_event(  # F118: before the commit it rides
             db, workspace_id=str(task.workspace_id), task_id=task.id,
             status="blocked", event="task_updated",
         )
+        db.commit()
     except Exception:  # noqa: BLE001 — the guard must not become its own failure
         logger.error("[spend-guard] could not park ticket %s", task_id, exc_info=True)
         db.rollback()
