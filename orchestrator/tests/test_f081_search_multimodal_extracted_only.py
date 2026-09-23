@@ -60,6 +60,8 @@ def test_a_document_question_still_has_a_rag_tool_to_reach():
     from modules.tools.registry.tool_registry import get_tool_registry
     from modules.tools.services.tool_capability_mapper import ToolCapabilityMapper
 
-    assert "uploaded documents" in get_tool_registry().get_tool("search_knowledge").description
+    # F085 reworded the text ("this workspace's documents — the owner's uploads"); the intent stands.
+    description = get_tool_registry().get_tool("search_knowledge").description.lower()
+    assert "documents" in description and "uploads" in description
     assert "search_knowledge" in UnifiedToolExecutor(db_session=MagicMock()).tool_routes
     assert "search_knowledge" in ToolCapabilityMapper.TASK_TOOL_MAPPINGS["research"]["specific"]
