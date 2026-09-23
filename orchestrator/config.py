@@ -1496,8 +1496,9 @@ class Config:
     # (the retrieval funnel's final score) a passage needs to reach the prompt.
     KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))
     KNOWLEDGE_PREFETCH_MIN_SCORE: float = float(os.getenv("KNOWLEDGE_PREFETCH_MIN_SCORE", "0.3"))
-    # F103: a memory write that times out is tried once more after this pause.
-    DURABLE_MEMORY_WRITE_RETRY_PAUSE_S: float = float(os.getenv("DURABLE_MEMORY_WRITE_RETRY_PAUSE_S", "0.5"))
+    # F103: a memory write (durable or mission field) that times out is tried
+    # once more after this pause.
+    MEMORY_WRITE_RETRY_PAUSE_S: float = float(os.getenv("MEMORY_WRITE_RETRY_PAUSE_S", "0.5"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)

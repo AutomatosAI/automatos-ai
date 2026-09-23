@@ -21,7 +21,6 @@ payload so tenancy is fail-closed and GDPR erasure is one filter delete.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import time
@@ -29,9 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import httpx
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -46,19 +43,9 @@ from qdrant_client.models import (
 
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
+from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 
 logger = logging.getLogger(__name__)
-
-
-def is_timeout(exc: BaseException) -> bool:
-    """F103: the store did not answer in time — a 408 from Qdrant, or the
-    client's own timeout (night 3: 154 writes lost in 30 minutes, all inside the
-    F105 event-loop freezes)."""
-    if isinstance(exc, UnexpectedResponse):
-        return exc.status_code == 408
-    if isinstance(exc, ResponseHandlingException):  # the client wraps its transport errors
-        exc = exc.source
-    return isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError))
 
 
 def filter_by_relevance_floor(results: List[Dict], floor: float) -> List[Dict]:
@@ -275,7 +262,7 @@ class DurableMemoryStore:
             },
         )
         try:
-            await self._upsert_with_one_retry(point)
+            await upsert_retrying_a_timeout_once(self._client, self._collection, [point])
         except Exception as exc:
             if not is_timeout(exc):
                 raise
@@ -284,20 +271,6 @@ class DurableMemoryStore:
             return {"success": False, "error": "the memory store did not answer in time, twice"}
         logger.info("[Durable] Stored memory namespace=%s len=%d", user_id, len(text))
         return {"success": True, "id": point_id}
-
-    async def _upsert_with_one_retry(self, point: PointStruct) -> None:
-        """F103: a write that times out (a Qdrant 408 or the client's own
-        timeout) is tried once more after a short pause; anything else, or a
-        second timeout, is raised."""
-        for attempt in (1, 2):
-            try:
-                await self._client.upsert(collection_name=self._collection, points=[point])
-                return
-            except Exception as exc:
-                if attempt == 2 or not is_timeout(exc):
-                    raise
-                logger.info("[Durable] memory write timed out (%r) — retrying once", exc)
-                await asyncio.sleep(config.DURABLE_MEMORY_WRITE_RETRY_PAUSE_S)
 
     # ── Read ────────────────────────────────────────────────────
 

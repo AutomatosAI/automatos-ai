@@ -67,7 +67,7 @@ def lines():
 
 
 def _store(monkeypatch, *outcomes):
-    monkeypatch.setattr(ds.config, "DURABLE_MEMORY_WRITE_RETRY_PAUSE_S", 0, raising=False)
+    monkeypatch.setattr(ds.config, "MEMORY_WRITE_RETRY_PAUSE_S", 0, raising=False)
     store = ds.DurableMemoryStore.__new__(ds.DurableMemoryStore)
     store._enabled, store._bootstrap_done, store._collection = True, True, "durable_memory"
     store._client, store._embedder = _Client(*outcomes), _Embedder()
