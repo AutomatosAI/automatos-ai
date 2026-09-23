@@ -16,9 +16,16 @@ errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 409, PublishingUnavailable → 501, InvalidPost → 422.
 
 An approval binds to the content the approver saw (D6): the approve request
-carries that version's ``content_hash``, and the write is a compare-and-set on
-the post's status and hash (``service.claim_unchanged``). A post that changed
-before the click, or while the request runs, answers 409 and is not written.
+carries that version's ``content_hash``, and a post that changed before the
+click answers 409.
+
+Every write is a compare-and-set (``_commit_unchanged``): it commits only if the
+post's row still has the status and ``content_hash`` the request loaded
+(``service.claim_unchanged``). When another writer committed first, the request
+rolls back, writes nothing and answers 409 with the current ``content_hash``.
+An edit can therefore never slip under an approval, and an approval never lands
+on copy nobody reviewed. ``review_log`` is reassigned whole, so this also keeps a
+stale copy from erasing entries another writer committed.
 """
 
 from __future__ import annotations
@@ -167,6 +174,21 @@ def _save(db: Session, post: SocialPost) -> Dict[str, Any]:
     return post.to_dict()
 
 
+def _commit_unchanged(
+    db: Session, ctx: RequestContext, post: SocialPost, *, status: str, content_hash: str
+) -> Dict[str, Any]:
+    """Commit the request's change to ``post`` only if its row still has
+    ``status`` and ``content_hash``, the version the request checked. When
+    another writer committed first, roll back, write nothing and answer 409 with
+    the post's current hash. Call it straight after the service mutation: a
+    query in between would autoflush the change before the check."""
+    post_id = post.id
+    if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
+        db.rollback()
+        _raise_for(service.StaleContent(service.compute_content_hash(_load(db, ctx, post_id))))
+    return _save(db, post)
+
+
 def _parse_statuses(status: Optional[str]) -> Optional[List[str]]:
     if not status:
         return None
@@ -237,6 +259,7 @@ async def update_social_post(
 ):
     """Edit a post. A content change voids an approval (D6)."""
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     changes = body.model_dump(exclude_unset=True, by_alias=True)
     if "title" in changes and changes["title"] is None:
         raise HTTPException(status_code=422, detail="title cannot be empty")
@@ -245,7 +268,7 @@ async def update_social_post(
         service.update_post(post, _actor(ctx), changes)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +283,12 @@ async def submit_social_post(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     try:
         service.submit(post, _actor(ctx))
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/approve", dependencies=[CAN_REVIEW])
@@ -289,10 +313,7 @@ async def approve_social_post(
         )
     except service.SocialsError as exc:
         _raise_for(exc)
-    if not service.claim_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash):
-        db.rollback()
-        _raise_for(service.StaleContent(service.compute_content_hash(_load(db, ctx, post_id))))
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])
@@ -303,11 +324,12 @@ async def request_changes_social_post(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     try:
         service.request_changes(post, _actor(ctx), body.comment)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/reject", dependencies=[CAN_REVIEW])
@@ -319,11 +341,12 @@ async def reject_social_post(
 ):
     body = body or RejectRequest()
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     try:
         service.reject(post, _actor(ctx), body.reason)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/schedule", dependencies=[CAN_UPDATE])
@@ -334,11 +357,12 @@ async def schedule_social_post(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     try:
         service.schedule(post, _actor(ctx), body.scheduled_for, body.timezone)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/unschedule", dependencies=[CAN_UPDATE])
@@ -348,11 +372,12 @@ async def unschedule_social_post(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     post = _load(db, ctx, post_id)
+    status, content_hash = post.status, post.content_hash
     try:
         service.unschedule(post, _actor(ctx))
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/publish-now", dependencies=[CAN_UPDATE])

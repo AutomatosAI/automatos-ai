@@ -14,9 +14,10 @@
   needs_approval and its approval is void, because ``approved_hash`` no longer
   matches.
 * **The write guard.** ``claim_unchanged`` is a compare-and-set on the row:
-  the approval is written only if the post still has the status and hash the
-  request checked, so an edit another worker commits mid-request is never
-  approved.
+  a write commits only if the post still has the status and hash the request
+  checked. So an edit another worker commits mid-request is never approved,
+  an approval never lands on copy nobody reviewed, and a stale copy of
+  ``review_log`` never overwrites entries another writer committed.
 * **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry
   in ``sources``. ``approve`` refuses unsourced claims unless the approver
   overrides, and the override is stored and named in ``review_log``.
@@ -130,12 +131,13 @@ class NotPublishable(SocialsError):
 
 
 class StaleContent(SocialsError):
-    """The post's content is not the version the approver was shown (D6)."""
+    """The post is not the version the request was made against (D6): the
+    approver was shown other content, or another writer committed first."""
 
     def __init__(self, current_hash: str):
         self.current_hash = current_hash
         super().__init__(
-            "the post changed since you opened it: review the current version, then approve it"
+            "the post changed since you opened it: review the current version, then try again"
         )
 
 

@@ -14,6 +14,9 @@ stubbed. Pins:
 * D6 — approve carries the content_hash the reviewer saw: a post edited since
   is 409 with the current hash and stays unapproved, and so is an edit another
   worker commits while the approve request runs (the compare-and-set);
+* D6/D7 — every other write is the same compare-and-set (P251-RVW-5): an edit,
+  submit, review, schedule or unschedule that another worker's commit overtook
+  is 409, writes nothing, and leaves every committed review_log entry in place;
 * D7 — approve with an unsourced claim is 422 naming it; the override is 200
   and recorded;
 * ``socials:approve`` — a viewer gets 403, an editor 200;
@@ -28,6 +31,7 @@ import os
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -506,6 +510,194 @@ def test_an_edit_committed_while_the_approve_runs_is_409_and_the_post_is_not_app
     resp = _post(api, post["id"], "approve", {"content_hash": edits[0]})
     assert resp.status_code == 200, resp.text
     assert _row(api, post["id"])["approved_hash"] == edits[0]
+
+
+# ---------------------------------------------------------------------------
+# D6/D7 — every write is a compare-and-set (P251-RVW-5)
+# ---------------------------------------------------------------------------
+
+EDITED_BY_ANOTHER_WORKER = {"copy": {"base": "Edited by another worker."}}
+
+
+@contextmanager
+def _another_worker_commits_after_the_load(api, monkeypatch, write):
+    """The RVW-2 harness for any route: once, right after the route under test
+    has loaded the post and before it commits, a second session (another
+    worker) applies ``write`` to the post and commits. Yields the content_hash
+    that commit left, once it ran."""
+    other_worker = sessionmaker(bind=api.session.get_bind())()
+    real_get_post = socials_service.get_post
+    committed = []
+
+    def load_then_another_worker_writes(db, workspace_id, post_id):
+        loaded = real_get_post(db, workspace_id, post_id)
+        if not committed:
+            row = other_worker.get(SocialPost, post_id)
+            write(row)
+            content_hash = row.content_hash
+            other_worker.commit()
+            committed.append(content_hash)
+        return loaded
+
+    monkeypatch.setattr(socials_service, "get_post", load_then_another_worker_writes)
+    try:
+        yield committed
+    finally:
+        monkeypatch.setattr(socials_service, "get_post", real_get_post)
+        other_worker.close()
+
+
+def _approve_as(reviewer, seen_hash):
+    return lambda row: socials_service.approve(row, reviewer, content_hash=seen_hash)
+
+
+def _edit_as(editor, changes):
+    return lambda row: socials_service.update_post(row, editor, changes)
+
+
+def _actions(row):
+    return [entry["action"] for entry in row["review_log"]]
+
+
+def _assert_the_approval_covers_the_content(row):
+    """Never approved or scheduled on content its approval does not cover (D6),
+    and never approved with an unsourced claim unless overridden (D7)."""
+    if row["status"] in ("approved", "scheduled"):
+        assert row["approved_hash"] == row["content_hash"], row
+        unsourced = socials_service.unsourced_claims(SimpleNamespace(**row))
+        assert not unsourced or row["override_unsourced"], row
+
+
+def _assert_lost_the_race(resp, current_hash):
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["content_hash"] == current_hash
+    assert "changed since you opened it" in detail["message"]
+
+
+def test_an_edit_racing_a_committed_approve_is_409_and_the_approval_stands(api, monkeypatch):
+    """(a) The PATCH loaded the post in needs_approval; an approve committed
+    first. The edit must not land under that approval."""
+    post = _create(api)
+    assert _post(api, post["id"], "submit").status_code == 200
+    seen = _get(api, post["id"])["content_hash"]
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _approve_as("reviewer-2", seen)) as committed:
+        resp = api.client.patch(f"/api/socials/posts/{post['id']}", json={"copy": {"base": "An edit nobody reviewed."}})
+
+    assert committed, "the concurrent approve never ran"
+    _assert_lost_the_race(resp, seen)
+    row = _row(api, post["id"])
+    assert row["status"] == "approved" and row["approved_by"] == "reviewer-2"
+    assert row["copy"] == post["copy"]
+    assert row["approved_hash"] == row["content_hash"] == seen
+    assert _actions(row) == ["submit", "approve"]
+    _assert_the_approval_covers_the_content(row)
+
+    # Sent again, now against the approved post, the edit voids the approval (D6).
+    resp = api.client.patch(f"/api/socials/posts/{post['id']}", json={"copy": {"base": "An edit nobody reviewed."}})
+    assert resp.status_code == 200, resp.text
+    row = _row(api, post["id"])
+    assert row["status"] == "needs_approval" and row["approved_hash"] != row["content_hash"]
+    assert _actions(row) == ["submit", "approve", "approval_voided"]
+
+
+def test_a_schedule_racing_a_committed_edit_is_409_and_the_void_stands(api, monkeypatch):
+    """(b) The schedule loaded the approved post; an edit committed first and
+    voided the approval. The post must not be scheduled on the edited copy."""
+    approved = _approved(api)
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _edit_as("editor-2", EDITED_BY_ANOTHER_WORKER)) as committed:
+        resp = _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT, "timezone": "Europe/Lisbon"})
+
+    assert committed, "the concurrent edit never ran"
+    _assert_lost_the_race(resp, committed[0])
+    assert committed[0] != approved["content_hash"]
+    row = _row(api, approved["id"])
+    assert row["status"] == "needs_approval"
+    assert (row["scheduled_for"], row["timezone"]) == (None, None)
+    assert row["content_hash"] == committed[0] and row["copy"] == EDITED_BY_ANOTHER_WORKER["copy"]
+    assert _actions(row) == ["submit", "approve", "approval_voided"]
+    _assert_the_approval_covers_the_content(row)
+
+
+def test_an_unschedule_racing_a_committed_edit_is_409_and_the_void_stands(api, monkeypatch):
+    """(c) The unschedule loaded the scheduled post; an edit committed first and
+    voided the approval. The post must not go back to approved."""
+    approved = _approved(api)
+    assert _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT}).status_code == 200
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _edit_as("editor-2", EDITED_BY_ANOTHER_WORKER)) as committed:
+        resp = _post(api, approved["id"], "unschedule")
+
+    assert committed, "the concurrent edit never ran"
+    _assert_lost_the_race(resp, committed[0])
+    row = _row(api, approved["id"])
+    assert row["status"] == "needs_approval"
+    assert row["content_hash"] == committed[0] != row["approved_hash"]
+    assert _actions(row) == ["submit", "approve", "schedule", "approval_voided"]
+    _assert_the_approval_covers_the_content(row)
+
+
+def test_a_claim_added_while_an_approve_commits_is_409_and_never_approved_unsourced(api, monkeypatch):
+    """(d) The PATCH adding a claim loaded the post in needs_approval; an approve
+    committed first. The post must not be approved with an unsourced claim and
+    no override (D7)."""
+    post = _create(api)
+    assert _post(api, post["id"], "submit").status_code == 200
+    seen = _get(api, post["id"])["content_hash"]
+    claim = {"variables": {"users": {"value": 1200, "claim": True}}}
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _approve_as("reviewer-2", seen)) as committed:
+        resp = api.client.patch(f"/api/socials/posts/{post['id']}", json=claim)
+
+    assert committed, "the concurrent approve never ran"
+    _assert_lost_the_race(resp, seen)
+    row = _row(api, post["id"])
+    assert row["status"] == "approved" and row["override_unsourced"] is False
+    assert row["variables"] == {} and row["approved_hash"] == row["content_hash"] == seen
+    assert _actions(row) == ["submit", "approve"]
+    _assert_the_approval_covers_the_content(row)
+
+    # Sent again, the claim voids the approval, and approving it then needs a source or an override.
+    resp = api.client.patch(f"/api/socials/posts/{post['id']}", json=claim)
+    assert resp.status_code == 200 and resp.json()["status"] == "needs_approval"
+    resp = _post(api, post["id"], "approve", {"content_hash": resp.json()["content_hash"]})
+    assert resp.status_code == 422 and resp.json()["detail"]["claims"] == ["users"]
+
+
+@pytest.mark.parametrize("action, body", [("request-changes", {"comment": "Tighten the hook"}), ("reject", {"reason": "Off brand"})])
+def test_a_review_racing_a_committed_approve_is_409_and_the_approval_stands(api, monkeypatch, action, body):
+    post = _create(api)
+    assert _post(api, post["id"], "submit").status_code == 200
+    seen = _get(api, post["id"])["content_hash"]
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _approve_as("reviewer-2", seen)) as committed:
+        resp = _post(api, post["id"], action, body)
+
+    assert committed, "the concurrent approve never ran"
+    _assert_lost_the_race(resp, seen)
+    row = _row(api, post["id"])
+    assert row["status"] == "approved" and row["approved_by"] == "reviewer-2"
+    assert _actions(row) == ["submit", "approve"]
+    _assert_the_approval_covers_the_content(row)
+
+
+def test_a_submit_racing_a_committed_edit_is_409_and_writes_nothing(api, monkeypatch):
+    post = _create(api)
+
+    with _another_worker_commits_after_the_load(api, monkeypatch, _edit_as("editor-2", EDITED_BY_ANOTHER_WORKER)) as committed:
+        resp = _post(api, post["id"], "submit")
+
+    assert committed, "the concurrent edit never ran"
+    _assert_lost_the_race(resp, committed[0])
+    row = _row(api, post["id"])
+    assert row["status"] == "draft" and row["copy"] == EDITED_BY_ANOTHER_WORKER["copy"]
+    assert _actions(row) == []
+
+    # Now shown the edit, the author submits it.
+    resp = _post(api, post["id"], "submit")
+    assert resp.status_code == 200 and resp.json()["status"] == "needs_approval"
 
 
 def test_schedule_and_unschedule(api):

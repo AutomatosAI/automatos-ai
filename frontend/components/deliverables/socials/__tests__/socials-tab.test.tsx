@@ -3,7 +3,8 @@
  * the S0.3 rules: the status machine (TRANSITIONS), the content hash, and D6 —
  * a content edit to an approved post voids the approval and sends it back to
  * needs_approval, and approve takes the content_hash of the version on screen
- * (a post changed since answers 409). The workspace comes through the REAL WorkspaceProvider (its
+ * (a post changed since answers 409; so does a save another writer's commit
+ * overtook). The workspace comes through the REAL WorkspaceProvider (its
  * GET /api/workspaces/current is the only stubbed fetch), so turning Socials on
  * is proven to refetch the workspace and swap the card for the list in place.
  */
@@ -303,6 +304,30 @@ describe('Socials on', () => {
     await screen.findByRole('heading', { name: 'Approved 1' })
     expect(api.approveSocialPost).toHaveBeenLastCalledWith(post.id, server.posts[0].content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
+  })
+
+  it('Save copy answering 409 (another writer committed first) toasts and refetches the posts, as Approve does', async () => {
+    const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' } })
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
+    fireEvent.change(within(detail('Launch week teaser')).getByLabelText('Copy'), { target: { value: 'v2 mine' } })
+
+    // Another editor's change commits first, so the server refuses this save.
+    const edited = { ...server.posts[0], copy: { base: 'v2 from another editor' } }
+    server.posts = [{ ...edited, content_hash: contentHashOf(edited) }]
+    api.updateSocialPost.mockRejectedValueOnce(
+      Object.assign(new Error('the post changed since you opened it'), { status: 409 }),
+    )
+    const fetches = api.listSocialPosts.mock.calls.length
+
+    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Save copy' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
+    expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, { copy: { base: 'v2 mine' } })
+    await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
+    expect(await within(detail('Launch week teaser')).findByDisplayValue('v2 from another editor')).toBeInTheDocument()
+    expect(server.posts[0].copy).toEqual({ base: 'v2 from another editor' })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('request changes takes a comment and moves the post to Changes requested', async () => {

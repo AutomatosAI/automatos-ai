@@ -6,8 +6,10 @@
  * post lifecycle (create, edit, submit, approve, request changes, reject). The
  * server enforces every rule (the gate, the role, the status machine, D6's
  * approval hash); these hooks only call it and refresh the list. Approve sends
- * the content_hash of the post on screen; a 409 means the post changed since it
- * was fetched, so the list is refetched and the reviewer looks again.
+ * the content_hash of the post on screen, and every write commits only if the
+ * post is still the version the server loaded. So a 409 from any write means
+ * the post changed since it was fetched: the list is refetched and the user
+ * looks again.
  *
  * Query keys are scoped by workspace id so switching workspaces clears cache.
  */
@@ -51,6 +53,20 @@ function useInvalidateSocials() {
   const workspaceId = useWorkspaceId()
   const queryClient = useQueryClient()
   return () => queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(workspaceId) })
+}
+
+/** onError for a post write: a 409 says the post changed and refetches the
+ * posts; anything else shows the server's message, or `fallback`. */
+function usePostWriteErrorHandler(fallback: string) {
+  const invalidate = useInvalidateSocials()
+  return async (error: Error) => {
+    if (httpStatusOf(error) === HTTP_CONFLICT) {
+      toast.error(SOCIAL_POST_CHANGED_MESSAGE)
+      await invalidate()
+      return
+    }
+    toast.error(error.message || fallback)
+  }
 }
 
 // ============= QUERY HOOKS =============
@@ -103,15 +119,14 @@ export function useCreateSocialPost() {
 
 export function useUpdateSocialPost() {
   const invalidate = useInvalidateSocials()
+  const onError = usePostWriteErrorHandler('Could not save the post')
   return useMutation<SocialPost, Error, { postId: string; changes: UpdateSocialPostInput }>({
     mutationFn: ({ postId, changes }) => apiClient.updateSocialPost(postId, changes),
     onSuccess: async () => {
       await invalidate()
       toast.success('Post saved')
     },
-    onError: (error) => {
-      toast.error(error.message || 'Could not save the post')
-    },
+    onError,
   })
 }
 
@@ -145,19 +160,13 @@ function runAction(postId: string, action: SocialPostAction): Promise<SocialPost
 
 export function useSocialPostAction() {
   const invalidate = useInvalidateSocials()
+  const onError = usePostWriteErrorHandler('The action failed')
   return useMutation<SocialPost, Error, { postId: string; action: SocialPostAction }>({
     mutationFn: ({ postId, action }) => runAction(postId, action),
     onSuccess: async (_post, { action }) => {
       await invalidate()
       toast.success(ACTION_DONE[action.kind])
     },
-    onError: async (error) => {
-      if (httpStatusOf(error) === HTTP_CONFLICT) {
-        toast.error(SOCIAL_POST_CHANGED_MESSAGE)
-        await invalidate()
-        return
-      }
-      toast.error(error.message || 'The action failed')
-    },
+    onError,
   })
 }
