@@ -131,7 +131,10 @@ def test_platform_list_tools_lists_only_what_can_run(unconfigured):
     from modules.tools.discovery.handlers_tools_llms import list_tools
 
     def listed():
-        result = asyncio.run(list_tools(None, uuid4(), {"category": "platform"}))
+        # The monitoring tier is super_admin_only, so the listing is a super
+        # admin's: the flag the executor injects for one (F122).
+        params = {"category": "platform", "_caller_is_super_admin": True}
+        result = asyncio.run(list_tools(None, uuid4(), params))
         return {t["name"] for t in result["tools"]}
 
     assert ALERTS in listed() and not listed() & MONITORING
