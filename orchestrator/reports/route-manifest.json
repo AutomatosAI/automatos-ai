@@ -1,5 +1,5 @@
 {
-  "route_count": 807,
+  "route_count": 818,
   "routes": [
     {
       "method": "GET",
@@ -2040,6 +2040,50 @@
     {
       "method": "PATCH",
       "path": "/api/sites/{site_id}/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/publish-now"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/request-changes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/schedule"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/submit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/unschedule"
     },
     {
       "method": "GET",
