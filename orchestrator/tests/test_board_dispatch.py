@@ -329,3 +329,56 @@ def test_sla_breach_ignores_terminal_tasks(seeded, new_session):
     breached = board_dispatcher.scan_sla_breaches(s)
     s.close()
     assert tid not in [b["task_id"] for b in breached], "terminal tasks are never SLA-breached"
+
+
+# ── night 3 (#612, #614): the answer sat in sessions/<ticket>; the ticket failed ─
+
+def _expire(new_session, task_id):
+    s = new_session()
+    s.execute(
+        text("UPDATE board_tasks SET lease_until = :past WHERE id = :id"),
+        {"past": datetime.now(timezone.utc) - timedelta(minutes=5), "id": task_id},
+    )
+    s.commit()
+    return s
+
+
+def test_an_expired_ticket_whose_session_left_its_answer_goes_to_review_naming_it(
+        seeded, new_session, tmp_path, monkeypatch):
+    from config import config
+
+    ws_id, agent_id = seeded
+    [task_id] = _seed_tasks(new_session, ws_id, agent_id, 1, status="in_progress", attempts=2)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    folder = tmp_path / ws_id / "sessions" / str(task_id)
+    folder.mkdir(parents=True)
+    (folder / "cafe-questions-answered.md").write_text("# Seven answers\n")
+    s = _expire(new_session, task_id)
+
+    out = board_dispatcher.requeue_expired_leases(s, max_attempts=2)
+    assert out["delivered"] == [task_id] and out["failed"] == []
+    status, feedback = s.execute(
+        text("SELECT status, review_feedback FROM board_tasks WHERE id = :id"), {"id": task_id}).fetchone()
+    registered = s.execute(
+        text("SELECT file_path FROM deliverables WHERE source_type = 'task' AND source_id = :id"),
+        {"id": str(task_id)}).scalar()
+    s.close()
+    assert status == "review"
+    assert f"sessions/{task_id}/cafe-questions-answered.md" in feedback
+    assert registered == f"sessions/{task_id}/cafe-questions-answered.md"
+
+
+def test_an_expired_ticket_whose_session_folder_is_empty_still_fails(seeded, new_session, tmp_path, monkeypatch):
+    from config import config
+
+    ws_id, agent_id = seeded
+    [task_id] = _seed_tasks(new_session, ws_id, agent_id, 1, status="in_progress", attempts=2)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    folder = tmp_path / ws_id / "sessions" / str(task_id)
+    folder.mkdir(parents=True)
+    (folder / ".claude-lock").write_text("")                       # nothing the owner would read
+    s = _expire(new_session, task_id)
+
+    out = board_dispatcher.requeue_expired_leases(s, max_attempts=2)
+    s.close()
+    assert out["failed"] == [task_id] and out["delivered"] == []
