@@ -1128,12 +1128,14 @@ def _record_terminal_events(db: Session, host: CliHost, task_id: int, events: Li
                 task.completed_at = _now()
                 task.lease_until = None
     task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
-    db.commit()
     if task.status != status_before:
+        # F119: before the commit that carries it — the host's events route
+        # returns without another, and the request's rollback dropped it.
         notify_board_event(
             db, workspace_id=host.workspace_id, task_id=task.id, status=task.status,
             event="task_claimed" if task.status == "in_progress" else "task_completed",
         )
+    db.commit()
     return {"status": task.status, "lease_renewed": False, "control": {}, "decisions": []}
 
 
@@ -2401,8 +2403,8 @@ def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
         f"Stopped after {getattr(task, 'attempts', 0) or 0} attempts — {why}. "
         "Nothing was re-queued; this needs a person."
     )
+    _notify_status(db, task)  # F119: before the commit that carries it
     db.commit()
-    _notify_status(db, task)
     logger.warning(
         "[cli-host] ticket #%s hit the hard attempt cap (%s) — parked in review, not re-queued",
         task.id, config.BOARD_DISPATCH_HARD_ATTEMPT_CAP,
@@ -2452,10 +2454,12 @@ def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optio
         task.blocked_reason = None
     task.lease_until = None            # not a running session any more
     task.runtime_ref = ref
-    db.commit()
+    # F119: before the commit that carries them — apply_result's route returns
+    # without another commit, and the request's rollback dropped them.
     _notify_status(db, task)
     if not open_asks:
         _notify_available(db, task)
+    db.commit()
     logger.info("[cli-host] ticket #%s parks on %s ask(s) → %s",
                 task.id, len(open_asks) or "answered", task.status)
     return task.status

@@ -238,6 +238,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
             db.commit()
             # PRD-227 US-001: push the create (+immediate done) to Command Centres.
             _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
+            db.commit()  # F119: the notice rides this commit
             return {
                 "success": True,
                 "task_id": task.id,
@@ -270,6 +271,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     result: Dict[str, Any] = {
         "success": True,
@@ -626,6 +628,7 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     return {
         "success": True,
@@ -844,6 +847,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
             # We won the assigned->in_progress transition — the dispatcher did not
             # beat us to this claim. Push the board frame and launch exactly once.
             _notify_board_safe(db, workspace_id, int(task_id), "in_progress", "status_changed")
+            db.commit()  # F119: the frame rides this commit
             from api.board_tasks import _launch_task_execution
 
             _launch_task_execution(
@@ -908,6 +912,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
+    db.commit()  # F119: the notices ride this commit
 
     return {
         "success": True,

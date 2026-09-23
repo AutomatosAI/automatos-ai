@@ -202,6 +202,7 @@ def file_cli_ticket(
     else:
         consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=source_type)
     _notify(db, workspace_id, task)
+    db.commit()  # F119: the notices ride this commit (after the consent, for the dispatch wake)
     logger.info("[CliTicketLane] filed ticket #%s for agent %s from %s/%s", task.id, agent_id, source_type, source_id)
     return task
 
@@ -378,6 +379,7 @@ def open_session_ticket(
         notify_board_event(db, workspace_id=str(workspace_id), task_id=task.id, status=task.status, event="task_created")
     except Exception:  # noqa: BLE001
         logger.debug("[CliTicketLane] board notify skipped", exc_info=True)
+    db.commit()  # F119: the notice rides this commit — the route returns without another
     logger.info("[CliTicketLane] opened session ticket #%s for agent %s in chat %s", task.id, agent.id, chat_id)
     return task, True
 

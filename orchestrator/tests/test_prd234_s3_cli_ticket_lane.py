@@ -60,7 +60,9 @@ def test_files_one_assigned_ticket_in_the_lanes_shape(monkeypatch):
                              source_id="agent:15", priority="low")
     assert t.id == 4242 and t.status == "assigned" and t.assigned_agent_id == 15
     assert t.source_type == "heartbeat" and t.source_id == "agent:15" and t.priority == "low"
-    assert t.created_by_type == "system" and t.blocked_reason is None and db.commits == 1
+    # two commits: the insert, then the notices (F119 — after the consent, so the
+    # dispatch wake follows it; a notice after the last commit was rolled back)
+    assert t.created_by_type == "system" and t.blocked_reason is None and db.commits == 2
     assert lane.queued_line(t) == "queued for your Claude Code session as ticket #4242"
 
 
@@ -213,7 +215,7 @@ def test_a_review_ticket_for_the_heartbeat_is_not_reused_a_new_one_is_filed(monk
     assert lane.open_ticket_for_source(db, "ws", "heartbeat", "agent:57") is None
     t = lane.file_cli_ticket(db, workspace_id="ws", agent_id=57, title="Heartbeat: RESEARCHER",
                              prompt="Read the board.", source_type="heartbeat", source_id="agent:57")
-    assert t.id == 4242 and t.status == "assigned" and db.added == [t] and db.commits == 1
+    assert t.id == 4242 and t.status == "assigned" and db.added == [t] and db.commits == 2   # insert + notices (F119)
 
 
 def test_an_in_progress_ticket_for_the_heartbeat_is_reused(monkeypatch):
