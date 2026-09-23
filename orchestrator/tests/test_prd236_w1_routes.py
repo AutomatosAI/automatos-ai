@@ -188,10 +188,16 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     kb = (versions / "kb_multimodal_tables.py").read_text()
     assert 'down_revision = "tool_execution_logs_workspace_user_idx"' in kb
     # 2026-09-22: llm_usage_agent_name chains onto that (F049 — a deleted agent's
-    # spend keeps its name); the guard follows it.
+    # spend keeps its name).
     named = (versions / "llm_usage_agent_name.py").read_text()
     assert 'down_revision = "kb_multimodal_tables"' in named
-    assert 'EXPECTED_HEAD = "llm_usage_agent_name"' in guard
+    # 2026-09-23: prd251_socials chains onto that too (PRD-251's one Socials
+    # migration), and f049_prd251_merge_heads joins the two; the guard follows it.
+    socials = (versions / "prd251_socials.py").read_text()
+    assert 'down_revision = "kb_multimodal_tables"' in socials
+    joined = (versions / "f049_prd251_merge_heads.py").read_text()
+    assert '"llm_usage_agent_name"' in joined and '"prd251_socials"' in joined
+    assert 'EXPECTED_HEAD = "f049_prd251_merge_heads"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

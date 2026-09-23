@@ -64,6 +64,7 @@ from api.statistics import router as statistics_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
 from api.blog import router as blog_router
+from api.socials import router as socials_router  # PRD-251: Socials (Deliverables → Socials)
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router, public_router as team_public_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
@@ -1052,6 +1053,7 @@ app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documen
 app.include_router(documents_router)
 app.include_router(teams_router)  # PRD-158: Teams entity (list/create)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
+app.include_router(socials_router)  # PRD-251: every route 404s unless both Socials switches are on
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(memory_stats_router)  # PRD-77 memory explorer reads (/browse, /health, /stats/real) — workspace-scoped, member-visible

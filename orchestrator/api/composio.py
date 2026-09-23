@@ -273,20 +273,28 @@ async def list_connections(
     return result
 
 
-@router.get("/linkedin/test-upload-init")
-async def test_linkedin_upload_init():
+@router.get("/linkedin/test-upload-init", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def test_linkedin_upload_init(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Smoke test: call LinkedIn initializeUpload directly (no Composio).
-    Verifies credential store + OAuth token + API version work."""
+    Verifies the CALLER'S workspace credential + OAuth token + API version work
+    (PRD-251 S0.4: never another workspace's credential)."""
     import httpx as _httpx
+    from core.composio.deny_list import composio_action_denial
     from core.composio.linkedin_image_workaround import (
-        _get_access_token, _initialize_image_upload, _load_linkedin_credentials,
+        IMAGE_POST_ACTION, _get_access_token, _initialize_image_upload, _load_linkedin_credentials,
     )
 
+    # PRD-251 S0.6 (D16): a deny-listed LinkedIn image post is refused here too,
+    # before the credential store or LinkedIn is touched.
+    denial = composio_action_denial(IMAGE_POST_ACTION)
+    if denial:
+        raise HTTPException(status_code=403, detail=denial)
+
     try:
-        creds = _load_linkedin_credentials()
+        creds = _load_linkedin_credentials(ctx.workspace_id)
         org_urn = creds.get("organization_urn", "")
         async with _httpx.AsyncClient(timeout=15) as http:
-            token = await _get_access_token(http)
+            token = await _get_access_token(http, ctx.workspace_id)
             upload_url, image_urn = await _initialize_image_upload(http, token, org_urn)
             return {
                 "ok": bool(upload_url and image_urn),

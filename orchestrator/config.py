@@ -1389,7 +1389,12 @@ class Config:
 
     # S3 Documents (general storage bucket)
     S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
-    
+    # PRD-251 S0.4c: GET /api/generated-images/{id} streams the S3 body in chunks
+    # of this many bytes (never the whole object in memory).
+    GENERATED_IMAGE_STREAM_CHUNK_BYTES: int = int(
+        os.getenv("GENERATED_IMAGE_STREAM_CHUNK_BYTES", str(64 * 1024))
+    )
+
     # =============================================================================
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
@@ -1829,6 +1834,33 @@ class Config:
         os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
         or "api.automatos.app"
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-251 Socials
+    # =============================================================================
+    # Socials is gated two ways (D1): the platform master switch is the
+    # ``socials.enabled`` system setting, a super-admin toggle in Settings →
+    # System Settings, and each workspace has ``settings['socials'].enabled``
+    # (modules/socials/settings.py). SOCIALS_ENABLED_DEFAULT is only the master
+    # switch's DEFAULT: the prd251_socials migration seeds the row with it, and
+    # it applies wherever no row exists. Every plan gets Socials, so there is no
+    # plan exposure key.
+    SOCIALS_ENABLED_DEFAULT: bool = os.getenv(
+        "SOCIALS_ENABLED_DEFAULT", "false"
+    ).strip().lower() == "true"
+    # D9: the lifetime of the presigned media URL a channel fetches at publish time.
+    SOCIALS_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_URL_TTL_SECONDS", "86400"))
+    # D10: a post whose slot passed while the backend was down still publishes
+    # within this grace; later than that it goes to ``missed``, never posted late.
+    SOCIALS_MISFIRE_GRACE_SECONDS: int = int(os.getenv("SOCIALS_MISFIRE_GRACE_SECONDS", "1800"))
+    # D8: transient-error retries per channel target.
+    SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
+    # D3: the media-render service (Wave 1). Empty = no renderer configured.
+    SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
+    # D9: the local edition's public bucket for channels that fetch media by URL
+    # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
+    # channels show "needs public storage".
+    SOCIALS_PUBLIC_MEDIA_BUCKET: str = os.getenv("SOCIALS_PUBLIC_MEDIA_BUCKET", "").strip()
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

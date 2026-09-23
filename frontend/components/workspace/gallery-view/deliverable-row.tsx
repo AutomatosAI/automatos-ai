@@ -17,7 +17,6 @@ import {
   MessageSquare,
   Music,
   Upload,
-  Video,
   Workflow,
   Wrench,
   Zap,
@@ -34,20 +33,18 @@ import type { Deliverable } from '@/hooks/use-deliverables-api'
 
 // ============= STYLE MAPS =============
 
-// Non-canonical types (archive/audio/video) keep lucide fallbacks; the 7 canonical
-// deliverable types (report, image, document, code, slide, spreadsheet, blog_post)
-// render via DeliverableIcon for consistent design.
+// Non-canonical types (archive/audio) keep lucide fallbacks; the 8 canonical
+// deliverable types (report, image, document, code, slide, spreadsheet, blog_post,
+// video) render via DeliverableIcon for consistent design.
 
 const FALLBACK_ICONS: Record<string, LucideIcon> = {
   archive: Archive,
   audio: Music,
-  video: Video,
 }
 
 const FALLBACK_COLORS: Record<string, string> = {
   archive: 'text-warning',
   audio: 'text-pink-400',
-  video: 'text-destructive',
 }
 
 const SOURCE_LABELS: Record<string, string> = {

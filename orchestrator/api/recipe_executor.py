@@ -476,6 +476,7 @@ async def _execute_step(
     from modules.tools.services.composio_tool_service import ComposioToolService
     from core.composio.tool_executor import resolve_file_uploads
     from core.composio.client import get_composio_client
+    from core.composio.deny_list import composio_action_denial
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -770,7 +771,14 @@ async def _execute_step(
                 # Dedup: if the LLM calls the same action with the same args
                 # again, return the cached result instead of hitting the API.
                 _dedup_key = f"{tool_name}|{json.dumps(tool_args, sort_keys=True, default=str)}"
-                if _dedup_key in _composio_call_cache:
+                # PRD-251 S0.6 (D16): a denied action never runs — not from the
+                # dedup cache, the LinkedIn workaround, file uploads or the spine.
+                _denial = composio_action_denial(tool_name)
+                if _denial:
+                    result_text = f"Error executing {tool_name}: {_denial}"
+                    exec_ms = 0
+                    logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
+                elif _dedup_key in _composio_call_cache:
                     result_text = _composio_call_cache[_dedup_key]
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")

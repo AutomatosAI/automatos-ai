@@ -12,9 +12,9 @@
  *  - Static — no animations (a wall of these tiles needs to feel calm)
  *  - Deterministic IDs via useId() so multiple cards on a page don't collide
  *
- * Canonical types (the 7 design-system deliverables) match the row/badge icon
+ * Canonical types (the 8 design-system deliverables) match the row/badge icon
  * artwork in `@/components/icons/deliverable-icon`. Non-canonical types
- * (archive, audio, video) keep simple fallback artwork so the system covers
+ * (archive, audio) keep simple fallback artwork so the system covers
  * every artifact_type the backend produces.
  */
 
@@ -22,13 +22,12 @@ import { memo, useId } from 'react'
 
 import { DELIVERABLE_ACCENTS, type DeliverableType } from '@/components/icons/deliverable-icon'
 
-type FallbackType = 'archive' | 'audio' | 'video' | 'default'
+type FallbackType = 'archive' | 'audio' | 'default'
 type ArtworkType = DeliverableType | FallbackType
 
 const FALLBACK_ACCENT: Record<FallbackType, string> = {
   archive: '#fbbf24',
   audio: '#f472b6',
-  video: '#f87171',
   default: '#94a3b8',
 }
 
@@ -45,7 +44,7 @@ function isCanonical(t: string): t is DeliverableType {
 
 function normalizeType(t: string): ArtworkType {
   if (isCanonical(t)) return t
-  if (t === 'archive' || t === 'audio' || t === 'video') return t
+  if (t === 'archive' || t === 'audio') return t
   return 'default'
 }
 
@@ -168,7 +167,22 @@ function BlogPostArt({ fg }: { fg: string }) {
   )
 }
 
-// ─── Fallback artwork (archive, audio, video, default) ──────────────
+function VideoArt({ fg }: { fg: string }) {
+  return (
+    <g>
+      <rect x="36" y="52" width="128" height="96" rx="8" fill="none" stroke={fg} strokeWidth="1.75" />
+      <line x1="36" y1="68"  x2="164" y2="68"  stroke={fg} strokeOpacity="0.45" strokeWidth="1.25" />
+      <line x1="36" y1="132" x2="164" y2="132" stroke={fg} strokeOpacity="0.45" strokeWidth="1.25" />
+      {[57, 137].flatMap((y) => [43, 64, 85, 107, 128, 149].map((x) => (
+        <rect key={`s${x}-${y}`} x={x} y={y} width="8" height="6" rx="1.5" fill={fg} fillOpacity="0.45" />
+      )))}
+      <circle cx="100" cy="100" r="18" fill={fg} fillOpacity="0.18" stroke={fg} strokeWidth="1.5" />
+      <path d="M94,90 L94,110 L111,100 Z" fill={fg} />
+    </g>
+  )
+}
+
+// ─── Fallback artwork (archive, audio, default) ─────────────────────
 
 function ArchiveArt({ fg }: { fg: string }) {
   return (
@@ -195,15 +209,6 @@ function AudioArt({ fg }: { fg: string }) {
       {bars.map((b) => (
         <rect key={b.x} x={b.x} y={100 - b.base / 2} width="8" height={b.base} rx="2" fill={fg} fillOpacity="0.7" />
       ))}
-    </g>
-  )
-}
-
-function VideoArt({ fg }: { fg: string }) {
-  return (
-    <g>
-      <circle cx="100" cy="100" r="50" fill={fg} fillOpacity="0.15" stroke={fg} strokeOpacity="0.4" strokeWidth="1.5" />
-      <polygon points="90,80 90,120 125,100" fill={fg} fillOpacity="0.85" />
     </g>
   )
 }

@@ -61,7 +61,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # tables PRD-209's schema retirement dropped from every fresh install.
 # 2026-09-22: llm_usage_agent_name chains onto it — a usage row keeps the name of
 # the agent that spent it once the agent is deleted (F049).
-EXPECTED_HEAD = "llm_usage_agent_name"
+# 2026-09-23 (PRD-251 Socials): prd251_socials chains onto kb_multimodal_tables too
+# — the ONE Socials migration (the master-switch seed, then the social_posts
+# tables) — and f049_prd251_merge_heads joins the two into the single head.
+EXPECTED_HEAD = "f049_prd251_merge_heads"
 
 
 def _literal(node: ast.AST):

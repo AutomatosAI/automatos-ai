@@ -22,6 +22,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from config import config
+from core.composio.deny_list import composio_action_denial
 from core.composio.tool_executor import ComposioToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,11 @@ class CloudFileDownloader:
         Defaults to v3.1 (latest toolkit version served automatically) via the
         canonical config var. Uses entity_id (snake_case) — v3+ convention.
         """
+        # PRD-251 S0.6 (D16): the platform deny list, before any network call.
+        denial = composio_action_denial(action)
+        if denial:
+            raise RuntimeError(denial)
+
         api_key = self._get_api_key()
         entity_id = self._get_entity_id(workspace_id)
 

@@ -96,9 +96,10 @@ def test_matrix_speaks_canonical_vocabulary_only():
     )
     assert "missions:*" in all_perms and "playbooks:*" in all_perms
     resources = {p.split(":", 1)[0] for p in all_perms}
+    # PRD-251 D6 adds ``socials`` (``socials:approve``, owner/admin/editor).
     assert resources == {
         "workspace", "members", "agents", "missions", "playbooks",
-        "documents", "knowledge", "audit",
+        "documents", "knowledge", "audit", "socials",
     }, f"unexpected permission resources: {sorted(resources)}"
 
 
