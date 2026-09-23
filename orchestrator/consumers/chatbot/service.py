@@ -2024,9 +2024,21 @@ class StreamingChatService:
         # that reads "both created ✅" with nothing executed is a fabrication the
         # UI cannot expose on its own.
         try:
-            if use_tools and not executor.tracker.tool_counts:
-                from modules.tools.execution.tool_loop import looks_like_narrated_action
-                if looks_like_narrated_action(getattr(result.response, "content", "") or ""):
+            if use_tools:
+                from modules.tools.execution.tool_loop import (
+                    UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
+                )
+                reply = getattr(result.response, "content", "") or ""
+                ran = {key.split(":", 1)[-1] for key in executor.tracker.tool_counts}
+                # F099 (night 3): an earlier answer came back "(Source: search_knowledge …)"
+                # with no search in this turn — say so where the owner can see it.
+                cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
+                if cited:
+                    logger.warning("[chat] reply cites %s as its source but it did not run — notice emitted", cited)
+                    yield self.streaming_handler.format_aisdk_limit_reached(
+                        limit="no_tool_call", value=0, message=UNRUN_SOURCE_NOTICE.format(tool=cited),
+                    )
+                elif not executor.tracker.tool_counts and looks_like_narrated_action(reply):
                     logger.warning("[chat] reply narrates actions but no tool ran — notice emitted")
                     yield self.streaming_handler.format_aisdk_limit_reached(
                         limit="no_tool_call",

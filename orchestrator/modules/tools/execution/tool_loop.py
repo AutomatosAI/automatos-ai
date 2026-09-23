@@ -537,14 +537,22 @@ class ToolLoopExecutor:
         if not tools or _has_tool_calls(current):
             return current
         text = getattr(current, "content", "") or ""
-        if not looks_like_narrated_action(text):
+        cited = cited_tool_not_run(text, offered_tool_names(tools))
+        if cited:
+            # F099 (night 3): an earlier answer, recalled, came back labelled
+            # "(Source: search_knowledge …)" with no search in this turn.
+            logger.warning("[tool-loop] reply cites %s but ran no tool — nudging once", cited)
+            nudge = _UNRUN_SOURCE_RECOVERY_MSG.format(tool=cited)
+        elif looks_like_narrated_action(text):
+            logger.warning(
+                "[tool-loop] reply narrated actions without a tool call (%d chars) — nudging once",
+                len(text),
+            )
+            nudge = _NARRATION_RECOVERY_MSG
+        else:
             return current
-        logger.warning(
-            "[tool-loop] reply narrated actions without a tool call (%d chars) — nudging once",
-            len(text),
-        )
         messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "system", "content": _NARRATION_RECOVERY_MSG})
+        messages.append({"role": "system", "content": nudge})
         return await self._llm(messages, tools)
 
 
@@ -560,6 +568,48 @@ _NARRATION_RECOVERY_MSG = (
     "Never describe an action as done without a tool result, and never "
     "invent ids, models or statuses."
 )
+
+# F099 (night 3): a reply that names a tool as its source when no tool ran in
+# this turn is repeating something from memory — an earlier conversation's
+# answer, labelled as if it were a fresh search.
+_UNRUN_SOURCE_RECOVERY_MSG = (
+    "Your previous reply gives {tool} as its source, but no tool ran in this "
+    "turn: what you wrote came from memory of an earlier conversation and may "
+    "be out of date. Call {tool} now, in this response, or say plainly that the "
+    "answer is from an earlier conversation and was not searched again."
+)
+UNRUN_SOURCE_NOTICE = (
+    "No search ran for this reply — it gives {tool} as its source, but repeats an "
+    "earlier answer that may be out of date. Ask me to search again."
+)
+_SOURCE_CLAIM = re.compile(
+    r"(?:\bsources?\s*[:=–-]|\((?:source|via|from|per)\b)[^\n)]{0,120}?\b(?P<tool>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b",
+    re.IGNORECASE,
+)
+
+
+def offered_tool_names(tools: Optional[List[Dict[str, Any]]]) -> set:
+    """The names of the tools a model was offered (OpenAI-style schemas)."""
+    names = set()
+    for t in tools or []:
+        if isinstance(t, dict):
+            name = (t.get("function") or {}).get("name") or t.get("name")
+            if name:
+                names.add(str(name))
+    return names
+
+
+def cited_tool_not_run(text: str, offered: set, ran: Optional[set] = None) -> Optional[str]:
+    """The first offered tool a reply names as its source ("Source:
+    search_knowledge", "(via platform_search_documents)") that did not run in
+    this turn, else None. A tool merely mentioned ("I can search with
+    search_knowledge") is not a source claim."""
+    for m in _SOURCE_CLAIM.finditer(text or ""):
+        tool = m.group("tool")
+        if tool in offered and tool not in (ran or set()):
+            return tool
+    return None
+
 
 _NARRATION_CUES = re.compile(
     r"\b(let me|now let me|let'?s (now )?(create|build|assign|install|update|set up|wire)|"
