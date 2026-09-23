@@ -58,6 +58,7 @@ const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'slide', label: 'Slides' },
   { value: 'spreadsheet', label: 'Spreadsheets' },
   { value: 'blog_post', label: 'Blog Posts' },
+  { value: 'video', label: 'Videos' },
 ]
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [

@@ -1,7 +1,7 @@
 /**
  * TypeRow — Netflix-style horizontal scroller for one artifact type.
  *
- * Each type (report, image, document, code, slide, spreadsheet, blog_post)
+ * Each type (report, image, video, document, code, slide, spreadsheet, blog_post)
  * gets its own row with a typed accent dot, count, scroll chevrons, and a
  * "See all →" hand-off to the Explorer tab pre-filtered to that type.
  */

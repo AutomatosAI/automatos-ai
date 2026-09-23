@@ -7,7 +7,7 @@
  *
  * Layout:
  *   1. Today hero            (what did the team make today?)
- *   2. 7 type rows           (Slides, Reports, Images, Documents,
+ *   2. 8 type rows           (Slides, Reports, Images, Videos, Documents,
  *                             Spreadsheets, Code, Blog Posts)
  *   3. System diagnostics    (heartbeat counter strip)
  */
@@ -28,6 +28,7 @@ const TYPE_ROW_ORDER: ReadonlyArray<{ type: DeliverableType; portrait?: boolean 
   { type: 'slide', portrait: true },
   { type: 'report' },
   { type: 'image' },
+  { type: 'video' },
   { type: 'document' },
   { type: 'spreadsheet' },
   { type: 'code' },

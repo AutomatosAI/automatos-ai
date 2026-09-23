@@ -58,15 +58,18 @@ def _workspace_file_url(workspace_id: str | UUID, file_path: str) -> str:
 
     Uses `/files/raw` for binary formats (images, PDFs, etc.) which returns
     actual bytes with correct MIME types. Uses `/files/content` for text files
-    which returns JSON for the code viewer.
+    which returns JSON for the code viewer. Every extension whose artifact type
+    streams by URL (``STREAMED_ARTIFACT_TYPES``: images and videos) is binary,
+    so a .mov or .mkv video plays from the same route as an .mp4.
     """
     _, ext = os.path.splitext(file_path)
+    ext = ext.lower()
     _BINARY_EXTENSIONS = {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
         ".pdf", ".docx", ".xlsx", ".pptx", ".zip", ".tar", ".gz",
         ".mp4", ".mp3", ".wav", ".ogg", ".webm",
     }
-    if ext.lower() in _BINARY_EXTENSIONS:
+    if ext in _BINARY_EXTENSIONS or EXTENSION_TO_ARTIFACT.get(ext) in STREAMED_ARTIFACT_TYPES:
         return f"/api/workspaces/{workspace_id}/files/raw?path={quote(file_path)}"
     return f"/api/workspaces/{workspace_id}/files/content?path={quote(file_path)}"
 
@@ -126,12 +129,17 @@ def _infer_artifact_type(file_path: str) -> str:
     return EXTENSION_TO_ARTIFACT.get(ext, "document")
 
 
-# Artifact types that should auto-register when agents write files. Archives,
-# audio, and video are excluded because agents rarely produce them as primary
-# deliverables (usually intermediate/temp files).
+# Artifact types that should auto-register when agents write files. Archives
+# and audio are excluded because agents rarely produce them as primary
+# deliverables (usually intermediate/temp files). Video is a primary Deliverable
+# (PRD-251 S0.4: rendered MP4s show in Outputs with a player).
 AGENT_REGISTERABLE_ARTIFACT_TYPES = frozenset({
-    "report", "image", "document", "slide", "spreadsheet", "code",
+    "report", "image", "document", "slide", "spreadsheet", "code", "video",
 })
+
+# Artifact types whose bytes stream to the browser by URL (``/files/raw``),
+# never inline through ``get_deliverable(include_content=True)``.
+STREAMED_ARTIFACT_TYPES = frozenset({"image", "video"})
 
 
 def _humanize_basename(file_path: str) -> str:
@@ -472,8 +480,8 @@ class DeliverableService:
                         self.workspace_id, data["file_path"]
                     )
 
-                    if data["artifact_type"] == "image":
-                        # Images stream via URL, never inline.
+                    if data["artifact_type"] in STREAMED_ARTIFACT_TYPES:
+                        # Images and videos stream via URL, never inline.
                         data["content"] = None
                     else:
                         ws_client = WorkspaceClient(str(self.workspace_id))

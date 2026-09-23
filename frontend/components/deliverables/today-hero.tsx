@@ -33,7 +33,7 @@ const TODAY_FILTERS: FilterState = {
 }
 
 const TYPE_PILL_ORDER: DeliverableType[] = [
-  'image', 'slide', 'report', 'document', 'spreadsheet', 'code', 'blog_post',
+  'image', 'video', 'slide', 'report', 'document', 'spreadsheet', 'code', 'blog_post',
 ]
 
 const TYPE_PILL_LABEL_SINGULAR: Record<DeliverableType, string> = {
@@ -44,6 +44,7 @@ const TYPE_PILL_LABEL_SINGULAR: Record<DeliverableType, string> = {
   slide: 'slide',
   spreadsheet: 'spreadsheet',
   blog_post: 'blog post',
+  video: 'video',
 }
 
 const TYPE_PILL_LABEL_PLURAL: Record<DeliverableType, string> = {
@@ -54,6 +55,7 @@ const TYPE_PILL_LABEL_PLURAL: Record<DeliverableType, string> = {
   slide: 'slides',
   spreadsheet: 'spreadsheets',
   blog_post: 'blog posts',
+  video: 'videos',
 }
 
 function pluralize(type: DeliverableType, count: number): string {

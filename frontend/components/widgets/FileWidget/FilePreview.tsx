@@ -20,7 +20,7 @@
  *   binary (via `url`):
  *     - pdf         — browser-native iframe
  *     - image       — <img>
- *     - video       — <video controls>
+ *     - video       — <video controls preload="metadata">
  *     - audio       — <audio controls>
  *     - docx        — mammoth.js → HTML (lazy-loaded)
  *     - xlsx        — SheetJS → HTML tables (lazy-loaded)
@@ -373,7 +373,7 @@ function VideoContent({ url, className }: { url?: string; className?: string }) 
   if (!src) return <LoadingPane message="Loading video…" />
   return (
     <div className={cn('flex items-center justify-center h-full p-4 bg-black', className)}>
-      <video src={src} controls style={{ maxWidth: '100%', maxHeight: '100%' }}>
+      <video src={src} controls preload="metadata" style={{ maxWidth: '100%', maxHeight: '100%' }}>
         <track kind="captions" />
       </video>
     </div>
@@ -758,6 +758,7 @@ export function inferPreviewType(
     case 'mov':
     case 'm4v':
     case 'avi':
+    case 'mkv':
       return 'video'
     case 'mp3':
     case 'wav':
