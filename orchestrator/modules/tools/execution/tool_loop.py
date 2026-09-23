@@ -537,7 +537,10 @@ class ToolLoopExecutor:
         if not tools or _has_tool_calls(current):
             return current
         text = getattr(current, "content", "") or ""
-        cited = cited_tool_not_run(text, offered_tool_names(tools))
+        # A tool that already ran this turn (F085-A's retrieval first) is a
+        # source the reply may cite.
+        cited = cited_tool_not_run(text, offered_tool_names(tools),
+                                   {key.split(":", 1)[-1] for key in self.tracker.tool_counts})
         if cited:
             # F099 (night 3): an earlier answer, recalled, came back labelled
             # "(Source: search_knowledge …)" with no search in this turn.

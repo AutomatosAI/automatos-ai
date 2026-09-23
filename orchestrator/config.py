@@ -429,6 +429,14 @@ class Config:
         return str(val).strip().lower() in ("1", "true", "yes", "on")
 
     @property
+    def CHATBOT_KNOWLEDGE_PREFETCH(self) -> bool:
+        """F085-A: a question in a workspace with documents is searched before
+        the model's first call. Dial chatbot.knowledge_prefetch; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "knowledge_prefetch", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
     def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
         """Retries when a tool returns 'action not mapped'."""
         return self._required_int_setting("chatbot", "action_retry_budget")
@@ -1484,6 +1492,10 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F085-A: how many passages the automatic search brings, and the relevance
+    # (the retrieval funnel's final score) a passage needs to reach the prompt.
+    KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))
+    KNOWLEDGE_PREFETCH_MIN_SCORE: float = float(os.getenv("KNOWLEDGE_PREFETCH_MIN_SCORE", "0.3"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)

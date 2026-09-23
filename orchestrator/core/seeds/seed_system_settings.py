@@ -622,6 +622,21 @@ def seed_system_settings(db: Session):
         },
         {
             "category": SettingCategory.CHATBOT.value,
+            "key": "knowledge_prefetch",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "When the workspace has documents and the owner asks a question, "
+                "search them before Auto's first model call and put the passages "
+                "that clear the relevance floor in its prompt, cited by file (F085, "
+                "night 3: Auto searched the product's own manual once in 40 "
+                "questions). One embedding and one search per question turn. Set "
+                "false to answer as before."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
             "key": "action_retry_budget",
             "default_value": "1",
             "value_type": "number",

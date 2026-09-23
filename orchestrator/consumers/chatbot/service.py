@@ -1575,6 +1575,48 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
+    async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
+                               chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
+        """F085-A: search the documents for a question before the first model
+        call. Yields the activity-trail frames; appends the cited passages to
+        ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, is_question, prefetch
+
+        if not is_question(latest_text):
+            return
+
+        async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
+            result = await self.tool_router.execute_and_format(
+                tool_name=PREFETCH_TOOL,
+                tool_args=args,
+                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
+                workspace_id=self.workspace_id,
+                original_intent=latest_text,
+                caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
+            )
+            self._collect_tool_retrieval(PREFETCH_TOOL, result)
+            return result
+
+        try:
+            found = await prefetch(
+                self.db, self.workspace_id, latest_text, search=_search,
+                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH,
+                limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
+            )
+        except Exception:
+            logger.warning("[F085] retrieval first skipped", exc_info=True)
+            return
+        if found is None:
+            return
+        call_id = f"retrieval-first-{uuid.uuid4().hex[:12]}"
+        yield self.streaming_handler.format_aisdk_tool_start(call_id, PREFETCH_TOOL, {**found.args, "automatic": True})
+        yield self.streaming_handler.format_aisdk_tool_end(
+            call_id, PREFETCH_TOOL, True, duration_ms=found.elapsed_ms, summary=found.summary,
+        )
+        prefetched.append((PREFETCH_TOOL, found.args))
+        if found.message:
+            llm_messages.append(found.message)
+
     async def _stream_tool_loop(
         self,
         response,
@@ -1589,6 +1631,7 @@ class StreamingChatService:
         is_super_admin: bool = False,
         streamed_text: Optional[List[str]] = None,
         reasoning_log: Optional[List[str]] = None,
+        prefetched: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1981,6 +2024,10 @@ class StreamingChatService:
             max_iterations=max_iterations,
             content_truncate_tokens=2000,
         )
+        # F085-A: a search that already ran this turn (retrieval first) counts —
+        # its repeat is skipped and citing it is no false claim (F099).
+        for _ran_name, _ran_args in prefetched or []:
+            executor.tracker.record_execution(_ran_name, _ran_args)
 
         async def _runner():
             try:
@@ -2056,7 +2103,8 @@ class StreamingChatService:
             _notice = unexecuted_claims_notice(
                 getattr(result.response, "content", "") or "", use_tools,
                 {key.split(":", 1)[-1] for key in executor.tracker.tool_counts},
-                any_tool_ran=bool(executor.tracker.tool_counts),
+                # the automatic search (F085-A) is a source, not an action the model took
+                any_tool_ran=sum(executor.tracker.tool_counts.values()) > len(prefetched or []),
             )
             if _notice:
                 logger.warning("[chat] reply claims work no tool did this turn — notice emitted")
@@ -2732,6 +2780,14 @@ class StreamingChatService:
                 if _narrow_line:
                     llm_messages.append({"role": "system", "content": _narrow_line})
 
+            # F085-A (night 3): retrieval first — a question in a workspace with
+            # documents is searched before the model's first call; the passages
+            # that clear the floor go in last, after every cache-stable block.
+            _prefetched: List[Tuple[str, Dict[str, Any]]] = []
+            if not force_text_only:
+                async for _frame in self._retrieval_first(latest_text, llm_messages, agent_runtime, chat_id, _prefetched):
+                    yield _frame
+
             # Generate LLM response
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
             logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}")
@@ -2797,6 +2853,7 @@ class StreamingChatService:
                     is_super_admin=is_super_admin,
                     streamed_text=streamed_text,
                     reasoning_log=reasoning_log,
+                    prefetched=_prefetched,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -2823,7 +2880,9 @@ class StreamingChatService:
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
-                    _notice = unexecuted_claims_notice(final_text, use_tools, set(), any_tool_ran=False)
+                    _notice = unexecuted_claims_notice(
+                        final_text, use_tools, {name for name, _args in _prefetched}, any_tool_ran=False,
+                    )
                     if _notice:
                         logger.warning("[chat] first reply claims work no tool did — notice emitted")
                         yield self.streaming_handler.format_aisdk_limit_reached(
