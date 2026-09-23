@@ -1491,12 +1491,20 @@ class AgentFactory:
                     # Synthesize empty response from tool results
                     if response and (not response.content or not response.content.strip()):
                         if tool_results:
+                            from services.result_substance import (
+                                NOTHING_DONE_HEADER, TOOL_RESULTS_HEADER, is_skip_message,
+                            )
+
                             tool_summary = "\n\n".join([
                                 f"**{tr['name']}**: {tr['content'][:500]}"
                                 for tr in tool_results
                                 if tr.get("role") == "tool"
                             ])
-                            response.content = f"Based on the tool results:\n\n{tool_summary}"
+                            # F093: skipped calls are not results — say the run did nothing
+                            header = (NOTHING_DONE_HEADER
+                                      if all(is_skip_message(tr.get("content", "")) for tr in tool_results)
+                                      else TOOL_RESULTS_HEADER)
+                            response.content = f"{header}\n\n{tool_summary}"
 
                     # Handle truncation: continue generating if output was cut off
                     max_continuations = 2

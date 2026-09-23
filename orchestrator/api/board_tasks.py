@@ -1625,6 +1625,13 @@ async def finalize_board_task_run(
     if file_check is not None:
         task.result = f"{task.result or ''}\n\n{file_check.note}".strip()
         force_review = force_review or file_check.review
+    # F093 (night 3, #484): a result that is only skipped tool calls did nothing.
+    from services.result_substance import nothing_done_note
+
+    nothing_done = nothing_done_note(str(llm_text or ""))
+    if nothing_done:
+        task.result = f"{task.result or ''}\n\n{nothing_done}".strip()
+        force_review = True
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier
