@@ -104,6 +104,33 @@ def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optio
     return None
 
 
+NARRATED_ACTIONS_NOTICE = (
+    "No tools ran in this reply, so nothing it describes was "
+    "executed. Tell me to do it and I will make the calls."
+)
+
+
+def unexecuted_claims_notice(reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool) -> Optional[str]:
+    """What to tell the owner when a reply claims work no tool did this turn —
+    a source that did not run (F099: "(Source: search_knowledge …)" repeated
+    from memory) or actions told in prose with no tool call (#746). None when
+    the reply claims nothing it did not do. Both reply paths ask this: a turn
+    whose first reply calls no tool never enters the tool loop, and that is
+    exactly where night 3's replayed answer was."""
+    from modules.tools.execution.tool_loop import (
+        UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
+    )
+
+    if not use_tools or not reply:
+        return None
+    cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
+    if cited:
+        return UNRUN_SOURCE_NOTICE.format(tool=cited)
+    if not any_tool_ran and looks_like_narrated_action(reply):
+        return NARRATED_ACTIONS_NOTICE
+    return None
+
+
 def build_tool_caller_context(
     *,
     user_query: Optional[str],
@@ -2024,30 +2051,18 @@ class StreamingChatService:
         # that reads "both created ✅" with nothing executed is a fabrication the
         # UI cannot expose on its own.
         try:
-            if use_tools:
-                from modules.tools.execution.tool_loop import (
-                    UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
+            # F099 / #746: a reply that claims a source or actions no tool gave
+            # it says so where the owner can see it.
+            _notice = unexecuted_claims_notice(
+                getattr(result.response, "content", "") or "", use_tools,
+                {key.split(":", 1)[-1] for key in executor.tracker.tool_counts},
+                any_tool_ran=bool(executor.tracker.tool_counts),
+            )
+            if _notice:
+                logger.warning("[chat] reply claims work no tool did this turn — notice emitted")
+                yield self.streaming_handler.format_aisdk_limit_reached(
+                    limit="no_tool_call", value=0, message=_notice,
                 )
-                reply = getattr(result.response, "content", "") or ""
-                ran = {key.split(":", 1)[-1] for key in executor.tracker.tool_counts}
-                # F099 (night 3): an earlier answer came back "(Source: search_knowledge …)"
-                # with no search in this turn — say so where the owner can see it.
-                cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
-                if cited:
-                    logger.warning("[chat] reply cites %s as its source but it did not run — notice emitted", cited)
-                    yield self.streaming_handler.format_aisdk_limit_reached(
-                        limit="no_tool_call", value=0, message=UNRUN_SOURCE_NOTICE.format(tool=cited),
-                    )
-                elif not executor.tracker.tool_counts and looks_like_narrated_action(reply):
-                    logger.warning("[chat] reply narrates actions but no tool ran — notice emitted")
-                    yield self.streaming_handler.format_aisdk_limit_reached(
-                        limit="no_tool_call",
-                        value=0,
-                        message=(
-                            "No tools ran in this reply, so nothing it describes was "
-                            "executed. Tell me to do it and I will make the calls."
-                        ),
-                    )
         except Exception:
             logger.debug("[no-tool-call] notice skipped", exc_info=True)
 
@@ -2805,6 +2820,17 @@ class StreamingChatService:
             else:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
+                # F099 (night 3): the replayed answer was a first reply with no
+                # tool call — it never entered the tool loop, so check it here.
+                try:
+                    _notice = unexecuted_claims_notice(final_text, use_tools, set(), any_tool_ran=False)
+                    if _notice:
+                        logger.warning("[chat] first reply claims work no tool did — notice emitted")
+                        yield self.streaming_handler.format_aisdk_limit_reached(
+                            limit="no_tool_call", value=0, message=_notice,
+                        )
+                except Exception:
+                    logger.debug("[no-tool-call] first-reply notice skipped", exc_info=True)
 
             # PRD-238 S2: the saved message is exactly what the screen showed —
             # every round's streamed text in order, plus a final answer that the

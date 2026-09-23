@@ -84,3 +84,30 @@ def test_the_replayed_reply_is_nudged_once_and_the_retry_searches():
 def test_the_notice_names_the_tool():
     assert UNRUN_SOURCE_NOTICE.format(tool="search_knowledge").startswith(
         "No search ran for this reply — it gives search_knowledge as its source")
+
+
+# ── both reply paths ask the same question ──────────────────────────────────
+
+def test_the_notice_covers_a_source_that_did_not_run_and_narrated_actions():
+    from consumers.chatbot.service import NARRATED_ACTIONS_NOTICE, unexecuted_claims_notice
+
+    assert unexecuted_claims_notice(REPLAYED_2037, [SEARCH], set(), any_tool_ran=False).startswith(
+        "No search ran for this reply — it gives search_knowledge as its source")
+    assert unexecuted_claims_notice(REPLAYED_2037, [SEARCH], {"search_knowledge"}, any_tool_ran=True) is None
+    narrated = "Now let me create OPS and TRACKER. Good — both created."
+    assert unexecuted_claims_notice(narrated, [SEARCH], set(), any_tool_ran=False) == NARRATED_ACTIONS_NOTICE
+    assert unexecuted_claims_notice(narrated, [SEARCH], {"platform_create_agent"}, any_tool_ran=True) is None
+    assert unexecuted_claims_notice(REPLAYED_2037, None, set(), any_tool_ran=False) is None      # no tools offered
+
+
+def test_a_first_reply_with_no_tool_call_is_checked_too():
+    """Night 3's replayed answer was a first reply with no tool call: it never
+    entered the tool loop, where the notice used to live."""
+    import inspect
+
+    from consumers.chatbot import service
+
+    source = inspect.getsource(service.StreamingChatService._stream_response_with_agent_scoped)
+    branch = source[source.index('final_text = response.content or ""'):]
+    assert branch.index("unexecuted_claims_notice(final_text") < branch.index("shown_so_far")
+    assert "unexecuted_claims_notice(" in inspect.getsource(service.StreamingChatService._stream_tool_loop)
