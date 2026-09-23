@@ -541,7 +541,7 @@ async def _apply_decision_rerank(
         registry = get_action_registry()
 
         async def rank_wide(n: int):
-            return await index.rank_actions(
+            ranked = await index.rank_actions(
                 query,
                 top_k=n,
                 exclude_admin=not is_admin,
@@ -549,6 +549,13 @@ async def _apply_decision_rerank(
                 include_super_admin=is_super_admin,
                 workspace_id=workspace_id,
             )
+            if ranked:
+                return ranked
+            # The embedding timed out or matched nothing: judge the lexical
+            # shortlist the narrowing itself falls back to (a None score marks
+            # the source) — the embedding-outage turn is where a judge helps most.
+            names = _lexical_shortlist(index, query, n, not is_admin, False, is_super_admin) or []
+            return [(name, None) for name in names]
 
         def describe(name: str) -> str:
             action = registry.get(name)

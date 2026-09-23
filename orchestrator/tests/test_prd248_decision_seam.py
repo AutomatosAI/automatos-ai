@@ -678,6 +678,41 @@ async def test_shadow_mode_never_changes_the_verdict_and_writes_the_comparison(b
 
 
 @pytest.mark.asyncio
+async def test_the_shadow_task_never_touches_the_callers_session(brain, monkeypatch, tmp_path):
+    """The roster is read on the request's session before the task exists; the
+    task itself works on plain dicts only (the PR #618 borrowed-session trap)."""
+    backend = _Backend(result=DECIDED_ATOM)
+    _install_engine(monkeypatch, tmp_path, MODE_SHADOW, backend)
+    queries = []
+    real_query = brain._db.query
+    monkeypatch.setattr(brain._db, "query", lambda model: queries.append(model) or real_query(model))
+    task = brain._start_shadow("please draft the board pack for thursday", 3)
+    assert task is not None
+    before = len(queries)
+    await _drain_shadow()
+    assert len(queries) == before
+    assert backend.calls[0]["state"]["agents"] == [
+        {"name": "Jim", "role": "writer", "description": "Drafts board packs"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_shadow_runs_beside_the_onboarding_pin(brain, monkeypatch, tmp_path):
+    """Tier 0 pins every turn of a workspace mid-onboarding; the shadow must
+    still see those turns (2026-09-22: a workspace stuck at 'powerup' pinned
+    all of them and the classifier shadow recorded nothing)."""
+    backend = _Backend(result=DECIDED_ATOM)
+    _install_engine(monkeypatch, tmp_path, MODE_SHADOW, backend)
+    monkeypatch.setattr(brain, "_onboarding_active", lambda: True)
+    verdict = await brain.assess("what is on my board right now", 2)
+    await _drain_shadow()
+    assert verdict.reasoning.startswith("Onboarding active") and brain._test_tier3 == []
+    rows = _shadow_rows(tmp_path)
+    assert len(rows) == 1 and rows[0]["tier"] == 0
+    assert rows[0]["verdict"]["complexity"] == "molecule" and rows[0]["agree"]["complexity"] is False
+
+
+@pytest.mark.asyncio
 async def test_shadow_runs_beside_the_regex_tier_too(brain, monkeypatch, tmp_path):
     backend = _Backend(result=DECIDED_ATOM)
     _install_engine(monkeypatch, tmp_path, MODE_SHADOW, backend)

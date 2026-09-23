@@ -826,6 +826,13 @@ class AutoBrain:
 
         msg_lower = message.lower().strip()
 
+        # ── PRD-248: in shadow mode the decision engine runs beside every tier,
+        # the onboarding pin included (a workspace stuck mid-onboarding pins
+        # every turn, and the shadow must still see them); it never blocks the
+        # turn — the comparison is written when it lands.
+        started = time.monotonic()
+        shadow = self._start_shadow(message, conversation_length)
+
         # ── Tier 0: onboarding pin (PRD-222) ──
         # The onboarding spine lives ONLY in the full ContextService path (the
         # OnboardingSection + the platform tools that advance the stage). The
@@ -841,17 +848,15 @@ class AutoBrain:
         # see it. A workspace that never ran onboarding reads as not_started and
         # would otherwise pin every turn forever ("ask Bob to…" became a mission).
         if self._onboarding_active() and not self._names_active_agent(message):
-            return ComplexityAssessment(
-                complexity=Complexity.MOLECULE, action=Action.RESPOND,
-                reasoning="Onboarding active — full context path (spine + platform tools)",
-                confidence=1.0, needs_memory=False, tool_hints=["platform"],
-                needs_multi_agent=False,
+            return self._with_shadow(
+                ComplexityAssessment(
+                    complexity=Complexity.MOLECULE, action=Action.RESPOND,
+                    reasoning="Onboarding active — full context path (spine + platform tools)",
+                    confidence=1.0, needs_memory=False, tool_hints=["platform"],
+                    needs_multi_agent=False,
+                ),
+                0, shadow, message, started,
             )
-
-        # ── PRD-248: in shadow mode the decision engine runs beside the tiers;
-        # it never blocks the turn — the comparison is written when it lands.
-        started = time.monotonic()
-        shadow = self._start_shadow(message, conversation_length)
 
         # ── Tier 1: Redis cache lookup (<5ms) ──
         cached = self._cache_lookup(msg_lower)
@@ -889,11 +894,24 @@ class AutoBrain:
             logger.debug("[AutoBrain] decision dials unavailable — off", exc_info=True)
             return MODE_OFF
 
-    async def _decision_ask(self, message: str, conversation_length: int):
+    async def _decision_ask(
+        self,
+        message: str,
+        conversation_length: int,
+        entries: Optional[List[Dict[str, Any]]] = None,
+    ):
         """One engine call for the classifier questions over the message and
-        the active roster. Returns ``(result, roster)``; result None on a miss."""
-        roster = self._active_agents()
-        entries = auto_decisions.roster_entries(roster)
+        the active roster. Returns ``(result, roster)``; result None on a miss.
+
+        The shadow path passes ``entries`` (plain dicts) read on the request's
+        own session BEFORE its task exists, so the task never borrows the
+        caller's session (the PR #618 trap). The live path passes nothing and
+        reads the roster inline; its ORM rows come back for the ASSIGN-lane
+        name match."""
+        roster = None
+        if entries is None:
+            roster = self._active_agents()
+            entries = auto_decisions.roster_entries(roster)
         questions = auto_decisions.build_questions(e["name"] for e in entries)
         state = auto_decisions.build_state(message, conversation_length, entries)
         result = await get_decision_engine().decide(
@@ -911,9 +929,12 @@ class AutoBrain:
         held in a module-level set so the loop cannot drop it mid-flight."""
         if self._decision_mode() != MODE_SHADOW:
             return None
+        # Read the roster now, on the request's session, and hand the task plain
+        # dicts: a fire-and-forget task must never touch the caller's session.
+        entries = auto_decisions.roster_entries(self._active_agents())
         try:
             task = asyncio.get_running_loop().create_task(
-                self._decision_ask(message, conversation_length)
+                self._decision_ask(message, conversation_length, entries=entries)
             )
         except RuntimeError:
             return None
