@@ -285,6 +285,13 @@ def setup_logging(
     root = logging.getLogger()
     root.setLevel(level)
 
+    # httpx logs every request line at INFO, URL included, and a URL can carry a
+    # secret in its path (Telegram's bot<token>, Discord webhooks). Hold httpx
+    # and httpcore at WARNING, as the backend does (orchestrator/core/monitoring/
+    # automatos_logging.py, 23 Sep).
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
+
     # Console handler (always)
     if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
         console = logging.StreamHandler()
