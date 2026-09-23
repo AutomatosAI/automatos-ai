@@ -7,6 +7,11 @@
   ``SOCIALS_ENABLED_DEFAULT`` at migration time (default off), so a stack
   that ships with Socials on starts on, and the page shows the real state.
   After that the row is the switch: the super-admin's choice wins over the env.
+* Seeds the platform-wide Composio deny list (category ``composio``, key
+  ``denied_actions``, S0.6 / D16): a JSON list of action slugs that spend real
+  money or act outside Automatos, refused for every caller before any network
+  call (``core/composio/deny_list.py``). The list is data the super-admin edits
+  in Settings → System Settings; this seed is its first value and its default.
 * Creates the two D2 tables (``core/models/socials.py`` declares the same shape;
   ``tests/test_prd251_models.py`` holds the two together):
   - ``social_posts``: one row per post, its approval bound to ``content_hash`` (D6);
@@ -18,7 +23,7 @@
 Insert-if-absent seed: ``system_settings`` has no (category, key) unique
 constraint, so the upgrade checks first (the voice precedent), and a re-run
 never overwrites a super-admin's choice. The downgrade drops exactly what the
-upgrade creates: the two tables with their indexes, and the seeded row.
+upgrade creates: the two tables with their indexes, and the seeded rows.
 
 Chains single-parent on kb_multimodal_tables (the current single head).
 
@@ -27,6 +32,8 @@ Revises: kb_multimodal_tables
 Create Date: 2026-09-23
 """
 from __future__ import annotations
+
+import json
 
 import sqlalchemy as sa
 from alembic import op
@@ -38,6 +45,21 @@ branch_labels = None
 depends_on = None
 
 SEED_CREATED_BY = "prd251"
+SEEDED_CATEGORIES = ("socials", "composio")
+
+# D16: the Composio actions no agent, Playbook or API caller may run. Buying
+# credits, changing plans and deploying stay with a person, in the tool's own
+# interface (Composio docs, higgsfield_mcp, verified 2026-09-23).
+COMPOSIO_DENIED_ACTIONS_SEED = (
+    "HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE",
+    "HIGGSFIELD_MCP_CANCEL_TRIAL_AUTO_RENEWAL",
+    "HIGGSFIELD_MCP_CONFIRM_TRIAL_CANCEL",
+    "HIGGSFIELD_MCP_CREATE_WEBSITE",
+    "HIGGSFIELD_MCP_DEPLOY_WEBSITE",
+    "HIGGSFIELD_MCP_PUBLISH_WEBSITE",
+    "HIGGSFIELD_MCP_PARTICIPATE_IN_CONTEST",
+    "HIGGSFIELD_MCP_APPS_INVOKE",
+)
 
 POST_STATUS_CHECK = (
     "status IN ('draft', 'rendering', 'needs_approval', 'changes_requested', 'approved', "
@@ -84,6 +106,27 @@ def _socials_settings_seed() -> tuple:
             "is_sensitive": False,
             "is_required": True,
             "default_value": default,
+        },
+    )
+
+
+def _composio_settings_seed() -> tuple:
+    denied = json.dumps(list(COMPOSIO_DENIED_ACTIONS_SEED))
+    return (
+        {
+            "category": "composio",
+            "key": "denied_actions",
+            "value": denied,
+            "value_type": "json",
+            "description": (
+                "Composio deny list (PRD-251 D16): a JSON list of action slugs refused "
+                "for every agent, Playbook and API caller in every workspace, before any "
+                "network call and whatever the policy plane mode. Case-insensitive. "
+                "Takes effect on the next call — no restart or redeploy."
+            ),
+            "is_sensitive": False,
+            "is_required": True,
+            "default_value": denied,
         },
     )
 
@@ -175,7 +218,7 @@ def _create_social_post_targets() -> None:
 
 
 def upgrade() -> None:
-    _seed_settings(op.get_bind(), _socials_settings_seed())
+    _seed_settings(op.get_bind(), _socials_settings_seed() + _composio_settings_seed())
     _create_social_posts()
     _create_social_post_targets()
 
@@ -189,7 +232,7 @@ def downgrade() -> None:
     op.drop_table("social_posts")
     op.get_bind().execute(
         sa.text(
-            "DELETE FROM system_settings WHERE category = 'socials' AND created_by = :created_by"
-        ),
-        {"created_by": SEED_CREATED_BY},
+            "DELETE FROM system_settings WHERE category IN :categories AND created_by = :created_by"
+        ).bindparams(sa.bindparam("categories", expanding=True)),
+        {"categories": list(SEEDED_CATEGORIES), "created_by": SEED_CREATED_BY},
     )

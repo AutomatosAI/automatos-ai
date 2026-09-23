@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from core.composio.client import ComposioClient, get_composio_client
+from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +378,18 @@ class ComposioToolExecutor:
             }
 
         action_upper = action.upper()
+
+        # PRD-251 S0.6 (D16): the platform deny list, first — before access
+        # validation, file uploads, the LinkedIn workaround or any network call,
+        # and whatever the policy plane mode or the capability classifier says.
+        denial = composio_action_denial(action_upper)
+        if denial:
+            return {
+                **denied_result(denial),
+                "action": action_upper,
+                "execution_time_ms": int((time.time() - start_time) * 1000),
+            }
+
         # Prefer explicit app_name passed from composio_execute() call;
         # then try ComposioActionCache (handles multi-word apps like COMPOSIO_SEARCH);
         # last resort: split on first underscore.

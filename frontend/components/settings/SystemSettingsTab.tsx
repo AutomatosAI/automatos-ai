@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, BrainCircuit, Mic, Megaphone } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, BrainCircuit, Mic, Megaphone, ShieldBan } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -35,6 +35,7 @@ import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 import VoiceLiveArmingTab from './VoiceLiveArmingTab'
 import SocialsSettingsTab from './SocialsSettingsTab'
+import ComposioDenyListTab from './ComposioDenyListTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -219,6 +220,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Megaphone className="w-3.5 h-3.5 mr-1 shrink-0" />
             Socials
           </TabsTrigger>
+          <TabsTrigger value="composio">
+            <ShieldBan className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Composio
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="voice">
@@ -236,6 +241,15 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             onSave={(updates) => saveCategorySettings('socials', updates)}
             saving={saving}
             onReset={() => resetToDefaults('socials')}
+          />
+        </TabsContent>
+
+        <TabsContent value="composio">
+          <ComposioDenyListTab
+            settings={settingsByCategory.find(cat => cat.category === 'composio')?.settings || []}
+            onSave={(updates) => saveCategorySettings('composio', updates)}
+            saving={saving}
+            onReset={() => resetToDefaults('composio')}
           />
         </TabsContent>
 

@@ -58,6 +58,9 @@ class SettingCategory(str, Enum):
     # PRD-251: the Socials master switch (modules/socials/settings.py).
     SOCIALS = "socials"
 
+    # PRD-251 S0.6 (D16): the platform-wide Composio deny list (core/composio/deny_list.py).
+    COMPOSIO = "composio"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

@@ -55,6 +55,10 @@ _RESTLI_HEADERS = {
     "X-Restli-Protocol-Version": "2.0.0",
 }
 
+# The Composio action this module stands in for (image posts): the deny list
+# (core/composio/deny_list.py) is consulted with this slug.
+IMAGE_POST_ACTION = "LINKEDIN_CREATE_LINKED_IN_POST"
+
 # How long a stored access token is trusted before a refresh is attempted.
 STORED_TOKEN_TTL_SECONDS = 86400
 REFRESHED_TOKEN_DEFAULT_TTL_SECONDS = 3600

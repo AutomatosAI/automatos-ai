@@ -300,7 +300,9 @@ def test_the_migration_round_trips_and_the_downgrade_drops_exactly_what_it_creat
             _run_migration(conn, "upgrade")
             assert set(sa.inspect(conn).get_table_names()) == before | set(TABLES)
             seeded = conn.execute(sa.text("SELECT category, key FROM system_settings ORDER BY category")).fetchall()
-            assert [tuple(r) for r in seeded] == [("socials", "enabled"), ("voice", "live_enabled")]
+            assert [tuple(r) for r in seeded] == [
+                ("composio", "denied_actions"), ("socials", "enabled"), ("voice", "live_enabled"),
+            ]
 
             _run_migration(conn, "downgrade")
             assert set(sa.inspect(conn).get_table_names()) == before
