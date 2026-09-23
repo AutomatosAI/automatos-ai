@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, BrainCircuit, Mic } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, BrainCircuit, Mic, Megaphone } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -34,6 +34,7 @@ import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 import VoiceLiveArmingTab from './VoiceLiveArmingTab'
+import SocialsSettingsTab from './SocialsSettingsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -214,6 +215,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Mic className="w-3.5 h-3.5 mr-1 shrink-0" />
             Voice
           </TabsTrigger>
+          <TabsTrigger value="socials">
+            <Megaphone className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Socials
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="voice">
@@ -222,6 +227,15 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             onSave={(updates) => saveCategorySettings('voice', updates)}
             saving={saving}
             onReset={() => resetToDefaults('voice')}
+          />
+        </TabsContent>
+
+        <TabsContent value="socials">
+          <SocialsSettingsTab
+            settings={settingsByCategory.find(cat => cat.category === 'socials')?.settings || []}
+            onSave={(updates) => saveCategorySettings('socials', updates)}
+            saving={saving}
+            onReset={() => resetToDefaults('socials')}
           />
         </TabsContent>
 

@@ -1,5 +1,5 @@
 {
-  "route_count": 806,
+  "route_count": 807,
   "routes": [
     {
       "method": "GET",
@@ -3032,6 +3032,10 @@
     {
       "method": "PUT",
       "path": "/api/workspaces/current/orchestrator"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/current/socials"
     },
     {
       "method": "PUT",

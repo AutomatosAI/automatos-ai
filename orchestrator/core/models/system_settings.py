@@ -55,6 +55,9 @@ class SettingCategory(str, Enum):
     # PRD-223: which models may hold the orchestrator (Auto) seat + turn cost governor.
     MODEL_POLICY = "model_policy"
 
+    # PRD-251: the Socials master switch (modules/socials/settings.py).
+    SOCIALS = "socials"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

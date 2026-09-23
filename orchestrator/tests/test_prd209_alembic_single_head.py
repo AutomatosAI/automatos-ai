@@ -59,7 +59,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # create_all-first installs.
 # 2026-09-18: kb_multimodal_tables chains onto it — the three multimodal knowledge
 # tables PRD-209's schema retirement dropped from every fresh install.
-EXPECTED_HEAD = "kb_multimodal_tables"
+# 2026-09-23 (PRD-251 Socials): prd251_socials chains onto it — the ONE Socials
+# migration (the master-switch seed, then the social_posts tables).
+EXPECTED_HEAD = "prd251_socials"
 
 
 def _literal(node: ast.AST):
