@@ -11,28 +11,40 @@ changing plans and deploying stay with a person, in the tool's own interface.
 
 The list is DATA, never a code constant: the ``composio.denied_actions`` system
 setting, a JSON list of action slugs, seeded by the ``prd251_socials`` migration
-and edited by the super-admin in Settings → System Settings. It is read on every
-call (``read_system_setting``), so removing a slug unblocks it with no restart or
-deploy. Slugs match case-insensitively.
+and edited by the super-admin in Settings → System Settings. Slugs match
+case-insensitively.
 
-``composio_action_denial(slug)`` is the ONE check. Every Composio execution entry
-point calls it before any network call; ``tests/test_prd251_composio_deny.py``
-finds them by grep and holds each one to it.
+The list is cached per process for ``config.COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS``
+(30 s by default), so removing a slug unblocks it within one TTL, with no restart
+or deploy. A warm cache answers from memory; a stale one answers from memory too
+and starts ONE background refresh. Once the list has been read, a Composio call
+never waits on the database: the F105 lesson, where synchronous pool waits froze
+the event loop, applies to every execution path.
+
+``composio_action_denial(slug)`` is the ONE check. ``composio_action_denial_async``
+gives the same decision to code on the event loop: a cold cache is read in a worker
+thread, never on the loop. Every Composio execution entry point calls one of them
+before any network call; ``tests/test_prd251_composio_deny.py`` finds them by grep
+and holds each one to it.
 
 * No row, or an empty value → nothing is denied (a stack without the seed).
 * A value that is not a JSON list of strings → EVERY action is refused, with
   the reason, until it is fixed: a guard on real money fails closed.
 * A read that cannot complete (an exhausted pool, a timeout, a dropped
-  connection) → EVERY action is refused and the failure is logged at ERROR.
-  The read is strict: never ``get_system_setting``, whose catch-all returns the
+  connection) → the last list read is kept and the failure is logged at WARNING;
+  with nothing read yet in this process, EVERY action is refused and the failure
+  is logged at ERROR. The read is strict: never ``get_system_setting``, whose catch-all returns the
   default on any failure and would turn "could not read" into "nothing denied".
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any, Dict, FrozenSet, Optional
+import threading
+import time
+from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -81,28 +93,132 @@ def _read_denied_actions() -> Optional[str]:
     return read_system_setting(SettingCategory.COMPOSIO.value, KEY_DENIED_ACTIONS)
 
 
-def composio_action_denial(slug: Any) -> Optional[str]:
-    """``"This action is blocked in Automatos: <reason>"`` when ``slug`` may not
-    run, else ``None``. Reads the setting fresh on every call and never raises:
-    a read that cannot complete refuses the action."""
-    try:
-        raw = _read_denied_actions()
-    except Exception:  # noqa: BLE001 — any read that did not complete fails closed
-        logger.error(
-            "[ComposioDenyList] composio.denied_actions could not be read; refusing %s", slug, exc_info=True,
-        )
-        return BLOCKED_PREFIX + READ_FAILED_REASON
-    try:
-        denied = parse_denied_actions(raw)
-    except ValueError:
-        logger.error("[ComposioDenyList] composio.denied_actions is unreadable (%r); refusing %s", raw, slug)
-        return BLOCKED_PREFIX + UNREADABLE_REASON
+# The last COMPLETED read: (outcome, expires_at on the monotonic clock). The outcome
+# is the denied slugs, or _UNREADABLE when the stored value is not a JSON list. A
+# failed read is never cached: with nothing cached, the next call reads again.
+_UNREADABLE = object()
+_MISSING = object()
+_cache: Optional[Tuple[object, float]] = None
+_generation = 0  # bumped by reset_cache(), so a refresh that started before it never lands after it
+_refresh_lock = threading.Lock()
 
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _ttl_seconds() -> float:
+    from config import config
+
+    return float(config.COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS)
+
+
+def reset_cache() -> None:
+    """Forget the cached list, so the next check reads it again (tests)."""
+    global _cache, _generation
+    _generation += 1
+    _cache = None
+
+
+def _outcome_of(raw: Optional[str]) -> object:
+    try:
+        return parse_denied_actions(raw)
+    except ValueError:
+        logger.error(
+            "[ComposioDenyList] composio.denied_actions is unreadable (%r); every Composio action is refused until it is fixed",
+            raw,
+        )
+        return _UNREADABLE
+
+
+def _refresh() -> Optional[object]:
+    """Read the list once (single-flight) and cache the outcome.
+
+    Returns the outcome. When the read cannot complete, the cached outcome is
+    kept (WARNING) and returned; with nothing cached, returns ``None`` (ERROR),
+    which refuses every action. Blocks the calling thread, so it runs off the
+    event loop: in a worker thread, a background thread, or synchronous code.
+    """
+    global _cache
+    with _refresh_lock:
+        generation = _generation
+        cached = _cache
+        now = _now()
+        if cached is not None and now < cached[1]:
+            return cached[0]  # another thread refreshed while this one waited
+        try:
+            raw = _read_denied_actions()
+        except Exception:  # noqa: BLE001 — any read that did not complete
+            if cached is not None:
+                logger.warning(
+                    "[ComposioDenyList] composio.denied_actions could not be refreshed; keeping the cached list",
+                    exc_info=True,
+                )
+                if generation == _generation:
+                    _cache = (cached[0], now + _ttl_seconds())  # retry after one TTL, not on every call
+                return cached[0]
+            logger.error(
+                "[ComposioDenyList] composio.denied_actions could not be read and nothing is cached; "
+                "refusing Composio actions until it can be",
+                exc_info=True,
+            )
+            return None
+        outcome = _outcome_of(raw)
+        if generation == _generation:
+            _cache = (outcome, now + _ttl_seconds())
+        return outcome
+
+
+def _start_background_refresh() -> None:
+    """Refresh in a daemon thread, at most one at a time; never blocks the caller."""
+    if _refresh_lock.locked():
+        return
+    threading.Thread(target=_refresh, name="composio-deny-list-refresh", daemon=True).start()
+
+
+def _cached_outcome() -> object:
+    """The cached outcome without a database read. Fresh → it. Stale → it, with a
+    background refresh started. Cold → ``_MISSING``."""
+    cached = _cache
+    if cached is None:
+        return _MISSING
+    if _now() >= cached[1]:
+        _start_background_refresh()
+        cached = _cache or cached  # an inline refresh (tests) has already landed
+    return cached[0]
+
+
+def _decide(outcome: Optional[object], slug: Any) -> Optional[str]:
+    if outcome is None:
+        return BLOCKED_PREFIX + READ_FAILED_REASON
+    if outcome is _UNREADABLE:
+        return BLOCKED_PREFIX + UNREADABLE_REASON
     normalized = str(slug or "").strip().upper()
-    if normalized and normalized in denied:
+    if normalized and normalized in outcome:
         logger.warning("[ComposioDenyList] refused %s", normalized)
         return BLOCKED_PREFIX + DENIED_REASON.format(slug=normalized)
     return None
+
+
+def composio_action_denial(slug: Any) -> Optional[str]:
+    """``"This action is blocked in Automatos: <reason>"`` when ``slug`` may not
+    run, else ``None``. Never raises. A warm cache answers from memory; only a
+    cold cache reads, in the calling thread — so code on the event loop calls
+    :func:`composio_action_denial_async` instead."""
+    outcome = _cached_outcome()
+    if outcome is _MISSING:
+        outcome = _refresh()
+    return _decide(outcome, slug)
+
+
+async def composio_action_denial_async(slug: Any) -> Optional[str]:
+    """The same decision as :func:`composio_action_denial`, for code on the event
+    loop: a warm cache answers from memory, and a cold cache is read in a worker
+    thread (``asyncio.to_thread``), never on the loop."""
+    outcome = _cached_outcome()
+    if outcome is _MISSING:
+        outcome = await asyncio.to_thread(_refresh)
+    return _decide(outcome, slug)
 
 
 def denied_result(denial: str) -> Dict[str, Any]:

@@ -380,9 +380,9 @@ class ComposioAPIService:
             Action execution result
         """
         # PRD-251 S0.6 (D16): the platform deny list, before any network call.
-        from core.composio.deny_list import composio_action_denial, denied_result
+        from core.composio.deny_list import composio_action_denial_async, denied_result
 
-        denial = composio_action_denial(action_name)
+        denial = await composio_action_denial_async(action_name)
         if denial:
             return denied_result(denial)
 

@@ -679,14 +679,14 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
     import httpx
 
     from core.composio.client import get_composio_client
-    from core.composio.deny_list import composio_action_denial
+    from core.composio.deny_list import composio_action_denial_async
     from core.composio.entity_manager import EntityManager
     from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
 
     # PRD-251 S0.6 (D16): the platform deny list, before the workspace, the
     # Composio entity or the bulk query is touched.
-    denial = composio_action_denial(SHOPIFY_BULK_QUERY_ACTION)
+    denial = await composio_action_denial_async(SHOPIFY_BULK_QUERY_ACTION)
     if denial:
         raise HTTPException(status_code=403, detail=denial)
 
@@ -957,14 +957,14 @@ async def _orders_sync_impl(
     import networkx as nx
 
     from core.composio.client import get_composio_client
-    from core.composio.deny_list import composio_action_denial
+    from core.composio.deny_list import composio_action_denial_async
     from core.composio.entity_manager import EntityManager
     from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
 
     # PRD-251 S0.6 (D16): the platform deny list, before the workspace, the
     # Composio entity or the bulk query is touched.
-    denial = composio_action_denial(SHOPIFY_BULK_QUERY_ACTION)
+    denial = await composio_action_denial_async(SHOPIFY_BULK_QUERY_ACTION)
     if denial:
         raise HTTPException(status_code=403, detail=denial)
 

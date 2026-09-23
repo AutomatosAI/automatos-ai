@@ -279,14 +279,14 @@ async def test_linkedin_upload_init(ctx: RequestContext = Depends(get_request_co
     Verifies the CALLER'S workspace credential + OAuth token + API version work
     (PRD-251 S0.4: never another workspace's credential)."""
     import httpx as _httpx
-    from core.composio.deny_list import composio_action_denial
+    from core.composio.deny_list import composio_action_denial_async
     from core.composio.linkedin_image_workaround import (
         IMAGE_POST_ACTION, _get_access_token, _initialize_image_upload, _load_linkedin_credentials,
     )
 
     # PRD-251 S0.6 (D16): a deny-listed LinkedIn image post is refused here too,
     # before the credential store or LinkedIn is touched.
-    denial = composio_action_denial(IMAGE_POST_ACTION)
+    denial = await composio_action_denial_async(IMAGE_POST_ACTION)
     if denial:
         raise HTTPException(status_code=403, detail=denial)
 
