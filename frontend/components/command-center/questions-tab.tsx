@@ -29,6 +29,7 @@ import {
   useDenyApproval,
 } from '@/hooks/use-approval-grants'
 import type { ApprovalGrant } from '@/lib/api-client'
+import { agentLabel, ticketLabel } from '@/lib/grant-owner'
 
 const DISMISS_HINT = 'Answer "use your judgment" to unblock instead.'
 
@@ -38,7 +39,12 @@ function subjectHref(q: ApprovalGrant): string | null {
 }
 
 function askerLabel(q: ApprovalGrant): string {
-  return q.asked_by_agent_id ? `Agent #${q.asked_by_agent_id}` : 'An agent'
+  return agentLabel(q.owner, q.asked_by_agent_id)
+}
+
+function subjectLabel(q: ApprovalGrant): string {
+  // F091-E1: the ticket by number and title, not "board_task:612"
+  return ticketLabel(q.owner) ?? `${q.subject_type}:${q.subject_id}`
 }
 
 function QuestionCard({ q }: { q: ApprovalGrant }) {
@@ -90,11 +96,11 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
           <span aria-hidden>·</span>
           {href ? (
             <Link href={href as any} className="truncate underline-offset-2 hover:underline">
-              {q.subject_type}:{q.subject_id}
+              {subjectLabel(q)}
             </Link>
           ) : (
             <span className="truncate">
-              {q.subject_type}:{q.subject_id}
+              {subjectLabel(q)}
             </span>
           )}
         </div>

@@ -121,7 +121,11 @@ async def list_grants(
     if kind:
         q = q.filter(ApprovalGrant.kind == kind)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [_grant_payload(db, g) for g in rows]}
+    # F091-E1: every card says whose job it is — the agent and the ticket.
+    from services.grant_owners import grant_owners
+
+    owners = grant_owners(db, ctx.workspace_id, rows)
+    return {"grants": [{**_grant_payload(db, g), "owner": owners.get(g.id)} for g in rows]}
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:

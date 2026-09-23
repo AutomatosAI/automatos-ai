@@ -166,6 +166,12 @@ export interface QuestionCascade {
   tasks: QuestionCascadeTask[]
 }
 
+// F091-E1: whose job a card belongs to — the agent and the ticket.
+export interface GrantOwner {
+  agent?: { id: number; name?: string | null } | null
+  ticket?: { id: number; title?: string | null } | null
+}
+
 export interface ApprovalGrant {
   id: number
   workspace_id: string | null
@@ -194,6 +200,8 @@ export interface ApprovalGrant {
   answered_by?: string | null
   answered_at?: string | null
   asked_by_agent_id?: number | null
+  /** F091-E1: the agent and the ticket this card belongs to (list rows). */
+  owner?: GrantOwner | null
   channel_refs?: Record<string, unknown>
   /** Downstream tasks blocked behind a question (question rows only). */
   cascade?: QuestionCascade
