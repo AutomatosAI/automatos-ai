@@ -219,6 +219,23 @@ class AgentFactory:
         self.active_agents: Dict[int, AgentRuntime] = {}
         self.logger = logging.getLogger(__name__)
 
+    async def _call_model(self, agent_runtime: "AgentRuntime", messages: List[Dict[str, Any]],
+                          tools: Optional[List[Dict[str, Any]]] = None):
+        """F105-B: every model call of an agent run goes through here. A
+        transaction that has only read ends first, so the run holds no pool
+        connection while the model thinks (night 3: agent runs sat "idle in
+        transaction" 55–57 s). One that wrote is kept. Dial:
+        chatbot.release_db_between_model_calls, read once per factory."""
+        from core.database.read_release import release_if_read_only
+
+        if getattr(self, "_release_db_dial", None) is None:
+            from config import config as _config
+
+            self._release_db_dial = _config.CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS
+        if self._release_db_dial:
+            release_if_read_only(self.db_session)
+        return await agent_runtime.llm_manager.generate_response(messages, tools=tools)
+
     # ==================================================================
     # LLM Config Resolution
     # ==================================================================
@@ -1366,7 +1383,7 @@ class AgentFactory:
                     # PRD-201 S5: mark the Anthropic call as a headless run so the
                     # client seam emits context-editing + the memory tool.
                     with headless_run():
-                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        response = await self._call_model(agent_runtime, messages, tool_schemas)
                     execution_time = time.time() - start_time
 
                     # --- Converged tool loop (PRD-142 W3-S4 / G6): same executor as chat ---
@@ -1376,7 +1393,7 @@ class AgentFactory:
                         # PRD-201 S5: keep the headless scope across the tool loop's
                         # re-invocations so every iteration emits context-editing.
                         with headless_run():
-                            return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
+                            return await self._call_model(agent_runtime, msgs, tls)
 
                     # PRD-178 S1 (F020): thread the calling task's field context
                     # so PlatformActionExecutor binds field tools to THIS run's
@@ -1528,7 +1545,7 @@ class AgentFactory:
                             "role": "user",
                             "content": "Your response was truncated. Continue exactly where you left off — do not repeat any content.",
                         })
-                        continuation_response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        continuation_response = await self._call_model(agent_runtime, messages, tool_schemas)
                         if continuation_response and continuation_response.content:
                             response.content += continuation_response.content
                             if continuation_response.usage:
