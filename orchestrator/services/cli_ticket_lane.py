@@ -436,6 +436,25 @@ def _ticket_is_alive(task: Any) -> bool:
     return lease > datetime.now(timezone.utc)
 
 
+def is_database_unreachable(exc: BaseException) -> bool:
+    """F114: the database dropped the connection or is restarting (crash recovery,
+    "server closed the connection unexpectedly") — not a fault in the query."""
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+
+    if isinstance(exc, (OperationalError, InterfaceError)):
+        return True
+    return isinstance(exc, DBAPIError) and bool(getattr(exc, "connection_invalidated", False))
+
+
+def _db_outage_grace_s() -> float:
+    try:
+        from config import config
+
+        return float(getattr(config, "CLI_LANE_DB_OUTAGE_GRACE_SECONDS", 180))
+    except Exception:  # noqa: BLE001
+        return 180.0
+
+
 async def run_cli_ticket_and_wait(
     db: Session,
     *,
@@ -486,9 +505,32 @@ async def run_cli_ticket_and_wait(
     poll_s = max(0.5, float(poll_s))
     started = time.monotonic()
     extended = False
+    outage_since: Optional[float] = None
     while True:
-        db.expire_all()  # see the host's writes, not this session's cache
-        current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+        try:
+            db.expire_all()  # see the host's writes, not this session's cache
+            current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+        except Exception as exc:  # noqa: BLE001 — only a lost database is waited out
+            if not is_database_unreachable(exc):
+                raise
+            # F114 (run 4): Postgres crash-restarted mid-wait and every run waiting
+            # on a session died in the same second while its ticket worked on.
+            # The session is not the database: roll back, wait, poll again.
+            outage_since = outage_since if outage_since is not None else time.monotonic()
+            if time.monotonic() - outage_since > _db_outage_grace_s():
+                raise
+            logger.warning("[CliTicketLane] database unreachable while waiting on ticket #%s — polling again: %s",
+                           task_id, str(exc).splitlines()[0][:160])
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001 — the pool replaces the dead connection
+                pass
+            await asyncio.sleep(min(poll_s, 5.0))
+            continue
+        if outage_since is not None:
+            logger.info("[CliTicketLane] database back after %d s — still waiting on ticket #%s",
+                        int(time.monotonic() - outage_since), task_id)
+            outage_since = None
         if current is None:
             return {"status": "error", "error": f"ticket #{task_id} disappeared while the session ran",
                     "runtime": RUNTIME_CLI, "task_id": task_id}

@@ -759,6 +759,9 @@ class Config:
     # PRD-239 S3: how often a playbook step or mission task re-reads the ticket it
     # filed for a session agent while it waits for the session to end.
     CLI_LANE_POLL_SECONDS: int = int(os.getenv("CLI_LANE_POLL_SECONDS", "5"))
+    # F114 (run 4): how long that wait keeps polling through a database outage
+    # (Postgres crash-restarted mid-wait; ~10 s in recovery) before giving up.
+    CLI_LANE_DB_OUTAGE_GRACE_SECONDS: int = int(os.getenv("CLI_LANE_DB_OUTAGE_GRACE_SECONDS", "180"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket
