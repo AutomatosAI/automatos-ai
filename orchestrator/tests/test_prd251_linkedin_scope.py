@@ -23,6 +23,13 @@ LinkedIn (``httpx.MockTransport`` records every request):
   token is never paired with its replacement. The change is made through a
   separate connection, with no in-process hook: the loader re-reads the
   credential and calls clear_workspace_cache.
+* P251-RVW-7: an image URL goes through the platform's one SSRF decision
+  (``core/security/web_access.py``, its resolver seam stubbed here). A URL
+  that resolves into a blocked range (127.1, 0x7f000001, localhost, 10.x,
+  100.64.x) is refused before any request is sent, and the result carries the
+  reason. A public URL is fetched from the address that was checked, whatever
+  WEB_ACCESS is set to, and a redirect is not followed. ``_is_safe_url`` is
+  gone.
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import asyncio
 import json
 import os
 import re
+import socket
 import sys
 import time
 import uuid
@@ -58,6 +66,7 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 import core.composio.linkedin_image_workaround as lw  # noqa: E402
 import core.credentials.service as credential_service  # noqa: E402
 import core.database.database as database_mod  # noqa: E402
+import core.security.web_access as web_access  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.models.credentials import Credential, CredentialType  # noqa: E402
 from core.models.system_settings import SystemSetting  # noqa: E402
@@ -86,7 +95,28 @@ CREDENTIAL_ROWS = [
     (4, WS_B, 2, True),
     (5, WS_INACTIVE_ONLY, 1, False),
 ]
-IMAGE_POST = {"text": "Three weeks to Web Summit", "images": ["https://cdn.example.com/countdown.png"]}
+CDN = "cdn.example.com"
+CDN_IP = "93.184.216.34"
+IMAGE_POST = {"text": "Three weeks to Web Summit", "images": [f"https://{CDN}/countdown.png"]}
+
+# What the system resolver answers for each image host. The resolver seam
+# (web_access._getaddrinfo) is stubbed: no DNS in a unit test. The two numeric
+# shorthands resolve to loopback, as the system resolver does.
+RESOLVES_TO = {
+    CDN: CDN_IP,
+    "127.1": "127.0.0.1",
+    "0x7f000001": "127.0.0.1",
+    "localhost": "127.0.0.1",
+    "assets.internal.test": "10.0.0.5",
+    "edge.cgnat.test": "100.64.0.1",
+}
+
+
+def _resolve(host, port, proto=None):
+    ip = RESOLVES_TO.get(host)
+    if ip is None:
+        raise socket.gaierror(socket.EAI_NONAME, f"unknown host {host}")
+    return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
 
 
 # ---------------------------------------------------------------------------
@@ -121,14 +151,19 @@ class _FakeStore:
 
 
 class _LinkedIn:
-    """A mocked api.linkedin.com (plus the image CDN) that records every request."""
+    """A mocked api.linkedin.com (plus the image CDN) that records every request.
+
+    An image fetch connects to the address web_access checked, so the CDN is
+    recognised by its Host header, not by the URL's host (the pinned IP)."""
 
     def __init__(self):
         self.requests = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if request.url.host == "cdn.example.com":
+        if request.headers.get("host") == CDN:
+            if request.url.path == "/moved.png":
+                return httpx.Response(302, headers={"location": "http://assets.internal.test/secret.png"})
             return httpx.Response(200, content=b"\x89PNG-bytes", headers={"content-type": "image/png"})
         if "initializeUpload" in str(request.url):
             owner = json.loads(request.content)["initializeUploadRequest"]["owner"]
@@ -143,7 +178,7 @@ class _LinkedIn:
         return httpx.Response(404)
 
     def linkedin(self):
-        return [r for r in self.requests if r.url.host != "cdn.example.com"]
+        return [r for r in self.requests if r.headers.get("host") != CDN]
 
 
 _CACHES = (lw._creds_by_workspace, lw._token_by_workspace, lw._lock_by_workspace, lw._version_by_workspace)
@@ -182,6 +217,8 @@ def env(monkeypatch):
 
     monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
     monkeypatch.setattr(credential_service, "CredentialStore", _FakeStore)
+    monkeypatch.setattr(web_access, "_getaddrinfo", _resolve)
+    monkeypatch.setattr(web_access.config, "WEB_ACCESS_DENY", ())
     for cache in _CACHES:
         cache.clear()
 
@@ -475,3 +512,77 @@ def test_the_loader_calls_clear_workspace_cache():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "clear_workspace_cache" in called
+
+
+# ---------------------------------------------------------------------------
+# P251-RVW-7: an image URL goes through the one SSRF decision
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url, host",
+    [
+        ("http://127.1/", "127.1"),
+        ("http://0x7f000001/", "0x7f000001"),
+        ("http://localhost/", "localhost"),
+        ("http://assets.internal.test/countdown.png", "assets.internal.test"),  # → 10.0.0.5
+        ("http://edge.cgnat.test/countdown.png", "edge.cgnat.test"),  # → 100.64.0.1
+    ],
+)
+def test_an_image_url_into_a_blocked_range_is_refused_before_any_request(env, url, host):
+    result = _post_as(WS_A, {**IMAGE_POST, "images": [url]})
+
+    assert result["success"] is False
+    assert f"'{host}' is not reachable from agents: resolves into a blocked range" in result["error"]
+    assert env.linkedin.requests == []
+
+
+def test_a_refused_url_beside_a_public_one_is_reported_and_never_fetched(env):
+    params = {**IMAGE_POST, "images": ["http://assets.internal.test/secret.png", *IMAGE_POST["images"]]}
+
+    result = _post_as(WS_A, params)
+
+    assert result["success"] is True, result
+    assert (result["data"]["images_uploaded"], result["data"]["images_failed"]) == (1, 1)
+    failure = result["data"]["failures"][0]
+    assert failure["image"] == "image[0]"
+    assert "'assets.internal.test' is not reachable from agents" in failure["reason"]
+    assert all(r.headers.get("host") != "assets.internal.test" for r in env.linkedin.requests)
+    assert all(r.url.host != RESOLVES_TO["assets.internal.test"] for r in env.linkedin.requests)
+
+
+def test_a_public_image_url_is_fetched_from_the_address_that_was_checked(env):
+    assert _post_as(WS_A)["success"] is True
+
+    fetched = [r for r in env.linkedin.requests if r.headers.get("host") == CDN]
+    assert len(fetched) == 1
+    assert fetched[0].url.host == CDN_IP
+    assert fetched[0].extensions["sni_hostname"] == CDN
+
+
+@pytest.mark.parametrize("web_access_on", [True, False])
+def test_a_public_image_url_posts_whatever_web_access_is_set_to(env, monkeypatch, web_access_on):
+    monkeypatch.setattr(web_access.config, "WEB_ACCESS", web_access_on)
+
+    result = _post_as(WS_A)
+
+    assert result["success"] is True, result
+    assert [b["author"] for b in _bodies(env.linkedin.linkedin(), "/rest/posts")] == [ORG_A]
+
+
+def test_a_redirect_from_an_image_url_is_not_followed(env):
+    result = _post_as(WS_A, {**IMAGE_POST, "images": [f"https://{CDN}/moved.png"]})
+
+    assert result["success"] is False
+    assert "HTTP 302" in result["error"]
+    assert [r.url.path for r in env.linkedin.requests] == ["/moved.png"]
+
+
+def test_the_url_fetch_uses_the_one_ssrf_decision_and_no_copy_of_it():
+    source = Path(lw.__file__).read_text(encoding="utf-8")
+    assert not hasattr(lw, "_is_safe_url")
+    assert "ip_address" not in source and "is_global" not in source
+    assert lw.resolve_outbound_async is web_access.resolve_outbound_async
+    assert lw.build_pinned_request is web_access.build_pinned_request
+    assert re.search(r"resolve_outbound_async\(\s*url,\s*enforce_switch=False\s*\)", source)
+    assert re.search(r"build_pinned_request\(\s*http,\s*\"GET\",\s*url,\s*target\s*\)", source)

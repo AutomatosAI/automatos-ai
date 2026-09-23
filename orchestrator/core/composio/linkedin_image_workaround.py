@@ -24,6 +24,16 @@ database and not pushed by an in-process hook. A deactivated or deleted
 credential stops the next post before any LinkedIn call, and a replaced or
 edited one is used from the next post on.
 
+An image URL is an agent's tool argument, so fetching it goes through the
+platform's one SSRF decision, ``core/security/web_access.py`` (P251-RVW-7).
+The host is checked against the operator's denylist, and every address it
+resolves to against the blocked ranges. The request then connects to the
+address that was checked, so a DNS answer that changes in between cannot
+redirect it. A refused URL sends no request, and its reason reaches the
+result. The ``WEB_ACCESS`` switch does not apply here
+(``enforce_switch=False``, as for the heartbeat webhook): posting an image the
+workspace asked for is not agent web browsing. Redirects are not followed.
+
 Text-only posts still go through Composio. This module only activates when
 the agent passes image file references (media_urls, images, etc.).
 
@@ -44,13 +54,12 @@ import base64
 import hashlib
 import logging
 import time
-from ipaddress import ip_address
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 
+from core.security.web_access import build_pinned_request, resolve_outbound_async
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -298,61 +307,54 @@ def _extract_author(params: Dict[str, Any], creds: Dict[str, Any]) -> Optional[s
 
 
 # ---------------------------------------------------------------------------
-# URL safety
+# Image download (a URL, or a workspace file)
 # ---------------------------------------------------------------------------
 
-def _is_safe_url(url: str) -> bool:
-    """Reject URLs pointing to private/link-local/loopback addresses."""
-    try:
-        parsed = urlparse(url)
-        host = parsed.hostname or ""
-        if not host:
-            return False
-        addr = ip_address(host)
-        return addr.is_global
-    except ValueError:
-        return True
+async def _fetch_image_url(url: str, http: httpx.AsyncClient) -> Tuple[Optional[bytes], Optional[str]]:
+    """Image bytes from ``url``, or ``(None, why not)``. The URL is checked and
+    pinned by ``core/security/web_access.py``: a refused URL sends no request."""
+    target = await resolve_outbound_async(url, enforce_switch=False)
+    if not target.ok:
+        logger.warning("[LinkedIn] Refused image URL %s: %s", url[:80], target.reason)
+        return None, f"refused: {target.reason}"
+    resp = await http.send(build_pinned_request(http, "GET", url, target))
+    if resp.status_code != 200:
+        logger.warning("[LinkedIn] Failed to fetch URL %s: %s", url[:80], resp.status_code)
+        return None, f"the URL answered HTTP {resp.status_code}"
+    ct = resp.headers.get("content-type", "")
+    if ct and not ct.startswith("image/"):
+        logger.warning("[LinkedIn] URL %s returned non-image content-type: %s", url[:80], ct)
+        return None, f"the URL is not an image ({ct})"
+    return resp.content, None
 
-
-# ---------------------------------------------------------------------------
-# Image download from workspace
-# ---------------------------------------------------------------------------
 
 async def _download_image(
     img_path: str,
     ws_client: WorkspaceClient,
     http: httpx.AsyncClient,
-) -> Optional[bytes]:
-    """Download image bytes from a URL or workspace path."""
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Image bytes from a URL or a workspace path, or ``(None, why not)``."""
     if img_path.startswith(("http://", "https://")):
-        if not _is_safe_url(img_path):
-            logger.warning("[LinkedIn] Blocked fetch to non-public URL: %s", img_path[:80])
-            return None
-        resp = await http.get(img_path)
-        if resp.status_code != 200:
-            logger.warning("[LinkedIn] Failed to fetch URL %s: %s", img_path[:80], resp.status_code)
-            return None
-        ct = resp.headers.get("content-type", "")
-        if ct and not ct.startswith("image/"):
-            logger.warning("[LinkedIn] URL %s returned non-image content-type: %s", img_path[:80], ct)
-            return None
-        return resp.content
+        return await _fetch_image_url(img_path, http)
 
     dl = await ws_client.download_file(img_path)
     if not dl.get("success"):
         logger.info("[LinkedIn] download_file failed, trying read_file: %s", img_path)
         dl = await ws_client.read_file(img_path)
     if not dl.get("success"):
+        # The worker's error stays in the server log, not the agent's result.
         logger.warning("[LinkedIn] All download methods failed for %s: %s", img_path, dl.get("error"))
-        return None
+        return None, "could not read it from the workspace"
 
     content = dl.get("content") or dl.get("data")
     if isinstance(content, str):
         try:
-            return base64.b64decode(content)
+            return base64.b64decode(content), None
         except Exception:
-            return content.encode("utf-8")
-    return content or None
+            return content.encode("utf-8"), None
+    if not content:
+        return None, "the workspace file is empty"
+    return content, None
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +484,9 @@ async def execute_linkedin_image_post(
 
     ws_client = WorkspaceClient(workspace_id)
     image_urns: List[str] = []
-    failed: List[str] = []
+    # One {"image", "reason"} per image that was not uploaded, so the caller
+    # learns why (a refused URL names its refusal).
+    failed: List[Dict[str, str]] = []
 
     async with httpx.AsyncClient(timeout=60) as http:
         try:
@@ -493,35 +497,37 @@ async def execute_linkedin_image_post(
         for i, img_path in enumerate(image_paths):
             label = f"image[{i}]"
 
-            image_bytes = await _download_image(img_path, ws_client, http)
+            image_bytes, why_not = await _download_image(img_path, ws_client, http)
             if not image_bytes:
-                failed.append(img_path)
+                failed.append({"image": label, "reason": why_not or "no image data"})
                 continue
 
             if len(image_bytes) > MAX_IMAGE_BYTES:
                 logger.warning("[LinkedIn] %s is %d bytes, exceeds 5MB limit", label, len(image_bytes))
-                failed.append(img_path)
+                too_big = f"{len(image_bytes)} bytes is over the {MAX_IMAGE_BYTES}-byte limit"
+                failed.append({"image": label, "reason": too_big})
                 continue
 
             logger.info("[LinkedIn] Initializing upload for %s (%d bytes)", label, len(image_bytes))
             upload_url, image_urn = await _initialize_image_upload(http, token, author)
             if not upload_url or not image_urn:
-                failed.append(img_path)
+                failed.append({"image": label, "reason": "LinkedIn did not start the upload"})
                 continue
 
             logger.info("[LinkedIn] Uploading %s -> %s", label, image_urn)
             ok = await _upload_image_bytes(http, token, upload_url, image_bytes)
             if not ok:
-                failed.append(img_path)
+                failed.append({"image": label, "reason": "LinkedIn refused the upload"})
                 continue
 
             image_urns.append(image_urn)
 
         if not image_urns:
+            reasons = "; ".join(f"{f['image']}: {f['reason']}" for f in failed)
             return {
                 "success": False,
                 "data": None,
-                "error": f"All image uploads failed ({len(failed)} failures)",
+                "error": f"All image uploads failed ({len(failed)} failures): {reasons}",
             }
 
         logger.info("[LinkedIn] Creating post with %d images", len(image_urns))
@@ -536,6 +542,7 @@ async def execute_linkedin_image_post(
                     "post_id": post_id,
                     "images_uploaded": len(image_urns),
                     "images_failed": len(failed),
+                    "failures": failed,
                     "image_urns": image_urns,
                 },
                 "error": None,
