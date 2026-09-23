@@ -14,6 +14,7 @@ Executor methods are extracted into separate modules under
 modules/tools/execution/exec_*.py for maintainability.
 """
 
+import json
 import logging
 import time as _time
 from typing import Dict, Any, List, Optional, Tuple
@@ -76,6 +77,14 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
     "query": ("q", "search", "question", "prompt"),
     "description": ("desc", "summary", "details"),
+    # F027-C (night 3): the playbook-step actions. add_playbook_step's prompt
+    # arrived under another name 5 times; update_playbook_step's playbook and
+    # step 3 times. ("order" is NOT an alias of step_index: it is update's own
+    # parameter — the step's new position.)
+    "prompt_template": ("prompt", "template", "instructions", "instruction", "step_prompt", "prompt_text",
+                        "text", "content"),
+    "playbook_id": ("recipe_id", "workflow_id", "playbookId"),
+    "step_index": ("step", "index", "step_number", "step_idx", "stepIndex", "step_position"),
 }
 
 # A single dict argument named after the thing itself ({"report": {...}}) is a
@@ -109,6 +118,35 @@ def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> 
                 filled[name] = value
                 break
     return filled
+
+
+def _placeholder(prop: Dict[str, Any]) -> str:
+    """How a value of this schema type is written in the example call."""
+    if prop.get("enum"):
+        return json.dumps("<one of: " + " | ".join(str(v) for v in prop["enum"]) + ">")
+    kind = prop.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), "string")
+    return {"string": '"<string>"', "integer": "<integer>", "number": "<number>", "boolean": "<true|false>",
+            "array": "[...]", "object": "{...}"}.get(kind, "<value>")
+
+
+def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List[str], sent: Any) -> str:
+    """F027-C (night 3): the call to make, spelled out. 69 of the night's 98
+    failed platform_execute calls were "Missing required params" — models
+    (gemini-2.5-flash: 10 output tokens each) sent params={} and retried the
+    same after a hint. The error now names the exact call, every required key
+    with its type, from the action's own schema."""
+    props = schema.get("properties") or {}
+    example = ", ".join(f'"{key}": {_placeholder(props.get(key) or {})}' for key in (schema.get("required") or []))
+    lines = [
+        f"Missing required params for '{action_name}': {missing}. Pass them inside params={{...}}.",
+        f'Call it exactly like this: {{"action": "{action_name}", "params": {{{example}}}}}',
+    ]
+    if not sent:
+        lines.append("Your params was empty — the values go inside it.")
+    lines += [f"  {p}: {props[p].get('description', props[p].get('type', '?'))}" for p in missing if p in props]
+    return "\n".join(lines)
 
 
 class UnifiedToolExecutor:
@@ -793,19 +831,10 @@ class UnifiedToolExecutor:
                 action_params = _fill_required_from_aliases(action_params, required)
                 missing = [p for p in required if p not in action_params]
                 if missing:
-                    # Include param descriptions so the LLM can self-correct
-                    props = action_def.parameters.get("properties", {})
-                    hints = [
-                        f"  {p}: {props[p].get('description', props[p].get('type', '?'))}"
-                        for p in missing if p in props
-                    ]
-                    hint_str = "\n".join(hints)
+                    # F027-C: the exact call, every required key with its type.
                     result = {
                         "success": False,
-                        "error": (
-                            f"Missing required params for '{action_name}': {missing}. "
-                            f"Pass them inside params={{...}}.\n{hint_str}"
-                        ),
+                        "error": missing_params_error(action_name, action_def.parameters, missing, action_params),
                         "tool": tool_name,
                     }
                     return result
