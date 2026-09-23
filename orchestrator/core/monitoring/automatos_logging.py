@@ -364,6 +364,14 @@ def setup_logging(
     root = logging.getLogger()
     root.setLevel(level)
 
+    # httpx logs every request line at INFO, URL included, and some URLs carry a
+    # secret in the path: python-telegram-bot polls
+    # https://api.telegram.org/bot<token>/getUpdates. After #783 enabled the
+    # Telegram driver, the bot token reached the console and log-relay (Loki) on
+    # every poll (prod, 23 Sep). The request lines are noise; warnings still show.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
+
     # Console handler (always present)
     if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
         console = logging.StreamHandler()
