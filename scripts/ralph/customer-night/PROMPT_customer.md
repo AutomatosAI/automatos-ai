@@ -98,4 +98,6 @@ The sections, in this order:
 7. **Would I pay for this?** — yes/no and three reasons, as the owner.
 8. **Fix first** — ranked, five items at most.
 
+`night.status` in your night folder belongs to the runner that starts you — read it if you like, never write to it (other processes act on its lines).
+
 When the stop time has passed and the report is written, end your reply with the single line `NIGHT_COMPLETE`. Otherwise just stop when you have used this iteration well; the next one continues from the diary.
