@@ -149,6 +149,15 @@ def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List
     return "\n".join(lines)
 
 
+def unknown_action_error(action_name: str, registry: Any) -> str:
+    """F121: the actions an unknown-action error suggests are ones that can
+    run here — never one F078 leaves out of every surface."""
+    from modules.tools.discovery.action_registry import action_is_available
+
+    runnable = [a.name for a in registry.get_all() if action_is_available(a)]
+    return f"Unknown platform action: '{action_name}'. Use one of: {runnable[:20]}..."
+
+
 class UnifiedToolExecutor:
     """
     Unified tool executor that routes tool calls to the appropriate executor.
@@ -811,10 +820,9 @@ class UnifiedToolExecutor:
                 registry = get_action_registry()
                 action_def = registry.get(action_name)
                 if not action_def:
-                    available = [a.name for a in registry.get_all()]
                     result = {
                         "success": False,
-                        "error": f"Unknown platform action: '{action_name}'. Use one of: {available[:20]}...",
+                        "error": unknown_action_error(action_name, registry),
                         "tool": tool_name,
                     }
                     return result
@@ -1041,9 +1049,10 @@ class UnifiedToolExecutor:
         names = set(self.tool_routes)
         try:
             names |= {t.name for t in self.tool_registry.get_all_tools()}
-            from modules.tools.discovery.action_registry import get_action_registry
+            from modules.tools.discovery.action_registry import action_is_available, get_action_registry
 
-            names |= {a.name for a in get_action_registry().get_all()}
+            # F121: never suggest an action that cannot run here (F078)
+            names |= {a.name for a in get_action_registry().get_all() if action_is_available(a)}
         except Exception:  # noqa: BLE001 — the suggestions are a courtesy, never a failure
             logger.debug("unknown-tool suggestions unavailable", exc_info=True)
         near = difflib.get_close_matches(tool_name, sorted(names), n=3, cutoff=0.6)

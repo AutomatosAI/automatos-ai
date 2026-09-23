@@ -25,7 +25,11 @@ async def list_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     if category in ("all", "platform"):
         from modules.tools.discovery import get_action_registry
         registry = get_action_registry()
+        from modules.tools.discovery.action_registry import action_is_available
+
         for action in registry.get_all():
+            if not action_is_available(action):
+                continue  # F121: never list what cannot run here (F078)
             if search and search not in action.name.lower() and search not in (action.description or "").lower():
                 continue
             results.append({

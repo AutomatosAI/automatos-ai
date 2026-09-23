@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .action_registry import ActionDefinition, get_action_registry
+from .action_registry import ActionDefinition, action_is_available, get_action_registry
 
 logger = logging.getLogger(__name__)
 
@@ -202,14 +202,20 @@ class ActionSemanticIndex:
         exclude_admin: bool,
         exclude_promoted: bool,
         include_super_admin: bool = False,
+        available_only: bool = True,
     ) -> List[ActionDefinition]:
         # PRD-143: fail-closed — super_admin_only actions are eligible ONLY
         # when include_super_admin=True is passed explicitly.
+        # F121 (run 4): and only actions that can run here (F078's is_available)
+        # — the narrowed enum is built from this set, and an unconfigured
+        # Prometheus / Loki kept taking slots in it. The embedding build passes
+        # available_only=False so a tool configured later is ready to rank.
         return [
             a for a in self._registry.get_all()
             if not (exclude_admin and a.admin_only)
             and not (exclude_promoted and a.promoted)
             and (include_super_admin or not a.super_admin_only)
+            and (not available_only or action_is_available(a))
         ]
 
     def lexical_rank(
@@ -250,7 +256,8 @@ class ActionSemanticIndex:
                 self._indexed = False
             self._corpus_hash = current_hash
 
-            actions = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+            actions = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin,
+                                             available_only=False)
             missing = [a for a in actions if a.name not in self._action_embeddings]
             if not missing:
                 return

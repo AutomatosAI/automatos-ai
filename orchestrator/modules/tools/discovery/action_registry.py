@@ -448,6 +448,8 @@ class ActionRegistry:
         for action in actions:
             if action.name in blocked:
                 continue
+            if not action_is_available(action):
+                continue  # F121: the prompt never describes what cannot run here (F078)
             if action.super_admin_only and not include_super_admin:
                 continue
             if exclude_admin and action.admin_only:
