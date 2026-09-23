@@ -106,151 +106,110 @@ class SemanticChunker:
     
     def _chunk_by_semantic_similarity(self, text: str, document_id: str) -> List[SemanticChunk]:
         """Chunk text based on semantic similarity between sentences"""
-        
-        # Split into sentences first
+
         sentences = self._split_into_sentences(text)
         if not sentences:
             return []
-        
-        chunks = []
-        current_chunk_sentences = [sentences[0]]
-        current_start = 0
-        
-        for i in range(1, len(sentences)):
-            # Calculate semantic similarity with current chunk
-            chunk_text = ' '.join(current_chunk_sentences)
-            similarity = self._calculate_text_similarity(chunk_text, sentences[i])
-            
-            # Check if we should continue current chunk or start new one
-            current_size = len(chunk_text)
-            would_exceed_max = current_size + len(sentences[i]) > self.max_chunk_size
-            
-            if (similarity >= self.similarity_threshold and 
-                not would_exceed_max and 
-                current_size < self.target_chunk_size):
-                # Continue current chunk
-                current_chunk_sentences.append(sentences[i])
+
+        segments: List[List[str]] = []
+        current = [sentences[0]]
+        for sentence in sentences[1:]:
+            chunk_text = ' '.join(current)
+            similarity = self._calculate_text_similarity(chunk_text, sentence)
+            would_exceed_max = len(chunk_text) + len(sentence) > self.max_chunk_size
+            if (similarity >= self.similarity_threshold and
+                    not would_exceed_max and
+                    len(chunk_text) < self.target_chunk_size):
+                current.append(sentence)
             else:
-                # Finalize current chunk if it meets minimum size
-                if current_size >= self.min_chunk_size:
-                    chunk = self._create_chunk_from_sentences(
-                        current_chunk_sentences, current_start, document_id, len(chunks)
-                    )
-                    chunks.append(chunk)
-                
-                # Start new chunk
-                current_chunk_sentences = [sentences[i]]
-                current_start = self._find_sentence_position(text, sentences[i])
-        
-        # Handle final chunk
-        if current_chunk_sentences:
-            final_chunk = self._create_chunk_from_sentences(
-                current_chunk_sentences, current_start, document_id, len(chunks)
-            )
-            chunks.append(final_chunk)
-        
-        return self._add_overlap_and_relationships(chunks, text)
-    
+                segments.append(current)
+                current = [sentence]
+        segments.append(current)
+        return self._chunks_from_segments(segments, text, document_id)
+
     def _chunk_by_information_density(self, text: str, document_id: str) -> List[SemanticChunk]:
         """Chunk based on information density using entropy calculations"""
-        
+
         sentences = self._split_into_sentences(text)
         if not sentences:
             return []
-        
-        # Calculate entropy for each sentence
-        sentence_entropies = [
-            self.info_theory.calculate_entropy(sentence) 
-            for sentence in sentences
-        ]
-        
-        # Find optimal chunk boundaries based on entropy patterns
-        chunks = []
-        current_sentences = []
-        current_start = 0
-        target_density = np.mean(sentence_entropies)
-        
-        for i, (sentence, entropy) in enumerate(zip(sentences, sentence_entropies)):
-            current_sentences.append(sentence)
-            
-            # Calculate current chunk density
-            chunk_text = ' '.join(current_sentences)
+
+        target_density = np.mean([self.info_theory.calculate_entropy(s) for s in sentences])
+        segments: List[List[str]] = []
+        current: List[str] = []
+        for sentence in sentences:
+            current.append(sentence)
+            chunk_text = ' '.join(current)
             chunk_entropy = self.info_theory.calculate_entropy(chunk_text)
-            
-            # Decide whether to finalize chunk
-            should_finalize = (
-                len(chunk_text) >= self.target_chunk_size or
-                len(chunk_text) >= self.max_chunk_size or
-                (chunk_entropy > target_density * 1.2 and len(chunk_text) >= self.min_chunk_size) or
-                i == len(sentences) - 1
-            )
-            
-            if should_finalize and len(chunk_text) >= self.min_chunk_size:
-                chunk = self._create_chunk_from_sentences(
-                    current_sentences, current_start, document_id, len(chunks)
-                )
-                chunks.append(chunk)
-                
-                current_sentences = []
-                if i < len(sentences) - 1:
-                    current_start = self._find_sentence_position(text, sentences[i + 1])
-        
-        return self._add_overlap_and_relationships(chunks, text)
-    
+            if (len(chunk_text) >= self.target_chunk_size or
+                    len(chunk_text) >= self.max_chunk_size or
+                    (chunk_entropy > target_density * 1.2 and len(chunk_text) >= self.min_chunk_size)):
+                segments.append(current)
+                current = []
+        if current:
+            segments.append(current)
+        return self._chunks_from_segments(segments, text, document_id)
+
     def _chunk_by_topic_coherence(self, text: str, document_id: str) -> List[SemanticChunk]:
         """Chunk based on topic coherence using keyword analysis"""
-        
+
         sentences = self._split_into_sentences(text)
         if not sentences:
             return []
-        
-        # Extract keywords from each sentence
+
         sentence_keywords = [self._extract_keywords(sentence) for sentence in sentences]
-        
-        chunks = []
-        current_sentences = [sentences[0]]
+        segments: List[List[str]] = []
+        current = [sentences[0]]
         current_keywords = set(sentence_keywords[0])
-        current_start = 0
-        
         for i in range(1, len(sentences)):
             sentence_kw = set(sentence_keywords[i])
-            
-            # Calculate topic coherence (keyword overlap)
             coherence = len(current_keywords.intersection(sentence_kw)) / max(
                 len(current_keywords.union(sentence_kw)), 1
             )
-            
-            chunk_text = ' '.join(current_sentences)
+            chunk_text = ' '.join(current)
             would_exceed = len(chunk_text) + len(sentences[i]) > self.max_chunk_size
-            
-            if (coherence >= 0.3 and 
-                not would_exceed and 
-                len(chunk_text) < self.target_chunk_size):
-                # Continue current chunk
-                current_sentences.append(sentences[i])
+            if (coherence >= 0.3 and
+                    not would_exceed and
+                    len(chunk_text) < self.target_chunk_size):
+                current.append(sentences[i])
                 current_keywords.update(sentence_kw)
             else:
-                # Finalize current chunk
-                if len(chunk_text) >= self.min_chunk_size:
-                    chunk = self._create_chunk_from_sentences(
-                        current_sentences, current_start, document_id, len(chunks)
-                    )
-                    chunks.append(chunk)
-                
-                # Start new chunk
-                current_sentences = [sentences[i]]
+                segments.append(current)
+                current = [sentences[i]]
                 current_keywords = sentence_kw
-                current_start = self._find_sentence_position(text, sentences[i])
-        
-        # Handle final chunk
-        if current_sentences:
-            final_chunk = self._create_chunk_from_sentences(
-                current_sentences, current_start, document_id, len(chunks)
-            )
-            chunks.append(final_chunk)
-        
+        segments.append(current)
+        return self._chunks_from_segments(segments, text, document_id)
+
+    def _merge_short_segments(self, segments: List[List[str]]) -> List[List[str]]:
+        """F086 (night 3): a segment under ``min_chunk_size`` used to be DROPPED at
+        a topic shift — a price line, a date, a sign-off vanished while the
+        document read "completed" (brand-voice.md kept 461 of 1,304 characters).
+        No text is dropped now: a short segment joins the next one, and a short
+        last segment joins the one before it."""
+        merged: List[List[str]] = []
+        carry: List[str] = []
+        for segment in segments:
+            segment = [*carry, *segment]
+            carry = []
+            if len(' '.join(segment)) < self.min_chunk_size:
+                carry = segment
+                continue
+            merged.append(segment)
+        if carry:
+            if merged:
+                merged[-1] = [*merged[-1], *carry]
+            else:
+                merged.append(carry)
+        return merged
+
+    def _chunks_from_segments(self, segments: List[List[str]], text: str, document_id: str) -> List[SemanticChunk]:
+        chunks = [
+            self._create_chunk_from_sentences(segment, self._find_sentence_position(text, segment[0]),
+                                              document_id, index)
+            for index, segment in enumerate(self._merge_short_segments(segments))
+        ]
         return self._add_overlap_and_relationships(chunks, text)
-    
+
     def _chunk_hierarchically(self, text: str, document_id: str) -> List[SemanticChunk]:
         """Create hierarchical chunks with parent-child relationships"""
         

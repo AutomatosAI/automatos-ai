@@ -93,6 +93,19 @@ describe('QuestionsTab — PRD-225', () => {
     expect(asked).toEqual(['Agent #3', 'Agent #4'])
   })
 
+  it('names the agent and the ticket when the list carries the owner (F091-E1)', () => {
+    setQuestions([
+      question({
+        id: 5, subject_id: '612', asked_by_agent_id: 294,
+        owner: { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions' } },
+      }),
+    ])
+    render(<QuestionsTab />)
+    expect(screen.getByText('Scout (agent #294)')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ticket #612 · Cafe questions' })).toBeInTheDocument()
+    expect(screen.queryByText(/board_task:612/)).not.toBeInTheDocument()
+  })
+
   it('renders the blocked cascade capped at 6 with "+N more"', () => {
     const tasks = Array.from({ length: 6 }, (_, i) => ({
       id: i + 100,

@@ -230,7 +230,8 @@ def test_workspace_owner_fallback_does_not_include_su():
     assert _SU_PROMOTED not in _names(tools)
 
 
-def test_su_tool_present_for_super_admin_principal():
+@pytest.mark.parametrize("cache_stable", [False, True], ids=["narrowed-enum", "cache-stable-enum"])
+def test_su_tool_present_for_super_admin_principal(cache_stable, monkeypatch):
     """The ONLY inclusion path: an explicit is_super_admin=True principal.
     Also proves include_super_admin is threaded into the semantic-narrowing
     rank call (not just the schema builders).
@@ -244,6 +245,13 @@ def test_su_tool_present_for_super_admin_principal():
     # inclusion path for either su action is an explicit is_super_admin=True
     # principal (proven by the exclusion tests above), and include_super_admin is
     # threaded into the narrowing rank call.
+    # F025 (night 1): the enum ships cache-stable by default — the full eligible
+    # set every turn, only the pins first-class, the ranking in a late system
+    # line. The su boundary holds either way; which path carries _SU_PROMOTED
+    # (first-class or the enum) is what the dial changes.
+    from modules.tools import turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: cache_stable)
     recorder = _RecordingIndex(results=[(_SU, 0.95), (_SU_PROMOTED, 0.9), (_OPERATOR, 0.6)])
     with _tool_surface(_surface_registry()), \
             patch.object(tr, "_semantic_routing_enabled", return_value=True), \
@@ -262,9 +270,14 @@ def test_su_tool_present_for_super_admin_principal():
 
     enum = _dispatcher_enum(tools)
     assert _SU in enum
-    # ranked promoted → first-class (never a bare enum member), su-eligible only
-    assert _SU_PROMOTED in _names(tools)
-    assert _SU_PROMOTED not in enum
+    if cache_stable:
+        # only the pins attach first-class; the su-eligible enum carries it
+        assert _SU_PROMOTED in enum
+        assert _SU_PROMOTED not in _names(tools)
+    else:
+        # ranked promoted → first-class (never a bare enum member), su-eligible only
+        assert _SU_PROMOTED in _names(tools)
+        assert _SU_PROMOTED not in enum
     assert recorder.calls, "semantic narrowing was not invoked"
     assert recorder.calls[-1]["include_super_admin"] is True
 

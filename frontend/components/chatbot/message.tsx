@@ -11,6 +11,7 @@ import { chatMarkdownComponents } from './markdown-components'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
 import { ActivityTrail, LimitReachedNote } from './activity-trail'
+import { WithdrawOfferCard } from './withdraw-offer-card'
 import { ReasoningBlock } from './reasoning-block'
 import { TaskCard } from './task-card'
 
@@ -208,9 +209,11 @@ export function Message({
     const toolCalls = message.toolCalls || []
     const progress = message.progress || []
     const limit = message.limitReached
-    if (toolCalls.length === 0 && progress.length === 0 && !limit) return null
+    const offer = message.withdrawOffer
+    if (toolCalls.length === 0 && progress.length === 0 && !limit && !offer) return null
     return (
       <div className="space-y-1.5">
+        {offer && <WithdrawOfferCard offer={offer} />}
         <ActivityTrail toolCalls={toolCalls} formatLabel={formatToolLabel} progress={progress} />
         {limit && <LimitReachedNote limit={limit} />}
       </div>

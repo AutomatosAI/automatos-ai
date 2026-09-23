@@ -355,7 +355,11 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "input_data": {
                     "type": "object",
-                    "description": "Input data to pass to the playbook (key-value pairs).",
+                    "description": (
+                        "Input data to pass to the playbook (key-value pairs); its steps read "
+                        "each as {key}. A playbook that takes one text reads it as {input}: "
+                        'pass {"input": "<the text>"}.'
+                    ),
                 },
             },
             "required": [],

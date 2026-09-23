@@ -110,6 +110,16 @@ def _repair_stubbed_package_bindings():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _drain_best_effort_writes():
+    """F105: best-effort writes a test handed to their threads finish before the
+    next test starts, so a late write never lands in the next test's fakes."""
+    yield
+    best_effort = sys.modules.get("core.best_effort")
+    if best_effort is not None and hasattr(best_effort, "drain"):
+        best_effort.drain(timeout=5)
+
+
 def pytest_collectstart(collector):
     """Collection-time stub purge for heavy-import test modules.
 

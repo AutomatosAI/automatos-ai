@@ -330,6 +330,27 @@ async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any
         file_path = UPLOAD_DIR / f"{_uuid.uuid4().hex}{ext}"
         file_path.write_bytes(data)
 
+        # F087: the same name again replaces that document (same id, new text,
+        # the old source kept in its history) — never a second copy beside it.
+        from services.document_versions import replace_document, replaceable_document, replaced_message
+
+        replaced = replaceable_document(db, workspace_id, filename, [])
+        if replaced is not None:
+            version = await replace_document(
+                db, replaced, workspace_id=workspace_id, file_path=str(file_path), file_size=len(data),
+                content_hash=content_hash, file_type=file_type, replaced_by="auto",
+                description=params.get("description"),
+            )
+            return {
+                "success": replaced.status != "failed",
+                "document_id": replaced.id,
+                "filename": replaced.filename,
+                "status": replaced.status,
+                "replaced": True,
+                "version": version,
+                "message": replaced_message(replaced.filename, version, replaced.status),
+            }
+
         document = Document(
             workspace_id=workspace_id,
             filename=filename,

@@ -10,13 +10,14 @@ import time
 from typing import List
 
 from config import config
+from .embedding_bounds import client_kwargs as bounded_client_kwargs, single_text_timeout, timeout_note
 from .embedding_usage import record_embedding_usage
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
-    from openai import AsyncOpenAI
+    from openai import APITimeoutError, AsyncOpenAI
 except ImportError:
-    AsyncOpenAI = None
+    APITimeoutError, AsyncOpenAI = TimeoutError, None
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
             )
             self.client = None
         else:
-            client_kwargs = {"api_key": api_key}
+            client_kwargs = {"api_key": api_key, **bounded_client_kwargs()}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
             
@@ -65,12 +66,16 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
             started = time.monotonic()
             response = await self.client.embeddings.create(
                 model=self.config.model,
-                input=text
+                input=text,
+                timeout=single_text_timeout(),
             )
             record_embedding_usage("openai", self.config.model, response, [text], started)
 
             return response.data[0].embedding
-            
+
+        except APITimeoutError:
+            logger.error("OpenAI embedding (%s) %s", self.config.model, timeout_note(started, single=True))
+            raise
         except Exception as e:
             logger.error(f"OpenAI embedding error: {e}")
             raise

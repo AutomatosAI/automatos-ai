@@ -420,6 +420,23 @@ class Config:
         return self._required_float_setting("model_policy", "turn_cost_ceiling_usd")
 
     @property
+    def CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS(self) -> bool:
+        """F105-B: before each model call a chat turn ends its read-only
+        transaction, so it holds no pool connection while the model thinks.
+        Dial chatbot.release_db_between_model_calls; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "release_db_between_model_calls", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
+    def CHATBOT_KNOWLEDGE_PREFETCH(self) -> bool:
+        """F085-A: a question in a workspace with documents is searched before
+        the model's first call. Dial chatbot.knowledge_prefetch; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "knowledge_prefetch", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
     def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
         """Retries when a tool returns 'action not mapped'."""
         return self._required_int_setting("chatbot", "action_retry_budget")
@@ -742,6 +759,9 @@ class Config:
     # PRD-239 S3: how often a playbook step or mission task re-reads the ticket it
     # filed for a session agent while it waits for the session to end.
     CLI_LANE_POLL_SECONDS: int = int(os.getenv("CLI_LANE_POLL_SECONDS", "5"))
+    # F114 (run 4): how long that wait keeps polling through a database outage
+    # (Postgres crash-restarted mid-wait; ~10 s in recovery) before giving up.
+    CLI_LANE_DB_OUTAGE_GRACE_SECONDS: int = int(os.getenv("CLI_LANE_DB_OUTAGE_GRACE_SECONDS", "180"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket
@@ -1463,6 +1483,25 @@ class Config:
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     VECTOR_STORE_DIMENSIONS: int = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
+    # F105: every embedding call has a bound. The OpenAI SDK default is a 600 s
+    # read timeout with 2 retries — one stalled call held a search for minutes.
+    # A single text (a query) is small, so it gets the shorter read bound.
+    EMBEDDING_CONNECT_TIMEOUT_S: float = float(os.getenv("EMBEDDING_CONNECT_TIMEOUT_S", "5"))
+    EMBEDDING_QUERY_TIMEOUT_S: float = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_S", "15"))
+    EMBEDDING_BATCH_TIMEOUT_S: float = float(os.getenv("EMBEDDING_BATCH_TIMEOUT_S", "60"))
+    EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "1"))
+    # F105: best-effort writes (usage rows, telemetry, heartbeat findings, the
+    # NL2SQL audit) run on this many threads of their own, never on the loop.
+    BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
+    # ...and wait at most this long for a free pool connection, then drop the row.
+    BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F085-A: how many passages the automatic search brings, and the relevance
+    # (the retrieval funnel's final score) a passage needs to reach the prompt.
+    KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))
+    KNOWLEDGE_PREFETCH_MIN_SCORE: float = float(os.getenv("KNOWLEDGE_PREFETCH_MIN_SCORE", "0.3"))
+    # F103: a memory write (durable or mission field) that times out is tried
+    # once more after this pause.
+    MEMORY_WRITE_RETRY_PAUSE_S: float = float(os.getenv("MEMORY_WRITE_RETRY_PAUSE_S", "0.5"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)
@@ -1588,6 +1627,10 @@ class Config:
             return str(val).lower() == "true" if val else False
         except Exception:
             return os.getenv("RAG_QUERY_ENHANCEMENT_ENABLED", "false").lower() == "true"
+
+    # F086: a document whose stored chunks hold less than this share of its
+    # extracted text is shown to the owner as partial ("partial — 61% kept").
+    RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
 
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:

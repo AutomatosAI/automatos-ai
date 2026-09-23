@@ -18,6 +18,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.cron import CronTrigger
 
+from core.best_effort import off_loop
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +102,7 @@ PRIMITIVE_STATUSES = frozenset({"green", "degraded", "down"})
 # dispatch out of the heartbeat.
 
 
+@off_loop
 def emit_primitive_finding(
     workspace_id: str,
     primitive: str,
@@ -117,7 +120,8 @@ def emit_primitive_finding(
 
     Returns True on a written row, False on validation reject or write
     failure. NEVER raises — a failure here cannot break the heartbeat cycle
-    or the primitive's own code path.
+    or the primitive's own code path. On an event loop it runs on the
+    best-effort threads and returns None at once (F105).
     """
     try:
         if primitive not in PRIMITIVE_NAMES:

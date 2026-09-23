@@ -405,11 +405,13 @@ class ToolRegistry:
             name="search_knowledge",
             category=ToolCategory.RESEARCH,
             description=(
-                "Search INTERNAL workspace knowledge base — uploaded documents, guides, PDFs, and ingested files. "
-                "Returns only content that was previously uploaded to this workspace. "
-                "IMPORTANT: For live/current information, competitor research, market data, or anything NOT in your "
-                "uploaded documents, use platform_web_search / platform_web_fetch (via platform_execute) instead. "
-                "This tool searches local docs only. 2-attempt limit — vary your query if first attempt misses."
+                "Search this workspace's documents — the owner's uploads (price lists, policies, guides, "
+                "spreadsheets, and the product's own manual when it is uploaded) and the reports its agents "
+                "saved — and get cited passages back. Use it FIRST for any question about the owner's business, "
+                "customers, prices, suppliers, rules or plans, or about how the product works: answer from what "
+                "it returns and name the file. For live facts from the internet, or when the documents do not "
+                "cover the question, use platform_web_search via platform_execute. "
+                "2-attempt limit — vary the words if the first search misses."
             ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",

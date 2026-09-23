@@ -106,6 +106,14 @@ class TaskReconciler:
                             started_at,
                             COALESCE((execution_metadata->>'last_progress_at')::timestamp, started_at)
                           ) < :cutoff
+                      -- F114 (run 4): nor is a run one of whose steps a session is
+                      -- still working — the ticket is the progress.
+                      AND NOT EXISTS (
+                            SELECT 1 FROM board_tasks bt
+                            WHERE bt.source_type = 'recipe'
+                              AND bt.source_id LIKE 'recipe:' || recipe_executions.execution_id || ':%'
+                              AND bt.status IN ('assigned', 'in_progress', 'blocked')
+                          )
                 """),
                 {"cutoff": now - _timedelta_seconds(app_config.TASK_STALL_TIMEOUT_SECONDS)},
             ).fetchall()
@@ -196,16 +204,30 @@ class TaskReconciler:
 
         error_msg = f"Stalled: no progress for {timeout}s (status was '{reason}')"
 
+        # F114 (run 4): a run whose session steps already ran keeps them — the
+        # failure names each step ticket (their results are on the board) and
+        # the run is not retried from step 1, which would run them again.
+        step_tickets = _step_tickets(db, execution_id)
+        if step_tickets:
+            error_msg += (
+                " — nothing was driving the run any more. Its step tickets: "
+                + ", ".join(f"#{t['id']} step {t['step']} {t['status']}" for t in step_tickets[:12])
+                + "; their results are on the board."
+            )
+            metadata = {**metadata, "step_tickets": step_tickets}
+
         # Mark failed
         db.execute(
             text("""
                 UPDATE recipe_executions
                 SET status = 'failed',
                     error_message = :error,
-                    completed_at = :now
+                    completed_at = :now,
+                    execution_metadata = CAST(:meta AS jsonb)
                 WHERE execution_id = :eid
             """),
-            {"error": error_msg, "now": datetime.now(timezone.utc), "eid": execution_id},
+            {"error": error_msg, "now": datetime.now(timezone.utc), "eid": execution_id,
+             "meta": _json_dumps(metadata)},
         )
         logger.warning(
             "[TaskReconciler] Marked execution %s as failed — %s", execution_id, error_msg,
@@ -219,6 +241,12 @@ class TaskReconciler:
             logger.warning("[TaskReconciler] Board task sync failed for %s: %s", execution_id, bt_err)
 
         # Check retry eligibility
+        if step_tickets:
+            logger.info(
+                "[TaskReconciler] Execution %s not retried — %d of its steps already went to a session; "
+                "a fresh run would repeat them", execution_id, len(step_tickets),
+            )
+            return
         if attempt_count >= max_retries:
             logger.info(
                 "[TaskReconciler] Execution %s exhausted retries (%d/%d)",
@@ -326,6 +354,27 @@ class TaskReconciler:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _step_tickets(db, execution_id: str) -> List[Dict[str, Any]]:
+    """The session step tickets a playbook run filed (source 'recipe:<run>:<step>'),
+    with their status — what a stalled run already has on the board."""
+    from sqlalchemy import text
+
+    try:
+        rows = db.execute(
+            text("SELECT id, status, source_id FROM board_tasks WHERE source_type = 'recipe' "
+                 "AND source_id LIKE :prefix ORDER BY id"),
+            {"prefix": f"recipe:{execution_id}:%"},
+        ).fetchall()
+    except Exception:  # noqa: BLE001 — naming them must never stop the reconciler
+        logger.warning("[TaskReconciler] step tickets of %s could not be read", execution_id, exc_info=True)
+        return []
+    tickets = []
+    for row in rows:
+        step = str(row.source_id).rsplit(":", 1)[-1]
+        tickets.append({"id": int(row.id), "step": int(step) if step.isdigit() else step, "status": row.status})
+    return tickets
+
 
 def _timedelta_seconds(seconds: int):
     """Return a timedelta for the given seconds."""

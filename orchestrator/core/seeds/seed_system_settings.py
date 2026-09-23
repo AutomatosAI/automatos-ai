@@ -464,6 +464,32 @@ def seed_system_settings(db: Session):
                 "options": ["rerank-v3.5", "rerank-english-v3.0", "rerank-multilingual-v3.0"]
             },
         },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_upload_prior",
+            "default_value": "0.05",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the owner's own documents get over agents' "
+                "reports (0.05 = 5%), so an upload wins a near tie (F088). Only "
+                "near-equal scores change order. 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_recency_prior",
+            "default_value": "0.02",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the newest document among the hits gets "
+                "over the oldest (0.02 = 2%, scaled in between), so the newer "
+                "copy wins a near tie (F088). 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
     ])
 
     # =========================================================================
@@ -579,6 +605,35 @@ def seed_system_settings(db: Session):
             ),
             "is_required": True,
             "validation_rules": {"min": 5, "max": 100},
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "release_db_between_model_calls",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "Before each model call, a chat turn whose database transaction "
+                "has only read ends it, so the turn holds no pool connection while "
+                "the model thinks (F105, night 3: turns held connections through "
+                "their whole tool loop and the pool ran dry). A transaction that "
+                "wrote is never touched. Set false to hold connections as before."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "knowledge_prefetch",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "When the workspace has documents and the owner asks a question, "
+                "search them before Auto's first model call and put the passages "
+                "that clear the relevance floor in its prompt, cited by file (F085, "
+                "night 3: Auto searched the product's own manual once in 40 "
+                "questions). One embedding and one search per question turn. Set "
+                "false to answer as before."
+            ),
+            "is_required": False,
         },
         {
             "category": SettingCategory.CHATBOT.value,

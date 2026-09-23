@@ -1165,6 +1165,21 @@ async def cancel_execution(
         except Exception:
             logger.warning("Board task update on cancel failed (non-blocking)", exc_info=True)
 
+        # F116 (run 4): the run's session step tickets stop with it, through the
+        # board's own cancel (the host's next event batch gets control: cancel),
+        # each saying who cancelled and that it went with this run. Only an
+        # explicit cancel does this — a backend restart kills the run's task but
+        # must not kill the sessions working its steps.
+        try:
+            from services.board_cancel import cancel_run_step_tickets
+            from services.board_consent import actor_ref
+
+            stopped = cancel_run_step_tickets(db, execution_id, by=actor_ref(ctx))
+            if stopped:
+                logger.info("[cancel_execution] %s — step tickets cancelled with it: %s", execution_id, stopped)
+        except Exception:
+            logger.warning("[cancel_execution] the step tickets of %s could not be cancelled", execution_id, exc_info=True)
+
         # Signal the running task to abort the in-flight LLM call immediately.
         # If the task is on this replica, httpx propagates CancelledError and
         # closes the TCP connection mid-request — no more cost burn. If the

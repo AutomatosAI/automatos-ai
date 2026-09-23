@@ -20,6 +20,7 @@ import asyncio
 import logging
 import posixpath
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -115,10 +116,47 @@ async def _missing(pairs: Sequence[Tuple[str, str]], client: Any) -> List[str]:
     return missing
 
 
-async def missing_files_note(task: Any, text: str, workspace_id: Any, *,
-                             projects_dir: Optional[str] = None, client: Any = None) -> Optional[str]:
-    """The line to put on a ticket whose result names files that are not in
-    the workspace, or ``None`` when every checkable name is there."""
+@dataclass(frozen=True)
+class FileCheck:
+    note: str          # what to append to the result
+    review: bool       # a named file is nowhere at all: the ticket goes to review
+
+
+def _knowledge_base_matches(db: Any, workspace_id: Any, names: Sequence[str]) -> Set[str]:
+    """The named files that exist as knowledge-base DOCUMENTS instead. Night 1's
+    #153 saved its pack with platform_upload_document as a document called
+    ``deliverables/cafe_onboarding_pack.md`` — real work, in the knowledge base,
+    not a file on disk. Matched by name or by its last part."""
+    if db is None or not names:
+        return set()
+    from core.models.core import Document
+    from sqlalchemy import or_
+
+    candidates = sorted({*names, *(posixpath.basename(n) for n in names)})
+    try:
+        rows = (
+            db.query(Document.filename, Document.original_filename)
+            .filter(Document.workspace_id == workspace_id,
+                    or_(Document.filename.in_(candidates), Document.original_filename.in_(candidates)))
+            .all()
+        )
+    except Exception:  # noqa: BLE001 — a lookup that fails leaves the names unexplained
+        logger.warning("[result-files] knowledge-base lookup failed", exc_info=True)
+        return set()
+    stored = {name for row in rows for name in row if name}
+    return {n for n in names if n in stored or posixpath.basename(n) in stored}
+
+
+def _shown(names: Sequence[str]) -> str:
+    more = f" and {len(names) - NOTE_NAMES_SHOWN} more" if len(names) > NOTE_NAMES_SHOWN else ""
+    return ", ".join(f"`{name}`" for name in names[:NOTE_NAMES_SHOWN]) + more
+
+
+async def check_named_files(task: Any, text: str, workspace_id: Any, *, db: Any = None,
+                            projects_dir: Optional[str] = None, client: Any = None) -> Optional[FileCheck]:
+    """What to say about the files a result names: nothing when every
+    checkable name is in the workspace; where it went when it was saved to the
+    knowledge base instead; a review when a name is nowhere at all."""
     pairs = worker_paths(named_files(text or ""), workspace_id=str(workspace_id),
                          runtime_ref=getattr(task, "runtime_ref", None), projects_dir=projects_dir)
     if not pairs:
@@ -134,8 +172,15 @@ async def missing_files_note(task: Any, text: str, workspace_id: Any, *,
         return None
     if not missing:
         return None
-    shown = ", ".join(f"`{name}`" for name in missing[:NOTE_NAMES_SHOWN])
-    more = f" and {len(missing) - NOTE_NAMES_SHOWN} more" if len(missing) > NOTE_NAMES_SHOWN else ""
-    return (f"Not found when this ticket closed: {shown}{more} — the result names "
-            f"{'it' if len(missing) == 1 else 'them'}, but the workspace has no such "
-            f"{'file' if len(missing) == 1 else 'files'}. Sent to review instead of done.")
+    in_knowledge_base = _knowledge_base_matches(db, workspace_id, missing)
+    nowhere = [n for n in missing if n not in in_knowledge_base]
+    saved_as_documents = [n for n in missing if n in in_knowledge_base]
+    lines: List[str] = []
+    if nowhere:
+        lines.append(f"Not found when this ticket closed: {_shown(nowhere)} — the result names "
+                     f"{'it' if len(nowhere) == 1 else 'them'}, but the workspace has no such "
+                     f"{'file' if len(nowhere) == 1 else 'files'}. Sent to review instead of done.")
+    if saved_as_documents:
+        lines.append(f"Saved to the knowledge base, not as a file in the workspace: {_shown(saved_as_documents)}"
+                     f" — find {'it' if len(saved_as_documents) == 1 else 'them'} under Documents.")
+    return FileCheck(note="\n".join(lines), review=bool(nowhere))

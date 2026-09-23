@@ -12,6 +12,7 @@ from modules.context.sections.composio import ComposioSection
 from modules.context.sections.conversation import ConversationSection
 from modules.context.sections.custom import CustomSection
 from modules.context.sections.datetime_context import DatetimeContextSection
+from modules.context.sections.documents_inventory import DocumentsInventorySection
 from modules.context.sections.field_memory import FieldMemorySection
 from modules.context.sections.graph_context import GraphSection
 from modules.context.sections.identity import IdentitySection
@@ -44,6 +45,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "task_context": TaskContextSection,
     "playbook_context": PlaybookContextSection,
     "datetime_context": DatetimeContextSection,
+    "documents_inventory": DocumentsInventorySection,
     "business_graph": GraphSection,
     "field_memory": FieldMemorySection,
     "conversation": ConversationSection,

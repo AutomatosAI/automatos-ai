@@ -821,7 +821,9 @@ class GraphRouter:
         gated action) and the cluster ``action_names_hot`` US-010 merges into the
         entry candidates. Enforce the SAME eligibility here as organic entry nodes:
           * super_admin_only chains drop unless include_super_admin=True;
-          * admin_only chains drop when exclude_admin=True (a non-admin caller).
+          * admin_only chains drop when exclude_admin=True (a non-admin caller);
+          * F121: a chain through an action that cannot run here (F078's
+            is_available) drops for every caller.
         So rank_chains' exclude_admin / include_super_admin contract holds for EVERY
         action it returns, not just the ranked entry nodes.
 
@@ -833,12 +835,16 @@ class GraphRouter:
         if registry is None:
             from .action_registry import get_action_registry
             registry = get_action_registry()
+        from .action_registry import action_is_available
+
         blocked = set()
         for a in registry.get_all():
             if getattr(a, "super_admin_only", False) and not include_super_admin:
                 blocked.add(a.name)
             elif getattr(a, "admin_only", False) and exclude_admin:
                 blocked.add(a.name)
+            elif not action_is_available(a):
+                blocked.add(a.name)   # F121: an action that cannot run here is never routed to
         if not blocked:
             return chains
         return [c for c in chains if not blocked.intersection(c[2])]

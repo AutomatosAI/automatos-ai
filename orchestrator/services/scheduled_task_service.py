@@ -574,6 +574,14 @@ class ScheduledTaskService:
             sla_deadline=sla_deadline_for(priority, now=now),
         )
         db.add(ticket)
+        db.flush()  # the id the notice carries
+        # F119: each notice before the commit that carries it — the loop closes
+        # this session without another commit, which dropped both. The dispatch
+        # wake still goes out only after the D16 consent is committed.
+        notify_board_event(
+            db, workspace_id=str(task.workspace_id), task_id=ticket.id,
+            status=ticket.status, event="task_created",
+        )
         db.commit()
         db.refresh(ticket)
 
@@ -582,12 +590,9 @@ class ScheduledTaskService:
                 db, workspace_id=task.workspace_id, task=ticket,
                 actor=actor_from_user_id(created_by_user_id), why=WHY_SCHEDULED_AND_ASSIGNED,
             )
-        notify_board_event(
-            db, workspace_id=str(task.workspace_id), task_id=ticket.id,
-            status=ticket.status, event="task_created",
-        )
         if ticket.status == "assigned":
             notify_task_available(db, workspace_id=str(task.workspace_id), task_id=ticket.id)
+            db.commit()
         logger.info("[ScheduledTask] Task %d filed board ticket #%s (%s)", task_id, ticket.id, ticket.status)
 
         origin_chat_id = getattr(task, "origin_chat_id", None)

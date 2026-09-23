@@ -27,6 +27,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
+from core.best_effort import off_loop
+
 logger = logging.getLogger(__name__)
 
 TIER_SUBSCRIPTION = "subscription"
@@ -202,6 +204,7 @@ class UsageTracker:
     """Tracks usage per request for analytics and billing."""
 
     @staticmethod
+    @off_loop
     def track(
         workspace_id: Any,
         model_id: str,
@@ -222,7 +225,8 @@ class UsageTracker:
         cost_override: Optional[Tuple[float, float]] = None,
     ) -> None:
         """Record one call. Runs in its own DB session so a failure here never
-        touches the caller's transaction, and never raises.
+        touches the caller's transaction, and never raises. On an event loop it
+        runs on the best-effort threads (F105) — a pool wait never freezes the loop.
 
         ``reported_cost`` is the provider's own figure for the call (OpenRouter's
         ``usage.cost``) and wins over any estimate; ``cost_override`` is an

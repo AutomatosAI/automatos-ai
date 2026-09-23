@@ -257,9 +257,11 @@ class PlatformActionsSection(BaseSection):
             return (
                 self._PREAMBLE
                 + catalog
-                + "\n\nNeed anything else? Search the full catalog with "
+                + "\n\nNeed another ACTION? Search the full catalog with "
                 "`platform_find_tools(query=...)` — every platform action is "
-                "reachable through it.\n"
+                "reachable through it. For a QUESTION about the business, a "
+                "document or how the product works, search the workspace's "
+                "documents with `search_knowledge` first.\n"
             )
         except Exception:
             logger.warning(

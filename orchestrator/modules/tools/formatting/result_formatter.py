@@ -896,16 +896,19 @@ class ToolResultFormatter:
             summary_parts.append(
                 "Full document content for the top results is below. Synthesize an "
                 "answer using this material directly — do not just list the documents. "
-                "The UI renders source cards separately, so you do not need to repeat "
-                "filenames in your reply."
+                "The UI renders source cards separately; name a file only when the "
+                "owner asks where something comes from, and then only a file named here."
             )
             for i, doc in enumerate(results, start=1):
                 # PRD-136: read `content` (full body) — `excerpt` is a 500-char UI preview
                 # that crippled synthesis. Fall back to excerpt if no content.
                 body = doc.get('content') or doc.get('excerpt') or ''
                 score = float(doc.get('similarity', 0) or 0) * 100.0
-                # Avoid leaking filenames to the LLM (it tends to echo them back as a list)
-                summary_parts.append(f"\n[Source {i}] ({score:.1f}%)")
+                # F088 (night 3): the file's name was withheld here, so asked "which
+                # file says that?" Auto invented one — "harbourline-wholesale-sheet.md",
+                # "Q2 2026 Metrics.md" — or answered "Source 1". The real name, always.
+                name = doc.get('filename') or doc.get('source') or 'an unnamed document'
+                summary_parts.append(f"\n[Source {i}: {name}] ({score:.1f}%)")
                 summary_parts.append(body)
         
         elif tool_name in ['search_codebase', 'search_code']:

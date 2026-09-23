@@ -25,7 +25,7 @@ import time
 import uuid as uuid_mod
 from datetime import datetime, timezone
 import re
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -37,6 +37,28 @@ from core.models import Agent
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 
 logger = logging.getLogger(__name__)
+
+# F113 (run 4): a run's failure is what the owner reads on the ticket. A
+# programming error ("'str' object has no attribute 'items'") is logged with
+# its traceback and reported in words; an operational error (a provider's 402,
+# a timeout) keeps its own message — the owner can act on that.
+_INTERNAL_ERRORS = (AttributeError, TypeError, KeyError, IndexError, NameError,
+                    AssertionError, ZeroDivisionError, RecursionError)
+RUN_STOPPED_TEXT = (
+    "The run stopped before it finished — the backend stopped while it was in progress. "
+    "Session steps it had started carry on; their results are on the board."
+)
+INTERNAL_ERROR_TEXT = (
+    "The run stopped on an internal error, so nothing after it ran. "
+    "The details are in the server log."
+)
+
+
+def owner_error_text(exc: BaseException) -> str:
+    """What the owner reads for an exception that stopped a run."""
+    if isinstance(exc, _INTERNAL_ERRORS):
+        return INTERNAL_ERROR_TEXT
+    return str(exc) or type(exc).__name__
 
 
 # ---------------------------------------------------------------------------
@@ -1051,7 +1073,7 @@ def launch_recipe_task(
             try:
                 db = SessionLocal()
                 try:
-                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {e}")
+                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {owner_error_text(e)}")
                 finally:
                     db.close()
             except Exception as inner:
@@ -1143,9 +1165,13 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
                 RecipeExecution.execution_id == execution_id
             ).first()
             if execution and execution.status not in ("completed", "failed", "cancelled"):
+                # The cancel endpoint writes its row before it signals the task, so
+                # a run still open here was stopped by something else — a shutdown.
+                # (``sa_func`` was never imported here: until now this NameError'd
+                # into the warning below and the run stayed 'running'.)
                 execution.status = "cancelled"
-                execution.error_message = execution.error_message or "Cancelled by user"
-                execution.completed_at = sa_func.now()
+                execution.error_message = execution.error_message or RUN_STOPPED_TEXT
+                execution.completed_at = datetime.now(timezone.utc)
                 db.commit()
         finally:
             db.close()
@@ -1199,6 +1225,15 @@ async def _execute_recipe_inner(
     scratchpad = None
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
+
+        # F113: whatever the trigger stored (a string from a tool call, a retried
+        # row), the steps read key-value pairs.
+        from core.services.playbook_inputs import playbook_inputs
+
+        input_data, _input_problem = playbook_inputs(input_data)
+        if _input_problem:
+            await _fail_execution(db, recipe_execution_id, f"This run's input could not be read: {_input_problem}")
+            return
 
         # Load recipe and execution
         recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == recipe_id).first()
@@ -1329,6 +1364,7 @@ async def _execute_recipe_inner(
 
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
+        step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
@@ -1349,7 +1385,14 @@ async def _execute_recipe_inner(
                 msg = f"Total execution timeout ({total_timeout_sec}s) exceeded after {int(elapsed)}s at step {idx + 1}"
                 logger.warning(f"[recipe_direct] {msg}")
                 _persist_step_results(db, execution, step_results)
-                await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                # F123: out of time after finished work: say so, and keep the work.
+                stop = _budget_stop(
+                    f"Out of time after step {idx} of {total_steps} "
+                    f"({_span(elapsed)}; budget {_span(total_timeout_sec)})",
+                    idx + 1, step_results, step_result,
+                )
+                await _fail_execution(db, recipe_execution_id, stop[0] if stop else msg,
+                                      step_results=step_results, review_card=stop[1] if stop else None)
                 return
 
             # PRD-181 S2 (F060): playbook DOLLAR-CEILING admission gate — the same
@@ -1376,7 +1419,14 @@ async def _execute_recipe_inner(
                     )
                     logger.warning(f"[recipe_direct] {msg}")
                     _persist_step_results(db, execution, step_results)
-                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    # F123: the dollar ceiling stops the same honest way.
+                    stop = _budget_stop(
+                        f"Budget ceiling ${ceiling_usd:.2f} reached after step {idx} of "
+                        f"{total_steps} (${used_usd:.4f} spent)",
+                        idx + 1, step_results, step_result,
+                    )
+                    await _fail_execution(db, recipe_execution_id, stop[0] if stop else msg,
+                                          step_results=step_results, review_card=stop[1] if stop else None)
                     return
 
             step_id = step.get('step_id', f'step-{idx + 1}')
@@ -1535,7 +1585,7 @@ async def _execute_recipe_inner(
 
                 except Exception as e:
                     step_result["status"] = "failed"
-                    step_result["error"] = str(e)
+                    step_result["error"] = owner_error_text(e)
                     step_result["duration_ms"] = int((time.time() - step_start) * 1000)
                     step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
                     logger.error(f"[recipe_direct] generate_document step failed: {e}", exc_info=True)
@@ -1543,7 +1593,7 @@ async def _execute_recipe_inner(
                     if error_handling == "stop":
                         step_results.append(_build_compact_step_result(step_result))
                         _persist_step_results(db, execution, step_results)
-                        await _fail_execution(db, recipe_execution_id, f"Document generation step failed: {e}", step_results=step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Document generation step failed: {owner_error_text(e)}", step_results=step_results)
                         return
                     elif error_handling == "skip":
                         step_results.append(_build_compact_step_result(step_result))
@@ -1670,12 +1720,12 @@ async def _execute_recipe_inner(
                     logger.error(f"[recipe_direct] Step {step_order} pre_exec error: {pre_exc}", exc_info=True)
                     if error_handling == 'stop':
                         step_result["status"] = "failed"
-                        step_result["error"] = f"pre_exec error: {pre_exc}"
+                        step_result["error"] = f"pre_exec error: {owner_error_text(pre_exc)}"
                         step_result["duration_ms"] = int((time.time() - step_start) * 1000)
                         step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
                         step_results.append(_build_compact_step_result(step_result))
                         _persist_step_results(db, execution, step_results)
-                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {pre_exc}", step_results=step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {owner_error_text(pre_exc)}", step_results=step_results)
                         return
 
             # F055: a placeholder the run did not supply must never reach an
@@ -1785,7 +1835,7 @@ async def _execute_recipe_inner(
                     last_error = f"Step timed out after {step_deadline:.0f}s"
                     logger.warning(f"[recipe_direct] Step {step_order} timed out ({step_deadline:.0f}s)")
                 except Exception as e:
-                    last_error = str(e)
+                    last_error = owner_error_text(e)
                     logger.error(f"[recipe_direct] Step {step_order} exception: {e}", exc_info=True)
 
                 attempt += 1
@@ -1870,14 +1920,7 @@ async def _execute_recipe_inner(
 
         # Determine final output: last completed step's full output
         # (step_results are compact, but we still have the last step_result dict in scope)
-        final_output = None
-        if step_result.get("status") == "completed":
-            final_output = step_result.get("output", "")
-        if not final_output:
-            for sr in reversed(step_results):
-                if sr.get("status") == "completed":
-                    final_output = sr.get("output_preview", "")
-                    break
+        final_output = _final_output(step_results, step_result)
 
         execution.status = 'completed'
         execution.completed_at = datetime.now(timezone.utc)
@@ -1932,7 +1975,10 @@ async def _execute_recipe_inner(
         # Complete the board task
         try:
             from services.board_task_bridge import complete_recipe_board_task
-            complete_recipe_board_task(db, recipe_execution_id, success=True, result=str(final_output)[:4000])
+            last_log_url = next((sr.get("log_url") for sr in reversed(step_results)
+                                 if sr.get("status") == "completed"), None)
+            complete_recipe_board_task(db, recipe_execution_id, success=True,
+                                       result=_card_text(str(final_output), last_log_url))
         except Exception:
             db.rollback()
             logger.warning("Board task completion failed (non-blocking)", exc_info=True)
@@ -1992,7 +2038,7 @@ async def _execute_recipe_inner(
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
         try:
-            await _fail_execution(db, recipe_execution_id, str(e))
+            await _fail_execution(db, recipe_execution_id, owner_error_text(e))
         except Exception as err:
             logger.exception(
                 f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"
@@ -2211,6 +2257,73 @@ def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
     return []
 
 
+# The board card's result cap, on the success path and on a budget stop's card.
+BOARD_RESULT_MAX_CHARS = 4000
+
+
+def _final_output(step_results: List[dict], last_step: Dict[str, Any]) -> Optional[str]:
+    """The run's output: the last step's full text when it completed (its dict is
+    still in scope), else the newest completed step's stored preview."""
+    final_output = None
+    if last_step.get("status") == "completed":
+        final_output = last_step.get("output", "")
+    if not final_output:
+        for sr in reversed(step_results):
+            if sr.get("status") == "completed":
+                final_output = sr.get("output_preview", "")
+                break
+    return final_output
+
+
+def _card_text(text: str, log_url: Optional[str]) -> str:
+    """A board card's text at the cap. A cut says so where it happens and where
+    the rest is: a silent cut hides work the way a missing output does (F123)."""
+    if len(text) <= BOARD_RESULT_MAX_CHARS:
+        return text
+    rest = f" The full output: {log_url}" if log_url else ""
+    return f"{text[:BOARD_RESULT_MAX_CHARS]}\n\n[Cut at {BOARD_RESULT_MAX_CHARS:,} characters.{rest}]"
+
+
+def _span(seconds: float) -> str:
+    """A duration as an owner reads it: whole minutes, or seconds under one."""
+    return f"{int(seconds // 60)} min" if seconds >= 60 else f"{int(seconds)} s"
+
+
+def _step_numbers(orders: List[Any]) -> str:
+    """Step numbers as prose: '1–3' when consecutive, else '1, 3 and 4'."""
+    if all(isinstance(o, int) for o in orders) and orders == list(range(orders[0], orders[0] + len(orders))):
+        return f"{orders[0]}–{orders[-1]}"
+    return ", ".join(str(o) for o in orders[:-1]) + f" and {orders[-1]}"
+
+
+def _budget_stop(
+    reason: str,
+    next_step: int,
+    step_results: List[dict],
+    last_step: Dict[str, Any],
+) -> Optional[Tuple[str, str]]:
+    """F123: a run out of budget after finished work fails honestly. Returns
+    (error_message, card_result): the reason first, then every completed step,
+    then the last one's output. None when no step completed: today's failure
+    stands, with no work to show."""
+    done = [s for s in step_results if s.get("status") == "completed"]
+    if not done:
+        return None
+    orders = [s.get("order") for s in done]
+    if len(orders) == 1:
+        finished = f"Step {orders[0]} completed; its output is below."
+    else:
+        finished = f"Steps {_step_numbers(orders)} completed; the last one's output is below."
+    message = f"{reason}. Step {next_step} never started. {finished}"
+    lines = [message, "", "Completed steps:"]
+    for s in done:
+        line = (f"- Step {s.get('order')} ({s.get('agent_name')}): completed in "
+                f"{_span((s.get('duration_ms') or 0) / 1000)}, {s.get('tokens_used') or 0:,} tokens")
+        lines.append(f"{line}, log {s['log_url']}" if s.get("log_url") else line)
+    lines += ["", f"Step {done[-1].get('order')}'s output:", _final_output(step_results, last_step) or ""]
+    return message, _card_text("\n".join(lines), done[-1].get("log_url"))
+
+
 def _persist_step_results(db: Session, execution: RecipeExecution, step_results: List[dict]):
     """Persist step results to the execution record."""
     try:
@@ -2225,9 +2338,12 @@ async def _fail_execution(
     db: Session,
     execution_id: str,
     error_message: str,
-    step_results: Optional[List[dict]] = None
+    step_results: Optional[List[dict]] = None,
+    review_card: Optional[str] = None,
 ):
-    """Mark an execution as failed with an error message."""
+    """Mark an execution as failed with an error message. ``review_card`` is
+    the finished work a budget stop leaves (F123): the board card goes to review
+    with it instead of failed."""
     try:
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id
@@ -2261,10 +2377,13 @@ async def _fail_execution(
                 detail=f"exec={execution_id} error={error_message}",
             )
 
-            # Fail the board task
+            # Fail the board task, or put the finished work in front of a human
             try:
                 from services.board_task_bridge import complete_recipe_board_task as _complete_board
-                _complete_board(db, execution_id, success=False, error_message=error_message)
+                if review_card:
+                    _complete_board(db, execution_id, success=False, result=review_card, review=True)
+                else:
+                    _complete_board(db, execution_id, success=False, error_message=error_message)
             except Exception:
                 db.rollback()
 

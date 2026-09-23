@@ -434,6 +434,8 @@ def test_upload_document_happy_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr(documents_api, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(documents_api, "get_document_manager", lambda ws: _FakeManager())
+    # F087: no earlier upload of this name to replace — a new document
+    monkeypatch.setattr("services.document_versions.replaceable_document", lambda *a, **k: None)
 
     db = _ORMDB(first=None)  # no duplicate
     out = _run(upload_document(db, _WS, {

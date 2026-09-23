@@ -411,6 +411,13 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     return role in ("owner", "admin")
 
 
+def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
+    """PRD-143's super-admin predicate: only a literal system_role ==
+    'super_admin' passes. There is no fallback, and no caller_context refuses.
+    The gate and platform_list_tools' listing (F122) both read this one."""
+    return (caller_context or {}).get("system_role") == "super_admin"
+
+
 def _bind_ask_orchestrator_context(
     params: Dict[str, Any],
     caller_context: Optional[Dict[str, Any]],
@@ -787,6 +794,27 @@ class PlatformActionExecutor:
         # Plane OFF (or read failure): historical always-fallback behaviour.
         return self._workspace_has_admin_owner()
 
+    def _caller_is_admin(self, caller_context: Optional[Dict[str, Any]], full_autonomy: bool) -> bool:
+        """US-003's admin predicate. The admin gate and platform_list_tools'
+        listing (F122) both read this one."""
+        if full_autonomy:
+            # Workspace dialled to full autonomy — Auto runs as admin.
+            return True
+        if caller_context is not None:
+            # Explicit caller identity — check roles directly.
+            # A dict with no role keys means "known non-admin user".
+            return (
+                caller_context.get("workspace_role") in ("owner", "admin")
+                or caller_context.get("system_role") == "admin"
+            )
+        # No caller_context (heartbeat, agent factory, etc.).
+        # PRD-174 F014: the "agents inherit admin from the workspace
+        # owner" fallback is no longer implicit — under the policy
+        # plane it applies ONLY when the explicit, default-OFF
+        # ``agents_inherit_admin`` workspace policy is set. Plane OFF
+        # keeps the historical always-fallback behaviour.
+        return self._agent_inherits_admin()
+
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
 
@@ -852,7 +880,7 @@ class PlatformActionExecutor:
             # fallback and API keys (system_role='admin') NEVER satisfy it;
             # caller_context=None refuses (no identity resolution).
             if action_def and action_def.super_admin_only:
-                if (caller_context or {}).get("system_role") != "super_admin":
+                if not _caller_is_super_admin(caller_context):
                     logger.warning(
                         "[PlatformExecutor] Super-admin-only action '%s' denied — "
                         "workspace_id=%s, caller_context=%s",
@@ -876,25 +904,7 @@ class PlatformActionExecutor:
 
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
-                if full_autonomy:
-                    # Workspace dialled to full autonomy — Auto runs as admin.
-                    is_admin = True
-                elif caller_context is not None:
-                    # Explicit caller identity — check roles directly.
-                    # A dict with no role keys means "known non-admin user".
-                    is_admin = (
-                        caller_context.get("workspace_role") in ("owner", "admin")
-                        or caller_context.get("system_role") == "admin"
-                    )
-                else:
-                    # No caller_context (heartbeat, agent factory, etc.).
-                    # PRD-174 F014: the "agents inherit admin from the workspace
-                    # owner" fallback is no longer implicit — under the policy
-                    # plane it applies ONLY when the explicit, default-OFF
-                    # ``agents_inherit_admin`` workspace policy is set. Plane OFF
-                    # keeps the historical always-fallback behaviour.
-                    is_admin = self._agent_inherits_admin()
-                if not is_admin:
+                if not self._caller_is_admin(caller_context, full_autonomy):
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "
                         "workspace_id=%s, caller_context=%s",
@@ -960,6 +970,16 @@ class PlatformActionExecutor:
                         action_name, approved_via_grant_id, self.workspace_id,
                     )
                 else:
+                    # F091 (night 3): never ask about something that is not
+                    # there, and name what is on the card.
+                    from modules.tools.execution.subject_targets import (
+                        missing_targets_error, named_subject, resolve_targets,
+                    )
+
+                    found, missing = resolve_targets(self.db, self.workspace_id, params, action_name)
+                    if missing:
+                        return missing_targets_error(action_name, missing)
+                    subject = named_subject(found) or _subject_line(params)
                     ask = {
                         "success": False,
                         "requires_confirmation": True,
@@ -967,7 +987,7 @@ class PlatformActionExecutor:
                         "permission_level": action_def.permission_level,
                         "message": (
                             f"This action ({action_def.permission_level}) requires confirmation. "
-                            f"Action: {action_name}{_subject_line(params)} — "
+                            f"Action: {action_name}{subject} — "
                             f"{action_def.description[:100]}"
                         ),
                         "params": params,
@@ -981,6 +1001,7 @@ class PlatformActionExecutor:
                         permission_level=action_def.permission_level,
                         description=action_def.description,
                         caller_context=caller_context,
+                        subject=subject,
                     )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
@@ -1304,6 +1325,20 @@ class PlatformActionExecutor:
             _driver = driver_from_caller_context(caller_context)
             if _driver:
                 params = {**params, "_user_id": _driver}
+
+        # F122: platform_list_tools lists what THIS caller may run. Both flags
+        # come from the predicates the gates above read. Strip-then-inject like
+        # the keys around it, so a tool arg can never claim a role.
+        if action_name == "platform_list_tools":
+            params = {
+                k: v for k, v in params.items()
+                if k not in ("_caller_is_super_admin", "_caller_is_admin")
+            }
+            params = {
+                **params,
+                "_caller_is_super_admin": _caller_is_super_admin(caller_context),
+                "_caller_is_admin": self._caller_is_admin(caller_context, full_autonomy),
+            }
 
         # PRD-238 S4: every handler learns which chat turn (if any) it runs in,
         # so a long-running action can narrate progress through

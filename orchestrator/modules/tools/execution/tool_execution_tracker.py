@@ -63,7 +63,11 @@ class ToolExecutionTracker:
 
     TOOL_RETRY_LIMITS: Dict[str, int] = {
         "composio_execute": 5,
-        "search_knowledge": 5,
+        # F120 (run 4): a ceiling, not a retry count. Eight questions in one
+        # message are eight distinct searches — at 5 the last three went
+        # unsearched and came back "not in the documents". Repeats are still
+        # caught by the exact and similar-query checks below, whatever the count.
+        "search_knowledge": 12,
         "semantic_search": 5,
         "search_codebase": 5,
         "smart_query_database": 5,
@@ -80,6 +84,18 @@ class ToolExecutionTracker:
         self.exact_executions: Set[Tuple[str, str]] = set()
         self.search_queries: Dict[str, List[str]] = {}
         self.tool_counts: Dict[str, int] = {}
+        # F108: the actions that did what they were asked this turn (a result
+        # that reports a failure does not count) — what a reply may claim.
+        self.succeeded: Set[str] = set()
+        # F120: how many queries per search tool came from EARLIER model responses;
+        # None until a caller marks rounds (then every earlier query counts).
+        self._round_start: Optional[Dict[str, int]] = None
+
+    def begin_round(self) -> None:
+        """F120: the calls of one model response are one batch — similar-looking
+        queries in it are separate questions (eight cafés, one price each), not a
+        retry. A similar query is only a repeat of one from an earlier response."""
+        self._round_start = {tool: len(queries) for tool, queries in self.search_queries.items()}
 
     def _hash_args(self, tool_args: Dict[str, Any]) -> str:
         return hashlib.md5(json.dumps(tool_args, sort_keys=True).encode()).hexdigest()
@@ -118,20 +134,35 @@ class ToolExecutionTracker:
         current_count = self.tool_counts.get(key, 0)
         limit = self._resolve_limit(key)
 
+        # F120: a skipped search names the question it left, so the reply says
+        # "not searched" — never "not in the documents".
+        query = _extract_query_from_args(tool_name, tool_args) if tool_name in self.SEARCH_TOOLS else None
         if current_count >= limit:
+            if query:
+                return True, (
+                    f'Not searched: "{query}" — this reply already ran {limit} {tool_name} calls, its '
+                    "ceiling. Tell the owner this question was not searched; do not say the answer "
+                    "is not in the documents."
+                )
             return True, f"Tool '{key}' has reached its execution limit ({limit}) for this turn"
 
         args_hash = self._hash_args(tool_args)
         exec_key = (tool_name, args_hash)
         if exec_key in self.exact_executions:
+            if query:
+                return True, f'Not searched again: "{query}" — the same search already ran in this reply; use its result.'
             return True, f"Tool '{tool_name}' was already executed with identical parameters"
 
-        if tool_name in self.SEARCH_TOOLS:
-            query = _extract_query_from_args(tool_name, tool_args)
-            if query:
-                for prev_query in self.search_queries.get(tool_name, []):
-                    if _queries_are_similar(query, prev_query):
-                        return True, f"Tool '{tool_name}' was already executed with a similar query"
+        if query:
+            earlier = self.search_queries.get(tool_name, [])
+            if self._round_start is not None:
+                earlier = earlier[: self._round_start.get(tool_name, 0)]
+            for prev_query in earlier:
+                if _queries_are_similar(query, prev_query):
+                    return True, (
+                        f'Not searched again: "{query}" — a similar search ("{prev_query}") already ran '
+                        "in this reply; use its result."
+                    )
 
         return False, ""
 
@@ -145,6 +176,14 @@ class ToolExecutionTracker:
             query = _extract_query_from_args(tool_name, tool_args)
             if query:
                 self.search_queries.setdefault(tool_name, []).append(query)
+
+    def record_outcome(self, tool_name: str, tool_args: Dict[str, Any], result: Any) -> None:
+        """F108: record an action that succeeded — the inner action for the
+        platform_execute dispatcher. A result that says it failed
+        (``success: False``, Composio's ``successful: False``) is not recorded."""
+        if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
+            return
+        self.succeeded.add(self._counting_key(tool_name, tool_args).split(":", 1)[-1])
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

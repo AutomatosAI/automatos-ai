@@ -52,6 +52,9 @@ interface DocumentDetails {
   team_access?: string[]
   upload_date?: string
   processed_date?: string | null
+  // F086: how much of the file's text the knowledge base holds
+  kept_pct?: number
+  partial?: boolean
   processing_stages?: Array<{
     stage: string
     status: 'completed' | 'processing' | 'failed' | 'pending'
@@ -86,7 +89,8 @@ const statusStyles: Record<string, string> = {
   processed: 'bg-green-500/10 text-green-400 border-green-500/20',
   processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+  partial: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
 }
 
 const stageStatusIcons = {
@@ -264,9 +268,14 @@ export function DocumentDetailsModal({
                         </div>
                         <div>
                           <p className="text-sm font-medium text-muted-foreground">Status</p>
-                          <Badge className={statusStyles[(document?.status || 'completed').toLowerCase()]}>
-                            {document?.status || 'completed'}
+                          <Badge className={statusStyles[document?.partial ? 'partial' : (document?.status || 'completed').toLowerCase()]}>
+                            {document?.partial ? `partial — ${document?.kept_pct}% kept` : (document?.status || 'completed')}
                           </Badge>
+                          {document?.partial && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Part of this file&apos;s text did not make it into the knowledge base — agents cannot find what is missing. Upload the file again to index it in full, then remove this copy.
+                            </p>
+                          )}
                         </div>
                       </CardContent>
                     </Card>

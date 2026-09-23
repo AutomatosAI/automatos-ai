@@ -40,7 +40,12 @@ interface LocalDocument {
   chunk_count?: number
   upload_date?: string
   team_access?: string[]
+  // F086: how much of the file's text the knowledge base holds
+  kept_pct?: number
+  partial?: boolean
 }
+
+const PARTIAL_HINT = "Part of this file's text did not make it into the knowledge base — agents cannot find what is missing. Upload the file again to index it in full, then remove this copy."
 
 interface LocalStorageBrowserProps {
   documents: LocalDocument[]
@@ -258,6 +263,11 @@ export function LocalStorageBrowser({
                           )}
                           {doc.chunk_count || 0} chunks
                         </Badge>
+                        {doc.partial && (
+                          <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20" title={PARTIAL_HINT}>
+                            Partial — {doc.kept_pct}% kept
+                          </Badge>
+                        )}
 
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -376,6 +386,11 @@ export function LocalStorageBrowser({
                           )}
                           {doc.chunk_count || 0} chunks
                         </Badge>
+                        {doc.partial && (
+                          <Badge variant="outline" className="text-[10px] bg-warning/10 text-warning border-warning/20" title={PARTIAL_HINT}>
+                            Partial — {doc.kept_pct}% kept
+                          </Badge>
+                        )}
                         {doc.upload_date && (
                           <span className="text-[10px] text-muted-foreground">
                             {new Date(doc.upload_date).toLocaleDateString()}

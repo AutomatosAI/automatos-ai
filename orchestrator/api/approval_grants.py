@@ -121,7 +121,37 @@ async def list_grants(
     if kind:
         q = q.filter(ApprovalGrant.kind == kind)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [_grant_payload(db, g) for g in rows]}
+    # F091-E1: every card says whose job it is — the agent and the ticket.
+    from services.grant_owners import grant_owners
+
+    owners = grant_owners(db, ctx.workspace_id, rows)
+    return {"grants": [{**_grant_payload(db, g), "owner": owners.get(g.id)} for g in rows]}
+
+
+# F091-A2 (night 3): the two kinds keep their own verbs (PRD-225), but a refusal
+# says exactly what to call instead — the real id, the real options. The old text
+# said "approval-grants/{id}/answer" literally.
+_GRANTS_PATH = "/api/v1/approval-grants"
+_DENY_WORDS = ("deny", "no", "refuse", "reject", "decline", "stop", "cancel")
+
+
+def question_not_approval(grant: ApprovalGrant) -> str:
+    """The 422 for /grant on a question: the exact /answer call to make."""
+    options = [str(o) for o in (grant.options or []) if str(o).strip()]
+    body = (f'{{"option": "<one of: {", ".join(options)}>"}}' if options
+            else '{"answer_text": "<your answer>"}')
+    return (f"Grant {grant.id} is a question, not an approval — answer it: "
+            f"POST {_GRANTS_PATH}/{grant.id}/answer with {body}. "
+            "The /grant route is only for approval rows.")
+
+
+def approval_not_question(grant: ApprovalGrant, said: str) -> str:
+    """The 422 for /answer on an approval: the exact /deny or /grant call."""
+    deny = f"to refuse it: POST {_GRANTS_PATH}/{grant.id}/deny"
+    allow = f"to approve it: POST {_GRANTS_PATH}/{grant.id}/grant"
+    first, second = (deny, allow) if said.strip().lower().startswith(_DENY_WORDS) else (allow, deny)
+    return (f"Grant {grant.id} is an approval, not a question — {first}; {second}. "
+            "The /answer route is only for questions.")
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:
@@ -148,14 +178,7 @@ async def grant_approval(
     # PRD-225: a question is answered, never approved — /answer is its only
     # completion path (a yes/no can't stand in for a free-text decision).
     if grant.kind == KIND_QUESTION:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Grant {grant.id} is a question (kind='{grant.kind}'), not an approval — "
-                "answer it with POST /api/v1/approval-grants/{id}/answer, which takes "
-                "'answer_text' or 'option'. The /grant route is only for approval rows."
-            ),
-        )
+        raise HTTPException(status_code=422, detail=question_not_approval(grant))
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
@@ -315,12 +338,7 @@ async def answer_question(
     grant = _load_grant(db, ctx, grant_id)
     if grant.kind != KIND_QUESTION:
         raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Grant {grant.id} is an approval (kind='{grant.kind}'), not a question — "
-                "approve it with POST /api/v1/approval-grants/{id}/grant, or refuse it with "
-                "/deny. The /answer route is only for kind='question' rows."
-            ),
+            status_code=422, detail=approval_not_question(grant, body.answer_text or body.option or ""),
         )
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(

@@ -17,6 +17,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -132,6 +133,11 @@ class DocumentMetadata:
             data['processed_date'] = self.processed_date.isoformat()
         data['status'] = self.status.value
         return data
+
+# A Markdown table's separator row: | --- | :---: | ---: |
+_TABLE_SEPARATOR_RE = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+\s*$")
+TABLE_CHUNK_CHARS = 1200   # a spreadsheet chunk: its table's header plus rows up to about this size
+
 
 @dataclass
 class DocumentChunk:
@@ -329,6 +335,48 @@ class DocumentProcessor:
         
         return text
     
+    def _chunk_table_rows(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
+        """F086: a spreadsheet (CSV, XLSX — extracted as Markdown tables) is chunked
+        by ROWS, and every chunk carries its table's header, so each row can be
+        retrieved with its column names. Night 3's 30-row café sheet came back as
+        8 of 30 rows, its second half stored without headers. Lines outside a
+        table (a sheet title) ride with the next table's header."""
+        lines = text.splitlines()
+        contents: List[str] = []
+        preamble: List[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if (line.startswith("|") and i + 1 < len(lines)
+                    and _TABLE_SEPARATOR_RE.match(lines[i + 1].strip())):
+                header = "\n".join([*preamble, line, lines[i + 1]])
+                preamble = []
+                i += 2
+                batch: List[str] = []
+                while i < len(lines) and lines[i].startswith("|"):
+                    row = lines[i]
+                    if batch and len(header) + sum(len(r) + 1 for r in batch) + len(row) > TABLE_CHUNK_CHARS:
+                        contents.append(header + "\n" + "\n".join(batch))
+                        batch = []
+                    batch.append(row)
+                    i += 1
+                contents.append(header + ("\n" + "\n".join(batch) if batch else ""))
+                continue
+            if line.strip():
+                preamble.append(line)
+            i += 1
+        if preamble:
+            contents.append("\n".join(preamble))
+        return [
+            DocumentChunk(
+                document_id=0, chunk_index=n, content=content,
+                metadata={'file_type': file_type.value, 'chunk_size': len(content), 'table_rows': True,
+                          **(metadata or {})},
+                parent_content=None, headers={},
+            )
+            for n, content in enumerate(contents)
+        ]
+
     def chunk_document(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
         """
         Split document into chunks using EXISTING SemanticChunker.
@@ -343,7 +391,12 @@ class DocumentProcessor:
         Plus mathematical foundations (entropy, information theory).
         """
         chunks = []
-        
+
+        if file_type in (DocumentType.CSV, DocumentType.XLSX):
+            table_chunks = self._chunk_table_rows(text, file_type, metadata)
+            if table_chunks:
+                return table_chunks
+
         # USE EXISTING SEMANTIC CHUNKER (NOT A DUPLICATE!)
         if SEMANTIC_CHUNKER_AVAILABLE:
             try:
@@ -820,7 +873,7 @@ class DocumentManager:
             logger.error(f"Error uploading document: {e}")
             raise
     
-    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None):
+    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None, update_graph: bool = True):
         """
         Process document: extract text, chunk, and generate embeddings.
 
@@ -830,6 +883,9 @@ class DocumentManager:
             file_type: Document type
             s3_key: S3 key where document is stored (for reference)
             filename: Real document filename (not the temp path basename)
+            update_graph: schedule the knowledge-graph update (a re-ingest of the
+                same source leaves the graph as it was — it is built from the
+                source, not the chunks)
         """
         self._ensure_database_initialized()
         # W3-S8: track S3 vector_ids the persist helper stored so the outer
@@ -1175,6 +1231,18 @@ class DocumentManager:
 
                 filtered_chunks.append(chunk)
 
+            # F086: what the stored chunks hold of the extracted text. Night 3
+            # marked documents "completed" that kept a third of their text.
+            from config import config as _cov_config
+            from modules.rag.ingestion.coverage import kept_pct
+
+            kept = kept_pct(text, [c.content for c in filtered_chunks])
+            if kept < _cov_config.RAG_KEPT_WARN_PCT:
+                logger.warning(
+                    "[ingest] document %s (%s) keeps %s%% of its text — shown to the owner as partial",
+                    document_id, filename, kept,
+                )
+
             # PRD-188 S2: contextual annotations — situate each chunk within
             # its parent document BEFORE embedding (Anthropic contextual-
             # retrieval pattern). The annotated content is what gets embedded
@@ -1225,10 +1293,12 @@ class DocumentManager:
             # Update document status
             cursor.execute("""
                 UPDATE documents
-                SET status = %s, processed_date = %s, chunk_count = %s
+                SET status = %s, processed_date = %s, chunk_count = %s,
+                    doc_metadata = (COALESCE(doc_metadata::jsonb, '{}'::jsonb) || %s::jsonb)::json
                 WHERE id = %s
             """, (
-                DocumentStatus.COMPLETED.value, datetime.now(), len(valid_chunks), document_id
+                DocumentStatus.COMPLETED.value, datetime.now(), len(valid_chunks),
+                json.dumps({"kept_pct": kept}), document_id,
             ))
 
             conn.commit()
@@ -1248,7 +1318,7 @@ class DocumentManager:
             # PRD-126: Trigger knowledge graph update on document ingest
             try:
                 from modules.knowledge.graph_service import get_graph_service
-                if self.workspace_id:
+                if self.workspace_id and update_graph:
                     get_graph_service().schedule_incremental_update(
                         str(self.workspace_id),
                         [{"type": "document", "path": file_path, "id": document_id}],
@@ -1627,6 +1697,32 @@ class DocumentManager:
             logger.error(f"Error getting document {document_id}: {e}")
             raise
     
+    def clear_chunks(self, document_id: int) -> int:
+        """F086 re-ingest: drop what ingestion stored for a document — its chunks,
+        its table and formula rows, its S3 vectors — and keep the document row,
+        so ``_process_document`` can run again under the same id. Returns the
+        number of chunks removed."""
+        self._ensure_database_initialized()
+        conn = psycopg2.connect(**self.db_config)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (document_id,))
+            removed = cursor.rowcount
+            cursor.execute("SELECT to_regclass('public.kb_tables') IS NOT NULL, "
+                           "to_regclass('public.kb_formulas') IS NOT NULL")
+            has_tables, has_formulas = cursor.fetchone()
+            if has_tables:
+                cursor.execute("DELETE FROM kb_tables WHERE knowledge_item_id = %s", (document_id,))
+            if has_formulas:
+                cursor.execute("DELETE FROM kb_formulas WHERE knowledge_item_id = %s", (document_id,))
+            conn.commit()
+            cursor.close()
+        finally:
+            conn.close()
+        if self.use_s3_vectors and self._s3_backend:
+            self._s3_backend.delete_documents(str(document_id))
+        return removed
+
     def delete_document(self, document_id: int) -> bool:
         """Delete document, all its chunks, and any S3-stored vectors.
 
