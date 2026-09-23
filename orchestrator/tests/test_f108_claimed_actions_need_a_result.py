@@ -86,7 +86,9 @@ def test_the_loop_records_the_actions_that_succeeded():
     async def tools(name, args, call_id, workspace_id):
         return {"success": args["action"] != "platform_approve_mission", "error": "not yours to approve"}
 
-    executor = ToolLoopExecutor(llm_callback=_Model(LLMResponse(content="I've approved the mission.", tool_calls=None)),
+    # the claim is nudged once (test_f108_b); the retry says what happened
+    executor = ToolLoopExecutor(llm_callback=_Model(LLMResponse(content="I've approved the mission.", tool_calls=None),
+                                                    LLMResponse(content="The approval was refused.", tool_calls=None)),
                                 tool_callback=tools, max_iterations=5)
     first = LLMResponse(content="", tool_calls=[_call("platform_get_mission"), _call("platform_approve_mission")])
     asyncio.run(executor.run(initial_response=first, messages=[{"role": "user", "content": "approve it"}],

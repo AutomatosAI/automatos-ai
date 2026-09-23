@@ -243,12 +243,28 @@ class ToolLoopExecutor:
         # the call is written into the visible text instead of being made. One
         # nudge, one retry — the model either calls the tools or says plainly
         # that it did not act.
-        current = await self._recover_narrated_actions(current, messages, tools)
+        recovered = await self._recover_narrated_actions(current, messages, tools)
+        nudged = recovered is not current     # one nudge per run
+        current = recovered
 
         if not _has_tool_calls(current):
             return ToolLoopResult(response=current, iterations=0)
 
-        while _has_tool_calls(current) and iteration < self.max_iterations:
+        while True:
+            if not (_has_tool_calls(current) and iteration < self.max_iterations):
+                # F108 (night 3): the final reply says an action was done ("I've
+                # approved the mission. It's now running") and no action that does
+                # it succeeded this turn — one nudge: make the call, or say plainly
+                # it has not happened. A retry that makes the call runs it here.
+                if nudged or iteration >= self.max_iterations:
+                    break
+                nudged = True
+                retry = await self._recover_claimed_action(current, messages, tools)
+                if retry is None:
+                    break
+                current = retry
+                if not _has_tool_calls(current):
+                    break
             iteration += 1
             logger.info(
                 "[tool-loop] iteration %d: %d tool call(s)",
@@ -555,9 +571,30 @@ class ToolLoopExecutor:
             )
             nudge = _NARRATION_RECOVERY_MSG
         else:
-            return current
+            return await self._recover_claimed_action(current, messages, tools) or current
         messages.append({"role": "assistant", "content": text})
         messages.append({"role": "system", "content": nudge})
+        return await self._llm(messages, tools)
+
+    async def _recover_claimed_action(
+        self,
+        current: LLMResponse,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]],
+    ) -> Optional[LLMResponse]:
+        """F108: retry once when a reply without a tool call says an action was
+        done and no action that does it succeeded this turn. The claim stays in
+        the history; the nudge says it has not happened. None when there is
+        nothing to recover."""
+        if not tools or _has_tool_calls(current):
+            return None
+        text = getattr(current, "content", "") or ""
+        claim = claimed_action_not_done(text, self.tracker.succeeded)
+        if not claim:
+            return None
+        logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
+        messages.append({"role": "assistant", "content": text})
+        messages.append({"role": "system", "content": _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)})
         return await self._llm(messages, tools)
 
 
@@ -582,6 +619,13 @@ _UNRUN_SOURCE_RECOVERY_MSG = (
     "turn: what you wrote came from memory of an earlier conversation and may "
     "be out of date. Call {tool} now, in this response, or say plainly that the "
     "answer is from an earlier conversation and was not searched again."
+)
+# F108 (night 3): "I've approved the mission. It's now running" — it wasn't.
+_CLAIMED_ACTION_RECOVERY_MSG = (
+    "Your previous reply says something was {claim}, but no tool call in this turn "
+    "did that, so it has not happened. Make the call now, in this response, or say "
+    "plainly that it has not been done and what you need. Never report an action "
+    "as done without a tool result."
 )
 UNRUN_SOURCE_NOTICE = (
     "No search ran for this reply — it gives {tool} as its source, but repeats an "
