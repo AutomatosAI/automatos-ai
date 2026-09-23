@@ -6,8 +6,9 @@
 * ``social_post_targets``: one row per channel per post, each with its own
   idempotency key, attempts, remote id, permalink and error.
 
-JSON columns are ``JSON().with_variant(JSONB(), "postgresql")``, so the tables
-also build under SQLite in the unit tests. The ``prd251_socials`` migration
+JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns
+the portable ``Uuid`` (native UUID on Postgres, CHAR(32) elsewhere), so the
+tables also build under SQLite in the unit tests. The ``prd251_socials`` migration
 creates the same shape, and ``tests/test_prd251_models.py`` holds the two
 together. There is no ``social_campaigns`` table: D2 creates it in Wave 2,
 and only if series approval ships.
@@ -30,9 +31,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     false,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from core.database.base import Base
@@ -82,14 +84,14 @@ class SocialPost(Base):
         {"extend_existing": True},
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     workspace_id = Column(
-        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     # The user or agent that made the post.
     created_by = Column(String(255), nullable=False)
     # social_campaigns arrives in Wave 2, only if series approval ships: no FK yet.
-    campaign_id = Column(UUID(as_uuid=True), nullable=True)
+    campaign_id = Column(Uuid(as_uuid=True), nullable=True)
 
     title = Column(String(500), nullable=False)
     # The ask the post answers.
@@ -99,7 +101,7 @@ class SocialPost(Base):
     # One of SOCIAL_POST_FORMATS; NULL until a format is chosen.
     format = Column(String(20), nullable=True)
     # A document_templates id (social templates are Wave 1, S1.2).
-    template_id = Column(UUID(as_uuid=True), nullable=True)
+    template_id = Column(Uuid(as_uuid=True), nullable=True)
     # {name: {"value": ..., "claim": bool}}
     variables = Column(_json_type(), nullable=False, default=dict)
     # {claim name: {"kind", "ref", "as_of"}} (D7)
@@ -166,9 +168,9 @@ class SocialPostTarget(Base):
         {"extend_existing": True},
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     post_id = Column(
-        UUID(as_uuid=True), ForeignKey("social_posts.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("social_posts.id", ondelete="CASCADE"), nullable=False
     )
     # The Composio app name (linkedin, twitter, instagram, ...).
     toolkit = Column(String(100), nullable=False)

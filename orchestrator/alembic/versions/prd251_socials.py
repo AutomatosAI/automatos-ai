@@ -62,7 +62,8 @@ def _json():
 
 
 def _uuid():
-    return postgresql.UUID(as_uuid=True)
+    # Portable: native UUID on Postgres, CHAR(32) elsewhere (the model's type).
+    return sa.Uuid(as_uuid=True)
 
 
 def _socials_settings_seed() -> tuple:
