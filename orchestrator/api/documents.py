@@ -233,6 +233,25 @@ async def handle_request(
         if team_access:
             team_access_list = normalize_teams(team_access.split(","))
 
+        # F087: a file uploaded again under the same name replaces that document —
+        # same id, the new text, the old source kept in its history.
+        from services.document_versions import replace_document, replaceable_document, replaced_message
+
+        replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
+        if replaced is not None:
+            version = await replace_document(
+                db, replaced, workspace_id=ctx.workspace_id, file_path=str(file_path), file_size=file_size,
+                content_hash=content_hash, file_type=file_type,
+                replaced_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
+                tags=tag_list, description=description,
+            )
+            return DocumentUploadResponse(
+                document_id=replaced.id,
+                filename=replaced.filename,
+                status=replaced.status,
+                message=replaced_message(replaced.filename, version, replaced.status),
+            )
+
         # Create document record. tags persist to documents.tags — a real PostgreSQL
         # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
         # The prior "SQLAlchemy array bug" was a mis-diagnosis: team_access below uses the

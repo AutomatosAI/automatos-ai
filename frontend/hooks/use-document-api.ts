@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { logger } from '../lib/logger'
 import apiClient from '../lib/api-client'
+import { uploadOutcome } from '../lib/upload-outcome'
 
 // Document query keys for consistent caching
 export const documentQueryKeys = {
@@ -245,7 +246,10 @@ export function useUploadDocument() {
     },
     onSuccess: (response) => {
       console.log('[useUploadDocument] SUCCESS! Response:', response)
-      toast.success('Document uploaded successfully')
+      // F087: a replacement, a duplicate and a failed pipeline each say so
+      const { ok, text } = uploadOutcome(response)
+      if (ok) toast.success(text)
+      else toast.error(text)
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documents })
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documentStats })
     },
