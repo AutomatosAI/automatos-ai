@@ -5,13 +5,20 @@
  * Socials switch: the tab shows the seeded slugs one per line, and saves the
  * JSON list the backend reads (upper-cased, de-duplicated). No row yet → it
  * says the migration is pending; an unreadable row says every action is
- * refused until it is saved again.
+ * refused until it is saved again, and is shown verbatim for repair.
+ *
+ * P251-RVW-6: the backend refuses everything while the value is unreadable
+ * and denies nothing once the list is empty, so this screen must never turn
+ * the one into the other by accident. A line that is not an action slug
+ * blocks Save, and an empty list needs a second, explicit confirmation.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import ComposioDenyListTab, {
+  denyListEditorText,
   normalizeDeniedActions,
+  notActionSlugs,
   parseDeniedActions,
 } from '../ComposioDenyListTab'
 import type { SystemSetting } from '@/lib/api/system-settings'
@@ -46,6 +53,7 @@ function seededRow(value: string | null): SystemSetting {
 }
 
 const textarea = () => screen.getByLabelText('Denied action slugs, one per line') as HTMLTextAreaElement
+const saveButton = () => screen.getByRole('button', { name: /save deny list/i })
 
 describe('ComposioDenyListTab (PRD-251 S0.6)', () => {
   it('says the migration is pending when the row is not seeded', () => {
@@ -92,7 +100,88 @@ describe('ComposioDenyListTab (PRD-251 S0.6)', () => {
     render(<ComposioDenyListTab settings={[seededRow('not json')]} onSave={vi.fn()} saving={false} onReset={vi.fn()} />)
 
     expect(screen.getByRole('alert')).toHaveTextContent(/every Composio action is refused/)
-    expect(textarea().value).toBe('')
+    expect(textarea().value).toBe('not json')
+  })
+
+  it.each([
+    'not json',
+    '["HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE", 5]',
+    '{"denied": ["HIGGSFIELD_MCP_DEPLOY_WEBSITE"]}',
+    '[1]',
+  ])('an unreadable stored value (%s) is shown verbatim, and an unedited Save writes nothing', (raw) => {
+    const onSave = vi.fn()
+    render(<ComposioDenyListTab settings={[seededRow(raw)]} onSave={onSave} saving={false} onReset={vi.fn()} />)
+
+    expect(textarea().value).toBe(raw)
+    expect(saveButton()).toBeDisabled()
+    fireEvent.click(saveButton())
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText(/Not action slugs, so the list cannot be saved/)).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('an unreadable stored value rewritten one slug per line saves as the JSON list', () => {
+    const onSave = vi.fn()
+    render(
+      <ComposioDenyListTab
+        settings={[seededRow('["HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE", 5]')]}
+        onSave={onSave}
+        saving={false}
+        onReset={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(textarea(), {
+      target: { value: 'HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE\nhiggsfield_mcp_deploy_website' },
+    })
+    fireEvent.click(saveButton())
+
+    expect(onSave).toHaveBeenCalledWith({
+      denied_actions: JSON.stringify(['HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE', 'HIGGSFIELD_MCP_DEPLOY_WEBSITE']),
+    })
+  })
+
+  it('a JSON list pasted whole is not saved as one slug that matches nothing', () => {
+    const onSave = vi.fn()
+    render(
+      <ComposioDenyListTab settings={[seededRow(JSON.stringify(D16))]} onSave={onSave} saving={false} onReset={vi.fn()} />,
+    )
+
+    fireEvent.change(textarea(), { target: { value: JSON.stringify(D16) } })
+
+    expect(saveButton()).toBeDisabled()
+    fireEvent.click(saveButton())
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText(/Not action slugs, so the list cannot be saved/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['the seeded list', JSON.stringify(D16)],
+    ['an unreadable value', 'not json'],
+    ['a list already empty', '[]'],
+  ])('saving an empty list, starting from %s, needs a second explicit confirmation', async (_start, raw) => {
+    const onSave = vi.fn()
+    render(<ComposioDenyListTab settings={[seededRow(raw)]} onSave={onSave} saving={false} onReset={vi.fn()} />)
+
+    fireEvent.change(textarea(), { target: { value: '' } })
+    fireEvent.click(saveButton())
+
+    const confirmation = await screen.findByRole('alertdialog')
+    expect(confirmation).toHaveTextContent(/every Composio action becomes runnable/)
+    expect(confirmation).toHaveTextContent(/Higgsfield billing actions/)
+    expect(onSave).not.toHaveBeenCalled()
+
+    // Without the confirmation nothing is saved.
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(onSave).not.toHaveBeenCalled()
+
+    // With it, the empty list is saved.
+    fireEvent.click(saveButton())
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Save the empty list' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ denied_actions: '[]' }))
+    expect(onSave).toHaveBeenCalledTimes(1)
   })
 
   it('resets through the category reset (back to the seeded list)', () => {
@@ -110,5 +199,12 @@ describe('ComposioDenyListTab (PRD-251 S0.6)', () => {
     expect(parseDeniedActions('{"a": 1}')).toBeNull()
     expect(parseDeniedActions('[1]')).toBeNull()
     expect(normalizeDeniedActions('a_b\n A_B \n\nc')).toEqual(['A_B', 'C'])
+  })
+
+  it('starts the editor from the stored list, or from an unreadable value verbatim', () => {
+    expect(denyListEditorText(null)).toBe('')
+    expect(denyListEditorText('["A_B","C"]')).toBe('A_B\nC')
+    expect(denyListEditorText('{"a": 1}')).toBe('{"a": 1}')
+    expect(notActionSlugs(['A_B', 'GMAIL_SEND_EMAIL2', '["A_B"]', 'NOT JSON', 'A,B'])).toEqual(['["A_B"]', 'NOT JSON', 'A,B'])
   })
 })
