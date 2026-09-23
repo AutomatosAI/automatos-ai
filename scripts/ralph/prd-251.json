@@ -138,6 +138,64 @@
    "priority": 9,
    "passes": true,
    "notes": "Anchors: core/composio/tool_executor.py:344 (execute), :705 (LinkedIn hook inside execute), api/recipe_executor.py:763, api/composio.py:281; modules/tools/capabilities/taxonomy.py:268-280 (REQUIRES_CONFIRMATION); config.py:898 (AUTOMATOS_POLICY_PLANE default off). Composio docs verified 2026-09-23: docs.composio.dev/toolkits/higgsfield_mcp. The list is DATA (system setting), never a code constant."
+  },
+  {
+   "id": "P251-RVW-1",
+   "title": "[HIGH] The Composio deny list fails OPEN when its settings read errors",
+   "description": "core/composio/deny_list.py:73 reads composio.denied_actions through core.llm.manager.get_system_setting, which catches EVERY exception (core/llm/manager.py:93-96), logs it at DEBUG and returns the default — None here. parse_denied_actions(None) (deny_list.py:57-58) means 'nothing denied'. So any failed read lets HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE (and every other D16 slug) execute, silently: pool exhaustion or timeout on the ad-hoc SessionLocal the helper opens on every call (up to three per execution: tool_executor.py twice, client.py once), a dropped connection or a statement timeout. Verified: the real get_system_setting and composio_action_denial bodies, with SessionLocal raising, return None for HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE. This contradicts the module's own contract ('a guard on real money fails closed') and the platform rule at main.py:894 ('A gate that can't decide must deny'). Keep 'no row, or an empty value → nothing denied' (a stack without the seed). Only a read that could not complete must refuse.",
+   "acceptanceCriteria": [
+    "composio_action_denial reads the setting through a path that tells 'no row' apart from 'the read failed' (NOT get_system_setting's catch-all). When the read fails it refuses EVERY action with 'This action is blocked in Automatos: <reason naming the unreadable deny list>', never returns None because of the failure, and logs at ERROR.",
+    "tests/test_prd251_composio_deny.py: with SessionLocal patched to raise, and separately with the query raising, ComposioClient.execute_action('HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE') and ComposioToolExecutor.execute(...) both return the blocked error, and the mocked SDK tools.execute is never called.",
+    "test_no_row_denies_nothing, test_an_empty_list_denies_nothing and test_removing_the_slug_from_the_setting_unblocks_it_with_no_restart stay green and unchanged: a missing row still denies nothing, and a super-admin edit still applies on the next call.",
+    "CI green on the fix commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built); record the run id."
+   ],
+   "priority": 10,
+   "passes": false,
+   "notes": "Adversarial review 2026-09-23 of 4a8ca308a (acceptance gate exit 0; test.yml run 35821917213 green on HEAD). The code-reviewer agent reported the same defect independently as HIGH. The memory note on PRD-251 had already listed 'deny list fails OPEN on a settings-read error' as open. No existing test raises from the read path; the only fail-closed test covers a malformed VALUE."
+  },
+  {
+   "id": "P251-RVW-2",
+   "title": "[MEDIUM] An approval binds to whatever the content is at click time, not to what the approver saw",
+   "description": "POST /api/socials/posts/{id}/approve takes only {override_unsourced, comment} (api/socials.py:91-93, extra=forbid). service.approve binds approved_hash to the content as it is when the request lands (modules/socials/service.py:412-418). The Socials tab sends no hash (frontend/lib/api-client.ts:2540-2545; frontend/hooks/use-socials-api.ts:122-123), and its post list is cached for 15 s. Failure: a reviewer opens post P (copy A, content_hash H1). An editor PATCHes P's copy to B while it is in needs_approval, which the service allows (status stays needs_approval, content_hash becomes H2); from Wave 4 an agent can do the same. The reviewer clicks Approve, and the server records approved_hash = H2 with approved_by = the reviewer. Copy B is now approved and publishable, though nobody who approved it has seen it. D6 and Goal 3 promise that an approval binds to the exact content approved. Separately, the load→write has no lock: a PATCH that commits between the approve's load and its commit leaves status=approved with approved_hash ≠ content_hash. assert_publishable still refuses it, but the post shows Approved with no approval_voided entry.",
+   "acceptanceCriteria": [
+    "The approve request carries a required content_hash: the hash of the content the approver is looking at. When it differs from the post's current content_hash, the route answers 409 and gives the current hash, and the post is unchanged (status, approved_hash, approved_by, approved_at, review_log).",
+    "tests/test_prd251_api.py: create → submit → GET (H1) → PATCH copy (H2) → approve with H1 → 409, status still needs_approval, approved_hash still null. Then approve with H2 → 200 and approved_hash == H2.",
+    "The approve write cannot land on content it did not check. Test: a second session commits a PATCH after the approve route has loaded the post and before it commits. The approve answers 409, and the row is not left approved (use SELECT … FOR UPDATE on the load, or an UPDATE conditional on content_hash and status).",
+    "The Socials tab's Approve sends the displayed post's content_hash. vitest: the approveSocialPost mock receives post.content_hash; a 409 shows a toast and refetches the posts.",
+    "CI green on the fix commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built); record the run id."
+   ],
+   "priority": 11,
+   "passes": false,
+   "notes": "Adversarial review 2026-09-23 of 4a8ca308a (acceptance gate exit 0; test.yml run 35821917213 green on HEAD). This is the standard If-Match pattern. request-changes and reject never make a post publishable, so they are out of this story. The Wave 0 transitions are unchanged."
+  },
+  {
+   "id": "P251-RVW-3",
+   "title": "[MEDIUM] The public image route walks the whole generated-images prefix for every unknown id",
+   "description": "GET /api/generated-images/{id} is public (api/generated_images.py:30-37) and unthrottled: the slowapi middleware is registered only with the policy plane on (main.py:923-924). For a well-formed id with no pointer, _resolve_key (core/services/image_store.py:207-214) falls through to _find_legacy_key. Its second search is the WHOLE generated-images/ prefix (:250), walked page by page (:257-268) until a match, and a miss is never remembered. All of it runs in one default-executor thread (:169). asyncio.to_thread shares that pool, and the Composio executor uses it for every tool call (tool_executor.py, asyncio.to_thread(self.client.execute_action…)). Measured with the real module over a stub bucket of 25,000 images: each GET for a random uuid4 made 1 pointer GET + 25 list_objects_v2 calls, every time. The base code made 2. Anyone can therefore tie up the shared thread pool and multiply S3 LIST spend with random UUIDs. The legacy set is closed (every save now writes a pointer first), so the walk only ever needs to happen once.",
+   "acceptanceCriteria": [
+    "Once legacy ids are indexed, an unknown id triggers no list call. tests/test_prd251_image_store.py: with 5,000 stub legacy objects, 20 sequential lookups of distinct unknown uuid4 ids make at most 5 list_objects_v2 calls IN TOTAL, and each returns None (the route: 404).",
+    "The legacy walk is single-flight: 10 concurrent lookups of distinct unknown ids start at most one walk (test).",
+    "Every legacy id still resolves: test_the_1400th_of_1500_stored_images_resolves and test_a_legacy_ids_first_lookup_writes_its_pointer stay green and unchanged, and a new save still resolves with one pointer GET and no list call.",
+    "Any TTL, limit or marker name the fix introduces is a config.py attribute or a named module constant (no inline literal). CI green on the fix commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built); record the run id."
+   ],
+   "priority": 12,
+   "passes": false,
+   "notes": "Adversarial review 2026-09-23 of 4a8ca308a (acceptance gate exit 0; test.yml run 35821917213 green on HEAD). US-007's ACs are met as written. This is a cost and availability regression that the per-miss paginated fallback introduced. Any of these fixes would do: a one-shot pointer backfill with a persistent completion marker, a per-process legacy index, or a negative cache. The builder picks one and says why (the US-007 description asked the same for pointer vs lookup row)."
+  },
+  {
+   "id": "P251-RVW-4",
+   "title": "[MEDIUM] A deactivated or replaced LinkedIn credential keeps posting from a warm process",
+   "description": "No credential change ever invalidates the per-workspace caches in core/composio/linkedin_image_workaround.py. _load_linkedin_credentials returns the cached credential without touching the store (:107-109). A stored access token is trusted for 24 h (:63, :176). After a refresh, the token is cached for LinkedIn's expires_in (:202-203) and only the credential cache is dropped (:204). clear_workspace_cache (:87) has no production caller: CredentialStore.update_credential and delete_credential (core/credentials/service.py:293, :371) never reach it, and tests are its only caller. So in any worker that has posted: (a) an owner who deactivates or deletes the credential (the wrong organisation connected, or the staff member left) keeps publishing image posts to that organisation for up to 24 h, and then one more refresh runs with the removed credential's secrets. That breaks the module's own contract (:14-16: 'a workspace with no active credential of its own gets a clear error and no LinkedIn call is made'). (b) An owner who replaces it gets the new organisation URN paired with the OLD credential's refreshed token for that token's lifetime. This stays inside one tenant; US-005's cross-tenant fix holds.",
+   "acceptanceCriteria": [
+    "tests/test_prd251_linkedin_scope.py, one process with warm caches: after a successful post, deactivating the workspace's credential makes the next post return the LinkedInCredentialError, with zero requests to LinkedIn.",
+    "After a successful post, replacing the credential (old one deactivated; new active one with its own token and organisation) makes the next post use the new token and the new organisation URN.",
+    "After a successful post, editing the credential's access_token in place makes the next post use the new token.",
+    "ACs 1-3 hold when the credential row is changed through a SEPARATE database session (another worker), not through any in-process hook. Example: each post re-reads the active credential's id and updated_at, and drops the workspace's cached credential and token on a mismatch. clear_workspace_cache is either called from that path or deleted.",
+    "CI green on the fix commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built); record the run id."
+   ],
+   "priority": 13,
+   "passes": false,
+   "notes": "Adversarial review 2026-09-23 of 4a8ca308a (acceptance gate exit 0; test.yml run 35821917213 green on HEAD). The owner kept the workaround and chose to scope it (open question 6). Honouring revocation is part of that scope. The existing no-credential test covers a cold cache only."
   }
  ]
 }
