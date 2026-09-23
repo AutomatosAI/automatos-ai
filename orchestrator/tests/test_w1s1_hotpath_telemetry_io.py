@@ -90,6 +90,10 @@ def test_board_task_failure_emits_board_error(monkeypatch):
     monkeypatch.setattr(
         bt_mod, "_board_task_blocked_pending_approval", lambda *a, **k: False
     )
+    # F034 (night 1) checks the day's spend ceiling before the approval gate. With
+    # SessionLocal mocked its spend read looks over the ceiling, so the task was
+    # parked before it reached the path under test; neutralise it the same way.
+    monkeypatch.setattr("services.daily_spend_guard.refuse_new_work", lambda *a, **k: None)
 
     ws = str(uuid4())
     bt_mod._launch_task_execution(
@@ -140,6 +144,10 @@ def test_board_task_success_does_not_emit(monkeypatch):
     monkeypatch.setattr(
         bt_mod, "_board_task_blocked_pending_approval", lambda *a, **k: False
     )
+    # F034 (night 1) checks the day's spend ceiling before the approval gate. With
+    # SessionLocal mocked its spend read looks over the ceiling, so the task was
+    # parked before it reached the path under test; neutralise it the same way.
+    monkeypatch.setattr("services.daily_spend_guard.refuse_new_work", lambda *a, **k: None)
 
     bt_mod._launch_task_execution(
         task_id=123,
