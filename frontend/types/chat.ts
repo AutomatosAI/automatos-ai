@@ -74,6 +74,12 @@ export interface LimitReached {
   message: string
 }
 
+/** F091-C2: the owner said no while a request of Auto's still waits on a yes. */
+export interface WithdrawOffer {
+  message: string
+  requests: Array<{ grant_id: number; action?: string | null; reason?: string | null }>
+}
+
 /** PRD-239 S4: a turn that failed — one plain sentence and a stable code. */
 export interface TurnError {
   message: string
@@ -191,6 +197,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   toolCalls?: ToolCall[]
   routingInfo?: RoutingInfo
   limitReached?: LimitReached
+  /** F091-C2: offer to withdraw a pending request after a "no" in chat. */
+  withdrawOffer?: WithdrawOffer
   /** PRD-238 S1: live reasoning text while a reply streams (persisted as a part). */
   reasoning?: string
   /** PRD-238 S4: progress lines from a long-running tool call (device-only, not persisted). */

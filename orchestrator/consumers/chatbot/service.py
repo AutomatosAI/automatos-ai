@@ -2475,6 +2475,17 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
             await asyncio.sleep(0)
 
+            # F091-C2 (night 3): a "no" in chat offers to withdraw Auto's request
+            # still waiting on a yes in this conversation — one click, never silent.
+            try:
+                from services.withdraw_offers import withdraw_offer
+
+                _offer = withdraw_offer(self.db, self.workspace_id, chat_id, latest_text)
+                if _offer:
+                    yield self.streaming_handler.format_aisdk_data("withdraw_offer", _offer)
+            except Exception:
+                logger.debug("[chat] withdraw offer skipped", exc_info=True)
+
             # Await agent activation
             agent_runtime = await agent_task
             if not agent_runtime:

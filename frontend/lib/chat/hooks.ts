@@ -444,6 +444,16 @@ export function useChat({
                     )
                   )
                 }
+                // F091-C2: a "no" in chat — offer to withdraw the request still pending.
+                else if (data.type === 'withdraw_offer' && Array.isArray(data.data?.requests)) {
+                  const offer = {
+                    message: String(data.data.message ?? ''),
+                    requests: data.data.requests as Array<{ grant_id: number; action?: string | null; reason?: string | null }>,
+                  }
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantMessageId ? { ...m, withdrawOffer: offer } : m))
+                  )
+                }
                 // PRD-238 S3: a cap ended the turn — say so instead of going quiet.
                 else if (data.type === 'limit_reached' && data.data?.message) {
                   const limit = {
