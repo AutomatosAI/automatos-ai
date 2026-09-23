@@ -564,6 +564,17 @@ def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:
         return False
     if task is None or task.status != "blocked":
         return False
+    # F036: a grant resumes the park it was for — never a person's stop. Night
+    # 1's ticket 231 was stopped at 23:44 and came back at 23:56 off an approval
+    # granted before the stop; the grant is recorded, the ticket stays put.
+    from services.operator_stop import operator_stop
+
+    if operator_stop(task):
+        logger.info(
+            "[approval_grants.api] grant resolved for ticket %s, but a person stopped it — not re-queued",
+            task.id,
+        )
+        return False
     task.status = "assigned"
     task.blocked_at = None
     task.blocked_reason = None

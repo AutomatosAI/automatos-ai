@@ -614,8 +614,8 @@ class ToolRegistry:
             name="search_multimodal",
             category=ToolCategory.RESEARCH,
             description=(
-                "Unified search across ALL INTERNAL knowledge types: documents, code, tables, images, formulas. "
-                "Use this for comprehensive research across the workspace when you need multiple content types at once. "
+                "One search across the workspace's EXTRACTED knowledge: tables, images, formulas and code. "
+                "Use this when you need several of those content types at once. "
                 "Searches uploaded/ingested content only — for external research, use web search tools."
             ),
             executor_class="MultimodalKnowledgeTools",
@@ -630,9 +630,9 @@ class ToolRegistry:
                 ToolParameter(
                     name="kb_types",
                     type="array",
-                    description="Knowledge types to search (default: all types)",
+                    description="Knowledge types to search (default: table, image, formula, codegraph)",
                     required=False,
-                    default=["document", "table", "image", "formula", "codegraph"]
+                    default=["table", "image", "formula", "codegraph"]
                 ),
                 ToolParameter(
                     name="limit",
@@ -645,9 +645,9 @@ class ToolRegistry:
             security_level=SecurityLevel.SAFE,
             permissions_required={"read": True},
             examples=[
-                {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["document", "codegraph", "image"], "limit": 10}}
+                {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["codegraph", "image"], "limit": 10}}
             ],
-            metadata={"kb_types": ["document", "table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
+            metadata={"kb_types": ["table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
         ))
         
         # ==========================================
@@ -658,8 +658,8 @@ class ToolRegistry:
             name="query_database",
             category=ToolCategory.DATABASE_TOOLS,
             description=(
-                "Query CONNECTED databases using natural language. Converts your question to SQL and executes it "
-                "against knowledge sources or the main Automatos database. Can generate charts via PandasAI. "
+                "Query a database connected to this workspace (Settings → Data Sources) using natural language. "
+                "Converts your question to SQL and runs it against that database. Can generate charts via PandasAI. "
                 "Use for structured data questions (counts, trends, metrics). For document content, use search_knowledge instead. "
                 "For live internet data, use web search tools."
             ),
@@ -669,13 +669,16 @@ class ToolRegistry:
                 ToolParameter(
                     name="query",
                     type="string",
-                    description="Natural language query (e.g., 'Show failed workflows in the last 7 days', 'Count agents by type')",
+                    description="Natural language query (e.g., 'How many orders shipped last week?', 'Top 5 customers by revenue')",
                     required=True
                 ),
                 ToolParameter(
                     name="database_name",
                     type="string",
-                    description="Specific database/knowledge source to query (optional - uses default if not specified)",
+                    description=(
+                        "The database source to query: its name or numeric id. Omit it when the workspace has "
+                        "one database — that one is used automatically. With several, name one; the error lists them."
+                    ),
                     required=False
                 ),
                 ToolParameter(
@@ -688,8 +691,8 @@ class ToolRegistry:
             security_level=SecurityLevel.SAFE,
             permissions_required={"read": True},
             examples=[
-                {"action": "query_database", "params": {"query": "Show failed workflows in the last 14 days"}},
-                {"action": "query_database", "params": {"query": "How many agents are active?", "analysis_prompt": "Create a bar chart of agent types"}}
+                {"action": "query_database", "params": {"query": "How many orders shipped in the last 14 days?"}},
+                {"action": "query_database", "params": {"query": "How many customers signed up this month?", "analysis_prompt": "Create a bar chart by signup week"}}
             ],
             metadata={"supports_pandas_ai": True, "added_in": "unified_tools"}
         ))
@@ -715,7 +718,10 @@ class ToolRegistry:
                 ToolParameter(
                     name="database_name",
                     type="string",
-                    description="Specific database/knowledge source to query (optional)",
+                    description=(
+                        "The database source to query: its name or numeric id. Omit it when the workspace has "
+                        "one database — that one is used automatically. With several, name one; the error lists them."
+                    ),
                     required=False
                 ),
                 ToolParameter(
@@ -1443,6 +1449,10 @@ class ToolRegistry:
                 # Auto-inherit: when agent has no explicit assignments, use all
                 # workspace-connected apps. 850+ tools — agents shouldn't need
                 # manual per-app assignment to use what's already connected.
+                from core.composio.agent_apps import inherits_workspace_apps
+
+                if not assigned_apps and not inherits_workspace_apps(db, agent_id):
+                    return False, "Every app assigned to this agent is switched off"
                 if not assigned_apps:
                     if connected_apps:
                         logger.info(

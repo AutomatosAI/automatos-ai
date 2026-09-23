@@ -1104,6 +1104,17 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
                 {"ids": [r.id for r in orphaned]},
             )
 
+        # F049 (night 1): the agent's spend outlives it. llm_usage.agent_id has no
+        # foreign key, so its rows would keep an id that names nothing — Analytics
+        # showed "Agent #273" for CELLAR. Stamp the name first.
+        db.execute(
+            text(
+                "UPDATE llm_usage SET agent_name = :name "
+                "WHERE agent_id = :agent_id AND workspace_id = :workspace_id AND agent_name IS NULL"
+            ),
+            {"name": agent.name, "agent_id": agent_id, "workspace_id": ctx.workspace_id},
+        )
+
         # Now delete the agent (other relationships have CASCADE)
         db.delete(agent)
         db.commit()

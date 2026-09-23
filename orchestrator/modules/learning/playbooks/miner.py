@@ -8,6 +8,7 @@ Mines workflow execution patterns to identify reusable playbooks.
 from __future__ import annotations
 
 from typing import Optional, List, Dict
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import json
 
@@ -70,10 +71,10 @@ class PlaybookMiner:
         created = []
         for idx, r in enumerate(rows, start=1):
             self.db.execute(
-                """
+                text("""
                 INSERT INTO playbooks (id, name, tenant_id, pattern, support)
-                VALUES (gen_random_uuid(), :name, :tenant_id, :pattern::jsonb, :support)
-                """,
+                VALUES (gen_random_uuid(), :name, :tenant_id, CAST(:pattern AS jsonb), :support)
+                """),
                 {
                     "name": f"{name_prefix}-{idx}",
                     "tenant_id": self.tenant_id,

@@ -229,6 +229,22 @@ def _same_failure_key(tool_name: str, result: Dict[str, Any]) -> Optional[str]:
     return f"{tool_name}:{error.splitlines()[0][:120]}"
 
 
+
+def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
+    """``RuntimeMismatchError`` when ``agent_id`` is a ``runtime: cli`` agent,
+    else ``None``. Fail-soft: an unreadable row falls back to the generic error."""
+    try:
+        from core.cli_runtime import RUNTIME_CLI, RuntimeMismatchError, is_cli_agent
+        from core.models import Agent as _Agent
+
+        row = db.query(_Agent.configuration).filter(_Agent.id == agent_id).first()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is not None and is_cli_agent(row[0]):
+        return RuntimeMismatchError(agent_id, RUNTIME_CLI, lane="chat")
+    return None
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -2436,6 +2452,14 @@ class StreamingChatService:
             # Await agent activation
             agent_runtime = await agent_task
             if not agent_runtime:
+                # F071: a session agent is never activated in the LLM runtime by
+                # design, and saying "Failed to activate agent N" sent the owner
+                # to check a provider key that was fine. Raise the reason the
+                # turn-error mapping already words correctly: it runs as a
+                # session — file a ticket for it.
+                mismatch = _session_agent_mismatch(self.db, agent_id)
+                if mismatch is not None:
+                    raise mismatch
                 raise Exception(f"Failed to activate agent {agent_id}")
 
             logger.info(f"Activating agent {agent_id} for chat {chat_id}")

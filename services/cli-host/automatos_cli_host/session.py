@@ -47,12 +47,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__
+from . import usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
-from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import empty_usage, usage_delta
@@ -68,7 +69,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @dataclass
 class SessionOutcome:
-    status: str                      # success | error | cancelled
+    status: str                      # success | error | cancelled | usage_limit | host_stopped
     result_text: str = ""
     error: Optional[str] = None
     exit_reason: str = ""
@@ -78,6 +79,7 @@ class SessionOutcome:
     session_id: Optional[str] = None
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
+    resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -94,6 +96,7 @@ class SessionOutcome:
             # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
             # the directory `claude --resume` and the editor links must open.
             "effective_cwd": self.effective_cwd,
+            "resets_at": self.resets_at,
         }
 
 
@@ -295,6 +298,7 @@ class Session:
             self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.cancel_requested = threading.Event()
+        self.stopped_by_host: Optional[str] = None     # F015: why the HOST stopped this session
         self.stopped = threading.Event()
         self.session_started = threading.Event()
         self.ended = threading.Event()
@@ -532,6 +536,10 @@ class Session:
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=extra_dirs,
             session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
+            # F042: the platform's own .env / credential key and this host's state
+            # (its token) are out of reach, whatever folder the ticket runs in.
+            secret_roots=platform_secret_roots(),
+            off_limits=(Path(self.cfg.state_dir).expanduser(),),
         )
 
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
@@ -649,7 +657,12 @@ class Session:
             except subprocess.TimeoutExpired:
                 log.error("task %s: process %s survived SIGKILL", self.task_id, self.proc.pid)
 
-    def request_cancel(self) -> None:
+    def request_cancel(self, host_reason: Optional[str] = None) -> None:
+        """Stop the session. ``host_reason`` when the host itself is stopping
+        (F015): the operator did not cancel the ticket, the machine stopped
+        serving it — it goes back to the queue, not to ``cancelled``."""
+        if host_reason and not self.cancel_requested.is_set():
+            self.stopped_by_host = host_reason
         self.cancel_requested.set()
 
     def _collect(self, exit_reason: str, cwd: Path, binary: str) -> SessionOutcome:
@@ -670,6 +683,8 @@ class Session:
         if exit_reason == "completed":
             status = "success"
             error = None
+        elif exit_reason == "cancelled" and self.stopped_by_host:
+            status, error = "host_stopped", self.stopped_by_host
         elif exit_reason == "cancelled":
             status, error = "cancelled", "cancelled by the operator"
         elif exit_reason == "timeout":
@@ -685,10 +700,21 @@ class Session:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None
             status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
+        resets = None
+        if status == "error":
+            # F083: the CLI's plan window closed. That is a pause — the ticket goes
+            # back to the queue and the host stops claiming for this CLI — not a
+            # failed attempt, and never "check your key".
+            said = bytes(self.output_tail).decode("utf-8", "replace")[-4000:] + "\n" + (text or "")
+            if usage_limit.is_usage_limit(said):
+                until, known = usage_limit.pause(said, _local_now())
+                status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
         files = [*self.files_touched, *self._land_deliverables(cwd)]
         self._shred_session_credentials()
-        return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
-                             files_touched=files)
+        outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
+                                files_touched=files)
+        outcome.resets_at = resets
+        return outcome
 
     def _shred_session_credentials(self) -> None:
         """The turn is over: delete the files holding this ticket's token.
@@ -730,6 +756,12 @@ class Session:
             transcript_path=self.transcript_path,
             effective_cwd=str(self.effective_cwd or cwd) if (self.effective_cwd or cwd) else None,
         )
+
+
+def _local_now():
+    from datetime import datetime
+
+    return datetime.now().astimezone()
 
 
 def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:

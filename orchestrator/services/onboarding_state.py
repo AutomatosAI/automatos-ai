@@ -102,8 +102,10 @@ def current_stage(workspace: Any) -> str:
 
 
 def is_onboarding_active(workspace: Any) -> bool:
-    """True while the spine should run — stage NOT IN (completed, skipped),
-    and the stage has moved recently enough to still be onboarding.
+    """THE definition of "this workspace is onboarding" — the tool router's
+    onboarding prior and AutoBrain's classifier both read this one (F064).
+    True while the stage is a known, non-terminal one and the run is recent
+    enough to still be onboarding.
 
     A stage nobody ever finishes is not onboarding, it is a stuck row. Gerard's
     operator workspace has sat on ``powerup`` since 2026-09-02, and the
@@ -113,7 +115,12 @@ def is_onboarding_active(workspace: Any) -> bool:
     turn; the stage itself is left alone, so resuming onboarding still works
     and nothing about the row is rewritten behind the operator's back.
     """
-    if current_stage(workspace) in TERMINAL_STAGES:
+    stage = current_stage(workspace)
+    # Strict: only a KNOWN non-terminal stage is onboarding. A corrupt or
+    # unrecognised stage string classifies normally rather than pinning the
+    # spine onto every turn. (AutoBrain had this rule in its own copy of the
+    # check; F064 unified the two so the age-out applies to both.)
+    if not isinstance(stage, str) or stage not in ALL_STAGES or stage in TERMINAL_STAGES:
         return False
     return not _stage_is_stale(workspace)
 

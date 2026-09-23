@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import hmac
 import logging
 import secrets
@@ -63,7 +64,20 @@ SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # card, a bell and a Telegram message addressed to the operator.
 MAX_ASKS_PER_TICKET = 6
 MAX_ASK_QUESTION_KEPT = 1000
-MAX_ASK_ANSWER_KEPT = 2000
+# F037 (night 1): the owner's answer was cut here at 2,000 characters, mid-word,
+# with nothing said to anyone — three of 28 answers lost ~1,050 characters of
+# instructions. An answer runs to pages before it is cut now, and when it is,
+# the text the session reads says so and where the rest is.
+MAX_ASK_ANSWER_KEPT = 16_000
+CUT_NOTE = "\n\n[{what} cut here at {kept:,} characters; {more:,} more are on question #{grant_id}.]"
+
+
+def _kept(text: Any, limit: int, *, what: str, grant_id: Any) -> str:
+    """``text`` as kept on the ticket: whole, or cut with a note saying so."""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + CUT_NOTE.format(what=what, kept=limit, more=len(text) - limit, grant_id=grant_id)
 
 
 def _now() -> datetime:
@@ -574,7 +588,7 @@ def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
 # ── Settings → Session mode (PRD-239 S6c) ───────────────────────────────────
 SESSION_MODE_SETTINGS_KEY = "session_mode"
 DEFAULT_FOLDER_PROJECTS = "projects"   # tickets for agents without a folder run in LOCAL_PROJECTS_DIR
-DEFAULT_FOLDER_SESSIONS = "sessions"   # … in a fresh ./workspaces/<ws>/sessions/<ticket>
+DEFAULT_FOLDER_SESSIONS = "sessions"   # … in a fresh ./workspaces/<ws>/sessions/<ticket> — the default (F042)
 DEFAULT_FOLDER_CHOICES = (DEFAULT_FOLDER_PROJECTS, DEFAULT_FOLDER_SESSIONS)
 
 
@@ -588,15 +602,17 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
     """What the operator sees and sets on Settings → Session mode: where tickets
     run when their agent names no folder, plus the projects folder as the stack
     was started with (a Docker mount — set in .env, read here) and how it is
-    mounted. The default is the projects folder when one is configured — most
-    tickets are "fix a bug in a repo" or "start a new repo" — else a fresh
-    sessions folder per ticket."""
+    mounted. The default is a fresh sessions folder per ticket; the projects
+    folder only when the operator chooses it. F042 (night 1): a folder-less OPS
+    ticket started at the top of ~/Development — the folder that holds the
+    Automatos checkout — walked in and sourced the platform's .env. A session
+    started in a folder of its own reaches no repository it was not given."""
     ws = _workspace_row(db, workspace_id)
     stored = ((getattr(ws, "settings", None) or {}).get(SESSION_MODE_SETTINGS_KEY) or {}) if ws is not None else {}
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     choice = stored.get("default_folder")
     if choice not in DEFAULT_FOLDER_CHOICES:
-        choice = DEFAULT_FOLDER_PROJECTS if projects_dir else DEFAULT_FOLDER_SESSIONS
+        choice = DEFAULT_FOLDER_SESSIONS
     return {
         "default_folder": choice,
         "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
@@ -632,7 +648,7 @@ def save_session_mode_settings(db: Session, workspace_id: Any, *, default_folder
 
 def default_session_folder(db: Session, workspace_id: Any) -> Optional[str]:
     """The folder a ticket runs in when its agent names none: the projects
-    folder when the workspace says so and one is configured, else ``None`` —
+    folder when the operator chose it and one is configured, else ``None`` —
     the host then uses its per-ticket ``sessions/<ticket>`` folder."""
     try:
         settings = session_mode_settings(db, workspace_id)
@@ -1261,16 +1277,50 @@ _VERB_INTENTS: Dict[str, str] = {
 }
 
 
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEPARATOR_RE = re.compile(r"&&|\|\||[;|]")
+
+
+def _command_verbs(command: str) -> List[str]:
+    """The programs a command line actually runs, in order, without repeats.
+
+    Skips blank lines, comment lines and leading ``VAR=value`` assignments —
+    none of which is a program. F056 (night 2, grant 355): this took the first
+    WORD of ``WORK=/…/sessions/359`` and printed "The agent wants to run 359";
+    the program three lines down was ``grep``.
+    """
+    verbs: List[str] = []
+    for line in command.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        for segment in _SEPARATOR_RE.split(line):
+            words = segment.split()
+            while words and _ASSIGNMENT_RE.match(words[0]):
+                words = words[1:]
+            if not words or words[0].startswith("#"):
+                continue
+            verb = words[0].rsplit("/", 1)[-1]      # /usr/bin/grep -> grep
+            if verb and verb not in verbs:
+                verbs.append(verb)
+    return verbs
+
+
 def _plain_intent(command: str) -> str:
     """One sentence describing what the held command would do."""
-    words = command.strip().split()
-    if not words:
+    verbs = _command_verbs(command)
+    if not verbs:
+        if _ASSIGNMENT_RE.match(command.strip()):
+            return "The agent wants to set a shell variable (it runs no program)."
         return "The agent wants to run a command."
-    verb = words[0].rsplit("/", 1)[-1]
-    what = _VERB_INTENTS.get(verb)
-    if what:
-        return f"The agent wants to **{what}** (`{verb}`)."
-    return f"The agent wants to run **{verb}**."
+    first = verbs[0]
+    what = _VERB_INTENTS.get(first)
+    lead = f"**{what}** (`{first}`)" if what else f"run **{first}**"
+    rest = verbs[1:]
+    if not rest:
+        return f"The agent wants to {lead}."
+    tail = ", ".join(f"`{v}`" for v in rest[:4]) + (f" and {len(rest) - 4} more" if len(rest) > 4 else "")
+    return f"The agent wants to {lead}, then {tail}."
 
 
 def is_allow_answer(answer: Any) -> bool:
@@ -1298,7 +1348,8 @@ def open_session_asks(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def record_session_ask(ref: Dict[str, Any], *, grant_id: Any, question: str) -> Dict[str, Any]:
     """Remember an ask the session just made. Returns the rebuilt ref."""
-    entry = {"grant_id": int(grant_id), "question": str(question)[:MAX_ASK_QUESTION_KEPT],
+    entry = {"grant_id": int(grant_id),
+             "question": _kept(question, MAX_ASK_QUESTION_KEPT, what="The question is", grant_id=grant_id),
              "asked_at": _iso(_now())}
     return {**ref, SESSION_ASKS_KEY: [*session_asks(ref), entry]}
 
@@ -1323,7 +1374,11 @@ def record_session_answer(ref: Dict[str, Any], *, grant_id: Any, answer: str) ->
     touched = False
     for ask in session_asks(ref):
         if not touched and int(ask.get("grant_id") or 0) == int(grant_id) and not ask.get("answered_at"):
-            updated.append({**ask, "answer": str(answer)[:MAX_ASK_ANSWER_KEPT], "answered_at": _iso(_now())})
+            kept = _kept(answer, MAX_ASK_ANSWER_KEPT, what="The owner's answer is", grant_id=grant_id)
+            if len(str(answer)) > MAX_ASK_ANSWER_KEPT:
+                logger.warning("[cli-host] the answer to ask #%s is %s characters — %s kept on the ticket, "
+                               "the rest stays on the question", grant_id, len(str(answer)), MAX_ASK_ANSWER_KEPT)
+            updated.append({**ask, "answer": kept, "answered_at": _iso(_now())})
             touched = True
             continue
         updated.append(ask)
@@ -1450,6 +1505,18 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
         db.commit()
         logger.info("[cli-host] ask #%s answered, but ticket #%s is %s — nothing to resume",
                     grant.id, task.id, task.status)
+        return False
+    # F036: the answer is recorded on the ticket either way, but it only
+    # resumes a ticket that is parked FOR it. Night 1's ticket 136 was stopped
+    # by a person at 18:18:06 and re-claimed at 18:19:17 — one second after its
+    # dead session's question was answered.
+    from services.operator_stop import operator_stop
+
+    if operator_stop(task):
+        task.runtime_ref = ref
+        db.commit()
+        logger.info("[cli-host] ask #%s answered, but ticket #%s was stopped by a person — not resumed",
+                    grant.id, task.id)
         return False
     if requeue_exhausted(task):
         task.runtime_ref = ref
@@ -2085,6 +2152,10 @@ async def apply_result(
         return {"applied": False, "reason": f"task is {task.status}", "status": task.status}
 
     status = str(payload.get("status") or "success").lower()
+    if status == "usage_limit":
+        return _release_for_usage_limit(db, task, ref, payload)
+    if status == "host_stopped":
+        return _release_for_host_stop(db, task, ref, payload, host)
     denials = payload.get("permission_denials") or []
     denial_summaries = [_denial_summary(d) for d in denials]
     usage = payload.get("usage") or {}
@@ -2204,6 +2275,55 @@ async def apply_result(
     return {"applied": terminal is not None, "status": terminal or task.status}
 
 
+def _release_for_usage_limit(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """F083: the CLI's plan window closed mid-turn. That is a pause, not a failed
+    attempt: the ticket goes back to the queue with the claim's attempt refunded
+    (a limit must never use up the two a ticket gets), its credential dies, and
+    it says why and when it resumes. The host stops claiming for that CLI until
+    then, so the ticket is not handed straight back to a closed window."""
+    reason = str(payload.get("error") or "paused: usage limit")
+    return _release_to_queue(db, task, ref, payload, exit_reason="usage_limit", reason=reason,
+                             record=("paused", {"reason": reason, "resets_at": payload.get("resets_at")}))
+
+
+def _release_for_host_stop(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any],
+                           host: CliHost) -> Dict[str, Any]:
+    """F015 (night 1): the CLI host stopped while this ticket ran — its service
+    restarted, the host was reinstalled, the machine went down. Night 1 wrote
+    those as ``cancelled`` with no one and no reason on them: tickets the owner
+    never stopped. It is neither the owner's stop nor a failed attempt: the
+    ticket goes back to the queue with the claim's attempt refunded, saying
+    which host stopped and why, and the next claim picks it up."""
+    reason = str(payload.get("error") or "the CLI host stopped")
+    by = f"cli-host:{host.id}"
+    logger.info("[cli-host] task %s back in the queue — %s (%s)", task.id, reason, by)
+    return _release_to_queue(db, task, ref, payload, exit_reason="host_stopped", reason=reason,
+                             record=("released", {"reason": reason, "by": by}))
+
+
+def _release_to_queue(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any], *,
+                      exit_reason: str, reason: str, record: Tuple[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """A claimed ticket back to ``assigned``: the claim's attempt refunded, the
+    session's credential dead, the turn's tokens still booked, and ``record``
+    (key, facts) on the ticket saying why."""
+    clear_session_token(ref)
+    now = _iso(_now())
+    key, facts = record
+    ref.update({"exit_reason": exit_reason, "finished_at": now, key: {**facts, "at": now}})
+    task.runtime_ref = ref
+    task.status = "assigned"
+    task.lease_until = None
+    task.attempts = max(0, int(task.attempts or 0) - 1)
+    db.commit()
+    # The turn's tokens before the release are still real spend (booked as the
+    # error they used to be booked as).
+    book_session_usage(
+        task, ref, payload.get("usage") or {},
+        status="error", request_type=LANE_BOARD_TASK, execution_id=f"board_task:{task.id}", error=reason,
+    )
+    return {"applied": True, "status": "assigned", "released": True, "reason": reason}
+
+
 def _produced_nothing(exec_result: Dict[str, Any]) -> bool:
     """True when a successful-looking turn left no trace a human could read.
 
@@ -2299,7 +2419,10 @@ def requeue_exhausted(task: BoardTask) -> bool:
     ask, a resumed session — had no ceiling at all, which is how night 1
     re-dispatched one ticket 534 times. This is the backstop they share.
     """
-    return int(task.attempts or 0) >= int(config.BOARD_DISPATCH_HARD_ATTEMPT_CAP)
+    # getattr: a ticket that has never been claimed has recorded no attempts —
+    # and the existing PRD-245 suites build tickets without the column. Reading
+    # it directly (4109206c8) broke six of their tests.
+    return int(getattr(task, "attempts", 0) or 0) >= int(config.BOARD_DISPATCH_HARD_ATTEMPT_CAP)
 
 
 def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
@@ -2310,7 +2433,7 @@ def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
     task.blocked_reason = None
     task.completed_at = _now()
     task.review_feedback = (
-        f"Stopped after {task.attempts} attempts — {why}. "
+        f"Stopped after {getattr(task, 'attempts', 0) or 0} attempts — {why}. "
         "Nothing was re-queued; this needs a person."
     )
     db.commit()

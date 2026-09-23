@@ -144,10 +144,32 @@ def _is_composio_tool(tool: Any) -> bool:
     return isinstance(meta, dict) and meta.get("integration_type") == "composio"
 
 
+# F070: per-source NL2SQL tools registered by DatabaseToolIntegration. They sit
+# in the process-global ToolRegistry with no workspace, so a source connected in
+# one workspace put `query_<its name>_database` into EVERY workspace's Auto — the
+# other tenant's source name included — and the unified executor has no route to
+# them, so every call is "Unknown tool: …". Night 3: Auto reached for one and
+# then asked the owner which table held the data. Never offered-then-erroring,
+# the same rule as a Composio tool without Composio. The generic, workspace-
+# scoped `query_database` / `smart_query_database` are NOT this class.
+_UNROUTABLE_EXECUTOR_CLASSES = frozenset({"DatabaseToolIntegration"})
+
+
+def _is_unroutable(tool: Any) -> bool:
+    return getattr(tool, "executor_class", None) in _UNROUTABLE_EXECUTOR_CLASSES
+
+
 def _offerable_candidates(candidates: List[Any], trace_id: str) -> List[Any]:
-    """Drop every Composio tool from the offered candidates when Composio is
-    unavailable. Returns the SAME list object when it is available."""
+    """The candidates that can actually run: never a tool the executor has no
+    route to (F070), and no Composio tool when Composio is unavailable. Returns
+    the SAME list object when nothing is dropped."""
     global _composio_exclusion_logged
+    if any(_is_unroutable(t) for t in candidates):
+        unroutable = [t.name for t in candidates if _is_unroutable(t)]
+        candidates = [t for t in candidates if not _is_unroutable(t)]
+        logger.debug(
+            f"[tool-trace {trace_id}] {len(unroutable)} unroutable tool(s) not offered: {unroutable[:6]}"
+        )
     if composio_available():
         return candidates
     kept = [t for t in candidates if not _is_composio_tool(t)]
@@ -905,9 +927,11 @@ def _get_tools_for_agent_core(
 
                     app_names = [a.app_name for a in assignments if a.app_name]
 
-                    # Workspace inheritance: if no per-agent assignments,
-                    # fall back to workspace-connected apps
-                    if not app_names and workspace_id:
+                    # Workspace inheritance: only an agent with no assignments at
+                    # all (F040 — one switched all off inherits nothing)
+                    from core.composio.agent_apps import inherits_workspace_apps
+
+                    if not app_names and workspace_id and inherits_workspace_apps(session_used, agent_id):
                         try:
                             from core.composio.entity_manager import EntityManager
                             manager = EntityManager(session_used)

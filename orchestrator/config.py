@@ -802,6 +802,11 @@ class Config:
     # PRD-176 F068: local-safe defaults (SaaS sets the railway host via env).
     LOKI_URL: str = os.getenv("LOKI_URL", "http://localhost:3100")
     PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
+    # F078: whether an operator actually pointed us at them. The defaults above
+    # only keep a fresh clone off Railway's topology — nothing answers there in
+    # the compose stack — so the monitoring actions are offered only when set.
+    LOKI_CONFIGURED: bool = bool(os.getenv("LOKI_URL"))
+    PROMETHEUS_CONFIGURED: bool = bool(os.getenv("PROMETHEUS_URL"))
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")

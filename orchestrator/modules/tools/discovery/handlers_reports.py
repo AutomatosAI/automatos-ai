@@ -146,11 +146,11 @@ async def link_report_to_task(
                 """
                 UPDATE agent_reports
                    SET linked_task_ids = COALESCE(linked_task_ids, '[]'::jsonb)
-                                         || to_jsonb(:task_id::int),
+                                         || to_jsonb(CAST(:task_id AS int)),
                        updated_at = NOW()
                  WHERE id = :report_id
                    AND workspace_id = :workspace_id
-                   AND NOT (linked_task_ids @> to_jsonb(:task_id::int))
+                   AND NOT (linked_task_ids @> to_jsonb(CAST(:task_id AS int)))
                  RETURNING id, linked_task_ids
                 """
             ),

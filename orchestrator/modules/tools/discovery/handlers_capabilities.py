@@ -66,7 +66,7 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     limit = max(1, limit)
     include_params = params.get("include_params", True) is not False
 
-    from modules.tools.discovery.action_registry import get_action_registry
+    from modules.tools.discovery.action_registry import action_is_available, get_action_registry
 
     registry = get_action_registry()
     # Fail-closed advertisement: never surface admin/su actions via discovery.
@@ -74,6 +74,7 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
         a for a in registry.get_all()
         if not getattr(a, "admin_only", False)
         and not getattr(a, "super_admin_only", False)
+        and action_is_available(a)
     ]
     by_name = {a.name: a for a in eligible}
 

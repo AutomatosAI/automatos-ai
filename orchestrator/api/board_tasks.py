@@ -664,12 +664,23 @@ async def update_task(
             task.started_at = datetime.now(timezone.utc)
         if new_status in ("done", "review", "closed"):
             task.completed_at = datetime.now(timezone.utc)
-        if new_status == "blocked" and task.blocked_at is None:
-            task.blocked_at = datetime.now(timezone.utc)
-            task.blocked_reason = body.get("blocked_reason")
+        if new_status == "blocked":
+            # A person blocking a ticket that a machine had ALREADY parked used to
+            # record nothing — the `blocked_at is None` guard kept the park's
+            # reason, so the person's intent was invisible to everything after.
+            if task.blocked_at is None:
+                task.blocked_at = datetime.now(timezone.utc)
+            if body.get("blocked_reason") or old_status != "blocked":
+                task.blocked_reason = body.get("blocked_reason")
         if new_status != "blocked" and old_status == "blocked":
             task.blocked_at = None
             task.blocked_reason = None
+        # F036: an explicit status change through this route is a person's
+        # decision. A stop is recorded so no answer or grant can quietly undo
+        # it; any other status lifts it.
+        from services.operator_stop import apply_explicit_status
+
+        apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     if "priority" in body:
         if body["priority"] not in VALID_PRIORITIES:
@@ -1075,6 +1086,11 @@ async def update_task_status(
     if new_status != "blocked" and old_status == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
+    # F036: the dedicated status route is a person's decision too (the board's
+    # drag-and-drop lands here) — same stop rule as PATCH /{task_id}.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     # PRD-128: dispatch task_complete on drag-to-done transitions
     if new_status == "done":
@@ -1594,6 +1610,21 @@ async def finalize_board_task_run(
         return task.status
 
     task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
+    # F014 (night 1, #153): a result that names a file the workspace does not
+    # have is not finished work, however well it reads.
+    from services.result_files import missing_files_note
+
+    try:
+        missing_note = await missing_files_note(
+            task, str(llm_text or ""), workspace_id,
+            projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
+        logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
+        missing_note = None
+    if missing_note:
+        task.result = f"{task.result or ''}\n\n{missing_note}".strip()
+        force_review = True
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier

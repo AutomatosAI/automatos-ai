@@ -22,9 +22,22 @@ from core.composio.tool_executor import ComposioToolExecutor
 from core.models.cloud_sync import CloudDocument, CloudSyncConfig, CloudSyncJob
 from core.models.composio import ComposioConnection
 from modules.rag.ingestion.manager import DocumentManager
+from modules.rag.services.cloud_file_downloader import CloudContentError, CloudDownloadError
 from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
 
 logger = logging.getLogger(__name__)
+
+# What a workspace member may read about a failed file (sync_error reaches the
+# file listing): the downloader's own account of it, or nothing specific. An
+# upstream error body — Composio's HTTP text, a parser's traceback message —
+# stays in the server log.
+_SYNC_FAILED = "Sync failed while processing this file — the server log has the details."
+
+
+def _sync_error_text(exc: BaseException) -> str:
+    if isinstance(exc, (CloudContentError, CloudDownloadError)):
+        return str(exc)
+    return _SYNC_FAILED
 
 # Composio actions for listing files/folders per provider
 _LIST_ACTIONS = {
@@ -179,13 +192,18 @@ class CloudSyncService:
         for f in cloud_files:
             doc = synced_map.get(f["external_file_id"])
             if doc:
-                f["is_synced"] = True
+                # An errored row is not a synced file (F072: the browser showed
+                # a green "0 chunks" for every file whose sync had failed).
+                f["is_synced"] = doc.sync_status == "synced"
                 f["sync_status"] = doc.sync_status
+                f["sync_error"] = doc.sync_error
+                f["size"] = f.get("size") or doc.file_size or 0
                 f["chunk_count"] = doc.chunk_count or 0
                 f["last_synced_at"] = doc.last_synced_at.isoformat() if doc.last_synced_at else None
             else:
                 f["is_synced"] = False
                 f["sync_status"] = "pending"
+                f["sync_error"] = None
                 f["chunk_count"] = 0
                 f["last_synced_at"] = None
 
@@ -322,6 +340,7 @@ class CloudSyncService:
                             return ("skipped", file_name, None, 0)
 
                 async with semaphore:
+                    tmp_path = None
                     try:
                         from modules.rag.services.cloud_file_downloader import CloudFileDownloader
 
@@ -332,7 +351,11 @@ class CloudSyncService:
                             workspace_id=workspace_id,
                             file_name=file_name
                         )
-                        logger.info(f"✅ Downloaded {file_name} to {tmp_path}")
+                        # F072: the size of what was actually downloaded. The
+                        # listing's size is 0 for Drive, and that 0 was stored
+                        # as the file's size for every synced file.
+                        real_size = os.path.getsize(tmp_path)
+                        logger.info(f"✅ Downloaded {file_name} to {tmp_path} ({real_size:,} bytes)")
 
                         # Use DocumentManager for full processing (multimodal + S3 vectors)
                         logger.info(f"🔄 Starting upload_document() for {file_name}")
@@ -344,10 +367,6 @@ class CloudSyncService:
                             created_by=f"cloud_sync_{app_name}"
                         )
                         logger.info(f"✅ upload_document() returned document_id={document_id} for {file_name}")
-
-                        # Clean up temp file
-                        if os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
 
                         if document_id:
                             from core.models import Document
@@ -363,10 +382,12 @@ class CloudSyncService:
 
                             if doc_status != "completed":
                                 logger.error(f"Document {document_id} processing failed with status: {doc_status}")
-                                if existing:
-                                    existing.sync_status = "error"
-                                    existing.sync_error = f"Document processing failed: {doc_status}"
-                                    self.db.commit()
+                                self._record_sync_error(
+                                    existing, cf, workspace_id=workspace_id,
+                                    connection_id=connection_id, app_name=app_name,
+                                    error=f"Document processing failed: {doc_status}",
+                                    document_id=document_id,
+                                )
                                 return ("error", file_name, None, 0)
 
                             # Upsert cloud_documents record for tracking
@@ -380,6 +401,7 @@ class CloudSyncService:
                                     if modified_at else None
                                 )
                                 existing.chunk_count = chunk_count
+                                existing.file_size = real_size
                                 existing.sync_error = None
                             else:
                                 new_doc = CloudDocument(
@@ -391,7 +413,7 @@ class CloudSyncService:
                                     file_name=file_name,
                                     file_path=cf.get("path", ""),
                                     mime_type=cf.get("mime_type"),
-                                    file_size=cf.get("size"),
+                                    file_size=real_size,
                                     s3_vector_bucket=f"automatos-vectors-{workspace_id}",
                                     chunk_count=chunk_count,
                                     cloud_modified_at=(
@@ -406,19 +428,24 @@ class CloudSyncService:
                             self.db.commit()
                             return ("synced", file_name, document_id, chunk_count)
                         else:
-                            if existing:
-                                existing.sync_status = "error"
-                                existing.sync_error = "Document upload failed"
-                                self.db.commit()
+                            self._record_sync_error(
+                                existing, cf, workspace_id=workspace_id,
+                                connection_id=connection_id, app_name=app_name,
+                                error="Document upload failed",
+                            )
                             return ("error", file_name, None, 0)
 
                     except Exception as e:
                         logger.error(f"Sync failed for {file_name}: {e}", exc_info=True)
-                        if existing:
-                            existing.sync_status = "error"
-                            existing.sync_error = str(e)
-                            self.db.commit()
+                        self._record_sync_error(
+                            existing, cf, workspace_id=workspace_id,
+                            connection_id=connection_id, app_name=app_name,
+                            error=_sync_error_text(e),
+                        )
                         return ("error", file_name, None, 0)
+                    finally:
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
 
             # Launch all files in parallel (bounded by semaphore)
             tasks = [_process_one_file(cf) for cf in cloud_files]
@@ -479,6 +506,51 @@ class CloudSyncService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _record_sync_error(
+        self,
+        existing: Optional[CloudDocument],
+        cf: Dict[str, Any],
+        *,
+        workspace_id: UUID,
+        connection_id: int,
+        app_name: str,
+        error: str,
+        document_id: Optional[int] = None,
+    ) -> None:
+        """Record a file's failed sync on its cloud_documents row — creating
+        the row for a file never synced before (F072: a new file's failure was
+        dropped, so the sync looked clean). Only "synced" rows are skipped, so
+        an errored file is retried on the next sync."""
+        try:
+            # A failed commit earlier in this file's run leaves the session
+            # unusable until rolled back; every other file commits before it
+            # awaits, so nothing of theirs is pending here.
+            self.db.rollback()
+            if existing is None:
+                existing = CloudDocument(
+                    workspace_id=workspace_id,
+                    connection_id=connection_id,
+                    app_name=app_name,
+                    external_file_id=cf["external_file_id"],
+                    file_name=cf.get("name") or "unknown",
+                    file_path=cf.get("path", ""),
+                    mime_type=cf.get("mime_type"),
+                    s3_vector_bucket=f"automatos-vectors-{workspace_id}",
+                    chunk_count=0,
+                )
+                self.db.add(existing)
+            existing.sync_status = "error"
+            existing.sync_error = error
+            if document_id is not None:
+                existing.document_id = document_id
+            self.db.commit()
+        except Exception as record_err:  # noqa: BLE001 — the sync itself must go on
+            logger.error(
+                f"Could not record the sync failure for {cf.get('name')}: {record_err}",
+                exc_info=True,
+            )
+            self.db.rollback()
 
     def _get_connection(self, connection_id: int) -> ComposioConnection:
         connection = self.db.query(ComposioConnection).get(connection_id)

@@ -630,7 +630,7 @@ async def upload_document_multimodal(
                         embedding = await embedding_manager.generate_embedding(content)
                         embedding_str = '[' + ','.join(str(v) for v in embedding) + ']'
                         update_query = text("""
-                            UPDATE knowledge_items SET embedding = :embedding::vector
+                            UPDATE knowledge_items SET embedding = CAST(:embedding AS vector)
                             WHERE id = :item_id
                         """)
                         db.execute(update_query, {"embedding": embedding_str, "item_id": item_id})

@@ -38,6 +38,7 @@ interface CloudFile {
   modified_at?: string
   is_synced: boolean
   sync_status: 'pending' | 'syncing' | 'synced' | 'error'
+  sync_error?: string | null
   chunk_count: number
   last_synced_at?: string
 }
@@ -476,7 +477,7 @@ export function ProviderBrowser({
                           )}
                         </>
                       ) : file.sync_status === 'error' ? (
-                        <Badge variant="destructive" className="text-xs">
+                        <Badge variant="destructive" className="text-xs" title={file.sync_error ?? undefined}>
                           <XCircle className="w-3 h-3 mr-1" />
                           Error
                         </Badge>

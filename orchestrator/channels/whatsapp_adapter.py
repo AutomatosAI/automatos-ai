@@ -196,7 +196,7 @@ class WhatsAppAdapter(BaseChannelAdapter):
                         "UPDATE channel_connections "
                         "SET message_count = message_count + 1, "
                         "last_activity_at = NOW() "
-                        "WHERE id = :cid::uuid"
+                        "WHERE id = CAST(:cid AS uuid)"
                     ),
                     {"cid": self.connection_id},
                 )

@@ -16,6 +16,7 @@ import logging
 import queue
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -28,6 +29,7 @@ from .allowlist import NotAllowed, choose_default_root
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
+from .policy import secret_protection_summary
 from .session import Session, host_capabilities
 from .terminal_server import MAX_TERMINALS, TerminalServer
 
@@ -103,12 +105,16 @@ class Host:
         self._source_fingerprint = source_fingerprint()
         self._backend_contract: Optional[str] = None
         self.draining: Optional[str] = None  # the reason, once a restart is requested
+        self.stopping: Optional[str] = None  # F015: why the host is stopping, told to every session it ends
         self.exit_code = 0
         # PRD-239 S7: the Canvas terminal (the operator's own shell on the loopback)
         self.terminal: Optional[TerminalServer] = None
         # PRD-239 S7 v2: TerminalOpened/TerminalClosed per ticket, shipped with the
         # session events (same endpoint, same batches).
         self.terminal_events: "queue.Queue[tuple]" = queue.Queue()
+        # F083: CLIs out of their plan's usage window — cli → (until epoch, the
+        # honest line, until ISO). No claims for them until then.
+        self.limited: Dict[str, tuple] = {}
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -164,6 +170,7 @@ class Host:
         """What the host announces. Re-detected every CAPABILITIES_TTL_SECONDS: a
         CLI the operator installs or logs into (``codex login``) while the host
         runs becomes ``served`` on the next heartbeat, no restart (design §8.2)."""
+        paused = self._active_limits()   # first: a window that reopened invalidates the cache
         now = time.time()
         if self._capabilities is None or now - self._capabilities_at > CAPABILITIES_TTL_SECONDS:
             caps = host_capabilities(self.cfg)
@@ -172,7 +179,55 @@ class Host:
             caps["max_terminals"] = MAX_TERMINALS if self.terminal is not None else 0
             self._capabilities = caps
             self._capabilities_at = now
-        return self._capabilities
+        if not paused:
+            return self._capabilities
+        # F083: a CLI out of its usage window is not served until it reopens — the
+        # backend's claim filter reads ``providers`` — and says so, honestly.
+        caps = self._capabilities
+        clis = {cli: dict(info) for cli, info in caps.get("clis", {}).items()}
+        for cli, (_, reason, _) in paused.items():
+            clis[cli] = {**clis.get(cli, {}), "served": False, "reason": reason}
+        return {**caps, "clis": clis,
+                "providers": [p for p in caps.get("providers", []) if p not in paused],
+                "paused": {cli: reason for cli, (_, reason, _) in paused.items()}}
+
+    # ── F083: usage limits ───────────────────────────────────────────────────
+    def _pause_cli(self, cli: str, until_iso: Optional[str], reason: str) -> None:
+        """Stop claiming this CLI's tickets until its window reopens, and tell the
+        backend on the very next tick (a fresh heartbeat carries the capabilities
+        its claim filter reads)."""
+        try:
+            from datetime import datetime
+
+            until = datetime.fromisoformat(until_iso).timestamp() if until_iso else time.time() + 15 * 60
+        except ValueError:
+            until = time.time() + 15 * 60
+        self.limited[cli] = (until, reason, until_iso)
+        self._capabilities = None
+        self._last_heartbeat = 0.0
+        log.warning("%s — no new %s tickets until then", reason, cli)
+
+    def _active_limits(self) -> Dict[str, tuple]:
+        now = time.time()
+        for cli, (until, _, _) in list(self.limited.items()):
+            if until <= now:
+                self.limited.pop(cli, None)
+                self._capabilities = None
+                self._last_heartbeat = 0.0
+                log.info("%s usage window reopened — claiming its tickets again", cli)
+        return dict(self.limited)
+
+    def _release_limited(self, ticket: Dict[str, Any], limit: tuple) -> None:
+        """A ticket claimed for a CLI that is paused (claimed before the backend
+        heard) goes straight back — nothing spawned, no attempt spent."""
+        task_id = str(ticket.get("task_id"))
+        _, reason, until_iso = limit
+        self.pending_results[task_id] = {
+            "attempt": ticket.get("attempt"), "status": "usage_limit", "error": reason, "resets_at": until_iso,
+            "result_text": "", "usage": {}, "files_touched": [], "permission_denials": [],
+            "exit_reason": "usage_limit",
+        }
+        log.info("task %s released — %s", task_id, reason)
 
     def _reap_previous_run(self) -> None:
         table = state.load_process_table(self.cfg.process_table_path)
@@ -190,6 +245,7 @@ class Host:
     def run_forever(self) -> int:
         host_id = self.identity["host_id"]
         log.info("CLI host %s (v%s) serving %s — directories: %s", host_id, __version__, self.cfg.url, ", ".join(self.allow_roots))
+        log.info("%s", secret_protection_summary())       # F042: a host with no checkout says so
         state.write_pid(self.cfg.pid_path)
         try:
             while not self.stop.is_set():
@@ -218,8 +274,12 @@ class Host:
                     return 0
                 time.sleep(self.cfg.poll_seconds if not self.sessions else min(1.0, self.cfg.poll_seconds))
         finally:
+            # F015: night 1 recorded these as `cancelled` by nobody for no reason.
+            # The host stopping is not the operator's cancel — each ticket goes back
+            # to the queue saying which host stopped and why.
+            why = self.stopping or f"the CLI host on {socket.gethostname()} stopped"
             for s in self.sessions.values():
-                s.request_cancel()
+                s.request_cancel(host_reason=why)
             for t in self.threads.values():
                 t.join(timeout=15)
             self._flush_events(host_id)
@@ -296,7 +356,12 @@ class Host:
                 self._announced_parked.add(key)
                 log.info("task %s (%s) is waiting for the operator: %s — approve it in the Command Centre and it comes back",
                          key, held.get("title"), held.get("reason"))
+        paused = self._active_limits()
         for ticket in claimed["tasks"]:
+            limit = paused.get(str(ticket.get("provider") or ""))
+            if limit is not None:
+                self._release_limited(ticket, limit)
+                continue
             self._start(ticket)
 
     def _start(self, ticket: Dict[str, Any]) -> None:
@@ -308,6 +373,8 @@ class Host:
 
         def _runner() -> None:
             outcome = session.run()
+            if outcome.status == "usage_limit":
+                self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit")
             self.pending_results[task_id] = outcome.as_result_payload(session.attempt)
 
         t = threading.Thread(target=_runner, name=f"session-{task_id}", daemon=True)
@@ -453,7 +520,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("backend error: %s", exc)
         return 3
 
-    def _sigterm(_signum, _frame):
+    def _sigterm(signum, _frame):
+        host.stopping = f"the CLI host on {socket.gethostname()} stopped ({signal.Signals(signum).name})"
         host.stop.set()
 
     def _sighup(_signum, _frame):

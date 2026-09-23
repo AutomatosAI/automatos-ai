@@ -321,9 +321,12 @@ class ComposioToolService:
         except Exception as conn_err:
             logger.warning("[ComposioToolService] Connection check failed: %s", conn_err)
 
-        # Auto-inherit: no explicit assignments → use all workspace-connected apps
+        # Auto-inherit: no assignments at all → use all workspace-connected apps
+        # (F040 — an agent whose apps are all switched off inherits nothing)
+        from core.composio.agent_apps import inherits_workspace_apps
+
         if not assigned_apps:
-            if connected_apps:
+            if connected_apps and inherits_workspace_apps(self.db, agent_id):
                 logger.info(
                     "[ComposioToolService] Agent %s has no app assignments — "
                     "inheriting %d workspace apps", agent_id, len(connected_apps)

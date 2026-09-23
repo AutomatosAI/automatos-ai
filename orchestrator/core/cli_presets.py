@@ -108,7 +108,8 @@ SESSION_BASH_VERBS: Tuple[str, ...] = (
     "git worktree list", "git stash list", "ls", "cat", "head", "tail", "wc", "grep", "rg",
     "find", "pwd", "which", "echo", "sort", "uniq", "cut", "tr", "sed", "awk", "date", "diff",
     "stat", "basename", "dirname", "printf", "jq", "file", "tree", "du", "true", "test", "[",
-    "[[", "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run",
+    "[[", "comm", "join", "paste", "nl", "tac", "rev", "fold", "expand", "unexpand", "column",
+    "md5sum", "sha1sum", "sha256sum", "cksum", "realpath", "readlink", "seq", "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run",
     "pnpm test", "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
     "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
 )

@@ -16,7 +16,8 @@ def test_prompt_rendering_fills_every_placeholder_or_refuses():
 def test_shipped_prompt_only_uses_placeholders_the_runner_provides():
     from pathlib import Path
     template = (Path(__file__).resolve().parents[3] / "scripts" / "ralph" / "customer-night" / "PROMPT_customer.md").read_text(encoding="utf-8")
-    provided = {"DATE", "NIGHT_DIR", "WORKSPACE_ID", "API_URL", "ITER", "MAX_ITERS", "STOP_AT", "NOW", "DELIVERABLES_DIR", "PERSONA", "INVENTORY", "NIGHT_START"}
+    provided = {"DATE", "NIGHT_DIR", "WORKSPACE_ID", "API_URL", "ITER", "MAX_ITERS", "STOP_AT", "NOW", "DELIVERABLES_DIR", "PERSONA", "INVENTORY", "NIGHT_START",
+                "AGENDA"}  # the night's theme, nights/<theme>.md (136916278)
     used = {m.group(1) for m in ops.PLACEHOLDER.finditer(template)}
     assert used <= provided, f"placeholders the runner does not fill: {used - provided}"
     assert {"PERSONA", "INVENTORY", "NIGHT_DIR", "WORKSPACE_ID"} <= used

@@ -24,6 +24,7 @@ import logging
 import time
 import uuid as uuid_mod
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, List, Optional, Callable
 from uuid import UUID
 
@@ -1448,10 +1449,7 @@ async def _execute_recipe_inner(
             }
 
             # Build clean step prompt: input substitutions + trigger context
-            clean_step_prompt = prompt_template
-            if input_data:
-                for key, value in input_data.items():
-                    clean_step_prompt = clean_step_prompt.replace(f"{{input.{key}}}", str(value))
+            clean_step_prompt = substitute_playbook_input(prompt_template, input_data)
 
             # Inject trigger/input context
             trigger_content = input_data.get("content", "") if input_data else ""
@@ -1679,6 +1677,32 @@ async def _execute_recipe_inner(
                         _persist_step_results(db, execution, step_results)
                         await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {pre_exc}", step_results=step_results)
                         return
+
+            # F055: a placeholder the run did not supply must never reach an
+            # agent. Ticket #387's agent did the right thing — refused to invent
+            # a document and asked — but it should never have been handed a
+            # template variable to puzzle over. The step fails, saying which
+            # placeholder and why, so the owner can fix the playbook or rerun it
+            # with input.
+            missing_input = unresolved_input_placeholders(clean_step_prompt)
+            if missing_input:
+                reason = (
+                    f"Step {step_order} uses {', '.join(missing_input)}, but this run was "
+                    f"{'given no input' if not input_data else 'not given that field'}. "
+                    "Rerun the playbook with the input it expects, or change the step's "
+                    "prompt. Nothing was sent to the agent."
+                )
+                logger.warning(f"[recipe_direct] {reason}")
+                step_result["status"] = "failed"
+                step_result["error"] = reason
+                step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                step_results.append(_build_compact_step_result(step_result))
+                _persist_step_results(db, execution, step_results)
+                if error_handling == "stop":
+                    await _fail_execution(db, recipe_execution_id, reason, step_results=step_results)
+                    return
+                continue
 
             # Execute with retries
             attempt = 0
@@ -1989,6 +2013,46 @@ async def _execute_recipe_inner(
 # Prompt resolution (kept for backward compat — used by _resolve_prompt callers)
 # ---------------------------------------------------------------------------
 
+# `{input}` and `{input.<field>}` — the placeholders a playbook step may use to
+# reach what the run was given. Nothing else in a prompt is touched: a brace in
+# a JSON example or a code sample is the author's text, not a variable.
+_INPUT_PLACEHOLDER_RE = re.compile(r"\{input(?:\.[A-Za-z0-9_]+)?\}")
+
+
+def substitute_playbook_input(template: str, input_data: Optional[Dict[str, Any]]) -> str:
+    """Fill a step's input placeholders from the run's input.
+
+    F055 (night 2, ticket #387): a step reading "…every price and tasting note
+    in {input}" reached its agent verbatim. The engine understood only
+    ``{input.<field>}``; the bare ``{input}`` — the thing a person naturally
+    writes — passed straight through. It now means the whole input: the one
+    field when there is one, the ``content`` of a trigger or upload when there
+    is that, otherwise every field as ``key: value`` lines.
+    """
+    resolved = template
+    if not input_data:
+        return resolved
+    for key, value in input_data.items():
+        resolved = resolved.replace(f"{{input.{key}}}", str(value))
+    if "{input}" in resolved:
+        resolved = resolved.replace("{input}", _whole_input(input_data))
+    return resolved
+
+
+def _whole_input(input_data: Dict[str, Any]) -> str:
+    if len(input_data) == 1:
+        return str(next(iter(input_data.values())))
+    if input_data.get("content"):
+        return str(input_data["content"])
+    return "\n".join(f"{key}: {value}" for key, value in input_data.items())
+
+
+def unresolved_input_placeholders(text: str) -> List[str]:
+    """Input placeholders still in ``text`` after substitution — each one is a
+    variable the run did not supply."""
+    return sorted(set(_INPUT_PLACEHOLDER_RE.findall(text or "")))
+
+
 def _resolve_prompt(
     template: str,
     input_data: dict,
@@ -2008,10 +2072,8 @@ def _resolve_prompt(
     """
     resolved = template
 
-    # Substitute {input.xxx} placeholders
-    if input_data:
-        for key, value in input_data.items():
-            resolved = resolved.replace(f"{{input.{key}}}", str(value))
+    # Substitute {input} and {input.xxx} placeholders (F055)
+    resolved = substitute_playbook_input(resolved, input_data)
 
     # Determine "previous_output" for backward compat: last step's text
     previous_output: Optional[str] = None

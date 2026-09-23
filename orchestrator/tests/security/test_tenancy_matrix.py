@@ -22,6 +22,7 @@ builder in isolation). The end-to-end DB matrix runs in CI.
 from __future__ import annotations
 
 import importlib.util as _ilu
+import re
 import sys as _sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,6 +64,12 @@ def _capturing_tools():
     return tools, db
 
 
+# The bound parameter may be cast in place — CAST(:p AS type), the only cast
+# SQLAlchemy binds (F074) — so these read the scoping, not its spelling.
+_WORKSPACE_FILTER = re.compile(r"ki\.workspace_id = (CAST\()?:workspace_id\b")
+_EMBEDDING_RANK = re.compile(r"ki\.embedding <=> (CAST\()?:query_embedding\b")
+
+
 def _last_execute(db):
     assert db.execute.called, "tool issued no DB query"
     args = db.execute.call_args.args
@@ -75,7 +82,7 @@ async def test_tool_query_is_workspace_scoped(tool_name):
     tools, db = _capturing_tools()
     result = await getattr(tools, tool_name)("find anything", workspace_id="ws-A")
     sql, params = _last_execute(db)
-    assert "ki.workspace_id = :workspace_id" in sql, (
+    assert _WORKSPACE_FILTER.search(sql), (
         f"{tool_name} sends an UNSCOPED query — cross-tenant leak"
     )
     assert params.get("workspace_id") == "ws-A"
@@ -127,7 +134,7 @@ async def test_similarity_is_embedding_ranked_not_exact_match():
     tools, db = _capturing_tools()
     await tools.search_tables("a query never seen before", workspace_id="ws-A")
     sql, params = _last_execute(db)
-    assert "ki.embedding <=> :query_embedding" in sql, "not embedding-ranked"
+    assert _EMBEDDING_RANK.search(sql), "not embedding-ranked"
     assert "as similarity" in sql
     assert params.get("query_embedding") == "[0.1,0.2,0.3]"
     assert "content = :query" not in sql, "old exact-match subquery still present"

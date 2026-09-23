@@ -132,56 +132,35 @@ async def get_schedule(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
 
 async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Query a connected database using natural language."""
-    from modules.nl2sql.service import DatabaseKnowledgeService
-    from core.models.database_knowledge import DatabaseKnowledgeSource
+    """Query a connected database using natural language.
 
+    F077: both old paths were broken. A NAME in ``database_id`` was compared
+    with the integer id in SQL (InvalidTextRepresentation — and the aborted
+    transaction then failed every later tool in the turn), and no
+    ``database_id`` built ``DatabaseKnowledgeService()`` with none of its five
+    dependencies (TypeError). It now runs the same in-process NL2SQL path as
+    ``query_database`` / ``smart_query_database``: the one service construction
+    site, workspace-scoped resolution by id OR name, one audit row.
+    """
     question = params.get("question")
-    if not question:
+    if not question or not str(question).strip():
         return {"success": False, "error": "question is required"}
 
-    database_id = params.get("database_id")
+    reference = params.get("database_id")
+    if reference is not None and (isinstance(reference, bool) or not isinstance(reference, (int, str))):
+        return {"success": False, "error": "database_id must be a database source's id or its name"}
+
+    from modules.tools.execution.exec_research import run_nl2sql
 
     try:
-        # Resolve database source
-        if database_id:
-            source = db.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.id == database_id,
-                DatabaseKnowledgeSource.workspace_id == workspace_id,
-                DatabaseKnowledgeSource.is_active.is_(True),
-            ).first()
-            if not source:
-                return {
-                    "success": False,
-                    "error": f"Database source {database_id} not found or not active in this workspace",
-                }
-        else:
-            # Use first active database in workspace
-            source = db.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.workspace_id == workspace_id,
-                DatabaseKnowledgeSource.is_active.is_(True),
-            ).order_by(DatabaseKnowledgeSource.id).first()
-            if not source:
-                return {
-                    "success": False,
-                    "error": (
-                        "No connected databases found. Connect a database first "
-                        "via Settings -> Data Sources."
-                    ),
-                }
-
-        # Execute via DatabaseKnowledgeService
-        service = DatabaseKnowledgeService()
-        agent_id = str(params.get("_agent_id", "")) or None
-        user_id = str(params.get("_user_id", "")) or str(workspace_id)
-
-        result = await service.query_database(
-            source_id=str(source.id),
-            natural_language_query=question,
-            user_id=user_id,
-            agent_id=agent_id,
+        result = await run_nl2sql(
+            method="query_database",
+            parameters={"query": question, "database_name": reference},
+            agent_id=params.get("_agent_id"),
+            workspace_id=workspace_id,
+            caller_context={"user_id": params.get("_user_id")},
+            db_session=db,
         )
-
         if not result.get("success"):
             return {
                 "success": False,
@@ -217,9 +196,11 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
             "data": display_rows,
             "explanation": result.get("explanation"),
             "confidence": result.get("confidence"),
-            "database": source.name,
         }
 
     except Exception as e:
+        # The request session is shared with every other tool in this turn:
+        # never hand it back aborted.
+        db.rollback()
         logger.error("[PlatformExecutor] query_data failed: %s", e, exc_info=True)
-        return {"success": False, "error": f"Database query failed: {str(e)[:200]}"}
+        return {"success": False, "error": "Database query failed."}
