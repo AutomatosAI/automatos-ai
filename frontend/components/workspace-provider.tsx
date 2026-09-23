@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
+import type { WorkspaceSocialsState } from '@/lib/api-client'
 
 const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
 
@@ -74,6 +75,8 @@ export interface Workspace {
     }
     exposure?: WorkspaceExposure
     onboarding?: WorkspaceOnboarding
+    /** PRD-251 D1: `available` is the platform master switch, `enabled` this workspace's. */
+    socials?: WorkspaceSocialsState
     webhookUrl?: string
     webhookKey?: string
     settings?: {
@@ -182,6 +185,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 planLimits: data.plan_limits,
                 exposure: data.exposure ?? undefined,
                 onboarding: data.onboarding ?? undefined,
+                socials: data.socials ?? undefined,
                 webhookUrl: data.webhook_url,
                 webhookKey: data.webhook_key,
                 settings: data.settings || {},

@@ -15,27 +15,28 @@ import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { DEFAULT_FILTERS, FEED_DEFAULT_FILTERS, type FilterState } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
-import { DELIVERABLE_TABS, type DeliverableTab } from '@/lib/deliverables/tabs'
+import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
+import { resolveDeliverableTab, visibleDeliverableTabs, type DeliverableTab } from '@/lib/deliverables/tabs'
 import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 
 const TAB_LABELS: Record<DeliverableTab, string> = {
   outputs: 'Outputs',
   blogs: 'Blogs',
   templates: 'Templates',
+  socials: 'Socials',
 }
 /** The file explorer is its own route; it sits on the strip as the last tab. */
 const EXPLORER_HREF = '/deliverables/explorer'
-
-function resolveTab(param: string | null): DeliverableTab {
-  return param && (DELIVERABLE_TABS as readonly string[]).includes(param) ? (param as DeliverableTab) : 'outputs'
-}
 
 export function DeliverablesStudio() {
   const { workspace, isLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  const tab = resolveTab(searchParams?.get('tab') ?? null)
+  // PRD-251 D1: the Socials tab exists only while the platform offers Socials.
+  const socialsAvailable = workspace?.socials?.available === true
+  const tabs = visibleDeliverableTabs(socialsAvailable)
+  const tab = resolveDeliverableTab(searchParams?.get('tab') ?? null, socialsAvailable)
   // The same strip behaviour as the Command Centre and the hub — one hook.
   const tabStrip = useTabStripScroll(tab)
   const artifactTypeParam = searchParams?.get('artifact_type') ?? null
@@ -77,7 +78,7 @@ export function DeliverablesStudio() {
       </div>
 
       <nav className="cc-tabs" aria-label="Deliverables sections" ref={tabStrip}>
-        {DELIVERABLE_TABS.map((key) => (
+        {tabs.map((key) => (
           <button
             key={key}
             type="button"
@@ -110,6 +111,7 @@ export function DeliverablesStudio() {
         ))}
       {tab === 'blogs' && <DeliverablesBlog variant="studio" />}
       {tab === 'templates' && <TemplateStudio />}
+      {tab === 'socials' && <SocialsTab />}
     </div>
   )
 }

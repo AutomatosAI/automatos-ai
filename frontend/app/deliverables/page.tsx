@@ -9,10 +9,11 @@ import {
   FileText,
   BookOpen,
   FolderTree,
+  Share2,
 } from 'lucide-react'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
+import { PageHeader, FilterTabs, TabsContent, type FilterTab } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { OutputsFeed } from '@/components/deliverables/outputs-feed'
 import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
@@ -22,6 +23,7 @@ import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import { DeliverablesStudio } from '@/components/deliverables/studio/deliverables-studio'
+import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import {
   DEFAULT_FILTERS,
   FEED_DEFAULT_FILTERS,
@@ -29,14 +31,15 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 
-import { DELIVERABLE_TABS, type DeliverableTab } from '@/lib/deliverables/tabs'
+import { resolveDeliverableTab, visibleDeliverableTabs, type DeliverableTab } from '@/lib/deliverables/tabs'
 
-const VALID_TABS: ReadonlyArray<DeliverableTab> = DELIVERABLE_TABS
-
-function resolveTab(param: string | null): DeliverableTab {
-  if (param && VALID_TABS.includes(param as DeliverableTab)) return param as DeliverableTab
-  return 'outputs'
+const TAB_META: Record<DeliverableTab, Omit<FilterTab, 'value'>> = {
+  outputs: { label: 'Outputs', icon: LayoutGrid },
+  blogs: { label: 'Blogs', icon: FileText },
+  templates: { label: 'Templates', icon: BookOpen },
+  socials: { label: 'Socials', icon: Share2 },
 }
+const EXPLORER_TAB: FilterTab = { value: 'explorer', label: 'Explorer', icon: FolderTree }
 
 export default function DeliverablesPage() {
   usePageAPI('workspace')
@@ -45,7 +48,16 @@ export default function DeliverablesPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  const activeTab = resolveTab(searchParams?.get('tab') ?? null)
+  // PRD-251 D1: the Socials tab exists only while the platform offers Socials.
+  const socialsAvailable = workspace?.socials?.available === true
+  const activeTab = resolveDeliverableTab(searchParams?.get('tab') ?? null, socialsAvailable)
+  const filterTabs = useMemo<FilterTab[]>(
+    () => [
+      ...visibleDeliverableTabs(socialsAvailable).map((value) => ({ value, ...TAB_META[value] })),
+      EXPLORER_TAB,
+    ],
+    [socialsAvailable],
+  )
   const artifactTypeParam = searchParams?.get('artifact_type') ?? null
 
   const drilldownTitle = useMemo(() => {
@@ -104,12 +116,7 @@ export default function DeliverablesPage() {
             lede="Every file, report, draft, and template your agents produced. Open, share, fork into a new mission, or post to the books."
           />
           <FilterTabs
-            tabs={[
-              { value: 'outputs', label: 'Outputs', icon: LayoutGrid },
-              { value: 'blogs', label: 'Blogs', icon: FileText },
-              { value: 'templates', label: 'Templates', icon: BookOpen },
-              { value: 'explorer', label: 'Explorer', icon: FolderTree },
-            ]}
+            tabs={filterTabs}
             value={activeTab}
             onValueChange={handleTabChange}
           >
@@ -153,6 +160,14 @@ export default function DeliverablesPage() {
                 <TemplateStudio />
               </div>
             </TabsContent>
+
+            {socialsAvailable && (
+              <TabsContent value="socials">
+                <div className="mx-auto max-w-[1600px]">
+                  <SocialsTab />
+                </div>
+              </TabsContent>
+            )}
           </FilterTabs>
         </div>
       )}

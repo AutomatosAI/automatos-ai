@@ -409,6 +409,82 @@ export interface ProfileUpdateRequest {
   avatar_url?: string
 }
 
+// ===== PRD-251 Socials: posts and their approval lifecycle =====
+export type SocialPostStatus =
+  | 'draft'
+  | 'rendering'
+  | 'needs_approval'
+  | 'changes_requested'
+  | 'approved'
+  | 'scheduled'
+  | 'publishing'
+  | 'published'
+  | 'partially_published'
+  | 'failed'
+  | 'missed'
+  | 'archived'
+
+/** `{"base": text, "channels": {toolkit: text}}`: the base text plus per-channel overrides. */
+export interface SocialPostCopy {
+  base?: string
+  channels?: Record<string, string>
+}
+
+export interface SocialReviewEntry {
+  at: string
+  by: string
+  action: string
+  comment: string | null
+}
+
+export interface SocialPost {
+  id: string
+  workspace_id: string
+  created_by: string
+  title: string
+  brief: string | null
+  copy: SocialPostCopy
+  format: string | null
+  template_id: string | null
+  variables: Record<string, unknown>
+  sources: Record<string, unknown>
+  media: Record<string, unknown>
+  status: SocialPostStatus
+  content_hash: string
+  approved_hash: string | null
+  approved_by: string | null
+  approved_at: string | null
+  override_unsourced: boolean
+  review_log: SocialReviewEntry[]
+  scheduled_for: string | null
+  timezone: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SocialPostsResponse {
+  posts: SocialPost[]
+  total: number
+}
+
+export interface CreateSocialPostInput {
+  title: string
+  brief?: string | null
+  copy?: SocialPostCopy
+}
+
+export interface UpdateSocialPostInput {
+  title?: string
+  brief?: string | null
+  copy?: SocialPostCopy
+}
+
+/** The `socials` block of GET /api/workspaces/current (D1): the platform master switch and this workspace's. */
+export interface WorkspaceSocialsState {
+  available: boolean
+  enabled: boolean
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2425,6 +2501,61 @@ class ApiClient {
   // ===== PRD-228 Fleet State: live floor read-model =====
   async getFleetState(): Promise<FleetStateResponse> {
     return this.request<FleetStateResponse>('/api/v1/fleet')
+  }
+
+  // ===== PRD-251 Socials: the workspace switch and the post lifecycle =====
+  async setWorkspaceSocialsEnabled(enabled: boolean): Promise<{ status: string; socials: WorkspaceSocialsState }> {
+    return this.request('/api/workspaces/current/socials', {
+      method: 'PUT',
+      body: JSON.stringify({ socials: { enabled } }),
+    })
+  }
+
+  async listSocialPosts(): Promise<SocialPostsResponse> {
+    return this.request<SocialPostsResponse>('/api/socials/posts')
+  }
+
+  async createSocialPost(input: CreateSocialPostInput): Promise<SocialPost> {
+    return this.request<SocialPost>('/api/socials/posts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async getSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}`)
+  }
+
+  async updateSocialPost(postId: string, changes: UpdateSocialPostInput): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    })
+  }
+
+  async submitSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/submit`, { method: 'POST' })
+  }
+
+  async approveSocialPost(postId: string, comment?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ comment: comment || null }),
+    })
+  }
+
+  async requestSocialPostChanges(postId: string, comment: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/request-changes`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    })
+  }
+
+  async rejectSocialPost(postId: string, reason?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason || null }),
+    })
   }
 }
 
