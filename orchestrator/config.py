@@ -1463,6 +1463,13 @@ class Config:
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     VECTOR_STORE_DIMENSIONS: int = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
+    # F105: every embedding call has a bound. The OpenAI SDK default is a 600 s
+    # read timeout with 2 retries — one stalled call held a search for minutes.
+    # A single text (a query) is small, so it gets the shorter read bound.
+    EMBEDDING_CONNECT_TIMEOUT_S: float = float(os.getenv("EMBEDDING_CONNECT_TIMEOUT_S", "5"))
+    EMBEDDING_QUERY_TIMEOUT_S: float = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_S", "15"))
+    EMBEDDING_BATCH_TIMEOUT_S: float = float(os.getenv("EMBEDDING_BATCH_TIMEOUT_S", "60"))
+    EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "1"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)
