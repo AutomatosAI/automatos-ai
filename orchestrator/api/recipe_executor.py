@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 # a timeout) keeps its own message — the owner can act on that.
 _INTERNAL_ERRORS = (AttributeError, TypeError, KeyError, IndexError, NameError,
                     AssertionError, ZeroDivisionError, RecursionError)
+RUN_STOPPED_TEXT = (
+    "The run stopped before it finished — the backend stopped while it was in progress. "
+    "Session steps it had started carry on; their results are on the board."
+)
 INTERNAL_ERROR_TEXT = (
     "The run stopped on an internal error, so nothing after it ran. "
     "The details are in the server log."
@@ -1161,9 +1165,13 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
                 RecipeExecution.execution_id == execution_id
             ).first()
             if execution and execution.status not in ("completed", "failed", "cancelled"):
+                # The cancel endpoint writes its row before it signals the task, so
+                # a run still open here was stopped by something else — a shutdown.
+                # (``sa_func`` was never imported here: until now this NameError'd
+                # into the warning below and the run stayed 'running'.)
                 execution.status = "cancelled"
-                execution.error_message = execution.error_message or "Cancelled by user"
-                execution.completed_at = sa_func.now()
+                execution.error_message = execution.error_message or RUN_STOPPED_TEXT
+                execution.completed_at = datetime.now(timezone.utc)
                 db.commit()
         finally:
             db.close()
