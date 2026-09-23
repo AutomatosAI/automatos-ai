@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, NoReturn, Optional
+from typing import Annotated, Any, Dict, List, NoReturn, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -62,10 +62,14 @@ class _Strict(BaseModel):
 
 # ``copy`` is aliased: a field literally named ``copy`` would shadow
 # ``BaseModel.copy``. Dump with ``by_alias=True`` to get the service's names.
+# The alias rides ``Annotated`` metadata (pydantic's supported form).
+PostCopy = Annotated[Optional[Dict[str, Any]], Field(alias="copy")]
+
+
 class CreateSocialPostRequest(_Strict):
     title: str = Field(..., min_length=1, max_length=500)
     brief: Optional[str] = None
-    post_copy: Optional[Dict[str, Any]] = Field(None, alias="copy")
+    post_copy: PostCopy = None
     format: Optional[str] = None
     template_id: Optional[UUID] = None
     variables: Optional[Dict[str, Any]] = None
@@ -76,7 +80,7 @@ class CreateSocialPostRequest(_Strict):
 class UpdateSocialPostRequest(_Strict):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     brief: Optional[str] = None
-    post_copy: Optional[Dict[str, Any]] = Field(None, alias="copy")
+    post_copy: PostCopy = None
     format: Optional[str] = None
     template_id: Optional[UUID] = None
     variables: Optional[Dict[str, Any]] = None
