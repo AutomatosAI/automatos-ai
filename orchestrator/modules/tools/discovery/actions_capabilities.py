@@ -16,13 +16,14 @@ def register_capabilities_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_find_tools",
         description=(
-            "Search the platform's full action catalog by describing what you "
-            "want to do. Returns matching actions with their description, "
-            "required/optional parameters and how to call them via "
-            "platform_execute. Use this whenever the task needs a capability "
-            "you don't currently see a tool for — every platform action is "
-            "reachable this way, so never assume something is impossible "
-            "without checking here first."
+            "Find a platform ACTION for something you need to DO and have no "
+            "tool for (e.g. 'publish a blog post', 'index a github repo'). "
+            "Returns matching actions with their parameters and how to call "
+            "them via platform_execute; every platform action is reachable "
+            "this way, so check here before telling the owner an action is "
+            "impossible. This finds tools, not answers: for a QUESTION about "
+            "the business, a document, or how the product works, search the "
+            "workspace's documents with search_knowledge first."
         ),
         category="capabilities",
         parameters={

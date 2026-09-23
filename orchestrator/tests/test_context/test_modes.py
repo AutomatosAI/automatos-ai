@@ -117,6 +117,7 @@ class TestSectionRegistry:
         "business_graph", "field_memory", "conversation", "custom",
         "onboarding", "mission_context", "agent_roster",
         "planning_knowledge", "planning_history",
+        "documents_inventory",   # F085-B
     }
 
     def test_all_expected_sections_registered(self):
