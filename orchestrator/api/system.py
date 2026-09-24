@@ -29,11 +29,27 @@ from core.auth.workspace_permission import require_workspace_permission
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
 
+SYSTEM_ICON_MAPPINGS_KEY = "system_icon_mappings"
+
+
+def _validate_system_config_value(config_key: str, config_value: Any) -> None:
+    """config_value is Any (PRD icon-style fix) since some keys — active_icon_style —
+    are legitimately scalar. Keys whose consumers assume an object shape (icon
+    mappings are indexed by category, e.g. WidgetGrid's iconMappings['global_plugin'])
+    still need that guaranteed, or a wrong-shaped value persists silently and every
+    consumer just falls back to a default icon with no error anywhere."""
+    if config_key == SYSTEM_ICON_MAPPINGS_KEY and not isinstance(config_value, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="system_icon_mappings must be a JSON object",
+        )
+
 # System Configuration endpoints
 @router.post("/config", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create or update system configuration"""
     try:
+        _validate_system_config_value(config_data.config_key, config_data.config_value)
         # Check if config already exists
         existing = db.query(SystemConfiguration).filter(
             SystemConfiguration.config_key == config_data.config_key
@@ -70,6 +86,8 @@ async def create_system_config(config_data: SystemConfigCreate, ctx: RequestCont
             updated_by=config.updated_by
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating system config: {e}")
@@ -164,6 +182,7 @@ async def update_system_config(
 ):
     """Update or create system configuration (upsert)."""
     try:
+        _validate_system_config_value(config_key, config_data.config_value)
         config = db.query(SystemConfiguration).filter(
             SystemConfiguration.config_key == config_key
         ).first()
