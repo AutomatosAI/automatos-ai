@@ -39,7 +39,13 @@ const ICON_STYLES: IconStyleOption[] = [
         label: 'Core Gradient',
         description: 'Default multi-color gradient icons',
         color: '',
-        previewIcons: ['brain-2', 'cog', 'graph-bar-increase'],
+        // brain-2 and cog have no equivalent in the shipped gradient pack
+        // (frontend/public/assets/icons/ — the Streamline Core Gradient set,
+        // distinct from the 6 Core Line color variants) — still broken,
+        // flagged in PR #786. graph-bar-increase was just a wrong slug:
+        // the pack ships this same icon as graph.svg, same name every
+        // other style uses for it.
+        previewIcons: ['brain-2', 'cog', 'graph'],
     },
     {
         id: 'core-line-orange',
