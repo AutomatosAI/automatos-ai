@@ -910,13 +910,16 @@ class DocumentResponse(BaseModel):
 
 class SystemConfigCreate(BaseModel):
     config_key: str
-    config_value: Dict[str, Any]
+    # The column is a plain JSON column — some keys store an object
+    # (system_icon_mappings), others store a bare scalar (active_icon_style
+    # is a string). Dict[str, Any] rejected the scalar keys with a 422.
+    config_value: Any
     description: Optional[str] = None
 
 class SystemConfigResponse(BaseModel):
     id: int
     config_key: str
-    config_value: Dict[str, Any]
+    config_value: Any
     description: Optional[str]
     is_active: bool
     created_at: datetime
