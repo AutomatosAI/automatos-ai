@@ -8,22 +8,70 @@ and the reports the agents saved — and says to search them for questions.
 
 Volatile (rendered after the cached prompt prefix): the counts move every time
 an agent saves a report, and a cache-stable block would be re-read each time.
+
+F077/F078 (refresh-2 retest): with one database connected, Auto answered shop
+questions from its memory and the documents, or asked "which database?". Nothing
+named the database, and the documents sentence claimed every question about the
+business. The section now names the workspace's active databases and sends a
+number question to ``platform_query_data``; the documents sentence keeps what a
+document says. Without a database the F085 text is unchanged.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
 
 TITLES_SHOWN = 10
+DATABASES_SHOWN = 5          # PRD-231: past five, the count alone; platform_query_data lists them
 _READY = "status IN ('completed', 'processed')"
+_ASK_DOCUMENTS = ("For a question about the business, a document, or how the product works, "
+                  "search them with search_knowledge first and name the file you used.")
+_ASK_DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, "
+                              "search them with search_knowledge first and name the file you used.")
+
+
+def connected_databases(db: Any, workspace_id: Any) -> List[str]:
+    """Names of the workspace's active database sources, newest first: the filter
+    nl2sql ``active_sources`` resolves ``platform_query_data`` against."""
+    from sqlalchemy import text
+
+    rows = db.execute(
+        text("SELECT name FROM database_knowledge_sources WHERE workspace_id = CAST(:ws AS uuid) "
+             "AND is_active IS TRUE ORDER BY created_at DESC, id DESC"),
+        {"ws": str(workspace_id)},
+    ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def databases_sentence(names: List[str]) -> str:
+    """Two sentences: what is connected, and how to ask it for a number."""
+    if len(names) == 1:
+        return (f"This workspace has 1 connected database ({names[0]}). For numbers about the business "
+                "(counts, totals, rankings, trends), ask it with platform_query_data and pass only the question.")
+    listed = f" ({', '.join(names)})" if len(names) <= DATABASES_SHOWN else ""
+    return (f"This workspace has {len(names)} connected databases{listed}. For numbers about the business "
+            "(counts, totals, rankings, trends), ask one with platform_query_data, passing the question and "
+            "the database's name (it lists them when none is named).")
 
 
 def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
-    """The section's text, or None when the workspace holds no documents."""
+    """The section's text, or None when the workspace holds no documents and no database."""
+    databases = connected_databases(db, workspace_id)
+    held = _documents_held(db, workspace_id)
+    if not held and not databases:
+        return None
+    if not databases:
+        return f"## Documents in this workspace\nThis workspace holds {held}. {_ASK_DOCUMENTS}"
+    lines = [f"This workspace holds {held}. {_ASK_DOCUMENTS_BESIDE_DATA}"] if held else []
+    return "\n".join(["## Documents and data in this workspace", *lines, databases_sentence(databases)])
+
+
+def _documents_held(db: Any, workspace_id: Any) -> Optional[str]:
+    """"2 of the owner's documents (a, b) and 1 report its agents saved", or None."""
     # Imported where it queries, like the other sections: the package imports
     # every section eagerly, so a module-level import binds whatever
     # `sqlalchemy` is in sys.modules at that moment.
@@ -50,17 +98,17 @@ def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
         held.append(f"{owners} of the owner's document{'s' if owners != 1 else ''} ({', '.join(titles)}{more})")
     if reports:
         held.append(f"{reports} report{'s' if reports != 1 else ''} its agents saved")
-    return ("## Documents in this workspace\n"
-            f"This workspace holds {' and '.join(held)}. For a question about the business, a document, "
-            "or how the product works, search them with search_knowledge first and name the file you used.")
+    return " and ".join(held)
 
 
 class DocumentsInventorySection(BaseSection):
-    """What the workspace's knowledge base holds, in two sentences."""
+    """What the workspace's knowledge base holds, and where a number is asked for."""
 
     name: str = "documents_inventory"
     priority: int = 4
-    max_tokens: Optional[int] = 220
+    # The budget truncates past this, from the end: the database sentences come last,
+    # so the cap holds ten long titles and five database names whole.
+    max_tokens: Optional[int] = 320
 
     async def render(self, ctx: SectionContext) -> str:
         if ctx.db_session is None or not ctx.workspace_id:
