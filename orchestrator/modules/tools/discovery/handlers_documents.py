@@ -84,18 +84,41 @@ async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str,
     }
 
 
+def _whole_number(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _like_text(text: str) -> str:
+    """``text`` as literal characters inside a LIKE pattern: `_` and `%` in a
+    filename are not wildcards (roast_log_…, 100%-arabica.md)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """F138 (night 4): ``search`` was ignored and only the newest page came back,
+    so Auto said a document "might have been deleted" after reading the newest
+    20 (B6, B71). ``search`` now filters by name or description, ``offset``
+    pages, and ``total`` says how many match."""
+    from sqlalchemy import or_
+
     from core.models import Document
 
-    limit = min(params.get("limit", 50), 200)
-
-    docs = (
-        db.query(Document)
-        .filter(Document.workspace_id == workspace_id)
-        .order_by(Document.upload_date.desc())
-        .limit(limit)
-        .all()
-    )
+    limit = min(max(_whole_number(params.get("limit"), 50), 1), 200)
+    offset = max(_whole_number(params.get("offset"), 0), 0)
+    query = db.query(Document).filter(Document.workspace_id == workspace_id)
+    search = str(params.get("search") or "").strip()
+    if search:
+        pattern = f"%{_like_text(search)}%"
+        query = query.filter(or_(
+            Document.filename.ilike(pattern, escape="\\"),
+            Document.original_filename.ilike(pattern, escape="\\"),
+            Document.description.ilike(pattern, escape="\\"),
+        ))
+    total = query.count()
+    docs = query.order_by(Document.upload_date.desc(), Document.id.desc()).offset(offset).limit(limit).all()
 
     return {
         "success": True,
@@ -112,6 +135,8 @@ async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]
             for d in docs
         ],
         "count": len(docs),
+        "total": total,
+        "offset": offset,
     }
 
 
