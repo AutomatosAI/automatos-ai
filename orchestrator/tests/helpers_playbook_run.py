@@ -111,7 +111,8 @@ MONDAY_DISPATCH = [
 ]
 
 
-def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None):
+def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None,
+                 agent_status="active"):
     """Run a playbook (default: the two-step Monday dispatch) through the real
     loop; return (execution, card). ``calls`` collects what each step was sent."""
     clock = [1_000_000.0]
@@ -135,7 +136,7 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
         WorkflowTemplate: [SimpleNamespace(id=79, name="Monday dispatch", steps=steps, execution_config=exec_config)],
         RecipeExecution: [execution],
         Workspace: [SimpleNamespace(deleted_at=None, paused_at=None, paused_reason=None)],
-        Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={})],
+        Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={}, status=agent_status)],
         BoardTask: [card],
     })
     pad_mod = types.ModuleType("core.services.playbook_scratchpad")

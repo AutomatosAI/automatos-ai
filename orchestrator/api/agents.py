@@ -1064,6 +1064,10 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
             # keeping it here as `required` made every agent deletion 500 on a
             # nonexistent table (PRD-209 live-test finding, 2026-08-29).
             ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
+            # F135 (B66): routing rows name the agent with no ON DELETE; left in place,
+            # db.delete(agent) raised IntegrityError and the delete answered 500.
+            ("tool_routing_edges", "DELETE FROM tool_routing_edges WHERE agent_id = :agent_id", False),
+            ("tool_routing_affinities", "DELETE FROM tool_routing_affinities WHERE agent_id = :agent_id", False),
         ]
         
         for table_name, sql_stmt, required in deletions:

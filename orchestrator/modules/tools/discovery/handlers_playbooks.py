@@ -211,9 +211,13 @@ async def _validate_agent_id(db: Session, workspace_id: UUID, agent_id) -> tuple
     except (ValueError, TypeError):
         return None, f"agent_id must be an integer, got: {agent_id!r}"
     agent = db.query(Agent).filter(Agent.id == aid, Agent.workspace_id == workspace_id).first()
-    if not agent:
+    # F135 (B67, B87): a switched-off agent was accepted here and then ran the step.
+    if not agent or (agent.status or "active") != "active":
         valid = db.query(Agent.id, Agent.name).filter(Agent.workspace_id == workspace_id, Agent.status == "active").all()
         agent_list = ", ".join(f"{a.id}={a.name}" for a in valid[:20])
+        if agent:
+            return None, (f"agent_id {aid} ({agent.name}) is switched off ({agent.status}). "
+                          f"Switch it on, or pick an active agent: [{agent_list}]")
         return None, f"agent_id {aid} does not exist in this workspace. Valid agents: [{agent_list}]"
     return aid, None
 
@@ -524,7 +528,7 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
             "[PlatformExecutor] Concurrency limit reached for workspace %s: %s",
             workspace_id, concurrency.reason,
         )
-        return {"status": "error", "error": concurrency.reason}
+        return {"status": "error", "error": concurrency.refusal}
 
     # Create execution record
     execution_id = f"exec-{uuid.uuid4().hex[:12]}"

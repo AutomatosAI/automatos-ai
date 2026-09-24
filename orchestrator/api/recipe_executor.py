@@ -1331,6 +1331,14 @@ async def _execute_recipe_inner(
         if missing_agents:
             await _fail_execution(db, recipe_execution_id, f"Agents not found: {missing_agents}")
             return
+        # F135 (B67, B87): agent #303 was switched off at 14:08:11 and ran a step at 14:08:16.
+        switched_off = [a for a in agents if (a.status or "active") != "active"]
+        if switched_off:
+            names = ", ".join(f"#{a.id} {a.name} ({a.status})" for a in switched_off)
+            await _fail_execution(
+                db, recipe_execution_id,
+                f"Switched off: {names}. Switch the agent on, or give its steps another agent. Nothing ran.")
+            return
 
         # --- Initialize scratchpad ---
         from core.services.playbook_scratchpad import PlaybookScratchpad
