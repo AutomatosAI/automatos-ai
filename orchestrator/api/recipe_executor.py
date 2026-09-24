@@ -728,6 +728,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_TOOL_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -745,6 +746,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_READ_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -776,12 +778,13 @@ async def _execute_step(
                 # PRD-251 S0.6 (D16): a denied action never runs — not from the
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
                 _denial = await composio_action_denial_async(tool_name)
+                call_ok = False  # F137: whether the call worked, never guessed from its text
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
                     logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
                 elif _dedup_key in _composio_call_cache:
-                    result_text = _composio_call_cache[_dedup_key]
+                    result_text, call_ok = _composio_call_cache[_dedup_key]
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
                 else:
@@ -816,11 +819,12 @@ async def _execute_step(
                                 else:
                                     result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
                                     logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
-                                _composio_call_cache[_dedup_key] = result_text
+                                call_ok = bool(success)
+                                _composio_call_cache[_dedup_key] = (result_text, call_ok)
                                 all_tool_calls.append({
                                     "action": tool_name, "params": tool_args,
                                     "result": result_text[:8000], "duration_ms": exec_ms,
-                                    "composio_direct": True,
+                                    "composio_direct": True, "success": call_ok,
                                 })
                                 messages.append({
                                     "role": "tool", "tool_call_id": tool_id,
@@ -853,6 +857,7 @@ async def _execute_step(
 
                         raw = spine_result.get("raw_result") or {}
                         success = bool(spine_result.get("success"))
+                        call_ok = success
                         data = raw.get("data") if isinstance(raw, dict) else None
                         error = (
                             (raw.get("error") if isinstance(raw, dict) else None)
@@ -875,7 +880,7 @@ async def _execute_step(
                                 tf.unlink(missing_ok=True)
                             except Exception:
                                 pass
-                    _composio_call_cache[_dedup_key] = result_text
+                    _composio_call_cache[_dedup_key] = (result_text, call_ok)
 
                 all_tool_calls.append({
                     "action": tool_name,
@@ -883,6 +888,7 @@ async def _execute_step(
                     "result": result_text[:8000],
                     "duration_ms": exec_ms,
                     "composio_direct": True,
+                    "success": call_ok,
                 })
                 messages.append({
                     "role": "tool",
@@ -903,6 +909,7 @@ async def _execute_step(
                 "action": tool_args.get("action", tool_name),
                 "params": tool_args.get("params", tool_args),
                 "result": result.get("llm_context", ""),
+                "success": result.get("success") is not False,
             })
 
             messages.append({
@@ -1019,10 +1026,12 @@ def _build_compact_step_result(
     tool_summaries = []
     for tc in tool_calls:
         action = tc.get("action", "unknown")
-        # Infer success/failure from result content
-        result_str = str(tc.get("result", ""))
-        status = "error" if "error" in result_str.lower()[:100] else "success"
-        tool_summaries.append(f"{action} ({status})")
+        # F137: the call's own success flag. B22's "Tool composio_execute failed: …"
+        # holds no "error", so the text guess showed four failed drafts as (success).
+        worked = tc.get("success")
+        if worked is None:  # a record from before the flag: the old guess
+            worked = "error" not in str(tc.get("result", "")).lower()[:100]
+        tool_summaries.append(f"{action} ({'success' if worked else 'error'})")
 
     output = step_result.get("output", "")
     output_preview = output[:200] + "..." if output and len(output) > 200 else (output or "")
@@ -2197,6 +2206,7 @@ def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
                     "params": call.get("params") or call.get("function", {}).get("arguments", {}),
                     "result": call.get("result") or call.get("content", {}),
                     "duration_ms": call.get("duration_ms", 0),
+                    "success": call.get("success"),
                 })
         return normalized
     return []
