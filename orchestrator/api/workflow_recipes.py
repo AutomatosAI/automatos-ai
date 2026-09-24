@@ -34,19 +34,29 @@ from config import config
 
 
 def _sync_cron_schedule(recipe: WorkflowRecipe):
-    """Sync a playbook's cron schedule with the PlaybookSchedulerService."""
-    if not config.RECIPE_SCHEDULER_ENABLED:
-        return
+    """Sync a playbook's cron schedule with the scheduler, through the helper Auto's
+    tools use too (F132). A save never fails on it: the leader's reconcile tick
+    registers a saved schedule within a minute."""
     try:
-        from services.playbook_scheduler import get_playbook_scheduler
-        scheduler = get_playbook_scheduler()
-        sc = recipe.schedule_config or {}
-        if sc.get("type") == "cron" and sc.get("cron_expression"):
-            scheduler.schedule_playbook(recipe)
-        else:
-            scheduler.unschedule_playbook(recipe.id)
+        from services.playbook_scheduler import sync_playbook_schedule
+        sync_playbook_schedule(recipe)
     except Exception as e:
-        logger.warning(f"[_sync_cron_schedule] Failed for recipe {recipe.id}: {e}")
+        logger.error(f"[_sync_cron_schedule] Playbook {recipe.id} is not scheduled: {e}")
+
+
+def _explicit_schedule(recipe: WorkflowRecipe, db: Session, workspace_id) -> None:
+    """A cron saves with its zone named (the workspace's heartbeat timezone, else
+    UTC), and a cron or zone the scheduler cannot use is a 400, not a schedule
+    that never fires (F132)."""
+    from services.playbook_scheduler import SERVER_ZONE, cron_trigger, is_live_cron, with_explicit_zone
+
+    recipe.schedule_config = with_explicit_zone(recipe.schedule_config, db, workspace_id)
+    sc = recipe.schedule_config
+    if is_live_cron(sc):
+        try:
+            cron_trigger(sc["cron_expression"], sc.get("timezone") or SERVER_ZONE)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {exc}")
 
 
 def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
@@ -469,6 +479,7 @@ async def create_workflow_recipe(
         is_valid, error = recipe.validate_schedule_config()
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+        _explicit_schedule(recipe, db, ctx.workspace_id)
 
         # Validate agent_id references exist in workspace
         agent_ids = [step.get('agent_id') for step in recipe.steps if step.get('agent_id')]
@@ -601,6 +612,7 @@ async def update_workflow_recipe(
             if not is_valid:
                 logger.warning(f"[update_recipe] schedule_config validation failed for {recipe_id}: {error}")
                 raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+            _explicit_schedule(recipe, db, ctx.workspace_id)
 
         recipe.updated_at = datetime.now()
         db.commit()

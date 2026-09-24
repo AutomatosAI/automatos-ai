@@ -291,6 +291,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "Schedule a playbook to run automatically on a cron schedule. "
             "Sets the playbook's schedule_config so it fires at the specified "
             "times. Use platform_execute_playbook for immediate one-off runs. "
+            "For one run at a set time, give a dated cron: '20 18 23 9 *' is "
+            "18:20 on 23 September, once. The cron is read in the schedule's "
+            "timezone (default: the workspace's); the reply names it. "
             "Provide playbook_id or playbook_name."
         ),
         category="playbooks",
@@ -307,11 +310,11 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "cron_expression": {
                     "type": "string",
-                    "description": "5-field cron expression (e.g. '0 9 * * 1' = every Monday at 09:00 UTC).",
+                    "description": "5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every Monday at 09:00).",
                 },
                 "timezone": {
                     "type": "string",
-                    "description": "Timezone for the schedule (e.g. 'UTC', 'Europe/Dublin'). Defaults to 'UTC'.",
+                    "description": "IANA timezone the cron is read in (e.g. 'Europe/London'). Defaults to the workspace's timezone (its heartbeat setting), else UTC.",
                 },
                 "enabled": {
                     "type": "boolean",

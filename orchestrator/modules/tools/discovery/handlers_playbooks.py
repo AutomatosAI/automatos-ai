@@ -169,21 +169,35 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     if params.get("execution_config") is not None:
         playbook.execution_config = params["execution_config"]
         changes.append("execution_config updated")
+    schedule_note = None
     if params.get("schedule_config") is not None:
-        playbook.schedule_config = params["schedule_config"]
+        from services.playbook_scheduler import SERVER_ZONE, cron_trigger, is_live_cron, with_explicit_zone
+
+        schedule_config = with_explicit_zone(params["schedule_config"], db, workspace_id)
+        if is_live_cron(schedule_config):
+            try:
+                cron_trigger(schedule_config["cron_expression"], schedule_config.get("timezone") or SERVER_ZONE)
+            except ValueError as exc:
+                return {"success": False, "error": f"scheduling failed: {exc}"}
+        playbook.schedule_config = schedule_config
         changes.append("schedule_config updated")
 
     if not changes:
         return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
 
     db.flush()
+    if params.get("schedule_config") is not None:
+        failed, schedule_note = _sync_schedule(playbook)
+        if failed:
+            return failed
     logger.info(f"[PlatformExecutor] Updated playbook {playbook.id}: {', '.join(changes)}")
 
     return {
         "success": True,
         "playbook_id": playbook.id,
         "changes": changes,
-        "message": f"Playbook '{playbook.name}' updated: {', '.join(changes)}",
+        "message": f"Playbook '{playbook.name}' updated: {', '.join(changes)}"
+                   + (f". Schedule: {_schedule_text(playbook.schedule_config)} {schedule_note}" if schedule_note else ""),
     }
 
 
@@ -397,8 +411,14 @@ async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, A
     if not playbook:
         return {"success": False, "error": "Playbook not found"}
 
-    timezone = params.get("timezone", "UTC")
+    from services.playbook_scheduler import cron_trigger, default_schedule_zone
+
+    timezone = params.get("timezone") or default_schedule_zone(db, workspace_id)
     enabled = params.get("enabled", True)
+    try:
+        cron_trigger(cron_expression, timezone)
+    except ValueError as exc:
+        return {"success": False, "error": f"scheduling failed: {exc}"}
 
     schedule_config = {
         "type": "cron",
@@ -409,16 +429,11 @@ async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, A
     playbook.schedule_config = schedule_config
     db.flush()
 
-    # Sync with APScheduler if available
-    try:
-        from services.playbook_scheduler import PlaybookSchedulerService
-        scheduler = PlaybookSchedulerService()
-        if enabled:
-            scheduler.schedule_playbook(playbook.id, cron_expression, timezone)
-        else:
-            scheduler.unschedule_playbook(playbook.id)
-    except Exception as e:
-        logger.warning("[PlatformExecutor] Scheduler sync failed for playbook %d: %s", playbook.id, e)
+    # F132: this called a fresh, never-started scheduler with the wrong arguments and
+    # swallowed the TypeError, so Auto's schedules reached no scheduler at all.
+    failed, schedule_note = _sync_schedule(playbook)
+    if failed:
+        return failed
 
     logger.info(
         "[PlatformExecutor] Scheduled playbook '%s' (id=%d) with cron '%s' tz=%s enabled=%s",
@@ -430,8 +445,42 @@ async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, A
         "playbook_id": playbook.id,
         "playbook_name": playbook.name,
         "schedule_config": schedule_config,
-        "message": f"Playbook '{playbook.name}' scheduled: {cron_expression} ({timezone}). {'Active now.' if enabled else 'Paused — set enabled=true to activate.'}",
+        "message": f"Playbook '{playbook.name}' scheduled: {cron_expression} in {timezone}. {schedule_note}",
     }
+
+
+def _schedule_text(schedule_config) -> str:
+    sc = schedule_config or {}
+    if sc.get("type") != "cron":
+        return f"{sc.get('type') or 'none'}."
+    return f"{sc.get('cron_expression')} in {sc.get('timezone')}."
+
+
+def _sync_schedule(playbook) -> tuple:
+    """Register the playbook's saved schedule with the scheduler (F132).
+
+    Returns (failure_reply, None) when the scheduler refused it — the reply says
+    "scheduling failed", never "scheduled" — else (None, what the owner is told).
+    """
+    from services.playbook_scheduler import (
+        SYNC_DEFERRED, SYNC_OFF, SYNC_REMOVED, sync_playbook_schedule,
+    )
+    from services.scheduled_task_service import RECONCILE_INTERVAL_SECONDS
+
+    try:
+        outcome = sync_playbook_schedule(playbook)
+    except Exception as exc:  # noqa: BLE001 — reported to the owner, never swallowed
+        logger.error("[PlatformExecutor] Scheduler sync failed for playbook %d: %s", playbook.id, exc, exc_info=True)
+        return {"success": False, "playbook_id": playbook.id, "error": f"scheduling failed: {exc}"}, None
+    sc = playbook.schedule_config or {}
+    removed = ("Paused — set enabled=true to activate." if sc.get("type") == "cron"
+               else "It runs only when started.")
+    notes = {
+        SYNC_REMOVED: removed,
+        SYNC_DEFERRED: f"Active: the scheduler picks it up within {RECONCILE_INTERVAL_SECONDS} s.",
+        SYNC_OFF: "Saved, but scheduled runs are switched off on this server (RECIPE_SCHEDULER_ENABLED).",
+    }
+    return None, notes.get(outcome, "Active now.")
 
 
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

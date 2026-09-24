@@ -808,6 +808,9 @@ class Config:
     # A manual run that succeeds breaks the streak and auto-resets the breaker.
     # Set to 0 to disable the breaker entirely.
     PLAYBOOK_BREAKER_THRESHOLD: int = int(os.getenv("PLAYBOOK_BREAKER_THRESHOLD", "3"))
+    # F132: how late a scheduled playbook may still start. APScheduler's default (1 s)
+    # dropped a fire the loop reached a moment late, silently.
+    PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS: int = int(os.getenv("PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS", "300"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
