@@ -1,6 +1,6 @@
 """A two-step playbook ("Monday dispatch") through the real step loop and the
 real board bridge, faking only the edges: the session, the step's agent call,
-the clock, the log upload and the notifications. Shared by F123 and F125."""
+the clock, the log upload and the notifications. Shared by F123, F125 and F130."""
 from __future__ import annotations
 
 import asyncio
@@ -103,21 +103,27 @@ def done(output, tokens=TOKENS):
     return {"status": "success", "result": output, "execution": {"tokens_used": tokens, "tool_calls": []}}
 
 
-def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config):
-    """Run a two-step playbook through the real loop; return (execution, card)."""
+MONDAY_DISPATCH = [
+    {"step_id": "s1", "order": 1, "agent_id": 7, "prompt_template": "Redo the club list.",
+     "error_handling": "skip", "max_retries": 0},
+    {"step_id": "s2", "order": 2, "agent_id": 7, "prompt_template": "Send Callum the Monday sheet.",
+     "error_handling": "stop", "max_retries": 0},
+]
+
+
+def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None):
+    """Run a playbook (default: the two-step Monday dispatch) through the real
+    loop; return (execution, card). ``calls`` collects what each step was sent."""
     clock = [1_000_000.0]
     results = iter(outcomes)
 
     async def _step(**kwargs):
         clock[0] += step_seconds
+        if calls is not None:
+            calls.append(kwargs)
         return next(results)
 
-    steps = [
-        {"step_id": "s1", "order": 1, "agent_id": 7, "prompt_template": "Redo the club list.",
-         "error_handling": "skip", "max_retries": 0},
-        {"step_id": "s2", "order": 2, "agent_id": 7, "prompt_template": "Send Callum the Monday sheet.",
-         "error_handling": "stop", "max_retries": 0},
-    ]
+    steps = steps if steps is not None else MONDAY_DISPATCH
     execution = SimpleNamespace(
         execution_id="exec-120", recipe_id=79, workspace_id=WS, status="pending", current_step=0,
         step_results=None, error_message=None, completed_at=None, started_at=None, output_data=None,
@@ -152,5 +158,5 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config):
     monkeypatch.setattr(board_task_bridge, "create_recipe_board_task", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "update_recipe_board_task_progress", lambda *a, **k: None)
     monkeypatch.setattr(playbook_engine_heartbeat, "_emit_playbooks_primitive", lambda *a, **k: None)
-    asyncio.run(rex._execute_recipe_inner("exec-120", 79, WS, {}, None))
+    asyncio.run(rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None))
     return execution, card
