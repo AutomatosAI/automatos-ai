@@ -37,6 +37,12 @@ Nothing in Wave 1 schedules or publishes a post (Wave 3), and the full composer 
 
 ## The execution contract
 
+- **This session ends when your turn ends (`claude --print`).** Nothing reports back later.
+  - Never end your turn while anything runs in the background: an agent, a background shell, a `gh run watch`. The process is killed about 600 s later, the story is left uncommitted, and the next session has to recover it. Wave 1's first sessions lost over an hour this way (2026-09-25).
+  - Never use ScheduleWakeup, and never reply that you will "pick up when it reports": there is no later.
+  - Wait for CI in the foreground: `gh run watch <id> --exit-status`. If the tool call times out, run it again.
+  - A code review in a build session runs in the FOREGROUND (`run_in_background: false`), before the commit. It is only for a story that touches money (D13), the deny list or the post gate (D14, D16), approval (D6) or auth. Every other story relies on CI and the wave-end review session.
+  - Commit and push as soon as the story's code and tests are written, then fix forward on CI. Uncommitted work at the end of a session is lost time.
 - **RE-VERIFY every anchor by grep before building on it.** If an anchor moved, adapt and say so in the commit body. If a story's premise is gone, reply `RALPH_BLOCKED` with the grep.
 - **Order is the design.** Follow the story order in the JSON: the service and its CI job, then the cost lane, then the client with the quotas (they count the lane's render units), then everything that renders or spends, then the agent layer (US-115..US-120) on top of the finished engine.
 - **The renderer assembles; it never generates (D3).**
