@@ -1,7 +1,7 @@
 """Mission handlers for PlatformActionExecutor (PRD-82A)."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -367,6 +367,22 @@ def _resolve_run(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     return run, None
 
 
+WIDGET_CANNOT_DECIDE = (
+    "The public widget can't approve, resume or reject a mission: the workspace owner does "
+    "that from the dashboard."
+)
+
+
+def _widget_cannot_decide() -> Optional[Dict[str, Any]]:
+    """F155: approving, resuming or rejecting a mission is the owner's decision,
+    never a public widget visitor's. Refused before the run is looked up."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return {"success": False, "error": WIDGET_CANNOT_DECIDE}
+    return None
+
+
 def _ok(run: Any, verb: str) -> Dict[str, Any]:
     return {
         "success": True,
@@ -378,6 +394,9 @@ def _ok(run: Any, verb: str) -> Dict[str, Any]:
 
 async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Approve a mission plan and start execution (awaiting_approval → running)."""
+    refused = _widget_cannot_decide()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -407,6 +426,9 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Reject a mission plan (awaiting_approval → cancelled, F143: it never ran)."""
+    refused = _widget_cannot_decide()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -448,6 +470,9 @@ async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
 async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Resume a paused mission (paused → running)."""
+    refused = _widget_cannot_decide()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err

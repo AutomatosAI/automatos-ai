@@ -8,7 +8,8 @@ which the NL2SQL service scopes to the key's workspace, remains.
 predicates every gate shares read the mark, so whatever caller context a tool
 call carries, the turn is made for nobody, is never an admin, a super admin or
 autonomous, never approves a card by instruction, and is offered no admin tier;
-its auto_approve neither starts a mission nor runs a board task's approval.
+its auto_approve neither starts a mission nor runs a board task's approval, and
+it cannot approve, resume or reject a mission.
 (c) The widget records the key that starts a conversation; a key reads and
 resumes only the conversations it started.
 """
@@ -231,6 +232,36 @@ def test_a_widget_turns_auto_approve_never_runs_a_board_approval(db_session, see
         "review", [], "not applied: a call from the public widget is no approval")
     reply = file(None)
     assert reply["status"] == "done" and len(published) == 1
+
+
+@pytest.mark.parametrize("handler,decision", [("approve_mission", "approve_plan"),
+                                              ("resume_mission", "resume_mission"),
+                                              ("reject_mission", "reject_plan")])
+def test_a_widget_turn_cannot_decide_a_mission(monkeypatch, handler, decision):
+    """Under a policy that lets a call approve (auto_below_budget), on a run
+    paused at its token budget."""
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery import handlers_missions as missions
+
+    monkeypatch.setattr("core.services.approval_policy.load_approval_policy",
+                        lambda db, ws: {"policy": "auto_below_budget", "approval_dollar_ceiling": 5.0,
+                                        "auto_proceed_after_seconds": None})
+    run = NS(id=uuid4(), state="paused", stop_reason="budget_exceeded", goal="g")
+
+    def decide(surface):
+        coordinator = MagicMock()
+        getattr(coordinator, decision).return_value = NS(id=run.id, state="running", goal="g")
+        with turn_surface(surface), patch.object(missions, "_resolve_run", return_value=(run, None)), \
+                patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
+            reply = asyncio.run(getattr(missions, handler)(MagicMock(), uuid4(), {"mission_id": str(run.id)}))
+        return reply, getattr(coordinator, decision)
+
+    reply, called = decide(WIDGET)
+    assert reply == {"success": False, "error": missions.WIDGET_CANNOT_DECIDE}
+    called.assert_not_called()
+    reply, called = decide(None)
+    assert reply["success"] is True
+    called.assert_called_once()
 
 # ── (c): a key reaches only the conversations it started ────────────────────
 
