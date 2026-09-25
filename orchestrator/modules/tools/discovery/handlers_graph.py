@@ -43,22 +43,22 @@ def _get_service():
 
 
 def _resolve_agent_team(db: Session, agent_id: Optional[int]) -> Optional[str]:
-    """Look up the agent's team from the DB. Returns None if no team set.
+    """The team that scopes the graph: a widget key's team lock on a widget
+    turn, else the agent's team (core.team_access.retrieval_team).
 
-    PRD-124: agent with team=NULL sees all nodes (no filtering).
+    PRD-124: with neither (an agent with team=NULL) every node is visible.
     """
+    from core.team_access import retrieval_team
+
     if not agent_id:
-        return None
+        return retrieval_team(None)
     try:
         from core.models.core import Agent
         agent = db.query(Agent.team).filter(Agent.id == agent_id).first()
-        if agent and agent.team:
-            from core.team_access import normalize_team
-            return normalize_team(agent.team)
-        return None
+        return retrieval_team(agent.team if agent else None)
     except Exception:
         logger.debug("_resolve_agent_team: failed for agent_id=%s", agent_id)
-        return None
+        return retrieval_team(None)
 
 
 def _get_filtered_graph(graph, agent_team: Optional[str]):

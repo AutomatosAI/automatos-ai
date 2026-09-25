@@ -3,7 +3,9 @@
 (h) The widget data plane runs no caller SQL: only the natural-language query,
 which the NL2SQL service scopes to the key's workspace, remains.
 (d-1) A key's team lock scopes its chat's documents, as it already scopes
-/search and /docs; without one, the answering agent's team does.
+/search and /docs; without one, the answering agent's team does. On a widget
+turn the lock also scopes every document tool: knowledge and multimodal
+search, document reads and listing, the graph, and where an upload lands.
 (b)+(e) interim: the chat service marks a widget turn for its duration, and the
 predicates every gate shares read the mark, so whatever caller context a tool
 call carries, the turn is made for nobody, is never an admin, a super admin or
@@ -45,6 +47,100 @@ def test_the_keys_team_lock_scopes_widget_chat(db_session, seed_workspace):
     assert _retrieval_team(db_session, NS(team="franchise-a"), agent) == "franchise-a"
     assert _retrieval_team(db_session, NS(team=None), agent) == "hq"
 
+
+
+LOCKED = ("franchise-a", "Franchise-A ")
+
+
+def _barista(db, ws):
+    return db.execute(text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration, team) "
+                           "VALUES ('Barista', 'custom', CAST(:w AS uuid), 'active', CAST('{}' AS json), 'hq') "
+                           "RETURNING id"), {"w": str(ws)}).scalar()
+
+
+def _locked():
+    from core.security.surface import WIDGET, turn_surface
+
+    return turn_surface(WIDGET, ("chat", "documents:read", "documents:write"), LOCKED[1])
+
+
+def test_the_keys_team_lock_scopes_the_document_and_graph_tools(db_session, seed_workspace):
+    from modules.tools.discovery import handlers_documents, handlers_graph
+
+    agent = _barista(db_session, seed_workspace())
+    for handlers in (handlers_documents, handlers_graph):
+        with _locked():
+            assert handlers._resolve_agent_team(db_session, agent) == LOCKED[0]
+        assert handlers._resolve_agent_team(db_session, agent) == "hq"
+
+
+def _document(db, ws, name, teams):
+    from core.models import Document
+
+    db.add(Document(workspace_id=ws, filename=name, original_filename=name, file_type="text", file_size=1,
+                    file_path=f"/uploads/{name}", content_hash=uuid4().hex, status="completed", team_access=teams))
+    db.flush()
+
+
+def test_a_locked_widget_turn_lists_only_its_teams_documents(db_session, seed_workspace):
+    from modules.tools.discovery.handlers_documents import list_documents
+
+    ws = UUID(seed_workspace())
+    for name, teams in (("franchise-menu.txt", ["franchise-a"]), ("hq-margins.txt", ["hq"]), ("faq.txt", [])):
+        _document(db_session, ws, name, teams)
+
+    def listed():
+        reply = asyncio.run(list_documents(db_session, ws, {}))
+        return sorted(document["filename"] for document in reply["documents"])
+
+    with _locked():
+        assert listed() == ["faq.txt", "franchise-menu.txt"]
+    assert listed() == ["faq.txt", "franchise-menu.txt", "hq-margins.txt"]
+
+
+def test_a_locked_widget_turns_upload_belongs_to_its_team(db_session, seed_workspace, monkeypatch, tmp_path):
+    import api.documents as documents
+    from modules.tools.discovery.handlers_documents import upload_document
+
+    ws = UUID(seed_workspace())
+    monkeypatch.setattr(documents, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(documents, "get_document_manager", lambda w: NS(_process_document=AsyncMock()))
+    with _locked():
+        reply = asyncio.run(upload_document(db_session, ws, {"filename": "specials.txt", "content": "Soup."}))
+    teams = db_session.execute(text("SELECT team_access FROM documents WHERE id = :id"),
+                               {"id": reply["document_id"]}).scalar()
+    assert teams == [LOCKED[0]]
+
+
+def test_the_keys_team_lock_scopes_knowledge_search(db_session, seed_workspace):
+    from modules.agents.services.agent_platform_tools import AgentPlatformTools
+
+    agent = _barista(db_session, seed_workspace())
+    tools = AgentPlatformTools.__new__(AgentPlatformTools)
+    tools.db, tools.logger, tools.rag_config = db_session, __import__("logging").getLogger("t"), None
+    retrieve = AsyncMock(return_value=NS(chunks=[]))
+    tools.rag_service = NS(retrieve_context=retrieve)
+
+    def searched(tool):
+        asyncio.run(tools.execute_tool(tool_name=tool, parameters={"query": "margins"}, agent_id=agent))
+        return retrieve.call_args.kwargs["team"]
+
+    for tool in ("search_knowledge", "semantic_search"):
+        with _locked():
+            assert searched(tool) == LOCKED[0]
+        assert searched(tool) == "hq"
+
+
+def test_a_locked_widget_turns_multimodal_search_cannot_name_another_team(monkeypatch):
+    from modules.rag.services import multimodal_knowledge_tools as multimodal
+    from modules.tools.execution import exec_multimodal
+
+    search = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(multimodal.MultimodalKnowledgeTools, "search_multimodal", search)
+    with _locked():
+        asyncio.run(exec_multimodal.execute_multimodal_tool(
+            NS(db=None), "search_multimodal", {"query": "margins", "team": "hq"}, 9, workspace_id=uuid4()))
+    assert search.call_args.kwargs["team"] == LOCKED[0]
 
 # ── (b)+(e) interim: a widget turn is neither admin nor autonomous ─────────
 
@@ -169,7 +265,7 @@ def test_only_a_widget_turn_is_marked_and_only_while_it_runs(widget_mode):
 
     service = StreamingChatService.__new__(StreamingChatService)
     service.widget_mode = widget_mode
-    service.widget_scopes = ("chat",)
+    service.widget_scopes, service.widget_team = ("chat",), None
 
     async def _turn(*args, **kwargs):
         yield widget_turn()

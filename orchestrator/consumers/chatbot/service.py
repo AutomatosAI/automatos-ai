@@ -718,7 +718,7 @@ class StreamingChatService:
     """
 
     def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False,
-                 widget_scopes: Optional[List[str]] = None):
+                 widget_scopes: Optional[List[str]] = None, widget_team: Optional[str] = None):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -726,8 +726,10 @@ class StreamingChatService:
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
-        # F155: the widget key's scopes decide what its turns may call.
+        # F155: the widget key's scopes decide what its turns may call, and its
+        # team lock scopes every document they read.
         self.widget_scopes = tuple(widget_scopes or ())
+        self.widget_team = widget_team
 
         # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
         # per request (one request == one turn), so these accumulate the turn's
@@ -2508,7 +2510,7 @@ class StreamingChatService:
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
-                turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes):
+                turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,

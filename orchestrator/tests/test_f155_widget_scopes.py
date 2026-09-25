@@ -130,17 +130,18 @@ def test_auto_has_no_system_bypass_on_a_widget_turn(db_session, seed_workspace):
         assert decide().allowed is False
 
 
-@pytest.mark.parametrize("widget_mode,expected", [(True, frozenset({"chat", "documents:read"})), (False, frozenset())])
-def test_a_widget_turn_carries_its_keys_scopes(widget_mode, expected):
+@pytest.mark.parametrize("widget_mode,expected", [(True, (frozenset({"chat", "documents:read"}), "franchise-a")),
+                                                  (False, (frozenset(), None))])
+def test_a_widget_turn_carries_its_keys_scopes_and_team(widget_mode, expected):
     from consumers.chatbot.service import StreamingChatService
-    from core.security.surface import widget_scopes
+    from core.security.surface import widget_scopes, widget_team
 
     service = StreamingChatService.__new__(StreamingChatService)
     service.widget_mode = widget_mode
-    service.widget_scopes = ("chat", "documents:read")
+    service.widget_scopes, service.widget_team = ("chat", "documents:read"), "Franchise-A"
 
     async def _turn(*args, **kwargs):
-        yield widget_scopes()
+        yield widget_scopes(), widget_team()
 
     service._stream_response_with_agent_scoped = _turn
 

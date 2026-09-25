@@ -102,13 +102,21 @@ async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]
     so Auto said a document "might have been deleted" after reading the newest
     20 (B6, B71). ``search`` now filters by name or description, ``offset``
     pages, and ``total`` says how many match."""
-    from sqlalchemy import or_
+    from sqlalchemy import or_, text
 
     from core.models import Document
 
     limit = min(max(_whole_number(params.get("limit"), 50), 1), 200)
     offset = max(_whole_number(params.get("offset"), 0), 0)
     query = db.query(Document).filter(Document.workspace_id == workspace_id)
+    # F155: a widget turn lists only its key's team's documents and those
+    # shared with every team (the PRD-124 rule of TEAM_FILTER_CLAUSE).
+    from core.security.surface import widget_team
+
+    lock = widget_team()
+    if lock:
+        query = query.filter(text("(documents.team_access = '{}' OR :team = ANY(documents.team_access))")
+                             .bindparams(team=lock))
     search = str(params.get("search") or "").strip()
     if search:
         pattern = f"%{_like_text(search)}%"
@@ -386,7 +394,7 @@ async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any
             content_hash=content_hash,
             status="uploaded",
             description=params.get("description"),
-            team_access=[],
+            team_access=_widget_team_access(),
             created_by="auto",
         )
         db.add(document)
@@ -436,17 +444,29 @@ _GREP_MAX_SCAN_CHUNKS = 5000     # bound the literal scan
 _GREP_SNIPPET_TOKENS = 120       # per-match snippet token budget
 
 
+def _widget_team_access() -> list:
+    """F155: a widget key's upload belongs to its team, if it has one."""
+    from core.security.surface import widget_team
+
+    lock = widget_team()
+    return [lock] if lock else []
+
+
 def _resolve_agent_team(db: Session, agent_id: Any) -> Optional[str]:
-    """Look up an agent's team for retrieval scoping. None when unknown."""
+    """The team that scopes this call's retrieval: a widget key's team lock on
+    a widget turn, else the agent's team (core.team_access.retrieval_team).
+    None when neither is known."""
+    from core.team_access import retrieval_team
+
     if not agent_id:
-        return None
+        return retrieval_team(None)
     try:
         from core.models import Agent
 
         row = db.query(Agent).filter(Agent.id == int(agent_id)).first()
-        return getattr(row, "team", None) if row else None
+        return retrieval_team(getattr(row, "team", None) if row else None)
     except Exception:
-        return None
+        return retrieval_team(None)
 
 
 async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
