@@ -1,5 +1,5 @@
 {
-  "route_count": 826,
+  "route_count": 825,
   "routes": [
     {
       "method": "GET",
@@ -2804,10 +2804,6 @@
     {
       "method": "GET",
       "path": "/api/widgets/config"
-    },
-    {
-      "method": "POST",
-      "path": "/api/widgets/data/execute"
     },
     {
       "method": "POST",
