@@ -104,9 +104,11 @@ class _FakeExecutor:
         self._tasks = tasks
         self._agents = agents
         self.calls = []
+        self.contexts = []
 
-    async def execute(self, action, params):
+    async def execute(self, action, params, caller_context=None):
         self.calls.append((action, params))
+        self.contexts.append((action, caller_context))
         if action == "platform_list_tasks":
             return {"data": self._tasks}
         if action == "platform_list_agents":
@@ -191,6 +193,23 @@ def test_handle_approve_command(monkeypatch, tmp_path):
     assert os.path.exists(_ledger_path(tmp_path))
     ledger = hc.get_harness_service()._read_applied_tasks(_WS_ID)
     assert "7" in {str(i) for i in ledger["applied_task_ids"]}
+
+
+def test_an_admins_approval_applies_as_that_admin(monkeypatch, tmp_path):
+    """F151: the change is made for the approving admin, so an admin_only action
+    (the power mode) applies as them; the executor re-reads their membership."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    task = _harness_task(change_type="power_mode_upgrade", current={"power_mode": "standard"},
+                         proposed={"power_mode": "max"}, task_id=7)
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    _patch_executor(monkeypatch, ex)
+
+    result = asyncio.run(hc.handle_harness_command(_FakeDB(member=_ADMIN_MEMBER), _WS_ID, "/approve",
+                                                   _RX_ID, _ADMIN))
+
+    assert result["success"] is True
+    assert ("platform_set_power_mode", {"driving_user_id": "5"}) in ex.contexts
 
 
 def test_handle_reject_command(monkeypatch):

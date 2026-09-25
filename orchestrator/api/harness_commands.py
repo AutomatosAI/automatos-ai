@@ -249,7 +249,12 @@ async def _approve(
         }
 
     current_before = svc._snapshot_current_value(rx)
-    apply_result = await svc._auto_apply_prescription(executor, rx)
+    # F151: the change is made for the approving admin, so an admin_only action
+    # (power mode, routing rule) applies as them; the executor re-reads their
+    # membership rather than trusting this check.
+    apply_result = await svc._auto_apply_prescription(
+        executor, rx, caller_context={"driving_user_id": str(user_id)}
+    )
     if not apply_result.get("success"):
         return {
             "success": False,

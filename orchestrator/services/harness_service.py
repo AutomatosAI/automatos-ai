@@ -1510,9 +1510,18 @@ class HarnessService:
         return issues
 
     async def _auto_apply_prescription(
-        self, executor: "PlatformActionExecutor", rx: Dict[str, Any]
+        self,
+        executor: "PlatformActionExecutor",
+        rx: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Execute a single auto-apply prescription."""
+        """Execute a single auto-apply prescription.
+
+        ``caller_context`` names the person the change is made for: an owner's
+        or admin's explicit /approve passes theirs (F151), so an admin_only
+        action applies as that person. HARNESS's own ticks pass none — a lane
+        acting for nobody, which the executor's admin gate refuses.
+        """
         change_type = rx.get("change_type", "")
         target_id = rx.get("target_id")
         proposed = rx.get("proposed_value", {})
@@ -1536,21 +1545,21 @@ class HarnessService:
                 result = await executor.execute("platform_configure_agent_heartbeat", {
                     "agent_id": target_id,
                     "interval_minutes": proposed.get("interval_minutes"),
-                })
+                }, caller_context)
             elif change_type == "temperature_adjust":
                 # update_agent reads temperature as a top-level param (it folds it
                 # into model_config itself); a nested model_config is ignored.
                 result = await executor.execute("platform_update_agent", {
                     "agent_id": target_id,
                     "temperature": proposed.get("temperature"),
-                })
+                }, caller_context)
             elif change_type in ("tag_update", "description_update"):
                 update_params = {"agent_id": target_id}
                 if change_type == "tag_update":
                     update_params["tags"] = proposed.get("tags", [])
                 else:
                     update_params["description"] = proposed.get("description", "")
-                result = await executor.execute("platform_update_agent", update_params)
+                result = await executor.execute("platform_update_agent", update_params, caller_context)
             elif change_type == "model_change_same_tier":
                 # update_agent reads the new model as the top-level model_id param
                 # (a nested model_config is ignored). The prescription carries it
@@ -1558,7 +1567,7 @@ class HarnessService:
                 result = await executor.execute("platform_update_agent", {
                     "agent_id": target_id,
                     "model_id": proposed.get("model"),
-                })
+                }, caller_context)
             elif change_type == "tool_assignment_add":
                 # Verified against actions_assignments.py: the param is app_name
                 # (the Composio app identifier), NOT tool_name. Idempotent —
@@ -1566,14 +1575,14 @@ class HarnessService:
                 result = await executor.execute("platform_assign_tool_to_agent", {
                     "agent_id": target_id,
                     "app_name": proposed.get("app_name"),
-                })
+                }, caller_context)
             elif change_type == "tool_assignment_remove":
                 # Deactivates the assignment (is_active=False) by default, keeping
                 # the audit trail. app_name is accepted by both assign/unassign.
                 result = await executor.execute("platform_unassign_tool_from_agent", {
                     "agent_id": target_id,
                     "app_name": proposed.get("app_name"),
-                })
+                }, caller_context)
             elif change_type == "routing_rule_add":
                 # routing_rules is read by the UniversalRouter at Tier 2a
                 # (core/routing/engine.py); the rule is workspace-scoped by the
@@ -1586,7 +1595,7 @@ class HarnessService:
                     "target_agent_id": proposed.get("target_agent_id"),
                     "target_workflow_id": proposed.get("target_workflow_id"),
                     "priority": proposed.get("priority", 0),
-                })
+                }, caller_context)
             elif change_type in ("power_mode_upgrade", "power_mode_downgrade"):
                 # Sets the workspace default power mode (workspace.settings['power_mode']),
                 # which a Mission run inherits when its run_config doesn't pin one
@@ -1595,7 +1604,7 @@ class HarnessService:
                 # knob, not an agent attribute). (PRD-142 Wave 4, W4-S5.)
                 result = await executor.execute("platform_set_power_mode", {
                     "power_mode": proposed.get("power_mode"),
-                })
+                }, caller_context)
             else:
                 # routing_rule_add (W4-S6) and power_mode_* (W4-S5) are handled above.
                 return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}

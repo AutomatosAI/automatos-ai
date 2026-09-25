@@ -101,7 +101,7 @@ class _FakeExecutor:
         self.task_status = {}
         self.task_result = {}
 
-    async def execute(self, action, params):
+    async def execute(self, action, params, caller_context=None):
         self.calls.append((action, params))
         if action == "platform_list_tasks":
             return {"data": self._tasks}

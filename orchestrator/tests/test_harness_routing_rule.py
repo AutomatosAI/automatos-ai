@@ -80,7 +80,7 @@ class _FakeExecutor:
     def __init__(self):
         self.calls = []
 
-    async def execute(self, name, params):
+    async def execute(self, name, params, caller_context=None):
         self.calls.append((name, params))
         return {"success": True}
 
