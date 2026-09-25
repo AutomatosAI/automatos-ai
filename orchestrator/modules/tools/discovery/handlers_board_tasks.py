@@ -416,6 +416,11 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
         ).first()
         if agent:
             query = query.filter(BoardTask.assigned_agent_id == agent.id)
+        elif _widget_turn():
+            # F155: a widget turn cannot tell a name no agent has from an agent
+            # with no tickets: who the agents are is agents:read's, not tasks:read's.
+            return {"success": True, "tasks": [], "total": 0, "total_matching": 0,
+                    "limit": min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)}
         else:
             return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
 

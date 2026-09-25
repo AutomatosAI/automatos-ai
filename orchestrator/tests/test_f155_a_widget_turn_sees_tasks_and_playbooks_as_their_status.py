@@ -107,3 +107,23 @@ def test_a_widget_turn_sees_a_playbook_and_its_runs_as_their_status(db_session, 
 
     owner = asyncio.run(playbooks.get_playbook(db_session, ws, {"playbook_id": playbook.id}))
     assert owner["playbook"]["steps"][0]["prompt_preview"] == f"Offer {PRIVATE}"
+
+
+def test_a_widget_turn_cannot_tell_a_name_no_agent_has_from_an_agent_without_tickets(db_session, seed_workspace):
+    """Filtering by assigned agent answered "No agent named 'X' found": an
+    agent-name oracle for a key that holds tasks:read but not agents:read."""
+    from sqlalchemy import text
+
+    from modules.tools.discovery import handlers_board_tasks as board
+
+    ws = UUID(seed_workspace())
+    db_session.execute(text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
+                            "VALUES ('Payroll Clerk', 'custom', CAST(:w AS uuid), 'active', CAST('{}' AS json))"),
+                       {"w": str(ws)})
+    with _widget_turn("tasks:read"):
+        idle = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Payroll Clerk"}))
+        nobody = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Nobody Here"}))
+    assert idle == nobody == {"success": True, "tasks": [], "total": 0, "total_matching": 0, "limit": 20}
+
+    owner = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Nobody Here"}))
+    assert owner["note"] == "No agent named 'Nobody Here' found"
