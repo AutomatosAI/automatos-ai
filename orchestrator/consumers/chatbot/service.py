@@ -2497,8 +2497,12 @@ class StreamingChatService:
         conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
+        from core.security.surface import WIDGET, turn_surface
 
-        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id):
+        # F155: every tool call of a widget turn carries the widget surface, so the
+        # gates treat it as a visitor's whatever caller context the call built.
+        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
+                turn_surface(WIDGET if self.widget_mode else None):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,

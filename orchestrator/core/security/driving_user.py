@@ -10,6 +10,9 @@ no driving user, and so no admin.
 - ``driver_is_workspace_admin``: the literal ``system_role: super_admin`` the
   chat writes for a super admin, or the driving user's ACTIVE owner/admin row in
   ``workspace_members``, read fresh at the check. Fails closed on any error.
+
+A public widget turn (``core.security.surface``) is made for nobody, whatever
+its caller context names (F155).
 """
 from __future__ import annotations
 
@@ -17,6 +20,8 @@ import logging
 from typing import Any, Mapping, Optional
 
 from sqlalchemy import text
+
+from core.security.surface import widget_turn
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +31,7 @@ SUPER_ADMIN = "super_admin"
 
 def driving_user_id(caller_context: Optional[Mapping[str, Any]]) -> Optional[int]:
     """The ``users.id`` the call is made for, or None when it is made for nobody."""
-    if not isinstance(caller_context, Mapping):
+    if widget_turn() or not isinstance(caller_context, Mapping):
         return None
     value = str(caller_context.get("driving_user_id") or "").strip()
     return int(value) if value.isdigit() else None
@@ -35,7 +40,7 @@ def driving_user_id(caller_context: Optional[Mapping[str, Any]]) -> Optional[int
 def driver_is_workspace_admin(db: Any, workspace_id: Any, caller_context: Optional[Mapping[str, Any]]) -> bool:
     """The call is made for a super admin, or for an active owner/admin of this
     workspace. No caller context, or no driving user, is never an admin."""
-    if not isinstance(caller_context, Mapping):
+    if widget_turn() or not isinstance(caller_context, Mapping):
         return False
     if caller_context.get("system_role") == SUPER_ADMIN:
         return True

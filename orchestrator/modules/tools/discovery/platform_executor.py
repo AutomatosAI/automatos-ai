@@ -409,6 +409,10 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     unresolvable principal, any lookup error — keeps the ask. The su tier is
     untouched (its gate runs earlier and never consults this).
     """
+    from core.security.surface import widget_turn
+
+    if widget_turn():  # F155: a widget visitor's instruction is no approval
+        return False
     ctx = caller_context if isinstance(caller_context, dict) else {}
     if not ctx.get("conversation_id"):
         return False
@@ -422,7 +426,12 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
 def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
     """PRD-143's super-admin predicate: only a literal system_role ==
     'super_admin' passes. There is no fallback, and no caller_context refuses.
-    The gate and platform_list_tools' listing (F122) both read this one."""
+    The gate and platform_list_tools' listing (F122) both read this one. A
+    public widget turn never passes, whatever its context names (F155)."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return False
     return (caller_context or {}).get("system_role") == "super_admin"
 
 
@@ -802,6 +811,10 @@ class PlatformActionExecutor:
         non-admin. Full autonomy is the owner's explicit grant. With no caller
         context, only the plane's opt-in inheritance applies.
         """
+        from core.security.surface import widget_turn
+
+        if widget_turn():  # F155: a public widget's visitor is never an admin
+            return False
         if full_autonomy:
             return True
         if caller_context is None:
@@ -1276,13 +1289,13 @@ class PlatformActionExecutor:
         # sender, the owner a role change needs. From the server-built context
         # only: caller-supplied values are ALWAYS stripped first.
         if action_name in _DRIVER_AWARE_ACTIONS and isinstance(params, dict):
-            from core.security.driving_user import SUPER_ADMIN, driving_user_id
+            from core.security.driving_user import driving_user_id
 
             params = {k: v for k, v in params.items() if k not in ("_driving_user_id", "_driving_super_admin")}
             _user = driving_user_id(caller_context)
             if _user is not None:
                 params = {**params, "_driving_user_id": _user}
-            if isinstance(caller_context, dict) and caller_context.get("system_role") == SUPER_ADMIN:
+            if isinstance(caller_context, dict) and _caller_is_super_admin(caller_context):
                 params = {**params, "_driving_super_admin": True}
 
         # PRD-205 S4: capture the originating conversation for watch-creating
