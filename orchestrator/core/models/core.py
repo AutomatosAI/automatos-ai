@@ -1168,6 +1168,9 @@ class Chat(Base):
     # the checkpoint distill (idle sweep + platform_checkpoint_thread); read by
     # the S3 resume payload. NULL until the thread has been checkpointed.
     summary = Column(JSONB, nullable=True)
+    # F155: the widget key that started this conversation. A widget key reads
+    # and resumes only the conversations it started; NULL is no key's.
+    widget_key_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")

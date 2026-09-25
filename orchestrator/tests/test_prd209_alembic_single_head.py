@@ -66,7 +66,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-23 (PRD-251 Socials): prd251_socials chains onto kb_multimodal_tables too
 # — the ONE Socials migration (the master-switch seed, then the social_posts
 # tables) — and f049_prd251_merge_heads joins it with F125 into the single head.
-EXPECTED_HEAD = "f049_prd251_merge_heads"
+# 2026-09-25: f155_chats_widget_key_id chains onto that — the widget key that
+# started a conversation (F155).
+EXPECTED_HEAD = "f155_chats_widget_key_id"
 
 
 def _literal(node: ast.AST):

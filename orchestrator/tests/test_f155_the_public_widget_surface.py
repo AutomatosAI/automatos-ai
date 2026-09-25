@@ -8,6 +8,8 @@ which the NL2SQL service scopes to the key's workspace, remains.
 predicates every gate shares read the mark, so whatever caller context a tool
 call carries, the turn is made for nobody, is never an admin, a super admin or
 autonomous, never approves a card by instruction, and is offered no admin tier.
+(c) The widget records the key that starts a conversation; a key reads and
+resumes only the conversations it started.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 
 ADMIN_PROBE = "platform_f155_admin_probe"
@@ -174,3 +177,66 @@ def test_only_a_widget_turn_is_marked_and_only_while_it_runs(widget_mode):
         return chunks, widget_turn()
 
     assert asyncio.run(_chat()) == ([widget_mode], False)
+
+
+# ── (c): a key reaches only the conversations it started ────────────────────
+
+@pytest.fixture
+def site(db_session, seed_workspace):
+    """Two widget keys on one workspace, a conversation each started, and a
+    dashboard chat, each with one message."""
+    from api.widgets.auth import WidgetAuthContext
+    from core.models.core import Chat, Message
+
+    db = db_session
+    ws = UUID(seed_workspace())
+    person = db.execute(text("INSERT INTO users (email, username) VALUES (:e, :u) RETURNING id"),
+                        {"e": f"owner-{uuid4().hex[:8]}@harbourline.test", "u": f"owner-{uuid4().hex[:8]}"}).scalar()
+    ours, theirs = uuid4(), uuid4()
+
+    def conversation(key):
+        chat = Chat(id=uuid4(), user_id=person, workspace_id=ws, title="t", visibility="private", widget_key_id=key)
+        db.add(chat)
+        db.flush()
+        db.add(Message(chat_id=chat.id, workspace_id=ws, role="user", parts=[{"type": "text", "text": "hello"}]))
+        db.flush()
+        return str(chat.id)
+
+    return NS(db=db, ws=ws, key_id=ours, key=WidgetAuthContext(workspace_id=ws, api_key_id=ours, permissions=["chat"]),
+              ours=conversation(ours), theirs=conversation(theirs), dashboard=conversation(None))
+
+
+def _history(site, conversation_id):
+    from api.widgets.chat import widget_chat_history
+
+    return asyncio.run(widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db))
+
+
+def _send(site, conversation_id=None):
+    from api.widgets.chat import WidgetChatRequest, widget_chat
+
+    return asyncio.run(widget_chat(body=WidgetChatRequest(message="hi", conversation_id=conversation_id),
+                                   request=NS(headers={}), auth=site.key, db=site.db))
+
+
+def test_a_key_reads_only_the_conversations_it_started(site):
+    assert [message.content for message in _history(site, site.ours)] == ["hello"]
+    for other in (site.theirs, site.dashboard, "not-a-chat"):
+        with pytest.raises(HTTPException) as missing:
+            _history(site, other)
+        assert missing.value.status_code == 404
+
+
+def test_a_key_resumes_only_the_conversations_it_started(site):
+    for other in (site.theirs, site.dashboard):
+        with pytest.raises(HTTPException) as missing:
+            _send(site, other)
+        assert missing.value.status_code == 404
+
+
+def test_a_conversation_the_widget_starts_records_its_key(site):
+    _send(site)
+    started = site.db.execute(text("SELECT count(*) FROM chats WHERE workspace_id = CAST(:ws AS uuid) "
+                                   "AND widget_key_id = CAST(:key AS uuid)"),
+                              {"ws": str(site.ws), "key": str(site.key_id)}).scalar()
+    assert started == 2

@@ -415,14 +415,17 @@ class ChatService:
         title: str,
         visibility: str = "private",
         workspace_id: Optional[uuid.UUID] = None,
+        widget_key_id: Optional[uuid.UUID] = None,
     ) -> Chat:
-        """Create a new chat session scoped to a workspace."""
+        """Create a new chat session scoped to a workspace. A widget passes
+        the key that starts it (F155)."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
             workspace_id=workspace_id,
             title=title,
             visibility=visibility,
+            widget_key_id=widget_key_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )

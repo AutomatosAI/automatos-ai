@@ -121,6 +121,21 @@ def _get_widget_user_id(db: Session) -> int:
     return result[0]
 
 
+def _key_started(db: Session, conversation_id: str, auth: WidgetAuthContext) -> bool:
+    """F155: a key reads and resumes only the conversations it started. Any
+    other id — another key's, the dashboard's, not a chat — is not found."""
+    try:
+        chat_id = str(uuid.UUID(str(conversation_id)))
+    except ValueError:
+        return False
+    row = db.execute(
+        text("SELECT 1 FROM chats WHERE id = CAST(:id AS uuid) AND workspace_id = CAST(:ws AS uuid) "
+             "AND widget_key_id = CAST(:key AS uuid)"),
+        {"id": chat_id, "ws": str(auth.workspace_id), "key": str(auth.api_key_id)},
+    ).first()
+    return row is not None
+
+
 def _resolve_workspace_vertical(db: Session, workspace_id: str) -> str:
     """PRD-141: read ``workspace.settings.vertical`` for plugin dispatch.
 
@@ -263,9 +278,7 @@ async def widget_chat(
 
     t_conv = time.perf_counter()
     if body.conversation_id:
-        ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
-        chat = chat_service.get_chat(body.conversation_id, workspace_id=ws_uuid)
-        if not chat:
+        if not _key_started(db, body.conversation_id, auth):
             logger.warning(
                 "%s CONV_NOT_FOUND: %s",
                 log_extra,
@@ -286,6 +299,7 @@ async def widget_chat(
             title=title,
             visibility="private",
             workspace_id=ws_uuid,
+            widget_key_id=auth.api_key_id,
         )
         chat_id = str(chat.id)
         logger.info(
@@ -577,10 +591,12 @@ async def widget_chat_history(
     auth: WidgetAuthContext = Depends(require_permission("chat")),
     db: Session = Depends(get_db),
 ):
-    """Return the message history for a conversation.
-
-    Only messages belonging to the authenticated workspace are returned.
-    """
+    """Return the message history for a conversation this key started."""
+    if not _key_started(db, conversation_id, auth):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or no messages",
+        )
     workspace_id = str(auth.workspace_id)
 
     rows = db.execute(
