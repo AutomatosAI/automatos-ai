@@ -10,7 +10,8 @@ call carries, the turn is made for nobody, is never an admin, a super admin or
 autonomous, never approves a card by instruction, and is offered no admin tier;
 its auto_approve neither starts a mission nor runs a board task's approval, and
 it cannot change a mission (approve, resume, reject, pause, cancel, replan or
-edit its plan).
+edit its plan). A mission it starts is stamped widget-born, and its approval is
+decided as the widget's even when it is planned later (async_planning).
 (c) The widget records the key that starts a conversation; a key reads and
 resumes only the conversations it started.
 """
@@ -273,6 +274,56 @@ def test_a_widget_turn_cannot_change_a_mission(monkeypatch, handler, decision, e
     reply, called = decide(None)
     assert reply["success"] is True
     called.assert_called_once()
+
+
+def test_a_mission_records_the_surface_it_started_from(monkeypatch):
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery import handlers_missions as missions
+
+    monkeypatch.setattr(missions, "_recent_chat_context", lambda *a, **k: [])
+    monkeypatch.setattr("modules.tools.discovery.handlers_watches.auto_create_watch", lambda *a, **k: None)
+    run = NS(id=uuid4(), goal="g", state="awaiting_approval", plan={"tasks": []}, config={})
+
+    def create(surface, config):
+        coordinator = NS(create_mission=AsyncMock(return_value=run))
+        with turn_surface(surface), patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
+            asyncio.run(missions.create_mission(MagicMock(), uuid4(), {"goal": "g", "config": config}))
+        return coordinator.create_mission.call_args.kwargs["config"]
+
+    assert create(WIDGET, {"async_planning": True})["origin_surface"] == WIDGET
+    assert "origin_surface" not in create(None, {"origin_surface": WIDGET})
+
+
+@pytest.mark.parametrize("origin,state", [("widget", "awaiting_approval"), (None, "running")])
+def test_a_widget_born_mission_planned_later_is_not_autonomous(db_session, seed_workspace, monkeypatch, origin, state):
+    """full_auto policy and the full-autonomy dial: a dashboard mission planned
+    on the tick auto-runs; a widget-born one waits for the owner."""
+    import services.coordinator_service as coordinator
+    from core.services.auto_autonomy import FULL, set_autonomy_level
+    from modules.coordination.agent_matcher import AgentMatcher
+    from modules.coordination.planner import MissionPlanner
+
+    ws = UUID(seed_workspace())
+    set_autonomy_level(db_session, ws, FULL)
+    monkeypatch.setattr("core.services.approval_policy.load_approval_policy",
+                        lambda db, w: {"policy": "full_auto", "approval_dollar_ceiling": None,
+                                       "auto_proceed_after_seconds": None})
+    monkeypatch.setattr(MissionPlanner, "decompose", AsyncMock(return_value=NS(tasks=[], token_estimate=1000)))
+    monkeypatch.setattr(AgentMatcher, "compute_signals_for_tasks", AsyncMock(return_value={}))
+    monkeypatch.setattr("services.daily_spend_guard.refuse_new_work", lambda *a, **k: None)
+    for name in ("create_mission_board_task", "emit_event"):
+        monkeypatch.setattr(coordinator, name, lambda *a, **k: None)
+    monkeypatch.setattr(coordinator, "_dispatch_mission_event", AsyncMock())
+    states = []
+    monkeypatch.setattr(coordinator, "transition_run", lambda **kw: states.append(kw["new_state"].value))
+    service = coordinator.CoordinatorService()
+    service._persist_decomposition = lambda *a, **k: {}
+    service._annotate_match_previews = lambda *a, **k: None
+    service._queue_initial_tasks = lambda *a, **k: None
+    service._create_mission_field = AsyncMock()
+    config = {"async_planning": True, **({"origin_surface": origin} if origin else {})}
+    asyncio.run(service._run_planning(db_session, NS(id=uuid4(), workspace_id=ws, goal="g", config=config, plan=None)))
+    assert states == [state]
 
 # ── (c): a key reaches only the conversations it started ────────────────────
 

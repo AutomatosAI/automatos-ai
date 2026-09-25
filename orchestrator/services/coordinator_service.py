@@ -2663,10 +2663,18 @@ class CoordinatorService:
                 ceiling=None, estimated_cost=estimated_cost, countdown_seconds=None,
             )
         else:
-            decision = evaluate_approval(
-                db, workspace_id, estimated_cost,
-                override_auto_approve=bool(mission_config.get("auto_approve", False)),
-            )
+            # F155: a widget-born mission is decided as its widget turn would be
+            # (never autonomous), even when planning runs later on the tick.
+            from contextlib import nullcontext
+
+            from core.security.surface import WIDGET, turn_surface
+
+            widget_born = mission_config.get("origin_surface") == WIDGET
+            with turn_surface(WIDGET) if widget_born else nullcontext():
+                decision = evaluate_approval(
+                    db, workspace_id, estimated_cost,
+                    override_auto_approve=bool(mission_config.get("auto_approve", False)),
+                )
 
         # F034: a mission is the single largest way to start spending. The
         # day's ceiling refuses a NEW auto-approved run; one already running is
