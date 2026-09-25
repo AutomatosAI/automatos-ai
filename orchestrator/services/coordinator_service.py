@@ -803,6 +803,45 @@ def pick_final_output_task(tasks):
     return final
 
 
+async def _park_if_the_step_asked(
+    db: Session,
+    run: OrchestrationRun,
+    task: OrchestrationTask,
+    agent_id: Optional[int],
+    result: Dict[str, Any],
+) -> None:
+    """F163 (night 5, step ba7cacb5): a step whose answer only asks the owner
+    ("I need this specific information… Could you please provide…?") passed
+    verification, and nobody was asked. F140's test for such an answer now
+    routes the question through PRD-229's ladder, the channel a step's own
+    ask_orchestrator uses: the question lands in the owner's Questions, the
+    task waits parked (held QUEUED by record_task_completion), and the answer
+    re-runs it with the question and the answer in its prompt. A run a website
+    visitor started never reaches the owner's Questions (F155). Nothing here
+    stops the result being recorded."""
+    output = result.get("result")
+    if result.get("status") != "success" or not isinstance(output, str):
+        return
+    from core.security.surface import widget_born
+    from services.clarification_ladder import escalate_clarification, pending_ask_id
+    from services.orchestrator_answers import ClarificationSubject
+    from services.playbook_owner_ask import owner_question
+
+    try:
+        if pending_ask_id(task) is not None or widget_born(run.config):
+            return
+        ask = owner_question(output, result, f"{task.title or ''}\n{task.description or ''}")
+        if ask is None:
+            return
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        subject = ClarificationSubject(run_id=run.id, workspace_id=run.workspace_id, task_id=task.id,
+                                       task=task, agent_id=int(agent_id) if agent_id else None)
+        await escalate_clarification(db, subject, ask["question"], category="step_asked_the_owner",
+                                     partial_output=output, agent_name=getattr(agent, "name", None))
+    except Exception:  # noqa: BLE001 -- no question was placed: the result is recorded as it is
+        logger.warning("[F163] could not ask the owner for task %s", getattr(task, "id", None), exc_info=True)
+
+
 class CoordinatorService:
     """
     Stateless coordinator that orchestrates sequential missions.
@@ -2540,6 +2579,7 @@ class CoordinatorService:
         result: Dict[str, Any],
     ) -> None:
         """Record task completion/failure — runs serially on shared session."""
+        await _park_if_the_step_asked(db, run, task, agent_id, result)
         MissionDispatcher.record_task_completion(db, task, result)
 
         # PRD-131d Phase 2: capture permanent agent-error failures into memory.
