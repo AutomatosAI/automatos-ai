@@ -163,6 +163,13 @@ async def _build_planning_context(
 # validator no longer rejects a 1-task plan.
 MIN_TASKS = 1
 MAX_TASKS = 20
+# F142: the planner prompts state the range the validator enforces. They said
+# "between 3 and 20", so a two-step goal was padded to three tasks and more.
+_TASK_RANGE_RULE = (
+    f"- The plan MUST contain between {MIN_TASKS} and {MAX_TASKS} tasks inclusive. Use as few "
+    "as the goal needs: one task is a whole plan for a simple goal, and a task is never added "
+    "only to reach a count.\n"
+)
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
 
@@ -750,7 +757,7 @@ that merges and integrates the outputs of the parallel tasks.
 - Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
 researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
 platform routes each capability to the best-fit agent.
-- The plan MUST contain between 3 and 20 tasks inclusive.
+""" + _TASK_RANGE_RULE + """\
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
@@ -941,7 +948,7 @@ that merges the parallel outputs.
 - Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
 researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
 platform routes each capability to the best-fit agent.
-- The plan MUST contain between 3 and 20 tasks inclusive.
+""" + _TASK_RANGE_RULE + """\
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
