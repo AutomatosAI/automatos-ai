@@ -1,0 +1,52 @@
+# Ruff: the lint rules CI holds CHANGED lines to (AGENTS.md → Hard rules, Errors and
+# inputs, Security, Code shape). CI runs it through diff-quality (the `code-standards`
+# job in .github/workflows/test.yml), so only the lines a change touches are checked:
+# existing code is held to these rules the next time someone edits it, not rewritten
+# wholesale. Bare `except:` stays with scripts/ci/check-no-bare-except.sh (repo-wide,
+# run by orchestrator/tests/test_exception_telemetry.py).
+target-version = "py311"
+extend-exclude = ["frontend", "docs", "**/node_modules", "**/.venv"]
+
+[lint]
+select = [
+  "F",       # pyflakes: unused imports and variables, undefined names
+  "E9",      # syntax and IO errors
+  "B",       # bugbear, including B006 (mutable default arguments)
+  "BLE001",  # a blind `except Exception` must log with logger.exception and re-raise, or fail clearly
+  "C901",    # cyclomatic complexity (max-complexity below)
+  "S102",    # exec
+  "S301",    # pickle of untrusted data
+  "S307",    # eval
+  "S324",    # insecure hash for security use (pass usedforsecurity=False otherwise)
+  "S501",    # requests with verify=False
+  "S506",    # unsafe yaml.load
+  "S602", "S604", "S605",  # shell=True / shell injection
+  "S608",    # SQL built with string formatting
+  "T20",     # print in application code: use logging
+  "TID251",  # banned APIs: the environment is read only in orchestrator/config.py
+]
+ignore = [
+  "B008",    # FastAPI's Depends()/Query() in argument defaults is the framework's idiom
+  "B905",    # zip() without strict= is fine where lengths are equal by construction
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.flake8-tidy-imports.banned-api]
+"os.getenv".msg = "Read the environment only in orchestrator/config.py: add a config attribute and use config.<NAME>."
+"os.environ".msg = "Read the environment only in orchestrator/config.py: add a config attribute and use config.<NAME>."
+
+[lint.per-file-ignores]
+"orchestrator/config.py" = ["TID251"]
+# Tests assert, print, set the environment and build SQL fixtures on purpose.
+"**/tests/**" = ["S", "T20", "TID251", "BLE001", "B011", "B017"]
+"**/conftest.py" = ["S", "T20", "TID251"]
+# Command-line tools print and read their own environment.
+"scripts/**" = ["T20", "TID251"]
+"orchestrator/scripts/**" = ["T20", "TID251"]
+"**/__main__.py" = ["T20"]
+# Separate containers each have their own config module.
+"services/**" = ["TID251"]
+# Migrations build DDL strings from constants.
+"orchestrator/alembic/versions/**" = ["S608", "T20"]
