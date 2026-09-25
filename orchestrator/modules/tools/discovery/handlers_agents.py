@@ -203,6 +203,25 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if not name:
         return {"success": False, "error": "Missing required parameter: name"}
 
+    # F134 (night 4, B55): asked to use an existing agent, Auto created a namesake,
+    # whose dead model then answered nothing (B56). One active agent per name.
+    namesake = (
+        db.query(Agent.id, Agent.name)
+        .filter(
+            Agent.workspace_id == workspace_id,
+            Agent.status == "active",
+            func.lower(func.trim(Agent.name)) == str(name).strip().lower(),
+        )
+        .first()
+    )
+    if namesake:
+        return {
+            "success": False,
+            "existing_agent_id": namesake.id,
+            "error": (f"An active agent is already called '{namesake.name}' (id {namesake.id}). "
+                      "Use that agent, or give the new one a different name."),
+        }
+
     agent_type = params.get("agent_type", "chatbot")
     description = params.get("description", "")
     model_id = params.get("model_id") or params.get("model")  # back-compat

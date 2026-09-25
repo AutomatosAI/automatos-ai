@@ -635,8 +635,10 @@ async def update_workflow_recipe(
 
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
+        from services.playbook_engine import next_run_note
+
         return {
-            "message": "Recipe updated successfully",
+            "message": "Recipe updated successfully." + next_run_note(db, recipe.id),
             "recipe": recipe.to_dict()
         }
 

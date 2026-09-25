@@ -206,7 +206,10 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         name="platform_update_playbook_step",
         description=(
             "Modify an existing playbook step by its 0-based index. Can change "
-            "prompt, agent, order, or error handling."
+            "prompt, agent, order, or error handling. To change part of a step's "
+            "prompt, pass find and replace: that one passage changes and the rest "
+            "stays as written. prompt_template replaces the WHOLE prompt, and the "
+            "reply lists every line it dropped."
         ),
         category="playbooks",
         parameters={
@@ -222,7 +225,15 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "prompt_template": {
                     "type": "string",
-                    "description": "New prompt template for this step.",
+                    "description": "New prompt template for this step: replaces the whole prompt.",
+                },
+                "find": {
+                    "type": "string",
+                    "description": "Exact text in the step's prompt to change; it must appear exactly once.",
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "What `find` becomes (an empty string removes it).",
                 },
                 "agent_id": {
                     "type": "integer",
