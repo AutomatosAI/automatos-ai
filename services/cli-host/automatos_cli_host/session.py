@@ -118,7 +118,7 @@ SESSION_RULES = (
     "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
     "reply with a concise summary of what changed, what you verified, and anything left open.\n"
     "Tools in this session: file tools work only inside the working folder and the ticket "
-    "folder; Bash runs an allowlist of read, build and test verbs, and anything else is held "
+    "folder; Bash runs an allowlist of read, build and test verbs, and anything else may be held "
     "for the operator. The Automatos tools you have are listed earlier in this prompt, under "
     "\"Tools in this session\" — that list is the truth, and it is the only place to read it. "
     "A platform tool your skills name that is NOT on that list does not exist here: do not call "

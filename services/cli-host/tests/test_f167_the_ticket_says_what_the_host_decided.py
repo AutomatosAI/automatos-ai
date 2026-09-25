@@ -128,3 +128,12 @@ def test_a_reason_is_bounded(tmp_path):
     _call(s, "google-chrome " + "--flag " * 200)
     event = _events(s)[-1]
     assert len(event["reason"]) <= 300
+
+
+def test_the_session_rules_never_say_every_other_command_is_held():
+    """Under ``--unlisted-bash allow`` an unlisted command runs with nobody asked;
+    "anything else is held" told #999's session a hold had happened."""
+    from automatos_cli_host.session import SESSION_RULES
+
+    rules = " ".join(SESSION_RULES.split())
+    assert "anything else may be held for the operator" in rules and "anything else is held" not in rules
