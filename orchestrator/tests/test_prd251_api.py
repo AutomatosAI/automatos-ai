@@ -216,6 +216,8 @@ def test_the_router_serves_every_wave_0_and_wave_1_route():
             ("POST", "/api/socials/posts/{post_id}/render"),
             ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
             ("GET", "/api/socials/usage"),
+            # Wave 1 (S1.4): the source picker's search.
+            ("GET", "/api/socials/sources"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

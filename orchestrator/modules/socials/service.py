@@ -23,7 +23,10 @@
   ``review_log`` never overwrites entries another writer committed.
 * **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry
   in ``sources``. ``approve`` refuses unsourced claims unless the approver
-  overrides, and the override is stored and named in ``review_log``.
+  overrides, and the override is stored and named in ``review_log``. Wave 1
+  (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``):
+  a claim whose source no longer resolves, a deleted Deliverable say, counts as
+  unsourced, and the approval record names why.
 * **The publish guard.** ``assert_publishable`` passes only an approved or
   scheduled post whose approval matches its content as it is NOW.
 * **Rendered media (D6).** A finished render writes ``media`` as
@@ -150,12 +153,22 @@ class IllegalTransition(SocialsError):
 
 
 class UnsourcedClaims(SocialsError):
-    def __init__(self, names: Iterable[str]):
+    """Claims with no source, or whose source did not resolve (``unresolved``:
+    claim → why, S1.4)."""
+
+    def __init__(self, names: Iterable[str], unresolved: Optional[Mapping[str, str]] = None):
         self.names = sorted(names)
-        super().__init__(
-            "these claims have no source: " + ", ".join(self.names)
-            + " (approve with override_unsourced to publish them anyway)"
-        )
+        self.unresolved = {name: unresolved[name] for name in self.names if unresolved and name in unresolved}
+        missing = [name for name in self.names if name not in self.unresolved]
+        reasons = []
+        if missing:
+            reasons.append("these claims have no source: " + ", ".join(missing))
+        if self.unresolved:
+            reasons.append(
+                "these claims' sources could not be found: "
+                + "; ".join(f"{name} ({why})" for name, why in self.unresolved.items())
+            )
+        super().__init__("; ".join(reasons) + " (approve with override_unsourced to publish them anyway)")
 
 
 class NotPublishable(SocialsError):
@@ -286,8 +299,9 @@ def _validate_variables(value: Any) -> Dict[str, Any]:
     return dict(variables)
 
 
-def _validate_sources(value: Any) -> Dict[str, Any]:
-    """``{claim name: {"kind", "ref", "as_of"}}`` (D7)."""
+def validate_sources(value: Any) -> Dict[str, Any]:
+    """``{claim name: {"kind", "ref", "as_of"}}`` (D7): the shape only.
+    ``modules/socials/sources.py`` checks each source exists in the workspace."""
     sources = _require_dict("sources", value)
     for name, source in sources.items():
         if not isinstance(source, dict):
@@ -322,7 +336,7 @@ _VALIDATORS = {
     "format": _validate_format,
     "template_id": _validate_template_id,
     "variables": _validate_variables,
-    "sources": _validate_sources,
+    "sources": validate_sources,
     "media": _validate_media,
 }
 
@@ -364,14 +378,17 @@ def _move(post: SocialPost, action: str) -> None:
 
 
 # ── D7 ──────────────────────────────────────────────────────────────────────
-def unsourced_claims(post: Any) -> List[str]:
-    """Names of the variables marked ``claim: true`` that have no entry in ``sources``."""
+def unsourced_claims(post: Any, unresolved: Optional[Iterable[str]] = None) -> List[str]:
+    """Names of the variables marked ``claim: true`` that have no entry in
+    ``sources``, or whose source is among ``unresolved`` (it does not resolve in
+    the workspace any more, S1.4)."""
     variables = getattr(post, "variables", None) or {}
     sources = getattr(post, "sources", None) or {}
+    broken = set(unresolved or ())
     return sorted(
         name
         for name, spec in variables.items()
-        if isinstance(spec, dict) and spec.get("claim") is True and name not in sources
+        if isinstance(spec, dict) and spec.get("claim") is True and (name not in sources or name in broken)
     )
 
 
@@ -454,6 +471,7 @@ def approve(
     content_hash: str,
     override_unsourced: bool = False,
     comment: Optional[str] = None,
+    unresolved_sources: Optional[Mapping[str, str]] = None,
 ) -> SocialPost:
     """needs_approval → approved, bound to the content the approver saw (D6).
 
@@ -461,16 +479,18 @@ def approve(
     post's content is not that version any more, :class:`StaleContent` (with the
     current hash) and the post is unchanged. Refuses unsourced claims (D7)
     unless ``override_unsourced``; an override is stored on the post and names
-    the claims in ``review_log``.
+    the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the
+    sources the caller found missing from the workspace (S1.4): their claims
+    count as unsourced, and an override records why.
     """
     target = _target(post, ACTION_APPROVE)
     comment = _validate_comment(comment, required=False, what="comment")
     current = compute_content_hash(post)
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
-    unsourced = unsourced_claims(post)
+    unsourced = unsourced_claims(post, unresolved_sources)
     if unsourced and not override_unsourced:
-        raise UnsourcedClaims(unsourced)
+        raise UnsourcedClaims(unsourced, unresolved_sources)
 
     post.approved_hash = current
     post.approved_by = actor
@@ -479,7 +499,11 @@ def approve(
     post.status = target
     if unsourced:
         note = "Approved with unsourced claims: " + ", ".join(unsourced)
-        _log(post, actor, ACTION_APPROVE, comment or note, overridden_claims=unsourced)
+        extra: Dict[str, Any] = {"overridden_claims": unsourced}
+        broken = {name: why for name, why in (unresolved_sources or {}).items() if name in unsourced}
+        if broken:
+            extra["unresolved_sources"] = dict(sorted(broken.items()))
+        _log(post, actor, ACTION_APPROVE, comment or note, **extra)
     else:
         _log(post, actor, ACTION_APPROVE, comment)
     return post

@@ -12,9 +12,15 @@ post is a 404. Review actions (approve, request changes, reject) need
 
 The lifecycle lives in ``modules/socials/service.py``; this module maps its
 errors: IllegalTransition → 409, StaleContent → 409 (giving the current
-``content_hash``), UnsourcedClaims → 422 (naming the claims), NotPublishable →
-409, PublishingUnavailable → 501, InvalidPost → 422, NotRenderable → 422,
-RenderQuotaExceeded → 429, RendererUnavailable → 503.
+``content_hash``), UnsourcedClaims → 422 (naming the claims), SourcesNotFound →
+422 (naming each claim and why), NotPublishable → 409, PublishingUnavailable →
+501, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
+RendererUnavailable → 503.
+
+Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
+unless it resolves in the caller's workspace (``modules/socials/sources.py``);
+an approval resolves every source again, and a claim whose source is gone counts
+as unsourced. ``GET /sources`` searches candidates per kind for the composer.
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
 the month's render minutes (refused before anything reaches media-render),
@@ -62,6 +68,7 @@ from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_store, render, service
+from modules.socials import sources as post_sources
 from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.settings import require_socials_enabled
 
@@ -76,6 +83,7 @@ router = APIRouter(
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
 CAN_REVIEW = Depends(require_workspace_permission("socials:approve"))
+CAN_READ_SOURCES = Depends(require_workspace_permission("documents:read"))
 
 POST_NOT_FOUND = "Post not found"
 MEDIA_NOT_FOUND = "Media not found"
@@ -156,7 +164,12 @@ def _actor(ctx: RequestContext) -> str:
 
 def _raise_for(exc: Exception) -> NoReturn:
     if isinstance(exc, service.UnsourcedClaims):
-        raise HTTPException(status_code=422, detail={"message": str(exc), "claims": exc.names})
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc), "claims": exc.names, "unresolved": exc.unresolved},
+        )
+    if isinstance(exc, post_sources.SourcesNotFound):
+        raise HTTPException(status_code=422, detail={"message": str(exc), "unresolved": exc.unresolved})
     if isinstance(exc, service.StaleContent):
         raise HTTPException(status_code=409, detail={"message": str(exc), "content_hash": exc.current_hash})
     if isinstance(exc, PublishingUnavailable):
@@ -290,12 +303,13 @@ async def create_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Create a draft."""
+    """Create a draft. Every source must resolve in the workspace (D7)."""
     _check_template(db, ctx, body.template_id)
+    fields = body.model_dump(by_alias=True)
     try:
-        post = service.create_draft(
-            db, workspace_id=ctx.workspace_id, created_by=_actor(ctx), **body.model_dump(by_alias=True)
-        )
+        if fields["sources"]:
+            post_sources.require_resolved(db, ctx.workspace_id, fields["sources"])
+        post = service.create_draft(db, workspace_id=ctx.workspace_id, created_by=_actor(ctx), **fields)
     except service.SocialsError as exc:
         _raise_for(exc)
     return _save(db, post)
@@ -317,7 +331,9 @@ async def update_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Edit a post. A content change voids an approval (D6)."""
+    """Edit a post. A content change voids an approval (D6). A source the edit
+    adds or changes must resolve in the workspace (D7); one it keeps as it was
+    is checked again at approval."""
     post = _load(db, ctx, post_id)
     status, content_hash = post.status, post.content_hash
     changes = body.model_dump(exclude_unset=True, by_alias=True)
@@ -325,6 +341,8 @@ async def update_social_post(
         raise HTTPException(status_code=422, detail="title cannot be empty")
     _check_template(db, ctx, changes.get("template_id"))
     try:
+        if changes.get("sources"):
+            post_sources.require_resolved(db, ctx.workspace_id, changes["sources"], unchanged_from=post.sources)
         service.update_post(post, _actor(ctx), changes)
     except service.SocialsError as exc:
         _raise_for(exc)
@@ -361,8 +379,10 @@ async def approve_social_post(
     """Approve the version the reviewer saw (D6). ``content_hash`` differs from
     the post's → 409 with the current hash. An edit another worker commits
     after the load is caught by the compare-and-set → the same 409, nothing
-    written."""
+    written. Every source is resolved again first (D7): a claim whose source is
+    gone from the workspace counts as unsourced."""
     post = _load(db, ctx, post_id)
+    unresolved = post_sources.unresolved(db, ctx.workspace_id, post.sources)
     try:
         service.approve(
             post,
@@ -370,6 +390,7 @@ async def approve_social_post(
             content_hash=body.content_hash,
             override_unsourced=body.override_unsourced,
             comment=body.comment,
+            unresolved_sources=unresolved,
         )
     except service.SocialsError as exc:
         _raise_for(exc)
@@ -543,3 +564,30 @@ async def get_socials_usage(
     """This month's render minutes used and the plan's quota (``null`` = no quota)."""
     reading = render_quota.render_quota(db, _workspace(db, ctx))
     return {"render_minutes": reading.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Sources (S1.4)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sources", dependencies=[CAN_READ_SOURCES])
+async def search_social_sources(
+    kind: Optional[str] = Query(None, description="deliverable, report, document, url or metric; every kind when omitted"),
+    q: Optional[str] = Query(None, max_length=post_sources.SEARCH_QUERY_MAX_CHARS),
+    limit: int = Query(post_sources.SEARCH_DEFAULT_LIMIT, ge=1, le=post_sources.SEARCH_MAX_LIMIT),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """What a claim can be bound to (D7), from the caller's workspace only.
+
+    Deliverables, reports and documents whose title or summary contains ``q``;
+    metrics whose name does, each with its latest figure and the report it was
+    read from; for ``url``, ``q`` itself when it is an http(s) address. Newest
+    first, at most ``limit`` per kind. A candidate's ``kind``, ``ref`` and
+    ``as_of`` are the source to store.
+    """
+    if kind is not None and kind not in service.SOURCE_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {list(service.SOURCE_KINDS)}")
+    candidates = post_sources.search(db, ctx.workspace_id, kind=kind, q=q, limit=limit)
+    return {"candidates": candidates, "total": len(candidates)}
