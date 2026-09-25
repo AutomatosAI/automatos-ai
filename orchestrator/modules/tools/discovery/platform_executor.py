@@ -720,8 +720,8 @@ class PlatformActionExecutor:
     def _workspace_has_admin_owner(self) -> bool:
         """Check if the workspace owner has an admin/owner role.
 
-        Used when no caller_context is available (heartbeat, agent factory).
-        Agents inherit admin privileges from their workspace owner.
+        Read only under the policy plane's opt-in ``agents_inherit_admin``
+        policy (see ``_agent_inherits_admin``): there is an admin to inherit from.
         Fail-closed: returns False on any error.
         """
         try:
@@ -761,48 +761,45 @@ class PlatformActionExecutor:
         when the workspace's explicit, default-OFF ``agents_inherit_admin``
         policy is set (and there really is an admin/owner to inherit from).
 
-        Plane OFF ⇒ historical behaviour (always fall back to the owner check)
-        so the rollout is byte-for-byte reversible.
+        F145: that policy is the ONLY inheritance path. With the plane off, or
+        when the policy cannot be read, an agent acting for nobody is not an
+        admin; the old plane-off fallback made it one in every workspace that
+        has an owner or admin member.
         """
         try:
             from modules.policy import policy_plane_enabled
 
-            if policy_plane_enabled():
-                from modules.policy.policy_document import load_policy_document
+            if not policy_plane_enabled():
+                return False
+            from modules.policy.policy_document import load_policy_document
 
-                doc = load_policy_document(self.db, self.workspace_id)
-                if not doc.agents_inherit_admin:
-                    return False  # explicit default-off policy → agent is NOT admin
-                return self._workspace_has_admin_owner()
+            doc = load_policy_document(self.db, self.workspace_id)
+            return bool(doc.agents_inherit_admin) and self._workspace_has_admin_owner()
         except Exception:
             logger.warning(
-                "[PlatformExecutor] agents_inherit_admin policy read failed for %s "
-                "— falling back to legacy owner check", self.workspace_id,
-                exc_info=True,
+                "[PlatformExecutor] agents_inherit_admin policy read failed for %s — not admin",
+                self.workspace_id, exc_info=True,
             )
-        # Plane OFF (or read failure): historical always-fallback behaviour.
-        return self._workspace_has_admin_owner()
+            return False
 
     def _caller_is_admin(self, caller_context: Optional[Dict[str, Any]], full_autonomy: bool) -> bool:
         """US-003's admin predicate. The admin gate and platform_list_tools'
-        listing (F122) both read this one."""
+        listing (F122) both read this one.
+
+        F145: a call is an admin's when it is made for a workspace owner/admin
+        (the driving user's active membership, read fresh) or for the server-side
+        super_admin role (core.security.driving_user). It used to read a
+        ``workspace_role`` the chat's context never carries, so an owner read as
+        non-admin. Full autonomy is the owner's explicit grant. With no caller
+        context, only the plane's opt-in inheritance applies.
+        """
         if full_autonomy:
-            # Workspace dialled to full autonomy — Auto runs as admin.
             return True
-        if caller_context is not None:
-            # Explicit caller identity — check roles directly.
-            # A dict with no role keys means "known non-admin user".
-            return (
-                caller_context.get("workspace_role") in ("owner", "admin")
-                or caller_context.get("system_role") == "admin"
-            )
-        # No caller_context (heartbeat, agent factory, etc.).
-        # PRD-174 F014: the "agents inherit admin from the workspace
-        # owner" fallback is no longer implicit — under the policy
-        # plane it applies ONLY when the explicit, default-OFF
-        # ``agents_inherit_admin`` workspace policy is set. Plane OFF
-        # keeps the historical always-fallback behaviour.
-        return self._agent_inherits_admin()
+        if caller_context is None:
+            return self._agent_inherits_admin()
+        from core.security.driving_user import driver_is_workspace_admin
+
+        return driver_is_workspace_admin(self.db, self.workspace_id, caller_context)
 
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
