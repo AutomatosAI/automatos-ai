@@ -169,6 +169,7 @@ def test_only_a_widget_turn_is_marked_and_only_while_it_runs(widget_mode):
 
     service = StreamingChatService.__new__(StreamingChatService)
     service.widget_mode = widget_mode
+    service.widget_scopes = ("chat",)
 
     async def _turn(*args, **kwargs):
         yield widget_turn()

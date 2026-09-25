@@ -182,7 +182,10 @@ def can_actor_modify(
                      source=source, escalate=False)
 
     # --- Narrowed system bypass: flag AND allowlisted name ---------------
-    if bool(actor.is_system_agent) and (actor.name or "") in SYSTEM_BYPASS_ALLOWLIST:
+    # F155: never on a public widget turn — there Auto answers a visitor.
+    from core.security.surface import widget_turn
+
+    if bool(actor.is_system_agent) and (actor.name or "") in SYSTEM_BYPASS_ALLOWLIST and not widget_turn():
         return _allow(
             "system_actor_bypass", target_type, target_id, change_type,
             actor_id=actor_agent_id, actor_name=actor.name, source=source,

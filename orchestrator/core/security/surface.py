@@ -7,30 +7,44 @@ nobody (core.security.driving_user), never autonomous (the full-autonomy dial,
 core.services.auto_autonomy, is the owner's grant to Auto, not to the site's
 visitors), never an admin or super admin and never the human whose
 instruction approves a card (platform_executor), and is offered no admin tier
-(tool_router). The mark is a context variable, not state on the process-wide
-tool router, so concurrent turns never see each other's; tasks a turn starts
-inherit it.
+(tool_router). A widget turn also carries its key's scopes, which decide what
+it may call at all (core.security.widget_scopes). The mark is a context
+variable, not state on the process-wide tool router, so concurrent turns never
+see each other's; tasks a turn starts inherit it.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, Optional
+from typing import FrozenSet, Iterable, Iterator, NamedTuple, Optional
 
 WIDGET = "widget"
 
-_surface_var: ContextVar[Optional[str]] = ContextVar("turn_surface", default=None)
+
+class _Turn(NamedTuple):
+    surface: Optional[str]
+    scopes: FrozenSet[str]
+
+
+_surface_var: ContextVar[_Turn] = ContextVar("turn_surface", default=_Turn(None, frozenset()))
 
 
 def widget_turn() -> bool:
     """The current turn is a public widget visitor's."""
-    return _surface_var.get() == WIDGET
+    return _surface_var.get().surface == WIDGET
+
+
+def widget_scopes() -> FrozenSet[str]:
+    """The widget key's scopes on a widget turn; empty on any other turn."""
+    turn = _surface_var.get()
+    return turn.scopes if turn.surface == WIDGET else frozenset()
 
 
 @contextmanager
-def turn_surface(surface: Optional[str]) -> Iterator[None]:
-    """Mark every tool call made inside the block with ``surface``."""
-    token = _surface_var.set(surface)
+def turn_surface(surface: Optional[str], scopes: Iterable[str] = ()) -> Iterator[None]:
+    """Mark every tool call made inside the block with ``surface`` and, on a
+    widget turn, its key's ``scopes``."""
+    token = _surface_var.set(_Turn(surface, frozenset(scopes or ())))
     try:
         yield
     finally:

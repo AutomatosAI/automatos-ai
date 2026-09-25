@@ -717,7 +717,8 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
 
-    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False,
+                 widget_scopes: Optional[List[str]] = None):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -725,6 +726,8 @@ class StreamingChatService:
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
+        # F155: the widget key's scopes decide what its turns may call.
+        self.widget_scopes = tuple(widget_scopes or ())
 
         # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
         # per request (one request == one turn), so these accumulate the turn's
@@ -2505,7 +2508,7 @@ class StreamingChatService:
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
-                turn_surface(WIDGET if self.widget_mode else None):
+                turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2802,8 +2805,9 @@ class StreamingChatService:
                     )
                     await asyncio.sleep(0)
 
-            # Inject Composio per-action tools
-            if _complexity != Complexity.ATOM:
+            # Inject Composio per-action tools (never on a widget turn: they act
+            # on the owner's connected apps, F155)
+            if _complexity != Complexity.ATOM and not self.widget_mode:
                 use_tools, _composio_result = self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
@@ -2821,6 +2825,13 @@ class StreamingChatService:
                 )
                 use_tools = None
                 _composio_result = None
+
+            # F155: a widget turn is offered only what its key's scopes grant
+            # (the tool executor refuses anything else).
+            if self.widget_mode and use_tools:
+                from core.security.widget_scopes import widget_tool_surface
+
+                use_tools = widget_tool_surface(use_tools, self.widget_scopes) or None
 
             # F025: this turn's ranked actions go in LAST, after every stable
             # block. The dispatcher enum is byte-identical between turns so the
