@@ -23,6 +23,7 @@ import json
 import logging
 import time
 import uuid as uuid_mod
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -35,6 +36,8 @@ from sqlalchemy.orm import sessionmaker
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.security.surface import origin_surface, widget_scopes, widget_turn
+from core.security.widget_scopes import widget_tool_surface
 from core.services.playbook_scratchpad import answer_for_next_step
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,9 @@ INTERNAL_ERROR_TEXT = (
     "The run stopped on an internal error, so nothing after it ran. "
     "The details are in the server log."
 )
+# F155: a Claude Code session's tools are not the widget key's, so a run a
+# widget turn started never files a session ticket.
+WIDGET_SESSION_REFUSAL = "A playbook started from the website chat does not run on a Claude Code session."
 
 
 def owner_error_text(exc: BaseException) -> str:
@@ -461,6 +467,9 @@ async def _execute_step(
 
     from services.cli_ticket_lane import RECIPE_SOURCE_TYPE, is_cli_agent, run_cli_ticket_and_wait
     if is_cli_agent(db, agent.id):
+        if widget_turn():
+            return {"status": "error", "error": WIDGET_SESSION_REFUSAL,
+                    "execution": {"tokens_used": 0, "tool_calls": [], "messages": []}}
         import uuid as _uuid
 
         return await run_cli_ticket_and_wait(
@@ -531,16 +540,19 @@ async def _execute_step(
 
     # 2. Composio tools — SDK semantic search for per-action function-calling tools.
     #    Falls back to hint-based composio_execute if SDK search returns empty.
-    tool_service = ComposioToolService(db)
+    #    F155: none on a widget turn — the owner's connected apps are not the
+    #    widget key's (the widget chat is never offered them either).
     composio_result = None
-    try:
-        composio_result = tool_service.get_tools_for_step(
-            agent_id=agent.id,
-            workspace_id=workspace_id,
-            task_prompt=prompt_for_hints or clean_prompt,
-        )
-    except Exception as exc:
-        logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
+    if not widget_turn():
+        tool_service = ComposioToolService(db)
+        try:
+            composio_result = tool_service.get_tools_for_step(
+                agent_id=agent.id,
+                workspace_id=workspace_id,
+                task_prompt=prompt_for_hints or clean_prompt,
+            )
+        except Exception as exc:
+            logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
 
     # If SDK search returned tools, inject a simpler scope message.
     # Otherwise fall back to hint-based composio_execute mega-tool.
@@ -550,7 +562,7 @@ async def _execute_step(
             f"[recipe_step] SDK search: strategy={composio_result.strategy} "
             f"actions={len(composio_result.action_set)} search_ms={composio_result.search_ms}"
         )
-    else:
+    elif not widget_turn():
         # Fallback: existing hint service with composio_execute mega-tool
         if composio_result:
             composio_result.strategy = "hint_fallback"
@@ -601,6 +613,10 @@ async def _execute_step(
     else:
         # Fallback: composio_execute + hints (existing behavior)
         tools = list(base_tools)
+    if widget_turn():
+        # F155: what the widget key's scopes allow (the executor refuses
+        # anything else on the resolved action).
+        tools = widget_tool_surface(tools, widget_scopes())
     if scratchpad:
         scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
         if step_order > 1:
@@ -1242,6 +1258,7 @@ async def _execute_recipe_inner(
         db = SessionLocal()
 
     scratchpad = None
+    origin = ExitStack()
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
 
@@ -1266,6 +1283,9 @@ async def _execute_recipe_inner(
         if not execution:
             logger.error(f"[recipe_direct] Execution record not found: {recipe_execution_id}")
             return
+        # F155: a run a widget turn started (its origin is on the row, server-set)
+        # runs under that turn's key scopes and team lock, retries and reruns too.
+        origin.enter_context(origin_surface(execution.execution_metadata))
 
         # Disabled / deleted workspace gate — covers scheduled runs that
         # bypass the request-context middleware. The HTTP entry point also
@@ -2072,6 +2092,7 @@ async def _execute_recipe_inner(
                 f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"
             )
     finally:
+        origin.close()
         # Cleanup scratchpad TTL
         if scratchpad:
             try:

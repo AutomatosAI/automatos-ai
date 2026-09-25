@@ -12,9 +12,10 @@ it may call at all (core.security.widget_scopes), and its key's team lock,
 which scopes every document it reads (core.team_access.retrieval_team). The mark is a context
 variable, not state on the process-wide tool router, so concurrent turns never
 see each other's; tasks a turn starts inherit it. Work a widget turn starts
-that runs later, outside the turn (a mission's tasks on the coordinator tick),
-carries the turn's origin on its config (stamp_origin) and runs under it
-again (origin_surface).
+that runs later, outside the turn (a mission's tasks on the coordinator tick,
+a playbook's steps), carries the turn's origin on its config (stamp_origin)
+and runs under it again (origin_surface); a retry or rerun of that work
+carries it on (origin_of).
 """
 from __future__ import annotations
 
@@ -85,6 +86,14 @@ def stamp_origin(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     if turn.surface == WIDGET:
         stamped.update({ORIGIN_SURFACE: WIDGET, ORIGIN_SCOPES: sorted(turn.scopes), ORIGIN_TEAM: turn.team})
     return stamped
+
+
+def origin_of(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """The origin ``config`` was stamped with, for work that continues it (a
+    retry, a rerun); empty unless a widget turn started it."""
+    if not widget_born(config):
+        return {}
+    return {key: config[key] for key in _ORIGIN_KEYS if key in config}
 
 
 def widget_born(config: Optional[Mapping[str, Any]]) -> bool:

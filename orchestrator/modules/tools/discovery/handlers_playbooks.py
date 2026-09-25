@@ -590,7 +590,10 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         )
         return {"status": "error", "error": concurrency.refusal}
 
-    # Create execution record
+    # Create execution record. F155: a run a widget turn starts records the
+    # turn's origin, and its steps run under it (api.recipe_executor).
+    from core.security.surface import stamp_origin
+
     execution_id = f"exec-{uuid.uuid4().hex[:12]}"
     execution = RecipeExecution(
         execution_id=execution_id,
@@ -599,6 +602,7 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         status="pending",
         input_data=input_data,
         triggered_by="platform_action",
+        execution_metadata=stamp_origin(None) or None,
     )
     db.add(execution)
     db.commit()  # Must commit before async task (it opens its own session)

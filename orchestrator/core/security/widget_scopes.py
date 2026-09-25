@@ -18,9 +18,11 @@ The tool executor refuses on the resolved action (platform_execute's inner
 action included), and the chat trims the tool list the model is offered to
 the same set.
 
-missions:execute and playbooks:execute unlock nothing on a widget turn: a
-mission's tasks and a playbook's steps run later, outside the turn, where
-none of these restrictions apply (F155 review, 25 Sep).
+missions:execute and playbooks:execute unlock nothing on a widget turn (F155
+review, 25 Sep). A mission's tasks and a playbook's steps run later, outside
+the turn; work a widget turn starts runs under its key's restrictions again
+(core.security.surface.origin_surface), and whether a key may start it at all
+is not decided yet.
 """
 from __future__ import annotations
 

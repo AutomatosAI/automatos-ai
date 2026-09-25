@@ -162,12 +162,16 @@ def create_rerun_execution(
 
     Copies ``input_data``, chains ``retry_of``, bumps ``attempt_count``.
     ``step_overrides`` live in ``execution_metadata`` for the executor's
-    run-start merge -- the recipe row is untouched.
+    run-start merge -- the recipe row is untouched. F155: a rerun of a run a
+    widget turn started is one too (its input is still the visitor's).
     """
+    from core.security.surface import origin_of
+
     metadata: Dict[str, Any] = {
         "execution_type": "recipe_direct",
         "total_steps": len(recipe.steps or []),
         "rerun_of": original.execution_id,
+        **origin_of(original.execution_metadata),
     }
     if step_overrides:
         metadata["step_overrides"] = step_overrides

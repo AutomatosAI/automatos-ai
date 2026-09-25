@@ -112,9 +112,11 @@ MONDAY_DISPATCH = [
 
 
 def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None,
-                 agent_status="active"):
+                 agent_status="active", execution_metadata=None, on_step=None, after_run=None):
     """Run a playbook (default: the two-step Monday dispatch) through the real
-    loop; return (execution, card). ``calls`` collects what each step was sent."""
+    loop; return (execution, card). ``calls`` collects what each step was sent;
+    ``on_step`` is called inside each step, ``after_run`` in the run's task once
+    the run returns."""
     clock = [1_000_000.0]
     results = iter(outcomes)
 
@@ -122,13 +124,15 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
         clock[0] += step_seconds
         if calls is not None:
             calls.append(kwargs)
+        if on_step is not None:
+            on_step(kwargs)
         return next(results)
 
     steps = steps if steps is not None else MONDAY_DISPATCH
     execution = SimpleNamespace(
         execution_id="exec-120", recipe_id=79, workspace_id=WS, status="pending", current_step=0,
         step_results=None, error_message=None, completed_at=None, started_at=None, output_data=None,
-        execution_metadata={},
+        execution_metadata=dict(execution_metadata or {}),
     )
     card = SimpleNamespace(id=760, status="in_progress", result=None, error_message=None,
                            review_feedback=None, completed_at=None)
@@ -159,5 +163,11 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
     monkeypatch.setattr(board_task_bridge, "create_recipe_board_task", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "update_recipe_board_task_progress", lambda *a, **k: None)
     monkeypatch.setattr(playbook_engine_heartbeat, "_emit_playbooks_primitive", lambda *a, **k: None)
-    asyncio.run(rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None))
+
+    async def _run():
+        await rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None)
+        if after_run is not None:
+            after_run()
+
+    asyncio.run(_run())
     return execution, card
