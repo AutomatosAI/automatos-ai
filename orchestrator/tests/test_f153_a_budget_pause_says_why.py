@@ -256,3 +256,17 @@ def test_a_failed_concurrent_build_is_dropped_before_it_is_rebuilt(monkeypatch):
 
     assert upgrade(invalid=True) == ["DROP INDEX CONCURRENTLY", "CREATE INDEX CONCURRENTLY"]
     assert upgrade(invalid=False) == ["CREATE INDEX CONCURRENTLY"]
+
+
+def test_the_pause_event_says_why(mission):
+    """The mission page's activity feed reads the events: the pause's carries
+    the same detail as the run and its card."""
+    from api.missions import _event_to_response
+    from core.models.orchestration import OrchestrationEvent
+
+    _book(mission, _ceiling() + 1.25, 60_000)
+    _dispatch(mission)
+    paused = mission.db.query(OrchestrationEvent).filter(OrchestrationEvent.run_id == mission.run.id,
+                                                         OrchestrationEvent.event_type == "run_paused").one()
+    assert _event_to_response(paused)["stop_detail"] == mission.run.stop_detail
+    assert mission.run.stop_detail.startswith("Paused: spent $")

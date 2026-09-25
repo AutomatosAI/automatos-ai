@@ -168,6 +168,9 @@ class EventResponse(BaseModel):
     old_state: Optional[str] = None
     new_state: Optional[str] = None
     task_id: Optional[str] = None
+    # F153: why the run stopped, on the transition that stopped it (a budget
+    # pause names the spend and the budget).
+    stop_detail: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -192,6 +195,8 @@ class MissionResponse(BaseModel):
     parallel_groups: List[str] = []
     has_synthesis_tasks: bool = False
     created_by: str
+    stop_reason: Optional[str] = None
+    stop_detail: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -409,6 +414,7 @@ def _event_to_response(event: OrchestrationEvent) -> dict:
         "old_state": event.old_state,
         "new_state": event.new_state,
         "task_id": str(event.task_id) if event.task_id else None,
+        "stop_detail": (event.payload or {}).get("stop_detail"),
         "created_at": event.created_at,
     }
 
