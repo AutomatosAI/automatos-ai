@@ -1820,7 +1820,6 @@ async def _execute_recipe_inner(
                         return
 
                     if result.get("status") == "success":
-                        step_result["status"] = "completed"
                         raw_output = result.get("result", "")
                         if isinstance(raw_output, (dict, list)):
                             step_result["output"] = json.dumps(raw_output)
@@ -1834,6 +1833,15 @@ async def _execute_recipe_inner(
                         step_result["tool_calls"] = _normalize_tool_calls(tool_calls_raw)
                         exec_messages = result.get("execution", {}).get("messages", [])
 
+                        # F131: a step can run to its end and still have failed.
+                        failed = step_failure(step_result["tool_calls"], result)
+                        if failed:
+                            last_error = failed
+                            logger.warning(f"[recipe_direct] Step {step_order} failed: {failed}")
+                            attempt += 1
+                            continue
+
+                        step_result["status"] = "completed"
                         success = True
 
                         # Write to scratchpad (auto-extract)
@@ -2199,6 +2207,25 @@ def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
     elif isinstance(data, list):
         return [_resolve_doc_step_variables(item, scratchpad) for item in data]
     return data
+
+
+def step_failure(tool_calls: List[Dict[str, Any]], result: Dict[str, Any]) -> Optional[str]:
+    """Why a step that ran to its end failed, from deterministic signals, or None.
+
+    F131 (night 4): the run's status came from the loop finishing, never from what
+    the steps did. B33, B25: a step's tool call failed in words while the turn
+    ended normally, so the step's 'stop' never fired and the run said complete.
+    B47: a session step never reached Automatos ("No Automatos tools this
+    session") and the run said "Playbook complete". Whether the step's answer
+    MEANS it failed is the PRD-204 watch's job (Gerard's wiring), not this.
+    """
+    if result.get("session_connected") is False:
+        return "the session never reached Automatos, so it ran without any of its tools"
+    if tool_calls and tool_calls[-1].get("success") is False:
+        last = tool_calls[-1]
+        said = " ".join(str(last.get("result") or "").split())[:200]
+        return f"its last tool call, {last.get('action') or 'a tool'}, failed" + (f": {said}" if said else "")
+    return None
 
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:

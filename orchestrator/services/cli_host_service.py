@@ -57,6 +57,11 @@ _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # ends, which is the whole point of scoping it to one ticket.
 SESSION_TOKEN_BYTES = 32
 SESSION_TOKEN_HASH_KEY = "session_token_sha256"
+# F131 (night 4, B47): the claim offered the session its Automatos tools, and the
+# session's MCP client reached them (stamped at its `initialize`). A ticket that
+# was offered them and never connected ran without any of its platform tools.
+SESSION_TOOLS_OFFERED_KEY = "session_tools_offered"
+SESSION_CONNECTED_KEY = "mcp_connected_at"
 SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # What of an ask we keep ON the ticket (the grant row is the record; this is the
 # fold-in for the next session's prompt, and it rides a JSONB column).
@@ -983,6 +988,7 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         # PRD-245 S1.1: the session's own credential for the Automatos tools.
         # Handed over ONCE, in this payload; only its hash stays on the ticket.
         session_token = mint_session_token(ref)
+        ref[SESSION_TOOLS_OFFERED_KEY] = True
         task.runtime_ref = ref
         prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
         # Mark the answers just folded in, so a LATER resume of the same ticket
