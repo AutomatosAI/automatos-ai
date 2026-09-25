@@ -37,8 +37,10 @@ const ENFORCED_RULES = new Set([...SHAPE_RULES, 'no-restricted-syntax'])
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.tsx?$/
 const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/
 
+// git's stderr is captured, not printed: a new file has no base version, and the
+// `fatal: path … not in <base>` that `git show` prints for it is expected, not an error.
 function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
 /** New-side line numbers per file, from `git diff -U0` output. */
