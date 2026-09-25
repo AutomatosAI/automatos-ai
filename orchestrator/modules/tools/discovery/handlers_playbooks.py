@@ -17,6 +17,30 @@ def next_run_note(db, playbook_id) -> str:
     return note(db, playbook_id)
 
 
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
+def _playbook_visitor_view(playbook: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a playbook (playbooks:read):
+    what it is for. Never its steps (prompts, agents, error handling, outputs),
+    tags or how often it ran."""
+    created_at = getattr(playbook, "created_at", None)
+    return {"id": playbook.id, "name": playbook.name, "description": (playbook.description or "")[:200],
+            "step_count": len(playbook.steps or []), "created_at": created_at.isoformat() if created_at else None}
+
+
+def _execution_visitor_view(execution: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a playbook run: where it stands.
+    Never its inputs, step outputs or errors."""
+    return {"execution_id": execution.execution_id, "playbook_id": execution.recipe_id, "status": execution.status,
+            "current_step": execution.current_step,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None}
+
+
 async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
@@ -29,6 +53,9 @@ async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]
         query = query.filter(WorkflowTemplate.status == status_filter)
 
     playbooks = query.order_by(WorkflowTemplate.id).all()
+    if _widget_turn():
+        return {"success": True, "playbooks": [_playbook_visitor_view(r) for r in playbooks],
+                "count": len(playbooks)}
 
     return {
         "success": True,
@@ -66,6 +93,8 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     playbook = query.first()
     if not playbook:
         return {"success": False, "error": "Playbook not found"}
+    if _widget_turn():
+        return {"success": True, "playbook": _playbook_visitor_view(playbook)}
 
     # Count executions
     exec_count = 0
@@ -702,6 +731,8 @@ async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[s
         )
         if not execution:
             return {"success": False, "error": f"Execution '{execution_id}' not found"}
+        if _widget_turn():
+            return {"success": True, "execution": _execution_visitor_view(execution)}
 
         # Summarize step_results (200 char preview per step)
         step_summaries = []
@@ -740,6 +771,9 @@ async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[s
             .limit(5)
             .all()
         )
+        if _widget_turn():
+            return {"success": True, "executions": [_execution_visitor_view(e) for e in executions],
+                    "count": len(executions)}
 
         return {
             "success": True,

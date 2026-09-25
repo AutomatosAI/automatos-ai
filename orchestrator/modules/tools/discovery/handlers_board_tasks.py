@@ -362,6 +362,24 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     return result
 
 
+def task_visitor_view(task: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a board task (tasks:read): what
+    it is and where it stands. Never its description, prompt, result, errors,
+    tags, who works it or how (a session's tools and files)."""
+    def _at(name: str) -> Optional[str]:
+        value = getattr(task, name, None)
+        return str(value) if value else None
+
+    return {"id": task.id, "title": (task.title or "")[:150], "status": task.status,
+            "created_at": _at("created_at"), "started_at": _at("started_at"), "completed_at": _at("completed_at")}
+
+
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
 async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List board tasks with optional filters."""
     from core.models.core import BoardTask
@@ -409,6 +427,9 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     except Exception:  # noqa: BLE001 — a count failure never fails the listing
         total_matching = None
     tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
+    if _widget_turn():
+        return {"success": True, "tasks": [task_visitor_view(t) for t in tasks], "total": len(tasks),
+                "total_matching": total_matching if total_matching is not None else len(tasks), "limit": limit}
 
     # Enrich with agent names
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
@@ -543,15 +564,17 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
 
     started = time.monotonic()
     waited = 0
+    visitor = _widget_turn()
     while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
-        await turn_progress.emit(turn_id, _progress_line(task_card(task, agent_name), waited))
+        await turn_progress.emit(turn_id, (f"#{task.id} is still running · {waited} s" if visitor
+                                           else _progress_line(task_card(task, agent_name), waited)))
         await asyncio.sleep(min(poll, limit - waited))
         waited = int(time.monotonic() - started)
         task = _load()
         if not task:
             return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
 
-    card = task_card(task, agent_name)
+    card = task_visitor_view(task) if visitor else task_card(task, agent_name)
     terminal = task.status in WAIT_TERMINAL_STATUSES
     return {
         "success": True,
@@ -584,6 +607,8 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
+    if _widget_turn():
+        return {"success": True, "task": task_visitor_view(task)}
 
     # Resolve agent name
     agent_name = None
