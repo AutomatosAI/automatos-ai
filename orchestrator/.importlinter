@@ -37,7 +37,6 @@ modules =
     modules.documents
     modules.intake
     modules.knowledge
-    modules.learning
     modules.memory
     modules.nl2sql
     modules.policy

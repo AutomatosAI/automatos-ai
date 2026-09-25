@@ -38,8 +38,6 @@ What it does NOT do (out of agent scope)
   is the [HUMAN GATE] decision in PRD §12.6 (front-door choice + FE
   repoint of ~10 ``api-client.ts`` call sites).
 - **Does NOT delete** the ``modules/workflows/`` twin — same human gate.
-- **Does NOT promote** ``api/api_playbooks.py`` to an execution router —
-  same human gate (the front-door decision).
 
 Design constraint: import-light
 -------------------------------

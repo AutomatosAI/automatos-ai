@@ -1,5 +1,5 @@
 {
-  "route_count": 828,
+  "route_count": 826,
   "routes": [
     {
       "method": "GET",
@@ -1868,14 +1868,6 @@
     {
       "method": "GET",
       "path": "/api/personas/{persona_id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/playbooks"
-    },
-    {
-      "method": "POST",
-      "path": "/api/playbooks/mine"
     },
     {
       "method": "GET",

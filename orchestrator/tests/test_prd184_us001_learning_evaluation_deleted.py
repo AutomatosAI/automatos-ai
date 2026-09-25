@@ -12,13 +12,11 @@ They are removed rather than kept (honest-empty over silent placebo — the whol
 point of the kill-list: the codebase must stop lying to the humans *and agents*
 that read it).
 
-HELD (must SURVIVE — this guard proves the boundary, not just the deletion):
-``modules/learning/playbooks/miner.py`` (``PlaybookMiner``) is the S10 retire,
-NOT this story. It is a LIVE dependency of ``api/api_playbooks.py`` (mounted at
-``main.py``). Its reachability chain — ``modules/learning/__init__.py`` →
-``modules/learning/playbooks/__init__.py`` → ``miner.py`` — therefore stays: the
-deletion gate forbids breaking a live caller. So ``learning/`` is trimmed to its
-real, in-use core, not razed.
+RETIRED since (F136, Gerard 2026-09-25): the S10-held ``PlaybookMiner`` and its
+only caller, ``api/api_playbooks.py``. The table both read, ``playbooks``, was
+dropped by prd135_drop_bucket_6 (their raw-SQL strings hid them from the
+dead-code scan), so GET /api/playbooks answered 500 for everyone (night 4, B1).
+The whole ``modules/learning/`` package is gone with them.
 
 Pure/static — file reads only, imports no app package.
 """
@@ -40,8 +38,8 @@ _SOURCE_DIRS = ("modules", "services", "core", "api", "consumers", "evals")
 # false-positive; only the specific ``modules.*`` dotted import forms do.
 _GONE_TOKENS = (
     "modules.evaluation",
-    "modules.learning.feedback",
-    "modules.learning.patterns",
+    "modules.learning",
+    "api.api_playbooks",
 )
 _GONE_TOKEN_PATTERNS = tuple(
     (token, re.compile(rf"\b{re.escape(token)}\b")) for token in _GONE_TOKENS
@@ -52,8 +50,8 @@ def test_learning_evaluation_theatre_dirs_deleted():
     """The three dead package dirs are gone — no ``_legacy`` shim (CLAUDE.md)."""
     for rel in (
         "modules/evaluation",
-        "modules/learning/feedback",
-        "modules/learning/patterns",
+        "modules/learning",
+        "api/api_playbooks.py",
     ):
         assert not (_ORCH / rel).exists(), (
             f"{rel}/ must stay deleted (PRD-184 US-001) — empty theatre, zero callers"
@@ -80,32 +78,16 @@ def test_no_learning_evaluation_imports():
     assert not offenders, f"dangling learning/evaluation references: {offenders}"
 
 
-def test_modules_barrel_drops_evaluation_keeps_learning():
-    """``modules/__init__.py`` no longer advertises the razed ``evaluation``
-    package, but STILL lists ``learning`` (the held PlaybookMiner chain lives on)."""
+def test_modules_barrel_drops_evaluation_and_learning():
+    """``modules/__init__.py`` advertises neither razed package (F136 retired learning)."""
     src = (_ORCH / "modules" / "__init__.py").read_text()
-    assert '"evaluation"' not in src, (
-        "modules/__init__.py __all__ must drop the deleted 'evaluation' package"
-    )
-    assert '"learning"' in src, (
-        "modules/__init__.py must KEEP 'learning' — PlaybookMiner (held S10) is "
-        "still re-exported from it and used by the live api_playbooks router"
-    )
+    assert '"evaluation"' not in src and '"learning"' not in src
 
 
-def test_held_playbook_miner_chain_survives():
-    """Boundary proof: the S10-held PlaybookMiner reachability is intact.
-
-    Deleting this chain would silently break the live ``api/api_playbooks.py``
-    router — exactly what the deletion gate forbids. This story trims the dead
-    theatre AROUND the miner, it does not touch the miner."""
-    assert (_ORCH / "modules" / "learning" / "playbooks" / "miner.py").exists()
-    learning_init = (_ORCH / "modules" / "learning" / "__init__.py").read_text()
-    assert "from .playbooks import PlaybookMiner" in learning_init
-    playbooks_init = (
-        _ORCH / "modules" / "learning" / "playbooks" / "__init__.py"
-    ).read_text()
-    assert "from .miner import PlaybookMiner" in playbooks_init
-    # The live held caller still resolves the symbol through the intact chain.
-    api_pb = (_ORCH / "api" / "api_playbooks.py").read_text()
-    assert "from modules.learning import PlaybookMiner" in api_pb
+def test_the_playbook_miner_and_its_endpoint_are_retired():
+    """F136: GET /api/playbooks read a table prd135 dropped and answered 500 for
+    everyone; the miner behind POST /api/playbooks/mine wrote to the same table."""
+    main = (_ORCH / "main.py").read_text()
+    assert "playbooks_router" not in main and "api_playbooks" not in main
+    lint = (_ORCH / ".importlinter").read_text()
+    assert "modules.learning" not in lint
