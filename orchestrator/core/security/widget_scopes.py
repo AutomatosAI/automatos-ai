@@ -59,13 +59,9 @@ SCOPE_TOOLS: Mapping[str, FrozenSet[str]] = {
     }),
     "documents:write": frozenset({"platform_upload_document", "platform_reprocess_document"}),
     "data:query": frozenset({"smart_query_database", "platform_query_data"}),
-    "agents:read": frozenset({
-        "platform_list_agents",
-        "platform_get_agent",
-        "platform_fleet_status",
-        "platform_get_agent_heartbeat",
-        "platform_recommend_agent",
-    }),
+    # Who the agents are (a visitor's view: name, description, status); never
+    # their heartbeats, live work or models.
+    "agents:read": frozenset({"platform_list_agents", "platform_get_agent"}),
     "missions:read": frozenset({"platform_list_missions", "platform_get_mission"}),
     "playbooks:read": frozenset({"platform_list_playbooks", "platform_get_playbook", "platform_get_playbook_execution"}),
     "tasks:read": frozenset({

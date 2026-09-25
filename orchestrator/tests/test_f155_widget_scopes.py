@@ -111,6 +111,14 @@ def test_no_scope_starts_work_that_runs_outside_the_turn(tool_name, parameters):
     ran.assert_not_awaited()
 
 
+@pytest.mark.parametrize("action", ["platform_fleet_status", "platform_get_agent_heartbeat",
+                                    "platform_recommend_agent"])
+def test_agents_read_on_a_widget_turn_is_who_the_agents_are_only(action):
+    reply, ran = _call(("chat", "agents:read"), *_via_dispatcher(action, agent_id=3))
+    assert reply["error"] == REFUSED
+    ran.assert_not_awaited()
+
+
 def test_no_scope_ever_grants_the_owners_apps_files_or_shell():
     from core.security.widget_scopes import SCOPE_TOOLS, allowed_tools
 
