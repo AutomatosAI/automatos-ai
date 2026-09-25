@@ -459,11 +459,11 @@ def _history(site, conversation_id):
     return asyncio.run(widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db))
 
 
-def _send(site, conversation_id=None, agent_id=None):
+def _send(site, conversation_id=None, agent_id=None, headers=None):
     from api.widgets.chat import WidgetChatRequest, widget_chat
 
     body = WidgetChatRequest(message="hi", conversation_id=conversation_id, agent_id=agent_id)
-    return asyncio.run(widget_chat(body=body, request=NS(headers={}), auth=site.key, db=site.db))
+    return asyncio.run(widget_chat(body=body, request=NS(headers=headers or {}), auth=site.key, db=site.db))
 
 
 def test_a_key_reads_only_the_conversations_it_started(site):
@@ -499,3 +499,14 @@ def test_the_agent_a_keys_visitors_name_is_counted(site, caplog):
     census = [record.getMessage() for record in caplog.records if "AGENT_CENSUS" in record.getMessage()]
     assert len(census) == 1
     assert f"key={site.key_id} named={agent} resolved={agent}" in census[0]
+
+
+def test_what_a_visitor_sends_cannot_forge_a_log_line(site, caplog):
+    import logging
+
+    forged = "\r\n[widget] ADMIN LOGIN ok"
+    with caplog.at_level(logging.INFO, logger="api.widgets.chat"), pytest.raises(HTTPException):
+        _send(site, agent_id=f"7{forged}", headers={"X-Request-ID": f"r1{forged}", "Origin": f"https://x{forged}"})
+    lines = [record.getMessage() for record in caplog.records]
+    assert any("REQUEST" in line and "ADMIN LOGIN" in line for line in lines)
+    assert not [line for line in lines if "\n" in line or "\r" in line]

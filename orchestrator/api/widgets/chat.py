@@ -41,10 +41,12 @@ _LOG_TAG = "widget_chat"
 
 
 def _short(s: Optional[str], n: int = 80) -> str:
-    """Truncate strings for logging. Avoids dumping huge messages into logs."""
+    """Truncate strings for logging. Avoids dumping huge messages into logs.
+    F155: line breaks and other control characters become spaces, so a value a
+    visitor sends cannot forge a log line."""
     if s is None:
         return "<none>"
-    s = str(s)
+    s = "".join(ch if ch.isprintable() else " " for ch in str(s))
     return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
 
 router = APIRouter(tags=["Widget Chat"])
@@ -180,23 +182,24 @@ async def widget_chat(
     # ------------------------------------------------------------------
     # Tag this request for log correlation
     # ------------------------------------------------------------------
-    req_id = (
+    req_id = _short(
         request.headers.get("X-Request-ID")
         or request.headers.get("x-railway-request-id")
-        or uuid.uuid4().hex[:12]
+        or uuid.uuid4().hex[:12],
+        64,
     )
     started_at = time.perf_counter()
-    origin = request.headers.get("Origin") or "?"
+    origin = _short(request.headers.get("Origin") or "?", 120)
     log_extra = (
         f"[{_LOG_TAG} req={req_id} ws={auth.workspace_id} origin={origin}]"
     )
     logger.info(
         "%s REQUEST: agent_id=%s conv_id=%s trigger_reason=%s page_type=%s msg_len=%d msg_preview=%s",
         log_extra,
-        body.agent_id,
-        body.conversation_id,
-        body.trigger_reason,
-        (body.page_context or {}).get("pageType") if body.page_context else None,
+        _short(body.agent_id, 40),
+        _short(body.conversation_id, 64),
+        _short(body.trigger_reason, 40),
+        _short((body.page_context or {}).get("pageType") if body.page_context else None, 40),
         len(body.message or ""),
         _short(body.message),
     )
@@ -253,7 +256,7 @@ async def widget_chat(
             "%s PROACTIVE_REWRITE: vertical=%s trigger=%s original_msg_len=%d new_msg_len=%d telemetry=%s new_preview=%s",
             log_extra,
             vertical,
-            body.trigger_reason,
+            _short(body.trigger_reason, 40),
             original_msg_len,
             len(body.message),
             plugin_result.telemetry,
@@ -263,7 +266,7 @@ async def widget_chat(
         logger.warning(
             "%s UNKNOWN_TRIGGER_REASON: %s vertical=%s (page_context=%s) — proceeding as normal chat",
             log_extra,
-            body.trigger_reason,
+            _short(body.trigger_reason, 40),
             vertical,
             "present" if body.page_context else "missing",
         )
@@ -283,7 +286,7 @@ async def widget_chat(
             logger.warning(
                 "%s CONV_NOT_FOUND: %s",
                 log_extra,
-                body.conversation_id,
+                _short(body.conversation_id, 64),
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -376,7 +379,7 @@ async def widget_chat(
         logger.info(
             "%s AGENT_RESOLVED: input=%s -> id=%s (source=%s)",
             log_extra,
-            _raw_agent_ref,
+            _short(str(_raw_agent_ref), 40),
             effective_agent_id,
             "key_lock" if auth.default_agent_id else "body",
         )
