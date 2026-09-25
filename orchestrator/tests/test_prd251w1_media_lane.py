@@ -39,7 +39,7 @@ import sqlalchemy as sa  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-import core.models  # noqa: E402,F401  (registers every table the FKs name)
+import core.models  # noqa: E402,F401  (registers every mapper, so LLMUsage configures)
 from core import best_effort  # noqa: E402
 from core.llm import usage_context as uc  # noqa: E402
 from core.llm import usage_tracker as ut  # noqa: E402
@@ -158,10 +158,22 @@ def test_a_bad_amount_books_zero_and_warns_never_below_zero(fake_db, monkeypatch
     assert any("booked as 0" in w for w in log.warnings)
 
 
-def test_no_workspace_books_nothing_and_says_so(fake_db, monkeypatch):
+@pytest.fixture
+def no_workspace(monkeypatch):
+    """No workspace anywhere: no usage scope, no request context, the SaaS
+    edition. The request ContextVar is pinned because a test earlier in the
+    process can leave it set (``_enrich_log_context`` sets it and never resets)."""
     from config import config as cfg
+    from core.monitoring.automatos_logging import workspace_id_var
 
     monkeypatch.setattr(cfg, "AUTH_EDITION", "saas", raising=False)
+    monkeypatch.setattr(uc, "current_usage_scope", lambda: {})
+    token = workspace_id_var.set("")
+    yield
+    workspace_id_var.reset(token)
+
+
+def test_no_workspace_books_nothing_and_says_so(fake_db, no_workspace, monkeypatch):
     log = _Log()
     monkeypatch.setattr(ut, "logger", log)
     ut.UsageTracker.track_media(provider="fal_ai", model_id=FOOTAGE_MODEL, units=5, usd=0.46)
@@ -192,10 +204,19 @@ def test_analytics_reads_the_renderer_as_a_free_media_provider():
 
 @pytest.fixture
 def ledger():
+    """``llm_usage`` on in-memory SQLite, rows written through the model. The
+    table is raw DDL over the model's own column names, untyped: SQLAlchemy
+    2.0.23 cannot compile the Postgres UUID type for SQLite (the approach of
+    test_tool_routing_models.py)."""
     engine = sa.create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    LLMUsage.metadata.create_all(engine, tables=[LLMUsage.__table__])
+    columns = ", ".join(
+        f"{c.name} INTEGER PRIMARY KEY" if c.primary_key else c.name
+        for c in LLMUsage.__table__.columns
+    )
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f"CREATE TABLE {LLMUsage.__tablename__} ({columns})")
     session = sessionmaker(bind=engine)()
     try:
         yield session
