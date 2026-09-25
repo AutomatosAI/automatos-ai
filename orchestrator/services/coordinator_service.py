@@ -381,24 +381,17 @@ async def _dispatch_mission_event(
     the outer tick transaction (the tick commits once per run). Failures
     are logged but never block the coordinator.
 
-    Resolves ``run.created_by`` (Clerk user ID) to an integer ``user_id``
+    Resolves ``run.created_by`` (a Clerk user ID, or a local operator's email) to an integer ``user_id``
     so notifications target the mission creator — not the entire workspace.
     """
     try:
-        from core.models.core import User
+        from core.auth.actor import resolve_recorded_person
         from core.services.notification_dispatcher import NotificationDispatcher
 
-        # Resolve Clerk ID → integer user_id so notifications are
-        # scoped to the mission creator, not broadcast workspace-wide.
-        user_id: Optional[int] = None
-        if run.created_by:
-            user_row = (
-                db.query(User.id)
-                .filter(User.clerk_user_id == run.created_by)
-                .first()
-            )
-            if user_row:
-                user_id = user_row[0]
+        # Resolve the creator (a Clerk id, or F166 a local operator's email) to an
+        # integer user_id so notifications are scoped to the mission creator, not
+        # broadcast workspace-wide. An agent id is nobody: the workspace hears it.
+        user_id: Optional[int] = resolve_recorded_person(db, run.created_by)
 
         dispatcher = NotificationDispatcher(db, str(run.workspace_id))
         await dispatcher.dispatch(

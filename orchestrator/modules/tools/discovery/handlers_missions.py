@@ -15,8 +15,9 @@ _CONTEXT_MESSAGE_LIMIT = 5
 
 
 def _actor(params: Dict[str, Any]) -> str:
-    """PRD-163 Q56: the human behind this action — the chatting user's clerk id
-    (``_created_by``, injected by the executor) when available, else the agent."""
+    """PRD-163 Q56: the human behind this action — the chatting user's clerk id,
+    or on the local edition their email (``_created_by``, injected by the
+    executor, F166) when available, else the agent."""
     return str(params.get("_created_by") or params.get("_agent_id") or "agent")
 
 

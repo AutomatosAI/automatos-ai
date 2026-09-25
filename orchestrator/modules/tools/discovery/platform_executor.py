@@ -363,6 +363,37 @@ OPERATOR_CONSENT_ACTIONS = (
 )
 
 
+def _person_for_mission(db, caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
+    """F166: who a mission action is made for, as the mission records it — the
+    chat's Clerk id, or on the local edition (no Clerk id) the person's email, read
+    from the server-threaded ``driving_user_id``. The email is what the local REST
+    API records (``created_by = ctx.user.id``). Never the bare ``users.id``: a digit
+    string in ``created_by`` is already an agent id wherever no person drove the
+    action. A widget turn is made for nobody (F155); an unreadable user is nobody."""
+    from core.security.driving_user import driving_user_id
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return None
+    ctx = caller_context if isinstance(caller_context, dict) else {}
+    if ctx.get("user_id"):
+        return str(ctx["user_id"])
+    user = driving_user_id(ctx)
+    if user is None:
+        return None
+    try:
+        from core.models.core import User
+
+        with db.begin_nested():  # a failed lookup never poisons the caller's transaction
+            row = db.query(User.email).filter(User.id == user).first()
+    except Exception:  # noqa: BLE001 — fails closed: nobody, so F036 still leaves it to the owner
+        logger.warning("[PlatformExecutor] no email for driving user %s — the call is made for nobody", user,
+                       exc_info=True)
+        return None
+    email = str(row[0] or "").strip() if row else ""
+    return email or None
+
+
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
     """Resolve the driving user's workspace role, fresh, at the gate.
 
@@ -1260,8 +1291,10 @@ class PlatformActionExecutor:
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via
-        # caller_context['user_id']; inject it as _created_by so the handler sets
-        # created_by / actor to the user, not the agent.
+        # caller_context['user_id'] (on the local edition, which has no Clerk
+        # id, only the internal driving_user_id: their email is recorded); inject
+        # it as _created_by so the handler sets created_by / actor to the user,
+        # not the agent.
         _MISSION_ATTRIBUTED = (
             "platform_create_mission",
             "platform_approve_mission",
@@ -1280,9 +1313,12 @@ class PlatformActionExecutor:
             # workflows) where caller_context carries no user_id. Grep-verified
             # no legitimate params-side producer exists.
             params = {k: v for k, v in params.items() if k != "_created_by"}
-            _driver = (caller_context or {}).get("user_id")
-            if _driver:
-                params = {**params, "_created_by": str(_driver)}
+            # F166: with the Clerk id alone, every local chat approval arrived
+            # with no person behind it and F036 refused it. A board ticket or a
+            # workflow threads no driver, so F036 still refuses their approvals.
+            _person = _person_for_mission(self.db, caller_context)
+            if _person:
+                params = {**params, "_created_by": _person}
 
         # F133 / F148: who the call is made for, for the handlers that record or
         # check it: a playbook's creator (created_by_user_id), an invitation's
