@@ -342,7 +342,11 @@ class ContextService:
         try:
             config = MODE_CONFIGS[ContextMode.PLANNING]
 
-            kwargs: dict[str, Any] = {"team": team}
+            # F155: planning a widget-born mission reads what the widget key
+            # may: its team lock wins, and no workspace history is recalled.
+            from core.team_access import retrieval_team
+
+            kwargs: dict[str, Any] = {"team": retrieval_team(team)}
             if include_roster:
                 roster = agents if agents is not None else self._fetch_roster(workspace_id)
                 if roster is not None:
@@ -355,6 +359,7 @@ class ContextService:
                 db_session=self._db_session,
                 messages=None,
                 task_description=goal,
+                widget_mode=widget_turn(),
                 kwargs=kwargs,
             )
 

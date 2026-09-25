@@ -62,6 +62,9 @@ class FieldMemorySection(BaseSection):
             return ""
 
     async def _build(self, ctx: SectionContext) -> str:
+        if ctx.widget_mode:
+            # F155: the owner's past missions are not a widget turn's to recall.
+            return ""
         query = self._extract_query(ctx)
         if not query:
             return ""

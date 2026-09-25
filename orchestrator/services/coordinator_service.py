@@ -2672,15 +2672,20 @@ class CoordinatorService:
             .all()
         )
 
-        # Decompose goal into task DAG
+        # Decompose goal into task DAG. F155: a widget-born mission is planned
+        # under its widget key's restrictions (the planning pack's documents,
+        # graph and history), even later on the tick.
+        from core.security.surface import origin_surface
+
         try:
-            decomposition = await MissionPlanner.decompose(
-                goal=goal,
-                workspace_id=workspace_id,
-                agents=agents,
-                config=mission_config,
-                db=db,  # PRD-164 S1: enables the planning context pack
-            )
+            with origin_surface(mission_config):
+                decomposition = await MissionPlanner.decompose(
+                    goal=goal,
+                    workspace_id=workspace_id,
+                    agents=agents,
+                    config=mission_config,
+                    db=db,  # PRD-164 S1: enables the planning context pack
+                )
         except PlanValidationError:
             transition_run(
                 db=db,
@@ -3739,18 +3744,22 @@ class CoordinatorService:
             .all()
         )
 
-        # Call planner to generate replacement tasks
+        # Call planner to generate replacement tasks (F155: under a widget-born
+        # mission's origin, as its first plan is).
+        from core.security.surface import origin_surface
+
         try:
-            decomposition = await MissionPlanner.replan(
-                goal=run.goal,
-                workspace_id=run.workspace_id,
-                agents=agents,
-                completed_outputs=completed_outputs,
-                failed_task_title=failed_task_title,
-                failed_task_reason=failed_task_reason,
-                user_notes=notes,
-                db=db,  # PRD-164 S1: enables the planning context pack
-            )
+            with origin_surface(run.config):
+                decomposition = await MissionPlanner.replan(
+                    goal=run.goal,
+                    workspace_id=run.workspace_id,
+                    agents=agents,
+                    completed_outputs=completed_outputs,
+                    failed_task_title=failed_task_title,
+                    failed_task_reason=failed_task_reason,
+                    user_notes=notes,
+                    db=db,  # PRD-164 S1: enables the planning context pack
+                )
         except PlanValidationError:
             # Replan failed — transition back to failed
             transition_run(
