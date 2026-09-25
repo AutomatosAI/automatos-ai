@@ -48,14 +48,18 @@ def connected_databases(db: Any, workspace_id: Any) -> List[str]:
 
 
 def databases_sentence(names: List[str]) -> str:
-    """Two sentences: what is connected, and how to ask it for a number."""
+    """Two sentences: what is connected, and how to ask it for a number. The tool
+    is smart_query_database, the one Auto holds first-class: the refresh-3 retest
+    named platform_query_data, reachable only through platform_execute, and Auto
+    called neither (0 of 7) while the graph action got params={} (F027)."""
     if len(names) == 1:
         return (f"This workspace has 1 connected database ({names[0]}). For numbers about the business "
-                "(counts, totals, rankings, trends), ask it with platform_query_data and pass only the question.")
+                "(counts, totals, rankings, trends), call smart_query_database with the question; with one "
+                "database no name is needed.")
     listed = f" ({', '.join(names)})" if len(names) <= DATABASES_SHOWN else ""
     return (f"This workspace has {len(names)} connected databases{listed}. For numbers about the business "
-            "(counts, totals, rankings, trends), ask one with platform_query_data, passing the question and "
-            "the database's name (it lists them when none is named).")
+            "(counts, totals, rankings, trends), call smart_query_database with the question and the "
+            "database's name (it lists them when none is named).")
 
 
 def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:

@@ -8,10 +8,18 @@ Nothing in its prompt named the database. The documents section said every
 question about the business was a search_knowledge first. The action catalog
 shows parameter names, never their descriptions, so platform_query_data's "omit
 it when the workspace has one database" never reached the model. Now the section
-names the active databases (at most five, PRD-231) and says a number goes to
-platform_query_data with only the question, and the action's own description
-carries the one-database rule. Without a database the F085 text is unchanged
+names the active databases (at most five, PRD-231) and says a number goes to the
+database, and platform_query_data's own description carries the one-database
+rule. Without a database the F085 text is unchanged
 (test_f085_the_prompt_says_documents_exist).
+
+Refresh-3 retest: still 2 of 7, and the data tool was called 0 times. The
+sentence named platform_query_data, reachable only through platform_execute,
+where flash sends params={} (F027); smart_query_database, which Auto holds as a
+first-class tool, went unnamed. And F085-A's prefetch put a summary document's
+figures (415 for 400) in front of every number question, headed "answer from
+them". The sentence now names smart_query_database, and with a database the
+prefetched passages say a number comes from it.
 """
 from __future__ import annotations
 
@@ -24,10 +32,10 @@ from sqlalchemy.orm import Session
 from modules.context.sections.documents_inventory import DocumentsInventorySection, documents_summary
 
 TABLES = ("documents", "database_knowledge_sources")
-NUMBERS_TO_ONE = ("For numbers about the business (counts, totals, rankings, trends), ask it with "
-                  "platform_query_data and pass only the question.")
-NUMBERS_TO_ONE_OF = ("For numbers about the business (counts, totals, rankings, trends), ask one with "
-                     "platform_query_data, passing the question and the database's name (it lists them when "
+NUMBERS_TO_ONE = ("For numbers about the business (counts, totals, rankings, trends), call "
+                  "smart_query_database with the question; with one database no name is needed.")
+NUMBERS_TO_ONE_OF = ("For numbers about the business (counts, totals, rankings, trends), call "
+                     "smart_query_database with the question and the database's name (it lists them when "
                      "none is named).")
 DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, search them with "
                          "search_knowledge first and name the file you used.")
@@ -121,3 +129,34 @@ def test_the_catalog_line_for_platform_query_data_carries_the_one_database_rule(
     line = ActionRegistry._format_action_line(get_action_registry().get("platform_query_data"))
     assert "With one database connected, pass only the question: that one is used." in line
     assert "Name a database (database_id) only when several are connected." in line
+
+
+# ── refresh-3 retest: the database was offered, never called (0 of 7) ──────
+
+def _prefetch(monkeypatch, databases):
+    import asyncio as _asyncio
+
+    from consumers.chatbot import knowledge_prefetch as kp
+    from modules.context.sections import documents_inventory as inv
+
+    monkeypatch.setattr(kp, "documents_in", lambda db, ws: 3)
+    monkeypatch.setattr(inv, "connected_databases", lambda db, ws: databases)
+
+    async def _search(args):
+        return {"raw_result": {"results": [
+            {"filename": "subscriber-numbers-august.md", "similarity": 0.91, "content": "415 active subscribers"}]}}
+
+    got = _asyncio.run(kp.prefetch(None, uuid4(), "How many active subscribers are on each plan?",
+                                   search=_search, enabled=True, limit=5, min_score=0.3))
+    return kp, got.message["content"]
+
+
+def test_with_a_database_the_prefetched_passages_send_a_number_to_it(monkeypatch):
+    kp, content = _prefetch(monkeypatch, ["harbourline_shop"])
+    assert content.startswith(f"{kp.PREFETCH_HEADER} {kp.PREFETCH_DATABASE_NOTE}\n\n")
+    assert "subscriber-numbers-august.md" in content
+
+
+def test_without_one_the_passages_go_as_they_did(monkeypatch):
+    kp, content = _prefetch(monkeypatch, [])
+    assert content.startswith(f"{kp.PREFETCH_HEADER}\n\n")
