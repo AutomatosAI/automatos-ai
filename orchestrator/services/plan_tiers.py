@@ -27,10 +27,10 @@ so unmanaged keys survive, under the keys the LIVE consumers already read:
 NO quota hardening. No billing anywhere: ``display_price_usd`` is a label only
 (PRD §12 Q5). ``enterprise`` is coming-soon and is rejected by :func:`assign_plan`.
 
-  * ``render_minutes_month`` — PRD-251 S1.1c: the monthly Socials render quota,
-    read by ``modules/socials/render_quota.py`` (``0`` or no key = no quota).
-    It is written on every assignment, so a move between tiers never leaves the
-    previous tier's quota behind.
+  * ``render_minutes_month`` — PRD-251 S1.1c: the monthly media render quota,
+    hosting, not a capability gate (``0`` or no key = no quota). It is written
+    on every assignment, so a move between tiers never leaves the previous
+    tier's quota behind.
 """
 from __future__ import annotations
 
