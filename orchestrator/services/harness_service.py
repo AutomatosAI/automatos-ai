@@ -1651,15 +1651,18 @@ class HarnessService:
             # int-vs-str. One canonical type makes both the membership check and
             # the sorted() in _write_applied_tasks total.
             applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
+            # F151: tasks held for an owner's or admin's /approve are not retried.
+            held_ids = {str(i) for i in ledger.get("needs_approve_task_ids", [])}
             agents_by_name = await self._resolve_agents_by_name(executor)
 
             newly_applied: List[Dict[str, Any]] = []
+            newly_held: List[str] = []
             for task in tasks:
                 raw_id = task.get("id")
                 if raw_id is None:
                     continue
                 task_id = str(raw_id)
-                if task_id in applied_ids:
+                if task_id in applied_ids or task_id in held_ids:
                     continue
 
                 rx = self._parse_harness_task(task, agents_by_name=agents_by_name)
@@ -1689,6 +1692,16 @@ class HarnessService:
                     applied_ids.add(task_id)
                     newly_applied.append(entry)
                     changelog.setdefault("applied_from_approved", []).append(entry)
+                elif apply_result.get("required_role") == "owner_or_admin":
+                    # F151: completing a board task is not an owner's or admin's
+                    # approval of an admin_only change — say so once, then wait.
+                    newly_held.append(task_id)
+                    self._note_needs_an_approve(executor, workspace_id, task, rx)
+                    changelog.setdefault("needs_approve", []).append({
+                        "task_id": task_id,
+                        "title": task.get("title", ""),
+                        "change_type": rx.get("change_type"),
+                    })
                 else:
                     changelog.setdefault("failed", []).append({
                         "task_id": task_id,
@@ -1696,7 +1709,8 @@ class HarnessService:
                         "error": apply_result.get("error", "unknown"),
                     })
 
-            if newly_applied:
+            if newly_applied or newly_held:
+                ledger["needs_approve_task_ids"] = sorted(held_ids | set(newly_held))
                 self._write_applied_tasks(
                     workspace_id, ledger, applied_ids, newly_applied
                 )
@@ -1707,6 +1721,40 @@ class HarnessService:
                 "[HARNESS] Failed to apply approved board tasks: %s",
                 exc, exc_info=True,
             )
+
+    @staticmethod
+    def _note_needs_an_approve(
+        executor: "PlatformActionExecutor", workspace_id: UUID, task: Dict[str, Any], rx: Dict[str, Any]
+    ) -> None:
+        """F151: write once, on a done [HARNESS] task, that its change was not applied.
+
+        The status action carries no result field, so the row is set directly, as
+        api.harness_commands does for an applied change. Best-effort: the ledger
+        already holds the task, so a failed note only loses the explanation.
+        """
+        from core.models.core import BoardTask
+
+        rx_tag = next((t for t in task.get("tags") or [] if isinstance(t, str) and t.startswith("rx:")), None)
+        how = f"/approve {rx_tag[3:]}" if rx_tag else "/approve"
+        note = {
+            "actuated": False,
+            "needs": "an owner's or admin's /approve",
+            "message": (
+                f"Not applied: {rx.get('change_type')} is an owner's or admin's change, and completing "
+                f"this task does not approve it. An owner or admin applies it with {how}."
+            ),
+        }
+        try:
+            row = (
+                executor.db.query(BoardTask)
+                .filter(BoardTask.id == int(task.get("id")), BoardTask.workspace_id == workspace_id)
+                .first()
+            )
+            if row is not None:
+                row.result = json.dumps(note)
+                executor.db.commit()
+        except Exception:  # noqa: BLE001 — the ledger hold stands without the note
+            logger.warning("[HARNESS] Could not note task %s as needing /approve", task.get("id"), exc_info=True)
 
     async def _resolve_agents_by_name(
         self, executor: "PlatformActionExecutor"

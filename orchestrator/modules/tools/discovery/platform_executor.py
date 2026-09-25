@@ -918,6 +918,9 @@ class PlatformActionExecutor:
                     return {
                         "success": False,
                         "permission_denied": True,
+                        # F151: machine-readable, so a lane (HARNESS) can hold the
+                        # change for an owner's or admin's approval.
+                        "required_role": "owner_or_admin",
                         "error": (
                             f"Action '{action_name}' requires workspace admin or owner role."
                         ),

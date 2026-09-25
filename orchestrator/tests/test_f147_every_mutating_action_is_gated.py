@@ -100,7 +100,7 @@ def test_a_workspace_owner_cannot_change_a_platform_setting(cafe):
 def test_a_member_cannot_change_the_workspace_settings_but_an_owner_can(cafe):
     params = {"key": "default_notification_channel", "value": "email"}
     reply, handler = _run(cafe, "platform_update_workspace_settings", params, _for(cafe.member))
-    assert reply == {"success": False, "permission_denied": True,
+    assert reply == {"success": False, "permission_denied": True, "required_role": "owner_or_admin",
                      "error": "Action 'platform_update_workspace_settings' requires workspace admin or owner role."}
     handler.assert_not_called()
     reply, handler = _run(cafe, "platform_update_workspace_settings", params, _for(cafe.owner))

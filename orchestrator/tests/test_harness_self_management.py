@@ -253,6 +253,67 @@ def test_already_applied_task_is_skipped(monkeypatch, tmp_path):
     assert not os.path.exists(_ledger_path(tmp_path))
 
 
+class _RowDB:
+    """One board-task row, for the note HARNESS writes on a held task."""
+
+    def __init__(self, row):
+        self.row, self.commits = row, 0
+
+    def query(self, model):
+        return self
+
+    def filter(self, *conditions):
+        return self
+
+    def first(self):
+        return self.row
+
+    def commit(self):
+        self.commits += 1
+
+
+class _AdminGateExecutor(_FakeExecutor):
+    """The executor's admin gate refuses the power mode: HARNESS acts for nobody."""
+
+    def __init__(self, tasks, agents, row):
+        super().__init__(tasks, agents)
+        self.db = _RowDB(row)
+
+    async def execute(self, action, params, caller_context=None):
+        if action == "platform_set_power_mode":
+            self.calls.append((action, params))
+            return {"success": False, "permission_denied": True, "required_role": "owner_or_admin",
+                    "error": "Action 'platform_set_power_mode' requires workspace admin or owner role."}
+        return await super().execute(action, params, caller_context)
+
+
+def test_a_done_task_the_admin_gate_refuses_waits_for_an_approve(monkeypatch, tmp_path):
+    """F151: completing a [HARNESS] task is not an owner's or admin's approval of an
+    admin_only change. The refusal is written on the task once, and later ticks
+    stop retrying it; an owner's or admin's /approve applies it as them."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    svc = HarnessService()
+    task = _harness_task(change_type="power_mode_upgrade", current={"power_mode": "standard"},
+                         proposed={"power_mode": "max"}, task_id=7,
+                         tags=["harness", "org-review", "risk-2", "rx:rx-power-1"])
+    row = types.SimpleNamespace(result=None)
+    ex = _AdminGateExecutor([task], [{"id": 42, "name": "ScribeAgent"}], row)
+
+    ticks = [{}, {}]
+    for changelog in ticks:
+        asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    assert ex.actions().count("platform_set_power_mode") == 1
+    assert ticks[0] == {"needs_approve": [{"task_id": "7", "title": task["title"],
+                                           "change_type": "power_mode_upgrade"}]}
+    assert ticks[1] == {}
+    assert svc._read_applied_tasks(_WS_ID)["needs_approve_task_ids"] == ["7"]
+    note = json.loads(row.result)
+    assert note["actuated"] is False
+    assert note["message"].endswith("An owner or admin applies it with /approve rx-power-1.")
+
+
 def test_unresolved_target_is_skipped_not_applied(monkeypatch, tmp_path):
     """A task whose target_name is not in the agents map is skipped, never
     applied against a guessed/null target."""

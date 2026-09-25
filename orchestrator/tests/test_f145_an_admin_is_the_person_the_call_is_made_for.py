@@ -101,7 +101,7 @@ def test_the_server_side_super_admin_role_counts(cafe):
 
 def test_a_member_is_not_an_admin(cafe):
     reply, handler = _run(cafe, _for(cafe.member))
-    assert reply == {"success": False, "permission_denied": True, "error": REFUSED}
+    assert reply == {"success": False, "permission_denied": True, "required_role": "owner_or_admin", "error": REFUSED}
     handler.assert_not_called()
 
 
@@ -117,7 +117,7 @@ def test_a_role_without_a_driving_user_is_not_an_admin(cafe):
 def test_a_lane_acting_for_nobody_is_not_an_admin_with_the_plane_off(cafe, monkeypatch):
     _plane(monkeypatch, on=False)
     reply, handler = _run(cafe, None)
-    assert reply == {"success": False, "permission_denied": True, "error": REFUSED}
+    assert reply == {"success": False, "permission_denied": True, "required_role": "owner_or_admin", "error": REFUSED}
     handler.assert_not_called()
 
 
