@@ -1,7 +1,7 @@
 """Agent CRUD handlers for PlatformActionExecutor."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy import func
@@ -196,6 +196,23 @@ async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     }
 
 
+def _model_not_offered(route: Any, model_id: str) -> Optional[str]:
+    """Why an agent cannot run on ``model_id``, given its catalog ``route``; None when it can.
+
+    F141: every chat writer of an agent's model asks what the Model tab asks. An
+    id the catalog does not have (PRD-223 W1) or a route its provider no longer
+    offers (PRD-239 S5) never becomes an agent's model: every turn on it fails.
+    """
+    if route is None:
+        return f"Model '{model_id}' is not in the catalog"
+    if (getattr(route, "status", None) or "active") == "deprecated":
+        from core.llm import providers as registry
+
+        spec = registry.get_spec(route.serving_provider)
+        return f"Model '{model_id}' is no longer offered by {spec.label if spec else route.serving_provider}"
+    return None
+
+
 async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent
 
@@ -242,20 +259,20 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         from core.llm.model_policy import check_model_for_agent
 
         resolved = _get_or_create_from_cache(db, model_id, params.get("provider"))
-        if resolved is None:
+        not_offered = _model_not_offered(resolved, model_id)
+        if not_offered:
             # Prod 2026-09-02 (post-#672): told "omit model_id to use the default",
             # the model retried the SAME unknown id twice and the build stalled.
             # An unknown id means the governed default in practice (PRD-223: the
             # registry decides, never the caller's string) — use it and SAY so,
-            # in the result and in the log. The agent is still created.
+            # in the result and in the log. The agent is still created. F141: a
+            # route its provider no longer offers goes the same way.
             default_id = model_config.get("model_id")
             logger.warning(
-                "[create_agent] unknown model %r — using the workspace default %r", model_id, default_id
+                "[create_agent] %s model %r — using the workspace default %r",
+                "unknown" if resolved is None else "retired", model_id, default_id,
             )
-            model_note = (
-                f"Model '{model_id}' is not in the catalog — the agent uses the workspace "
-                f"default ({default_id}) instead."
-            )
+            model_note = f"{not_offered} — the agent uses the workspace default ({default_id}) instead."
         else:
             allowed, reason = check_model_for_agent(
                 db, workspace_id, model_id, orchestrator_seat=False,
@@ -341,6 +358,33 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if not agent:
         return {"success": False, "error": "Agent not found"}
 
+    # F141: a new model is checked before anything changes, as create_agent and
+    # the Model tab check it. This path stored any string and guessed the provider
+    # by substring: BEANCOUNTER got 'anthropic/claude-sonnet-4-20250514', an id
+    # OpenRouter never offered, and every turn routed to it failed.
+    model_id = params.get("model_id")
+    route = None
+    if model_id:
+        from api.llm_marketplace import _get_or_create_from_cache
+        from core.llm.model_policy import check_model_for_agent
+
+        route = _get_or_create_from_cache(db, model_id, params.get("provider"))
+        not_offered = _model_not_offered(route, model_id)
+        if not_offered:
+            current = (agent.model_config or {}).get("model_id") or "the default model"
+            return {
+                "success": False,
+                "error": (f"{not_offered}, so '{agent.name}' keeps {current}. "
+                          "Use a model that platform_list_workspace_models lists."),
+            }
+        allowed, reason = check_model_for_agent(
+            db, workspace_id, model_id,
+            orchestrator_seat=agent.name == "Auto" and bool(getattr(agent, "is_system_agent", False)),
+            provider=route.serving_provider,
+        )
+        if not allowed:
+            return {"success": False, "error": f"Model rejected: {reason}"}
+
     changes = []
 
     # Basic fields
@@ -355,23 +399,12 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         changes.append(f"status -> '{params['status']}'")
 
     # Model configuration
-    model_id = params.get("model_id")
     temperature = params.get("temperature")
     if model_id or temperature is not None:
         mc = dict(agent.model_config or {})
         if model_id:
             mc["model_id"] = model_id
-            # Infer provider
-            if "claude" in model_id.lower() or "anthropic" in model_id.lower():
-                mc["provider"] = "anthropic"
-            elif "gemini" in model_id.lower():
-                mc["provider"] = "google"
-            elif "llama" in model_id.lower() or "mixtral" in model_id.lower():
-                mc["provider"] = "groq"
-            elif "/" in model_id:
-                mc["provider"] = "openrouter"
-            else:
-                mc["provider"] = "openrouter"
+            mc["provider"] = route.serving_provider  # PRD-236 W1: the route, never the vendor
             changes.append(f"model -> '{model_id}'")
         if temperature is not None:
             mc["temperature"] = max(0.0, min(2.0, float(temperature)))
