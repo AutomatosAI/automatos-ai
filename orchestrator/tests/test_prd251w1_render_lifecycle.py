@@ -67,9 +67,9 @@ import api.socials as socials_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.boot.reaper as reaper  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
+import core.media_render_quota as render_quota  # noqa: E402  (US-105 moved it into core)
 import modules.socials.media_store as media_store  # noqa: E402
 import modules.socials.render as render  # noqa: E402
-import modules.socials.render_quota as render_quota  # noqa: E402
 import modules.socials.service as service  # noqa: E402
 import modules.socials.settings as socials_settings  # noqa: E402
 import services.deliverable_service as deliverable_service  # noqa: E402
@@ -80,10 +80,12 @@ from core.database.database import get_db  # noqa: E402
 from core.llm import usage_context as uc  # noqa: E402
 from core.llm.providers import MEDIA_RENDER_PROVIDER  # noqa: E402
 from core.llm.usage_tracker import UsageTracker  # noqa: E402
+from core.media_render_bundle import NO_LOGO  # noqa: E402
 from core.media_render_client import MediaRenderClient, MediaRenderError, MediaRenderUnavailable  # noqa: E402
 from core.models.core import DocumentTemplate, LLMUsage  # noqa: E402
 from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
+from modules.documents.brand_kit import DEFAULT_ACCENT, DEFAULT_FONT, DEFAULT_PRIMARY  # noqa: E402
 
 # Hex with letters, so SQLite keeps every UUID column as text.
 WS = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
@@ -97,7 +99,8 @@ MP4 = b"\x00\x00\x00\x18ftypmp42" + b"frame-bytes " * 400
 MP4_SHA = hashlib.sha256(MP4).hexdigest()
 OUTPUT = {"name": "render.mp4", "aspect": "9:16", "width": 1080, "height": 1920, "bytes": len(MP4), "duration": 39.5}
 COMPOSITION = {
-    "html": '<!doctype html><html><body><div id="root" data-composition-id="main" data-width="1080" '
+    # A social template as S1.2 defines it (core/social_templates.py): a full document.
+    "html": '<!doctype html><html><head></head><body><div id="root" data-composition-id="main" data-width="1080" '
             'data-height="1920" data-duration="39.5"><h1>{{ headline }}</h1></div></body></html>',
     "css": "h1 { color: var(--brand-text); }",
     "variables_schema": {"headline": {"type": "text"}},
@@ -370,11 +373,24 @@ def test_rendering_a_draft_stores_the_mp4_registers_a_deliverable_and_awaits_app
     renderer, store = Renderer(), FakeStore()
     assert _run(job, renderer, store, env.factory) is True
 
-    # The bundle: the template's composition, the post's variable values, the audio plan.
+    # The bundle: the template's composition, the post's variable values, the audio plan,
+    # and (US-105, S1.2) the workspace brand kit as --brand-* tokens with the brand and
+    # size variables. This workspace has no kit: the neutral defaults, its own name, no logo.
     (bundle,) = renderer.bundles
     assert bundle["workspace_id"] == str(WS) and bundle["reference"] == f"social_post:{post['id']}"
     assert bundle["composition"] == {"html": COMPOSITION["html"], "css": COMPOSITION["css"]}
-    assert bundle["variables"] == {"headline": "Three weeks to go"}
+    assert bundle["variables"] == {
+        "headline": "Three weeks to go",
+        "brand.name": "ws-a1",
+        "brand.tagline": "",
+        "brand.logo": NO_LOGO,
+        "size.width": 1080,
+        "size.height": 1920,
+    }
+    tokens = bundle["brand"]["tokens"]
+    assert tokens["primary"] == DEFAULT_PRIMARY and tokens["accent"] == DEFAULT_ACCENT
+    assert tokens["body-font"] == tokens["heading-font"] == DEFAULT_FONT
+    assert "files" not in bundle
     assert bundle["audio"] == COMPOSITION["audio_plan"]
     assert all(token == TOKEN for _, _, token in renderer.seen)
 

@@ -1,9 +1,9 @@
 """PRD-251 S1.1c: rendering a post.
 
 ``POST /api/socials/posts/{id}/render`` checks the post, its template, the
-monthly quota (render_quota.py), storage and the renderer, moves the post to
-``rendering`` and hands a :class:`RenderJob` to :func:`run_render`, which runs
-in the background:
+monthly quota (``core/media_render_quota.py``), storage and the renderer, moves
+the post to ``rendering`` and hands a :class:`RenderJob` to :func:`run_render`,
+which runs in the background:
 
 1. submit the bundle to media-render (``core/media_render_client.py``), which
    answers once the job is staged, spoken, mixed and checked; a full renderer
@@ -23,9 +23,12 @@ under the boot reaper's stale cutoff, so the reaper only ever fails a render no
 live task owns. A post that moved on while it rendered (the reaper failed it)
 is left as it is, and nothing is booked. The renderer assembles; it never
 generates (D3).
-The bundle is the template's composition (``blocks.html`` and ``blocks.css``),
-the post's variable values and the template's audio plan; brand tokens, fonts
-and media inputs join it with the social templates (S1.2).
+The bundle (``core/media_render_bundle.py``, S1.2) is the social template's
+composition, checked against its contract (``core/social_templates.py``), the
+post's variable values with the template's defaults, the audio plan, and the
+workspace brand kit: tokens as ``--brand-*`` CSS variables, an uploaded logo
+and font files inlined. The api layer hands the brand kit in: this module may
+not import the documents module that owns it.
 """
 from __future__ import annotations
 
@@ -39,26 +42,24 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from config import config
-from core.llm.providers import MEDIA_RENDER_PROVIDER
-from core.llm.usage_context import LANE_MEDIA, usage_scope
-from core.llm.usage_tracker import UsageTracker
+from core.media_render_bundle import build_bundle
 from core.media_render_client import (
-    BUSY,
+    BAD_RESPONSE,
     JOB_DONE,
-    JOB_TERMINAL,
     NOT_CONFIGURED,
     NOT_FOUND,
+    TIMEOUT,
     MediaRenderClient,
     MediaRenderError,
     MediaRenderUnavailable,
 )
+from core.media_render_quota import book_render_seconds
+from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 
 logger = logging.getLogger(__name__)
 
-# The booking's model id: the renderer's engine (core/llm/providers.py MEDIA_RENDER_PROVIDER).
-RENDER_MODEL_ID = "hyperframes"
 EXECUTION_PREFIX = "social_post:"
 DELIVERABLE_SOURCE_TYPE = "social_post"
 # The report kept in review_log: the first findings, each trimmed.
@@ -120,37 +121,51 @@ async def ensure_renderer(client: Optional[MediaRenderClient] = None, store: Opt
 
 # ── the bundle ──────────────────────────────────────────────────────────────
 def composition_of(template: Any) -> Optional[Dict[str, Any]]:
-    """A social template's ``blocks``, or ``None`` when it carries no composition."""
-    blocks = getattr(template, "blocks", None) if template is not None else None
+    """A social template's ``blocks``, or ``None`` when it is no social template with a composition."""
+    if template is None or not is_social_format(getattr(template, "format", None)):
+        return None
+    blocks = getattr(template, "blocks", None)
     if not isinstance(blocks, dict):
         return None
     html = blocks.get("html")
     return blocks if isinstance(html, str) and html.strip() else None
 
 
-def bundle_for(post: Any, template: Any) -> Dict[str, Any]:
+def bundle_for(
+    post: Any, template: Any, brand_kit: Optional[Mapping[str, Any]] = None, *, fallback_name: str = ""
+) -> Dict[str, Any]:
     """The render bundle media-render takes (``services/media-render/media_render/bundle.py``).
 
-    :class:`NotRenderable` when the post has no template, or its template no composition.
+    ``brand_kit`` is the workspace's, render-ready; ``fallback_name`` (the
+    workspace's name) is the brand name when the kit has none.
+    :class:`NotRenderable` when the post has no social template, the template
+    breaks its contract, or the post leaves a variable without a default empty.
     """
     blocks = composition_of(template)
     if blocks is None:
         raise NotRenderable("this post has no social template to render: choose a template with a composition")
-    variables = {
+    try:
+        blocks = validate_social_blocks(blocks, template.format)
+    except SocialTemplateError as exc:
+        raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
+    supplied = {
         name: spec.get("value")
         for name, spec in (getattr(post, "variables", None) or {}).items()
-        if isinstance(spec, dict) and spec.get("value") is not None
+        if isinstance(spec, dict)
     }
-    bundle: Dict[str, Any] = {
-        "workspace_id": str(post.workspace_id),
-        "reference": f"{EXECUTION_PREFIX}{post.id}",
-        "composition": {"html": blocks["html"], "css": blocks.get("css") or ""},
-        "variables": variables,
-    }
-    audio = blocks.get("audio_plan")
-    if isinstance(audio, dict) and audio:
-        bundle["audio"] = audio
-    return bundle
+    resolved = resolve_variables(blocks["variables_schema"], supplied)
+    if resolved.missing:
+        raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
+    if resolved.invalid:
+        raise NotRenderable("; ".join(resolved.invalid))
+    return build_bundle(
+        workspace_id=post.workspace_id,
+        reference=f"{EXECUTION_PREFIX}{post.id}",
+        blocks=blocks,
+        values=resolved.values,
+        brand_kit=brand_kit,
+        fallback_name=fallback_name,
+    )
 
 
 @dataclass(frozen=True)
@@ -201,36 +216,33 @@ def _failure_from(exc: MediaRenderError) -> RenderFailure:
     return RenderFailure(exc.code, f"The renderer refused the render: {reason}.", _report(report=exc.report))
 
 
+def _poll_failure(exc: MediaRenderError) -> RenderFailure:
+    if exc.code == TIMEOUT:
+        minutes = config.SOCIALS_RENDER_MAX_WAIT_SECONDS // 60
+        return RenderFailure("timed_out", f"The render did not finish within {minutes} minutes.")
+    if exc.code == NOT_FOUND:
+        return RenderFailure(NOT_FOUND, "The renderer lost the render (it restarted). Render again.")
+    if exc.code == BAD_RESPONSE:
+        return RenderFailure("bad_response", "The renderer accepted the render but gave no job id.")
+    return _failure_from(exc)
+
+
 # ── the background render ───────────────────────────────────────────────────
 async def _submit(client: MediaRenderClient, job: RenderJob, deadline: float) -> Dict[str, Any]:
-    while True:
-        try:
-            return await client.submit(job.bundle)
-        except MediaRenderError as exc:
-            wait = exc.retry_after or config.SOCIALS_RENDER_POLL_SECONDS
-            if exc.code == BUSY and time.monotonic() + wait < deadline:
-                logger.info("[Socials] renderer busy; post %s asks again in %ss", job.post_id, wait)
-                await asyncio.sleep(wait)
-                continue
-            raise _failure_from(exc) from exc
+    """Submit the bundle; a busy renderer is asked again while the deadline allows."""
+    try:
+        return await client.submit_when_free(job.bundle, deadline=deadline, poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS)
+    except MediaRenderError as exc:
+        raise _failure_from(exc) from exc
 
 
 async def _wait(client: MediaRenderClient, job: RenderJob, record: Dict[str, Any], deadline: float) -> Dict[str, Any]:
     """Poll until the job ends; a lost poll is retried until the deadline."""
-    job_id = str(record.get("id") or "")
-    if not job_id:
-        raise RenderFailure("bad_response", "The renderer accepted the render but gave no job id.")
-    while record.get("status") not in JOB_TERMINAL:
-        if time.monotonic() >= deadline:
-            minutes = config.SOCIALS_RENDER_MAX_WAIT_SECONDS // 60
-            raise RenderFailure("timed_out", f"The render did not finish within {minutes} minutes.")
-        await asyncio.sleep(config.SOCIALS_RENDER_POLL_SECONDS)
-        try:
-            record = await client.job(job_id)
-        except MediaRenderError as exc:
-            if exc.code == NOT_FOUND or exc.status == 404:
-                raise RenderFailure(NOT_FOUND, "The renderer lost the render (it restarted). Render again.") from exc
-            logger.warning("[Socials] polling render %s for post %s failed: %s", job_id, job.post_id, exc)
+    try:
+        record = await client.wait_for(record, deadline=deadline, poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS)
+    except MediaRenderError as exc:
+        logger.warning("[Socials] waiting on the render of post %s failed: %s", job.post_id, exc)
+        raise _poll_failure(exc) from exc
     if record.get("status") != JOB_DONE:
         error = record.get("error") if isinstance(record.get("error"), dict) else {}
         code = str(error.get("code") or record.get("status") or "failed")
@@ -396,14 +408,12 @@ def _default_session_factory() -> Callable[[], Any]:
 
 
 def _book(job: RenderJob, seconds: float, latency_ms: int) -> None:
-    with usage_scope(
-        request_type=LANE_MEDIA,
-        execution_id=f"{EXECUTION_PREFIX}{job.post_id}",
+    book_render_seconds(
         workspace_id=job.workspace_id,
-    ):
-        UsageTracker.track_media(
-            provider=MEDIA_RENDER_PROVIDER, model_id=RENDER_MODEL_ID, units=seconds, usd=0.0, latency_ms=latency_ms
-        )
+        execution_id=f"{EXECUTION_PREFIX}{job.post_id}",
+        seconds=seconds,
+        latency_ms=latency_ms,
+    )
 
 
 async def run_render(

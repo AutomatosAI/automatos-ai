@@ -1489,8 +1489,16 @@ class WorkflowTemplate(Base):
 # PRD-63: Document Generation Module
 # ===================================================================
 
+# PRD-251 S1.2 (D4): social_image and social_video templates are compositions
+# the media-render service renders; their ``blocks`` shape is core/social_templates.py.
+# The prd251_wave1 migration moves the CHECK below to this list.
+SOCIAL_TEMPLATE_FORMATS = ("social_image", "social_video")
+DOCUMENT_TEMPLATE_FORMATS = ("pdf", "docx", "xlsx") + SOCIAL_TEMPLATE_FORMATS
+
+
 class DocumentTemplate(Base):
-    """Document templates for PDF, DOCX, XLSX generation (PRD-63)"""
+    """Document templates: PDF, DOCX and XLSX (PRD-63), and social image and video
+    compositions (PRD-251 D4)."""
     __tablename__ = 'document_templates'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -1512,6 +1520,8 @@ class DocumentTemplate(Base):
     # PRD-167 S2: canonical block-tree body ({"version", "blocks": [...]}).
     # When present, this is the source of truth and renders to PDF/DOCX via the block
     # renderers; templates without blocks fall back to the legacy template_content path.
+    # PRD-251 D4: a social template's composition instead —
+    # {html, css, variables_schema, sizes, audio_plan}, checked on save.
     blocks = Column(JSONB, nullable=True)
 
     # Metadata
@@ -1529,7 +1539,10 @@ class DocumentTemplate(Base):
     updated_at = Column(DateTime, default=func.now(), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        CheckConstraint("format IN ('pdf', 'docx', 'xlsx')", name='check_document_template_format'),
+        CheckConstraint(
+            "format IN (" + ", ".join(f"'{fmt}'" for fmt in DOCUMENT_TEMPLATE_FORMATS) + ")",
+            name='check_document_template_format',
+        ),
         UniqueConstraint('workspace_id', 'name', 'version', name='uq_template_workspace_name_version'),
         {'extend_existing': True}
     )

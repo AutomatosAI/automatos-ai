@@ -15,7 +15,7 @@ still hand-roll ``replace(tzinfo=timezone.utc)`` and can move here over time.
 
 ``month_window_utc`` is the calendar month a monthly allowance counts in: the
 Auto Live voice minutes (``modules/voice/voice_meter.py``) and the Socials
-render minutes (``modules/socials/render_quota.py``). Moved here from the voice
+render minutes (``core/media_render_quota.py``). Moved here from the voice
 meter (PRD-251 S1.1c) so both meters read the same month.
 """
 from __future__ import annotations

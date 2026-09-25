@@ -21,8 +21,12 @@ from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
+from core.media_render_client import NOT_CONFIGURED, MediaRenderError, MediaRenderUnavailable
+from core.media_render_quota import RenderQuotaExceeded
+from core.social_templates import InvalidVariableValues, SocialTemplateError, is_social_format
 from config import config
 from modules.documents.models import UnresolvedDeliverableError
+from modules.documents.template_service import UnknownTemplateFormat
 from api.document_brand_kit import router as brand_kit_router
 
 logger = logging.getLogger(__name__)
@@ -40,7 +44,7 @@ GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
 
 class TemplateCreateRequest(BaseModel):
     name: str
-    format: str  # pdf, docx, xlsx
+    format: str  # pdf, docx, xlsx, social_image, social_video (PRD-251)
     description: Optional[str] = None
     template_content: Optional[str] = None
     data_schema: dict = Field(default_factory=dict)
@@ -69,7 +73,7 @@ class PreviewBlocksRequest(BaseModel):
 
 class GenerateDocumentRequest(BaseModel):
     title: str
-    format: str  # pdf, docx, xlsx
+    format: str  # pdf, docx, xlsx, social_image, social_video (PRD-251)
     data: dict
     template_name: Optional[str] = None
     template_id: Optional[str] = None
@@ -109,6 +113,40 @@ def _validate_blocks_or_422(blocks: Optional[dict]) -> Optional[dict]:
         raise HTTPException(status_code=422, detail={"message": "Invalid blocks", "errors": e.errors})
 
 
+# PRD-251 S1.2: what a social template's save or render can fail with.
+SOCIAL_TEMPLATE_ERRORS = (SocialTemplateError, UnknownTemplateFormat)
+SOCIAL_RENDER_ERRORS = (SocialTemplateError, RenderQuotaExceeded, MediaRenderError)
+RENDER_NOT_CONFIGURED = "Rendering is not configured on this server."
+RENDER_UNREACHABLE = "The renderer cannot be reached right now. Try again in a few minutes."
+
+
+def _template_error_422(e: ValueError) -> HTTPException:
+    """A social template that breaks its contract, or an unknown format: 422 naming each problem."""
+    errors = e.errors if isinstance(e, SocialTemplateError) else [{"field": "format", "message": str(e)}]
+    return HTTPException(status_code=422, detail={"message": "Invalid template", "errors": errors})
+
+
+def _social_render_error(e: Exception) -> HTTPException:
+    """The answer for a social render that could not run (PRD-251 S1.2)."""
+    if isinstance(e, InvalidVariableValues):
+        return HTTPException(status_code=422, detail={"message": "Invalid template variables", "errors": e.errors})
+    if isinstance(e, SocialTemplateError):
+        return _template_error_422(e)
+    if isinstance(e, RenderQuotaExceeded):
+        return HTTPException(status_code=429, detail=str(e))
+    logger.warning("Social render failed: %s (%s)", e, getattr(e, "code", None))
+    if isinstance(e, MediaRenderUnavailable):
+        return HTTPException(
+            status_code=503, detail=RENDER_NOT_CONFIGURED if e.code == NOT_CONFIGURED else RENDER_UNREACHABLE
+        )
+    if isinstance(e, MediaRenderError) and e.code == "check_failed":
+        return HTTPException(
+            status_code=422,
+            detail={"message": "The composition failed its check; nothing was rendered", "findings": list(e.findings)},
+        )
+    return HTTPException(status_code=502, detail=f"The renderer could not render this template ({getattr(e, 'code', 'error')}).")
+
+
 # ------------------------------------------------------------------
 # Template CRUD
 # ------------------------------------------------------------------
@@ -120,27 +158,34 @@ async def create_template(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Create a new document template."""
+    """Create a new document template.
+
+    PRD-251 S1.2: a social template's composition is checked by the service
+    (variables_schema, sizes, the brand rule); it answers 422 naming each problem.
+    """
     from modules.documents.template_service import DocumentTemplateService
 
     # PRD-167 S2: validate the block body up-front; malformed blocks return 422 with
-    # field-level errors (no silent swallow).
-    normalized_blocks = _validate_blocks_or_422(body.blocks)
+    # field-level errors (no silent swallow). A social composition is no block tree.
+    normalized_blocks = body.blocks if is_social_format(body.format) else _validate_blocks_or_422(body.blocks)
 
     service = DocumentTemplateService(db)
-    template = service.create_template(
-        workspace_id=ctx.workspace_id,
-        name=body.name,
-        format=body.format,
-        description=body.description,
-        template_content=body.template_content,
-        data_schema=body.data_schema,
-        sample_data=body.sample_data,
-        category=body.category,
-        tags=body.tags,
-        created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
-        blocks=normalized_blocks,
-    )
+    try:
+        template = service.create_template(
+            workspace_id=ctx.workspace_id,
+            name=body.name,
+            format=body.format,
+            description=body.description,
+            template_content=body.template_content,
+            data_schema=body.data_schema,
+            sample_data=body.sample_data,
+            category=body.category,
+            tags=body.tags,
+            created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
+            blocks=normalized_blocks,
+        )
+    except SOCIAL_TEMPLATE_ERRORS as e:
+        raise _template_error_422(e)
     return {
         "id": str(template.id),
         "name": template.name,
@@ -215,15 +260,24 @@ async def update_template(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Update a document template."""
+    """Update a document template (a social template's new composition is checked
+    by the service, PRD-251 S1.2)."""
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     # PRD-167 S2: validate blocks before persisting (422 with field-level errors).
+    # A social template's blocks are a composition, checked by the service instead.
     if "blocks" in updates:
-        updates["blocks"] = _validate_blocks_or_422(updates["blocks"])
-    template = service.update_template(template_id, ctx.workspace_id, **updates)
+        current = service.get_template(template_id, ctx.workspace_id)
+        if not current:
+            raise HTTPException(status_code=404, detail="Template not found")
+        if not is_social_format(current.format):
+            updates["blocks"] = _validate_blocks_or_422(updates["blocks"])
+    try:
+        template = service.update_template(template_id, ctx.workspace_id, **updates)
+    except SOCIAL_TEMPLATE_ERRORS as e:
+        raise _template_error_422(e)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"id": str(template.id), "name": template.name, "updated": True}
@@ -288,6 +342,8 @@ async def preview_template(
                 "unknown": e.unknown,
             },
         )
+    except SOCIAL_RENDER_ERRORS as e:
+        raise _social_render_error(e)
     except Exception as e:
         logger.error(f"Document preview failed: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Document preview failed")
@@ -403,6 +459,9 @@ async def generate_document(
                 "unknown": e.unknown,
             },
         )
+    except SOCIAL_RENDER_ERRORS as e:
+        # PRD-251 S1.2: a social format renders through media-render.
+        raise _social_render_error(e)
     except (ValueError, FileNotFoundError) as e:
         logger.warning(f"Document generation validation error: {e}")
         raise HTTPException(status_code=400, detail="Invalid document generation request")
@@ -526,6 +585,9 @@ MIME_TYPES = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    # PRD-251 S1.2: a rendered social template.
+    ".mp4": "video/mp4",
+    ".png": "image/png",
 }
 
 

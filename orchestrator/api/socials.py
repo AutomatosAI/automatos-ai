@@ -50,6 +50,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -58,7 +59,9 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
 from core.utils.background_tasks import launch_guarded
-from modules.socials import media_store, render, render_quota, service
+from modules.documents.brand_kit import get_brand_kit
+from modules.documents.brand_logo import brand_kit_for_render
+from modules.socials import media_store, render, service
 from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.settings import require_socials_enabled
 
@@ -151,7 +154,7 @@ def _actor(ctx: RequestContext) -> str:
     return str(actor)
 
 
-def _raise_for(exc: service.SocialsError) -> NoReturn:
+def _raise_for(exc: Exception) -> NoReturn:
     if isinstance(exc, service.UnsourcedClaims):
         raise HTTPException(status_code=422, detail={"message": str(exc), "claims": exc.names})
     if isinstance(exc, service.StaleContent):
@@ -218,17 +221,24 @@ def _workspace(db: Session, ctx: RequestContext) -> Workspace:
 
 
 def _render_template(db: Session, ctx: RequestContext, post: SocialPost) -> Any:
-    """The post's template (its ``blocks``), from the caller's workspace only."""
+    """The post's template (its format and ``blocks``), from the caller's workspace only."""
     template = None
     if post.template_id is not None:
         template = (
-            db.query(DocumentTemplate.id, DocumentTemplate.blocks)
+            db.query(DocumentTemplate.id, DocumentTemplate.format, DocumentTemplate.blocks)
             .filter(DocumentTemplate.id == post.template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
             .first()
         )
     if template is None:
         raise render.NotRenderable("this post has no template to render: choose a social template first")
     return template
+
+
+def _render_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The workspace brand kit from its ``settings``, render-ready (an uploaded
+    logo inlined, which may read storage). It lives in the documents module,
+    which modules/socials may not import, so the render bundle gets it here."""
+    return brand_kit_for_render(get_brand_kit(settings))
 
 
 def _launch_render(job: render.RenderJob) -> None:
@@ -470,11 +480,14 @@ async def render_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.assert_can_render(post)
-        bundle = render.bundle_for(post, _render_template(db, ctx, post))
-        render_quota.enforce_render_quota(db, _workspace(db, ctx))
+        template = _render_template(db, ctx, post)
+        workspace = _workspace(db, ctx)
+        brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
+        bundle = render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "")
+        render_quota.enforce_render_quota(db, workspace)
         await render.ensure_renderer()
         service.start_render(post, actor)
-    except service.SocialsError as exc:
+    except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         _raise_for(exc)
     saved = _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
     _launch_render(

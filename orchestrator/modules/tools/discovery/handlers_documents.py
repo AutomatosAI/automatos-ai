@@ -17,7 +17,9 @@ SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS = 1200
 
 
 async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-167 S6: list the workspace's document templates for an agent."""
+    """PRD-167 S6: list the workspace's document templates for an agent (a social
+    composition is never block-editable, PRD-251 S1.2)."""
+    from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
@@ -33,7 +35,7 @@ async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]
                 "description": t.description,
                 "format": t.format,
                 "category": t.category,
-                "has_blocks": bool(t.blocks),
+                "has_blocks": bool(t.blocks) and not is_social_format(t.format),
             }
             for t in templates
         ],
@@ -42,9 +44,15 @@ async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 
 async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-167 S6: describe the data a template needs (variable chips + data.* fields)."""
+    """PRD-167 S6: describe the data a template needs (variable chips + data.* fields).
+
+    PRD-251 S1.2: a social template's data fields are its ``variables_schema``,
+    which the answer carries whole (types, defaults, claims) with its sizes.
+    """
+    from core.social_templates import is_social_format
     from modules.documents.blocks import collect_variable_paths, validate_blocks
     from modules.documents.template_service import DocumentTemplateService
+    from modules.documents.template_summary import social_variable_names
     from modules.documents.variables import CATALOG_BY_PATH
 
     template_id_raw = params.get("template_id")
@@ -62,7 +70,10 @@ async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str,
 
     variables: List[Dict[str, Any]] = []
     data_fields: List[str] = []
-    if template.blocks:
+    social = is_social_format(template.format)
+    if social:
+        data_fields = [f"data.{name}" for name in social_variable_names(template.blocks)]
+    elif template.blocks:
         for path in sorted(collect_variable_paths(validate_blocks(template.blocks))):
             if path.startswith("data."):
                 data_fields.append(path)
@@ -70,18 +81,23 @@ async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str,
                 entry = CATALOG_BY_PATH[path]
                 variables.append({"path": path, "label": entry["label"], "category": entry["category"]})
 
-    return {
+    schema = {
         "success": True,
         "id": str(template.id),
         "name": template.name,
         "format": template.format,
         "description": template.description,
-        "uses_blocks": bool(template.blocks),
+        "uses_blocks": bool(template.blocks) and not social,
         "variables": variables,           # auto-resolved chips (user/company/brand/date)
         "data_fields": data_fields,       # data.* fields you must supply at generation
         "data_schema": template.data_schema or {},  # legacy templates
         "sample_data": template.sample_data or {},
     }
+    if social:
+        blocks = template.blocks if isinstance(template.blocks, dict) else {}
+        schema["variables_schema"] = blocks.get("variables_schema") or {}
+        schema["sizes"] = blocks.get("sizes") or []
+    return schema
 
 
 async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

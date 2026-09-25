@@ -1,17 +1,39 @@
 """
 Template CRUD service for document generation (PRD-63).
+
+PRD-251 S1.2 (D4): a ``social_image`` / ``social_video`` template is checked on
+create and update here (the API's ``format`` field is untyped, so the service is
+where the rule lives): its ``blocks`` must be a composition
+``{html, css, variables_schema, sizes, audio_plan}`` whose variables_schema
+declares every variable it uses, and it may not hardcode a colour, a font or a
+logo (``core/social_templates.py``). A template that breaks the contract raises
+:class:`~core.social_templates.SocialTemplateError` with every problem named.
 """
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.models.core import DocumentTemplate
+from core.models.core import DOCUMENT_TEMPLATE_FORMATS, DocumentTemplate
+from core.social_templates import is_social_format, validate_social_blocks
 
 logger = logging.getLogger(__name__)
+
+
+class UnknownTemplateFormat(ValueError):
+    """The format is none of DOCUMENT_TEMPLATE_FORMATS."""
+
+
+def checked_blocks(format: str, blocks: Any) -> Any:
+    """``blocks`` as a template of ``format`` stores them: a social template's
+    composition checked (variables_schema, sizes, the brand rule), any other
+    format's unchanged (the API checks PRD-167 block trees)."""
+    if format not in DOCUMENT_TEMPLATE_FORMATS:
+        raise UnknownTemplateFormat(f"format must be one of {list(DOCUMENT_TEMPLATE_FORMATS)}")
+    return validate_social_blocks(blocks, format) if is_social_format(format) else blocks
 
 
 class DocumentTemplateService:
@@ -38,7 +60,9 @@ class DocumentTemplateService:
         """Create a new document template.
 
         ``blocks`` (PRD-167 S2) is the canonical block-tree body; when present it is the
-        render source of truth.
+        render source of truth. For a social format it is the composition, checked
+        (``checked_blocks``: html, css, variables_schema, sizes, audio_plan) before
+        anything is written.
         """
         template = DocumentTemplate(
             workspace_id=workspace_id,
@@ -52,7 +76,7 @@ class DocumentTemplateService:
             category=category,
             tags=tags or [],
             created_by=created_by,
-            blocks=blocks,
+            blocks=checked_blocks(format, blocks),
         )
         self.db.add(template)
         self.db.commit()
@@ -104,10 +128,19 @@ class DocumentTemplateService:
         return query.order_by(DocumentTemplate.name, DocumentTemplate.version.desc()).all()
 
     def update_template(self, template_id: UUID, workspace_id: UUID, **kwargs) -> Optional[DocumentTemplate]:
-        """Update specified fields on a template (PRD-156 S4: workspace-scoped)."""
+        """Update specified fields on a template (PRD-156 S4: workspace-scoped).
+
+        A social template's new ``blocks`` (or a change of format) is checked like
+        a create; nothing is written when it breaks the contract.
+        """
         template = self.get_template(template_id, workspace_id)
         if not template:
             return None
+        if "blocks" in kwargs or "format" in kwargs:
+            kwargs = {
+                **kwargs,
+                "blocks": checked_blocks(kwargs.get("format", template.format), kwargs.get("blocks", template.blocks)),
+            }
         for key, value in kwargs.items():
             if hasattr(template, key) and key not in ("id", "workspace_id", "created_at"):
                 setattr(template, key, value)

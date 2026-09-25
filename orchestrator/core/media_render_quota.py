@@ -1,9 +1,16 @@
-"""PRD-251 S1.1c: the monthly render quota.
+"""The monthly render quota, and the render minutes it counts (PRD-251 S1.1c).
 
 Every plan gets Socials; plans differ only in render minutes a month (owner,
 2026-09-23): Basic 10, Pro 60, Business 240, as ``render_minutes_month`` on
 each tier in ``config.PLAN_TIERS``. Enterprise and the local edition have no
 quota until the owner sets one.
+
+The quota belongs to the renderer, not to one feature. A Socials post's render
+(``modules/socials/render.py``) and ``generate_document`` with a social format
+(``modules/documents/generation_service.py``) both check it before they call
+media-render, and both book what they rendered. It lives in core, beside the
+media-render client, because those two feature modules may not import each
+other (``orchestrator/.importlinter``).
 
 * **The quota.** The workspace's ``plan_limits['render_minutes_month']`` (plan
   assignment writes it, ``services/plan_tiers.plan_limits_for_tier``), or, for
@@ -11,8 +18,9 @@ quota until the owner sets one.
   missing plan counts as the entry tier. ``0``, ``None`` or a negative number is
   no quota, as for ``max_agents``. The local edition never has one.
 * **Minutes used.** The month's render units on the ``media`` lane (US-103):
-  every finished render books its rendered seconds, rounded up, as units at $0
-  under the ``media_render`` provider. The month is the UTC calendar month.
+  every finished render books its rendered seconds (:func:`book_render_seconds`),
+  rounded up, as units at $0 under the ``media_render`` provider. The month is
+  the UTC calendar month.
 * **The refusal.** A render starts only while the month has minutes left, and
   it is refused BEFORE anything reaches media-render (:class:`RenderQuotaExceeded`,
   HTTP 429). The render that crosses the line finishes and counts in full.
@@ -29,10 +37,10 @@ from sqlalchemy import func
 
 from config import config
 from core.llm.providers import MEDIA_RENDER_PROVIDER
-from core.llm.usage_context import LANE_MEDIA
+from core.llm.usage_context import LANE_MEDIA, usage_scope
+from core.llm.usage_tracker import UsageTracker
 from core.models.core import LLMUsage
 from core.utils.timestamps import month_window_utc, utc_iso
-from modules.socials.service import SocialsError
 from services.plan_tiers import get_tier
 
 logger = logging.getLogger(__name__)
@@ -43,10 +51,12 @@ ENTRY_TIER = "basic"
 SECONDS_PER_MINUTE = 60
 # How the tab shows minutes: one decimal place.
 MINUTES_DECIMALS = 1
+# The booking's model id: the renderer's engine (core/llm/providers.py MEDIA_RENDER_PROVIDER).
+RENDER_MODEL_ID = "hyperframes"
 
 
-class RenderQuotaExceeded(SocialsError):
-    """The workspace has used its render minutes for this month."""
+class RenderQuotaExceeded(Exception):
+    """The workspace has used its render minutes for this month; the message says so."""
 
 
 def _quota_minutes(value: Any, source: str) -> Optional[float]:
@@ -54,7 +64,7 @@ def _quota_minutes(value: Any, source: str) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        logger.warning("[Socials] %s %s=%r is not a number of minutes; no render quota applies", source, QUOTA_KEY, value)
+        logger.warning("[MediaRender] %s %s=%r is not a number of minutes; no render quota applies", source, QUOTA_KEY, value)
         return None
     return float(value) if value > 0 else None
 
@@ -153,8 +163,16 @@ def enforce_render_quota(db: Any, workspace: Any, now: Optional[datetime] = None
     reading = render_quota(db, workspace, now)
     if reading.exhausted:
         logger.info(
-            "[Socials] render refused for workspace %s: %ss used of %s min",
+            "[MediaRender] render refused for workspace %s: %ss used of %s min",
             workspace.id, reading.used_seconds, reading.quota_minutes,
         )
         raise RenderQuotaExceeded(reading.refusal())
     return reading
+
+
+def book_render_seconds(*, workspace_id: Any, execution_id: str, seconds: float, latency_ms: int) -> None:
+    """Book a finished render's seconds on the media lane at $0: the units the quota counts."""
+    with usage_scope(request_type=LANE_MEDIA, execution_id=execution_id, workspace_id=workspace_id):
+        UsageTracker.track_media(
+            provider=MEDIA_RENDER_PROVIDER, model_id=RENDER_MODEL_ID, units=seconds, usd=0.0, latency_ms=latency_ms
+        )

@@ -66,7 +66,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-23 (PRD-251 Socials): prd251_socials chains onto kb_multimodal_tables too
 # — the ONE Socials migration (the master-switch seed, then the social_posts
 # tables) — and f049_prd251_merge_heads joins it with F125 into the single head.
-EXPECTED_HEAD = "f049_prd251_merge_heads"
+# 2026-09-25 (PRD-251 Wave 1): prd251_wave1 chains onto it — the ONE migration of
+# the video engine wave (document_templates.format gains social_image / social_video).
+EXPECTED_HEAD = "prd251_wave1"
 
 
 def _literal(node: ast.AST):

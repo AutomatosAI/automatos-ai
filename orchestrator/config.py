@@ -2102,7 +2102,7 @@ orchestrator_config = config
 #
 # PRD-251 S1.1c (owner, 2026-09-23): every plan gets Socials, and plans differ
 # only in hosting: ``render_minutes_month`` is the monthly render quota
-# (modules/socials/render_quota.py). ``0`` or no key means no quota, as for
+# (core/media_render_quota.py). ``0`` or no key means no quota, as for
 # max_agents: enterprise has none until the owner sets one, and the local
 # edition never has one.
 # ---------------------------------------------------------------------------

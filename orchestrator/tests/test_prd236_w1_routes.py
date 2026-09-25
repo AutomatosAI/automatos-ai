@@ -202,7 +202,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = "kb_multimodal_tables"' in socials
     joined = (versions / "f049_prd251_merge_heads.py").read_text()
     assert '"f125_playbook_timeouts_seconds"' in joined and '"prd251_socials"' in joined
-    assert 'EXPECTED_HEAD = "f049_prd251_merge_heads"' in guard
+    # 2026-09-25: prd251_wave1 chains onto the merge (PRD-251 Wave 1's one migration);
+    # the guard follows it.
+    wave1 = (versions / "prd251_wave1.py").read_text()
+    assert 'down_revision = "f049_prd251_merge_heads"' in wave1
+    assert 'EXPECTED_HEAD = "prd251_wave1"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
