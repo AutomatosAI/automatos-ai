@@ -86,6 +86,23 @@ class WidgetMessageOut(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _retrieval_team(db: Session, auth: WidgetAuthContext, agent_id: Optional[int]) -> Optional[str]:
+    """PRD-124: the team that scopes a widget chat's documents. F155: the key's
+    team lock wins, as /search and /docs already honour it; otherwise the
+    answering agent's team."""
+    from core.team_access import effective_team
+
+    agent_team: Optional[str] = None
+    try:
+        from core.models.core import Agent
+
+        agent_row = db.query(Agent.team).filter(Agent.id == agent_id).first()
+        agent_team = agent_row.team if agent_row else None
+    except Exception:
+        logger.debug("Could not resolve agent team for agent_id=%s", agent_id)
+    return effective_team(auth.team, agent_team)
+
+
 def _get_widget_user_id(db: Session) -> int:
     """Return a default user id for widget-initiated chats.
 
@@ -358,14 +375,8 @@ async def widget_chat(
             effective_agent_id,
         )
 
-    # PRD-124: Resolve agent team for document scoping
-    agent_team: Optional[str] = None
-    try:
-        from core.models.core import Agent
-        agent_row = db.query(Agent.team).filter(Agent.id == effective_agent_id).first()
-        agent_team = agent_row.team if agent_row else None
-    except Exception:
-        logger.debug("Could not resolve agent team for agent_id=%s", effective_agent_id)
+    # PRD-124: the team that scopes this chat's documents.
+    agent_team = _retrieval_team(db, auth, effective_agent_id)
 
     # ------------------------------------------------------------------
     # Stream
