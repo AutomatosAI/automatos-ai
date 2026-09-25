@@ -831,7 +831,7 @@ class CoordinatorService:
         # Budget-gate: drop the digest rather than spend tokens we don't have.
         try:
             from modules.coordination.dispatcher import BudgetStatus, MissionDispatcher
-            status = MissionDispatcher._get_budget_status(run)
+            status = MissionDispatcher._get_budget_status(run, db)
         except Exception:
             status, BudgetStatus = None, None
         if status is not None and status in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED):
@@ -2437,10 +2437,17 @@ class CoordinatorService:
         task_tokens = result.get("execution", {}).get("tokens_used", 0)
         if task_tokens:
             run.tokens_used = (run.tokens_used or 0) + task_tokens
+            # F153: a runtime (Claude Code session) task runs on the owner's
+            # subscription; its tokens are recorded for visibility, never spent.
+            from modules.coordination.dispatcher import SESSION_TOKENS_KEY, session_tokens
+            from core.cli_runtime import RUNTIME_CLI
+
+            if result.get("runtime") == RUNTIME_CLI:
+                run.config = {**(run.config or {}), SESSION_TOKENS_KEY: session_tokens(run) + int(task_tokens)}
 
             if (
                 run.token_budget_estimate
-                and run.tokens_used > run.token_budget_estimate * 1.5
+                and run.tokens_used - session_tokens(run) > run.token_budget_estimate * 1.5
             ):
                 emit_event(
                     db=db,
@@ -3409,21 +3416,31 @@ class CoordinatorService:
     ) -> OrchestrationRun:
         """Resume a paused mission.
 
-        If the mission was paused due to budget exceeded, auto-extend the
-        budget by 25% so the dispatcher doesn't immediately re-pause.
+        F153: a run at 80% or more of its budget resumes with the budget raised
+        to twice what it has spent, in the dollars the dispatcher pauses on
+        (MissionDispatcher._cost_used_usd), so it does not pause again at once:
+        an explicit cost_ceiling is raised in dollars, a plan's token estimate
+        to the tokens the flat rate prices at that figure.
         """
+        from modules.policy.pricing import flat_rate_tokens
+
         run = self._get_run(db, run_id)
 
-        # Auto-extend budget when tokens_used >= 80% of budget (prevents re-pause loop)
         budget = run.token_budget_estimate or 0
         used = run.tokens_used or 0
-        if budget > 0 and used >= budget * 0.8:
-            new_budget = int(used * 2.0)
+        spent = MissionDispatcher._cost_used_usd(run, db)
+        ceiling = MissionDispatcher._budget_ceiling_usd(run)
+        extended = ceiling > 0 and spent >= ceiling * 0.8
+        if extended:
+            config = run.config or {}
+            if isinstance(config.get("cost_ceiling"), (int, float)) and config["cost_ceiling"] > 0:
+                run.config = {**config, "cost_ceiling": round(2.0 * spent, 2)}
+            else:
+                run.token_budget_estimate = flat_rate_tokens(2.0 * spent)
             logger.info(
-                "Mission %s: auto-extending budget %d → %d (tokens_used=%d)",
-                run_id, budget, new_budget, used,
+                "Mission %s: budget $%.2f → $%.2f on resume ($%.2f spent)",
+                run_id, ceiling, MissionDispatcher._budget_ceiling_usd(run), spent,
             )
-            run.token_budget_estimate = new_budget
 
         transition_run(
             db=db,
@@ -3440,10 +3457,13 @@ class CoordinatorService:
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
             payload={
-                "budget_extended": budget > 0 and used >= budget,
+                "budget_extended": extended,
                 "old_budget": budget,
                 "new_budget": run.token_budget_estimate,
                 "tokens_used": used,
+                "spent_usd": round(spent, 4),
+                "old_ceiling_usd": round(ceiling, 4),
+                "new_ceiling_usd": round(MissionDispatcher._budget_ceiling_usd(run), 4),
             },
         )
 

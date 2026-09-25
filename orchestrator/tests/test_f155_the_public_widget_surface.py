@@ -355,11 +355,12 @@ def test_a_widget_turn_cannot_change_a_mission(monkeypatch, handler, decision, e
                         lambda db, ws: {"policy": "auto_below_budget", "approval_dollar_ceiling": 5.0,
                                         "auto_proceed_after_seconds": None})
     run = NS(id=uuid4(), state="paused", stop_reason="budget_exhausted", goal="g",
-             token_budget_estimate=175_000, tokens_used=429_423)
+             token_budget_estimate=175_000, tokens_used=429_423, config={})
 
     def decide(surface):
         coordinator = MagicMock()
-        updated = NS(id=run.id, state="running", goal="g", token_budget_estimate=858_846, tokens_used=429_423)
+        updated = NS(id=run.id, state="running", goal="g", token_budget_estimate=858_846, tokens_used=429_423,
+                     config={})
         setattr(coordinator, decision,
                 AsyncMock(return_value=updated) if decision == "replan_mission" else MagicMock(return_value=updated))
         with turn_surface(surface), patch.object(missions, "_resolve_run", return_value=(run, None)), \

@@ -489,16 +489,18 @@ async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return err
     from services.coordinator_service import CoordinatorService
 
+    from modules.coordination.dispatcher import MissionDispatcher
+
     actor_id = _actor(params)
-    budget_before = run.token_budget_estimate or 0
+    ceiling_before = MissionDispatcher._budget_ceiling_usd(run)
     try:
         updated = CoordinatorService().resume_mission(db, run.id, actor_id)
         reply = _ok(updated, "resumed → running")
         # F153: say what the budget was extended to, when resuming raised it.
-        budget_after = updated.token_budget_estimate or 0
-        if budget_after > budget_before:
-            reply["message"] += (f" Its token budget was raised from {budget_before:,} to {budget_after:,} "
-                                 f"({updated.tokens_used or 0:,} used so far).")
+        ceiling_after = MissionDispatcher._budget_ceiling_usd(updated)
+        if ceiling_after > ceiling_before:
+            reply["message"] += (f" Its budget was raised from ${ceiling_before:,.2f} to ${ceiling_after:,.2f} "
+                                 f"(${MissionDispatcher._cost_used_usd(updated, db):,.2f} spent so far).")
         return reply
     except ValueError as e:
         return {"success": False, "error": str(e)}

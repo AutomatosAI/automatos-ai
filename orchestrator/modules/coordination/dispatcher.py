@@ -51,6 +51,45 @@ from services.orchestration_state import (
 
 logger = logging.getLogger(__name__)
 
+# F153: a runtime (Claude Code session) task's tokens, kept on the run config
+# for visibility. They run on the owner's subscription and are never spend.
+SESSION_TOKENS_KEY = "session_tokens"
+
+
+def session_tokens(run: Any) -> int:
+    """The run's tokens that ran in Claude Code sessions (never spend)."""
+    try:
+        return max(0, int((getattr(run, "config", None) or {}).get(SESSION_TOKENS_KEY) or 0))
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def _booked_spend(db: Optional[Session], run: Any) -> tuple:
+    """The run's API calls as ``llm_usage`` booked them: ``(dollars, tokens)``.
+    Every call in a mission's scope books ``execution_id = mission:<run id>``;
+    a ``session``-lane row is the owner's subscription, not spend. Unreadable
+    (or no db) is (0, 0), and the caller prices the tokens instead."""
+    from numbers import Number
+
+    run_id, workspace_id = getattr(run, "id", None), getattr(run, "workspace_id", None)
+    if db is None or run_id is None or workspace_id is None:
+        return 0.0, 0
+    try:
+        with db.begin_nested():
+            row = db.execute(
+                text("SELECT COALESCE(SUM(total_cost), 0), COALESCE(SUM(total_tokens), 0) FROM llm_usage "
+                     "WHERE workspace_id = CAST(:ws AS uuid) AND execution_id = :ref "
+                     "AND COALESCE(request_type, '') <> 'session'"),
+                {"ws": str(workspace_id), "ref": f"mission:{run_id}"},
+            ).first()
+    except Exception:  # noqa: BLE001 — the budget prices the tokens instead
+        logger.warning("F153: llm_usage unreadable for run %s — pricing its tokens", run_id, exc_info=True)
+        return 0.0, 0
+    cost, tokens = (row[0], row[1]) if row else (0, 0)
+    if not isinstance(cost, Number) or not isinstance(tokens, Number):
+        return 0.0, 0
+    return float(cost), int(tokens)
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -456,26 +495,35 @@ class MissionDispatcher:
         return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
 
     @staticmethod
-    def _budget_pause_detail(run: OrchestrationRun) -> str:
-        """F153: what a budget pause tells the owner — the measure the gate
-        used, spent against the ceiling."""
+    def _budget_pause_detail(run: OrchestrationRun, db: Optional[Session] = None) -> str:
+        """F153: what a budget pause tells the owner — the spend the gate
+        measured against the ceiling, in dollars."""
+        spent = MissionDispatcher._cost_used_usd(run, db)
+        detail = f"Paused: spent ${spent:,.2f} of the ${MissionDispatcher._budget_ceiling_usd(run):,.2f} budget"
         ceiling = (run.config or {}).get("cost_ceiling")
-        if isinstance(ceiling, (int, float)) and ceiling > 0:
-            used = f"budget used ${MissionDispatcher._cost_used_usd(run):,.2f} of ${float(ceiling):,.2f}"
-        else:
-            used = f"token budget used {run.tokens_used or 0:,} of {run.token_budget_estimate or 0:,}"
-        return f"Paused: {used} — raise the budget or resume"
+        if not (isinstance(ceiling, (int, float)) and ceiling > 0):
+            detail += f" (the plan's {run.token_budget_estimate or 0:,}-token estimate)"
+        free = session_tokens(run)
+        if free:
+            detail += f"; {free:,} tokens ran in Claude Code sessions at no cost"
+        return detail + " — raise the budget or resume"
 
     @staticmethod
-    def _cost_used_usd(run: OrchestrationRun) -> float:
-        """Actual dollar cost incurred so far (tokens_used priced through the
-        one pricing source, PRD-192 S3)."""
+    def _cost_used_usd(run: OrchestrationRun, db: Optional[Session] = None) -> float:
+        """F153: the run's real spend so far, in dollars. Its API calls count at
+        their ``llm_usage`` cost (the reconciler's and verifier's included), and
+        any API tokens ``llm_usage`` has not booked at the flat rate (the one
+        pricing source, PRD-192 S3). A runtime (Claude Code session) task runs
+        on the owner's subscription: its tokens are recorded, never spent."""
         from modules.policy import pricing as _pricing
 
-        return _pricing.price_total_tokens_usd(None, None, run.tokens_used or 0)
+        booked_cost, booked_tokens = _booked_spend(db, run)
+        api_tokens = max(0, (run.tokens_used or 0) - session_tokens(run))
+        return booked_cost + _pricing.price_total_tokens_usd(None, None, max(0, api_tokens - booked_tokens))
 
     @staticmethod
-    def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
+    def _get_budget_status(run: OrchestrationRun, db: Optional[Session] = None,
+                           used_usd: Optional[float] = None) -> BudgetStatus:
         """Budget health as a fraction of the DOLLAR ceiling consumed (PRD-163 S5:
         $ ceilings replace the token-estimate pause). HEALTHY when no ceiling is
         set (unlimited).
@@ -489,7 +537,7 @@ class MissionDispatcher:
 
         band = budget_status(
             ceiling_usd=MissionDispatcher._budget_ceiling_usd(run),
-            used_usd=MissionDispatcher._cost_used_usd(run),
+            used_usd=MissionDispatcher._cost_used_usd(run, db) if used_usd is None else used_usd,
         )
         # Map the shared band onto the mission's BudgetStatus enum (same tiers).
         return {
@@ -522,7 +570,8 @@ class MissionDispatcher:
         if config.get("budget_pause_disabled"):
             return "allow"
 
-        status = MissionDispatcher._get_budget_status(run)
+        used_usd = MissionDispatcher._cost_used_usd(run, db)
+        status = MissionDispatcher._get_budget_status(run, used_usd=used_usd)
         task_type = getattr(task, "task_type", None) or ""
 
         # Priority task types that dispatch even at CRITICAL budget
@@ -534,7 +583,7 @@ class MissionDispatcher:
         if status == BudgetStatus.WARNING:
             logger.warning(
                 "Budget WARNING for run %s: $%.2f/$%.2f used — dispatching task %s anyway",
-                run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd, task.id,
+                run.id, used_usd, ceiling_usd, task.id,
             )
             emit_event(
                 db=db,
@@ -543,7 +592,7 @@ class MissionDispatcher:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="dispatcher",
                 payload={
-                    "cost_used_usd": round(MissionDispatcher._cost_used_usd(run), 4),
+                    "cost_used_usd": round(used_usd, 4),
                     "cost_ceiling_usd": round(ceiling_usd, 4),
                     "tokens_used": run.tokens_used or 0,
                     "task_id": str(task.id),
@@ -567,7 +616,7 @@ class MissionDispatcher:
         # EXCEEDED
         logger.warning(
             "Budget EXCEEDED for run %s: $%.2f/$%.2f — blocking dispatch",
-            run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd,
+            run.id, used_usd, ceiling_usd,
         )
         return "block"
 
@@ -696,7 +745,7 @@ class MissionDispatcher:
                     actor_id="dispatcher",
                     reason="Budget exceeded — mission paused",
                     stop_reason=StopReason.BUDGET_EXHAUSTED.value,
-                    stop_detail=MissionDispatcher._budget_pause_detail(run),
+                    stop_detail=MissionDispatcher._budget_pause_detail(run, db),
                 )
                 results.append(DispatchResult(
                     dispatched=False,
@@ -751,7 +800,7 @@ class MissionDispatcher:
                 actor_id="dispatcher",
                 reason="Budget critical — all remaining tasks deferred, mission paused",
                 stop_reason=StopReason.BUDGET_EXHAUSTED.value,
-                stop_detail=MissionDispatcher._budget_pause_detail(run),
+                stop_detail=MissionDispatcher._budget_pause_detail(run, db),
             )
 
         logger.info(
