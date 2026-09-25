@@ -658,3 +658,53 @@ async def test_a_call_made_for_nobody_is_refused_an_admin_only_action():
         reply = await executor.execute("platform_f154_probe", {}, widget_ctx)
     assert reply.get("permission_denied") is True
     handler.assert_not_awaited()
+
+
+def test_a_widget_turn_is_for_nobody_and_a_dashboard_turn_for_its_user():
+    widget, dashboard = _make_service(), _make_service()
+    widget.widget_mode = True
+    widget._bind_turn_person(_WIDGET_CHAT_OWNER)
+    dashboard._bind_turn_person(7)
+    assert (widget._viewer_subject_id, widget._driving_user_id) == (None, None)
+    assert (dashboard._viewer_subject_id, dashboard._driving_user_id) == ("user:7", 7)
+
+
+async def test_a_turn_binds_its_person_before_it_streams():
+    svc = _make_service()
+    svc.widget_mode = True
+    svc._reset_turn_retrieval = lambda: None
+    bound: List[Any] = []
+    svc._bind_turn_person = bound.append
+    turn = svc._stream_response_with_agent_scoped(
+        chat_id="widget-chat-1", messages=[{"role": "user", "content": "hi"}],
+        agent_id=_AGENT_ID, user_id=_WIDGET_CHAT_OWNER,
+    )
+    try:
+        await turn.__anext__()
+    except Exception:  # noqa: BLE001 — the bare service stops the turn right after
+        pass
+    finally:
+        await turn.aclose()
+    assert bound == [_WIDGET_CHAT_OWNER]
+
+
+async def test_a_widget_turn_stores_no_memory():
+    """The visitor's words never become anyone's memory; a dashboard turn's
+    still do, under its user."""
+    stored = {}
+    for widget_mode in (True, False):
+        svc = _make_service()
+        svc.widget_mode = widget_mode
+        store = AsyncMock(return_value=True)
+        svc._smart_chat = SimpleNamespace(
+            store=store,
+            orchestrator=SimpleNamespace(memory_manager=SimpleNamespace(_last_l3_facts_stored=0)),
+        )
+        async for _chunk in svc._post_response(
+            "remember that refunds are free for me", "Noted.", "chat-1", SimpleNamespace(),
+            _AGENT_ID, SimpleNamespace(usage=None), None, user_id=7,
+        ):
+            pass
+        stored[widget_mode] = store.await_args
+    assert stored[True] is None
+    assert stored[False].kwargs["subject_id"] == "user:7"

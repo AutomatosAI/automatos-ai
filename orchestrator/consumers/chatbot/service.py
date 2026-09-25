@@ -1445,6 +1445,20 @@ class StreamingChatService:
 
         return use_tools, _composio_result
 
+    def _bind_turn_person(self, user_id: Optional[int]) -> None:
+        """Remember who this turn is for.
+
+        PRD-206 S7: the driving human is the viewer for the Q7 private-scope
+        recall guard (``user_id`` is the INTERNAL integer id — the value the
+        PRD-196 subject tag carries at store time). PRD-233 S6: the same id
+        seeds the greeting (_prepare_llm_messages → resolve_known_user_name).
+        F154: a widget turn is an anonymous visitor's, so it is for nobody —
+        the widget's user_id only owns the chat row.
+        """
+        person = None if self.widget_mode else user_id
+        self._viewer_subject_id = f"user:{person}" if person else None
+        self._driving_user_id = person
+
     # ─────────────────────────────────────────────────────────────────────
     # Post-response: memory, metrics, eval
     # ─────────────────────────────────────────────────────────────────────
@@ -1477,8 +1491,10 @@ class StreamingChatService:
         # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
         subject_id = f"user:{user_id}" if user_id else None
 
-        # Store memory via SmartChatIntegration
-        if latest_text and full_response and smart_chat:
+        # Store memory via SmartChatIntegration. F154: a widget turn is an
+        # anonymous visitor's, so it stores no memory; its transcript stays in
+        # the chat tables.
+        if latest_text and full_response and smart_chat and not self.widget_mode:
             try:
                 _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
                 _mm = smart_chat.orchestrator.memory_manager
@@ -2538,15 +2554,7 @@ class StreamingChatService:
         # PRD-185 S7: start the turn with clean retrieval provenance.
         self._reset_turn_retrieval()
 
-        # PRD-206 S7: the driving human as viewer for the Q7 private-scope
-        # recall guard (user_id here is the INTERNAL integer id — the same
-        # value the PRD-196 subject tag carries at store time). F154: a widget
-        # visitor is nobody — the widget's user_id only owns the chat row.
-        _person = None if self.widget_mode else user_id
-        self._viewer_subject_id = f"user:{_person}" if _person else None
-        # PRD-233 S6: the same integer id seeds the greeting (see
-        # _prepare_llm_messages → resolve_known_user_name).
-        self._driving_user_id = _person
+        self._bind_turn_person(user_id)
 
         try:
             # Ensure workspace_id is available
