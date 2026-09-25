@@ -4505,13 +4505,17 @@ class CoordinatorService:
             return None
 
         verification_service = VerificationService()
+        # F153: the consistency check's calls are the mission's spend, booked to it.
+        from core.llm.usage_context import usage_scope
 
         try:
-            result = await verification_service.verify_cross_task_consistency(
-                run_id=run.id,
-                goal=run.goal or "",
-                task_outputs=task_outputs,
-            )
+            with usage_scope(request_type="verifier", execution_id=f"mission:{run.id}",
+                             workspace_id=run.workspace_id):
+                result = await verification_service.verify_cross_task_consistency(
+                    run_id=run.id,
+                    goal=run.goal or "",
+                    task_outputs=task_outputs,
+                )
 
             # Emit consistency event
             emit_event(

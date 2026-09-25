@@ -407,18 +407,23 @@ class MissionReconciler:
             # becomes durable per task rather than at end-of-tick.
             end_open_transaction(db)
 
-            # Run verification
+            # Run verification. F153: the verifier's calls are the mission's
+            # spend, booked to it in llm_usage like its tasks' calls.
+            from core.llm.usage_context import usage_scope
+
             try:
-                result: VerificationResult = await verification_service.verify_task(
-                    task_title=t_title,
-                    task_description=t_desc,
-                    output=t_output,
-                    verification_criteria=criteria,
-                    executor_model=executor_model,
-                    run_id=run_id,
-                    task_id=t_id,
-                    definition_of_done=t_dod,
-                )
+                with usage_scope(request_type="verifier", execution_id=f"mission:{run_id}",
+                                 workspace_id=run.workspace_id):
+                    result: VerificationResult = await verification_service.verify_task(
+                        task_title=t_title,
+                        task_description=t_desc,
+                        output=t_output,
+                        verification_criteria=criteria,
+                        executor_model=executor_model,
+                        run_id=run_id,
+                        task_id=t_id,
+                        definition_of_done=t_dod,
+                    )
             except Exception:
                 logger.error(
                     "Verification service error for task %s", task.id,

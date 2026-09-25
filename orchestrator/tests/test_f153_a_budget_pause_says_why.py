@@ -188,3 +188,26 @@ def test_a_mission_s_creator_cannot_seed_the_coordinators_bookkeeping(mock_db):
     run = asyncio.run(CoordinatorService().create_mission(db=mock_db, workspace_id=uuid4(), goal="g",
                                                           created_by="user_test", config=SEEDED))
     assert run.config == {"async_planning": True, "max_retries": 2}
+
+
+def test_the_verifiers_calls_are_booked_to_the_mission(mission, monkeypatch):
+    """Its llm_usage rows carry execution_id mission:<run>, so the budget's
+    booked spend includes them."""
+    from core.llm.usage_context import current_usage_scope
+    from core.models.orchestration import OrchestrationTask
+    from modules.coordination.reconciler import MissionReconciler
+    from modules.coordination.verification import VERDICT_PASS, VerificationResult, VerificationService
+
+    mission.db.add(OrchestrationTask(run_id=mission.run.id, sequence_number=1, title="Draft the letter",
+                                     state=TaskState.COMPLETED.value))
+    mission.db.flush()
+    seen = []
+
+    async def _verify(self, **kwargs):
+        seen.append(dict(current_usage_scope()))
+        return VerificationResult(verdict=VERDICT_PASS, reasoning="ok")
+
+    monkeypatch.setattr(VerificationService, "verify_task", _verify)
+    asyncio.run(MissionReconciler._verify_completed_tasks(mission.db, mission.run))
+    assert [(scope.get("request_type"), scope.get("execution_id"), scope.get("workspace_id")) for scope in seen] == [
+        ("verifier", f"mission:{mission.run.id}", mission.ws)]
