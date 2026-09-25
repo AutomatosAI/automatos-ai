@@ -176,6 +176,11 @@ def test_unhardened_primitive_emits_nothing(monkeypatch):
     svc._scheduler = sched
 
     asyncio.run(svc._durable_memory_probe_tick())
+    # F105: on an event loop emit_primitive_finding hands its write to the
+    # best-effort threads and returns at once; wait for it before reading.
+    from core import best_effort
+
+    assert best_effort.drain(timeout=5)
 
     primitives_seen: set[str] = set()
     for _, params in session.inserts:
