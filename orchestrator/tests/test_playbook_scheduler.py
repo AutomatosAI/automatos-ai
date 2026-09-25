@@ -74,6 +74,17 @@ _install_apscheduler_stubs()
 from services.playbook_scheduler import PlaybookSchedulerService, get_playbook_scheduler
 import services.playbook_scheduler as sched_mod
 
+# The real modules _fire_playbook imports lazily are imported now, before any
+# patch.dict(sys.modules) window below. One imported for the first time inside a
+# window is dropped from sys.modules when the window closes, while the services
+# package attribute still points at it: a later test that patches it by dotted
+# path ("services.playbook_breaker.breaker_is_open") patches that orphan, and the
+# code under test imports a fresh, unpatched copy (test_prd204_silent_holes in a
+# shared run: the breaker read as closed and the real engine launched).
+import services.playbook_breaker  # noqa: E402,F401
+import services.playbook_engine  # noqa: E402,F401
+import services.trial_ledger  # noqa: E402,F401
+
 # Replace the (real-or-stub) CronTrigger with our fake so cron validation is
 # deterministic regardless of whether apscheduler is installed.
 sched_mod.CronTrigger = _FakeCronTrigger
