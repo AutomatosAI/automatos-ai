@@ -291,13 +291,18 @@ def test_invite_member_canonical_helper_exists():
 
 # ---------------------------------------------------------------------------
 # platform_set_member_role
+# F148: only the owner (or the platform super admin) changes roles; these
+# guard tests call as the super admin, the owner rule has its own tests
+# (test_f148_members_are_managed_by_the_owner_or_an_admin.py).
 # ---------------------------------------------------------------------------
+
+_SU = {"_driving_super_admin": True}
 
 def test_set_member_role_workspace_scoped_happy_path():
     target = _member(member_id=10, role="editor")
     # queries: member lookup, then owner lookup (audit principal)
     db = _SeqDB(results=[target, _member(member_id=1, user_id=42, role="owner")])
-    out = _run(set_member_role(db, _WS, {"member_id": 10, "role": "admin"}))
+    out = _run(set_member_role(db, _WS, {**{"member_id": 10, "role": "admin"}, **_SU}))
     assert out["success"] is True
     assert target.role == "admin"
     assert out["old_role"] == "editor"
@@ -308,7 +313,7 @@ def test_set_member_role_workspace_scoped_happy_path():
 
 def test_set_member_role_owner_guard():
     db = _SeqDB(results=[_member(member_id=10, role="owner")])
-    out = _run(set_member_role(db, _WS, {"member_id": 10, "role": "editor"}))
+    out = _run(set_member_role(db, _WS, {**{"member_id": 10, "role": "editor"}, **_SU}))
     assert out["success"] is False
     assert "owner" in out["error"].lower()
     assert db.committed is False
@@ -316,7 +321,7 @@ def test_set_member_role_owner_guard():
 
 def test_set_member_role_invalid_role_fails_closed():
     db = _SeqDB(results=[_member(member_id=10, role="editor")])
-    out = _run(set_member_role(db, _WS, {"member_id": 10, "role": "superuser"}))
+    out = _run(set_member_role(db, _WS, {**{"member_id": 10, "role": "superuser"}, **_SU}))
     assert out["success"] is False
     assert db.committed is False
 
@@ -325,7 +330,7 @@ def test_set_member_role_tenant_isolation():
     """A workspace-A principal cannot touch workspace-B members: the lookup is
     workspace-filtered, so the cross-tenant row is simply never found."""
     db = _SeqDB(results=[None])
-    out = _run(set_member_role(db, _WS, {"member_id": 999, "role": "admin"}))
+    out = _run(set_member_role(db, _WS, {**{"member_id": 999, "role": "admin"}, **_SU}))
     assert out["success"] is False
     assert "not found" in out["error"].lower()
     assert db.committed is False
@@ -592,7 +597,7 @@ def test_batch2_tools_operator_tier_and_permission_levels():
     # F147 (25 Sep): system settings are every tenant's, so they are the
     # platform operator's; workspace settings are an owner's or admin's.
     super_admin_gated = {"platform_update_system_setting"}
-    admin_gated = {"platform_update_workspace_settings"}
+    admin_gated = {"platform_update_workspace_settings", "platform_invite_member", "platform_set_member_role"}  # F147, F148
     registry = ActionRegistry()
     actions = {a.name: a for a in registry.get_all()}
     for name, level in BATCH2_TOOLS.items():

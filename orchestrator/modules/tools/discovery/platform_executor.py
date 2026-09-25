@@ -341,6 +341,16 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 }
 
 
+# F133 / F148: the actions whose handlers are told who the call is made for
+# (server-injected _driving_user_id / _driving_super_admin; see execute()).
+_DRIVER_AWARE_ACTIONS = (
+    "platform_create_playbook",
+    "platform_create_recipe",
+    "platform_invite_member",
+    "platform_set_member_role",
+)
+
+
 # PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
 # driving human so the local edition can record consent before dispatch.
 # platform_schedule_task joins them (calendar): a scheduled board ticket is
@@ -1260,16 +1270,19 @@ class PlatformActionExecutor:
             if _driver:
                 params = {**params, "_created_by": str(_driver)}
 
-        # F133: a playbook records the person it is made for (created_by_user_id),
-        # the creator its later edits are checked against. From the server-built
-        # context only: a caller-supplied _driving_user_id is ALWAYS stripped first.
-        if action_name in ("platform_create_playbook", "platform_create_recipe") and isinstance(params, dict):
-            from core.security.driving_user import driving_user_id
+        # F133 / F148: who the call is made for, for the handlers that record or
+        # check it: a playbook's creator (created_by_user_id), an invitation's
+        # sender, the owner a role change needs. From the server-built context
+        # only: caller-supplied values are ALWAYS stripped first.
+        if action_name in _DRIVER_AWARE_ACTIONS and isinstance(params, dict):
+            from core.security.driving_user import SUPER_ADMIN, driving_user_id
 
-            params = {k: v for k, v in params.items() if k != "_driving_user_id"}
+            params = {k: v for k, v in params.items() if k not in ("_driving_user_id", "_driving_super_admin")}
             _user = driving_user_id(caller_context)
             if _user is not None:
                 params = {**params, "_driving_user_id": _user}
+            if isinstance(caller_context, dict) and caller_context.get("system_role") == SUPER_ADMIN:
+                params = {**params, "_driving_super_admin": True}
 
         # PRD-205 S4: capture the originating conversation for watch-creating
         # actions (direct create + the launches whose handlers auto-create a

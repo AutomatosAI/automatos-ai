@@ -484,16 +484,17 @@ async def test_every_step_audited(real_registry):
         assert row.status == "success"
 
     # The autonomous marker is distinct and queryable: EXACTLY the
-    # confirmation-skipped administrative step carries it
-    # (router_decision->>'autonomous'), nothing else does.
+    # confirmation-skipped administrative steps carry it
+    # (router_decision->>'autonomous'), nothing else does. F148: inviting is
+    # confirmed too, so both member steps carry it.
     autonomous = [
         r for r in rows if (r.router_decision or {}).get("autonomous") is True
     ]
-    assert len(autonomous) == 1
-    assert _identity(autonomous[0]) == "platform_set_member_role"
+    assert sorted(_identity(r) for r in autonomous) == [
+        "platform_invite_member", "platform_set_member_role"]
 
     # Dispatcher rows carry the S14 selection outcome (narrowed surface hit).
-    role_row = autonomous[0]
+    role_row = next(r for r in autonomous if _identity(r) == "platform_set_member_role")
     sel = (role_row.router_decision or {}).get("selection") or {}
     assert sel.get("narrowed") is True
     assert sel.get("hit") is True
@@ -558,27 +559,26 @@ async def test_journey_requires_confirmation_at_standard_autonomy(real_registry)
         final, llm_messages, _ = await _run_journey(initial, rounds)
 
     h = arc.handlers
-    # Steps before the destructive role-grant ran (standard autonomy only
-    # stops confirmation-bearing actions — the documented dial semantics)…
-    for name in ("create_agent", "update_agent", "set_power_mode",
-                 "connect_channel", "invite_member"):
+    # Steps before the member management ran…
+    for name in ("create_agent", "update_agent", "set_power_mode", "connect_channel"):
         h[name].assert_awaited_once()
-    # …the role-grant stopped at the confirmation gate, and the journey
-    # never reached the playbook launch.
-    h["set_member_role"].assert_not_awaited()
-    h["execute_playbook"].assert_not_awaited()
+    # …F148: inviting and changing roles are an owner's or admin's (admin_only,
+    # as REST). This chat path carries no caller (caller_context=None), so at
+    # standard autonomy both stop at the admin gate, before any card, and the
+    # journey never reaches the playbook launch.
+    for name in ("invite_member", "set_member_role", "execute_playbook"):
+        h[name].assert_not_awaited()
 
-    # The confirmation ask is VISIBLE to Auto/the user — the tool transcript
-    # names the action and asks for confirmation (not a swallowed
-    # "Unknown error").
+    # The refusal is VISIBLE to Auto/the user — the tool transcript names each
+    # action and why (not a swallowed "Unknown error").
     tool_contents = [
         str(m.get("content") or "") for m in llm_messages if m.get("role") == "tool"
     ]
-    confirm_msgs = [c for c in tool_contents if "requires confirmation" in c.lower()]
-    assert confirm_msgs, (
-        "the requires_confirmation stop never surfaced in the LLM transcript"
+    refused = [c for c in tool_contents if "requires workspace admin or owner role" in c]
+    assert any("platform_invite_member" in c for c in refused), (
+        "the admin refusal never surfaced in the LLM transcript"
     )
-    assert any("platform_set_member_role" in c for c in confirm_msgs)
+    assert any("platform_set_member_role" in c for c in refused)
     assert final.content.lower().startswith("granting admin needs your confirmation")
 
     # No autonomous markers at standard — the dial really was off.
