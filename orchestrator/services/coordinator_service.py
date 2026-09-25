@@ -120,10 +120,13 @@ def _sanitize_for_field(raw: str) -> str:
 
 
 def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
-                               match_by_seq: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+                               match_by_seq: Dict[int, Dict[str, Any]],
+                               match_by_temp: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """PRD-164 S2: mirror per-task agent-match previews into the ``run.plan``
-    snapshot (keyed by ``sequence_number``) so the approval card — which is
-    built from the plan tasks — can show WHO would run each task and WHY.
+    snapshot so the approval card — which is built from the plan tasks — can
+    show WHO would run each task and WHY. A match is found by the plan task's
+    ``temp_id`` first (F162: tasks that run side by side share a
+    ``sequence_number``), then by its ``sequence_number``.
 
     Pure and immutable: returns a NEW plan dict (the JSON column needs the
     reassignment to track the change); the input plan is never mutated.
@@ -132,7 +135,9 @@ def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
     new_tasks: List[Dict[str, Any]] = []
     for pt in (plan.get("tasks") or []):
         seq = pt.get("sequence_number")
-        match = match_by_seq.get(int(seq)) if seq is not None else None
+        match = (match_by_temp or {}).get(str(pt.get("temp_id")))
+        if match is None:
+            match = match_by_seq.get(int(seq)) if seq is not None else None
         if match:
             pt = {
                 **pt,
@@ -223,6 +228,53 @@ def _staffed_task(planned: Any, staffing: Optional[List[Dict[str, Any]]]) -> Dic
             "pin": {"pinned_agent_id": entry["agent_id"]}}
 
 
+# F162 (night 5): the plan task a row was made from, on the row's input_context.
+# Tasks that run side by side share a sequence_number, so the step number alone
+# paired every sibling with one row, and an edit to one copied its title, role
+# and description onto all of them in the plan the approval card shows.
+PLAN_TEMP_ID_KEY = "plan_temp_id"
+
+
+def _paired_rows(tasks: List[Any], plan_tasks: List[Dict[str, Any]]) -> Dict[int, Any]:
+    """Each plan task's row, by the plan task's index; one row per plan task at
+    most. A row made since F162 carries its plan temp_id; an older one is paired
+    when it is the only row of its step, or the only one there with the plan
+    task's title. Anything else stays unpaired rather than guessed."""
+    by_temp = {}
+    by_step: Dict[int, List[Any]] = {}
+    for task in tasks:
+        temp = (getattr(task, "input_context", None) or {}).get(PLAN_TEMP_ID_KEY)
+        if temp is not None:
+            by_temp[str(temp)] = task
+        by_step.setdefault(int(getattr(task, "sequence_number", -1)), []).append(task)
+    pairs: Dict[int, Any] = {}
+    taken = set()
+    for index, pt in enumerate(plan_tasks):
+        row = by_temp.get(str(pt.get("temp_id")))
+        if row is None and pt.get("sequence_number") is not None:
+            at_step = [t for t in by_step.get(int(pt["sequence_number"]), []) if id(t) not in taken]
+            titled = [t for t in at_step if getattr(t, "title", None) == pt.get("title")]
+            row = at_step[0] if len(at_step) == 1 else (titled[0] if len(titled) == 1 else None)
+        if row is not None and id(row) not in taken:
+            pairs[index] = row
+            taken.add(id(row))
+    return pairs
+
+
+def _the_row_at_step(tasks: List[Any], step: Any) -> Any:
+    """The one row at a step; a step with tasks side by side needs a task_id or
+    temp_id instead of a guess."""
+    try:
+        step = int(step)
+    except (ValueError, TypeError):
+        return None
+    at_step = [t for t in tasks if int(getattr(t, "sequence_number", -1)) == step]
+    if len(at_step) > 1:
+        raise ValueError(f"Step {step} has {len(at_step)} tasks that run side by side; name the one to "
+                         "change by its task_id or temp_id.")
+    return at_step[0] if at_step else None
+
+
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                           edits: List[Dict[str, Any]]) -> tuple:
     """Apply per-task field edits to OrchestrationTask rows and mirror them into
@@ -230,21 +282,18 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
     testable: the caller supplies the loaded task rows + plan dict.
 
     Each edit matches a task by (in priority order) ``task_id`` (str of the row
-    id), ``temp_id`` (resolved to a sequence via the plan snapshot), or
-    ``sequence_number``. Only ``_EDITABLE_TASK_FIELDS`` are honoured. Task rows
-    are mutated in place (the ORM idiom); a NEW plan dict is returned so the JSON
+    id), ``temp_id`` (the plan task's row), or ``sequence_number`` (a step with
+    one task only). Only ``_EDITABLE_TASK_FIELDS`` are honoured. Task rows are
+    mutated in place (the ORM idiom); a NEW plan dict is returned so the JSON
     column's change is tracked. Returns ``(new_plan, fields_changed)``.
     """
     by_id = {str(getattr(t, "id", "")): t for t in tasks}
-    by_seq = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
 
     plan = plan or {}
     plan_tasks = list(plan.get("tasks") or [])
-    # temp_id -> sequence_number, so a temp_id edit can find the row by sequence.
-    temp_to_seq = {
-        str(pt.get("temp_id")): pt.get("sequence_number")
-        for pt in plan_tasks if pt.get("temp_id") is not None
-    }
+    rows = _paired_rows(tasks, plan_tasks)
+    row_by_temp = {str(pt.get("temp_id")): rows[index] for index, pt in enumerate(plan_tasks)
+                   if index in rows and pt.get("temp_id") is not None}
 
     fields_changed = 0
     edited_rows = set()
@@ -255,14 +304,9 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
         if edit.get("task_id") is not None:
             task = by_id.get(str(edit["task_id"]))
         if task is None and edit.get("temp_id") is not None:
-            seq = temp_to_seq.get(str(edit["temp_id"]))
-            if seq is not None:
-                task = by_seq.get(int(seq))
+            task = row_by_temp.get(str(edit["temp_id"]))
         if task is None and edit.get("sequence_number") is not None:
-            try:
-                task = by_seq.get(int(edit["sequence_number"]))
-            except (ValueError, TypeError):
-                task = None
+            task = _the_row_at_step(tasks, edit["sequence_number"])
         if task is None:
             continue
         for field in _EDITABLE_TASK_FIELDS:
@@ -281,16 +325,14 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
             if after != before:
                 task.input_context = after
                 fields_changed += 1
-        edited_rows.add(int(getattr(task, "sequence_number", -1)))
+        edited_rows.add(id(task))
 
-    # Mirror the row state back into the plan snapshot (by sequence_number).
+    # Mirror each edited row back into its own plan task.
     if edited_rows:
-        seq_to_row = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
         new_plan_tasks = []
-        for pt in plan_tasks:
-            seq = pt.get("sequence_number")
-            row = seq_to_row.get(int(seq)) if seq is not None else None
-            if row is not None and int(seq) in edited_rows:
+        for index, pt in enumerate(plan_tasks):
+            row = rows.get(index)
+            if row is not None and id(row) in edited_rows:
                 pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS},
                       "pinned_agent_id": (getattr(row, "input_context", None) or {}).get("pinned_agent_id")}
             new_plan_tasks.append(pt)
@@ -3246,7 +3288,8 @@ class CoordinatorService:
                     **({"definition_of_done": planned.definition_of_done}
                        if getattr(planned, "definition_of_done", None) else {}),
                     **staffed[planned.temp_id]["pin"],
-                } or None,
+                    PLAN_TEMP_ID_KEY: planned.temp_id,   # F162: which plan task this row is
+                },
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
                 parallel_group=getattr(planned, "parallel_group", None),
@@ -3301,6 +3344,10 @@ class CoordinatorService:
         """
         try:
             match_by_seq: Dict[int, Dict[str, Any]] = {}
+            match_by_temp: Dict[str, Dict[str, Any]] = {}
+            at_step: Dict[int, int] = {}
+            for task in tasks:
+                at_step[int(task.sequence_number)] = at_step.get(int(task.sequence_number), 0) + 1
             for task in tasks:
                 input_context = task.input_context if isinstance(task.input_context, dict) else {}
                 spec = {
@@ -3315,10 +3362,14 @@ class CoordinatorService:
                     continue
                 annotation = {**build_match_annotation(ranked), "decided_at": "plan"}
                 task.input_context = {**input_context, "agent_match": annotation}
-                match_by_seq[int(task.sequence_number)] = annotation
+                # F162: a task's own plan entry, never its side-by-side siblings'.
+                if input_context.get(PLAN_TEMP_ID_KEY) is not None:
+                    match_by_temp[str(input_context[PLAN_TEMP_ID_KEY])] = annotation
+                elif at_step[int(task.sequence_number)] == 1:
+                    match_by_seq[int(task.sequence_number)] = annotation
 
-            if match_by_seq:
-                run.plan = annotate_plan_with_matches(run.plan, match_by_seq)
+            if match_by_seq or match_by_temp:
+                run.plan = annotate_plan_with_matches(run.plan, match_by_seq, match_by_temp)
         except Exception:
             logger.warning(
                 "Match preview annotation failed for run %s (non-fatal)",
