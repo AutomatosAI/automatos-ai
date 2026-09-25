@@ -105,9 +105,6 @@ async def invite_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
     role = params.get("role") or "viewer"
     if not email:
         return {"success": False, "error": "email is required"}
-    # F148: a workspace has one owner; nobody is invited as another.
-    if str(role).strip().lower() == "owner":
-        return {"success": False, "error": "Nobody is invited as the owner: invite them as an admin, editor or viewer."}
 
     try:
         # F148: the person the call is made for sends the invitation (as REST
