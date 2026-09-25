@@ -377,8 +377,12 @@ async def _apply_telegram_answer(
     # Confirm HONESTLY, mirroring the in-app _confirm_answer_into_chat (P225-RVW-17):
     # this second confirmation channel must never claim 'resuming' for an answer
     # that lost the compare-and-swap race (applied False) or resumed nothing.
+    from services.playbook_owner_ask import ask_marker
+
     if not outcome.applied:
         reply = f"Question #{grant.id} was already answered."
+    elif outcome.resumed and ask_marker(grant) is not None:  # F140: a stopped playbook run
+        reply = f"Answered #{grant.id} — the playbook runs again from step 1."
     elif outcome.resumed:
         reply = f"Answered #{grant.id} — the agent is resuming."
     else:

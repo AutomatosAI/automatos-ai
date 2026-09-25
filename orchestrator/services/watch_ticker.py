@@ -155,6 +155,19 @@ class WatchTicker:
             and watch.deadline_at is not None
             and _aware(watch.deadline_at) <= now
         ):
+            from services.playbook_owner_ask import WAITING_FOR_OWNER
+
+            if (watch.target_type == WatchTargetType.PLAYBOOK_EXECUTION.value
+                    and self._read_target_state(db, watch) == WAITING_FOR_OWNER):
+                # F140: closed unscored with the reason, and no bell: the
+                # question itself is still in the owner's Questions.
+                reason = ("The run stopped to ask the owner, and the question had no answer "
+                          "by the watch's deadline.")
+                WatchService.ingest(db, watch, event_type=WatchEventType.EXPIRED.value,
+                                    event_key="expired", summary=reason)
+                watch.final_verdict = reason
+                WatchService.transition(db, watch, WatchStatus.EXPIRED, reason="unanswered question")
+                return
             event = WatchService.ingest(
                 db,
                 watch,
@@ -251,13 +264,18 @@ class WatchTicker:
 
         if target_type == WatchTargetType.PLAYBOOK_EXECUTION.value:
             from core.models.core import RecipeExecution
+            from services.playbook_owner_ask import WAITING_FOR_OWNER, waiting_for_owner
 
             row = (
-                db.query(RecipeExecution.status)
+                db.query(RecipeExecution.status, RecipeExecution.execution_metadata)
                 .filter(RecipeExecution.execution_id == watch.target_id)
                 .first()
             )
-            return row[0] if row else None
+            if row is None:
+                return None
+            # F140: a run that stopped to ask the owner is not over: the answer
+            # runs it again and this watch follows that run. Nothing to score yet.
+            return WAITING_FOR_OWNER if waiting_for_owner(row[0], row[1]) else row[0]
 
         if target_type == WatchTargetType.BOARD_TASK.value:
             from core.models.core import BoardTask
