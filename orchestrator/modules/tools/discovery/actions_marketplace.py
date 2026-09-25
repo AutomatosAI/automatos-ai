@@ -319,6 +319,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
         },
         permission_level="destructive",
         requires_confirmation=True,
+        admin_only=True,  # F151: REST: workspace:manage
         tags=["marketplace", "plugins", "disable", "uninstall"],
         examples=[
             "disable the shopify plugin",

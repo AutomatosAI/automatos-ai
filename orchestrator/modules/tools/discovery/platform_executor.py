@@ -88,7 +88,6 @@ from modules.tools.discovery.handlers_members import (  # PRD-143 S11
 )
 from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
     list_api_keys,
-    create_api_key,
     revoke_api_key,
 )
 from modules.tools.discovery.handlers_monitoring import (
@@ -697,7 +696,6 @@ class PlatformActionExecutor:
             "platform_list_system_settings": list_system_settings,
             "platform_update_system_setting": update_system_setting,
             "platform_list_api_keys": list_api_keys,
-            "platform_create_api_key": create_api_key,
             "platform_revoke_api_key": revoke_api_key,
             "platform_uninstall_plugin": uninstall_plugin,
             # Wave 2: Auto reporting preferences + send-notification wrapper

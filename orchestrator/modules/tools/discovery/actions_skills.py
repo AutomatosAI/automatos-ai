@@ -109,9 +109,10 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "required": ["enabled"],
         },
         permission_level="write",
-        # PRD-143 Rev 2 emptied the admin_only tier (it was a platform-wide no-op)
-        # — governance here is workspace-scope + audit (SkillAuditLog) + the
-        # write-permission/autonomy gate, same as every other skill-governance write.
+        # F151: the description's "workspace-admin action" is enforced — an
+        # owner or admin confirms it; the scan and SkillAuditLog still apply.
+        requires_confirmation=True,
+        admin_only=True,
         tags=["skills", "governance", "l3", "enablement", "admin"],
         examples=[
             "enable script execution for the analytics skill",

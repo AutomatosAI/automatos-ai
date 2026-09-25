@@ -56,6 +56,7 @@ def register_routing_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F151: routes a channel's inbound work
         tags=["routing", "rules", "channels", "configuration"],
         examples=[
             "route telegram messages to the support agent",

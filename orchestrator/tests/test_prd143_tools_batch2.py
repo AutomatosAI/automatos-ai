@@ -10,14 +10,13 @@ workspace-info read. The honest admin-surface gaps were:
                             whitelist: byok_overrides, default_notification_channel)
   - system settings      -> platform_list_system_settings (sensitive values masked)
                             / platform_update_system_setting
-  - SDK API keys         -> platform_list_api_keys / platform_create_api_key
-                            / platform_revoke_api_key
+  - SDK API keys         -> platform_list_api_keys / platform_revoke_api_key
   - plugin DISABLE       -> platform_uninstall_plugin
 
 Deliberately excluded: BYOK provider-key add/delete (api/user_api_keys.py)
-because raw provider secrets must never transit the LLM context; SDK keys are
-generated server-side so create is safe (full key returned exactly once,
-straight from ApiKeyService like the REST router).
+because raw provider secrets must never transit the LLM context. For the same
+reason there is no SDK key create tool (F151): the full key exists only in the
+create response, so keys are created in Settings.
 
 Every tool is OPERATOR tier — the Rev 2 inversion. Safety is gates-and-logs:
 destructive/role-changing tools are permission_level='destructive' with
@@ -75,7 +74,6 @@ def _install_fake_apscheduler():
 _install_fake_apscheduler()
 
 from modules.tools.discovery.handlers_api_keys import (  # noqa: E402
-    create_api_key,
     list_api_keys,
     revoke_api_key,
 )
@@ -104,7 +102,6 @@ BATCH2_TOOLS = {
     "platform_list_system_settings": "read",
     "platform_update_system_setting": "write",
     "platform_list_api_keys": "read",
-    "platform_create_api_key": "write",
     "platform_revoke_api_key": "destructive",
     "platform_uninstall_plugin": "destructive",
 }
@@ -491,43 +488,6 @@ def test_list_api_keys_workspace_scoped(monkeypatch):
     assert captured["workspace_id"] == _WS, "list must be scoped to the caller workspace"
 
 
-def test_create_api_key_happy_path(monkeypatch):
-    from core.services.api_key_service import ApiKeyService
-
-    captured = {}
-
-    def _fake_create(db, workspace_id, name, key_type, permissions, **kwargs):
-        captured.update(workspace_id=workspace_id, name=name, key_type=key_type,
-                        permissions=permissions)
-        return {"id": "k-9", "name": name, "key": "ak_live_full-key-once",
-                "key_type": key_type, "permissions": permissions}
-
-    monkeypatch.setattr(ApiKeyService, "create_api_key", _fake_create)
-    out = _run(create_api_key(MagicMock(), _WS, {
-        "name": "ci key", "key_type": "server", "permissions": ["chat"],
-    }))
-    assert out["success"] is True
-    assert out["key"]["key"] == "ak_live_full-key-once"
-    assert captured["workspace_id"] == _WS, "create must be scoped to the caller workspace"
-    assert captured["key_type"] == "server"
-
-
-def test_create_api_key_public_requires_domains():
-    out = _run(create_api_key(MagicMock(), _WS, {
-        "name": "widget key", "key_type": "public", "permissions": ["chat"],
-    }))
-    assert out["success"] is False
-    assert "allowed_domains" in out["error"]
-
-
-def test_create_api_key_invalid_permission_fails_closed():
-    out = _run(create_api_key(MagicMock(), _WS, {
-        "name": "bad key", "key_type": "server", "permissions": ["root:everything"],
-    }))
-    assert out["success"] is False
-    assert "permission" in out["error"].lower()
-
-
 def test_revoke_api_key_workspace_scoped(monkeypatch):
     from core.services.api_key_service import ApiKeyService
 
@@ -597,7 +557,8 @@ def test_batch2_tools_operator_tier_and_permission_levels():
     # F147 (25 Sep): system settings are every tenant's, so they are the
     # platform operator's; workspace settings are an owner's or admin's.
     super_admin_gated = {"platform_update_system_setting"}
-    admin_gated = {"platform_update_workspace_settings", "platform_invite_member", "platform_set_member_role"}  # F147, F148
+    admin_gated = {"platform_update_workspace_settings", "platform_invite_member", "platform_set_member_role",  # F147, F148
+                   "platform_revoke_api_key", "platform_uninstall_plugin"}  # F151
     registry = ActionRegistry()
     actions = {a.name: a for a in registry.get_all()}
     for name, level in BATCH2_TOOLS.items():

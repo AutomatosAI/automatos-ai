@@ -74,7 +74,8 @@ def register_channels_actions(registry: ActionRegistry) -> None:
             "required": ["platform", "config"],
         },
         permission_level="write",
-        requires_confirmation=False,
+        requires_confirmation=True,
+        admin_only=True,  # F151: REST: workspace:manage; a new ingress and its credentials
         tags=["channels", "integrations", "messaging", "setup", "connect"],
         examples=[
             "connect telegram with this bot token",
@@ -142,6 +143,7 @@ def register_channels_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F151: REST: workspace:manage
         tags=["channels", "integrations", "messaging", "lifecycle"],
         examples=[
             "start the telegram channel",
@@ -168,6 +170,7 @@ def register_channels_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F151: REST: workspace:manage
         tags=["channels", "integrations", "messaging", "lifecycle"],
         examples=[
             "pause the slack channel",
