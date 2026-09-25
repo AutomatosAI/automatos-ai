@@ -9,9 +9,14 @@ This service wraps the existing mathematical optimization components:
 NO DUPLICATE IMPLEMENTATIONS - uses what's already built.
 """
 
+import asyncio
+import contextvars
+import functools
 import logging
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -101,6 +106,37 @@ def reset_rag_settings_cache() -> None:
     """Drop the memoized RAG settings (call after changing them at runtime)."""
     global _RAG_SETTINGS_CACHE
     _RAG_SETTINGS_CACHE = None
+
+
+# F105 (25 Sep): every document backend's search is sync. The local one is a
+# Postgres full scan (F107: median 9 s, 209 s at worst), and it ran on the event
+# loop, so the whole backend stood still for each scan: /health timed out at
+# 25 s and the scheduler's jobs slipped by up to 70 s. Searches run on threads
+# of their own instead. A pool of their own, so a queue of slow scans never
+# holds up other work handed to the default executor, and at most
+# DOCUMENT_SEARCH_THREADS scans hold a pool connection at once.
+_search_executor: Optional[ThreadPoolExecutor] = None
+_search_executor_lock = threading.Lock()
+
+
+def _document_search_executor() -> ThreadPoolExecutor:
+    global _search_executor
+    with _search_executor_lock:
+        if _search_executor is None:
+            from config import config as app_config
+
+            _search_executor = ThreadPoolExecutor(
+                max_workers=app_config.DOCUMENT_SEARCH_THREADS,
+                thread_name_prefix="document-search",
+            )
+        return _search_executor
+
+
+async def search_off_loop(backend: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+    """``backend.search(**kwargs)`` on the document-search threads, with the
+    caller's context (workspace, request, usage scope) carried along."""
+    call = functools.partial(contextvars.copy_context().run, backend.search, **kwargs)
+    return await asyncio.get_running_loop().run_in_executor(_document_search_executor(), call)
 
 
 def _get_rag_setting_int(key: str, default: int) -> int:
@@ -1174,8 +1210,9 @@ class RAGService:
             # PRD-172 F005: pass an explicit workspace_id filter so the backend
             # drops any hit not scoped to this workspace (defence-in-depth over
             # the per-workspace bucket; a shared/mis-templated bucket no longer
-            # leaks cross-workspace chunks into LLM context).
-            results = vector_store.search(
+            # leaks cross-workspace chunks into LLM context). F105: off the loop.
+            results = await search_off_loop(
+                vector_store,
                 query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
                 limit=limit,
                 min_score=min_similarity,
