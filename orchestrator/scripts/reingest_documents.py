@@ -19,7 +19,10 @@ source, not the chunks — so no extraction is paid for twice.
 ``--move-uploads`` moves every uploaded file that sits outside
 DOCUMENT_UPLOAD_DIR into it and points ``documents.file_path`` there, so the
 sources outlive the next container rebuild (F102). Documents with no source
-anywhere are listed for the owner to upload again.
+anywhere are listed for the owner to upload again, with where the source should
+be. That includes an object storage no longer holds (F128): it is reported and
+skipped, never fatal. ``--apply`` re-ingests the rest, then exits 1 with the
+count of documents it could not re-ingest.
 
 Usage::
 
@@ -46,6 +49,12 @@ from typing import Callable, Dict, Iterator, List, Optional, Sequence
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SOURCE_LOCAL, SOURCE_OBJECT_STORAGE, SOURCE_NONE = "local file", "object storage", "none"
+# What object storage answers for a key it doesn't hold: HeadObject (download_file) says 404.
+MISSING_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
+
+class SourceMissing(Exception):
+    """The document's source is gone. It is reported as NO SOURCE and skipped, never fatal (F128)."""
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,20 @@ def source_of(file_path: Optional[str]) -> str:
     return SOURCE_NONE
 
 
+def missing_from(file_path: Optional[str]) -> str:
+    """Where a document's source should have been, for its NO SOURCE line."""
+    if not file_path:
+        return "no path recorded"
+    if file_path.startswith("s3://"):
+        return f"object storage has no {file_path}"
+    return f"no file at {file_path}"
+
+
+def no_source_line(c: Candidate) -> str:
+    where = missing_from(c.file_path)
+    return f"  #{c.id} [{c.workspace_id[:8]}] {c.filename} — NO SOURCE ({where}): the owner must upload it again"
+
+
 def plan(rows: Sequence[tuple], *, below: int, measure: Callable[[str, Optional[str], Sequence[str]], Optional[int]]
          ) -> List[Candidate]:
     """Every document under ``below`` percent kept, or with no source at all.
@@ -74,7 +97,12 @@ def plan(rows: Sequence[tuple], *, below: int, measure: Callable[[str, Optional[
     out: List[Candidate] = []
     for doc_id, workspace_id, filename, file_type, file_path, chunks in rows:
         source = source_of(file_path)
-        kept = measure(str(workspace_id), file_path, chunks) if source != SOURCE_NONE else None
+        kept = None
+        if source != SOURCE_NONE:
+            try:
+                kept = measure(str(workspace_id), file_path, chunks)
+            except SourceMissing:
+                source = SOURCE_NONE
         if kept is None or kept < below:
             out.append(Candidate(doc_id, str(workspace_id), filename, file_type, file_path, kept, source))
     return out
@@ -114,6 +142,19 @@ def _rows(db, workspace: Optional[str], ids: Optional[List[int]]) -> List[tuple]
     return [tuple(r) for r in db.execute(text(sql), {"ws": workspace, "ids": ids}).all()]
 
 
+def _fetch(manager, key: str, dest: str, file_path: str) -> None:
+    """Download one object. A key object storage doesn't hold raises SourceMissing (F128).
+    Any other error (access, network, a missing bucket) still stops the run."""
+    from botocore.exceptions import ClientError
+
+    try:
+        manager.s3_client.download_file(manager.s3_bucket, key, dest)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in MISSING_OBJECT_CODES:
+            raise SourceMissing(missing_from(file_path)) from exc
+        raise
+
+
 class _Stack:
     """Managers per workspace, sources fetched to disk, text measured as ingestion extracts it."""
 
@@ -132,6 +173,7 @@ class _Stack:
 
     @contextmanager
     def local_copy(self, workspace_id: str, file_path: str) -> Iterator[str]:
+        """The source as a local path. An object storage doesn't hold raises SourceMissing."""
         if not file_path.startswith("s3://"):
             yield file_path
             return
@@ -140,7 +182,7 @@ class _Stack:
         handle, tmp = tempfile.mkstemp(suffix=os.path.splitext(key)[1])
         os.close(handle)
         try:
-            manager.s3_client.download_file(manager.s3_bucket, key, tmp)
+            _fetch(manager, key, tmp, file_path)
             yield tmp
         finally:
             os.unlink(tmp)
@@ -151,9 +193,33 @@ class _Stack:
         try:
             with self.local_copy(workspace_id, file_path) as local:
                 return kept_pct(self._processor.extract_text_from_file(local), chunks)
+        except SourceMissing:
+            raise                    # the plan lists it as NO SOURCE
         except Exception as exc:  # noqa: BLE001 — an unreadable source is reported, not fatal
             print(f"  ! {file_path}: {exc}")
             return None
+
+
+def _apply(todo: Sequence[Candidate], stack: _Stack, db) -> List[Candidate]:
+    """Re-ingest each candidate in turn and return the ones whose source was gone. The
+    source is fetched before anything of the document is cleared, so a missing one is
+    skipped untouched and the run carries on (F128)."""
+    missing: List[Candidate] = []
+    for c in todo:
+        try:
+            with stack.local_copy(c.workspace_id, c.file_path) as local:
+                asyncio.run(reingest(c, stack.manager(c.workspace_id), local))
+        except SourceMissing:
+            print(no_source_line(c))
+            missing.append(c)
+            continue
+        after = _rows(db, c.workspace_id, [c.id])
+        try:
+            kept = stack.measure(c.workspace_id, after[0][4], after[0][5]) if after else None
+        except SourceMissing:
+            kept = None
+        print(f"  #{c.id} {c.filename}: {c.kept}% -> {kept}%")
+    return missing
 
 
 def main() -> int:
@@ -198,16 +264,15 @@ def main() -> int:
         for c in todo:
             print(f"  #{c.id} [{c.workspace_id[:8]}] {c.filename} ({c.file_type}) kept {c.kept}% — {c.source}")
         for c in gone:
-            print(f"  #{c.id} [{c.workspace_id[:8]}] {c.filename} — NO SOURCE: the owner must upload it again")
+            print(no_source_line(c))
         if not args.apply:
             print("dry run — nothing changed")
             return 0
-        for c in todo:
-            with stack.local_copy(c.workspace_id, c.file_path) as local:
-                asyncio.run(reingest(c, stack.manager(c.workspace_id), local))
-            after = _rows(db, c.workspace_id, [c.id])
-            kept = stack.measure(c.workspace_id, after[0][4], after[0][5]) if after else None
-            print(f"  #{c.id} {c.filename}: {c.kept}% -> {kept}%")
+        missing = _apply(todo, stack, db)
+    skipped = gone + missing
+    if skipped:
+        print(f"no source: {len(skipped)} not re-ingested ({', '.join(f'#{c.id}' for c in skipped)})")
+        return 1
     return 0
 
 

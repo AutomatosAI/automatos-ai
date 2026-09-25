@@ -66,6 +66,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # PRD-204 S4: scheduler skipped a cron fire on an open breaker with
         # only a log line -- now user-visible, once per breaker-open period.
         "playbook_benched",
+        # F132: a scheduled run that did not start (missed its grace, or the
+        # workspace was at its run limit) -- it used to leave no trace at all.
+        "playbook_schedule_skipped",
         # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
         # actions S7/S8, escalations).
         "watch_verdict",

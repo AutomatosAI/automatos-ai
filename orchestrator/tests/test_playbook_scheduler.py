@@ -18,7 +18,7 @@ import pytest
 class _FakeCronTrigger:
     """Minimal CronTrigger stub that validates basic cron syntax."""
     @classmethod
-    def from_crontab(cls, expression: str):
+    def from_crontab(cls, expression: str, timezone=None):
         parts = expression.strip().split()
         if len(parts) != 5:
             raise ValueError(f"Wrong number of fields; got {len(parts)}, expected 5")
@@ -38,6 +38,7 @@ _APS_KEYS = (
     "apscheduler.schedulers.asyncio",
     "apscheduler.jobstores",
     "apscheduler.jobstores.memory",
+    "apscheduler.events",
     "apscheduler.triggers",
     "apscheduler.triggers.cron",
 )
@@ -52,6 +53,7 @@ def _install_apscheduler_stubs():
         "apscheduler.schedulers.asyncio": MagicMock(AsyncIOScheduler=MagicMock),
         "apscheduler.jobstores": _pkg,
         "apscheduler.jobstores.memory": MagicMock(MemoryJobStore=MagicMock),
+        "apscheduler.events": MagicMock(EVENT_JOB_MISSED=2 ** 15),
         "apscheduler.triggers": _pkg,
         "apscheduler.triggers.cron": MagicMock(CronTrigger=_FakeCronTrigger),
     }
@@ -240,14 +242,16 @@ class TestScheduleUnschedule:
         mock_sched.add_job.assert_called_once()
 
     def test_schedule_playbook_invalid_cron(self, mock_playbook):
-        """Invalid cron expression logs error, no job added."""
+        """An invalid cron raises ValueError naming it and adds no job (F132: it
+        was logged and swallowed, and the caller said "scheduled")."""
         mock_playbook.schedule_config = {"type": "cron", "cron_expression": "not valid cron"}
 
         svc = PlaybookSchedulerService()
         mock_sched = MagicMock()
         svc._scheduler = mock_sched
 
-        svc.schedule_playbook(mock_playbook)
+        with pytest.raises(ValueError, match="invalid cron 'not valid cron'"):
+            svc.schedule_playbook(mock_playbook)
 
         mock_sched.add_job.assert_not_called()
 

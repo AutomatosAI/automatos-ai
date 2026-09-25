@@ -2008,12 +2008,15 @@ async def execute_tool_with_validation(
         return _integrations_unavailable_result(tool_name, trace_id)
 
     if is_composio and original_intent:
-        # Extract action ID from tool name or args
+        # The action the call names in its arguments, else the one in a
+        # composio_<ACTION> tool name. F139 (night 4, B7): the generic wrapper's
+        # own name came first, so composio_execute({"action": "DROPBOX_READ_FILE"})
+        # was checked as the action "execute" and refused as unknown.
         action_id = None
-        if tool_name.startswith("composio_"):
-            action_id = tool_name.replace("composio_", "")
-        elif isinstance(tool_args, dict):
+        if isinstance(tool_args, dict):
             action_id = tool_args.get("action") or tool_args.get("action_name")
+        if not action_id and tool_name.startswith("composio_") and tool_name != "composio_execute":
+            action_id = tool_name.replace("composio_", "")
 
         if action_id:
             eligible, reason = validate_action_for_intent(

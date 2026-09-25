@@ -808,6 +808,9 @@ class Config:
     # A manual run that succeeds breaks the streak and auto-resets the breaker.
     # Set to 0 to disable the breaker entirely.
     PLAYBOOK_BREAKER_THRESHOLD: int = int(os.getenv("PLAYBOOK_BREAKER_THRESHOLD", "3"))
+    # F132: how late a scheduled playbook may still start. APScheduler's default (1 s)
+    # dropped a fire the loop reached a moment late, silently.
+    PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS: int = int(os.getenv("PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS", "300"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
@@ -1227,7 +1230,11 @@ class Config:
     # Shadow-only until the flip.
     TOOL_SURFACE_HYBRID_CAP: int = int(os.getenv("TOOL_SURFACE_HYBRID_CAP", "6"))
     PLATFORM_ACTIONS_MAX_TOKENS: int = int(os.getenv("PLATFORM_ACTIONS_MAX_TOKENS", "4000"))
-    PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
+    # F130: the playbook section carries the earlier steps' answers, so 2000 cut them
+    # (the budget truncates from the end: the latest answer went first).
+    PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "12000"))
+    # F130: each earlier step's answer reaches a later step whole up to this many characters.
+    PLAYBOOK_STEP_ANSWER_MAX_CHARS: int = int(os.getenv("PLAYBOOK_STEP_ANSWER_MAX_CHARS", "12000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
     COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
     # TOOL_ROUTING_GRAPH (default OFF) gates the learned tool-routing GRAPH reads

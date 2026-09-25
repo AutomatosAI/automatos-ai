@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.services.playbook_scratchpad import answer_for_next_step
 
 logger = logging.getLogger(__name__)
 
@@ -452,6 +453,12 @@ async def _execute_step(
     # works; the step waits for it to end (the caller's step timeout bounds the
     # wait — the session carries on and its result lands on the board). Before
     # the tool/LLM imports: a session step touches none of them.
+    # The earlier steps' answers, for either kind of agent (F130: a session step
+    # got none of them and the next api step got 500 characters).
+    previous_output = ""
+    if scratchpad and step_order > 1:
+        previous_output = scratchpad.format_context_for_step(step_order) or ""
+
     from services.cli_ticket_lane import RECIPE_SOURCE_TYPE, is_cli_agent, run_cli_ticket_and_wait
     if is_cli_agent(db, agent.id):
         import uuid as _uuid
@@ -461,7 +468,8 @@ async def _execute_step(
             workspace_id=workspace_id,
             agent_id=agent.id,
             title=_cli_step_title(recipe_name, step_order, clean_prompt),
-            prompt=clean_prompt,
+            # A session reads only its ticket: the earlier answers go in it.
+            prompt=f"{clean_prompt}\n\n{previous_output}" if previous_output else clean_prompt,
             source_type=RECIPE_SOURCE_TYPE,
             source_id=f"{RECIPE_SOURCE_TYPE}:{recipe_execution_id or _uuid.uuid4().hex}:{step_order}",
             tags=["playbook"],
@@ -500,12 +508,6 @@ async def _execute_step(
 
     # 1. System prompt + tools via ContextService (PRD-80)
     #    Build recipe_step dict for RecipeContextSection
-    previous_output = ""
-    if scratchpad and step_order > 1:
-        prev_ctx = scratchpad.format_context_for_step(step_order)
-        if prev_ctx:
-            previous_output = prev_ctx
-
     recipe_step_dict = {
         "name": recipe_name,
         "step_number": step_order,
@@ -726,6 +728,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_TOOL_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -743,6 +746,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_READ_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -774,12 +778,13 @@ async def _execute_step(
                 # PRD-251 S0.6 (D16): a denied action never runs — not from the
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
                 _denial = await composio_action_denial_async(tool_name)
+                call_ok = False  # F137: whether the call worked, never guessed from its text
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
                     logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
                 elif _dedup_key in _composio_call_cache:
-                    result_text = _composio_call_cache[_dedup_key]
+                    result_text, call_ok = _composio_call_cache[_dedup_key]
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
                 else:
@@ -814,11 +819,12 @@ async def _execute_step(
                                 else:
                                     result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
                                     logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
-                                _composio_call_cache[_dedup_key] = result_text
+                                call_ok = bool(success)
+                                _composio_call_cache[_dedup_key] = (result_text, call_ok)
                                 all_tool_calls.append({
                                     "action": tool_name, "params": tool_args,
                                     "result": result_text[:8000], "duration_ms": exec_ms,
-                                    "composio_direct": True,
+                                    "composio_direct": True, "success": call_ok,
                                 })
                                 messages.append({
                                     "role": "tool", "tool_call_id": tool_id,
@@ -851,6 +857,7 @@ async def _execute_step(
 
                         raw = spine_result.get("raw_result") or {}
                         success = bool(spine_result.get("success"))
+                        call_ok = success
                         data = raw.get("data") if isinstance(raw, dict) else None
                         error = (
                             (raw.get("error") if isinstance(raw, dict) else None)
@@ -873,7 +880,7 @@ async def _execute_step(
                                 tf.unlink(missing_ok=True)
                             except Exception:
                                 pass
-                    _composio_call_cache[_dedup_key] = result_text
+                    _composio_call_cache[_dedup_key] = (result_text, call_ok)
 
                 all_tool_calls.append({
                     "action": tool_name,
@@ -881,6 +888,7 @@ async def _execute_step(
                     "result": result_text[:8000],
                     "duration_ms": exec_ms,
                     "composio_direct": True,
+                    "success": call_ok,
                 })
                 messages.append({
                     "role": "tool",
@@ -901,6 +909,7 @@ async def _execute_step(
                 "action": tool_args.get("action", tool_name),
                 "params": tool_args.get("params", tool_args),
                 "result": result.get("llm_context", ""),
+                "success": result.get("success") is not False,
             })
 
             messages.append({
@@ -1017,10 +1026,12 @@ def _build_compact_step_result(
     tool_summaries = []
     for tc in tool_calls:
         action = tc.get("action", "unknown")
-        # Infer success/failure from result content
-        result_str = str(tc.get("result", ""))
-        status = "error" if "error" in result_str.lower()[:100] else "success"
-        tool_summaries.append(f"{action} ({status})")
+        # F137: the call's own success flag. B22's "Tool composio_execute failed: …"
+        # holds no "error", so the text guess showed four failed drafts as (success).
+        worked = tc.get("success")
+        if worked is None:  # a record from before the flag: the old guess
+            worked = "error" not in str(tc.get("result", "")).lower()[:100]
+        tool_summaries.append(f"{action} ({'success' if worked else 'error'})")
 
     output = step_result.get("output", "")
     output_preview = output[:200] + "..." if output and len(output) > 200 else (output or "")
@@ -1320,6 +1331,14 @@ async def _execute_recipe_inner(
         if missing_agents:
             await _fail_execution(db, recipe_execution_id, f"Agents not found: {missing_agents}")
             return
+        # F135 (B67, B87): agent #303 was switched off at 14:08:11 and ran a step at 14:08:16.
+        switched_off = [a for a in agents if (a.status or "active") != "active"]
+        if switched_off:
+            names = ", ".join(f"#{a.id} {a.name} ({a.status})" for a in switched_off)
+            await _fail_execution(
+                db, recipe_execution_id,
+                f"Switched off: {names}. Switch the agent on, or give its steps another agent. Nothing ran.")
+            return
 
         # --- Initialize scratchpad ---
         from core.services.playbook_scratchpad import PlaybookScratchpad
@@ -1364,6 +1383,7 @@ async def _execute_recipe_inner(
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
         step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
+        answers: Dict[str, str] = {}      # output_key -> that step's whole answer (F130 placeholders)
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
@@ -1498,7 +1518,7 @@ async def _execute_recipe_inner(
             }
 
             # Build clean step prompt: input substitutions + trigger context
-            clean_step_prompt = substitute_playbook_input(prompt_template, input_data)
+            clean_step_prompt = fill_step_placeholders(prompt_template, input_data, answers)
 
             # Inject trigger/input context
             trigger_content = input_data.get("content", "") if input_data else ""
@@ -1825,6 +1845,7 @@ async def _execute_recipe_inner(
                             agent_exports=agent_exports,
                         )
 
+                        answers[output_key] = step_result["output"]
                         logger.info(f"[recipe_direct] Step {step_order} completed → output_key={output_key} ({step_result['tokens_used']} tokens)")
                     else:
                         last_error = result.get("error", "Agent returned non-success status")
@@ -2055,7 +2076,7 @@ async def _execute_recipe_inner(
 
 
 # ---------------------------------------------------------------------------
-# Prompt resolution (kept for backward compat — used by _resolve_prompt callers)
+# Prompt resolution: the run's input and the earlier steps' answers
 # ---------------------------------------------------------------------------
 
 # `{input}` and `{input.<field>}` — the placeholders a playbook step may use to
@@ -2098,90 +2119,32 @@ def unresolved_input_placeholders(text: str) -> List[str]:
     return sorted(set(_INPUT_PLACEHOLDER_RE.findall(text or "")))
 
 
-def _resolve_prompt(
+# `{{name}}` — a named blank (F130). Inner spaces allowed: `{{ name }}`.
+_NAMED_BLANK_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def fill_step_placeholders(
     template: str,
-    input_data: dict,
-    step_outputs: Dict[str, Dict[str, Any]],
+    input_data: Optional[Dict[str, Any]],
+    answers: Optional[Dict[str, str]] = None,
 ) -> str:
+    """Fill a step's placeholders: F055's ``{input}`` and ``{input.<field>}``,
+    then (F130) ``{{name}}`` from the run's input of that name, else from the
+    answer an earlier step stored under that ``output_key``, and ``{output_key}``
+    from that answer.
+
+    Night 4: ``{{date}}``, ``{{month}} {{year}}`` and ``{{roast_log_filename}}``
+    reached the agents literally although the run supplied exactly those keys
+    (B8, B27, B57), and step 2's ``{{price_per_kilo}}`` stayed blank after step 1
+    stored "£22.00" under that key (B68). A blank that names neither is left as
+    written: a prompt may be asking for a template.
     """
-    Resolve a step's prompt template with variable substitution.
-
-    IMPORTANT: The task instruction stays at the TOP of the prompt.
-    Context from previous steps is appended BELOW with a separator.
-
-    Supports:
-    - {input.field_name} — from user input_data
-    - {previous_output} — text from the most recently completed step (backward compat)
-    - {step_N_output} — text from step N by order (backward compat)
-    - {output_key} — text from a step by its output_key (NEW)
-    """
-    resolved = template
-
-    # Substitute {input} and {input.xxx} placeholders (F055)
-    resolved = substitute_playbook_input(resolved, input_data)
-
-    # Determine "previous_output" for backward compat: last step's text
-    previous_output: Optional[str] = None
-    if step_outputs:
-        last_entry = max(step_outputs.values(), key=lambda v: v.get("step_order", 0))
-        previous_output = last_entry.get("text", "")
-
-    if previous_output:
-        resolved = resolved.replace("{previous_output}", previous_output)
-
-    for key, entry in step_outputs.items():
-        order = entry.get("step_order", 0)
-        text = entry.get("text", "")
-        if text:
-            resolved = resolved.replace(f"{{step_{order}_output}}", text)
-
-    for key, entry in step_outputs.items():
-        text = entry.get("text", "")
-        if text:
-            resolved = resolved.replace(f"{{{key}}}", text)
-
-    has_explicit_ref = (
-        "{previous_output}" in template
-        or any(f"{{step_{e.get('step_order', 0)}_output}}" in template for e in step_outputs.values())
-        or any(f"{{{k}}}" in template for k in step_outputs)
-    )
-
-    if step_outputs and not has_explicit_ref:
-        context_parts = []
-        context_parts.append("=" * 60)
-        context_parts.append("DATA FROM PREVIOUS STEPS")
-        context_parts.append("When the task above mentions 'results', 'output', 'data',")
-        context_parts.append("or 'findings', it refers to the content below.")
-        context_parts.append("USE THIS CONTENT to complete the task — do not invent data.")
-        context_parts.append("=" * 60)
-
-        sorted_entries = sorted(step_outputs.items(), key=lambda kv: kv[1].get("step_order", 0))
-        for out_key, entry in sorted_entries:
-            sr_order = entry.get("step_order", "?")
-            sr_agent = entry.get("agent_name", "Agent")
-            sr_output = entry.get("text", "")
-            sr_tool_calls = entry.get("tool_calls", [])
-
-            context_parts.append(f"\n--- Step {sr_order} ({out_key}): {sr_agent} ---")
-
-            if sr_tool_calls:
-                for tc in sr_tool_calls:
-                    action = tc.get("action", "unknown")
-                    tc_result = tc.get("result", "")
-                    if tc_result:
-                        result_str = json.dumps(tc_result, indent=2) if isinstance(tc_result, (dict, list)) else str(tc_result)
-                        if len(result_str) > 20000:
-                            result_str = result_str[:20000] + "\n... (truncated)"
-                        context_parts.append(f"[Tool: {action}]\n{result_str}")
-
-            if sr_output:
-                output_preview = sr_output[:12000]
-                if len(sr_output) > 12000:
-                    output_preview += "\n... (truncated)"
-                context_parts.append(f"[Agent Output]\n{output_preview}")
-
-        resolved = f"{resolved}\n\n" + "\n".join(context_parts)
-
+    resolved = substitute_playbook_input(template, input_data)
+    answers = {key: answer_for_next_step(text) for key, text in (answers or {}).items() if text}
+    values = {**answers, **{key: str(value) for key, value in (input_data or {}).items()}}
+    resolved = _NAMED_BLANK_RE.sub(lambda m: values.get(m.group(1), m.group(0)), resolved)
+    for key, text in answers.items():
+        resolved = resolved.replace(f"{{{key}}}", text)
     return resolved
 
 
@@ -2251,6 +2214,7 @@ def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
                     "params": call.get("params") or call.get("function", {}).get("arguments", {}),
                     "result": call.get("result") or call.get("content", {}),
                     "duration_ms": call.get("duration_ms", 0),
+                    "success": call.get("success"),
                 })
         return normalized
     return []

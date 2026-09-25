@@ -141,7 +141,9 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
             "into SQL and executes it against a connected database. Use this when "
             "the user asks about metrics, counts, trends, revenue, users, or any "
             "data that lives in their connected databases. Returns results as a "
-            "formatted table with row count and the generated SQL."
+            "formatted table with row count and the generated SQL. With one "
+            "database connected, pass only the question: that one is used. Name a "
+            "database (database_id) only when several are connected."
         ),
         category="database",
         parameters={

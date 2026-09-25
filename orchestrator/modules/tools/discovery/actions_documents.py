@@ -11,7 +11,10 @@ def register_documents_actions(registry: ActionRegistry) -> None:
         description=(
             "List documents uploaded to the workspace knowledge base. "
             "Returns document names, types, sizes, and processing status. "
-            "Use when the user asks about their uploaded documents or files."
+            "Use when the user asks about their uploaded documents or files. "
+            "search keeps the documents whose name or description contains it; "
+            "offset pages past the first results, newest first; the reply's total "
+            "says how many match."
         ),
         category="documents",
         parameters={
@@ -20,6 +23,14 @@ def register_documents_actions(registry: ActionRegistry) -> None:
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of documents to return. Defaults to 50.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Only documents whose name or description contains this text (any case).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Skip this many documents (newest first) to see the next page.",
                 },
             },
             "required": [],
