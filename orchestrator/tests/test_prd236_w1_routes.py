@@ -202,10 +202,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     joined = (versions / "f049_prd251_merge_heads.py").read_text()
     assert '"f125_playbook_timeouts_seconds"' in joined and '"prd251_socials"' in joined
     # 2026-09-25: f155_chats_widget_key_id chains onto that (F155 — the widget key
-    # that started a conversation); the guard follows it.
+    # that started a conversation).
     widget_key = (versions / "f155_chats_widget_key_id.py").read_text()
     assert 'down_revision = "f049_prd251_merge_heads"' in widget_key
-    assert 'EXPECTED_HEAD = "f155_chats_widget_key_id"' in guard
+    # 2026-09-25: f156_harness_task_ledger chains onto that (F156 — the HARNESS
+    # ledger in the database); the guard follows it.
+    ledger = (versions / "f156_harness_task_ledger.py").read_text()
+    assert 'down_revision = "f155_chats_widget_key_id"' in ledger
+    assert 'EXPECTED_HEAD = "f156_harness_task_ledger"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

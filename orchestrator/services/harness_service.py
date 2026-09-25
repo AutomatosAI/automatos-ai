@@ -24,6 +24,7 @@ from uuid import UUID
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -1307,7 +1308,7 @@ class HarnessService:
     def _write_workspace_file(self, workspace_id: UUID, rel_path: str, content: str) -> None:
         """Persist a HARNESS artifact directly under the workspace volume.
 
-        HARNESS reads (_read_baseline / _read_applied_tasks / _read_last_run) go
+        HARNESS reads (_read_baseline / _read_last_run) go
         straight to the workspace volume on disk, so writes MUST hit the same
         store. ``workspace_write_file`` is an agent tool-execution primitive, not
         a registered platform action, so routing harness writes through
@@ -1625,9 +1626,9 @@ class HarnessService:
         so Phase 5 stays inert by default. When on, each done [HARNESS] task that
         has not already been applied is parsed, its pre-change value snapshotted
         (for US-022 rollback), and applied via _auto_apply_prescription. Applied
-        task ids are persisted to /harness/applied_tasks.json; that ledger is the
-        idempotency key because board tasks have no tag-mutation tool, so a task
-        is never re-applied on a later weekly tick.
+        and held task ids are recorded in the task ledger (harness_task_ledger,
+        F156); that ledger is the idempotency key because board tasks have no
+        tag-mutation tool, so a task is never re-applied on a later weekly tick.
         """
         from config import config
 
@@ -1645,11 +1646,10 @@ class HarnessService:
             if not isinstance(tasks, list):
                 return
 
-            ledger = self._read_applied_tasks(workspace_id)
-            # Normalise ids to str: a task id round-trips through JSON and the
-            # task API, so the ledger and the live list could disagree on
-            # int-vs-str. One canonical type makes both the membership check and
-            # the sorted() in _write_applied_tasks total.
+            ledger = self._read_applied_tasks(executor.db, workspace_id)
+            # Normalise ids to str: the ledger stores integers and the task API
+            # may return either, so one canonical type keeps the membership
+            # check exact.
             applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
             # F151: tasks held for an owner's or admin's /approve are not retried.
             held_ids = {str(i) for i in ledger.get("needs_approve_task_ids", [])}
@@ -1710,10 +1710,7 @@ class HarnessService:
                     })
 
             if newly_applied or newly_held:
-                ledger["needs_approve_task_ids"] = sorted(held_ids | set(newly_held))
-                self._write_applied_tasks(
-                    workspace_id, ledger, applied_ids, newly_applied
-                )
+                self._write_applied_tasks(executor.db, workspace_id, newly_applied, newly_held)
         except Exception as exc:
             # A failure here means human-approved changes were silently dropped —
             # surface the trace rather than bury it in a warning.
@@ -1796,72 +1793,64 @@ class HarnessService:
         return {}
 
     @staticmethod
-    def _applied_tasks_path(workspace_id: UUID) -> str:
-        from config import config
-        import os
+    def _read_applied_tasks(db: Any, workspace_id: UUID) -> Dict[str, Any]:
+        """The task ledger: the done [HARNESS] board tasks already applied, and
+        those held for an owner's or admin's /approve (F156: harness_task_ledger,
+        written only by this service — no workspace tool reaches it).
 
-        return os.path.join(
-            config.WORKSPACE_VOLUME_PATH,
-            str(workspace_id),
-            "harness",
-            "applied_tasks.json",
-        )
-
-    def _read_applied_tasks(self, workspace_id: UUID) -> Dict[str, Any]:
-        """Read the cumulative ledger of auto-applied HARNESS board task ids.
-
-        This is the idempotency key for self-management — board tasks have no
-        tag-mutation tool, so a task recorded here is never re-applied. A missing
-        or unreadable ledger yields an empty one; failing open is safe because
-        every applicable change_type sets an absolute value (so re-applying is a
+        An unreadable ledger reads empty; failing open is safe because every
+        applicable change_type sets an absolute value (so re-applying is a
         harmless no-op) and placeholder prescriptions are refused by
         _auto_apply_prescription before any write.
         """
-        import os
+        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
 
         try:
-            path = self._applied_tasks_path(workspace_id)
-            if os.path.exists(path):
-                with open(path, "r") as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    data.setdefault("applied_task_ids", [])
-                    data.setdefault("entries", [])
-                    return data
-        except Exception:
-            logger.warning(
-                "[HARNESS] Failed to read applied_tasks.json for %s",
-                workspace_id, exc_info=True,
-            )
-        return {"applied_task_ids": [], "entries": []}
+            with db.begin_nested():
+                rows = db.execute(
+                    text("SELECT board_task_id, state FROM harness_task_ledger WHERE workspace_id = CAST(:ws AS uuid)"),
+                    {"ws": str(workspace_id)},
+                ).fetchall()
+        except Exception:  # noqa: BLE001 — see the docstring: empty is safe
+            logger.warning("[HARNESS] Task ledger unreadable for %s", workspace_id, exc_info=True)
+            return {"applied_task_ids": [], "needs_approve_task_ids": []}
+        return {
+            "applied_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_APPLIED),
+            "needs_approve_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_HELD),
+        }
 
+    @staticmethod
     def _write_applied_tasks(
-        self,
+        db: Any,
         workspace_id: UUID,
-        ledger: Dict[str, Any],
-        applied_ids: set,
         newly_applied: List[Dict[str, Any]],
+        newly_held: List[str],
     ) -> None:
-        """Persist the applied-tasks ledger to the workspace volume on disk.
+        """Record newly applied tasks (each with its entry: the value it
+        replaced, for US-022) and newly held ones. A held task that is later
+        applied becomes applied; an applied one never goes back to held."""
+        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
 
-        Writes to the same path _read_applied_tasks reads, so the idempotency
-        key round-trips. See _write_workspace_file for why this is not routed
-        through the executor.
-        """
-        ledger["applied_task_ids"] = sorted(applied_ids)
-        ledger.setdefault("entries", []).extend(newly_applied)
-        ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
+        rows = [(entry.get("task_id"), LEDGER_APPLIED, json.dumps(entry, default=str)) for entry in newly_applied]
+        rows += [(task_id, LEDGER_HELD, None) for task_id in newly_held]
         try:
-            self._write_workspace_file(
-                workspace_id,
-                "/harness/applied_tasks.json",
-                json.dumps(ledger, indent=2),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[HARNESS] Failed to persist applied_tasks ledger for %s: %s",
-                workspace_id, exc,
-            )
+            with db.begin_nested():
+                for task_id, state, entry in rows:
+                    db.execute(
+                        text(
+                            "INSERT INTO harness_task_ledger (workspace_id, board_task_id, state, entry) "
+                            "VALUES (CAST(:ws AS uuid), :task, :state, CAST(:entry AS jsonb)) "
+                            "ON CONFLICT (workspace_id, board_task_id) DO UPDATE SET "
+                            "state = CASE WHEN harness_task_ledger.state = :applied THEN :applied "
+                            "ELSE EXCLUDED.state END, "
+                            "entry = COALESCE(EXCLUDED.entry, harness_task_ledger.entry), updated_at = now()"
+                        ),
+                        {"ws": str(workspace_id), "task": int(task_id), "state": state, "entry": entry,
+                         "applied": LEDGER_APPLIED},
+                    )
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 — the next tick finds the tasks again
+            logger.warning("[HARNESS] Failed to record the task ledger for %s: %s", workspace_id, exc)
 
     def _parse_harness_task(
         self,

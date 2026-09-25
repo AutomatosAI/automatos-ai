@@ -68,7 +68,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # tables) — and f049_prd251_merge_heads joins it with F125 into the single head.
 # 2026-09-25: f155_chats_widget_key_id chains onto that — the widget key that
 # started a conversation (F155).
-EXPECTED_HEAD = "f155_chats_widget_key_id"
+# 2026-09-25: f156_harness_task_ledger chains onto that — the HARNESS task ledger
+# moves off the workspace volume into the database (F156).
+EXPECTED_HEAD = "f156_harness_task_ledger"
 
 
 def _literal(node: ast.AST):

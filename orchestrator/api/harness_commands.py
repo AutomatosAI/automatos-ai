@@ -212,7 +212,7 @@ async def _approve(
 
     # Idempotency: the shared applied-tasks ledger is the source of truth, so a
     # second /approve (or a later tick) never re-applies the same change.
-    ledger = svc._read_applied_tasks(workspace_id)
+    ledger = svc._read_applied_tasks(db, workspace_id)
     applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
     if task_id in applied_ids:
         return {
@@ -282,8 +282,7 @@ async def _approve(
         "approved_by": user_id,
         "policy_verdict": decision.reason,
     }
-    applied_ids.add(task_id)
-    svc._write_applied_tasks(workspace_id, ledger, applied_ids, [entry])
+    svc._write_applied_tasks(db, workspace_id, [entry], [])
 
     logger.info(
         "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s via policy plane",
