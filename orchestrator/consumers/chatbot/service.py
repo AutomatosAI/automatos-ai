@@ -1696,11 +1696,14 @@ class StreamingChatService:
         # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
         # created mid-chat is attributed to THEM (created_by) — not the agent — and
         # plan-ready / awaiting-approval notifications land for the right person.
+        # F154: a widget turn is an anonymous visitor's, so its tool calls are made
+        # for nobody; the widget's user_id only owns the chat row (a foreign key).
+        _driving_user = None if self.widget_mode else user_id
         _driving_clerk: Optional[str] = None
-        if user_id:
+        if _driving_user:
             try:
                 from core.models import User
-                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _row = self.db.query(User.clerk_user_id).filter(User.id == _driving_user).first()
                 _driving_clerk = _row[0] if _row else None
             except Exception:
                 _driving_clerk = None
@@ -1808,7 +1811,7 @@ class StreamingChatService:
                     conversation_id=conversation_id,
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
-                    driving_user_id=user_id,
+                    driving_user_id=_driving_user,
                     prior_action=_prior_action,
                     model_id=_turn_budget.get("model_id"),
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),
@@ -2537,11 +2540,13 @@ class StreamingChatService:
 
         # PRD-206 S7: the driving human as viewer for the Q7 private-scope
         # recall guard (user_id here is the INTERNAL integer id — the same
-        # value the PRD-196 subject tag carries at store time).
-        self._viewer_subject_id = f"user:{user_id}" if user_id else None
+        # value the PRD-196 subject tag carries at store time). F154: a widget
+        # visitor is nobody — the widget's user_id only owns the chat row.
+        _person = None if self.widget_mode else user_id
+        self._viewer_subject_id = f"user:{_person}" if _person else None
         # PRD-233 S6: the same integer id seeds the greeting (see
         # _prepare_llm_messages → resolve_known_user_name).
-        self._driving_user_id = user_id
+        self._driving_user_id = _person
 
         try:
             # Ensure workspace_id is available

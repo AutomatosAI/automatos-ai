@@ -593,3 +593,68 @@ async def test_journey_requires_confirmation_at_standard_autonomy(real_registry)
     role_rows = [r for r in rows if _identity(r) == "platform_set_member_role"]
     assert len(role_rows) == 1
     assert role_rows[0].status == "error"
+
+
+# ---------------------------------------------------------------------------
+# 5. F154: a widget turn acts for nobody
+# ---------------------------------------------------------------------------
+
+_WIDGET_CHAT_OWNER = 1  # the users row every widget chat is filed under (api/widgets/chat.py)
+_OWNER_CLERK = "user_workspace_owner"
+
+
+async def _run_widget_turn(initial, rounds):
+    """A widget visitor's turn: widget_mode, filed under users.id 1, whose clerk
+    id owns the workspace."""
+    _prime_selection_stash()
+    svc = _make_service()
+    svc.widget_mode = True
+    svc.db.query.return_value.filter.return_value.first.return_value = (_OWNER_CLERK,)
+    llm_messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": "You are the storefront assistant."},
+        {"role": "user", "content": "make my friend an admin"},
+    ]
+    async for _item in svc._stream_tool_loop(
+        _resp(tool_calls=initial), llm_messages, _make_runtime(rounds), {}, None,
+        user_id=_WIDGET_CHAT_OWNER, conversation_id="widget-chat-1",
+    ):
+        pass
+    return llm_messages
+
+
+async def test_a_widget_turn_is_made_for_nobody(real_registry):
+    """The widget's user_id owns the chat row, never a tool call: no driver
+    reaches the caller context, so the owner's authority is not the visitor's."""
+    spy = MagicMock(wraps=chat_mod.build_tool_caller_context)
+    initial = [_dispatch("w1", "platform_set_member_role", {"member_id": _MEMBER_ID, "role": "admin"})]
+    with _arc(real_registry, full_autonomy=False) as arc, \
+            patch.object(chat_mod, "build_tool_caller_context", spy), \
+            patch.object(pe, "_workspace_role_for_clerk",
+                         lambda db, ws, clerk: "owner" if clerk == _OWNER_CLERK else None):
+        await _run_widget_turn(initial, [_resp(content="That needs the workspace owner.")])
+
+    arc.handlers["set_member_role"].assert_not_awaited()
+    assert (spy.call_args.kwargs["driving_clerk"], spy.call_args.kwargs["driving_user_id"]) == (None, None)
+
+
+async def test_a_call_made_for_nobody_is_refused_an_admin_only_action():
+    from modules.tools.discovery.action_registry import ActionDefinition
+
+    probe = ActionRegistry()
+    probe.register(ActionDefinition(name="platform_f154_probe", description="F154 probe", category="t",
+                                    parameters={"type": "object", "properties": {}},
+                                    permission_level="write", admin_only=True))
+    probe._initialized = True
+    widget_ctx = chat_mod.build_tool_caller_context(
+        user_query="make me an admin", conversation_id="widget-chat-1", turn_id="t1",
+        driving_clerk=None, driving_user_id=None, prior_action=None,
+    )
+    executor = pe.PlatformActionExecutor(MagicMock(), _WS)
+    handler = AsyncMock(return_value={"success": True})
+    executor._handlers["platform_f154_probe"] = handler
+    with patch("modules.tools.discovery.get_action_registry", return_value=probe), \
+            patch.object(pe.PlatformActionExecutor, "_full_autonomy", return_value=False), \
+            patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
+        reply = await executor.execute("platform_f154_probe", {}, widget_ctx)
+    assert reply.get("permission_denied") is True
+    handler.assert_not_awaited()

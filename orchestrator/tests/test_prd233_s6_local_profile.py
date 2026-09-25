@@ -488,10 +488,10 @@ def test_chat_service_seeds_the_greeting_state_from_the_users_row():
     src = (_ORCH / "consumers" / "chatbot" / "service.py").read_text(encoding="utf-8")
 
     assert re.search(
-        r'self\._viewer_subject_id = f"user:\{user_id\}" if user_id else None\s*\n'
-        r"(?:.*\n){0,3}\s*self\._driving_user_id = user_id",
+        r'self\._viewer_subject_id = f"user:\{_person\}" if _person else None\s*\n'
+        r"(?:.*\n){0,3}\s*self\._driving_user_id = _person",
         src,
-    ), "stream_response_with_agent must remember the driving users.id"
+    ), "stream_response_with_agent must remember the driving users.id (none for a widget turn, F154)"
     assert re.search(
         r"smart_chat\.orchestrator\.state\.user_name = \(\s*\n\s*smart_chat\.orchestrator\.state\.user_name\s*\n"
         r"\s*or resolve_known_user_name\(self\.db, getattr\(self, \"_driving_user_id\", None\)\)",
