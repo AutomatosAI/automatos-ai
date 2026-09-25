@@ -201,7 +201,9 @@
       .hh, .mm { position: relative; width: 250px; height: 230px; overflow: hidden; }
       #hstrip { position: absolute; left: 0; top: 0; width: 250px; }
       #hstrip div { height: 230px; line-height: 230px; text-align: center; }
-      .colon { width: 90px; line-height: 230px; text-align: center; }
+      /* The colon's glyph can be wider than its column in a wide mono font: centre it (an overflowing line
+         is otherwise start-aligned, and it would run over the minutes). */
+      .colon { width: 90px; line-height: 230px; display: flex; justify-content: center; }
       .mm div { position: absolute; left: 0; right: 0; top: 0; height: 230px; line-height: 230px; text-align: center; }
       #mm2 { opacity: 0; }
       .list { position: absolute; left: 100px; right: 100px; top: 700px; display: flex; flex-direction: column; gap: 16px; }
@@ -280,7 +282,7 @@
       <section id="s1" class="clip" data-start="0" data-duration="1.75" data-track-index="1">
         <div id="s1stage">
           <div class="s1-eyebrow" id="s1eb">{{ hook_eyebrow }}</div>
-          <div class="s1-clock"><div id="s1t1">{{ hook_time_before }}</div><div id="s1t2">{{ hook_time_after }}</div></div>
+          <div class="s1-clock"><div id="s1t1" data-layout-allow-overlap>{{ hook_time_before }}</div><div id="s1t2" data-layout-allow-overlap>{{ hook_time_after }}</div></div>
           <div class="s1-head serif" id="s1head"><span id="s1a">{{ hook_line }}</span> <em class="o" id="s1b">{{ hook_accent }}</em></div>
         </div>
         <div id="flash"></div>
@@ -388,7 +390,7 @@
           </div>
 
           <div class="card" id="c1" style="top:648px">
-            <div class="ty" data-layout-allow-overlap><span>{{ task_1_kind }}</span><span class="hi">{{ task_1_flag }}</span></div>
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_1_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_1_flag }}</span></div>
             <div class="t" data-layout-allow-overlap>{{ task_1_title }}</div>
             <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-info"></i>{{ task_1_agent }}</div>
               <div class="st">
@@ -397,19 +399,19 @@
               </div></div>
           </div>
           <div class="card" id="c2" style="top:832px">
-            <div class="ty" data-layout-allow-overlap><span>{{ task_2_kind }}</span><span class="hi">{{ task_2_flag }}</span></div>
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_2_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_2_flag }}</span></div>
             <div class="t" data-layout-allow-overlap>{{ task_2_title }}</div>
             <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-progress"></i>{{ task_2_agent }}</div>
               <div class="st"><svg class="sp" id="c2sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
           </div>
           <div class="card" id="c3" style="top:1016px">
-            <div class="ty" data-layout-allow-overlap><span>{{ task_3_kind }}</span><span class="hi">{{ task_3_flag }}</span></div>
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_3_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_3_flag }}</span></div>
             <div class="t" data-layout-allow-overlap>{{ task_3_title }}</div>
             <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-accent"></i>{{ task_3_agent }}</div>
               <div class="st"><svg class="sp" id="c3sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
           </div>
           <div class="card" id="c4" style="top:1200px">
-            <div class="ty" data-layout-allow-overlap><span>{{ task_4_kind }}</span><span class="hi">{{ task_4_flag }}</span></div>
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_4_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_4_flag }}</span></div>
             <div class="t" data-layout-allow-overlap>{{ task_4_title }}</div>
             <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-ok"></i>{{ task_4_agent }}</div>
               <div class="st"><svg class="sp" id="c4sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
@@ -454,7 +456,7 @@
           <div id="nclock">
             <div class="hh"><div id="hstrip" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
             <div class="colon">:</div>
-            <div class="mm" data-layout-allow-overlap><div id="mm1">{{ night_minute }}</div><div id="mm2">{{ morning_minute }}</div></div>
+            <div class="mm" data-layout-allow-overlap><div id="mm1" data-layout-allow-overlap>{{ night_minute }}</div><div id="mm2" data-layout-allow-overlap>{{ morning_minute }}</div></div>
           </div>
           <div class="list">
             <div class="li"><div class="badge"><div class="num">1</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_1 }}</div>
@@ -623,6 +625,7 @@
         [["ac", "tone-ok", rosterEl.dataset.idle], ["wk", "tone-accent", rosterEl.dataset.busy]].forEach(([cls, dot, text]) => {
           const line = document.createElement("div");
           line.className = cls;
+          line.setAttribute("data-layout-allow-overlap", "");
           const i2 = document.createElement("i");
           i2.className = "dot " + dot;
           line.appendChild(i2);

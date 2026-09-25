@@ -212,7 +212,9 @@
       .hh, .mm { position: relative; width: 250px; height: 230px; overflow: hidden; }
       #hstrip { position: absolute; left: 0; top: 0; width: 250px; }
       #hstrip div { height: 230px; line-height: 230px; text-align: center; }
-      .colon { width: 90px; line-height: 230px; text-align: center; }
+      /* The colon's glyph can be wider than its column in a wide mono font: centre it (an overflowing line
+         is otherwise start-aligned, and it would run over the minutes). */
+      .colon { width: 90px; line-height: 230px; display: flex; justify-content: center; }
       .mm div { position: absolute; left: 0; right: 0; top: 0; height: 230px; line-height: 230px; text-align: center; }
       #mm2 { opacity: 0; }
       .list { position: absolute; left: 100px; right: 100px; top: 700px; display: flex; flex-direction: column; gap: 16px; }
@@ -472,7 +474,7 @@
           <div id="nclock">
             <div class="hh"><div id="hstrip" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
             <div class="colon">:</div>
-            <div class="mm" data-layout-allow-overlap><div id="mm1">{{ night_minute }}</div><div id="mm2">{{ morning_minute }}</div></div>
+            <div class="mm" data-layout-allow-overlap><div id="mm1" data-layout-allow-overlap>{{ night_minute }}</div><div id="mm2" data-layout-allow-overlap>{{ morning_minute }}</div></div>
           </div>
           <div class="list">
             <div class="li"><div class="badge"><div class="num">1</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_1 }}</div>
@@ -642,6 +644,7 @@
         [["ac", "tone-ok", rosterEl.dataset.idle], ["wk", "tone-accent", rosterEl.dataset.busy]].forEach(([cls, dot, text]) => {
           const line = document.createElement("div");
           line.className = cls;
+          line.setAttribute("data-layout-allow-overlap", "");
           const i2 = document.createElement("i");
           i2.className = "dot " + dot;
           line.appendChild(i2);

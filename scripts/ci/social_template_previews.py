@@ -183,8 +183,9 @@ class Renderer:
         if status != 202:
             findings = answer.get("findings") or []
             for finding in findings[:40]:
+                partner = f" with {finding['containerSelector']}" if finding.get("containerSelector") else ""
                 print(f"    {finding.get('severity')}: {finding.get('section')}/{finding.get('code')}: {finding.get('message')} "
-                      f"{finding.get('selector') or ''} t={finding.get('time')}")
+                      f"{finding.get('selector') or ''}{partner} t={finding.get('time')}")
             raise PreviewFailure(f"POST /render answered {status}: {answer.get('message') or answer}")
         print(f"    checked in {time.monotonic() - started:.1f} s (staged, spoken, mixed, checked); job {answer['id']}")
         job = answer

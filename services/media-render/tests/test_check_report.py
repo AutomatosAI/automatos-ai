@@ -111,3 +111,20 @@ def test_json_inside_a_log_line_never_stands_in_for_the_envelope():
 def test_no_report_is_an_error_not_a_pass(stdout):
     with pytest.raises(CheckReportError):
         parse_check_output(stdout, PROJECT)
+
+
+def test_an_overlap_names_both_text_blocks():
+    report = json.loads(json.dumps(PASSED))
+    overlap = {
+        "code": "content_overlap",
+        "severity": "error",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "selector": "div.colon",
+        "containerSelector": "#mm1",
+        "text": ":",
+        "time": 21.5,
+    }
+    report["ok"] = False
+    report["layout"].update(ok=False, errorCount=1, findings=[overlap])
+    (finding, _) = parse_check_output(json.dumps(report), PROJECT).findings
+    assert (finding["selector"], finding["containerSelector"], finding["text"]) == ("div.colon", "#mm1", ":")

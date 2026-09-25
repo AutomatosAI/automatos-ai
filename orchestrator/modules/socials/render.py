@@ -65,7 +65,7 @@ DELIVERABLE_SOURCE_TYPE = "social_post"
 # The report kept in review_log: the first findings, each trimmed.
 MAX_REPORTED_FINDINGS = 20
 # The keys of a check finding (services/media-render/media_render/check_report.py) and a voice finding.
-FINDING_KEYS = ("section", "severity", "code", "message", "selector", "time", "fixHint", "source", "line")
+FINDING_KEYS = ("section", "severity", "code", "message", "selector", "containerSelector", "time", "fixHint", "source", "line")
 FINDING_TEXT_CHARS = 300
 DEFAULT_ASPECT = "original"
 

@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 SECTIONS = ("lint", "runtime", "layout", "motion", "contrast")
 # A refusal carries every error and as many warnings as fit under this cap.
 MAX_FINDINGS = 200
-_EXTRA_KEYS = ("selector", "time", "fixHint", "ratio", "requiredRatio", "suggestedColor")
+# containerSelector and text name the other block of an overlap, and what it reads.
+_EXTRA_KEYS = ("selector", "containerSelector", "text", "time", "fixHint", "ratio", "requiredRatio", "suggestedColor")
 # The CLI prints the envelope with console.log at the start of a line; a log
 # line that carries JSON of its own ("[INFO] … {…}") never starts with a brace.
 _LINE_OPENS_OBJECT = re.compile(r"^\{", re.MULTILINE)
