@@ -1530,7 +1530,8 @@ def ending_summary(task: Any) -> Optional[str]:
     tools = ref.get("recent_tools")
     if isinstance(tools, (list, tuple)) and tools:
         last = tools[-1]
-        last_name = last.get("name") if isinstance(last, dict) else str(last)
+        # F168: the host's entries carry ``tool``; ``name`` is the older shape.
+        last_name = (last.get("tool") or last.get("name")) if isinstance(last, dict) else str(last)
         if last_name:
             bits.append(f"last tool: {last_name}")
     files = ref.get("files_touched")

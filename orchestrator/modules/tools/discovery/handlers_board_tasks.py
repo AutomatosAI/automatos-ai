@@ -494,7 +494,8 @@ def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
     last_tool = None
     if isinstance(tools, (list, tuple)) and tools:
         last = tools[-1]
-        last_tool = last.get("name") if isinstance(last, dict) else str(last)
+        # F168: the host's entries carry ``tool``; ``name`` is the older shape.
+        last_tool = (last.get("tool") or last.get("name")) if isinstance(last, dict) else str(last)
     files = ref.get("files_touched") or []
     return {
         "id": task.id,
