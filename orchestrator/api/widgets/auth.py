@@ -152,6 +152,9 @@ async def widget_auth(
                 detail="Workspace mismatch between token and header",
             )
 
+        from api.widgets.rate_limit import note_key_limit, stored_key_limit
+
+        await note_key_limit(api_key_id, stored_key_limit(db, api_key_id))
         default_agent_id = jwt_payload.get("default_agent_id")
         ctx = WidgetAuthContext(
             workspace_id=workspace_id,
@@ -217,6 +220,9 @@ async def widget_auth(
                 detail="Workspace mismatch between API key and header",
             )
 
+    from api.widgets.rate_limit import note_key_limit
+
+    await note_key_limit(api_key_record.id, getattr(api_key_record, "rate_limit_requests", None))
     permissions = api_key_record.permissions or []
     ctx = WidgetAuthContext(
         workspace_id=api_key_record.workspace_id,
