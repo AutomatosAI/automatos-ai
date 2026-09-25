@@ -331,7 +331,6 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
     # Playbook edits.
     "platform_update_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
     "platform_delete_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
-    "platform_update_recipe":              (TARGET_PLAYBOOK, "recipe_id"),
     "platform_add_playbook_step":          (TARGET_PLAYBOOK, "playbook_id"),
     "platform_update_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
     "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
@@ -482,9 +481,7 @@ class PlatformActionExecutor:
             "platform_list_agents": list_agents,
             "platform_recommend_agent": recommend_agent,  # PRD-234 S3
             "platform_get_agent": get_agent,
-            "platform_list_recipes": list_playbooks,
             "platform_list_playbooks": list_playbooks,
-            "platform_get_recipe": get_playbook,
             "platform_get_playbook": get_playbook,
             "platform_get_llm_usage": get_llm_usage,
             "platform_get_cost_breakdown": get_cost_breakdown,
@@ -500,15 +497,10 @@ class PlatformActionExecutor:
             # Write actions
             "platform_create_agent": create_agent,
             "platform_update_agent": update_agent,
-            "platform_create_recipe": create_playbook,
             "platform_create_playbook": create_playbook,
-            "platform_update_recipe": update_playbook,
             "platform_update_playbook": update_playbook,
-            "platform_add_recipe_step": add_playbook_step,
             "platform_add_playbook_step": add_playbook_step,
-            "platform_update_recipe_step": update_playbook_step,
             "platform_update_playbook_step": update_playbook_step,
-            "platform_delete_recipe_step": delete_playbook_step,
             "platform_delete_playbook_step": delete_playbook_step,
             "platform_schedule_playbook": schedule_playbook,
             "platform_store_memory": store_memory,
@@ -532,14 +524,11 @@ class PlatformActionExecutor:
             "platform_list_datasources": list_datasources,
             "platform_workspace_stats": workspace_stats,
             # Self-management
-            "platform_execute_recipe": execute_playbook,
             "platform_execute_playbook": execute_playbook,
-            "platform_get_recipe_execution": get_playbook_execution,
             "platform_get_playbook_execution": get_playbook_execution,
             "platform_get_system_health": get_system_health,
             "platform_delete_document": delete_document,
             "platform_reprocess_document": reprocess_document,
-            "platform_delete_recipe": delete_playbook,
             "platform_delete_playbook": delete_playbook,
             "platform_get_activity_feed": get_activity_feed,
             # Marketplace discovery & workspace inventory (PRD-71)
@@ -872,6 +861,14 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+            # Every gate below reads action_def, so a handler with no registered
+            # ActionDefinition is refused as unknown (fail-closed).
+            if action_def is None:
+                logger.warning(
+                    "[PlatformExecutor] '%s' has a handler but no registered action — refused",
+                    action_name,
+                )
+                return {"success": False, "error": f"Unknown platform action: {action_name}"}
 
             # PRD-143: Super-admin gate — fail-closed, BEFORE and independent
             # of the admin gate below. The ONLY principal that passes is a
@@ -1288,7 +1285,6 @@ class PlatformActionExecutor:
             "platform_create_watch",
             "platform_create_mission",
             "platform_execute_playbook",
-            "platform_execute_recipe",
             "platform_schedule_task",
             # PRD-224 US-005: the ASSIGN-lane ticket auto-attaches a watch whose
             # verdict must post back to THIS conversation.

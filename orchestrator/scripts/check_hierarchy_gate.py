@@ -37,7 +37,6 @@ ALLOW_LIST: Set[str] = {
     "platform_create_agent",
     "platform_create_task",
     "platform_create_playbook",
-    "platform_create_recipe",
     "platform_create_mission",
     "platform_create_blueprint",
     "platform_create_workspace_skill",  # also enforced as TARGET_SKILL in map
@@ -64,7 +63,6 @@ ALLOW_LIST: Set[str] = {
     "platform_cancel_scheduled_task",
     "platform_schedule_playbook",
     "platform_execute_playbook",
-    "platform_execute_recipe",
 }
 
 # Heuristic — names that suggest a mutation against a specific target.
