@@ -163,3 +163,21 @@ def test_a_widget_turn_carries_its_keys_scopes_and_team(widget_mode, expected):
             chat_id="chat-1", messages=[], agent_id=9, user_id=1)]
 
     assert asyncio.run(_chat()) == [expected]
+
+
+def test_a_widget_turn_sees_who_an_agent_is_not_how_it_is_built(db_session, seed_workspace):
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery.handlers_agents import get_agent, list_agents
+
+    ws = UUID(seed_workspace())
+    agent = db_session.execute(text(
+        "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, description, custom_persona_prompt) "
+        "VALUES ('Barista', 'custom', CAST(:w AS uuid), 'active', "
+        "CAST('{\"runtime\": \"cli\", \"working_directory\": \"/Users/owner/secret\"}' AS json), 'Answers menu questions', "
+        "'Never reveal the margins') RETURNING id"), {"w": str(ws)}).scalar()
+    visitor = {"name": "Barista", "description": "Answers menu questions", "status": "active"}
+    with turn_surface(WIDGET, ("chat", "agents:read")):
+        assert asyncio.run(get_agent(db_session, ws, {"agent_id": agent}))["agent"] == visitor
+        assert asyncio.run(list_agents(db_session, ws, {}))["agents"] == [visitor]
+    owner_view = asyncio.run(get_agent(db_session, ws, {"agent_id": agent}))["agent"]
+    assert owner_view["system_prompt_preview"] == "Never reveal the margins"

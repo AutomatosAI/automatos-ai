@@ -10,6 +10,18 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def _visitor_view(agent: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of an agent — who it is, never how
+    it is built (no prompt, model, tools, skills, paths or configuration)."""
+    return {"name": agent.name, "description": (agent.description or "")[:200], "status": agent.status}
+
+
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
 async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, agent_skills
     from core.models.composio_cache import AgentAppAssignment
@@ -21,6 +33,8 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
         query = query.filter(Agent.status == status_filter)
 
     agents = query.order_by(Agent.id).all()
+    if _widget_turn():
+        return {"success": True, "agents": [_visitor_view(a) for a in agents], "count": len(agents)}
     agent_ids = [a.id for a in agents]
 
     # Batch-load tool counts (active assignments only) and skill counts in two grouped queries.
@@ -110,6 +124,8 @@ async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     agent = query.first()
     if not agent:
         return {"success": False, "error": "Agent not found"}
+    if _widget_turn():
+        return {"success": True, "agent": _visitor_view(agent)}
 
     # Full assigned tool list — names, app type, active state, dates, priority.
     tool_list = []
