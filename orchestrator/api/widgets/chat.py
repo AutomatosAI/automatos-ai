@@ -267,8 +267,6 @@ async def widget_chat(
         )
 
     chat_service = ChatService(db)
-    streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True,
-                                             widget_scopes=auth.permissions, widget_team=auth.team)
 
     # ------------------------------------------------------------------
     # Resolve or create conversation
@@ -397,6 +395,10 @@ async def widget_chat(
 
     # PRD-124: the team that scopes this chat's documents.
     agent_team = _retrieval_team(db, auth, effective_agent_id)
+    # F155: the key's scopes, team lock and agent lock mark every call of the turn.
+    streaming_service = StreamingChatService(
+        db, workspace_id=workspace_id, widget_mode=True, widget_scopes=auth.permissions, widget_team=auth.team,
+        widget_agent_lock=effective_agent_id if auth.default_agent_id else None)
 
     # ------------------------------------------------------------------
     # Stream

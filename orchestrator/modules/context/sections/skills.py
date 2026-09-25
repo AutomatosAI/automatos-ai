@@ -49,6 +49,13 @@ class SkillsSection(BaseSection):
 
     async def render(self, ctx: SectionContext) -> str:
         """Load and return skill content for the agent (never raises)."""
+        from core.security.surface import widget_turn
+
+        if widget_turn():
+            # F155: none on a widget turn. load_skill is not a widget tool, so the
+            # skill lines would point at bodies the turn cannot load, and the one
+            # always-on body is Auto's owner-facing platform manual.
+            return ""
         try:
             return self._build(ctx)
         except Exception:

@@ -159,7 +159,7 @@ def test_a_widget_turn_carries_its_keys_scopes_and_team(widget_mode, expected):
 
     service = StreamingChatService.__new__(StreamingChatService)
     service.widget_mode = widget_mode
-    service.widget_scopes, service.widget_team = ("chat", "documents:read"), "Franchise-A"
+    service.widget_scopes, service.widget_team, service.widget_agent_lock = ("chat", "documents:read"), "Franchise-A", None
 
     async def _turn(*args, **kwargs):
         yield widget_scopes(), widget_team()

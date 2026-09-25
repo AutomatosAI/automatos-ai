@@ -267,7 +267,7 @@ def test_only_a_widget_turn_is_marked_and_only_while_it_runs(widget_mode):
 
     service = StreamingChatService.__new__(StreamingChatService)
     service.widget_mode = widget_mode
-    service.widget_scopes, service.widget_team = ("chat",), None
+    service.widget_scopes, service.widget_team, service.widget_agent_lock = ("chat",), None, None
 
     async def _turn(*args, **kwargs):
         yield widget_turn()
@@ -520,3 +520,22 @@ def test_widget_auth_logs_what_a_visitor_sends_on_one_line(db_session, caplog):
     lines = [record.getMessage() for record in caplog.records]
     assert any("widget_auth" in line and "ADMIN LOGIN" in line for line in lines)
     assert not [line for line in lines if "\n" in line or "\r" in line]
+
+
+def test_a_widget_turn_is_marked_with_the_agent_its_key_is_locked_to(site, monkeypatch):
+    """Only a locked key's agent brings its own plugins to the turn, so the
+    mark carries the lock (resolved to the agent's id); an unlocked key's none."""
+    import consumers.chatbot as chatbot
+
+    built, real = [], chatbot.StreamingChatService
+
+    def _recording(*args, **kwargs):
+        built.append(kwargs.get("widget_agent_lock"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(chatbot, "StreamingChatService", _recording)
+    agent = _barista(site.db, site.ws)
+    _send(site, agent_id=str(agent))
+    site.key.default_agent_id = agent
+    _send(site)
+    assert built == [None, agent]

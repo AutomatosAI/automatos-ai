@@ -9,7 +9,8 @@ visitors), never an admin or super admin and never the human whose
 instruction approves a card (platform_executor), and is offered no admin tier
 (tool_router). A widget turn also carries its key's scopes, which decide what
 it may call at all (core.security.widget_scopes), and its key's team lock,
-which scopes every document it reads (core.team_access.retrieval_team). The mark is a context
+which scopes every document it reads (core.team_access.retrieval_team), and
+the agent it is locked to, if any (whose own plugins it may use). The mark is a context
 variable, not state on the process-wide tool router, so concurrent turns never
 see each other's; tasks a turn starts inherit it. Work a widget turn starts
 that runs later, outside the turn (a mission's tasks on the coordinator tick,
@@ -27,13 +28,15 @@ WIDGET = "widget"
 ORIGIN_SURFACE = "origin_surface"
 ORIGIN_SCOPES = "origin_scopes"
 ORIGIN_TEAM = "origin_team"
-_ORIGIN_KEYS = (ORIGIN_SURFACE, ORIGIN_SCOPES, ORIGIN_TEAM)
+ORIGIN_AGENT_LOCK = "origin_agent_lock"
+_ORIGIN_KEYS = (ORIGIN_SURFACE, ORIGIN_SCOPES, ORIGIN_TEAM, ORIGIN_AGENT_LOCK)
 
 
 class _Turn(NamedTuple):
     surface: Optional[str]
     scopes: FrozenSet[str]
     team: Optional[str]
+    agent_lock: Optional[int] = None
 
 
 _surface_var: ContextVar[_Turn] = ContextVar("turn_surface", default=_Turn(None, frozenset(), None))
@@ -57,14 +60,23 @@ def widget_team() -> Optional[str]:
     return turn.team if turn.surface == WIDGET else None
 
 
+def widget_agent_lock() -> Optional[int]:
+    """The agent the widget key is locked to, on a widget turn; None on any
+    other turn or for a key any agent may answer."""
+    turn = _surface_var.get()
+    return turn.agent_lock if turn.surface == WIDGET else None
+
+
 @contextmanager
-def turn_surface(surface: Optional[str], scopes: Iterable[str] = (), team: Optional[str] = None) -> Iterator[None]:
+def turn_surface(surface: Optional[str], scopes: Iterable[str] = (), team: Optional[str] = None,
+                 agent_lock: Optional[int] = None) -> Iterator[None]:
     """Mark every tool call made inside the block with ``surface`` and, on a
-    widget turn, its key's ``scopes`` and team lock."""
+    widget turn, its key's ``scopes``, team lock and agent lock."""
     from core.team_access import normalize_team
 
     lock = normalize_team(team) if team and team.strip() else None
-    token = _surface_var.set(_Turn(surface, frozenset(scopes or ()), lock))
+    token = _surface_var.set(_Turn(surface, frozenset(scopes or ()), lock,
+                                   int(agent_lock) if agent_lock is not None else None))
     try:
         yield
     finally:
@@ -85,6 +97,8 @@ def stamp_origin(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     turn = _surface_var.get()
     if turn.surface == WIDGET:
         stamped.update({ORIGIN_SURFACE: WIDGET, ORIGIN_SCOPES: sorted(turn.scopes), ORIGIN_TEAM: turn.team})
+        if turn.agent_lock is not None:
+            stamped[ORIGIN_AGENT_LOCK] = turn.agent_lock
     return stamped
 
 
@@ -106,7 +120,8 @@ def origin_surface(config: Optional[Mapping[str, Any]]) -> Iterator[None]:
     """Run the block under the turn ``config`` was stamped from: a widget-born
     run's key scopes and team lock. Anything else runs as it is."""
     if widget_born(config):
-        with turn_surface(WIDGET, config.get(ORIGIN_SCOPES) or (), config.get(ORIGIN_TEAM)):
+        with turn_surface(WIDGET, config.get(ORIGIN_SCOPES) or (), config.get(ORIGIN_TEAM),
+                          config.get(ORIGIN_AGENT_LOCK)):
             yield
     else:
         yield
