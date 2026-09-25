@@ -1255,9 +1255,14 @@ async def _execute_agent_sync(
     workspace_id: UUID,
 ) -> Dict[str, Any]:
     """Execute an agent synchronously and return the result."""
+    from core.security.workspace_scope import agent_in_workspace
     from modules.agents.factory.agent_factory import AgentFactory
     db = next(get_db())
     try:
+        # F149: a webhook runs only an agent of its own workspace.
+        if not agent_in_workspace(db, agent_id, workspace_id):
+            logger.warning("[webhook/ws] Agent %s is not in workspace %s — not run", agent_id, workspace_id)
+            return {"status": "error", "error": "Agent not found"}
         # PRD-234 S3: a Claude Code agent's webhook becomes a board ticket; the
         # caller gets the ticket id back (the factory refuses cli agents by design).
         from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
@@ -1296,7 +1301,8 @@ async def _dispatch_workflow_async(
     from datetime import datetime, timezone
 
     recipe = db.query(WorkflowRecipe).filter(
-        WorkflowRecipe.id == workflow_id
+        WorkflowRecipe.id == workflow_id,
+        WorkflowRecipe.workspace_id == envelope.workspace_id,  # F149
     ).first()
 
     if not recipe or not recipe.steps:

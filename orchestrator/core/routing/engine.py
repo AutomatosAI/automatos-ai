@@ -180,6 +180,28 @@ class UniversalRouter:
             intent_category=decision.intent_category,
         )
 
+    def _within_workspace(
+        self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
+    ) -> Optional[RoutingDecision]:
+        """F149: a decision names an agent or playbook of the envelope's workspace,
+        or it is dropped and the next tier runs. Rules, overrides and the cache
+        carry bare ids; nothing else ties them to the message's workspace."""
+        if decision is None:
+            return None
+        from core.security.workspace_scope import agent_in_workspace, playbook_in_workspace
+
+        if decision.route_type == "agent" and decision.agent_id is not None:
+            if not agent_in_workspace(self._db, decision.agent_id, envelope.workspace_id):
+                logger.warning("[router] F149: agent %s is not in workspace %s — dropped",
+                               decision.agent_id, envelope.workspace_id)
+                return None
+        if decision.route_type == "workflow" and decision.workflow_id is not None:
+            if not playbook_in_workspace(self._db, decision.workflow_id, envelope.workspace_id):
+                logger.warning("[router] F149: playbook %s is not in workspace %s — dropped",
+                               decision.workflow_id, envelope.workspace_id)
+                return None
+        return decision
+
     async def _route_through_tiers(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
         """The tier chain itself. Callers use ``route``, which vets the result."""
 
@@ -192,28 +214,28 @@ class UniversalRouter:
         )
 
         # Tier 0 — explicit user overrides
-        decision = self._tier0_override(envelope)
+        decision = self._within_workspace(envelope, self._tier0_override(envelope))
         if decision is not None:
             logger.info("[router] Tier 0 hit (override): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 1 — cache lookup
-        decision = self._tier1_cache(envelope)
+        decision = self._within_workspace(envelope, self._tier1_cache(envelope))
         if decision is not None:
             logger.info("[router] Tier 1 hit (cache): agent_id=%s", decision.agent_id)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 2a — routing rules (source pattern match)
-        decision = self._tier2a_rules(envelope)
+        decision = self._within_workspace(envelope, self._tier2a_rules(envelope))
         if decision is not None:
             logger.info("[router] Tier 2a hit (rule): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 2b — TriggerSubscription (jira_trigger)
-        decision = self._tier2b_trigger_subscription(envelope)
+        decision = self._within_workspace(envelope, self._tier2b_trigger_subscription(envelope))
         if decision is not None:
             logger.info("[router] Tier 2b hit (trigger): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
@@ -226,6 +248,7 @@ class UniversalRouter:
         # Returns (decision, candidates) — candidates are request-local to
         # avoid race conditions under concurrent async requests.
         decision, semantic_candidates = await self._tier2_5_semantic(envelope)
+        decision = self._within_workspace(envelope, decision)
         if decision is not None:
             logger.info(
                 "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
@@ -238,14 +261,14 @@ class UniversalRouter:
         # Skip if Tier 2.5 already found semantic candidates — those go
         # straight to Tier 3 (LLM) which is smarter than keyword matching.
         if not semantic_candidates:
-            decision = self._tier2c_intent_classifier(envelope)
+            decision = self._within_workspace(envelope, self._tier2c_intent_classifier(envelope))
             if decision is not None:
                 logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
                 self._log_decision(envelope, decision, env_hash)
                 return decision
 
         # Tier 3 — LLM classification (fallback)
-        decision = await self._classify_with_llm(envelope, semantic_candidates)
+        decision = self._within_workspace(envelope, await self._classify_with_llm(envelope, semantic_candidates))
         if decision is not None:
             logger.info(
                 "[router] Tier 3 hit (LLM): route_type=%s agent_id=%s confidence=%.2f",

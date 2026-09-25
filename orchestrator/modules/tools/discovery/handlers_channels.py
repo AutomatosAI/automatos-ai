@@ -131,6 +131,11 @@ async def configure_channel(db: Session, workspace_id: UUID, params: Dict[str, A
             updates.append("config = :config")
             bind["config"] = _json.dumps(merged)
         if "default_agent_id" in params:
+            from core.security.workspace_scope import agent_in_workspace
+
+            if params["default_agent_id"] is not None and not agent_in_workspace(
+                    db, params["default_agent_id"], workspace_id):
+                return {"success": False, "error": "default_agent_id is not an agent of this workspace"}  # F149
             updates.append("default_agent_id = :agent_id")
             bind["agent_id"] = params["default_agent_id"]
 

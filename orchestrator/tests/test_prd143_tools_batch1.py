@@ -307,8 +307,10 @@ def test_connect_channel_canonical_helper_exists():
         assert expected in params
 
 
-def test_configure_channel_workspace_scoped():
+def test_configure_channel_workspace_scoped(monkeypatch):
     # F147: the handler reads the stored config to merge the call's into it.
+    # F149: agent 7 is taken as this workspace's (its tenancy check has its own tests).
+    monkeypatch.setattr("core.security.workspace_scope.agent_in_workspace", lambda db, agent_id, ws: True)
     db = _TextDB(row=SimpleNamespace(id="ch-1", config={"trigger_mode": "strict"}))
     out = _run(configure_channel(db, _WS, {
         "channel_id": "ch-1",
