@@ -128,11 +128,11 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
+                # F142 (e): no `modifications` here. The approval never applied
+                # them (api/missions.py PRD-163 S4 note), so an agent that sent
+                # agent_overrides believed it had pinned staff when it had not.
+                # Plan edits go through platform_update_mission_plan.
                 **_MISSION_ID_PARAM,
-                "modifications": {
-                    "type": "object",
-                    "description": "Optional approval-time plan edits (task_overrides, agent_overrides, notes).",
-                },
             },
             "required": ["mission_id"],
         },
