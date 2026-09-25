@@ -317,9 +317,10 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
                   />
                 </div>
                 <div>
-                  <Label htmlFor="brand-heading-font" className="flex items-center text-xs">
-                    Heading font <FieldHelp id="deliverables.brand_kit.heading_font" />
-                  </Label>
+                  <div className="flex items-center">
+                    <Label htmlFor="brand-heading-font" className="text-xs">Heading font</Label>
+                    <FieldHelp id="deliverables.brand_kit.heading_font" />
+                  </div>
                   <Input
                     id="brand-heading-font"
                     value={kit.heading_font}
