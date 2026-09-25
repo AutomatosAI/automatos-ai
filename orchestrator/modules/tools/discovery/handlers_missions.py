@@ -367,19 +367,19 @@ def _resolve_run(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     return run, None
 
 
-WIDGET_CANNOT_DECIDE = (
-    "The public widget can't approve, resume or reject a mission: the workspace owner does "
-    "that from the dashboard."
+WIDGET_CANNOT_CHANGE = (
+    "The public widget can't change a mission: the workspace owner does that from the dashboard."
 )
 
 
-def _widget_cannot_decide() -> Optional[Dict[str, Any]]:
-    """F155: approving, resuming or rejecting a mission is the owner's decision,
-    never a public widget visitor's. Refused before the run is looked up."""
+def _widget_cannot_change() -> Optional[Dict[str, Any]]:
+    """F155: approving, resuming, rejecting, pausing, cancelling, replanning or
+    editing a mission is the owner's decision, never a public widget visitor's.
+    Refused before the run is looked up."""
     from core.security.surface import widget_turn
 
     if widget_turn():
-        return {"success": False, "error": WIDGET_CANNOT_DECIDE}
+        return {"success": False, "error": WIDGET_CANNOT_CHANGE}
     return None
 
 
@@ -394,7 +394,7 @@ def _ok(run: Any, verb: str) -> Dict[str, Any]:
 
 async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Approve a mission plan and start execution (awaiting_approval → running)."""
-    refused = _widget_cannot_decide()
+    refused = _widget_cannot_change()
     if refused:
         return refused
     run, err = _resolve_run(db, workspace_id, params)
@@ -426,7 +426,7 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Reject a mission plan (awaiting_approval → cancelled, F143: it never ran)."""
-    refused = _widget_cannot_decide()
+    refused = _widget_cannot_change()
     if refused:
         return refused
     run, err = _resolve_run(db, workspace_id, params)
@@ -452,6 +452,9 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Pause a running mission (running → paused)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -470,7 +473,7 @@ async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
 async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Resume a paused mission (paused → running)."""
-    refused = _widget_cannot_decide()
+    refused = _widget_cannot_change()
     if refused:
         return refused
     run, err = _resolve_run(db, workspace_id, params)
@@ -491,6 +494,9 @@ async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Cancel a mission (any non-terminal → cancelled)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -509,6 +515,9 @@ async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Replan a failed mission (failed → replanning → running)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -530,6 +539,9 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
     mission (e.g. reassign a task's agent) so they persist into execution."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err

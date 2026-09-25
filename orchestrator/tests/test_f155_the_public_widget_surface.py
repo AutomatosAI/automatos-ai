@@ -9,7 +9,8 @@ predicates every gate shares read the mark, so whatever caller context a tool
 call carries, the turn is made for nobody, is never an admin, a super admin or
 autonomous, never approves a card by instruction, and is offered no admin tier;
 its auto_approve neither starts a mission nor runs a board task's approval, and
-it cannot approve, resume or reject a mission.
+it cannot change a mission (approve, resume, reject, pause, cancel, replan or
+edit its plan).
 (c) The widget records the key that starts a conversation; a key reads and
 resumes only the conversations it started.
 """
@@ -234,10 +235,17 @@ def test_a_widget_turns_auto_approve_never_runs_a_board_approval(db_session, see
     assert reply["status"] == "done" and len(published) == 1
 
 
-@pytest.mark.parametrize("handler,decision", [("approve_mission", "approve_plan"),
-                                              ("resume_mission", "resume_mission"),
-                                              ("reject_mission", "reject_plan")])
-def test_a_widget_turn_cannot_decide_a_mission(monkeypatch, handler, decision):
+EDITS = {"task_edits": [{"task_index": 0, "agent_id": 7}]}
+
+
+@pytest.mark.parametrize("handler,decision,extra", [("approve_mission", "approve_plan", {}),
+                                                    ("resume_mission", "resume_mission", {}),
+                                                    ("reject_mission", "reject_plan", {}),
+                                                    ("pause_mission", "pause_mission", {}),
+                                                    ("cancel_mission", "cancel_mission", {}),
+                                                    ("replan_mission", "replan_mission", {}),
+                                                    ("update_mission_plan", "update_mission_plan", EDITS)])
+def test_a_widget_turn_cannot_change_a_mission(monkeypatch, handler, decision, extra):
     """Under a policy that lets a call approve (auto_below_budget), on a run
     paused at its token budget."""
     from core.security.surface import WIDGET, turn_surface
@@ -250,14 +258,17 @@ def test_a_widget_turn_cannot_decide_a_mission(monkeypatch, handler, decision):
 
     def decide(surface):
         coordinator = MagicMock()
-        getattr(coordinator, decision).return_value = NS(id=run.id, state="running", goal="g")
+        updated = NS(id=run.id, state="running", goal="g")
+        setattr(coordinator, decision,
+                AsyncMock(return_value=updated) if decision == "replan_mission" else MagicMock(return_value=updated))
         with turn_surface(surface), patch.object(missions, "_resolve_run", return_value=(run, None)), \
                 patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
-            reply = asyncio.run(getattr(missions, handler)(MagicMock(), uuid4(), {"mission_id": str(run.id)}))
+            reply = asyncio.run(getattr(missions, handler)(MagicMock(), uuid4(),
+                                                           {"mission_id": str(run.id), **extra}))
         return reply, getattr(coordinator, decision)
 
     reply, called = decide(WIDGET)
-    assert reply == {"success": False, "error": missions.WIDGET_CANNOT_DECIDE}
+    assert reply == {"success": False, "error": missions.WIDGET_CANNOT_CHANGE}
     called.assert_not_called()
     reply, called = decide(None)
     assert reply["success"] is True
