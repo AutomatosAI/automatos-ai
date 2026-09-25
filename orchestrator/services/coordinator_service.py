@@ -3282,13 +3282,19 @@ class CoordinatorService:
         actor_id: str,
         reason: str,
     ) -> OrchestrationRun:
-        """Reject a mission plan. Transitions: awaiting_approval → failed."""
+        """Reject a mission plan. Transitions: awaiting_approval → cancelled.
+
+        F143 (night 4): a plan the owner rejects never ran. It was recorded as
+        failed, so its card went ``failed`` and the watch scored the run (0.5/10)
+        and told the owner it "needs a look". Cancelled, with the owner's reason,
+        is what happened; the watch closes a cancelled target without scoring it.
+        """
         run = self._get_run(db, run_id)
 
         transition_run(
             db=db,
             run=run,
-            new_state=RunState.FAILED,
+            new_state=RunState.CANCELLED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
             reason=reason,

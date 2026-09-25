@@ -358,9 +358,13 @@ def sync_mission_board_status(
     if new_status in ("done", "failed") and board_task.completed_at is None:
         board_task.completed_at = run.completed_at or datetime.now(timezone.utc)
 
-    # Store failure info when mission fails
+    # Store failure info when mission fails. F143: a cancelled mission's card is
+    # "done" (PRD-204 S4), so its error_message is what says it did not succeed,
+    # e.g. "Plan rejected: <the owner's reason>" (JEV keys watch verdicts on it).
     if run_state == RunState.FAILED:
         board_task.error_message = run.stop_detail or run.stop_reason or "Mission failed"
+    elif run_state == RunState.CANCELLED:
+        board_task.error_message = run.stop_detail or run.stop_reason or "Mission cancelled"
 
     # Blocked metadata for paused runs
     if new_status == "blocked" and old_status != "blocked":

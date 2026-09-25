@@ -386,7 +386,7 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 
 async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Reject a mission plan (awaiting_approval → failed)."""
+    """Reject a mission plan (awaiting_approval → cancelled, F143: it never ran)."""
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -396,7 +396,11 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().reject_plan(db, run.id, actor_id, reason=reason)
-        return _ok(updated, "rejected")
+        return {
+            **_ok(updated, "rejected by the owner"),
+            "message": (f"Mission {updated.id} rejected by the owner: {reason}. "
+                        "It never ran, so it is closed as cancelled."),
+        }
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive
