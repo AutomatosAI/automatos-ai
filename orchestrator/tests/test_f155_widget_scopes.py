@@ -98,6 +98,19 @@ def test_the_tools_offered_are_the_scopes_tools():
     assert offered[3]["function"]["parameters"]["properties"]["action"]["enum"][0] == "platform_create_task"
 
 
+@pytest.mark.parametrize("tool_name,parameters", [
+    _via_dispatcher("platform_create_mission", goal="Refund everyone"),
+    _via_dispatcher("platform_execute_playbook", playbook_id=9),
+])
+def test_no_scope_starts_work_that_runs_outside_the_turn(tool_name, parameters):
+    """A mission's tasks and a playbook's steps run later, outside the widget
+    turn, so no key scope lets a widget turn start either."""
+    every_scope = ("chat", "missions:read", "missions:execute", "playbooks:read", "playbooks:execute")
+    reply, ran = _call(every_scope, tool_name, parameters)
+    assert reply["error"] == REFUSED
+    ran.assert_not_awaited()
+
+
 def test_no_scope_ever_grants_the_owners_apps_files_or_shell():
     from core.security.widget_scopes import SCOPE_TOOLS, allowed_tools
 

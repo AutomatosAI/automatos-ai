@@ -17,6 +17,10 @@ widget turn:
 The tool executor refuses on the resolved action (platform_execute's inner
 action included), and the chat trims the tool list the model is offered to
 the same set.
+
+missions:execute and playbooks:execute unlock nothing on a widget turn: a
+mission's tasks and a playbook's steps run later, outside the turn, where
+none of these restrictions apply (F155 review, 25 Sep).
 """
 from __future__ import annotations
 
@@ -63,9 +67,7 @@ SCOPE_TOOLS: Mapping[str, FrozenSet[str]] = {
         "platform_recommend_agent",
     }),
     "missions:read": frozenset({"platform_list_missions", "platform_get_mission"}),
-    "missions:execute": frozenset({"platform_create_mission"}),
     "playbooks:read": frozenset({"platform_list_playbooks", "platform_get_playbook", "platform_get_playbook_execution"}),
-    "playbooks:execute": frozenset({"platform_execute_playbook"}),
     "tasks:read": frozenset({
         "platform_list_tasks",
         "platform_get_task",
