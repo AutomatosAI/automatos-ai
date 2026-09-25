@@ -7,7 +7,8 @@ which the NL2SQL service scopes to the key's workspace, remains.
 (b)+(e) interim: the chat service marks a widget turn for its duration, and the
 predicates every gate shares read the mark, so whatever caller context a tool
 call carries, the turn is made for nobody, is never an admin, a super admin or
-autonomous, never approves a card by instruction, and is offered no admin tier.
+autonomous, never approves a card by instruction, and is offered no admin tier;
+its auto_approve neither starts a mission nor runs a board task's approval.
 (c) The widget records the key that starts a conversation; a key reads and
 resumes only the conversations it started.
 """
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace as NS
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -178,6 +179,58 @@ def test_only_a_widget_turn_is_marked_and_only_while_it_runs(widget_mode):
 
     assert asyncio.run(_chat()) == ([widget_mode], False)
 
+
+
+def test_a_widget_turns_auto_approve_never_starts_a_mission(monkeypatch):
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery import handlers_missions as missions
+
+    monkeypatch.setattr("core.services.approval_policy.load_approval_policy",
+                        lambda db, ws: {"policy": "auto_below_budget", "approval_dollar_ceiling": 5.0,
+                                        "auto_proceed_after_seconds": None})
+    monkeypatch.setattr(missions, "_recent_chat_context", lambda *a, **k: [])
+    monkeypatch.setattr("modules.tools.discovery.handlers_watches.auto_create_watch", lambda *a, **k: None)
+    run = NS(id=uuid4(), goal="g", state="awaiting_approval", plan={"tasks": [{"title": "a"}]}, config={})
+
+    def create(surface):
+        coordinator = NS(create_mission=AsyncMock(return_value=run))
+        with turn_surface(surface), patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
+            reply = asyncio.run(missions.create_mission(MagicMock(), uuid4(),
+                                                        {"goal": "g", "config": {"auto_approve": True}}))
+        return reply, coordinator.create_mission.call_args.kwargs["config"]
+
+    reply, config = create(WIDGET)
+    assert "auto_approve" not in config and "public widget is no approval" in reply["message"]
+    reply, config = create(None)
+    assert config["auto_approve"] is True and "not applied" not in reply["message"]
+
+
+def test_a_widget_turns_auto_approve_never_runs_a_board_approval(db_session, seed_workspace):
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery.handlers_board_tasks import create_board_task
+
+    ws = UUID(seed_workspace())
+    published = []
+
+    class _Blog:
+        def __init__(self, db, workspace_id):
+            pass
+
+        def publish_post(self, post_id):
+            published.append(post_id)
+
+    def file(surface):
+        params = {"title": "Launch post", "description": "Publish the launch post", "auto_approve": True,
+                  "approval_action": {"type": "publish_blog", "post_id": str(uuid4())}}
+        with turn_surface(surface), patch("core.services.blog_service.BlogService", _Blog), \
+                patch("core.services.notification_service.send_workspace_notification", new=AsyncMock()):
+            return asyncio.run(create_board_task(db_session, ws, params))
+
+    reply = file(WIDGET)
+    assert (reply["status"], published, reply["auto_approve"]) == (
+        "review", [], "not applied: a call from the public widget is no approval")
+    reply = file(None)
+    assert reply["status"] == "done" and len(published) == 1
 
 # ── (c): a key reaches only the conversations it started ────────────────────
 

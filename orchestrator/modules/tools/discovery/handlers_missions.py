@@ -91,6 +91,23 @@ def _owner_approves_every_mission(db: Session, workspace_id: UUID) -> bool:
 AUTO_APPROVE_HELD_NOTE = (
     " auto_approve was not applied: this workspace asks its owner to approve every mission."
 )
+WIDGET_AUTO_APPROVE_HELD_NOTE = (
+    " auto_approve was not applied: a call from the public widget is no approval, so the "
+    "workspace's mission policy decides."
+)
+
+
+def _auto_approve_held(db: Session, workspace_id: UUID, config: Dict[str, Any]) -> str:
+    """Why the call's auto_approve does not count (the reply's note), or ""."""
+    if not config.get("auto_approve"):
+        return ""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return WIDGET_AUTO_APPROVE_HELD_NOTE
+    if _owner_approves_every_mission(db, workspace_id):
+        return AUTO_APPROVE_HELD_NOTE
+    return ""
 
 
 def _create_reply_message(run: Any, task_count: int) -> str:
@@ -150,8 +167,9 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     # F036 (night 1): a mission's approval gate is the OWNER's policy. An agent's
     # own tool call cannot skip it: auto_approve counts only where the policy
     # already lets missions start without asking (auto_below_budget, full_auto).
-    auto_approve_held = bool(config.get("auto_approve")) and _owner_approves_every_mission(db, workspace_id)
-    if auto_approve_held:
+    # F155: a public widget visitor's call is never an approval.
+    held_note = _auto_approve_held(db, workspace_id, config)
+    if held_note:
         config = {k: v for k, v in config.items() if k != "auto_approve"}
 
     if "context_messages" not in config:
@@ -212,7 +230,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "goal": run.goal[:200] if run.goal else "",
             "task_count": len(tasks),
             "tasks": task_summary,
-            "message": _create_reply_message(run, len(tasks)) + (AUTO_APPROVE_HELD_NOTE if auto_approve_held else ""),
+            "message": _create_reply_message(run, len(tasks)) + held_note,
         }
 
     except Exception as e:

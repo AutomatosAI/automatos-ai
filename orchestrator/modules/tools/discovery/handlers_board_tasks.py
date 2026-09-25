@@ -242,8 +242,12 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     db.commit()
     db.refresh(task)
 
-    # Auto-approve: execute the approval action immediately, skip human review
-    auto_approve = params.get("auto_approve", False)
+    # Auto-approve: execute the approval action immediately, skip human review.
+    # F155: a public widget visitor's call is never an approval; the task waits.
+    from core.security.surface import widget_turn
+
+    auto_approve_held = bool(params.get("auto_approve")) and widget_turn()
+    auto_approve = params.get("auto_approve", False) and not auto_approve_held
     if auto_approve and planning_data and planning_data.get("approval_action"):
         approval_action = planning_data["approval_action"]
         action_type = approval_action.get("type")
@@ -299,6 +303,8 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         "status": task.status,
         "title": task.title,
     }
+    if auto_approve_held:
+        result["auto_approve"] = "not applied: a call from the public widget is no approval"
 
     # PRD-224 US-005: an ASSIGN-lane assigned ticket is auto-supervised — attach a
     # run_and_report board_task watch here (in the create transaction path) so the
