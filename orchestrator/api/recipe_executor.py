@@ -1367,21 +1367,23 @@ async def _execute_recipe_inner(
         scratchpad.write_meta(recipe_id, total_steps)
 
         # --- Pre-execution: load Mem0 memories ---
+        # F155: none for a run a widget turn started — they are the owner's runs.
         recipe_memories = None
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            recipe_memories = await memory_svc.retrieve_relevant_memories(
-                recipe_id=recipe.id,
-                context={"workspace_id": str(workspace_id), "input_data": input_data}
-            )
-            if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
-                logger.info(
-                    "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
-                    recipe_memories["total_memories"], recipe.id,
+        if not widget_turn():
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                recipe_memories = await memory_svc.retrieve_relevant_memories(
+                    recipe_id=recipe.id,
+                    context={"workspace_id": str(workspace_id), "input_data": input_data}
                 )
-        except Exception as exc:
-            logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
+                if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
+                    logger.info(
+                        "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
+                        recipe_memories["total_memories"], recipe.id,
+                    )
+            except Exception as exc:
+                logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
 
         # F125: execution_config holds seconds. No unit is guessed from the size;
         # only the floors apply (core/services/playbook_timeouts.py).
@@ -2060,9 +2062,13 @@ async def _execute_recipe_inner(
         _update_agent_performance_metrics(db, step_results, success=True)
 
         # --- Post-execution: learning + memory storage ---
+        # F155: a run a widget turn started teaches the playbook nothing and
+        # leaves nothing in memory (a widget turn stores none, F154); later runs
+        # would recall it.
         post_exec_config = recipe.execution_config or {}
         learning_result = None
-        if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
+        remembered = not widget_turn()
+        if remembered and (post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False)):
             try:
                 from core.services.playbook_learning_service import PlaybookLearningService
                 learning_svc = PlaybookLearningService(db=db)
@@ -2072,16 +2078,17 @@ async def _execute_recipe_inner(
                 logger.warning(f"[recipe_direct] Auto-learning failed (non-blocking): {e}")
 
         # Store execution memories in Mem0 + L2 short-term
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            await memory_svc.store_execution_memory(
-                recipe_execution_id,
-                learnings=learning_result,
-            )
-            logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
-        except Exception as e:
-            logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
+        if remembered:
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                await memory_svc.store_execution_memory(
+                    recipe_execution_id,
+                    learnings=learning_result,
+                )
+                logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
+            except Exception as e:
+                logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)

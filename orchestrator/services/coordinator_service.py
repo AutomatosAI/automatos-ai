@@ -705,8 +705,15 @@ async def _store_mission_memory_safe(
     """PRD-131d Phase 1: persist mission summary to L2+L3 memory.
 
     Wrapped in a try/except so memory failures never break a mission transition.
+    F155: a mission a widget turn started leaves nothing in the workspace's
+    memory (a widget turn stores none, F154); later missions would recall it.
     """
     try:
+        from core.security.surface import widget_born
+
+        run = db.get(OrchestrationRun, run_id)
+        if run is not None and widget_born(run.config):
+            return
         from core.services.mission_memory_service import MissionMemoryService
         await MissionMemoryService(db=db).store_mission_summary(
             run_id=run_id,
@@ -772,7 +779,16 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
     ) -> Optional[str]:
-        """Create a shared vector field for a mission. Returns field_id or None."""
+        """Create a shared vector field for a mission. Returns field_id or None.
+
+        F155: none for a mission a widget turn started. The field is the
+        workspace's shared memory (planners and heartbeat agents recall it
+        workspace-wide), and a widget turn stores none (F154).
+        """
+        from core.security.surface import widget_born
+
+        if widget_born(run.config):
+            return None
         field = self._get_field()
         if not field:
             return None
@@ -2462,7 +2478,9 @@ class CoordinatorService:
         # record_task_completion transitions to FAILED only when retries are
         # exhausted; re-queued retries stay in QUEUED and should not fire here.
         try:
-            if task.state == TaskState.FAILED.value:
+            from core.security.surface import widget_born
+
+            if task.state == TaskState.FAILED.value and not widget_born(run.config):
                 from core.services.mission_memory_service import MissionMemoryService
                 await MissionMemoryService(db=db).store_task_failure(task=task)
         except Exception:
