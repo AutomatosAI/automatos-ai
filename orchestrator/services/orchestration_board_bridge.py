@@ -369,7 +369,8 @@ def sync_mission_board_status(
     # Blocked metadata for paused runs
     if new_status == "blocked" and old_status != "blocked":
         board_task.blocked_at = datetime.now(timezone.utc)
-        board_task.blocked_reason = "Mission paused"
+        # F153: the card says why (a budget pause names the numbers).
+        board_task.blocked_reason = run.stop_detail or "Mission paused"
     elif new_status != "blocked" and old_status == "blocked":
         board_task.blocked_at = None
         board_task.blocked_reason = None

@@ -35,6 +35,7 @@ from core.models.orchestration_enums import (
     EventType,
     FailureReasonCode,
     RunState,
+    StopReason,
     TaskState,
     TaskType,
 )
@@ -455,6 +456,17 @@ class MissionDispatcher:
         return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
 
     @staticmethod
+    def _budget_pause_detail(run: OrchestrationRun) -> str:
+        """F153: what a budget pause tells the owner — the measure the gate
+        used, spent against the ceiling."""
+        ceiling = (run.config or {}).get("cost_ceiling")
+        if isinstance(ceiling, (int, float)) and ceiling > 0:
+            used = f"budget used ${MissionDispatcher._cost_used_usd(run):,.2f} of ${float(ceiling):,.2f}"
+        else:
+            used = f"token budget used {run.tokens_used or 0:,} of {run.token_budget_estimate or 0:,}"
+        return f"Paused: {used} — raise the budget or resume"
+
+    @staticmethod
     def _cost_used_usd(run: OrchestrationRun) -> float:
         """Actual dollar cost incurred so far (tokens_used priced through the
         one pricing source, PRD-192 S3)."""
@@ -683,6 +695,8 @@ class MissionDispatcher:
                     actor_type=ActorType.COORDINATOR,
                     actor_id="dispatcher",
                     reason="Budget exceeded — mission paused",
+                    stop_reason=StopReason.BUDGET_EXHAUSTED.value,
+                    stop_detail=MissionDispatcher._budget_pause_detail(run),
                 )
                 results.append(DispatchResult(
                     dispatched=False,
@@ -736,6 +750,8 @@ class MissionDispatcher:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="dispatcher",
                 reason="Budget critical — all remaining tasks deferred, mission paused",
+                stop_reason=StopReason.BUDGET_EXHAUSTED.value,
+                stop_detail=MissionDispatcher._budget_pause_detail(run),
             )
 
         logger.info(
