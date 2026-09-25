@@ -593,6 +593,84 @@ jobs:
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
           docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
 
+  # PRD-251 Wave 1, S1.1a (US-101): the media-render image (D3). It builds the
+  # service exactly as Railway will (no build args, the default last stage), runs
+  # the service's own suite INSIDE the image, proves the boot assertion and
+  # /health, then renders the 3-second fixture with a Kokoro line, timed, and
+  # asserts the MP4 with ffprobe. The runner only builds, runs and asserts. A
+  # required job for the PRD-251 Wave 1 gate (scripts/ralph/acceptance-prd251w1.sh).
+  media-render:
+    name: media-render — image builds and renders the fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE: media-render:ci
+      TEST_IMAGE: media-render:test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (default target, as Railway builds it)
+        run: |
+          start=$(date +%s)
+          docker build -t "$IMAGE" services/media-render/
+          echo "image build: $(( $(date +%s) - start )) s"
+          docker image ls "$IMAGE"
+      - name: The versions baked into the image
+        run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
+      - name: The service's own suite, inside the image
+        run: |
+          docker build --target test -t "$TEST_IMAGE" services/media-render/
+          docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
+      - name: Boot assertion — a 160-character espeak data path stops the container
+        run: |
+          long="/opt/$(printf 'e%.0s' $(seq 1 160))"
+          set +e
+          timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false -e MEDIA_RENDER_ESPEAK_DATA_PATH="$long" "$IMAGE" > boot.log 2>&1
+          code=$?
+          set -e
+          cat boot.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
+            echo "::error::the container did not refuse a ${#long}-character espeak data path (exit $code)"
+            exit 1
+          fi
+          grep -q 'espeak-ng data path is 165 characters' boot.log
+          echo "the default command refused to boot with a ${#long}-character path (exit $code): PASS"
+      - name: The container boots and /health answers without a token
+        run: |
+          docker run -d --name media-render-health -e LOG_RELAY_ENABLED=false -p 127.0.0.1:8090:8090 "$IMAGE"
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health; then ok=1; echo; break; fi
+            sleep 2
+          done
+          docker logs media-render-health
+          docker rm -f media-render-health > /dev/null
+          if [ -z "$ok" ]; then echo "::error::/health never answered"; exit 1; fi
+      - name: Render the fixture (Kokoro line, then hyperframes render), timed
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && chmod 777 "$RUNNER_TEMP/out"
+          start=$(date +%s)
+          docker run --rm --shm-size=1g -e LOG_RELAY_ENABLED=false -v "$RUNNER_TEMP/out:/out" "$IMAGE" fixture --out /out
+          echo "fixture wall time (container start, model load, check, render): $(( $(date +%s) - start )) s"
+      - name: Assert the MP4 (ffprobe) and the Kokoro line
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/out:/out" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/fixture.mp4 > "$RUNNER_TEMP/out/probe.json"
+          python3 services/media-render/ci/assert_output.py "$RUNNER_TEMP/out/probe.json" \
+            --video-codec h264 --width 1080 --height 1920 --fps 30 \
+            --audio-codec aac --duration 3.0 --tolerance 0.1 \
+            --report "$RUNNER_TEMP/out/fixture.json" --min-line-seconds 0.5
+      - name: hyperframes check on the fixture (recorded here; US-102 makes /render refuse on it)
+        if: always()
+        run: cat "$RUNNER_TEMP/out/check.json" 2>/dev/null || echo "no check report"
+      - name: Keep the rendered fixture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-fixture
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+          retention-days: 7
+
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration
   # forest, create_all-at-boot, and inline ALTERs inside migrations). No lane

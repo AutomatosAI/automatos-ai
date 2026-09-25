@@ -31,6 +31,8 @@ PROD_DEFAULTS = {
     },
     "orchestrator/Dockerfile": {"INSTALL_GRAPH_EXTRAS": "true"},
     "services/workspace-worker/Dockerfile": {"INSTALL_BROWSER": "true"},
+    # PRD-251 W1: no defaulted ARG (TARGETARCH is BuildKit's, never defaulted).
+    "services/media-render/Dockerfile": {},
 }
 
 # What the LOCAL edition must pass explicitly (docker-compose.yml build args).
