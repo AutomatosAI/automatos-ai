@@ -174,43 +174,6 @@ actions:
     source: authored
   - text: set digest frequency to weekly
     source: authored
-  platform_update_system_setting:
-  - text: change the default LLM model setting
-    source: example
-  - text: update the email sender system setting
-    source: example
-  - text: update the platform default model to gpt-4o
-    source: authored
-  - text: change the system setting for max tokens
-    source: authored
-  - text: set the email sender address platform wide
-    source: authored
-  - text: modify the default temperature setting
-    source: authored
-  - text: change the platform level rate limit
-    source: authored
-  - text: update the storage bucket system setting
-    source: authored
-  - text: set the default llm provider for everyone
-    source: authored
-  - text: change the platform timeout config
-    source: authored
-  - text: update the smtp host setting
-    source: authored
-  - text: tweak the system setting for embedding model
-    source: authored
-  - text: set a new value for the api base url setting
-    source: authored
-  - text: update the platform's default currency setting
-    source: authored
-  - text: modify the retry limit in system settings
-    source: authored
-  - text: change the global setting for session length
-    source: authored
-  - text: adjust the platform-wide logging level
-    source: authored
-  - text: bump the default max tokens across the platform
-    source: authored
   platform_update_workspace_settings:
   - text: use my own OpenAI key for this workspace
     source: example

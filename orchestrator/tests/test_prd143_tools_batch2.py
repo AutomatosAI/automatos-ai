@@ -589,16 +589,20 @@ def test_uninstall_plugin_invalid_id_fails_closed():
 def test_batch2_tools_operator_tier_and_permission_levels():
     from modules.tools.discovery.action_registry import ActionRegistry
 
+    # F147 (25 Sep): system settings are every tenant's, so they are the
+    # platform operator's; workspace settings are an owner's or admin's.
+    super_admin_gated = {"platform_update_system_setting"}
+    admin_gated = {"platform_update_workspace_settings"}
     registry = ActionRegistry()
     actions = {a.name: a for a in registry.get_all()}
     for name, level in BATCH2_TOOLS.items():
         assert name in actions, f"{name} missing from registry"
         action = actions[name]
-        assert action.super_admin_only is False, (
+        assert action.super_admin_only is (name in super_admin_gated), (
             f"{name} must be operator tier (Rev 2 inversion — admin surface is "
-            "deliberately open, gated by logs not exclusion)"
+            "deliberately open, gated by logs not exclusion), F147's exceptions aside"
         )
-        assert action.admin_only is False, f"{name} must not be admin-gated (post-S4 catalogue)"
+        assert action.admin_only is (name in admin_gated), f"{name}: admin_only must be {name in admin_gated}"
         assert action.workspace_scoped is True, f"{name} must be workspace-scoped"
         assert action.permission_level == level, (
             f"{name}: expected permission_level={level!r}, got {action.permission_level!r}"

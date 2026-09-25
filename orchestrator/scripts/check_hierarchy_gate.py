@@ -63,6 +63,14 @@ ALLOW_LIST: Set[str] = {
     "platform_cancel_scheduled_task",
     "platform_schedule_playbook",
     "platform_execute_playbook",
+    # F147: workspace- or platform-scoped, no agent target; each is gated otherwise.
+    "platform_update_system_setting",      # super_admin_only + confirmation: every tenant's settings
+    "platform_update_workspace_settings",  # admin_only; fail-closed key whitelist
+    "platform_configure_channel",          # admin_only + confirmation; merges, keeps trigger_mode/credentials
+    "platform_remove_member",              # destructive + confirmation (admin grant); never the owner
+    "platform_update_widget_config",       # fail-closed whitelist of three public widget keys
+    "platform_update_mission_plan",        # edits a plan still awaiting the owner's approval
+    "platform_update_onboarding",          # the workspace's own onboarding state
 }
 
 # Heuristic — names that suggest a mutation against a specific target.

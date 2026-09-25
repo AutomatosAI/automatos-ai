@@ -112,6 +112,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # PRD-140 hierarchy audit (F147): every mutating platform action is
+      # hierarchy-gated or allow-listed with its reason. A new unlisted
+      # mutator fails the job here.
+      - name: Hierarchy gate audit
+        run: python scripts/check_hierarchy_gate.py
+
       - name: Initialise test database schema
         run: python scripts/init_test_db.py
 

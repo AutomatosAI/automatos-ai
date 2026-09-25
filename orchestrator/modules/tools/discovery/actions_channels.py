@@ -110,7 +110,10 @@ def register_channels_actions(registry: ActionRegistry) -> None:
             "required": ["channel_id"],
         },
         permission_level="write",
-        requires_confirmation=False,
+        # F147: a channel's config holds its trust gate (trigger_mode) and its
+        # credentials; an owner or admin confirms every change.
+        requires_confirmation=True,
+        admin_only=True,
         tags=["channels", "integrations", "messaging", "configure"],
         examples=[
             "rotate the telegram bot token",
