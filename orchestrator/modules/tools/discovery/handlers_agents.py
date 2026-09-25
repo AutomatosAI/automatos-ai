@@ -1,7 +1,7 @@
 """Agent CRUD handlers for PlatformActionExecutor."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import func
@@ -213,6 +213,22 @@ def _model_not_offered(route: Any, model_id: str) -> Optional[str]:
     return None
 
 
+def _namesakes_refusal(namesakes: List[Any]) -> str:
+    """Every active agent already carrying the name, by id, with its team and job
+    title when set, so Auto can pick the right one instead of making another."""
+    def who(agent: Any) -> str:
+        role = ", ".join(part for part in (getattr(agent, "team", None), getattr(agent, "job_title", None)) if part)
+        return f"id {agent.id}" + (f", {role}" if role else "")
+
+    name = namesakes[0].name
+    if len(namesakes) == 1:
+        return (f"An active agent is already called '{name}' ({who(namesakes[0])}). "
+                "Use that agent, or give the new one a different name.")
+    listed = "; ".join(who(agent) for agent in namesakes)
+    return (f"{len(namesakes)} active agents are already called '{name}' ({listed}). "
+            "Use one of them, or give the new one a different name.")
+
+
 async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent
 
@@ -222,21 +238,23 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
     # F134 (night 4, B55): asked to use an existing agent, Auto created a namesake,
     # whose dead model then answered nothing (B56). One active agent per name.
-    namesake = (
-        db.query(Agent.id, Agent.name)
+    # F144: a workspace may already hold several (WRITER 58/306/309): name them all.
+    namesakes = (
+        db.query(Agent.id, Agent.name, Agent.team, Agent.job_title)
         .filter(
             Agent.workspace_id == workspace_id,
             Agent.status == "active",
             func.lower(func.trim(Agent.name)) == str(name).strip().lower(),
         )
-        .first()
+        .order_by(Agent.id)
+        .all()
     )
-    if namesake:
+    if namesakes:
         return {
             "success": False,
-            "existing_agent_id": namesake.id,
-            "error": (f"An active agent is already called '{namesake.name}' (id {namesake.id}). "
-                      "Use that agent, or give the new one a different name."),
+            "existing_agent_id": namesakes[0].id,
+            "existing_agent_ids": [agent.id for agent in namesakes],
+            "error": _namesakes_refusal(namesakes),
         }
 
     agent_type = params.get("agent_type", "chatbot")

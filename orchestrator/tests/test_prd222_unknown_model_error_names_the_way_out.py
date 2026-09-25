@@ -24,6 +24,7 @@ def _db():
     namesake check reads that first)."""
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     return db
 
 

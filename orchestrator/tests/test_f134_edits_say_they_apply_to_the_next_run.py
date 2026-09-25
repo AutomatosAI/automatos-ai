@@ -34,8 +34,14 @@ class _Rows:
     def filter(self, *args, **kwargs):
         return self
 
+    def order_by(self, *args):
+        return self
+
     def first(self):
         return self._first
+
+    def all(self):
+        return [self._first] if self._first is not None else []
 
     def count(self):
         return self._count
@@ -110,6 +116,7 @@ def test_auto_cannot_make_a_second_active_agent_with_the_same_name():
     assert reply == {
         "success": False,
         "existing_agent_id": 284,
+        "existing_agent_ids": [284],
         "error": "An active agent is already called 'BEANCOUNTER' (id 284). "
                  "Use that agent, or give the new one a different name.",
     }
