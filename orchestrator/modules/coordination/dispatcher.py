@@ -565,11 +565,6 @@ class MissionDispatcher:
         if ceiling_usd <= 0:
             return "allow"
 
-        # User can disable budget pausing via mission config
-        config = run.config or {}
-        if config.get("budget_pause_disabled"):
-            return "allow"
-
         used_usd = MissionDispatcher._cost_used_usd(run, db)
         status = MissionDispatcher._get_budget_status(run, used_usd=used_usd)
         task_type = getattr(task, "task_type", None) or ""

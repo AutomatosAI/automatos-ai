@@ -149,3 +149,42 @@ def test_a_dollar_ceiling_pause_and_resume_stay_in_dollars(mission):
 
     CoordinatorService().resume_mission(mission.db, mission.run.id, "user_test")
     assert mission.run.config["cost_ceiling"] == 6.2
+
+
+def test_no_config_key_switches_the_budget_pause_off(mission):
+    """budget_pause_disabled was read by the budget gate and written by nothing:
+    any creator could turn the pause off. It is inert now."""
+    mission.run.config = {"budget_pause_disabled": True}
+    _book(mission, _ceiling() * 3, 30_000)
+    _dispatch(mission)
+    assert (mission.run.state, mission.run.stop_reason) == ("paused", "budget_exhausted")
+
+
+# What a creator tried to seed: the coordinator's bookkeeping, and verification
+# skipped (only an approver sets that, on the approve endpoint).
+SEEDED = {"async_planning": True, "max_retries": 2, "session_tokens": 999_999_999,
+          "approval_deadline_at": "2000-01-01T00:00:00+00:00", "approval_countdown_seconds": 1,
+          "approval_last_notified_at": "2000-01-01T00:00:00+00:00", "approval_estimated_cost_usd": 0.0,
+          "field_id": "field-of-another-mission", "field_archived": True, "field_expired_at": "2000-01-01",
+          "output_ingest": "skipped_opt_out", "output_ingest_failed": "2000-01-01", "output_document_id": 1,
+          "app_bundle_document_id": 2, "emitted_document": "brief.md", "emitted_deliverable_id": "d-1",
+          "progress_ledger": {"loops": 0}, "template_used": "t", "imported_plan": True, "skip_verification": True}
+
+
+def test_an_imported_plans_creator_cannot_seed_the_coordinators_bookkeeping(db_session, seed_workspace):
+    from services.coordinator_service import CoordinatorService
+
+    run = CoordinatorService().import_plan(db=db_session, workspace_id=UUID(seed_workspace()), goal="Draft the letter",
+                                           plan={"tasks": [{"title": "Draft the letter"}]}, created_by="user_test",
+                                           config=SEEDED)
+    assert run.config == {"async_planning": True, "max_retries": 2, "imported_plan": True}
+
+
+def test_a_mission_s_creator_cannot_seed_the_coordinators_bookkeeping(mock_db):
+    """A seeded session-token count would hide spend from the budget, and a
+    seeded approval deadline would have the tick auto-approve the plan."""
+    from services.coordinator_service import CoordinatorService
+
+    run = asyncio.run(CoordinatorService().create_mission(db=mock_db, workspace_id=uuid4(), goal="g",
+                                                          created_by="user_test", config=SEEDED))
+    assert run.config == {"async_planning": True, "max_retries": 2}

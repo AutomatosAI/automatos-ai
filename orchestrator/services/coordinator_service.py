@@ -365,6 +365,39 @@ async def _dispatch_mission_event(
         )
 
 
+# F153: run.config keys a mission's creator never sets, on any creation path
+# (_creator_config): the coordinator's own bookkeeping, and skip_verification,
+# which only an approver sets (the approve endpoint). A seeded session-token
+# count would hide spend from the budget, a seeded approval deadline would
+# auto-approve the plan, and a seeded field or output id would point the
+# mission's writes at another field or document.
+SERVER_OWNED_MISSION_CONFIG = frozenset({
+    "session_tokens",
+    "approval_deadline_at",
+    "approval_countdown_seconds",
+    "approval_last_notified_at",
+    "approval_estimated_cost_usd",
+    "field_id",
+    "field_archived",
+    "field_expired_at",
+    "output_ingest",
+    "output_ingest_failed",
+    "output_document_id",
+    "app_bundle_document_id",
+    "emitted_document",
+    "emitted_deliverable_id",
+    "progress_ledger",
+    "template_used",
+    "imported_plan",
+    "skip_verification",
+})
+
+
+def _creator_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A new mission's config as its creator may set it: without the keys in
+    SERVER_OWNED_MISSION_CONFIG."""
+    return {key: value for key, value in (config or {}).items() if key not in SERVER_OWNED_MISSION_CONFIG}
+
 WIDGET_SESSION_REFUSAL = (
     "A mission started from the website chat does not run on a Claude Code session."
 )
@@ -2526,7 +2559,8 @@ class CoordinatorService:
         Raises:
             PlanValidationError: if planner cannot produce a valid plan.
         """
-        mission_config = config or {}
+        # F153: the coordinator's own bookkeeping on run.config is never the caller's to set.
+        mission_config = _creator_config(config)
 
         # Create the run in PENDING state
         run = OrchestrationRun(
@@ -3195,7 +3229,7 @@ class CoordinatorService:
             max_concurrent=int(plan.get("max_concurrent", 1)),
         )
 
-        mission_config = {**(config or {}), "imported_plan": True}
+        mission_config = {**_creator_config(config), "imported_plan": True}
         run = OrchestrationRun(
             workspace_id=workspace_id,
             goal=goal,
