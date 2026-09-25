@@ -50,7 +50,7 @@ from core.models.orchestration_enums import (
     DONE_TASK_STATES,
 )
 from modules.coordination import progress_ledger
-from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation
+from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
     DecompositionResult,
@@ -145,6 +145,28 @@ def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
     return {**plan, "tasks": new_tasks}
 
 
+def _pin_the_named_agent(edit: Any, roster: List[Any]) -> Any:
+    """F142 (c): an edit that names ONE active agent (``agent_id``, or an
+    ``agent_role`` spelling an id, slug or name) pins it: the task carries its
+    id, and its name as the role. A capability word or other text pins nothing
+    and clears an earlier pin. A name several active agents share is refused
+    with their ids, never resolved to the lowest one."""
+    if not isinstance(edit, dict):
+        return edit
+    named = edit.get("agent_id") if edit.get("agent_id") is not None else edit.get("agent_role")
+    if named is None:
+        return edit
+    agent, why = resolve_named_agent(str(named), roster)
+    if why:
+        raise ValueError(why)
+    if agent is None:
+        if edit.get("agent_id") is not None:
+            raise ValueError(f"No active agent with id {edit['agent_id']} in this workspace.")
+        return {**edit, "pinned_agent_id": None}
+    return {**{k: v for k, v in edit.items() if k != "agent_id"},
+            "agent_role": agent.name, "pinned_agent_id": agent.id}
+
+
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                           edits: List[Dict[str, Any]]) -> tuple:
     """Apply per-task field edits to OrchestrationTask rows and mirror them into
@@ -193,6 +215,16 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                 if getattr(task, field, None) != new_val:
                     setattr(task, field, new_val)
                     fields_changed += 1
+        # F142 (c): the agent a person pinned (update_mission_plan resolves it);
+        # None clears a pin. It rides input_context, never agent_role.
+        if "pinned_agent_id" in edit:
+            before = dict(getattr(task, "input_context", None) or {})
+            after = {k: v for k, v in before.items() if k != "pinned_agent_id"}
+            if edit["pinned_agent_id"] is not None:
+                after["pinned_agent_id"] = int(edit["pinned_agent_id"])
+            if after != before:
+                task.input_context = after
+                fields_changed += 1
         edited_rows.add(int(getattr(task, "sequence_number", -1)))
 
     # Mirror the row state back into the plan snapshot (by sequence_number).
@@ -203,7 +235,8 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
             seq = pt.get("sequence_number")
             row = seq_to_row.get(int(seq)) if seq is not None else None
             if row is not None and int(seq) in edited_rows:
-                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS}}
+                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS},
+                      "pinned_agent_id": (getattr(row, "input_context", None) or {}).get("pinned_agent_id")}
             new_plan_tasks.append(pt)
         plan = {**plan, "tasks": new_plan_tasks}
 
@@ -3208,6 +3241,12 @@ class CoordinatorService:
             .filter(OrchestrationTask.run_id == run.id)
             .all()
         )
+        roster = (
+            db.query(Agent)
+            .filter(Agent.workspace_id == run.workspace_id, Agent.status == "active")
+            .all()
+        )
+        task_edits = [_pin_the_named_agent(edit, roster) for edit in (task_edits or [])]
         new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
         if fields_changed:
             run.plan = new_plan  # reassign so the JSON column is marked dirty

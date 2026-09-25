@@ -66,6 +66,8 @@ def _plan_task_summary(plan_tasks: list) -> list:
         }
         if t.get("match_agent"):
             entry["match_agent"] = t["match_agent"]
+        if t.get("match_agent_id") is not None:  # F142 (c): which of several same-named agents
+            entry["match_agent_id"] = t["match_agent_id"]
         if t.get("match_reason"):
             entry["match_reason"] = t["match_reason"]
         if t.get("match_is_override"):

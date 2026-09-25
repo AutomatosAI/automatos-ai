@@ -111,6 +111,8 @@ class MissionTaskEdit(BaseModel):
     task_id: Optional[str] = Field(None, description="Task row UUID")
     temp_id: Optional[str] = Field(None, description="Planner temp id")
     sequence_number: Optional[int] = Field(None, ge=1, description="1-based task sequence")
+    # F142 (c): pin a specific agent (several may share a name).
+    agent_id: Optional[int] = Field(None, ge=1, description="The agent that runs this task")
     agent_role: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
     description: Optional[str] = Field(None, max_length=5000)

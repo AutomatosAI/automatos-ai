@@ -1052,8 +1052,10 @@ def _render_agent_roster(agents: Sequence[Agent]) -> str:
             tags_text = f" | Tags: {', '.join(str(t) for t in agent.tags)}"
 
         desc = (agent.description or "")[:120]
+        # F142 (c): the id (and slug) tell same-named agents apart.
+        slug = getattr(agent, "slug", None)
         lines.append(
-            f"- {agent.name}: {desc}"
+            f"- {agent.name} (id {agent.id}{f', slug {slug}' if slug else ''}): {desc}"
             f"{skills_text}{tags_text}"
             f"{f' | Model: {model_id}' if model_id else ''}"
         )

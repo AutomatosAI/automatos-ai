@@ -228,7 +228,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                     "type": "array",
                     "description": (
                         "Per-task edits. Identify each task by task_id, temp_id, or "
-                        "sequence_number; set any of agent_role, title, description."
+                        "sequence_number; set any of agent_id, agent_role, title, description. "
+                        "To have a specific agent run the task, give its agent_id (or its "
+                        "name when only one active agent has it)."
                     ),
                     "items": {
                         "type": "object",
@@ -236,6 +238,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                             "task_id": {"type": "string"},
                             "temp_id": {"type": "string"},
                             "sequence_number": {"type": "integer"},
+                            "agent_id": {"type": "integer"},
                             "agent_role": {"type": "string"},
                             "title": {"type": "string"},
                             "description": {"type": "string"},
