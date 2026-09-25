@@ -412,6 +412,29 @@ def test_full_auto_under_ceiling_launches_and_watch_follows(
     s.close()
 
 
+def test_a_widget_born_runs_rerun_waits_for_approval_under_full_auto(
+    workspace, new_session, stub_launch, capture_notifications
+):
+    """F155: a rerun replays the visitor's input, so it is decided as the
+    widget's: never autonomous."""
+    from services.watch_rerun import request_rerun
+
+    s = new_session()
+    recipe, original = _seed_recipe_and_execution(s, workspace)
+    original.execution_metadata = {"origin_surface": "widget", "origin_scopes": ["chat"], "origin_team": None}
+    s.commit()
+    watch = _make_watch(s, workspace, original)
+    _set_policy(s, workspace, {"approval_policy": {"policy": "full_auto"}, "autonomy": {"level": "full"}})
+
+    outcome = asyncio.run(request_rerun(s, workspace_id=workspace, recipe=recipe, original=original,
+                                        triggered_by="watch_rerun", watch=watch))
+    s.commit()
+
+    assert (outcome.launched, stub_launch) == (False, [])
+    assert outcome.grant_id is not None
+    s.close()
+
+
 def test_over_ceiling_estimate_parks_under_auto_below_budget(
     workspace, new_session, stub_launch, capture_notifications
 ):

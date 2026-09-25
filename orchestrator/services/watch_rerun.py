@@ -271,10 +271,15 @@ async def request_rerun(
     spec in details, parks the watch in ``awaiting_approval``, fires the
     ``approval_pending`` notification. Caller commits.
     """
+    # F155: a rerun of a run a widget turn started is decided as the widget's
+    # (never autonomous): its input is still the visitor's.
+    from core.security.surface import origin_surface
+
     estimated = estimate_rerun_cost_usd(db, workspace_id, original.execution_id)
-    decision = evaluate_approval(
-        db, workspace_id, estimated, override_auto_approve=override_auto_approve
-    )
+    with origin_surface(original.execution_metadata):
+        decision = evaluate_approval(
+            db, workspace_id, estimated, override_auto_approve=override_auto_approve
+        )
 
     if decision.auto_approve:
         execution = create_rerun_execution(

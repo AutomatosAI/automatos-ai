@@ -163,8 +163,13 @@ async def run_mission_action(
         )
 
     # --- approval gate ---
+    # F155: a widget-born mission's action is decided as the widget's (never
+    # autonomous), as its planning is (core.security.surface.origin_surface).
+    from core.security.surface import origin_surface
+
     estimated = estimate_mission_action_cost_usd(run)
-    decision = evaluate_approval(db, watch.workspace_id, estimated)
+    with origin_surface(run.config):
+        decision = evaluate_approval(db, watch.workspace_id, estimated)
     auto = decision.auto_approve
     if action == ACTION_SPAWN_AGENT and decision.policy != FULL_AUTO:
         # Section 8 Q5: spawn is ALWAYS grant-gated in v1 -- only full_auto
