@@ -25,7 +25,10 @@ Deliverable registry and the usage tracker are recording fakes. Pins:
   503 / connection and read failures; a download streams to disk with its sha256;
 * the boot reaper fails a render stranded by a restart;
 * compose runs media-render under the ``media`` profile only, and the Railway
-  manifest carries it at 4 vCPU / 8 GB with one replica.
+  manifest carries it at 4 vCPU / 8 GB with one replica;
+* US-107: a carousel (a social_image template) asks for a still per slide it
+  shows, and its PNGs are stored, registered and recorded one per slide, in
+  order, at no render minutes.
 """
 from __future__ import annotations
 
@@ -250,15 +253,15 @@ def env(monkeypatch):
         engine.dispose()
 
 
-def _template(env, *, workspace_id=WS, blocks=COMPOSITION):
+def _template(env, *, workspace_id=WS, blocks=COMPOSITION, fmt="social_video"):
     template_id = uuid.uuid4()
     env.session.execute(
         sa.text(
             "INSERT INTO document_templates (id, workspace_id, name, format, data_schema, blocks) "
-            "VALUES (:id, :ws, :name, 'social_video', '{}', :blocks)"
+            "VALUES (:id, :ws, :name, :fmt, '{}', :blocks)"
         ),
         {
-            "id": template_id.hex, "ws": workspace_id.hex, "name": f"tpl-{template_id.hex[:6]}",
+            "id": template_id.hex, "ws": workspace_id.hex, "name": f"tpl-{template_id.hex[:6]}", "fmt": fmt,
             "blocks": json.dumps(blocks) if blocks is not None else None,
         },
     )
@@ -301,12 +304,14 @@ def _usage_row(workspace_id, seconds, *, provider=MEDIA_RENDER_PROVIDER, lane="m
 class Renderer:
     """media-render over httpx.MockTransport: the real client talks to it."""
 
-    def __init__(self, *, reject=None, busy_first=False, status="done", error=None, outputs=(OUTPUT,)):
+    def __init__(self, *, reject=None, busy_first=False, status="done", error=None, outputs=(OUTPUT,), files=None):
         self.reject = reject
         self.busy_first = busy_first
         self.status = status
         self.error = error
         self.outputs = list(outputs)
+        # The files GET /render/{id}/output/{name} serves (US-107: a carousel's PNGs).
+        self.files = dict(files) if files is not None else {"render.mp4": MP4}
         self.bundles = []
         self.seen = []
 
@@ -331,8 +336,9 @@ class Renderer:
                 "error": self.error,
             }
             return httpx.Response(200, json=body)
-        if request.method == "GET" and path == f"/render/{JOB_ID}/output/render.mp4":
-            return httpx.Response(200, content=MP4)
+        name = path.rsplit("/", 1)[-1]
+        if request.method == "GET" and path == f"/render/{JOB_ID}/output/{name}" and name in self.files:
+            return httpx.Response(200, content=self.files[name])
         return httpx.Response(404, json={"error": "not_found", "message": f"no route {path}"})
 
 
@@ -1088,3 +1094,72 @@ def test_the_render_wait_stays_under_the_reaper_cutoff():
     from config import config
 
     assert config.SOCIALS_RENDER_MAX_WAIT_SECONDS < config.BOOT_REAPER_STALE_MINUTES * 60
+
+
+# ---------------------------------------------------------------------------
+# US-107: an image renders as stills; a carousel keeps every slide it shows
+# ---------------------------------------------------------------------------
+
+
+def _carousel_blocks():
+    from modules.documents.social_starters import social_starters
+
+    (carousel,) = [s for s in social_starters("social_image") if s["slug"] == "carousel"]
+    return carousel["blocks"]
+
+
+def test_a_carousel_renders_a_png_per_slide_it_shows_stored_and_recorded_in_order(env):
+    post = _create(
+        env,
+        template_id=str(_template(env, blocks=_carousel_blocks(), fmt="social_image")),
+        format="carousel",
+        variables={
+            "headline": {"value": "4 SIGNS|YOUR AGENT|NEEDS A|HARNESS", "claim": False},
+            "point_1_title": {"value": "It forgets what it just did", "claim": False},
+            "point_2_title": {"value": "It picks the wrong tool", "claim": False},
+            "closing_title": {"value": "Build the harness first.", "claim": False},
+        },
+    )
+    _, job = _start(env, post)
+    pngs = {f"render-{i:02d}.png": b"\x89PNG\r\n\x1a\n" + bytes([i]) * 64 for i in range(1, 5)}
+    outputs = [
+        {"name": name, "kind": "still", "index": i, "at": at, "aspect": "4:5", "width": 1080, "height": 1350, "bytes": 72}
+        for i, (name, at) in enumerate(zip(sorted(pngs), (0.5, 1.5, 2.5, 7.5)), start=1)
+    ]
+    renderer, store = Renderer(outputs=outputs, files=pngs), FakeStore()
+    assert _run(job, renderer, store, env.factory) is True
+
+    # Points 3-6 are empty, so their slides are not taken: a still for the cover, the
+    # two points and the close. An image has no sound and is no preview.
+    (bundle,) = renderer.bundles
+    assert bundle["still"] == {"at": [0.5, 1.5, 2.5, 7.5]}
+    assert "audio" not in bundle and "preview" not in bundle
+    assert bundle["variables"]["size.width"] == 1080 and bundle["variables"]["size.height"] == 1350
+
+    # Each slide is its own file, numbered in order, stored and registered as an image.
+    names = [f"carousel-4x5-{i:02d}.png" for i in range(1, 5)]
+    keys = [f"social-media/{WS}/{post['id']}/{name}" for name in names]
+    assert sorted(store.objects) == keys
+    assert [store.objects[key] for key in keys] == [(pngs[f"render-{i:02d}.png"], "image/png") for i in range(1, 5)]
+    assert [call["artifact_type"] for call in Deliverables.calls] == ["image"] * 4
+    assert [call["file_path"] for call in Deliverables.calls] == keys
+
+    row = _post(env, post["id"])
+    assert row.status == "needs_approval"
+    records = row.media["4:5"]
+    assert [record["name"] for record in records] == names
+    assert all("duration" not in r and (r["width"], r["height"]) == (1080, 1350) for r in records)
+    assert row.content_hash == service.compute_content_hash(row)
+    assert row.review_log[-1]["comment"] == "Rendered 4 images at 1080×1350."
+    # A still has no duration: the render spends no minutes.
+    (booking,) = env.booked
+    assert booking["units"] == 0.0
+
+
+def test_one_output_keeps_its_plain_name_and_several_are_numbered():
+    job = SimpleNamespace(format="image")
+    still = {"name": "render.png", "index": 1, "aspect": "4:5"}
+    assert render.stored_file_name(job, still) == "image-4x5.png"
+    assert render.stored_file_name(job, still, several=True) == "image-4x5-01.png"
+    assert render.stored_file_name(job, {**OUTPUT, "index": 3}) == "image-9x16.mp4"
+

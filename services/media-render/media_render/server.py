@@ -131,7 +131,8 @@ async def _render(state: ServiceState, job_id: str, workspace_id: str, granted: 
             "queue_seconds": round(max(0.0, (job.started_at or checked_at) - checked_at), 3),
         }
         state.store.finish(job_id, DONE, outputs=result.outputs, report={**job.report, "timings": timings})
-        seconds = result.timings.get("render_seconds", result.timings.get("preview_seconds", 0))
+        timings_of = result.timings
+        seconds = timings_of.get("render_seconds", timings_of.get("preview_seconds", timings_of.get("still_seconds", 0)))
         logger.info("render %s done for workspace %s in %.1f s", job_id, workspace_id, seconds)
     except PipelineError as exc:
         _fail(state, job_id, exc.code, str(exc), exc.detail)

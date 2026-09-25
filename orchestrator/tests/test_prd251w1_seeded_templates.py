@@ -13,8 +13,9 @@ Pins:
   template; the starter's sample data carries the reference's own copy, and it
   fills every variable a render needs.
 * **Seeding (AC 1).** Turning Socials on seeds the four into the workspace in the
-  switch's own commit; turning it on twice leaves the same rows; a person's own
-  template of the same name is never touched. On real Postgres
+  switch's own commit, with the seven image templates US-107 adds beside them
+  (test_prd251w1_image_templates.py); turning it on twice leaves the same rows;
+  a person's own template of the same name is never touched. On real Postgres
   (``@integration``): the rows land once, and ``GET /api/documents/templates``
   lists them.
 * **Footage slots (AC 4).** A filled slot reaches media-render as a media file at
@@ -87,11 +88,19 @@ from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own 
 from media_render.config import load_settings  # noqa: E402
 from media_render.media_urls import parse_prefixes  # noqa: E402
 from modules.documents import seed_templates  # noqa: E402
-from modules.documents.social_starters import SOCIAL_STARTER_SLUGS, social_starters  # noqa: E402
+from modules.documents.social_starters import (  # noqa: E402
+    SOCIAL_IMAGE_STARTER_SLUGS,
+    SOCIAL_STARTER_SLUGS,
+    SOCIAL_VIDEO_STARTER_SLUGS,
+    social_starters,
+)
 from modules.documents.template_summary import STARTER_CREATOR, summarize_template  # noqa: E402
 
 WS = uuid.UUID("00000000-0000-0000-0000-0000000001a6")
 STARTER_NAMES = ["UI story promo", "Cinematic product promo", "App promo", "Data story"]
+# US-107: the image templates seed through the same path, after the videos.
+IMAGE_STARTER_NAMES = ["Title card", "Definition card", "Stats card", "Quote card", "Announcement card", "Fact card", "Carousel"]
+ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
 REFERENCE_OF = {
     "ui-story-promo": "v1-ui-story.html",
@@ -141,9 +150,10 @@ def _renderer_settings():
 
 
 def test_the_four_reference_videos_are_seeded_as_social_video_starters():
-    starters = social_starters()
+    starters = social_starters("social_video")
     assert [s["name"] for s in starters] == STARTER_NAMES
-    assert [s["slug"] for s in starters] == list(SOCIAL_STARTER_SLUGS) == list(REFERENCE_OF)
+    assert [s["slug"] for s in starters] == list(SOCIAL_VIDEO_STARTER_SLUGS) == list(REFERENCE_OF)
+    assert list(SOCIAL_STARTER_SLUGS) == list(SOCIAL_VIDEO_STARTER_SLUGS) + list(SOCIAL_IMAGE_STARTER_SLUGS)
     for starter in starters:
         blocks = starter["blocks"]
         assert (starter["format"], starter["category"], blocks["sizes"]) == ("social_video", "social", ["1080x1920"])
@@ -212,7 +222,7 @@ def test_the_sample_data_is_the_references_own_copy_and_fills_every_variable():
     sample = _starter("ui-story-promo")["sample_data"]
     for key in ("hook_eyebrow", "chat_request", "task_3_title", "ask_question", "done_6", "cap_outputs", "end_accent"):
         assert sample[key] in reference, key
-    for starter in social_starters():
+    for starter in social_starters("social_video"):
         resolved = resolve_variables(starter["blocks"]["variables_schema"], starter["sample_data"])
         assert resolved.missing == [] and resolved.invalid == [], starter["name"]
         # Every story line has no default: a post must write it, never inherit a reference's copy.
@@ -254,14 +264,17 @@ class _Session:
 
 def test_the_social_starters_seed_through_the_starter_path_once():
     db = _Session()
-    assert seed_templates.seed_social_starters(db, WS) == {"created": 4, "refreshed": 0}
-    assert [row.name for row in db.rows] == STARTER_NAMES and db.commits == 1
-    for row, starter in zip(db.rows, social_starters()):
-        assert (row.workspace_id, row.format, row.category, row.created_by) == (WS, "social_video", "social", STARTER_CREATOR)
+    assert seed_templates.seed_social_starters(db, WS) == {"created": len(ALL_STARTER_NAMES), "refreshed": 0}
+    assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
+    starters = social_starters()
+    assert len(starters) == len(db.rows) == 11
+    for row, starter in zip(db.rows, starters):
+        assert (row.workspace_id, row.format, row.category, row.created_by) == (WS, starter["format"], "social", STARTER_CREATOR)
         assert row.blocks == starter["blocks"] and row.sample_data == starter["sample_data"]
+    assert [row.format for row in db.rows] == ["social_video"] * 4 + ["social_image"] * 7
     # Twice is the same rows: nothing added, nothing refreshed, nothing committed.
     assert seed_templates.seed_social_starters(db, WS) == {"created": 0, "refreshed": 0}
-    assert len(db.rows) == 4 and db.commits == 1
+    assert len(db.rows) == 11 and db.commits == 1
 
 
 def test_a_drifted_starter_is_refreshed_and_a_persons_own_is_never_touched():
@@ -270,7 +283,7 @@ def test_a_drifted_starter_is_refreshed_and_a_persons_own_is_never_touched():
     mine = DocumentTemplate(workspace_id=WS, name="App promo", format="social_video", category="social",
                             blocks={"mine": True}, sample_data={}, description="", created_by="user-7", is_active=True)
     db = _Session([stale, mine])
-    assert seed_templates.seed_social_starters(db, WS, commit=False) == {"created": 2, "refreshed": 1}
+    assert seed_templates.seed_social_starters(db, WS, commit=False) == {"created": len(ALL_STARTER_NAMES) - 2, "refreshed": 1}
     assert stale.blocks == _starter("data-story")["blocks"]
     assert mine.blocks == {"mine": True} and mine.created_by == "user-7"
     assert db.commits == 0, "commit=False leaves the commit to the caller"
@@ -280,9 +293,9 @@ def test_the_gallery_lists_a_seeded_starter_by_its_variables():
     db = _Session()
     seed_templates.seed_social_starters(db, WS)
     listed = [summarize_template(row) for row in db.rows]
-    assert [entry["name"] for entry in listed] == STARTER_NAMES
-    for entry in listed:
-        assert entry["format"] == "social_video" and entry["is_starter"] is True and entry["has_blocks"] is False
+    assert [entry["name"] for entry in listed] == ALL_STARTER_NAMES
+    for entry, starter in zip(listed, social_starters()):
+        assert entry["format"] == starter["format"] and entry["is_starter"] is True and entry["has_blocks"] is False
         assert entry["data_fields"] and entry["sample_data"]
 
 
@@ -324,12 +337,12 @@ def test_turning_socials_on_seeds_the_starters_in_the_switchs_own_commit(monkeyp
     resp = client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}})
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "saved", "socials": {"available": True, "enabled": True}}
-    assert [row.name for row in db.rows] == STARTER_NAMES and db.commits == 1
+    assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
 
     # On again: the same rows. Off: nothing seeded, nothing removed.
     assert client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}}).status_code == 200
     assert client.put(SWITCH_ROUTE, json={"socials": {"enabled": False}}).status_code == 200
-    assert [row.name for row in db.rows] == STARTER_NAMES and db.commits == 3
+    assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 3
 
 
 def test_a_seed_that_breaks_the_contract_never_reaches_a_workspace(monkeypatch, tmp_path):
@@ -404,10 +417,10 @@ def test_turning_socials_on_seeds_the_four_templates_once_and_get_templates_list
             resp = client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}})
             assert resp.status_code == 200, resp.text
             first = rows()
-            assert sorted(r.name for r in first) == sorted(STARTER_NAMES)
-            assert {(r.format, r.created_by) for r in first} == {("social_video", STARTER_CREATOR)}
+            assert sorted(r.name for r in first) == sorted(ALL_STARTER_NAMES)
+            assert {(r.format, r.created_by) for r in first} == {("social_video", STARTER_CREATOR), ("social_image", STARTER_CREATOR)}
             by_name = {s["name"]: s for s in social_starters()}
-            assert all(r.blocks == by_name[r.name]["blocks"] for r in first)
+            assert all(r.blocks == by_name[r.name]["blocks"] and r.format == by_name[r.name]["format"] for r in first)
 
             # Turning it on twice leaves the same rows.
             assert client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}}).status_code == 200
@@ -416,11 +429,13 @@ def test_turning_socials_on_seeds_the_four_templates_once_and_get_templates_list
             listed = client.get("/api/documents/templates")
             assert listed.status_code == 200, listed.text
             entries = {entry["name"]: entry for entry in listed.json()}
-            assert sorted(entries) == sorted(STARTER_NAMES)
-            for entry in entries.values():
-                assert entry["format"] == "social_video" and entry["is_starter"] is True and entry["data_fields"]
+            assert sorted(entries) == sorted(ALL_STARTER_NAMES)
+            for name, entry in entries.items():
+                assert entry["format"] == by_name[name]["format"] and entry["is_starter"] is True and entry["data_fields"]
             videos = client.get("/api/documents/templates", params={"format": "social_video"}).json()
             assert sorted(e["name"] for e in videos) == sorted(STARTER_NAMES)
+            images = client.get("/api/documents/templates", params={"format": "social_image"}).json()
+            assert sorted(e["name"] for e in images) == sorted(IMAGE_STARTER_NAMES)
         finally:
             session.close()
             trans.rollback()
@@ -605,7 +620,7 @@ def test_the_ci_driver_builds_a_checked_preview_bundle_for_every_seeded_video():
     kit = {**driver.KIT, "logo_url": driver.logo_png(driver.KIT["primary_color"])}
     settings = _renderer_settings()
     probed = []
-    for starter in social_starters():
+    for starter in social_starters("social_video"):
         bundle = driver.bundle_for(starter, kit, starter["preview"]["at"])
         parsed = parse_bundle(bundle, settings, {})
         assert parsed.preview.at == tuple(sorted(starter["preview"]["at"]))

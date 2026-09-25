@@ -11,6 +11,11 @@ A bundle with a ``preview`` is checked the same way, and then its slot takes
 PNG snapshots of the composition at the moments asked for instead of the full
 render (US-106): each scaled to ``MEDIA_RENDER_PREVIEW_WIDTH``, and a short
 reel of them, held ``1 / MEDIA_RENDER_PREVIEW_REEL_FPS`` seconds each.
+
+A bundle with a ``still`` is an image (US-107): checked the same way, then its
+render is a PNG snapshot of the composition at each moment asked for, at the
+composition's own size and flattened to opaque RGB: ``render.png`` for one,
+``render-01.png``, ``render-02.png``, … for a carousel's slides.
 """
 
 from __future__ import annotations
@@ -38,6 +43,8 @@ from .media_urls import redact, url_allowed
 from .tts import Speaker
 
 OUTPUT_NAME = "render.mp4"
+STILL_NAME = "render.png"
+STILL_NAMES = "render-{:02d}.png"
 PREVIEW_FRAME = "preview-{:02d}.png"
 PREVIEW_FRAMES = "preview-%02d.png"
 PREVIEW_REEL = "preview.mp4"
@@ -289,6 +296,8 @@ class RenderPipeline:
     async def render(self, job: Job) -> RenderResult:
         if job.bundle.preview is not None:
             return await self.preview(job)
+        if job.bundle.still is not None:
+            return await self.still(job)
         settings, composition = self._settings, job.bundle.composition
         output = job.output_dir / OUTPUT_NAME
         job.output_dir.mkdir(parents=True, exist_ok=True)
@@ -324,7 +333,7 @@ class RenderPipeline:
         timings = {"render_seconds": run.seconds, "probe_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=(entry,), timings=timings)
 
-    def _ffmpeg(self, argv: Sequence[str], what: str) -> None:
+    def _ffmpeg(self, argv: Sequence[str], what: str, *, code: str = "preview_failed") -> None:
         try:
             proc = subprocess.run(
                 [self._settings.ffmpeg_bin, "-v", "error", "-y", *argv],
@@ -335,16 +344,14 @@ class RenderPipeline:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            raise PipelineError("preview_failed", f"{what} ran past {self._settings.preview_timeout_seconds} s") from None
+            raise PipelineError(code, f"{what} ran past {self._settings.preview_timeout_seconds} s") from None
         if proc.returncode != 0:
-            raise PipelineError("preview_failed", f"{what} failed", detail=proc.stderr.strip()[-LOG_TAIL_CHARS:])
+            raise PipelineError(code, f"{what} failed", detail=proc.stderr.strip()[-LOG_TAIL_CHARS:])
 
-    async def preview(self, job: Job) -> RenderResult:
-        """Snapshots of the checked composition at the preview's moments, small, and a short reel of them."""
-        settings, composition = self._settings, job.bundle.composition
-        at = job.bundle.preview.at
+    async def _snapshots(self, job: Job, at: Sequence[float], kind: str) -> Tuple[List[Path], float]:
+        """``hyperframes snapshot`` of the checked composition at ``at``: the frames, in time order, and the seconds it took."""
+        settings = self._settings
         shots = job.dir / SNAPSHOT_DIR
-        job.output_dir.mkdir(parents=True, exist_ok=True)
         run = await asyncio.to_thread(
             hyperframes.run_cli,
             hyperframes.snapshot_argv(settings, job.project_dir, shots, at),
@@ -355,9 +362,57 @@ class RenderPipeline:
         frames = sorted(shots.glob("frame-*.png")) if shots.is_dir() else []
         if not run.ok or len(frames) != len(at):
             if run.timed_out:
-                raise PipelineError("preview_timed_out", f"the snapshots ran past {settings.render_timeout_seconds} s")
+                raise PipelineError(f"{kind}_timed_out", f"the snapshots ran past {settings.render_timeout_seconds} s")
             message = f"hyperframes snapshot took {len(frames)} of {len(at)} frames (exit {run.returncode})"
-            raise PipelineError("preview_failed", message, detail=run.tail())
+            raise PipelineError(f"{kind}_failed", message, detail=run.tail())
+        return frames, run.seconds
+
+    async def still(self, job: Job) -> RenderResult:
+        """The image: a full-size, opaque PNG of the checked composition at each moment (a carousel's slides)."""
+        settings, composition = self._settings, job.bundle.composition
+        at = job.bundle.still.at
+        job.output_dir.mkdir(parents=True, exist_ok=True)
+        frames, seconds = await self._snapshots(job, at, "still")
+        started = time.monotonic()
+        outputs: List[Dict[str, Any]] = []
+        for index, (frame, moment) in enumerate(zip(frames, at), start=1):
+            name = STILL_NAME if len(at) == 1 else STILL_NAMES.format(index)
+            target = job.output_dir / name
+            flatten = ["-i", str(frame), "-frames:v", "1", "-pix_fmt", "rgb24", str(target)]
+            await asyncio.to_thread(self._ffmpeg, flatten, f"flattening {frame.name}", code="still_failed")
+            try:
+                info = await asyncio.to_thread(
+                    probe.probe, target, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
+                )
+            except probe.ProbeError as exc:
+                raise PipelineError("still_failed", str(exc)) from None
+            width, height = probe.image_size(info)
+            if (width, height) != (composition.width, composition.height):
+                message = f"{name} is {width}x{height}, not the composition's {composition.width}x{composition.height}"
+                raise PipelineError("still_failed", message)
+            outputs.append(
+                {
+                    "name": name,
+                    "kind": "still",
+                    "index": index,
+                    "at": moment,
+                    "aspect": composition.aspect,
+                    "width": width,
+                    "height": height,
+                    "bytes": target.stat().st_size,
+                }
+            )
+        shutil.rmtree(job.dir / SNAPSHOT_DIR, ignore_errors=True)
+        timings = {"still_seconds": seconds, "encode_seconds": round(time.monotonic() - started, 3)}
+        return RenderResult(outputs=tuple(outputs), timings=timings)
+
+    async def preview(self, job: Job) -> RenderResult:
+        """Snapshots of the checked composition at the preview's moments, small, and a short reel of them."""
+        settings, composition = self._settings, job.bundle.composition
+        at = job.bundle.preview.at
+        shots = job.dir / SNAPSHOT_DIR
+        job.output_dir.mkdir(parents=True, exist_ok=True)
+        frames, snapshot_seconds = await self._snapshots(job, at, "preview")
         started = time.monotonic()
         width = settings.preview_width
         height = int(round(composition.height * width / composition.width / 2)) * 2
@@ -396,5 +451,5 @@ class RenderPipeline:
             }
         )
         shutil.rmtree(shots, ignore_errors=True)
-        timings = {"preview_seconds": run.seconds, "encode_seconds": round(time.monotonic() - started, 3)}
+        timings = {"preview_seconds": snapshot_seconds, "encode_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=tuple(outputs), timings=timings)

@@ -222,3 +222,51 @@ def test_a_preview_snapshots_the_checked_composition_at_each_moment(settings, tm
             assert "preview_seconds" in job["report"]["timings"]
 
     asyncio.run(go())
+
+
+def _png_colour_type(data: bytes) -> int:
+    """The IHDR colour type: 2 is RGB, 6 is RGBA."""
+    return data[25]
+
+
+def test_a_still_renders_the_checked_composition_as_full_size_pngs(settings, tmp_path):
+    """US-107: the real check, then the real `hyperframes snapshot`, at the composition's own size, flattened to RGB."""
+    silent = {key: value for key, value in fixture_bundle().items() if key != "audio"}
+
+    async def render(client, body):
+        response = await client.post("/render", data=json.dumps(body), headers=AUTH)
+        accepted = await response.json()
+        assert response.status == 202, accepted
+        job = accepted
+        for _ in range(240):
+            job = await (await client.get(f"/render/{accepted['id']}", headers=AUTH)).json()
+            if job["status"] in ("done", "failed"):
+                break
+            await asyncio.sleep(0.5)
+        print(json.dumps(job, indent=2)[:4000])
+        assert job["status"] == "done", job
+        assert job["report"]["check"]["errors"] == 0
+        return job
+
+    async def go():
+        async with TestClient(TestServer(create_app(settings))) as client:
+            job = await render(client, {**silent, "still": {"at": [0.5, 2.0]}})
+            assert [output["name"] for output in job["outputs"]] == ["render-01.png", "render-02.png"]
+            assert [(o["kind"], o["index"], o["at"], o["aspect"]) for o in job["outputs"]] == [
+                ("still", 1, 0.5, "9:16"),
+                ("still", 2, 2.0, "9:16"),
+            ]
+            for output in job["outputs"]:
+                assert "duration" not in output
+                data = await (await client.get(output["path"], headers=AUTH)).read()
+                assert _png_size(data) == (1080, 1920) == (output["width"], output["height"])
+                assert _png_colour_type(data) == 2 and len(data) == output["bytes"]
+                (tmp_path / output["name"]).write_bytes(data)
+            # A still is the composition itself: its brand background, at full size.
+            assert all(abs(a - b) <= 3 for a, b in zip(_pixel(settings, tmp_path / "render-02.png", 8, 8), (0x14, 0x17, 0x1C)))
+            assert "still_seconds" in job["report"]["timings"]
+
+            single = await render(client, {**silent, "still": {"at": [1.0]}})
+            assert [output["name"] for output in single["outputs"]] == ["render.png"]
+
+    asyncio.run(go())

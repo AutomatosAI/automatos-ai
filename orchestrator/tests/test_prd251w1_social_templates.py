@@ -21,7 +21,9 @@ Pins:
   builds the bundle (brand tokens as CSS variables, the logo and fonts inlined
   as data: URIs), checks the month's render minutes BEFORE media-render is
   called, renders through the real client over ``httpx.MockTransport``, books
-  the seconds on the media lane and registers a video Deliverable.
+  the seconds on the media lane and registers a video Deliverable. US-107: an
+  image asks for one still and gets its PNG; a template that renders several
+  (a carousel) is refused as a document before the quota is touched.
 """
 from __future__ import annotations
 
@@ -64,7 +66,7 @@ import services.deliverable_service as deliverable_service  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import Base, get_db  # noqa: E402
-from core.brand_palette import STAGE_TOKENS  # noqa: E402
+from core.brand_palette import PAPER_TOKENS, STAGE_TOKENS  # noqa: E402
 from core.media_render_bundle import NO_LOGO, build_bundle  # noqa: E402
 from core.media_render_client import MediaRenderClient, MediaRenderError  # noqa: E402
 from core.media_render_quota import RenderQuotaExceeded  # noqa: E402
@@ -542,8 +544,9 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
         "primary": "#ff0000", "secondary": "#00ff00", "accent": "#0000ff", "text": "#111111",
         "body-font": "Inter, sans-serif", "heading-font": "Inter, sans-serif",
     }
-    # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py).
-    assert set(tokens) - set(raw) == set(STAGE_TOKENS)
+    # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py);
+    # US-107: and the paper a social image reads.
+    assert set(tokens) - set(raw) == set(STAGE_TOKENS) | set(PAPER_TOKENS)
     assert bundle["brand"]["fonts"] == [
         {"family": "Geist", "weight": "700", "style": "normal", "path": "assets/brand/fonts/font-0.woff2"}
     ]
@@ -650,10 +653,12 @@ def test_generate_sends_the_social_formats_to_media_render_and_the_documents_whe
 class _Renderer:
     """media-render over httpx.MockTransport: the real client talks to it."""
 
-    def __init__(self, events, *, status="done", error=None):
+    def __init__(self, events, *, status="done", error=None, output=None, content=MP4):
         self.events = events
         self.status = status
         self.error = error
+        self.output = output or {"name": "render.mp4", "aspect": "9:16", "width": 1080, "height": 1920, "duration": 12.5}
+        self.content = content
         self.bundles = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -664,13 +669,12 @@ class _Renderer:
             return httpx.Response(202, json={"id": JOB_ID, "status": "rendering", "outputs": [], "report": {}})
         if request.method == "GET" and path == f"/render/{JOB_ID}":
             done = self.status == "done"
-            output = {"name": "render.mp4", "aspect": "9:16", "width": 1080, "height": 1920, "duration": 12.5}
             return httpx.Response(
                 200,
-                json={"id": JOB_ID, "status": self.status, "outputs": [output] if done else [], "report": {}, "error": self.error},
+                json={"id": JOB_ID, "status": self.status, "outputs": [self.output] if done else [], "report": {}, "error": self.error},
             )
-        if request.method == "GET" and path == f"/render/{JOB_ID}/output/render.mp4":
-            return httpx.Response(200, content=MP4)
+        if request.method == "GET" and path == f"/render/{JOB_ID}/output/{self.output['name']}":
+            return httpx.Response(200, content=self.content)
         return httpx.Response(404, json={"error": "not_found", "message": f"no route {path}"})
 
 
@@ -855,3 +859,59 @@ def test_an_agent_reads_a_social_templates_variables():
     assert schema["data_fields"] == ["data.headline", "data.stat", "data.subtitle"]
     assert schema["variables_schema"] == BLOCKS["variables_schema"]
     assert schema["sizes"] == BLOCKS["sizes"]
+
+
+# ---------------------------------------------------------------------------
+# US-107: an image is one still; a carousel is not a document
+# ---------------------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"pixels " * 80
+IMAGE_HTML = HTML.replace('data-duration="3"', 'data-duration="1"')
+IMAGE_BLOCKS = {
+    "html": IMAGE_HTML,
+    "css": BLOCKS["css"],
+    "variables_schema": BLOCKS["variables_schema"],
+    "sizes": ["1080x1350", "1200x628"],
+}
+
+
+def _starter_template(slug):
+    from modules.documents.social_starters import social_starters
+
+    (starter,) = [s for s in social_starters() if s["slug"] == slug]
+    return SimpleNamespace(id=TEMPLATE_ID, name=starter["name"], format=starter["format"], blocks=starter["blocks"])
+
+
+def test_generate_social_renders_an_image_as_one_still_and_keeps_its_png(social_env):
+    service = _service_with(_social_template(fmt="social_image", blocks=IMAGE_BLOCKS))
+    service.db.query.return_value.filter.return_value.first.return_value = social_env.workspace
+    still = {"name": "render.png", "kind": "still", "index": 1, "at": 0.0, "aspect": "4:5", "width": 1080, "height": 1350}
+    renderer = _Renderer(social_env.events, output=still, content=PNG)
+
+    result = _generate(
+        service, renderer, title="Countdown card", format="social_image",
+        data={"headline": "Three weeks to go", "stat": 21}, workspace_id=WS, template_id=TEMPLATE_ID,
+    )
+
+    assert social_env.events[:2] == ["quota basic", "POST /render"]
+    (bundle,) = renderer.bundles
+    # One still at the template's first moment (it declares none: 0 s), no sound, at the first size.
+    assert bundle["still"] == {"at": [0.0]}
+    assert "audio" not in bundle and "preview" not in bundle
+    assert (bundle["variables"]["size.width"], bundle["variables"]["size.height"]) == (1080, 1350)
+    assert result.format == "png" and Path(result.path).read_bytes() == PNG
+    # A still spends no render minutes.
+    (booking,) = social_env.booked
+    assert booking["seconds"] == 0.0
+
+
+def test_a_carousel_is_refused_as_a_document_before_the_quota_is_touched(social_env):
+    template = _starter_template("carousel")
+    service = _service_with(template)
+    service.db.query.return_value.filter.return_value.first.return_value = social_env.workspace
+    renderer = _Renderer(social_env.events)
+    data = {"headline": "4 SIGNS", "point_1_title": "One", "point_2_title": "Two", "closing_title": "Done."}
+    with pytest.raises(ValueError, match="renders 4 images, one per slide.*Socials post"):
+        _generate(service, renderer, title="T", format="social_image", data=data, workspace_id=WS, template_id=TEMPLATE_ID)
+    assert social_env.events == [] and social_env.booked == [] and renderer.bundles == []
+

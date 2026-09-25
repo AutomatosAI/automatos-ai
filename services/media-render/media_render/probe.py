@@ -6,7 +6,7 @@ import json
 import subprocess
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ProbeError(RuntimeError):
@@ -43,6 +43,13 @@ def _fps(stream: Dict[str, Any]) -> Optional[float]:
         return round(float(Fraction(stream.get("avg_frame_rate") or stream.get("r_frame_rate") or "")), 3)
     except (ValueError, ZeroDivisionError):
         return None
+
+
+def image_size(info: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+    """``(width, height)`` of an image's one picture stream."""
+    video = _streams(info, "video")
+    first = video[0] if video else {}
+    return first.get("width"), first.get("height")
 
 
 def output_facts(info: Dict[str, Any]) -> Dict[str, Any]:

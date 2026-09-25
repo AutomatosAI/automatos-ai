@@ -1,4 +1,4 @@
-"""The dark stage a social video reads, derived from the brand kit (PRD-251 D4, D5).
+"""The dark stage a social video reads, and the paper a social image reads, derived from the brand kit (PRD-251 D4, D5).
 
 The reference videos are dark stages: a near-black ink, light text on it, and
 the brand colour for the accents (docs/PRDS/prd251-reference/). A brand kit is
@@ -19,9 +19,26 @@ and media-render refuses the render.
   on tinted pills (the reference's own fix: #E96235 became #F07A50 there).
 
 A kit colour that already meets its target is used exactly as it is, so the
-Automatos Studio Dark kit reproduces the reference palette. Every token is a
-6-digit hex: the contrast pass reads computed ``rgb()`` colours, so it checks
-each of them. Pure: no IO, no database.
+Automatos Studio Dark kit reproduces the reference palette.
+
+:func:`paper_palette` derives the light page the social image families read
+(US-107: automatos-social's cream paper, ink and brand-orange display words),
+again keeping each colour's hue. Every text tone is measured against the card,
+the darker of the two surfaces, so it reads on both:
+
+* ``paper``: the kit's text colour, lightened until it is a page (a light kit
+  colour, like the Studio Dark cream, is the page as it is);
+* ``paper-card``: the paper a shade darker, for the cards laid on it;
+* ``on-paper``: the kit's secondary colour, darkened until it reads on the card;
+* ``on-paper-muted`` and ``on-paper-dim``: two quieter text tones;
+* ``primary-on-paper`` and ``accent-on-paper``: the brand colours, darkened only
+  as far as small text in them must be (WCAG AA 4.5:1, with a margin);
+* ``primary-on-paper-large``: the primary darkened only as far as LARGE text
+  must be (AA 3:1 for 24 px, or 19 px bold, with a margin): display words and
+  big numbers.
+
+Every token is a 6-digit hex: the contrast pass reads computed ``rgb()``
+colours, so it checks each of them. Pure: no IO, no database.
 """
 from __future__ import annotations
 
@@ -48,6 +65,23 @@ SEARCH_STEPS = 24
 INK, ON_INK, ON_INK_MUTED, ON_INK_DIM = "ink", "on-ink", "on-ink-muted", "on-ink-dim"
 PRIMARY_ON_INK, PRIMARY_LIGHT, ACCENT_ON_INK = "primary-on-ink", "primary-light", "accent-on-ink"
 STAGE_TOKENS = (INK, ON_INK, ON_INK_MUTED, ON_INK_DIM, PRIMARY_ON_INK, PRIMARY_LIGHT, ACCENT_ON_INK)
+
+# The paper's targets. automatos-social's cream (#f1e9dd) is 0.82 luminance, and its
+# card (#e3d9c8) sits 1.16:1 below it; the muted and dim tones reuse the stage's
+# ratios. WCAG AA is 4.5:1 for text and 3:1 for large text: the brand colours keep
+# a margin over each, because the check measures rendered pixels and rounds.
+PAPER_MIN_LUMINANCE = 0.80
+CARD_CONTRAST = 1.16
+ON_PAPER_MIN_CONTRAST = 10.0
+PAPER_TEXT_MIN_CONTRAST = 4.7
+LARGE_TEXT_MIN_CONTRAST = 3.2
+
+PAPER, PAPER_CARD, ON_PAPER = "paper", "paper-card", "on-paper"
+ON_PAPER_MUTED, ON_PAPER_DIM = "on-paper-muted", "on-paper-dim"
+PRIMARY_ON_PAPER, PRIMARY_ON_PAPER_LARGE, ACCENT_ON_PAPER = "primary-on-paper", "primary-on-paper-large", "accent-on-paper"
+PAPER_TOKENS = (
+    PAPER, PAPER_CARD, ON_PAPER, ON_PAPER_MUTED, ON_PAPER_DIM, PRIMARY_ON_PAPER, PRIMARY_ON_PAPER_LARGE, ACCENT_ON_PAPER,
+)
 
 _HEX = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -150,11 +184,41 @@ def stage_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
     return {name: to_hex(rgb) for name, rgb in palette.items()}
 
 
+def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
+    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has no usable text colour.
+
+    A role whose kit colour is missing or not a hex colour is left out, and the
+    template's own ``var()`` fallback applies to it.
+    """
+    text = parse_hex(kit.get("text_color"))
+    if text is None:
+        return {}
+    paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
+    card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
+    palette = {PAPER: paper, PAPER_CARD: card}
+    secondary = parse_hex(kit.get("secondary_color"))
+    if secondary is not None:
+        on_paper = _least(secondary, BLACK, lambda c: contrast(c, card) >= ON_PAPER_MIN_CONTRAST)
+        palette[ON_PAPER] = on_paper
+        palette[ON_PAPER_MUTED] = _most(on_paper, card, lambda c: contrast(c, card) >= MUTED_CONTRAST)
+        palette[ON_PAPER_DIM] = _most(on_paper, card, lambda c: contrast(c, card) >= DIM_CONTRAST)
+    primary = parse_hex(kit.get("primary_color"))
+    if primary is not None:
+        palette[PRIMARY_ON_PAPER] = _least(primary, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
+        palette[PRIMARY_ON_PAPER_LARGE] = _least(primary, BLACK, lambda c: contrast(c, card) >= LARGE_TEXT_MIN_CONTRAST)
+    accent = parse_hex(kit.get("accent_color"))
+    if accent is not None:
+        palette[ACCENT_ON_PAPER] = _least(accent, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
+    return {name: to_hex(rgb) for name, rgb in palette.items()}
+
+
 __all__ = [
+    "PAPER_TOKENS",
     "STAGE_TOKENS",
     "contrast",
     "luminance",
     "mix",
+    "paper_palette",
     "parse_hex",
     "stage_palette",
     "to_hex",

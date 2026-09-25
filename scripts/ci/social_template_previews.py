@@ -1,4 +1,4 @@
-"""PRD-251 US-106 (S1.2b): preview every seeded social video template through a running media-render.
+"""PRD-251 US-106/US-107 (S1.2): check every seeded social template through a running media-render.
 
 The media-render CI job starts the image and runs this with the runner's own
 python3 (standard library only) and ``PYTHONPATH=orchestrator``. It uses the
@@ -17,10 +17,16 @@ check found no errors (a 422 carries the findings and fails this script). The
 job then snapshots the composition at those moments: small PNG frames and a
 short reel, kept as the job's artifact.
 
+Every seeded social IMAGE template (US-107) is rendered for real, as the
+workspace gets it, at every size it declares: a still bundle, the full check
+(202 = no errors), and the PNGs it returns, one per still (a carousel's
+slides), each read back and measured against the size.
+
 The pixel probe (S1.2: changing the brand kit's primary colour changes the
 render): a template whose seed names a probe (a spot the brand colour fills)
-is previewed again with the primary swapped. The pixel there must match the
-bundle's own ``primary-on-ink`` token in both renders, and the two must differ.
+is rendered again with the primary swapped. The pixel there must match the
+bundle's own token (``primary-on-ink`` on a video's stage, ``primary`` on an
+image's brand stripe) in both renders, and the two must differ.
 
     python3 scripts/ci/social_template_previews.py --url http://127.0.0.1:8090 --token "$TOKEN" --out "$RUNNER_TEMP/templates"
 """
@@ -40,7 +46,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.media_render_bundle import build_bundle
-from core.social_templates import SOCIAL_VIDEO, resolve_variables
+from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables
 from modules.documents.social_starters import social_starters
 
 # The brand kit the previews render with: the reference videos' own Studio Dark,
@@ -65,7 +71,7 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class PreviewFailure(RuntimeError):
-    """A template that did not check or preview cleanly."""
+    """A template that did not check, preview or render cleanly."""
 
 
 # ── PNG, both ways (standard library only) ──────────────────────────────────
@@ -175,7 +181,7 @@ class Renderer:
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
 
-    def preview(self, bundle: Mapping[str, Any]) -> Dict[str, Any]:
+    def render(self, bundle: Mapping[str, Any]) -> Dict[str, Any]:
         """Post the bundle; the finished job (outputs fetched), or PreviewFailure with the service's answer."""
         started = time.monotonic()
         status, body = self._request("POST", "/render", json.dumps(bundle).encode("utf-8"))
@@ -206,20 +212,37 @@ class Renderer:
         return job
 
 
-def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float]) -> Dict[str, Any]:
-    blocks = starter["blocks"]
-    resolved = resolve_variables(blocks["variables_schema"], starter["sample_data"])
+def _sample_values(starter: Mapping[str, Any]) -> Dict[str, Any]:
+    resolved = resolve_variables(starter["blocks"]["variables_schema"], starter["sample_data"])
     if resolved.missing or resolved.invalid:
         raise PreviewFailure(f"{starter['name']}: its sample data leaves {resolved.missing} missing, {resolved.invalid} invalid")
+    return resolved.values
+
+
+def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float]) -> Dict[str, Any]:
+    """A video's preview bundle: its sample data, snapshotted at ``at``."""
     bundle = build_bundle(
         workspace_id="ci-social-templates",
         reference=f"seeded template: {starter['name']}",
-        blocks=blocks,
-        values=resolved.values,
+        blocks=starter["blocks"],
+        values=_sample_values(starter),
         brand_kit=kit,
     )
     bundle["preview"] = {"at": at}
     return bundle
+
+
+def image_bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], size: str) -> Dict[str, Any]:
+    """An image's bundle at ``size``, exactly as a workspace renders it: a still per moment."""
+    return build_bundle(
+        workspace_id="ci-social-templates",
+        reference=f"seeded template: {starter['name']} {size}",
+        blocks=starter["blocks"],
+        values=_sample_values(starter),
+        brand_kit=kit,
+        size=size,
+        fmt=SOCIAL_IMAGE,
+    )
 
 
 def _check_summary(report: Mapping[str, Any]) -> str:
@@ -231,11 +254,17 @@ def _check_summary(report: Mapping[str, Any]) -> str:
 
 
 def run(renderer: Renderer, out: Path) -> List[str]:
-    failures: List[str] = []
-    videos = [starter for starter in social_starters() if starter["format"] == SOCIAL_VIDEO]
-    print(f"{len(videos)} seeded social video templates: {', '.join(s['name'] for s in videos)}")
     kit = {**KIT, "logo_url": logo_png(KIT["primary_color"])}
     report: Dict[str, Any] = {}
+    failures = run_videos(renderer, out, kit, report) + run_images(renderer, out, kit, report)
+    (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
+    return failures
+
+
+def run_videos(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Dict[str, Any]) -> List[str]:
+    failures: List[str] = []
+    videos = social_starters(SOCIAL_VIDEO)
+    print(f"{len(videos)} seeded social video templates: {', '.join(s['name'] for s in videos)}")
     for starter in videos:
         name, preview = starter["name"], starter["preview"]
         folder = out / starter["slug"]
@@ -243,7 +272,7 @@ def run(renderer: Renderer, out: Path) -> List[str]:
         print(f"\n== {name} ({starter['slug']}): preview at {preview['at']}")
         try:
             bundle = bundle_for(starter, kit, preview["at"])
-            job = renderer.preview(bundle)
+            job = renderer.render(bundle)
             print(f"    {_check_summary(job['report'])}")
             if (job["report"].get("check") or {}).get("errors"):
                 raise PreviewFailure("the check passed the job with errors")
@@ -259,8 +288,88 @@ def run(renderer: Renderer, out: Path) -> List[str]:
         except PreviewFailure as exc:
             print(f"    FAIL: {exc}")
             failures.append(f"{name}: {exc}")
-    (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
     return failures
+
+
+def png_size(data: bytes) -> Tuple[int, int]:
+    if data[:8] != PNG_SIGNATURE:
+        raise PreviewFailure("the output is not a PNG")
+    return struct.unpack(">II", data[16:24])
+
+
+def run_images(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Dict[str, Any]) -> List[str]:
+    """Every seeded image template, rendered at every size it declares: checked, and one PNG per still."""
+    failures: List[str] = []
+    images = social_starters(SOCIAL_IMAGE)
+    print(f"\n{len(images)} seeded social image templates: {', '.join(s['name'] for s in images)}")
+    for starter in images:
+        name, sizes = starter["name"], starter["blocks"]["sizes"]
+        entry: Dict[str, Any] = report.setdefault(starter["slug"], {"sizes": {}})
+        for size in sizes:
+            folder = out / starter["slug"] / size
+            folder.mkdir(parents=True, exist_ok=True)
+            print(f"\n== {name} ({starter['slug']}) at {size}")
+            try:
+                bundle = image_bundle_for(starter, kit, size)
+                job = renderer.render(bundle)
+                print(f"    {_check_summary(job['report'])}")
+                if (job["report"].get("check") or {}).get("errors"):
+                    raise PreviewFailure("the check passed the job with errors")
+                moments = bundle["still"]["at"]
+                if len(job["outputs"]) != len(moments):
+                    raise PreviewFailure(f"{len(job['outputs'])} PNGs for {len(moments)} stills")
+                for output in job["outputs"]:
+                    data = output.pop("data")
+                    if png_size(data) != parse_size(size) or (output.get("width"), output.get("height")) != parse_size(size):
+                        raise PreviewFailure(f"{output['name']} is {png_size(data)}, not {size}")
+                    (folder / output["name"]).write_bytes(data)
+                    print(f"    {output['name']}: {size} PNG at {output.get('at')} s, {output['bytes']} bytes")
+                print(f"    timings: {json.dumps(job['report'].get('timings'))}; {job['seconds']} s in all")
+                entry["sizes"][size] = {"check": job["report"].get("check"), "outputs": job["outputs"]}
+            except PreviewFailure as exc:
+                print(f"    FAIL: {exc}")
+                failures.append(f"{name} at {size}: {exc}")
+        probe = (starter.get("preview") or {}).get("probe")
+        if probe and not any(f.startswith(f"{name} at ") for f in failures):
+            try:
+                entry["probe"] = probe_image(renderer, starter, kit, probe, out / starter["slug"])
+            except PreviewFailure as exc:
+                print(f"    FAIL: {exc}")
+                failures.append(f"{name}: {exc}")
+    return failures
+
+
+def probe_image(renderer, starter, kit, probe, folder: Path) -> Dict[str, Any]:
+    """The image at its first size, rendered again with the primary swapped: the pixel follows the brand kit."""
+    size = starter["blocks"]["sizes"][0]
+    token = probe["token"]
+    first_bundle = image_bundle_for(starter, kit, size)
+    first = sample((folder / size / _first_still(first_bundle)).read_bytes(), probe["x"], probe["y"])
+    swapped_kit = {**kit, "primary_color": PROBE_PRIMARY}
+    swapped_bundle = image_bundle_for(starter, swapped_kit, size)
+    swapped_job = renderer.render(swapped_bundle)
+    data = swapped_job["outputs"][0].pop("data")
+    (folder / f"probe-swapped-{size}.png").write_bytes(data)
+    second = sample(data, probe["x"], probe["y"])
+    expected = (hex_rgb(first_bundle["brand"]["tokens"][token]), hex_rgb(swapped_bundle["brand"]["tokens"][token]))
+    return _judge_probe(probe, f"the first still at {size}", kit, first, second, expected, token)
+
+
+def _first_still(bundle: Mapping[str, Any]) -> str:
+    return "render.png" if len(bundle["still"]["at"]) == 1 else "render-01.png"
+
+
+def _judge_probe(probe, where, kit, first, second, expected, token) -> Dict[str, Any]:
+    close = lambda got, want: all(abs(a - b) <= PROBE_TOKEN_TOLERANCE for a, b in zip(got, want))  # noqa: E731
+    print(f"    pixel probe on {where} ({probe['what']}, {probe['x']},{probe['y']} of the frame):")
+    print(f"      primary {kit['primary_color']}: pixel {first}, {token} {expected[0]}")
+    print(f"      primary {PROBE_PRIMARY}: pixel {second}, {token} {expected[1]}")
+    if not (close(first, expected[0]) and close(second, expected[1])):
+        raise PreviewFailure("the probed pixel does not show the brand kit's primary colour")
+    if first == second:
+        raise PreviewFailure("swapping the primary colour did not change the probed pixel")
+    print("      PASS: the pixel is the brand's primary in both renders, and it changed with the brand kit")
+    return {"x": probe["x"], "y": probe["y"], "pixels": [first, second], "tokens": expected}
 
 
 def _frame_at(job: Mapping[str, Any], folder: Path, at: float) -> bytes:
@@ -277,22 +386,14 @@ def probe_primary(renderer, starter, kit, bundle, job, probe, folder: Path) -> D
     first = sample(_frame_at(job, folder, probe["at"]), fx, fy)
     swapped_kit = {**kit, "primary_color": PROBE_PRIMARY}
     swapped_bundle = bundle_for(starter, swapped_kit, [probe["at"]])
-    swapped_job = renderer.preview(swapped_bundle)
+    swapped_job = renderer.render(swapped_bundle)
     frame = next(o for o in swapped_job["outputs"] if o.get("kind") == "frame")
     data = frame.pop("data")
     (folder / f"probe-swapped-{frame['name']}").write_bytes(data)
     second = sample(data, fx, fy)
     expected = (hex_rgb(bundle["brand"]["tokens"][token]), hex_rgb(swapped_bundle["brand"]["tokens"][token]))
-    close = lambda got, want: all(abs(a - b) <= PROBE_TOKEN_TOLERANCE for a, b in zip(got, want))  # noqa: E731
-    print(f"    pixel probe at {probe['at']} s ({probe['what']}, {probe['x']},{probe['y']} of the frame):")
-    print(f"      primary {kit['primary_color']}: pixel {first}, {token} {expected[0]}")
-    print(f"      primary {PROBE_PRIMARY}: pixel {second}, {token} {expected[1]}")
-    if not (close(first, expected[0]) and close(second, expected[1])):
-        raise PreviewFailure("the probed pixel does not show the brand kit's primary colour")
-    if first == second:
-        raise PreviewFailure("swapping the primary colour did not change the probed pixel")
-    print("      PASS: the pixel is the brand's primary in both renders, and it changed with the brand kit")
-    return {"at": probe["at"], "x": probe["x"], "y": probe["y"], "pixels": [first, second], "tokens": expected}
+    judged = _judge_probe(probe, f"the preview at {probe['at']} s", kit, first, second, expected, token)
+    return {"at": probe["at"], **judged}
 
 
 def bundle_width(bundle: Mapping[str, Any]) -> int:
@@ -314,7 +415,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if failures:
         print("\nFAILED:\n  " + "\n  ".join(failures))
         return 1
-    print("\nevery seeded social video template checked with 0 errors and rendered its preview: PASS")
+    print("\nevery seeded social video template checked with 0 errors and rendered its preview,")
+    print("and every seeded social image template checked with 0 errors and rendered its PNGs at every size: PASS")
     return 0
 
 

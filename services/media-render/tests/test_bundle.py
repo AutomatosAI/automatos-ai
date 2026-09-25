@@ -291,3 +291,32 @@ def test_a_preview_names_moments_inside_the_composition(settings):
 )
 def test_a_preview_outside_the_composition_is_refused(settings, preview, message):
     assert message in refused(settings, bundle(preview=preview))
+
+
+def test_a_still_names_its_moments_in_order(settings):
+    """US-107: an image, one full-size PNG per moment (a carousel's slides)."""
+    parsed = parse_bundle(bundle(still={"at": [0.0, 1.5, 2.5]}), settings, {})
+    assert parsed.still.at == (0.0, 1.5, 2.5) and parsed.preview is None
+    assert parse_bundle(bundle(), settings, {}).still is None
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        pytest.param({"still": {"at": []}}, "at least one moment", id="no-moments"),
+        pytest.param({"still": {"at": [3.0]}}, "under 3", id="at-the-end"),
+        pytest.param({"still": {"at": [-1]}}, "at least 0", id="before-the-start"),
+        pytest.param({"still": {"at": [2.0, 1.0]}}, "time order", id="out-of-order"),
+        pytest.param({"still": {"at": [1.0, 1.0]}}, "time order", id="twice"),
+        pytest.param({"still": {"at": [0.5], "size": "1080x1350"}}, "unknown field", id="unknown-key"),
+        pytest.param({"still": {"at": [0.1 * i for i in range(11)]}}, "the limit is 10", id="too-many"),
+        pytest.param({"still": {"at": [0.5]}, "preview": {"at": [0.5]}}, "its own preview", id="and-a-preview"),
+        pytest.param(
+            {"still": {"at": [0.5]}, "audio": {"voice": {"lines": [{"id": "l01", "at": 0.3, "text": "Hi"}]}}},
+            "no sound",
+            id="and-a-voice",
+        ),
+    ],
+)
+def test_a_still_it_could_not_take_is_refused(settings, extra, message):
+    assert message in refused(settings, bundle(**extra))

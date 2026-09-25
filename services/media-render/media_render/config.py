@@ -106,6 +106,8 @@ class Settings:
     preview_max_frames: int
     preview_reel_fps: int
     preview_timeout_seconds: int
+    # A still (US-107): an image, one full-size PNG per moment; a carousel takes one per slide.
+    still_max_frames: int
 
     @property
     def is_production(self) -> bool:
@@ -220,4 +222,5 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         preview_max_frames=positive_int("MEDIA_RENDER_PREVIEW_MAX_FRAMES", 12),
         preview_reel_fps=positive_int("MEDIA_RENDER_PREVIEW_REEL_FPS", 2),
         preview_timeout_seconds=positive_int("MEDIA_RENDER_PREVIEW_TIMEOUT_SECONDS", 120),
+        still_max_frames=positive_int("MEDIA_RENDER_STILL_MAX_FRAMES", 10),
     )

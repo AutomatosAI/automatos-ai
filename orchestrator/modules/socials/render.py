@@ -29,6 +29,11 @@ post's variable values with the template's defaults, the audio plan, and the
 workspace brand kit: tokens as ``--brand-*`` CSS variables, an uploaded logo
 and font files inlined. The api layer hands the brand kit in: this module may
 not import the documents module that owns it.
+
+A ``social_image`` template renders as stills (US-107): one PNG for a card, one
+per slide for a carousel, each stored and registered like a video, numbered
+when there are several (``carousel-4x5-01.png``). A still spends no render
+minutes: it has no duration.
 """
 from __future__ import annotations
 
@@ -165,6 +170,7 @@ def bundle_for(
         values=resolved.values,
         brand_kit=brand_kit,
         fallback_name=fallback_name,
+        fmt=template.format,
     )
 
 
@@ -256,12 +262,18 @@ def _aspect_slug(aspect: str) -> str:
     return "".join(ch if ch.isalnum() else "x" for ch in aspect.lower()) or DEFAULT_ASPECT
 
 
-def stored_file_name(job: RenderJob, output: Mapping[str, Any]) -> str:
-    """``<format>-<aspect>.<ext>``, e.g. ``video-9x16.mp4``: stable, so a re-render replaces its file."""
+def stored_file_name(job: RenderJob, output: Mapping[str, Any], *, several: bool = False) -> str:
+    """``<format>-<aspect>.<ext>``, e.g. ``video-9x16.mp4``: stable, so a re-render replaces its file.
+
+    When a render returns several files (a carousel's slides), each carries its
+    ``index`` and the name its number: ``carousel-4x5-01.png``.
+    """
     name = str(output.get("name") or "")
     ext = Path(name).suffix.lower() if Path(name).suffix else ".mp4"
     aspect = str(output.get("aspect") or DEFAULT_ASPECT)
-    return f"{job.format or 'render'}-{_aspect_slug(aspect)}{ext}"
+    index = output.get("index")
+    number = f"-{index:02d}" if several and isinstance(index, int) and not isinstance(index, bool) else ""
+    return f"{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
 
 
 def _register(session_factory: Callable[[], Any], job: RenderJob, key: str, file_name: str, entry: Dict[str, Any]) -> str:
@@ -307,7 +319,7 @@ async def _store_outputs(
     with tempfile.TemporaryDirectory(prefix="socials-render-") as scratch:
         fetched = []
         for output in outputs:
-            file_name = stored_file_name(job, output)
+            file_name = stored_file_name(job, output, several=len(outputs) > 1)
             try:
                 key = media_key(job.workspace_id, job.post_id, file_name)
             except MediaNameError as exc:
@@ -353,13 +365,19 @@ def rendered_seconds(media: Mapping[str, List[Mapping[str, Any]]]) -> float:
     return float(sum(r.get("duration") or 0 for records in media.values() for r in records))
 
 
+def _size(record: Mapping[str, Any], aspect: str) -> str:
+    return f"{record['width']}×{record['height']}" if record.get("width") and record.get("height") else aspect
+
+
 def _summary(media: Mapping[str, List[Mapping[str, Any]]]) -> str:
     parts = []
     for aspect, records in media.items():
+        if len(records) > 1 and not any(r.get("duration") for r in records):
+            parts.append(f"{len(records)} images at {_size(records[0], aspect)}")  # a carousel's slides
+            continue
         for r in records:
-            size = f"{r['width']}×{r['height']}" if r.get("width") and r.get("height") else aspect
             length = f"{r['duration']:g} s " if r.get("duration") else ""
-            parts.append(f"{length}{size}".strip())
+            parts.append(f"{length}{_size(r, aspect)}".strip())
     return "Rendered " + ", ".join(parts) + "."
 
 

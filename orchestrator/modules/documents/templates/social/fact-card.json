@@ -1,0 +1,78 @@
+{
+  "name": "Fact card",
+  "description": "One number that makes the point: the figure in the brand colour, what it says, some context and its source line, on the brand's paper. The figure is a claim that needs a source.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "fact_value": {
+      "type": "text",
+      "label": "Figure",
+      "description": "The number, e.g. 80% or 3.2M. A claim: bind it to its source.",
+      "claim": true,
+      "max_chars": 10
+    },
+    "fact_statement": {
+      "type": "text",
+      "label": "What it says",
+      "description": "The fact in one sentence, read with the figure.",
+      "max_chars": 140
+    },
+    "context": {
+      "type": "text",
+      "label": "Context",
+      "description": "A sentence or two on why it matters. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "source_label": {
+      "type": "text",
+      "label": "Source line",
+      "description": "Where the number comes from, shown on the card, e.g. Source: Gartner, 2026.",
+      "max_chars": 120
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Save this post. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "sample_data": {
+    "eyebrow": "BY THE NUMBERS",
+    "fact_value": "80%",
+    "fact_statement": "of its agent's tools Vercel removed, and the agent got faster and better.",
+    "context": "Fewer tools meant fewer wrong turns: the model spent its effort on the task, not on choosing.",
+    "source_label": "Source: Vercel engineering blog, 2026",
+    "counter": "",
+    "handle": "@automatos.app",
+    "cta": "Save this post"
+  }
+}

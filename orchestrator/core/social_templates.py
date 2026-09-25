@@ -15,7 +15,8 @@ carries a composition in ``blocks``, which media-render renders:
       "audio_plan": {"voice": …, "music": …, "sfx": […]},  social_video only
       "slots": {                             optional: footage and stills a post may supply
         "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"}
-      }
+      },
+      "stills": [{"at": 0.5}, {"at": 1.5, "when": "point_3"}]   social_image only: one PNG each
     }
 
 * **Variables.** A variable is ``text``, a ``number`` or a ``boolean``, and it
@@ -33,6 +34,11 @@ carries a composition in ``blocks``, which media-render renders:
   media-render as a media file at that path; an empty one has its elements
   removed (:func:`without_slots`), and the template's own motion graphics play in
   its place.
+* **Stills.** An image renders as PNG snapshots of its composition, one per
+  moment in ``stills`` (US-107): one for a card, one per slide for a carousel.
+  A still with ``when`` is taken only when that variable has a value, so a
+  carousel's optional slides drop out; the first still is always taken.
+  Without ``stills`` an image is one still at 0 s (:func:`still_moments`).
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
   a composition as ``--brand-*`` CSS variables and ``{{ brand.logo }}``.
   :func:`brand_literals` finds a hex colour, a named font family or a logo baked
@@ -58,7 +64,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
 SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots")
+BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills")
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
 
@@ -94,11 +100,19 @@ SLOT_SPEC_KEYS = ("kind", "label", "description", "path")
 SLOT_DIR = "assets/slots/"
 MAX_SLOTS = 12
 
+# Stills: the moments an image render snapshots, one PNG each, ten at most (a
+# carousel's cover, points and close); the first still carries no ``when``.
+STILL_SPEC_KEYS = ("at", "when")
+MAX_STILLS = 10
+DEFAULT_STILL_AT = 0.0
+
 PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 _LEFTOVER = re.compile(r"\{\{[^{}]*\}\}")
 _SIZE = re.compile(r"^(\d{2,4})x(\d{2,4})$")
 _HEAD_CLOSE = re.compile(r"</head\s*>", re.IGNORECASE)
 _ROOT = re.compile(r"""data-composition-id\s*=\s*["']main["']""", re.IGNORECASE)
+_ROOT_TAG = re.compile(r"""<[^<>]*\bdata-composition-id\s*=\s*["']main["'][^<>]*>""", re.IGNORECASE)
+_DURATION = re.compile(r"""(?<![\w-])data-duration\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
 _SLOT_ATTRIBUTE = re.compile(r"""(?<![\w-])data-slot\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
 _SRC_ATTRIBUTE = re.compile(r"""(?<![\w-])src\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
 
@@ -386,6 +400,79 @@ def _slot_errors(slots: Any, html: str, css: str) -> List[Dict[str, str]]:
     return errors
 
 
+# ── stills ──────────────────────────────────────────────────────────────────
+def root_duration(html: str) -> Optional[float]:
+    """The root's ``data-duration`` in seconds, or ``None`` when it is not a plain number."""
+    root = _ROOT_TAG.search(html or "")
+    duration = _DURATION.search(root.group(0)) if root else None
+    try:
+        value = float(duration.group(1)) if duration else None
+    except ValueError:
+        return None
+    return value if value is not None and math.isfinite(value) else None
+
+
+def _still_errors(stills: Any, fmt: str, schema: Mapping[str, Any], html: str) -> List[Dict[str, str]]:
+    if stills is None:
+        return []
+    if fmt != SOCIAL_IMAGE:
+        return [_error("stills", "a video renders the whole film: stills are for an image, leave them out")]
+    if not isinstance(stills, list) or not stills:
+        return [_error("stills", 'must be a non-empty list of moments, e.g. [{"at": 0.5}]')]
+    if len(stills) > MAX_STILLS:
+        return [_error("stills", f"at most {MAX_STILLS} stills")]
+    errors: List[Dict[str, str]] = []
+    duration = root_duration(html)
+    previous: Optional[float] = None
+    for i, still in enumerate(stills):
+        where = f"stills[{i}]"
+        if not isinstance(still, dict):
+            errors.append(_error(where, 'must be an object such as {"at": 0.5}'))
+            continue
+        errors += [
+            _error(f"{where}.{key}", f"is not a still setting ({', '.join(STILL_SPEC_KEYS)})")
+            for key in still
+            if key not in STILL_SPEC_KEYS
+        ]
+        at = still.get("at")
+        if not _is_number(at) or at < 0:
+            errors.append(_error(f"{where}.at", "must be a number of seconds, 0 or more"))
+        else:
+            if previous is not None and at <= previous:
+                errors.append(_error(f"{where}.at", "stills must be in time order, each later than the one before"))
+            if duration is not None and at >= duration:
+                errors.append(_error(f"{where}.at", f"is past the composition's end ({duration:g} s)"))
+            previous = at
+        if "when" in still:
+            if i == 0:
+                errors.append(_error(f"{where}.when", "the first still is always taken: leave its when out"))
+            elif not isinstance(still["when"], str) or still["when"] not in schema:
+                errors.append(_error(f"{where}.when", "must name a variable of variables_schema"))
+    return errors
+
+
+def _has_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool):
+        return value
+    return value is not None and not (_is_number(value) and value == 0)
+
+
+def still_moments(blocks: Mapping[str, Any], values: Mapping[str, Any]) -> List[float]:
+    """The moments an image render snapshots, in order: every still whose ``when`` has a value.
+
+    ``values`` are the resolved variables. A template without stills is one
+    still at 0 s.
+    """
+    stills = blocks.get("stills") or [{"at": DEFAULT_STILL_AT}]
+    return [
+        float(still["at"])
+        for still in stills
+        if "when" not in still or _has_value(values.get(still["when"]))
+    ]
+
+
 # ── the whole template ──────────────────────────────────────────────────────
 def _text_errors(field: str, value: Any, *, required: bool) -> List[Dict[str, str]]:
     if value is None and not required:
@@ -464,6 +551,7 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         errors += _placeholder_errors("html", html, schema) + _placeholder_errors("css", css or "", schema)
         errors += _voice_placeholder_errors(blocks.get("audio_plan"), schema)
         errors += _slot_errors(blocks.get("slots"), html, css or "")
+        errors += _still_errors(blocks.get("stills"), fmt, schema, html)
         errors += [_error(field, message) for field, message in brand_literals(html, css or "")]
     if errors:
         raise SocialTemplateError(errors)
@@ -709,7 +797,9 @@ __all__ = [
     "parse_size",
     "placeholders",
     "resolve_variables",
+    "root_duration",
     "slot_names_in",
+    "still_moments",
     "strip_var_calls",
     "validate_social_blocks",
     "voice_lines",

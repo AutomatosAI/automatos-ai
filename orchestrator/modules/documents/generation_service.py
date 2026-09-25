@@ -69,6 +69,7 @@ from core.social_templates import (
     InvalidVariableValues,
     is_social_format,
     resolve_variables,
+    still_moments,
     validate_social_blocks,
 )
 from core.storage import ensure_bucket, get_public_s3_client, get_s3_client, is_storage_configured
@@ -584,6 +585,9 @@ class DocumentGenerationService:
         unresolved chip. The month's render minutes are checked before
         media-render is called (``RenderQuotaExceeded``), and the rendered
         seconds are booked on the media lane after, like a Socials post's render.
+        An image renders as one still (US-107); a template that renders several
+        (a carousel's slides) is refused: a document is one file, and a Socials
+        post's render keeps every slide.
         """
         if template is None or getattr(template, "format", None) != format:
             raise ValueError(f"{format} renders a {format} template: pass its template_id or template_name")
@@ -593,6 +597,14 @@ class DocumentGenerationService:
             raise UnresolvedDeliverableError(unresolved=[f"data.{name}" for name in resolved.missing])
         if resolved.invalid:
             raise InvalidVariableValues([{"field": "data", "message": problem} for problem in resolved.invalid])
+        # One document is one file: a template that renders several images (a
+        # carousel's slides) renders as a Socials post, which keeps every one.
+        stills = still_moments(blocks, resolved.values) if format == SOCIAL_IMAGE else []
+        if len(stills) > 1:
+            raise ValueError(
+                f"{template.name} renders {len(stills)} images, one per slide, and a document is one file: "
+                "draft it as a Socials post, whose render keeps every slide"
+            )
 
         workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
         if workspace is None:
@@ -606,6 +618,7 @@ class DocumentGenerationService:
             values=resolved.values,
             brand_kit=brand_kit_for_render(get_brand_kit(getattr(workspace, "settings", None))),
             fallback_name=getattr(workspace, "name", None) or "",
+            fmt=format,
         )
         file_type = SOCIAL_FILE_TYPES[format]
         output_path = Path(self._output_path(workspace_id, title, file_type))

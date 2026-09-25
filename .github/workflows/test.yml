@@ -740,7 +740,11 @@ jobs:
       # template's key moments, small, and a short reel. The pixel probe renders
       # a probed moment again with the brand kit's primary colour swapped and reads
       # the pixel back (scripts/ci/social_template_previews.py).
-      - name: The seeded video templates pass the check and render their previews; the pixel follows the brand kit
+      # US-107 (S1.2c): the seven image templates (the automatos-social families, a
+      # fact card and a carousel) render for real at every size they declare: the
+      # full check, then one full-size PNG per still (a carousel's slides), each
+      # read back and measured; the probe swaps the primary under the brand stripe.
+      - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit
         env:
           TOKEN: ci-render-token
         run: |
@@ -764,7 +768,7 @@ jobs:
           echo "the seeded templates: $(( $(date +%s) - start )) s"
           docker logs media-render-templates 2>&1 | tail -n 80
           docker rm -f media-render-templates > /dev/null
-          if [ "$code" != 0 ]; then echo "::error::a seeded video template failed its check, its preview or the pixel probe"; fi
+          if [ "$code" != 0 ]; then echo "::error::a seeded template failed its check, its preview or render, or the pixel probe"; fi
           exit $code
       - name: Keep the seeded templates' previews
         if: always()

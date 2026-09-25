@@ -14,7 +14,8 @@
                                     {"id": "l02", "at": 2.4, "path": "assets/vo/l02.wav"}]},
                 "music": {"track": "<library id>", "start": 32.0},
                 "sfx": [{"path": "assets/sfx/click.ogg", "at": 10.44, "volume": 0.5}]},
-      "preview": {"at": [1.2, 10.0, 36.5]}      optional: snapshot these moments, not the full render
+      "preview": {"at": [1.2, 10.0, 36.5]},     optional: snapshot these moments, not the full render
+      "still": {"at": [0.5, 1.5]}               optional: an image, one full-size PNG per moment
     }
 
 ``files`` are inlined as data: URIs (the brand kit's logo and font files, small
@@ -28,6 +29,11 @@ A ``preview`` asks for frames instead of the video (US-106): the job is
 staged, spoken, mixed and checked exactly as a render is, then snapshots the
 composition at each moment and returns them as small PNGs, with a short reel
 of them (pipeline.RenderPipeline.preview).
+
+A ``still`` is an image (US-107): the job is staged, mixed and checked the same
+way, then its render is a full-size PNG of the composition at each moment
+(pipeline.RenderPipeline.still): one for a card, one per slide for a carousel.
+A still has no sound, so it takes no audio plan, and it is its own preview.
 """
 
 from __future__ import annotations
@@ -134,6 +140,11 @@ class Preview:
 
 
 @dataclass(frozen=True)
+class Still:
+    at: Tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class Bundle:
     workspace_id: str
     reference: Optional[str]
@@ -142,6 +153,7 @@ class Bundle:
     media: Tuple[MediaInput, ...]
     audio: AudioPlan
     preview: Optional[Preview] = None
+    still: Optional[Still] = None
 
 
 def _file_path(value: Any, where: str, extensions: FrozenSet[str]) -> str:
@@ -309,6 +321,21 @@ def _preview(raw: Any, duration: float, settings: Settings) -> Optional[Preview]
     return Preview(at=tuple(sorted(set(at))))
 
 
+def _still(raw: Any, duration: float, settings: Settings) -> Optional[Still]:
+    """The moments an image is taken at: each inside the composition, in time order, each once."""
+    if raw is None:
+        return None
+    still = validate.mapping(raw, "still")
+    validate.keys(still, "still", required=("at",))
+    moments = validate.items(still["at"], "still.at", limit=settings.still_max_frames)
+    if not moments:
+        raise BundleError("still.at must name at least one moment")
+    at = [validate.number(t, f"still.at[{i}]", minimum=0, below=duration) for i, t in enumerate(moments)]
+    if any(later <= earlier for earlier, later in zip(at, at[1:])):
+        raise BundleError("still.at must list its moments in time order, each once")
+    return Still(at=tuple(at))
+
+
 def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track]) -> Bundle:
     """Validate a render bundle. Raises BundleError (HTTP 400) before anything is fetched."""
     body = validate.mapping(payload, "the bundle")
@@ -316,8 +343,13 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track])
         body,
         "the bundle",
         required=("workspace_id", "composition"),
-        optional=("reference", "variables", "brand", "files", "media", "audio", "preview"),
+        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still"),
     )
+    if body.get("still") is not None:
+        if body.get("preview") is not None:
+            raise BundleError("a still is its own preview: send still or preview, not both")
+        if body.get("audio"):
+            raise BundleError("a still has no sound: leave audio out")
     workspace_id = validate.pattern(body["workspace_id"], "workspace_id", WORKSPACE_ID, "a workspace id")
     reference = body.get("reference")
     if reference is not None:
@@ -339,4 +371,5 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track])
         media=media,
         audio=_audio(body.get("audio"), composition.duration, audio_paths, settings, library),
         preview=_preview(body.get("preview"), composition.duration, settings),
+        still=_still(body.get("still"), composition.duration, settings),
     )

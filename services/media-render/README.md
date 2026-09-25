@@ -40,7 +40,7 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | Route | Answers |
 |---|---|
 | `GET /health` | the versions, and how many renders are running and queued |
-| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render (see below) |
+| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render, and with `"still": {"at": [seconds…]}` it is an image (see below) |
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
 | `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
@@ -64,6 +64,12 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 - `preview.mp4`: a short reel of those frames, each held `1 / MEDIA_RENDER_PREVIEW_REEL_FPS` seconds.
 
 The media-render CI job previews every seeded social video template this way (`scripts/ci/social_template_previews.py`).
+
+**A still** (US-107) is an image: a social image template, or a carousel. It goes through the same stage, mix and check as a render, and the same render slots. Its render is `hyperframes snapshot --at …` at the composition's own size, each frame flattened to an opaque RGB PNG:
+- `render.png` for one moment; `render-01.png`, `render-02.png`, … for several (a carousel's slides), each with its `at` and `index`;
+- no `duration`: a still spends no render minutes.
+
+A still has no sound, so a bundle with `still` and an `audio` plan is refused, and so is one with `still` and `preview` (a still is its own preview). `MEDIA_RENDER_STILL_MAX_FRAMES` bounds the moments. The media-render CI job renders every seeded social image template this way, at every size it declares.
 
 **The mix** is the reference's ffmpeg graph (`docs/PRDS/prd251-reference/mix-reference.py`):
 - voice placed with `adelay`;
@@ -116,7 +122,8 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_KOKORO_MODEL` / `_VOICES` | `/opt/kokoro/kokoro-v1.0.onnx` / `voices-v1.0.bin` |
 | `MEDIA_RENDER_KOKORO_VOICE` / `_SPEED` / `_LANG` | `af_heart` / `0.95` / `en-us` |
 | `MEDIA_RENDER_QUALITY` / `MEDIA_RENDER_FPS` / `MEDIA_RENDER_WORKERS` | `delivery` / `30` / `auto` |
-| `MEDIA_RENDER_PREVIEW_WIDTH` / `_PREVIEW_MAX_FRAMES` / `_PREVIEW_REEL_FPS` / `_PREVIEW_TIMEOUT_SECONDS` | `540` / `12` / `2` / `120` (the frames' and the reel's ffmpeg steps) |
+| `MEDIA_RENDER_PREVIEW_WIDTH` / `_PREVIEW_MAX_FRAMES` / `_PREVIEW_REEL_FPS` / `_PREVIEW_TIMEOUT_SECONDS` | `540` / `12` / `2` / `120` (the frames' and the reel's ffmpeg steps, and a still's) |
+| `MEDIA_RENDER_STILL_MAX_FRAMES` | `10`: the most PNGs one still takes (a carousel's slides) |
 
 ## Tests
 

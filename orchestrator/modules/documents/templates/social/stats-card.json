@@ -1,0 +1,126 @@
+{
+  "name": "Stats card",
+  "description": "By the numbers: a headline, up to three big figures with what each means, and an optional dark note card, on the brand's paper. Every figure is a claim that needs a source. Ported from the automatos-social stats family.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. THE|HARNESS|IS THE|PRODUCT.",
+      "max_chars": 80
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "stat_1_value": {
+      "type": "text",
+      "label": "Figure 1",
+      "description": "The first big figure, e.g. 5x or 80%. A claim: bind it to its source.",
+      "claim": true,
+      "max_chars": 8
+    },
+    "stat_1_label": {
+      "type": "text",
+      "label": "Figure 1 meaning",
+      "description": "What the first figure says, in a sentence.",
+      "max_chars": 110
+    },
+    "stat_2_value": {
+      "type": "text",
+      "label": "Figure 2",
+      "description": "The second big figure. A claim: bind it to its source.",
+      "claim": true,
+      "max_chars": 8
+    },
+    "stat_2_label": {
+      "type": "text",
+      "label": "Figure 2 meaning",
+      "description": "What the second figure says, in a sentence.",
+      "max_chars": 110
+    },
+    "stat_3_value": {
+      "type": "text",
+      "label": "Figure 3",
+      "description": "A third big figure. A claim: bind it to its source. Leave empty for none.",
+      "default": "",
+      "claim": true,
+      "max_chars": 8
+    },
+    "stat_3_label": {
+      "type": "text",
+      "label": "Figure 3 meaning",
+      "description": "What the third figure says, in a sentence. Leave empty for none.",
+      "default": "",
+      "max_chars": 110
+    },
+    "note_title": {
+      "type": "text",
+      "label": "Note heading",
+      "description": "The heading of the dark note card under the figures. Leave empty for none.",
+      "default": "",
+      "max_chars": 60
+    },
+    "note_body": {
+      "type": "text",
+      "label": "Note text",
+      "description": "One or two sentences of context in the note card. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Swipe to know more. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "sample_data": {
+    "eyebrow": "WHY IT MATTERS",
+    "headline": "THE|HARNESS|IS THE|PRODUCT.",
+    "headline_accent": "HARNESS",
+    "stat_1_value": "5x",
+    "stat_1_label": "Manus rewrote its harness five times in six months. Same model, better results.",
+    "stat_2_value": "$2B",
+    "stat_2_label": "What Meta paid for Manus: not for a model, for the harness engineering.",
+    "stat_3_value": "80%",
+    "stat_3_label": "The share of its agent's tools Vercel removed, and got faster, better results.",
+    "note_title": "The harness decides the result",
+    "note_body": "Changing only the harness moved a LangChain agent from outside the top 30 to the top 5 on TerminalBench 2.0.",
+    "counter": "03 / 10",
+    "handle": "@automatos.app",
+    "cta": "Swipe to know more"
+  }
+}
