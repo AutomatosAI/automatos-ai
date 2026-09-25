@@ -446,16 +446,19 @@ def build_match_annotation(ranked: Sequence[MatchResult]) -> Dict[str, Any]:
     }
 
 
-def resolve_named_agent(named: Optional[str], agents: Sequence[Agent]) -> Tuple[Optional[Any], Optional[str]]:
+def resolve_named_agent(named: Optional[str], agents: Sequence[Agent],
+                        explicit: bool = False) -> Tuple[Optional[Any], Optional[str]]:
     """F142 (c): the one active agent a person names for a task, by id, slug or
     name (case-insensitive), as ``(agent, None)``. A capability word
     (CANONICAL_ROLES) or text naming no agent is ``(None, None)``: it is routed
     by capability. A name several active agents share is ``(None, why)``, never
-    the lowest id; the caller refuses and asks for the id.
+    the lowest id; the caller refuses and asks for the id. ``explicit``: the
+    text is known to name an agent (a mission's staffing), so a capability word
+    that is also an agent's name ("WRITER") names that agent.
     """
     role = str(named or "").strip()
     wanted = role.lower()
-    if not wanted or wanted in CANONICAL_ROLES:
+    if not wanted or (wanted in CANONICAL_ROLES and not explicit):
         return None, None
     active = [a for a in agents if getattr(a, "status", "active") == "active"]
     by_id = [a for a in active if wanted.removeprefix("agent:").strip() == str(a.id)]

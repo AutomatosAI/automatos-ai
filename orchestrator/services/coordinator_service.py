@@ -167,6 +167,62 @@ def _pin_the_named_agent(edit: Any, roster: List[Any]) -> Any:
             "agent_role": agent.name, "pinned_agent_id": agent.id}
 
 
+# F142 (a): how much of the owner's words for one agent's work a mission keeps.
+STAFFING_DUTY_CHARS = 500
+STAFFING_ENTRY_TEXT = ('Each staffing entry names one agent and its work, in the owner\'s words: '
+                       '{"agent": "WRITER", "does": "drafts the club newsletter"}.')
+
+
+class StaffingError(ValueError):
+    """F142 (a): the owner's staffing names no agent, several, or no work."""
+
+
+def resolve_staffing(staffing: Any, roster: List[Any]) -> List[Dict[str, Any]]:
+    """F142 (a): the owner's named staffing, resolved against the workspace's
+    active agents, as [{agent_id, agent_name, does}]. An entry names one agent
+    (by id, slug, or a name only one active agent has) and its work, in the
+    owner's words. A name several active agents share, a name no active agent
+    has, the same agent twice, or an entry without its work is refused, never
+    guessed."""
+    if not staffing:
+        return []
+    from modules.coordination.planner import MAX_TASKS
+
+    if not isinstance(staffing, list) or len(staffing) > MAX_TASKS:
+        raise StaffingError(f"staffing is a list of at most {MAX_TASKS} entries. {STAFFING_ENTRY_TEXT}")
+    resolved: List[Dict[str, Any]] = []
+    for entry in staffing:
+        named = entry.get("agent") if isinstance(entry, dict) else None
+        does = str(entry.get("does") or "").strip() if isinstance(entry, dict) else ""
+        if named is None or not str(named).strip() or not does:
+            raise StaffingError(STAFFING_ENTRY_TEXT)
+        agent, why = resolve_named_agent(str(named), roster, explicit=True)
+        if why:
+            raise StaffingError(why)
+        if agent is None:
+            raise StaffingError(f"No active agent in this workspace is called '{named}'. "
+                             "Name the agent by its name, slug or id.")
+        if any(done["agent_id"] == agent.id for done in resolved):
+            raise StaffingError(f"{agent.name} (id {agent.id}) is named twice; give it one entry with all its work.")
+        resolved.append({"agent_id": agent.id, "agent_name": agent.name, "does": does[:STAFFING_DUTY_CHARS]})
+    return resolved
+
+
+def _staffed_task(planned: Any, staffing: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """F142 (b)/(d2): a planned task's role, description and pin. A task the
+    planner gave a named agent (staffed_by) is pinned to it, as an approval edit
+    pins (input_context.pinned_agent_id, its name as the role), and carries the
+    owner's words for that work verbatim. Any other task is as planned."""
+    staffed_by = getattr(planned, "staffed_by", None)
+    entry = next((e for e in staffing or [] if staffed_by is not None and e["agent_id"] == staffed_by), None)
+    if entry is None:
+        return {"agent_role": planned.agent_role, "description": planned.description, "pin": {}}
+    words = f'The owner\'s words for this work: "{entry["does"]}"'
+    description = f"{planned.description}\n\n{words}" if planned.description else words
+    return {"agent_role": entry["agent_name"], "description": description,
+            "pin": {"pinned_agent_id": entry["agent_id"]}}
+
+
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                           edits: List[Dict[str, Any]]) -> tuple:
     """Apply per-task field edits to OrchestrationTask rows and mirror them into
@@ -390,6 +446,9 @@ SERVER_OWNED_MISSION_CONFIG = frozenset({
     "template_used",
     "imported_plan",
     "skip_verification",
+    # F142 (a): resolved by create_mission/replan_mission (resolve_staffing),
+    # never taken from a caller's config.
+    "staffing",
 })
 
 
@@ -761,6 +820,15 @@ class CoordinatorService:
         self._last_archive_at: Optional[datetime] = None
         self._last_field_compaction_at: Optional[datetime] = None  # PRD-166 S1
         self._field = None  # Lazy-init via factory
+
+    @staticmethod
+    def _active_roster(db: Session, workspace_id: UUID) -> List[Agent]:
+        """The workspace's active agents: who a mission's staffing may name."""
+        return (
+            db.query(Agent)
+            .filter(and_(Agent.workspace_id == workspace_id, Agent.status == "active"))
+            .all()
+        )
 
     def _get_field(self):
         """Lazy-init the PRD-108 shared context backend (vector_field or redis)."""
@@ -2574,6 +2642,7 @@ class CoordinatorService:
         goal: str,
         created_by: str,
         config: Optional[Dict[str, Any]] = None,
+        staffing: Optional[List[Dict[str, Any]]] = None,
     ) -> OrchestrationRun:
         """
         Create a new mission: plan → create DB rows → board tasks → await approval.
@@ -2584,6 +2653,9 @@ class CoordinatorService:
             goal: Natural-language goal string.
             created_by: Clerk user ID (e.g., 'user_xxx').
             config: Optional mission config overrides.
+            staffing: F142 (a): the owner's named staffing, [{agent, does}];
+                resolved here (resolve_staffing), a ValueError when it names no
+                agent or several.
 
         Returns:
             The created OrchestrationRun.
@@ -2593,6 +2665,8 @@ class CoordinatorService:
         """
         # F153: the coordinator's own bookkeeping on run.config is never the caller's to set.
         mission_config = _creator_config(config)
+        if staffing:
+            mission_config["staffing"] = resolve_staffing(staffing, self._active_roster(db, workspace_id))
 
         # Create the run in PENDING state
         run = OrchestrationRun(
@@ -3084,18 +3158,22 @@ class CoordinatorService:
         """Write a decomposition (planner output OR an imported plan) to
         ``run.plan`` + OrchestrationTask / dependency rows. Returns the
         temp_id -> task map. PRD-163 S2: shared by create_mission and import_plan
-        so an imported plan persists the EXACT given DAG (no re-decomposition)."""
+        so an imported plan persists the EXACT given DAG (no re-decomposition).
+        F142 (b): a task the owner staffed is pinned to the named agent."""
+        staffing = (run.config or {}).get("staffing")
+        staffed = {t.temp_id: _staffed_task(t, staffing) for t in decomposition.tasks}
         run.plan = {
             "tasks": [
                 {
                     "temp_id": t.temp_id,
                     "title": t.title,
-                    "description": t.description,
-                    "agent_role": t.agent_role,
+                    "description": staffed[t.temp_id]["description"],
+                    "agent_role": staffed[t.temp_id]["agent_role"],
                     "sequence_number": t.sequence_number,
                     "task_type": t.task_type,
                     "complexity": getattr(t, "complexity", "moderate"),
                     "parallel_group": getattr(t, "parallel_group", None),
+                    **staffed[t.temp_id]["pin"],
                 }
                 for t in decomposition.tasks
             ],
@@ -3114,10 +3192,10 @@ class CoordinatorService:
             task = OrchestrationTask(
                 run_id=run.id,
                 title=planned.title,
-                description=planned.description,
+                description=staffed[planned.temp_id]["description"],
                 task_type=planned.task_type,
                 sequence_number=planned.sequence_number,
-                agent_role=planned.agent_role,
+                agent_role=staffed[planned.temp_id]["agent_role"],
                 state=TaskState.PENDING.value,
                 state_type="initial",
                 verification_criteria=planned.verification_criteria or None,
@@ -3127,6 +3205,7 @@ class CoordinatorService:
                     **({"required_tools": planned.required_tools} if planned.required_tools else {}),
                     **({"definition_of_done": planned.definition_of_done}
                        if getattr(planned, "definition_of_done", None) else {}),
+                    **staffed[planned.temp_id]["pin"],
                 } or None,
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
@@ -3617,10 +3696,13 @@ class CoordinatorService:
         *,
         actor_type: ActorType = ActorType.HUMAN,
         trigger: str = "human",
+        staffing: Optional[List[Dict[str, Any]]] = None,
     ) -> OrchestrationRun:
         """
         Replan a mission by generating replacement tasks for the failed (or
-        looping) subtree while preserving completed/verified tasks.
+        looping) subtree while preserving completed/verified tasks. F142 (a):
+        ``staffing`` re-staffs it (resolved before anything changes; [] clears
+        it); otherwise the mission's own staffing is kept.
 
         Flow:
           1. Validate: 'failed' state (humans) or RUNNING via the joiner's
@@ -3674,6 +3756,9 @@ class CoordinatorService:
                 f"Mission has been replanned {current_replans} times, "
                 f"maximum is {max_replans}"
             )
+        if staffing is not None:
+            run.config = {**(run.config or {}),
+                          "staffing": resolve_staffing(staffing, self._active_roster(db, run.workspace_id))}
 
         # Transition failed/running → replanning
         transition_run(
@@ -3759,6 +3844,7 @@ class CoordinatorService:
                     failed_task_reason=failed_task_reason,
                     user_notes=notes,
                     db=db,  # PRD-164 S1: enables the planning context pack
+                    staffing=(run.config or {}).get("staffing"),
                 )
         except PlanValidationError:
             # Replan failed — transition back to failed
@@ -3819,25 +3905,25 @@ class CoordinatorService:
             default=0,
         )
 
-        # Insert new tasks
+        # Insert new tasks (F142 b: a replacement for a named agent's work stays pinned to it)
         temp_id_to_task: dict[str, OrchestrationTask] = {}
         for planned in decomposition.tasks:
             new_seq = max_seq + planned.sequence_number
+            staffed = _staffed_task(planned, (run.config or {}).get("staffing"))
             task = OrchestrationTask(
                 run_id=run.id,
                 title=planned.title,
-                description=planned.description,
+                description=staffed["description"],
                 task_type=planned.task_type,
                 sequence_number=new_seq,
-                agent_role=planned.agent_role,
+                agent_role=staffed["agent_role"],
                 state=TaskState.PENDING.value,
                 state_type="initial",
                 verification_criteria=planned.verification_criteria or None,
-                input_context=(
-                    {"required_tools": planned.required_tools}
-                    if planned.required_tools
-                    else None
-                ),
+                input_context={
+                    **({"required_tools": planned.required_tools} if planned.required_tools else {}),
+                    **staffed["pin"],
+                } or None,
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
                 parallel_group=getattr(planned, "parallel_group", None),

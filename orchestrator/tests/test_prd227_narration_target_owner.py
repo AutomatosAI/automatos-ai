@@ -52,7 +52,7 @@ def _capture_tool_config(monkeypatch) -> dict:
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             captured["config"] = config
             captured["created_by"] = created_by
             return types.SimpleNamespace(
@@ -123,7 +123,7 @@ def test_rest_create_strips_caller_supplied_origin_and_chat_id(monkeypatch):
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             captured["config"] = config
             return types.SimpleNamespace(id=uuid.uuid4(), state=RunState.AWAITING_APPROVAL.value)
 
@@ -163,7 +163,7 @@ def test_blog_create_strips_caller_supplied_origin_and_chat_id(monkeypatch):
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             captured["config"] = config
             captured["created_by"] = created_by
             return types.SimpleNamespace(

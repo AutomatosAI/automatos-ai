@@ -38,6 +38,23 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                         "publish (bool: auto-publish result if applicable)."
                     ),
                 },
+                "staffing": {
+                    "type": "array",
+                    "description": (
+                        "Only when the owner says which agent does what: one entry per named "
+                        "agent, with its work in the owner's words. Each named agent gets that "
+                        "work and is pinned to it; anything else is routed by capability. A name "
+                        "several agents share is refused with their ids: ask the owner which one."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": {"type": "string", "description": "The agent's name, slug or id"},
+                            "does": {"type": "string", "description": "Its work, in the owner's words"},
+                        },
+                        "required": ["agent", "does"],
+                    },
+                },
             },
             "required": ["goal"],
         },
@@ -203,6 +220,23 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "properties": {
                 **_MISSION_ID_PARAM,
                 "notes": {"type": "string", "description": "Optional guidance for the replanner."},
+                "staffing": {
+                    "type": "array",
+                    "description": (
+                        "To re-staff the mission (omit to keep its staffing; [] clears it): one entry per named "
+                        "agent, with its work in the owner's words. Each named agent gets that "
+                        "work and is pinned to it; anything else is routed by capability. A name "
+                        "several agents share is refused with their ids: ask the owner which one."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": {"type": "string", "description": "The agent's name, slug or id"},
+                            "does": {"type": "string", "description": "Its work, in the owner's words"},
+                        },
+                        "required": ["agent", "does"],
+                    },
+                },
             },
             "required": ["mission_id"],
         },

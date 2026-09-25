@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, validator
 from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
@@ -63,7 +63,7 @@ from core.models.orchestration_enums import (
 from modules.coordination.planner import PlanValidationError
 
 from services.chat_messenger import strip_caller_narration_origin
-from services.coordinator_service import get_coordinator_service
+from services.coordinator_service import StaffingError, get_coordinator_service
 from services.orchestration_state import (
     ConflictError,
     InvalidTransitionError,
@@ -79,6 +79,24 @@ router = APIRouter(prefix="/api/missions", tags=["missions"])
 # ---------------------------------------------------------------------------
 
 
+class StaffingEntry(BaseModel):
+    """F142: one agent the owner named, and its work in the owner's words."""
+
+    agent: str = Field(..., min_length=1, max_length=200, description="The agent's name, slug or id")
+    does: str = Field(..., min_length=1, max_length=2000, description="Its work, in the owner's words")
+
+    @field_validator("agent", mode="before")
+    @classmethod
+    def _an_id_is_a_name_too(cls, value: Any) -> Any:
+        """An agent's id may come as a JSON number, as the field says."""
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+
+def _staffing(entries: Optional[List[StaffingEntry]]) -> Optional[List[Dict[str, str]]]:
+    """The staffing as the coordinator resolves it; [] (clear it) stays []."""
+    return None if entries is None else [entry.model_dump() for entry in entries]
+
+
 class MissionCreateRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=10000, description="Natural-language goal")
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
@@ -90,6 +108,14 @@ class MissionCreateRequest(BaseModel):
     plan_only: bool = Field(
         False,
         description="PRD-163 S2: plan only — produce the plan and await approval, never auto-execute",
+    )
+    staffing: Optional[List[StaffingEntry]] = Field(
+        None,
+        max_length=20,
+        description=(
+            "F142: when the owner names who does what — [{agent: name, slug or id, "
+            "does: the work in the owner's words}]. Each named agent is pinned to its work."
+        ),
     )
 
 
@@ -483,10 +509,14 @@ async def create_mission(
             goal=body.goal,
             created_by=ctx.user.id or "unknown",
             config=mission_config or None,
+            staffing=_staffing(body.staffing),
         )
         db.commit()
         return _run_to_response(run)
 
+    except StaffingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
     except PlanValidationError as exc:
         db.rollback()
         raise HTTPException(
@@ -1450,6 +1480,14 @@ class MissionReplanRequest(BaseModel):
         max_length=5000,
         description="Optional user guidance for the replanner",
     )
+    staffing: Optional[List[StaffingEntry]] = Field(
+        None,
+        max_length=20,
+        description=(
+            "F142: when the owner names who does what — [{agent: name, slug or id, "
+            "does: the work in the owner's words}]. Each named agent is pinned to its work."
+        ),
+    )
 
 
 @router.post("/{mission_id}/replan", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -1486,12 +1524,16 @@ async def replan_mission(
             run_id=run.id,
             actor_id=ctx.user.id or "unknown",
             notes=body.notes,
+            staffing=_staffing(body.staffing),
         )
         db.commit()
         return _run_to_response(run)
 
     except HTTPException:
         raise
+    except StaffingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
     except PlanValidationError as exc:
         db.rollback()
         raise HTTPException(

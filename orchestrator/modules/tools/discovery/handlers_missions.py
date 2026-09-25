@@ -137,6 +137,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     goal = params.get("goal")
     if not goal:
         return {"success": False, "error": "goal is required"}
+    from services.coordinator_service import StaffingError
 
     created_by = _actor(params)
 
@@ -191,6 +192,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             goal=goal,
             created_by=created_by,
             config=config,
+            staffing=params.get("staffing"),
         )
 
         # PRD-204 S9 (Q1): Auto-launched missions get a run_and_report watch
@@ -235,6 +237,9 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "message": _create_reply_message(run, len(tasks)) + held_note,
         }
 
+    except StaffingError as e:
+        # F142 (a): a name no agent has, or several share, is the owner's to settle.
+        return {"success": False, "error": str(e)}
     except Exception as e:
         logger.error("[Missions] create_mission failed: %s", e, exc_info=True)
         return {"success": False, "error": f"Failed to create mission: {str(e)[:300]}"}
@@ -537,7 +542,7 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     actor_id = _actor(params)
     try:
         updated = await CoordinatorService().replan_mission(
-            db, run.id, actor_id, notes=params.get("notes"),
+            db, run.id, actor_id, notes=params.get("notes"), staffing=params.get("staffing"),
         )
         return _ok(updated, "replanned → running")
     except ValueError as e:
