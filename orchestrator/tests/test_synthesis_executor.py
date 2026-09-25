@@ -358,5 +358,5 @@ class TestPrepareTaskSynthesisWiring:
 
             await service._prepare_task(db, run, task, agent_id=1)
 
-        # Verify standard build_task_prompt was called
-        mock_dispatcher.build_task_prompt.assert_called_once_with(task)
+        # Verify standard build_task_prompt was called, with the mission's goal (F142 d1)
+        mock_dispatcher.build_task_prompt.assert_called_once_with(task, goal=run.goal)

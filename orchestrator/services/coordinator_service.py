@@ -2247,7 +2247,7 @@ class CoordinatorService:
                     task.verification_criteria,
                 )
         else:
-            prompt = MissionDispatcher.build_task_prompt(task)
+            prompt = MissionDispatcher.build_task_prompt(task, goal=run.goal)
 
         # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
         # resolved on the serial DB path. Threaded into execute_with_prompt →

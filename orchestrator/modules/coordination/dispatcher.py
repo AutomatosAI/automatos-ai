@@ -55,6 +55,9 @@ logger = logging.getLogger(__name__)
 # for visibility. They run on the owner's subscription and are never spend.
 SESSION_TOKENS_KEY = "session_tokens"
 
+# F142 (d1): how much of the owner's goal each task's prompt carries.
+MISSION_GOAL_PROMPT_CHARS = 2000
+
 
 def session_tokens(run: Any) -> int:
     """The run's tokens that ran in Claude Code sessions (never spend)."""
@@ -985,12 +988,16 @@ class MissionDispatcher:
     @staticmethod
     def build_task_prompt(
         task: OrchestrationTask,
+        goal: Optional[str] = None,
     ) -> str:
         """
         Build the user prompt for execute_with_prompt() from task data.
 
         Includes task title, description, and input context (the PRD-164 S4
-        dispatch digest, retry feedback, field instructions).
+        dispatch digest, retry feedback, field instructions). F142 (d1): and
+        the mission's goal, in the owner's words (capped), so the agent keeps
+        to the names, limits and figures it gives: the planner's task text
+        alone turned "20-minute visits" into two hours.
 
         Upstream dependency outputs are NOT stuffed here (Q22): they arrive
         as the token-budgeted ``field_digest`` block that _prepare_task pins
@@ -1082,6 +1089,16 @@ class MissionDispatcher:
 
         # PRD-127: Attachments are now handled via attachment_ids → build_context()
         # Not injected directly into prompt anymore.
+
+        goal = (goal or "").strip()
+        if goal:
+            if len(goal) > MISSION_GOAL_PROMPT_CHARS:
+                goal = goal[:MISSION_GOAL_PROMPT_CHARS].rstrip() + " …"
+            parts.append(
+                "\n## The mission's goal\n"
+                "This task is part of a mission. The owner's goal, in their words: keep to "
+                "any names, limits and figures it gives.\n\n" + goal
+            )
 
         # Inject required output format from verification_criteria
         vc = task.verification_criteria if hasattr(task, 'verification_criteria') else None
