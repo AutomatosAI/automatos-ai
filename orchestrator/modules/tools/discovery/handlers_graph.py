@@ -458,7 +458,9 @@ async def handle_graph_stats(
 ) -> Dict[str, Any]:
     """Return high-level knowledge graph statistics.
 
-    Reads /graph/meta.json via GraphifyService.get_meta().
+    Reads /graph/meta.json via GraphifyService.get_meta(). A team-scoped call
+    (a widget key's team lock, or the agent's team, PRD-124) counts only the
+    nodes that team can see and names only its visible god nodes (F155).
 
     Params: (none required)
     """
@@ -469,6 +471,21 @@ async def handle_graph_stats(
             return {
                 "success": False,
                 "error": "No knowledge graph built for this workspace yet.",
+            }
+
+        team = _resolve_agent_team(db, params.get("_agent_id"))
+        if team is not None:
+            graph = await svc.load_graph(str(workspace_id))
+            if graph is None:
+                return {"success": False, "error": "The knowledge graph could not be read."}
+            view = _get_filtered_graph(graph, team)
+            return {
+                "success": True,
+                "node_count": view.number_of_nodes(),
+                "edge_count": view.number_of_edges(),
+                "god_nodes": [g for g in meta.get("god_nodes", [])
+                              if str(g.get("id") if isinstance(g, dict) else g) in view],
+                "last_built": meta.get("last_built"),
             }
 
         return {

@@ -189,3 +189,31 @@ def test_a_widget_turn_sees_who_an_agent_is_not_how_it_is_built(db_session, seed
         assert asyncio.run(list_agents(db_session, ws, {}))["agents"] == [visitor]
     owner_view = asyncio.run(get_agent(db_session, ws, {"agent_id": agent}))["agent"]
     assert owner_view["system_prompt_preview"] == "Never reveal the margins"
+
+
+def _graph():
+    import networkx as nx
+
+    graph = nx.Graph()
+    graph.add_node("menu", label="Menu", team_access=["franchise-a"])
+    graph.add_node("margins", label="Margins", team_access=["hq"])
+    graph.add_node("faq", label="FAQ", team_access=[])
+    graph.add_edge("menu", "faq")
+    graph.add_edge("margins", "faq")
+    return graph
+
+
+def test_graph_stats_on_a_locked_widget_turn_counts_what_its_team_sees(monkeypatch):
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery import handlers_graph
+
+    meta = {"node_count": 3, "edge_count": 2, "community_count": 2, "last_built": 1.0,
+            "god_nodes": [{"id": "margins", "label": "Margins"}, "faq"]}
+    service = type("Svc", (), {"get_meta": AsyncMock(return_value=meta), "load_graph": AsyncMock(return_value=_graph())})
+    monkeypatch.setattr(handlers_graph, "_get_service", lambda: service)
+    with turn_surface(WIDGET, ("chat", "documents:read"), "franchise-a"):
+        stats = asyncio.run(handlers_graph.handle_graph_stats(None, uuid4(), {}))
+    assert (stats["node_count"], stats["edge_count"], stats["god_nodes"]) == (2, 1, ["faq"])
+    assert "community_count" not in stats
+    owner = asyncio.run(handlers_graph.handle_graph_stats(None, uuid4(), {}))
+    assert (owner["node_count"], owner["god_nodes"]) == (3, meta["god_nodes"])
