@@ -380,6 +380,13 @@ async def widget_chat(
             effective_agent_id,
             "key_lock" if auth.default_agent_id else "body",
         )
+        if not auth.default_agent_id:
+            # F155 (a), log-only: which agents each key's visitors name, before
+            # a per-key agent allow-list is decided.
+            logger.info(
+                "%s AGENT_CENSUS: key=%s named=%s resolved=%s",
+                log_extra, auth.api_key_id, _short(str(body.agent_id), 40), effective_agent_id,
+            )
     else:
         # Fallback to workspace Auto agent (Phase 2 will replace the `or 1`)
         from api.chat import get_default_agent_id

@@ -16,6 +16,8 @@ edit its plan). A mission it starts is stamped widget-born, and its approval is
 decided as the widget's even when it is planned later (async_planning).
 (c) The widget records the key that starts a conversation; a key reads and
 resumes only the conversations it started.
+(a), log-only: a chat on a key without an agent lock logs the agent it names,
+per key, before a per-key agent allow-list is decided.
 """
 from __future__ import annotations
 
@@ -455,11 +457,11 @@ def _history(site, conversation_id):
     return asyncio.run(widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db))
 
 
-def _send(site, conversation_id=None):
+def _send(site, conversation_id=None, agent_id=None):
     from api.widgets.chat import WidgetChatRequest, widget_chat
 
-    return asyncio.run(widget_chat(body=WidgetChatRequest(message="hi", conversation_id=conversation_id),
-                                   request=NS(headers={}), auth=site.key, db=site.db))
+    body = WidgetChatRequest(message="hi", conversation_id=conversation_id, agent_id=agent_id)
+    return asyncio.run(widget_chat(body=body, request=NS(headers={}), auth=site.key, db=site.db))
 
 
 def test_a_key_reads_only_the_conversations_it_started(site):
@@ -483,3 +485,15 @@ def test_a_conversation_the_widget_starts_records_its_key(site):
                                    "AND widget_key_id = CAST(:key AS uuid)"),
                               {"ws": str(site.ws), "key": str(site.key_id)}).scalar()
     assert started == 2
+
+
+def test_the_agent_a_keys_visitors_name_is_counted(site, caplog):
+    import logging
+
+    agent = _barista(site.db, site.ws)
+    with caplog.at_level(logging.INFO, logger="api.widgets.chat"):
+        _send(site, agent_id=str(agent))
+        _send(site)
+    census = [record.getMessage() for record in caplog.records if "AGENT_CENSUS" in record.getMessage()]
+    assert len(census) == 1
+    assert f"key={site.key_id} named={agent} resolved={agent}" in census[0]
