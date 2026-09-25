@@ -988,6 +988,12 @@ async def _dispatch_workflow(
                     input_data={"content": envelope.content, **envelope.metadata},
                 )
                 return
+            # F149: another workspace's playbook is refused here, never handed to
+            # the standard dispatch below.
+            if db.query(WorkflowRecipe.id).filter(WorkflowRecipe.id == workflow_id).first():
+                logger.warning("[webhook] Playbook %s is not in workspace %s — not run",
+                               workflow_id, envelope.workspace_id)
+                return
 
         # Standard workflow dispatch (no matching recipe)
         from api.workflows import execute_workflow_with_progress
@@ -1030,6 +1036,12 @@ async def subscribe_to_trigger(
     """
     Subscribe to a Composio trigger.
     """
+    # F149: a subscription routes only to this workspace's agents and playbooks.
+    from core.security.workspace_scope import routing_target_error
+
+    refused = routing_target_error(db, ctx.workspace_id, request.agent_id, request.workflow_id)
+    if refused:
+        raise HTTPException(status_code=400, detail=refused.replace("target_", ""))
     client = get_composio_client()
     entity_manager = EntityManager(db)
     

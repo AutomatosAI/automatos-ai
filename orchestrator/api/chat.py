@@ -134,6 +134,16 @@ def get_user_id(db: Session, ctx=None) -> int:
         raise HTTPException(status_code=500, detail="No users found")
     return result[0]
 
+def _explicitly_chosen_agent(db: Session, workspace_id, agent_id: int) -> int:
+    """F149: the agent a user picks is one of this workspace's, or a platform
+    system agent (as the agent switch allows) — never another workspace's."""
+    from core.security.workspace_scope import agent_in_workspace
+
+    if not agent_in_workspace(db, agent_id, workspace_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent_id
+
+
 def get_default_agent_id(db: Session, workspace_id) -> int:
     """Return the workspace's Auto agent (per-workspace system agent).
 
@@ -387,7 +397,7 @@ async def stream_chat(
     _session_agent = False
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
-        effective_agent_id = request.agentId
+        effective_agent_id = _explicitly_chosen_agent(db, ctx.workspace_id, request.agentId)
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
         # PRD-239: a session agent (runtime: cli) never runs in the LLM runtime —
         # it talks in the Runtime Canvas terminal (S7 v2).

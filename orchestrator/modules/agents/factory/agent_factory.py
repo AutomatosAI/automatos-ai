@@ -805,6 +805,17 @@ class AgentFactory:
         """
         from services.trial_ledger import TrialExhaustedError
 
+        # F149 (log-only until the logs show no caller hits it): an agent run
+        # for a workspace is that workspace's own or a platform system agent.
+        if workspace_id is not None:
+            from core.security.workspace_scope import agent_in_workspace
+
+            if not agent_in_workspace(self.db_session, agent_id, workspace_id):
+                self.logger.warning(
+                    "[F149] agent %s activated for workspace %s it does not belong to",
+                    agent_id, workspace_id, stack_info=True,
+                )
+
         try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
