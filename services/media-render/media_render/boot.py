@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Mapping, Sequence
 
 from .config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, TOKEN_ENV, Settings
+from .music import MusicLibraryError, load_library
 
 BOOT_FAILURE_EXIT_CODE = 2
 
@@ -56,11 +57,21 @@ def token_problems(settings: Settings) -> List[str]:
     return []
 
 
+def music_library_problems(settings: Settings) -> List[str]:
+    """A broken music manifest stops the container; an absent one is an empty library."""
+    try:
+        load_library(settings.music_dir)
+    except MusicLibraryError as exc:
+        return [f"the music library at {settings.music_dir} cannot be used: {exc}"]
+    return []
+
+
 def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
     return [
         *espeak_data_path_problems(settings.espeak_data_path),
         *hyperframes_env_problems(env),
         *token_problems(settings),
+        *music_library_problems(settings),
     ]
 
 

@@ -4,7 +4,9 @@ The GPL boundary: kokoro-onnx phonemizes through phonemizer and espeak-ng, both
 GPL-3.0. They are imported here, inside the media-render image, and nowhere in
 the orchestrator (PRD-251 D3 and Traps).
 
-One WAV per script line, so every line can be placed exactly in the mix.
+One WAV per script line, so every line can be placed exactly in the mix, with
+the line's voiced segments (timing.py) so on-screen text can land on its words.
+Callers serialise synthesis through tts.Speaker: one line is spoken at a time.
 """
 
 from __future__ import annotations
@@ -12,9 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from .config import Settings
+from .timing import voiced_segments
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class SpokenLine:
     path: Path
     seconds: float
     sample_rate: int
+    segments: Tuple[Tuple[float, float], ...] = ()
 
 
 @lru_cache(maxsize=1)
@@ -45,7 +49,7 @@ def synthesize_line(
     speed: Optional[float] = None,
     lang: Optional[str] = None,
 ) -> SpokenLine:
-    """Speak one script line into ``output`` (a WAV) and report its length."""
+    """Speak one script line into ``output`` (a WAV) and report its length and segments."""
     import soundfile
 
     line = text.strip()
@@ -60,4 +64,9 @@ def synthesize_line(
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     soundfile.write(str(output), samples, sample_rate)
-    return SpokenLine(path=output, seconds=round(len(samples) / sample_rate, 3), sample_rate=sample_rate)
+    return SpokenLine(
+        path=output,
+        seconds=round(len(samples) / sample_rate, 3),
+        sample_rate=sample_rate,
+        segments=tuple(voiced_segments(samples, sample_rate)),
+    )

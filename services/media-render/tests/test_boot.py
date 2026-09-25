@@ -88,6 +88,18 @@ def test_boot_problems_collects_every_failure(tmp_path):
         raise AssertionError("assert_boot_environment did not raise")
 
 
+def test_a_broken_music_manifest_stops_the_container(tmp_path):
+    music = tmp_path / "music"
+    music.mkdir()
+    settings = load_settings({"MEDIA_RENDER_MUSIC_DIR": str(music)})
+    assert boot.music_library_problems(settings) == [], "no manifest is an empty library"
+    (music / "manifest.json").write_text('{"tracks": [{"id": "gone", "file": "gone.mp3"}]}')
+    problems = boot.music_library_problems(settings)
+    assert len(problems) == 1 and "gone.mp3" in problems[0]
+    (music / "manifest.json").write_text('{"tracks": [{"id": "up", "file": "../outside.mp3"}]}')
+    assert "outside the library" in boot.music_library_problems(settings)[0]
+
+
 def test_the_container_command_exits_2_on_a_long_espeak_path():
     env = {**os.environ, "MEDIA_RENDER_ESPEAK_DATA_PATH": "/opt/" + "e" * 160, "LOG_RELAY_ENABLED": "false"}
     proc = subprocess.run(

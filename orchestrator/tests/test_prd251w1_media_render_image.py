@@ -109,3 +109,15 @@ def test_the_media_render_job_is_a_top_level_sibling_with_no_needs():
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "docker build -t \"$IMAGE\" services/media-render/" in commands
     assert "assert_output.py" in commands and "--fps 30" in commands and "--audio-codec aac" in commands
+
+
+def test_the_media_render_job_renders_the_fixture_through_the_api():
+    """US-102: the fixture bundle goes through POST /render behind the internal
+    token, and the job log carries ebur128's loudness, asserted at -14 +/- 1 LUFS."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
+    commands = "\n".join(step.get("run", "") for step in workflow["jobs"]["media-render"]["steps"])
+    assert '"$IMAGE" fixture-bundle' in commands
+    assert "X-Internal-Token: $TOKEN" in commands and "http://127.0.0.1:8090/render" in commands
+    assert '[ "$code" != 401 ]' in commands, "the job proves the API refuses a request without the token"
+    assert "ebur128=peak=true" in commands and "--lufs -14 --lufs-tolerance 1" in commands
+    assert "--shm-size=1g" in commands

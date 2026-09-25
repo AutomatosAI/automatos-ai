@@ -9,8 +9,8 @@ voice lines are spoken here with Kokoro, and the mix is made here with ffmpeg.
 
 | Part | Where it is built | What it proves |
 |---|---|---|
-| Container and CI job (S1.1a, US-101) | this directory, `media-render` in `.github/workflows/test.yml` | the image builds, boots, speaks and renders the fixture |
-| API (S1.1b, US-102) | `media_render/server.py` | `/render`, `/tts`, the mix, concurrency |
+| Container and CI job (S1.1a, US-101) | this directory, `media-render` in `.github/workflows/test.yml` | the image builds, boots, speaks and renders |
+| API (S1.1b, US-102) | `media_render/server.py`, `bundle.py`, `pipeline.py`, `audio.py`, `lanes.py` | `/render`, `/tts`, the check gate, the mix, concurrency |
 | Orchestrator client (S1.1c, US-104) | `orchestrator/core/media_render_client.py` | render lifecycle, quotas, compose, Railway |
 
 ## What the image carries
@@ -33,19 +33,58 @@ These Hyperframes settings are switched off in the image. Boot refuses to start 
 
 **The GPL boundary.** `phonemizer` and espeak-ng are GPL-3.0. Kokoro needs them, and they live only in this image. The orchestrator never imports them, and `orchestrator/tests/test_prd251w1_media_render_image.py` keeps it that way.
 
+## The API
+
+Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
+
+| Route | Answers |
+|---|---|
+| `GET /health` | the versions, and how many renders are running and queued |
+| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress |
+| `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
+| `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
+| `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
+
+**The bundle** is described at the top of `media_render/bundle.py`:
+- the template's HTML and CSS, and the variables that fill its `{{ name }}` placeholders (HTML-escaped text: every word on screen is template text);
+- brand tokens (`--brand-<name>` CSS variables) and font files;
+- inline files (logo, fonts, small charts) as `data:` URIs;
+- media as presigned GET URLs on our storage;
+- an audio plan: Kokoro or file voice lines, a music-library track and window, and SFX cues.
+
+**What a bundle is refused for (400, before anything is fetched):**
+- a media URL that is not under `MEDIA_RENDER_MEDIA_URL_PREFIXES`, or any URL in the markup (a composition reads only files staged beside it);
+- a file it does not provide;
+- an `<iframe>`, `<object>` or `<form>`;
+- a placeholder with no variable;
+- a text variable inside a `<script>` or an `on*` event handler (only numbers and true/false go there).
+
+**The mix** is the reference's ffmpeg graph (`docs/PRDS/prd251-reference/mix-reference.py`):
+- voice placed with `adelay`;
+- music ducked by `sidechaincompress` (threshold 0.015, ratio 10, attack 10, release 420) and held at ×0.6;
+- SFX;
+- `loudnorm` I=-14, TP=-1.5, LRA=11.
+
+loudnorm runs in two passes, and the mix is padded past 3 s for it; `audio.py` says why.
+
+**Concurrency** (owner, 2026-09-23): at most two renders at once overall and one per workspace. Further jobs queue first come, first served. A queued job never waits behind another workspace's queued job.
+
+Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS`.
+
 ## Boot assertions
 
 `python -m media_render` (the entrypoint) checks the environment before serving. If any check fails, it exits with code 2. It refuses to start when:
 - the espeak-ng data path is 160 characters or longer, measured after symlinks are resolved. espeak-ng truncates longer paths. The image copies the data to `/opt/espeak`;
 - any of the four Hyperframes switches is not `1`;
-- `ENVIRONMENT=production` and `SOCIALS_RENDER_TOKEN` is unset. Outside production, a missing token leaves every route open, and a warning is logged.
+- `ENVIRONMENT=production` and `SOCIALS_RENDER_TOKEN` is unset. Outside production, a missing token leaves every route open, and a warning is logged;
+- the music library's manifest names a track that is missing or outside the library.
 
 ## Commands
 
 ```
-python -m media_render serve              # the HTTP service (default); /health is open
-python -m media_render boot-check         # the boot assertions only
-python -m media_render fixture --out DIR  # render fixtures/fixture: DIR/fixture.mp4 + fixture.json
+python -m media_render serve            # the HTTP service (default); /health is open
+python -m media_render boot-check       # the boot assertions only
+python -m media_render fixture-bundle   # print fixtures/fixture as a POST /render body
 ```
 
 ## Settings
@@ -56,19 +95,29 @@ All of them are read in `media_render/config.py`.
 |---|---|
 | `MEDIA_RENDER_PORT` / `MEDIA_RENDER_BIND_HOST` | `8090` / `0.0.0.0` |
 | `SOCIALS_RENDER_TOKEN` | unset: the `X-Internal-Token` value; the orchestrator uses the same name |
+| `MEDIA_RENDER_MEDIA_URL_PREFIXES` | unset: no media URL is accepted. Our storage, e.g. `https://<bucket>.s3.<region>.amazonaws.com` or `http://minio:9000/<bucket>/` |
+| `MEDIA_RENDER_MAX_CONCURRENT_RENDERS` / `_MAX_RENDERS_PER_WORKSPACE` | `2` / `1` |
+| `MEDIA_RENDER_MAX_CONCURRENT_CHECKS` / `_MAX_CHECKS_PER_WORKSPACE` | `1` / `1` |
+| `MEDIA_RENDER_MAX_ACTIVE_JOBS` / `_BUSY_RETRY_AFTER_SECONDS` | `20` / `30` (the 503's `Retry-After`) |
+| `MEDIA_RENDER_JOB_TTL_SECONDS` / `_SWEEP_INTERVAL_SECONDS` | `3600` / `60` |
+| `MEDIA_RENDER_RENDER_TIMEOUT_SECONDS` / `_CHECK_` / `_MIX_` / `_PROBE_` / `_FETCH_` | `900` / `300` / `120` / `60` / `120` |
+| `MEDIA_RENDER_MAX_BUNDLE_BYTES` / `_MAX_ASSET_BYTES` / `_MAX_MEDIA_BYTES` | 32 MiB / 8 MiB / 256 MiB |
+| `MEDIA_RENDER_MAX_FILES` / `_MAX_DURATION_SECONDS` | `32` / `180` |
+| `MEDIA_RENDER_MAX_VARIABLES` / `_MAX_VARIABLE_CHARS` / `_MAX_BRAND_TOKENS` | `200` / `2000` / `64` |
+| `MEDIA_RENDER_TTS_MAX_LINES` / `_TTS_MAX_CHARS` | `40` / `500` |
+| `MEDIA_RENDER_WORK_DIR` / `MEDIA_RENDER_MUSIC_DIR` | `/tmp/media-render` / `/opt/media-render/music` |
 | `MEDIA_RENDER_ESPEAK_DATA_PATH` | `/opt/espeak` |
 | `MEDIA_RENDER_KOKORO_MODEL` / `_VOICES` | `/opt/kokoro/kokoro-v1.0.onnx` / `voices-v1.0.bin` |
 | `MEDIA_RENDER_KOKORO_VOICE` / `_SPEED` / `_LANG` | `af_heart` / `0.95` / `en-us` |
 | `MEDIA_RENDER_QUALITY` / `MEDIA_RENDER_FPS` / `MEDIA_RENDER_WORKERS` | `delivery` / `30` / `auto` |
-| `MEDIA_RENDER_RENDER_TIMEOUT_SECONDS` / `_CHECK_` / `_MIX_` | `900` / `300` / `120` |
 
 ## Tests
 
 Nothing runs on a developer machine. The `media-render` CI job:
 1. builds the image;
-2. runs `tests/` inside it;
+2. runs `tests/` inside it: the bundle rules, the queue, and the real `hyperframes check`, ffmpeg mix and Kokoro;
 3. proves the boot assertion and `/health`;
-4. renders the fixture, timed;
-5. asserts the MP4 with `ffprobe` (`ci/assert_output.py`).
+4. posts the fixture bundle to `POST /render` with the token, timed;
+5. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`).
 
-The fixture commits no media. Its HTML and its audio plan are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.
+The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.

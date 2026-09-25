@@ -593,12 +593,14 @@ jobs:
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
           docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
 
-  # PRD-251 Wave 1, S1.1a (US-101): the media-render image (D3). It builds the
-  # service exactly as Railway will (no build args, the default last stage), runs
-  # the service's own suite INSIDE the image, proves the boot assertion and
-  # /health, then renders the 3-second fixture with a Kokoro line, timed, and
-  # asserts the MP4 with ffprobe. The runner only builds, runs and asserts. A
-  # required job for the PRD-251 Wave 1 gate (scripts/ralph/acceptance-prd251w1.sh).
+  # PRD-251 Wave 1, S1.1a/b (US-101, US-102): the media-render image (D3). It
+  # builds the service exactly as Railway will (no build args, the default last
+  # stage), runs the service's own suite INSIDE the image (the real check, mix
+  # and Kokoro among it), proves the boot assertion and /health, then renders the
+  # 3-second fixture bundle through the API with the internal token, timed, and
+  # asserts the MP4 with ffprobe and its loudness with ebur128. The runner only
+  # builds, runs and asserts. A required job for the PRD-251 Wave 1 gate
+  # (scripts/ralph/acceptance-prd251w1.sh).
   media-render:
     name: media-render — image builds and renders the fixture
     runs-on: ubuntu-latest
@@ -619,7 +621,7 @@ jobs:
       - name: The service's own suite, inside the image
         run: |
           docker build --target test -t "$TEST_IMAGE" services/media-render/
-          docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
+          docker run --rm --shm-size=1g -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
       - name: Boot assertion — a 160-character espeak data path stops the container
         run: |
           long="/opt/$(printf 'e%.0s' $(seq 1 160))"
@@ -645,23 +647,62 @@ jobs:
           docker logs media-render-health
           docker rm -f media-render-health > /dev/null
           if [ -z "$ok" ]; then echo "::error::/health never answered"; exit 1; fi
-      - name: Render the fixture (Kokoro line, then hyperframes render), timed
+      - name: The API renders the fixture bundle (POST /render, poll, fetch the MP4), timed
+        env:
+          TOKEN: ci-render-token
         run: |
-          mkdir -p "$RUNNER_TEMP/out" && chmod 777 "$RUNNER_TEMP/out"
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle > "$out/bundle.json"
+          docker run -d --name media-render-api --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8090:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-api; echo "::error::the API never answered /health"; exit 1; fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8090/render)
+          echo "POST /render without the token answered $code"
+          if [ "$code" != 401 ]; then echo "::error::the render API is open without its token"; exit 1; fi
           start=$(date +%s)
-          docker run --rm --shm-size=1g -e LOG_RELAY_ENABLED=false -v "$RUNNER_TEMP/out:/out" "$IMAGE" fixture --out /out
-          echo "fixture wall time (container start, model load, check, render): $(( $(date +%s) - start )) s"
-      - name: Assert the MP4 (ffprobe) and the Kokoro line
+          code=$(curl -sS -o "$out/accepted.json" -w '%{http_code}' --max-time 600 \
+            -H "X-Internal-Token: $TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @"$out/bundle.json" http://127.0.0.1:8090/render)
+          echo "POST /render answered $code after $(( $(date +%s) - start )) s (staged, spoken, mixed, checked)"
+          cat "$out/accepted.json"; echo
+          if [ "$code" != 202 ]; then docker logs media-render-api; echo "::error::POST /render answered $code"; exit 1; fi
+          id=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["id"])' "$out/accepted.json")
+          status=""
+          for i in $(seq 1 300); do
+            curl -sS -H "X-Internal-Token: $TOKEN" "http://127.0.0.1:8090/render/$id" > "$out/job.json"
+            status=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$out/job.json")
+            case "$status" in done|failed|rejected) break ;; esac
+            sleep 2
+          done
+          echo "render $id: $status, $(( $(date +%s) - start )) s from POST to finished"
+          if [ "$status" != done ]; then cat "$out/job.json"; docker logs media-render-api; exit 1; fi
+          curl -sS -f -H "X-Internal-Token: $TOKEN" -o "$out/fixture.mp4" \
+            "http://127.0.0.1:8090/render/$id/output/render.mp4"
+          ls -l "$out/fixture.mp4"
+          docker logs media-render-api 2>&1 | tail -n 40
+          docker rm -f media-render-api > /dev/null
+      - name: Assert the MP4 (ffprobe), the Kokoro line and the loudness (ebur128)
         run: |
-          docker run --rm -v "$RUNNER_TEMP/out:/out" --entrypoint ffprobe "$IMAGE" \
-            -v error -show_streams -show_format -of json /out/fixture.mp4 > "$RUNNER_TEMP/out/probe.json"
-          python3 services/media-render/ci/assert_output.py "$RUNNER_TEMP/out/probe.json" \
+          out="$RUNNER_TEMP/out"
+          docker run --rm -v "$out:/out" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/fixture.mp4 > "$out/probe.json"
+          docker run --rm -v "$out:/out" --entrypoint ffmpeg "$IMAGE" -hide_banner -nostats \
+            -i /out/fixture.mp4 -map 0:a:0 -af ebur128=peak=true -f null - 2> "$out/ebur128.log"
+          sed -n '/Summary:/,$p' "$out/ebur128.log"
+          python3 services/media-render/ci/assert_output.py "$out/probe.json" \
             --video-codec h264 --width 1080 --height 1920 --fps 30 \
             --audio-codec aac --duration 3.0 --tolerance 0.1 \
-            --report "$RUNNER_TEMP/out/fixture.json" --min-line-seconds 0.5
-      - name: hyperframes check on the fixture (recorded here; US-102 makes /render refuse on it)
+            --job "$out/job.json" --min-line-seconds 0.5 \
+            --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
+      - name: The render job's report (check, mix, timings)
         if: always()
-        run: cat "$RUNNER_TEMP/out/check.json" 2>/dev/null || echo "no check report"
+        run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
       - name: Keep the rendered fixture
         if: always()
         uses: actions/upload-artifact@v4

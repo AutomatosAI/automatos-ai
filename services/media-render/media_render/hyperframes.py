@@ -2,11 +2,14 @@
 
 Every run takes the composition's own scratch directory as its working
 directory: the CLI loads a ``.env`` from its cwd, so it must never start in a
-directory the service does not control.
+directory the service does not control. Each run is its own process group, so
+a timeout takes the CLI's Chrome processes down with it.
 """
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import time
 from dataclasses import dataclass
@@ -14,6 +17,9 @@ from pathlib import Path
 from typing import List, Sequence
 
 from .config import Settings
+
+# The last part of a failed run's output kept for the job report.
+LOG_TAIL_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -28,6 +34,9 @@ class CliRun:
     @property
     def ok(self) -> bool:
         return self.returncode == 0 and not self.timed_out
+
+    def tail(self) -> str:
+        return (self.stdout + "\n" + self.stderr).strip()[-LOG_TAIL_CHARS:]
 
 
 def render_argv(settings: Settings, project_dir: Path, output: Path) -> List[str]:
@@ -49,40 +58,40 @@ def render_argv(settings: Settings, project_dir: Path, output: Path) -> List[str
 
 
 def check_argv(settings: Settings, project_dir: Path) -> List[str]:
-    return [settings.hyperframes_bin, "check", str(project_dir), "--json"]
+    # Software capture here too: the contrast pass samples the same pixels the render will.
+    return [settings.hyperframes_bin, "check", str(project_dir), "--json", "--no-browser-gpu"]
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def run_cli(argv: Sequence[str], cwd: Path, timeout_seconds: int, *, capture: bool) -> CliRun:
     """Run one CLI command. ``capture=False`` streams its output to ours."""
     started = time.monotonic()
+    pipe = subprocess.PIPE if capture else None
+    proc = subprocess.Popen(
+        list(argv), cwd=str(cwd), stdout=pipe, stderr=pipe, text=True, errors="replace", start_new_session=True
+    )
+    timed_out = False
     try:
-        proc = subprocess.run(
-            list(argv),
-            cwd=str(cwd),
-            capture_output=capture,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return CliRun(
-            argv=tuple(argv),
-            returncode=-1,
-            seconds=round(time.monotonic() - started, 3),
-            stdout=_text(exc.stdout),
-            stderr=_text(exc.stderr),
-            timed_out=True,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_group(proc)
+        stdout, stderr = proc.communicate()
+    except BaseException:
+        _kill_group(proc)
+        proc.wait()
+        raise
     return CliRun(
         argv=tuple(argv),
-        returncode=proc.returncode,
+        returncode=-1 if timed_out else proc.returncode,
         seconds=round(time.monotonic() - started, 3),
-        stdout=proc.stdout or "",
-        stderr=proc.stderr or "",
+        stdout=stdout or "",
+        stderr=stderr or "",
+        timed_out=timed_out,
     )
-
-
-def _text(value: object) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "replace")
-    return value if isinstance(value, str) else ""

@@ -1,7 +1,9 @@
-"""``python -m media_render [serve | boot-check | fixture --out DIR]``
+"""``python -m media_render [serve | boot-check | fixture-bundle]``
 
 The image's entrypoint. Every command boots through the assertions first
 (boot.py): a container that would render wrong exits with code 2 instead.
+``fixture-bundle`` prints the committed fixture as a POST /render body, which
+the media-render CI job renders through the API.
 """
 
 from __future__ import annotations
@@ -11,7 +13,6 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from typing import List, Optional
 
 from automatos_logging import setup_logging
@@ -27,8 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="run the HTTP service (the default)")
     commands.add_parser("boot-check", help="run the boot assertions and exit")
-    fixture = commands.add_parser("fixture", help="render the committed fixture composition")
-    fixture.add_argument("--out", required=True, type=Path, help="directory for the MP4 and its report")
+    commands.add_parser("fixture-bundle", help="print the committed fixture as a POST /render body")
     return parser
 
 
@@ -49,15 +49,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if command == "boot-check":
         print("media-render: boot checks passed")
         return 0
-    if command == "fixture":
-        from .fixture import FixtureError, render_fixture
+    if command == "fixture-bundle":
+        from .fixture import fixture_bundle
 
-        try:
-            report = render_fixture(args.out, settings)
-        except FixtureError as exc:
-            print(f"media-render: fixture render failed: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(report, indent=2))
+        print(json.dumps(fixture_bundle()))
         return 0
 
     from .server import serve

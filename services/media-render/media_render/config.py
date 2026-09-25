@@ -4,13 +4,16 @@ The service is its own image and never sees the orchestrator's ``config.py``.
 Every environment read in the service happens here, so call sites never read
 ``os.environ`` inline (the orchestrator's config discipline, and the worker's
 ``worker_config.py``). Defaults describe the image's own layout (Dockerfile).
+Every limit and every timeout the service applies is a setting below.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional, TypeVar
+from typing import Callable, Mapping, Optional, Tuple, TypeVar
+
+from .media_urls import UrlPrefix, parse_prefixes
 
 # The image switches these off (Dockerfile ENV) and boot refuses to start
 # without them: the CLI sends PostHog telemetry by default, installs skills
@@ -32,6 +35,8 @@ TOKEN_ENV = "SOCIALS_RENDER_TOKEN"
 
 RENDER_QUALITIES = frozenset({"draft", "looks", "standard", "high", "delivery"})
 RENDER_FPS = frozenset({24, 25, 30, 50, 60})
+
+MEBIBYTE = 1024 * 1024
 
 T = TypeVar("T")
 
@@ -57,12 +62,44 @@ class Settings:
     browser_path: str
     hyperframes_bin: str
     ffmpeg_bin: str
+    ffprobe_bin: str
     render_quality: str
     render_fps: int
     render_workers: str
     render_timeout_seconds: int
     check_timeout_seconds: int
     mix_timeout_seconds: int
+    probe_timeout_seconds: int
+    fetch_timeout_seconds: int
+    # Where jobs stage their compositions and keep their outputs until they expire.
+    work_dir: str
+    # The music library (US-112): manifest.json plus the tracks it names.
+    music_dir: str
+    # Presigned media URLs must fall under one of these (our storage only).
+    media_url_prefixes: Tuple[UrlPrefix, ...]
+    # Concurrency (owner, 2026-09-23): two renders at once overall, one per workspace.
+    max_concurrent_renders: int
+    max_renders_per_workspace: int
+    # Staging and `hyperframes check` run before the render queue, bounded here.
+    max_concurrent_checks: int
+    max_checks_per_workspace: int
+    # Jobs not yet finished (checking, queued or rendering); past this, 503.
+    max_active_jobs: int
+    # What a 503 tells the caller to wait before it submits again.
+    busy_retry_after_seconds: int
+    job_ttl_seconds: int
+    sweep_interval_seconds: int
+    max_bundle_bytes: int
+    max_asset_bytes: int
+    max_media_bytes: int
+    max_files: int
+    max_duration_seconds: int
+    max_variables: int
+    max_variable_chars: int
+    # Brand tokens, and brand fonts, per bundle.
+    max_brand_tokens: int
+    tts_max_lines: int
+    tts_max_chars: int
 
     @property
     def is_production(self) -> bool:
@@ -96,8 +133,14 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
     def text(name: str, default: str) -> str:
         return (source.get(name) or "").strip() or default
 
-    def positive_int(name: str, default: str) -> int:
-        return _parse(name, text(name, default), int, lambda v: v > 0, "a positive whole number")
+    def positive_int(name: str, default: int) -> int:
+        return _parse(name, text(name, str(default)), int, lambda v: v > 0, "a positive whole number")
+
+    def prefixes(name: str) -> Tuple[UrlPrefix, ...]:
+        try:
+            return parse_prefixes(source.get(name) or "")
+        except ValueError as exc:
+            raise ConfigError(f"{name}: {exc}") from None
 
     return Settings(
         environment=text("ENVIRONMENT", "development"),
@@ -123,6 +166,7 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         browser_path=text("HYPERFRAMES_BROWSER_PATH", "/opt/chrome/chrome-headless-shell"),
         hyperframes_bin=text("MEDIA_RENDER_HYPERFRAMES_BIN", "hyperframes"),
         ffmpeg_bin=text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
+        ffprobe_bin=text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
         render_quality=_parse(
             "MEDIA_RENDER_QUALITY",
             text("MEDIA_RENDER_QUALITY", "delivery"),
@@ -140,7 +184,30 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         render_workers=_parse(
             "MEDIA_RENDER_WORKERS", text("MEDIA_RENDER_WORKERS", "auto"), _workers, bool, "'auto' or a positive number"
         ),
-        render_timeout_seconds=positive_int("MEDIA_RENDER_RENDER_TIMEOUT_SECONDS", "900"),
-        check_timeout_seconds=positive_int("MEDIA_RENDER_CHECK_TIMEOUT_SECONDS", "300"),
-        mix_timeout_seconds=positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", "120"),
+        render_timeout_seconds=positive_int("MEDIA_RENDER_RENDER_TIMEOUT_SECONDS", 900),
+        check_timeout_seconds=positive_int("MEDIA_RENDER_CHECK_TIMEOUT_SECONDS", 300),
+        mix_timeout_seconds=positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", 120),
+        probe_timeout_seconds=positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
+        fetch_timeout_seconds=positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
+        work_dir=text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
+        music_dir=text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
+        media_url_prefixes=prefixes("MEDIA_RENDER_MEDIA_URL_PREFIXES"),
+        max_concurrent_renders=positive_int("MEDIA_RENDER_MAX_CONCURRENT_RENDERS", 2),
+        max_renders_per_workspace=positive_int("MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE", 1),
+        max_concurrent_checks=positive_int("MEDIA_RENDER_MAX_CONCURRENT_CHECKS", 1),
+        max_checks_per_workspace=positive_int("MEDIA_RENDER_MAX_CHECKS_PER_WORKSPACE", 1),
+        max_active_jobs=positive_int("MEDIA_RENDER_MAX_ACTIVE_JOBS", 20),
+        busy_retry_after_seconds=positive_int("MEDIA_RENDER_BUSY_RETRY_AFTER_SECONDS", 30),
+        job_ttl_seconds=positive_int("MEDIA_RENDER_JOB_TTL_SECONDS", 3600),
+        sweep_interval_seconds=positive_int("MEDIA_RENDER_SWEEP_INTERVAL_SECONDS", 60),
+        max_bundle_bytes=positive_int("MEDIA_RENDER_MAX_BUNDLE_BYTES", 32 * MEBIBYTE),
+        max_asset_bytes=positive_int("MEDIA_RENDER_MAX_ASSET_BYTES", 8 * MEBIBYTE),
+        max_media_bytes=positive_int("MEDIA_RENDER_MAX_MEDIA_BYTES", 256 * MEBIBYTE),
+        max_files=positive_int("MEDIA_RENDER_MAX_FILES", 32),
+        max_duration_seconds=positive_int("MEDIA_RENDER_MAX_DURATION_SECONDS", 180),
+        max_variables=positive_int("MEDIA_RENDER_MAX_VARIABLES", 200),
+        max_variable_chars=positive_int("MEDIA_RENDER_MAX_VARIABLE_CHARS", 2000),
+        max_brand_tokens=positive_int("MEDIA_RENDER_MAX_BRAND_TOKENS", 64),
+        tts_max_lines=positive_int("MEDIA_RENDER_TTS_MAX_LINES", 40),
+        tts_max_chars=positive_int("MEDIA_RENDER_TTS_MAX_CHARS", 500),
     )
