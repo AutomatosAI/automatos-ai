@@ -299,24 +299,29 @@ async def handle_graph_communities(
             )
             return {"success": False, "error": "Corrupt communities data."}
 
-        # PRD-124: filter community members by team visibility
+        # PRD-124: filter community members by team visibility. A graph a
+        # team-scoped call cannot read is an error, never the unfiltered list.
         if agent_team is not None:
             svc = _get_service()
             graph = await svc.load_graph(str(workspace_id))
-            if graph is not None:
-                from modules.knowledge.graph_service import node_is_visible
-                for c in communities:
-                    members = c.get("members", [])
-                    c["members"] = [
-                        m for m in members
-                        if node_is_visible(graph, m, agent_team)
-                    ]
-                    c["member_count"] = len(c["members"])
+            if graph is None:
+                return {"success": False, "error": "The knowledge graph could not be read."}
+            from modules.knowledge.graph_service import node_is_visible
+            for c in communities:
+                members = c.get("members", [])
+                c["members"] = [
+                    m for m in members
+                    if node_is_visible(graph, m, agent_team)
+                ]
+                c["member_count"] = len(c["members"])
 
-        # Filter to specific community if requested
+        # Filter to specific community if requested. F155: a community none of
+        # whose members the caller's team can see is not found (its title and
+        # summary describe what it cannot see).
         if community_id is not None:
             cid = int(community_id)
-            matched = [c for c in communities if c.get("community_id") == cid]
+            matched = [c for c in communities if c.get("community_id") == cid
+                       and (agent_team is None or c.get("members"))]
             if not matched:
                 return {
                     "success": False,

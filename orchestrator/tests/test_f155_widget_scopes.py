@@ -217,3 +217,33 @@ def test_graph_stats_on_a_locked_widget_turn_counts_what_its_team_sees(monkeypat
     assert "community_count" not in stats
     owner = asyncio.run(handlers_graph.handle_graph_stats(None, uuid4(), {}))
     assert (owner["node_count"], owner["god_nodes"]) == (3, meta["god_nodes"])
+
+
+def test_a_community_the_locked_team_cannot_see_is_not_found(monkeypatch):
+    import json
+
+    import core.graph_storage as graph_storage
+    from core.security.surface import WIDGET, turn_surface
+    from modules.tools.discovery import handlers_graph
+
+    communities = [{"community_id": 1, "members": ["margins"], "title": "HQ margins", "summary": "What HQ keeps"},
+                   {"community_id": 2, "members": ["menu", "faq"], "title": "Menu", "summary": "The menu"}]
+
+    class _Store:
+        def __init__(self, workspace_id):
+            pass
+
+        async def read_file(self, path):
+            return {"success": True, "content": json.dumps(communities)}
+
+    service = type("Svc", (), {"load_graph": AsyncMock(return_value=_graph())})
+    monkeypatch.setattr(graph_storage, "DbWorkspaceClient", _Store)
+    monkeypatch.setattr(handlers_graph, "_get_service", lambda: service)
+
+    def community(cid):
+        return asyncio.run(handlers_graph.handle_graph_communities(None, uuid4(), {"community_id": cid}))
+
+    with turn_surface(WIDGET, ("chat", "documents:read"), "franchise-a"):
+        assert community(1) == {"success": False, "error": "Community 1 not found."}
+        assert community(2)["community"]["members"] == ["menu", "faq"]
+    assert community(1)["community"]["title"] == "HQ margins"
