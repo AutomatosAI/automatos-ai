@@ -245,8 +245,29 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": f"Failed to create mission: {str(e)[:300]}"}
 
 
+_DONE_TASK_STATES = ("completed", "verified")
+
+
+def _mission_visitor_view(run: Any, task_count: int, tasks_done: Optional[int] = None) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a mission (missions:read): what it
+    is for and how far it has got. Never its config (the owner's staffing,
+    budget, origin), plan, task texts and outputs, errors, or who started it."""
+    view = {
+        "id": run.id,
+        "goal": (run.goal or "")[:150],
+        "state": run.state,
+        "task_count": task_count,
+        "created_at": str(run.created_at) if run.created_at else None,
+        "completed_at": str(run.completed_at) if run.completed_at else None,
+    }
+    if tasks_done is not None:
+        view["tasks_done"] = tasks_done
+    return view
+
+
 async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List missions in the workspace."""
+    from core.security.surface import widget_turn
     from core.models.orchestration import OrchestrationRun
 
     query = db.query(OrchestrationRun).filter(
@@ -259,6 +280,10 @@ async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     limit = min(int(params.get("limit", 10)), 50)
     runs = query.order_by(OrchestrationRun.created_at.desc()).limit(limit).all()
+
+    if widget_turn():
+        missions = [_mission_visitor_view(r, len((r.plan or {}).get("tasks", []))) for r in runs]
+        return {"success": True, "missions": missions, "total": len(missions)}
 
     result = []
     for r in runs:
@@ -302,6 +327,12 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     tasks = db.query(OrchestrationTask).filter(
         OrchestrationTask.run_id == run.id,
     ).order_by(OrchestrationTask.sequence_number).all()
+
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        done = sum(1 for t in tasks if t.state in _DONE_TASK_STATES)
+        return {"success": True, "mission": _mission_visitor_view(run, len(tasks), done)}
 
     task_details = []
     for t in tasks:
