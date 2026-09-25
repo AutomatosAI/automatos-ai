@@ -363,7 +363,7 @@ export interface FleetSession {
   last_event_at?: string
   exit_reason?: string
   cwd?: string
-  recent_tools?: Array<{ at?: string; tool?: string; subject?: string }>
+  recent_tools?: Array<{ at?: string; tool?: string; subject?: string; decision?: string; reason?: string; answer?: string }>
 }
 
 export interface FleetHost {

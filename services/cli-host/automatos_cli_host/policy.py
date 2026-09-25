@@ -229,6 +229,16 @@ _ANSI_C_RE = re.compile(r"""(?:^|[\s=(|;&])\$['"]""")
 MAX_NESTING = 8              # ``$(…)`` inside ``$(…)`` …
 _SEVERITY = {"allow": 0, "ask": 1, "deny": 2}
 
+# F167: why a call was ALLOWED, so the ticket says what really happened. A
+# ticket said a command "needed your approval, and it went through" when it had
+# run under ``--unlisted-bash allow`` with nobody asked.
+ALLOWED_BASH = "within this ticket's Bash allowlist"
+ALLOWED_UNLISTED_BASH = ("{command!r} is not on this ticket's Bash allowlist; this host runs such commands "
+                         "without asking (--unlisted-bash allow)")
+ALLOWED_FILES = "inside the session's folders"
+ALLOWED_SESSION_TOOL = "an Automatos tool this ticket may call"
+ALLOWED_NO_APPROVAL = "a tool that needs no approval"
+
 Bindings = Mapping[str, Tuple[str, ...]]
 
 
@@ -264,10 +274,12 @@ class Decision:
 
 
 def _worst(decisions: Iterable[Decision]) -> Decision:
-    """deny over ask over allow; the first reason of the worst kind."""
+    """deny over ask over allow; the first reason of the worst kind (an allow's
+    too: why a call ran is on the ticket, F167)."""
     worst = Decision("allow")
     for decision in decisions:
-        if _SEVERITY[decision.behavior] > _SEVERITY[worst.behavior]:
+        if _SEVERITY[decision.behavior] > _SEVERITY[worst.behavior] or (
+                decision.behavior == worst.behavior and decision.reason and not worst.reason):
             worst = decision
     return worst
 
@@ -1008,8 +1020,8 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
             # test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines both
             # said otherwise; found 2026-09-22 when that test's stand-in verb changed.
             # "Allow what the list does not name" means the VERB, never the path.
-            return _worst([on_targets, on_globals,
-                           _judge_args(words[0], list(words[1:]), bindings, roots)])
+            return _worst([Decision("allow", ALLOWED_UNLISTED_BASH.format(command=_first_words(joined))),
+                           on_targets, on_globals, _judge_args(words[0], list(words[1:]), bindings, roots)])
         return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} is outside this ticket's Bash allowlist")])
     head = Path(words[0]).name
     outer, inner, exec_option = _exec_split(words) if head == "find" else (list(words), [], None)
@@ -1312,21 +1324,22 @@ def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
         if any(g.behavior == "deny" for g in guards):
             return _worst(guards)
         if not intent.paths:
-            return _worst(guards)  # a search without a path works in cwd
+            return _worst([*guards, Decision("allow", ALLOWED_FILES)])  # a search without a path works in cwd
         for target in intent.paths:
             if not _inside(str(target), roots):
                 return Decision("deny", f"{intent.tool} outside the session directory: {target}")
-        return _worst(guards)
+        return _worst([*guards, Decision("allow", ALLOWED_FILES)])
     if intent.cls is ToolClass.SHELL:
-        return decide_bash(str(intent.command or ""), ctx)
+        # An unlisted verb's own reason comes first and wins over the allowlist's.
+        return _worst([decide_bash(str(intent.command or ""), ctx), Decision("allow", ALLOWED_BASH)])
     if intent.cls is ToolClass.PLATFORM:
         name = str(intent.command or "")
         if name and name in set(ctx.session_tools or ()):
-            return Decision("allow")
+            return Decision("allow", ALLOWED_SESSION_TOOL)
         offered = ", ".join(ctx.session_tools or ()) or "none in this ticket"
         return Decision("deny", f"Automatos tool {name!r} is not one this ticket may call ({offered})")
     if intent.cls in (ToolClass.WEB, ToolClass.BENIGN):
-        return Decision("allow")
+        return Decision("allow", ALLOWED_NO_APPROVAL)
     return Decision("deny", f"tool {intent.tool!r} is not enabled for session tickets")
 
 

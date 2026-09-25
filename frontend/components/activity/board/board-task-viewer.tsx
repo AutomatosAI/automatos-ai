@@ -2,6 +2,7 @@
 
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
+import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
@@ -92,6 +93,13 @@ function SessionBlock({ task }: { task: BoardTask }) {
               <span>{ref.denials}</span>
             </>
           )}
+          {/* F167: every call, by what the host decided — nobody asked, held for the operator, refused */}
+          {toolDecisionsSummary(ref) && (
+            <>
+              <span className="text-muted-foreground">Tool calls</span>
+              <span data-testid="session-tool-decisions">{toolDecisionsSummary(ref)}</span>
+            </>
+          )}
         </div>
         {reviewReason(ref) && (
           <div className="rounded-md border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-2 text-xs space-y-1">
@@ -113,13 +121,14 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
-        {Array.isArray(ref.recent_tools) && ref.recent_tools.length > 0 && (
+        {sessionToolCalls(ref).length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Recent tool calls</p>
             <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
-              {(ref.recent_tools as Array<{ at?: string; tool?: string; subject?: string }>).slice(-10).map((r, i) => (
-                <li key={i} className="truncate" title={r.subject || r.tool}>
+              {sessionToolCalls(ref).slice(-10).map((r, i) => (
+                <li key={i} className="truncate" title={toolCallTitle(r)}>
                   <span className="text-muted-foreground">{r.at ? new Date(r.at).toLocaleTimeString() : ''}</span> {r.tool}{r.subject ? ` · ${r.subject}` : ''}
+                  {toolCallVerdict(r) && <span className="text-muted-foreground"> — {toolCallVerdict(r)}</span>}
                 </li>
               ))}
             </ul>
