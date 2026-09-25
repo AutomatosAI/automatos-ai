@@ -1087,6 +1087,7 @@ class PlatformActionExecutor:
                             target_id=target_id,
                             change_type="update" if action_def.permission_level == "write" else "delete",
                             source="platform_tool",
+                            caller_context=caller_context,
                         )
                     except Exception as e:
                         # Fail closed: a permission check that errors must DENY, never
@@ -1115,24 +1116,30 @@ class PlatformActionExecutor:
                         }
                     if not decision.allowed:
                         logger.warning(
-                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s "
+                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s (%s) "
                             "target=%s (#%d of %d) reason=%s",
-                            action_name, actor_id, target_type, idx, n_targets, decision.reason,
+                            action_name, actor_id, decision.actor_name, target_type, idx, n_targets,
+                            decision.reason,
                         )
                         return {
                             "success": False,
                             "permission_denied": True,
                             "reason": decision.reason,
                             "escalation_target": decision.escalation_target,
+                            # F133: a refusal that says how to get it done, when it has one.
                             "error": (
-                                f"Action '{action_name}' denied — {decision.reason}. "
-                                + (
-                                    f"Route this through the {decision.escalation_target} "
-                                    "for arbitration."
-                                    if decision.escalation_target
-                                    else ""
-                                )
-                            ).strip(),
+                                f"Action '{action_name}' denied ({decision.reason}). {decision.message}"
+                                if decision.message
+                                else (
+                                    f"Action '{action_name}' denied — {decision.reason}. "
+                                    + (
+                                        f"Route this through the {decision.escalation_target} "
+                                        "for arbitration."
+                                        if decision.escalation_target
+                                        else ""
+                                    )
+                                ).strip()
+                            ),
                         }
 
         # Rate limit write/destructive actions — scoped per (workspace, agent)
@@ -1257,6 +1264,17 @@ class PlatformActionExecutor:
             _driver = (caller_context or {}).get("user_id")
             if _driver:
                 params = {**params, "_created_by": str(_driver)}
+
+        # F133: a playbook records the person it is made for (created_by_user_id),
+        # the creator its later edits are checked against. From the server-built
+        # context only: a caller-supplied _driving_user_id is ALWAYS stripped first.
+        if action_name in ("platform_create_playbook", "platform_create_recipe") and isinstance(params, dict):
+            from core.security.driving_user import driving_user_id
+
+            params = {k: v for k, v in params.items() if k != "_driving_user_id"}
+            _user = driving_user_id(caller_context)
+            if _user is not None:
+                params = {**params, "_driving_user_id": _user}
 
         # PRD-205 S4: capture the originating conversation for watch-creating
         # actions (direct create + the launches whose handlers auto-create a

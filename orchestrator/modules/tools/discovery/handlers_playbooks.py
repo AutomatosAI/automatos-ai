@@ -118,6 +118,9 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     tags = params.get("tags", [])
     template_id = f"custom-{uuid.uuid4().hex[:8]}"
 
+    # F133: the person the call is made for is the playbook's creator; its later
+    # edits are checked against them. Injected by the executor, never the model.
+    creator = params.get("_driving_user_id")
     playbook = WorkflowTemplate(
         name=name,
         template_id=template_id,
@@ -126,6 +129,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         owner_type="workspace",
         owner_id=str(workspace_id),
         created_by="platform",
+        created_by_user_id=creator if isinstance(creator, int) and not isinstance(creator, bool) else None,
         tags=tags,
         template_definition={"steps": [], "agents": [], "config": {}, "variables": []},
     )

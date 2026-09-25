@@ -1661,6 +1661,8 @@ async def save_as_routine(
         description = body.description or f"Routine created from mission: {run.goal[:200]}"
 
         # Create WorkflowTemplate record
+        from core.auth.principal import resolve_user_pk
+
         recipe = WorkflowTemplate(
             template_id=template_id_slug,
             name=body.name,
@@ -1668,6 +1670,8 @@ async def save_as_routine(
             workspace_id=ctx.workspace_id,
             owner_type="workspace",
             owner_id=str(ctx.workspace_id),
+            # F133: the person who saved it; its later edits are checked against them.
+            created_by_user_id=resolve_user_pk(db, ctx),
             tags=body.tags or [],
             template_definition=template_def,
             steps=[
