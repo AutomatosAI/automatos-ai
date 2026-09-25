@@ -1,0 +1,525 @@
+"""Builds index.html — Automatos Market Intelligence, the posh cut (40 s, 1080x1920).
+
+Brand: Automatos AI (Studio Dark, orange sailboat, AUTOMATOS A.I. wordmark,
+Newsreader + Geist + Geist Mono), matching the v2 and Academy videos.
+Footage: Higgsfield Cinema Studio 4.0 (c1_yacht, new) + v2's harbour and sunset
+sailboat; Soul Cinema stills (study, helm, logbook). Market data: the live pull of
+2026-09-23 via assets/data/derived.json (scripts/charts.py) — nothing typed.
+Music: Sascha Ende "Deep House 003" (CC BY 4.0) from 32.0 s.
+"""
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+D = json.loads((ROOT / "assets" / "data" / "derived.json").read_text())
+P = D["plan"]
+DUR = 40.0
+
+SAIL = ('<svg viewBox="0 0 139 162" width="W" height="H" xmlns="http://www.w3.org/2000/svg"><defs>'
+        '<linearGradient id="GID" x1="51.2" y1="125.7" x2="3.6" y2="58.3" gradientUnits="userSpaceOnUse">'
+        '<stop stop-color="#D53B00" /><stop offset="1" stop-color="#FF6A02" /></linearGradient></defs>'
+        '<path d="M95.8535 145.553L22.4082 146.085L16.8408 132.074L123 123.128L95.8535 145.553ZM59.6191 120.352C43.8983 119.724 34.5934 120.352 16 121.891C26.7648 103.979 50.0147 63.1915 56.8965 43.3311L59.6191 120.352ZM68.7656 15C90.5885 53.8094 116.979 101.64 121.969 112.226C103.108 113.808 91.6038 114.991 72.3955 117.694L68.7656 15Z" fill="url(#GID)" /></svg>')
+sail = lambda gid, w: SAIL.replace("GID", gid).replace('width="W"', f'width="{w}"').replace('height="H"', f'height="{round(w * 162 / 139)}"')
+
+# ── ledger rows (the latest 8 resolved plans, as they were) ──────────────────
+rows = []
+for i, r in enumerate(D["rows"]):
+    top = 600 + i * 88
+    rows.append(
+        f'<div class="lrow" id="lr{i}" style="top:{top}px">'
+        f'<div class="lc mono" data-layout-allow-overlap>{r["chart"]}</div>'
+        f'<div class="ls mono" data-layout-allow-overlap>{r["setup"]}</div>'
+        f'<div class="lo mono t-{r["tone"]}" data-layout-allow-overlap>{r["outcome"]}</div>'
+        f'<div class="lr serif c-{r["rtone"]}" data-layout-allow-overlap>{r["r"]}</div></div>')
+
+slot = D["replay"]["slot"]
+cursor_x0 = 90 + 6 + 16 * slot
+steps = 9
+fut_w = 990 - cursor_x0
+fut_end = (990 - (cursor_x0 + steps * slot)) / fut_w
+PLAN_TOP = 450
+
+HTML = """<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Automatos Market Intelligence — read the tide</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Geist"; src: url("assets/fonts/Geist-normal.woff2") format("woff2"); font-weight: 300 700; font-style: normal; }
+      @font-face { font-family: "Geist Mono"; src: url("assets/fonts/GeistMono-normal.woff2") format("woff2"); font-weight: 400 600; font-style: normal; }
+      @font-face { font-family: "Newsreader"; src: url("assets/fonts/Newsreader-normal.woff2") format("woff2"); font-weight: 400 600; font-style: normal; }
+      @font-face { font-family: "Newsreader"; src: url("assets/fonts/Newsreader-italic.woff2") format("woff2"); font-weight: 400 600; font-style: italic; }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #1a1714; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "Geist", sans-serif; color: #f0e8db; }
+      .clip { position: absolute; inset: 0; }
+      .inner { position: absolute; inset: 0; }
+      .serif { font-family: "Newsreader", serif; font-weight: 500; letter-spacing: -0.015em; }
+      .it { font-style: italic; color: #f07a50; }
+      .mono { font-family: "Geist Mono", monospace; }
+      .lab { font-family: "Geist Mono", monospace; text-transform: uppercase; letter-spacing: 0.14em; }
+      .sh { text-shadow: 0 4px 30px rgba(0, 0, 0, 0.55); }
+
+      /* ---------- persistent background (Studio Dark, as v2) ---------- */
+      #bg { z-index: 0; }
+      .bg-base { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, #241f1a 0%, #1a1714 55%, #120f0d 100%); }
+      .bg-floor { position: absolute; left: -540px; right: -540px; top: 1040px; height: 1000px; perspective: 700px; perspective-origin: 50% 0%; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 100%); mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 100%); }
+      .bg-plane { position: absolute; left: 0; right: 0; top: 0; height: 2600px; transform-origin: 50% 0%; transform: rotateX(68deg);
+        background-image: linear-gradient(rgba(233, 98, 53, 0.2) 2px, transparent 2px), linear-gradient(90deg, rgba(233, 98, 53, 0.2) 2px, transparent 2px); background-size: 120px 120px; }
+      #glowA { position: absolute; left: -310px; top: 260px; width: 1700px; height: 1700px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(233, 98, 53, 0.3) 0%, rgba(233, 98, 53, 0.1) 35%, transparent 62%); opacity: 0.5; }
+      .grain { position: absolute; inset: 0; opacity: 0.07;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+      .vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.6) 100%); }
+
+      /* ---------- footage + stills ---------- */
+      .vid { z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+      .vwrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+      .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .frz { z-index: 1; overflow: hidden; }
+      .frz img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .filmgrain { position: absolute; inset: 0; z-index: 2; opacity: 0.05; pointer-events: none;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>"); }
+
+      /* ---------- glass card + captions ---------- */
+      .glass { position: absolute; left: 60px; width: 960px; border-radius: 28px; background: rgba(26, 23, 20, 0.86); border: 1px solid rgba(240, 232, 219, 0.16); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5); }
+      .pill { position: absolute; font-family: "Geist Mono", monospace; font-size: 24px; letter-spacing: 0.12em; color: #f0e8db; padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(240, 232, 219, 0.4); background: rgba(26, 23, 20, 0.72); opacity: 0; }
+      .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1452px; }
+      .cap-in { max-width: 920px; padding: 16px 28px; border-radius: 18px; background: rgba(26, 23, 20, 0.84); border: 1px solid rgba(233, 98, 53, 0.35);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); font-size: 36px; font-weight: 500; line-height: 1.28; text-align: center; color: #f0e8db; opacity: 0; }
+
+      /* ---------- S1 hook ---------- */
+      #s1 { z-index: 3; }
+      #s1grad { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 15, 13, 0) 40%, rgba(18, 15, 13, 0.5) 58%, rgba(18, 15, 13, 0.88) 100%); }
+      .h1l { position: absolute; left: 72px; right: 72px; font-size: 92px; line-height: 1.1; opacity: 0; }
+      #h1a { top: 1120px; } #h1b { top: 1222px; }
+      #h2 { position: absolute; left: 72px; right: 72px; top: 1372px; font-size: 80px; line-height: 1.1; opacity: 0; }
+
+      /* ---------- S2 reveal ---------- */
+      #s2 { z-index: 3; }
+      #s2shade { position: absolute; inset: 0; background: radial-gradient(ellipse 85% 55% at 50% 46%, rgba(18, 15, 13, 0.78) 0%, rgba(18, 15, 13, 0.55) 60%, rgba(18, 15, 13, 0.3) 100%); opacity: 0; }
+      #s2halo { position: absolute; left: 40px; top: 220px; width: 1000px; height: 1000px; border-radius: 50%; background: radial-gradient(circle, rgba(233, 98, 53, 0.34) 0%, rgba(233, 98, 53, 0.1) 38%, transparent 64%); opacity: 0; }
+      #s2ring { position: absolute; left: 360px; top: 490px; width: 360px; height: 360px; border-radius: 50%; border: 3px solid rgba(233, 98, 53, 0.85); opacity: 0; }
+      #m2 { position: absolute; left: 430px; top: 540px; width: 220px; height: 256px; opacity: 0; }
+      #w2 { position: absolute; left: 0; right: 0; top: 870px; display: flex; justify-content: center; opacity: 0; }
+      #w2 img { width: 620px; height: auto; display: block; }
+      #mi2 { position: absolute; left: 0; right: 0; top: 1000px; text-align: center; font-size: 34px; letter-spacing: 0.36em; color: #f0e8db; opacity: 0; }
+      #l2 { position: absolute; left: 390px; width: 300px; top: 1072px; height: 3px; background: #e96235; transform-origin: 50% 50%; }
+
+      /* ---------- S3 the tide ---------- */
+      #s3 { z-index: 3; }
+      #s3grad { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 15, 13, 0.9) 0%, rgba(18, 15, 13, 0.72) 32%, rgba(18, 15, 13, 0) 50%, rgba(18, 15, 13, 0) 62%, rgba(18, 15, 13, 0.7) 100%); }
+      #t3a { position: absolute; left: 72px; right: 72px; top: 330px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t3b { position: absolute; left: 72px; right: 72px; top: 436px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #p3a { left: 72px; top: 1300px; } #p3b { left: 470px; top: 1300px; }
+
+      /* ---------- S4 computed ---------- */
+      #s4 { z-index: 3; }
+      #s4grad { position: absolute; inset: 0; background: rgba(18, 15, 13, 0.5); }
+      #t4 { position: absolute; left: 72px; right: 72px; top: 318px; font-size: 88px; line-height: 1.08; white-space: nowrap; }
+      #t4 .w { display: inline-block; opacity: 0; }
+      #c4 { top: 450px; height: 960px; }
+      #c4sym { position: absolute; left: 100px; top: 486px; font-size: 60px; }
+      #c4sym .mono { font-size: 30px; color: #d9cfbf; }
+      #c4px { position: absolute; right: 100px; top: 482px; text-align: right; }
+      #c4px .v { font-family: "Geist Mono", monospace; font-size: 56px; line-height: 1; }
+      #c4px .k { font-size: 20px; color: #b0a38d; margin-top: 10px; }
+      #ch4 { position: absolute; left: 90px; top: 590px; width: 900px; height: 560px; }
+      #cov4 { position: absolute; left: 90px; top: 590px; width: 900px; height: 560px; background: #1d1a17; transform-origin: 100% 50%; }
+      .stat { position: absolute; top: 1190px; width: 280px; }
+      .stat .k { font-size: 20px; color: #b0a38d; }
+      .stat .v { font-family: "Newsreader", serif; font-size: 52px; line-height: 1.2; }
+      .tag { display: inline-block; margin-top: 4px; font-family: "Geist Mono", monospace; font-size: 17px; letter-spacing: 0.12em; color: #f07a50; border: 1px solid rgba(233, 98, 53, 0.7); border-radius: 8px; padding: 2px 10px; opacity: 0; }
+      #st1 { left: 100px; } #st2 { left: 400px; } #st3 { left: 700px; }
+      #stamp4w { position: absolute; left: 0; right: 0; top: 800px; display: flex; justify-content: center; transform: rotate(-4deg); }
+      #stamp4 { font-size: 72px; padding: 6px 40px 14px; border: 3px solid #e96235; border-radius: 14px; background: rgba(26, 23, 20, 0.92); opacity: 0; }
+
+      /* ---------- S5 the odds ---------- */
+      #s5 { z-index: 3; }
+      #s5grad { position: absolute; inset: 0; background: rgba(18, 15, 13, 0.45); }
+      #c5 { top: 320px; height: 1090px; }
+      #p5t { position: absolute; left: 100px; top: 352px; font-size: 32px; letter-spacing: 0.06em; }
+      #p5s { position: absolute; left: 100px; top: 402px; font-size: 20px; color: #b0a38d; }
+      #ch5 { position: absolute; left: 90px; top: PLANTOPpx; width: 900px; height: 520px; }
+      #cov5 { position: absolute; left: 90px; top: PLANTOPpx; width: 900px; height: 520px; background: #1d1a17; transform-origin: 100% 50%; }
+      .pl { position: absolute; left: 104px; font-family: "Geist Mono", monospace; font-size: 24px; padding: 6px 16px; border-radius: 10px; background: rgba(26, 23, 20, 0.9); opacity: 0; }
+      #pl_t1 { color: #90af5a; border: 1px solid rgba(144, 175, 90, 0.7); }
+      #pl_en { color: #f07a50; border: 1px solid rgba(233, 98, 53, 0.7); }
+      #pl_st { color: #f07a50; border: 1px dashed rgba(240, 122, 80, 0.8); }
+      #odt { position: absolute; left: 100px; top: 1004px; font-size: 28px; letter-spacing: 0.08em; opacity: 0; }
+      #ods { position: absolute; left: 100px; top: 1046px; font-size: 20px; color: #b0a38d; opacity: 0; }
+      .orow { position: absolute; left: 100px; right: 100px; height: 56px; opacity: 0; }
+      .orow .ol { position: absolute; left: 0; top: 10px; font-family: "Geist Mono", monospace; font-size: 26px; letter-spacing: 0.08em; }
+      .orow .ot { position: absolute; left: 240px; top: 20px; width: 470px; height: 20px; border-radius: 10px; background: #2a2521; overflow: hidden; }
+      .orow .of { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 10px; transform-origin: 0 50%; }
+      .orow .ov { position: absolute; right: 0; top: -4px; font-family: "Newsreader", serif; font-size: 48px; line-height: 1.2; }
+      #o1 { top: 1094px; } #o2 { top: 1160px; } #o3 { top: 1226px; }
+      #oglow { position: absolute; left: 80px; width: 920px; top: 1152px; height: 70px; border-radius: 14px; background: rgba(233, 98, 53, 0.12); border: 1px solid rgba(233, 98, 53, 0.6); opacity: 0; }
+      #either { position: absolute; left: 100px; top: 1316px; font-size: 22px; color: #f07a50; opacity: 0; }
+
+      /* ---------- S6 the captain's log ---------- */
+      #s6 { z-index: 3; }
+      #s6grad { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 15, 13, 0.78) 0%, rgba(18, 15, 13, 0.55) 30%, rgba(18, 15, 13, 0.6) 100%); }
+      #t6 { position: absolute; left: 72px; top: 318px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t6s { position: absolute; left: 76px; top: 444px; font-size: 24px; color: #d9cfbf; opacity: 0; }
+      #c6 { top: 500px; height: 900px; }
+      .lhead { position: absolute; top: 540px; font-size: 18px; color: #b0a38d; }
+      .lrow { position: absolute; left: 60px; right: 60px; height: 88px; border-top: 1px solid rgba(240, 232, 219, 0.12); opacity: 0; }
+      .lrow .lc { position: absolute; left: 40px; top: 26px; font-size: 28px; font-weight: 500; }
+      .lrow .ls { position: absolute; left: 240px; top: 29px; font-size: 22px; color: #d9cfbf; }
+      .lrow .lo { position: absolute; left: 556px; top: 24px; font-size: 20px; letter-spacing: 0.08em; padding: 4px 14px; border-radius: 999px; border: 1px solid; }
+      .lrow .lr { position: absolute; right: 40px; top: 12px; font-size: 42px; line-height: 1.3; }
+      .t-profit { color: #90af5a; border-color: rgba(144, 175, 90, 0.7); }
+      .t-loss { color: #f07a50; border-color: rgba(240, 122, 80, 0.7); }
+      .t-muted { color: #d9cfbf; border-color: rgba(217, 207, 191, 0.45); }
+      .c-profit { color: #90af5a; } .c-loss { color: #f07a50; } .c-muted { color: #d9cfbf; }
+      #l6f { position: absolute; left: 100px; top: 1320px; font-size: 18px; color: #b0a38d; opacity: 0; }
+      #stamp6w { position: absolute; right: 90px; top: 452px; transform: rotate(-4deg); }
+      #stamp6 { font-size: 40px; padding: 2px 22px 8px; border: 2px solid #e96235; border-radius: 10px; background: rgba(26, 23, 20, 0.94); opacity: 0; }
+
+      /* ---------- S7 sea trials ---------- */
+      #s7 { z-index: 3; }
+      #t7 { position: absolute; left: 72px; top: 318px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t7s { position: absolute; left: 76px; top: 448px; font-size: 22px; color: #b0a38d; opacity: 0; }
+      #c7 { top: 500px; height: 620px; }
+      #ch7 { position: absolute; left: 90px; top: 550px; width: 900px; height: 520px; }
+      #fut7 { position: absolute; left: CURX0px; top: 540px; width: FUTWpx; height: 540px; transform-origin: 100% 50%;
+        background: repeating-linear-gradient(135deg, rgba(233, 98, 53, 0.14) 0 12px, transparent 12px 24px), #1d1a17; }
+      #cur7 { position: absolute; left: CURX0px; top: 530px; width: 4px; height: 560px; background: #e96235; box-shadow: 0 0 18px rgba(233, 98, 53, 0.7); }
+      #fut7l { position: absolute; left: 690px; top: 744px; width: 290px; text-align: center; font-size: 28px; line-height: 1.35; color: #f07a50; opacity: 0; }
+      #yc7 { position: absolute; left: 70px; top: 1146px; font-size: 20px; color: #b0a38d; }
+      .btn { position: absolute; top: 1184px; height: 84px; border-radius: 16px; border: 1px solid rgba(240, 232, 219, 0.3); color: #f0e8db; font-family: "Geist Mono", monospace; font-size: 28px; letter-spacing: 0.08em; display: flex; align-items: center; justify-content: center; background: #221f1c; }
+      #b_long { left: 70px; width: 190px; } #b_short { left: 276px; width: 190px; } #b_flat { left: 482px; width: 170px; }
+      #b_conf { left: 668px; width: 120px; color: #f07a50; border-color: rgba(233, 98, 53, 0.6); opacity: 0; }
+      #b_commit { left: 804px; width: 206px; color: #1a1714; background: #f0e8db; border-color: #f0e8db; }
+      #b_sel { position: absolute; left: 70px; top: 1184px; width: 190px; height: 84px; border-radius: 16px; background: #e96235; color: #1a1714; font-family: "Geist Mono", monospace; font-size: 28px; letter-spacing: 0.08em; display: flex; align-items: center; justify-content: center; opacity: 0; }
+      #rs7 { position: absolute; left: 70px; top: 1294px; font-size: 20px; color: #b0a38d; }
+      .rsv { position: absolute; left: 70px; top: 1330px; width: 940px; height: 62px; border-radius: 14px; display: flex; align-items: center; padding-left: 24px; font-size: 22px; }
+      #rsv7 { color: #d9cfbf; background: repeating-linear-gradient(135deg, rgba(240, 232, 219, 0.06) 0 12px, #221f1c 12px 24px); border: 1px dashed rgba(240, 232, 219, 0.35); }
+      #rsv7b { color: #f07a50; background: #221f1c; border: 1px solid rgba(233, 98, 53, 0.7); opacity: 0; }
+
+      /* ---------- S8 calm ---------- */
+      #s8 { z-index: 3; }
+      #s8grad { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 15, 13, 0.72) 0%, rgba(18, 15, 13, 0.3) 32%, rgba(18, 15, 13, 0) 50%); }
+      #t8a { position: absolute; left: 72px; top: 360px; font-size: 132px; line-height: 1.05; opacity: 0; }
+      #t8b { position: absolute; left: 72px; top: 510px; font-size: 104px; line-height: 1.05; opacity: 0; }
+
+      /* ---------- S9 end card (as v2) ---------- */
+      #s9 { z-index: 3; }
+      #s9shade { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 45% at 50% 42%, rgba(18, 15, 13, 0.64) 0%, rgba(18, 15, 13, 0.28) 70%, rgba(18, 15, 13, 0.06) 100%), linear-gradient(180deg, rgba(18, 15, 13, 0.35) 0%, rgba(18, 15, 13, 0) 30%, rgba(18, 15, 13, 0) 60%, rgba(18, 15, 13, 0.55) 100%); opacity: 0; }
+      #endhalo { position: absolute; left: 40px; top: 220px; width: 1000px; height: 1000px; border-radius: 50%; background: radial-gradient(circle, rgba(233, 98, 53, 0.36) 0%, rgba(233, 98, 53, 0.1) 38%, transparent 64%); opacity: 0; }
+      #ring { position: absolute; left: 340px; top: 521px; width: 400px; height: 400px; border-radius: 50%; border: 3px solid rgba(233, 98, 53, 0.85); opacity: 0; }
+      #endmark { position: absolute; left: 410px; top: 560px; width: 260px; height: 303px; opacity: 0; }
+      #endword { position: absolute; left: 0; right: 0; top: 920px; display: flex; justify-content: center; opacity: 0; }
+      #endword img { width: 600px; height: auto; display: block; }
+      .endtag { position: absolute; left: 70px; right: 70px; top: 1050px; text-align: center; font-size: 80px; line-height: 1.08; }
+      .endtag div { opacity: 0; }
+      #url { position: absolute; left: 0; right: 0; top: 1300px; display: flex; flex-direction: column; align-items: center; gap: 14px; opacity: 0; }
+      #url .u { font-family: "Geist Mono", monospace; font-size: 50px; color: #f0e8db; letter-spacing: 0.02em; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
+      #uline { width: 420px; height: 3px; background: #e96235; transform-origin: 0 50%; }
+      #url .os { font-family: "Geist Mono", monospace; font-size: 24px; letter-spacing: 0.16em; color: #d9cfbf; }
+      #url .nfa { font-family: "Geist Mono", monospace; font-size: 20px; letter-spacing: 0.16em; color: #b0a38d; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="DURS" data-width="1080" data-height="1920">
+      <div id="bg" class="clip" data-start="0" data-duration="DURS" data-track-index="0">
+        <div class="bg-base"></div>
+        <div id="glowA"></div>
+        <div class="bg-floor"><div class="bg-plane" id="plane" data-layout-allow-overflow></div></div>
+        <div class="grain"></div>
+        <div class="vig"></div>
+      </div>
+
+      <!-- ================= footage (Higgsfield Cinema Studio 4.0) and stills (Soul Cinema) ================= -->
+      <video id="cv1" class="clip vid" src="assets/cine/c1_yacht.mp4" data-start="0" data-duration="5.04" data-track-index="1" muted playsinline></video>
+      <div id="f1" class="clip frz" data-start="5.04" data-duration="2.41" data-track-index="1"><img id="f1img" data-layout-allow-overflow src="assets/cine/c1_last.jpg" alt="" /></div>
+      <video id="cv3" class="clip vid" src="assets/cine/c3_harbour.mp4" data-start="7.45" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <div id="st4" class="clip frz" data-start="11.49" data-duration="3.96" data-track-index="1"><img id="st4img" data-layout-allow-overflow src="assets/stills/s_study.png" alt="" /></div>
+      <div id="st5" class="clip frz" data-start="15.45" data-duration="4.0" data-track-index="1"><img id="st5img" data-layout-allow-overflow src="assets/stills/s_helm.png" alt="" /></div>
+      <div id="st6" class="clip frz" data-start="19.45" data-duration="5.55" data-track-index="1"><img id="st6img" data-layout-allow-overflow src="assets/stills/s_log.png" alt="" /></div>
+      <div class="vwrap" id="w8"><video id="cv8" class="clip" src="assets/cine/c4_sailboat.mp4" data-start="31.3" data-duration="5.04" data-track-index="1" muted playsinline></video></div>
+      <div id="f8" class="clip frz" data-start="36.34" data-duration="3.66" data-track-index="1"><img id="f8img" data-layout-allow-overflow src="assets/cine/c4_last.jpg" alt="" /></div>
+      <div class="filmgrain"></div>
+
+      <!-- ================= S1 hook ================= -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.95" data-track-index="2">
+        <div class="inner" id="s1in">
+          <div id="s1grad"></div>
+          <div class="h1l serif sh" id="h1a">The sea doesn't care</div>
+          <div class="h1l serif sh" id="h1b">how sure you are.</div>
+          <div id="h2" class="serif it sh">Neither does the market.</div>
+        </div>
+      </section>
+
+      <!-- ================= S2 reveal ================= -->
+      <section id="s2" class="clip" data-start="3.9" data-duration="3.55" data-track-index="2">
+        <div class="inner" id="s2in">
+          <div id="s2shade"></div>
+          <div id="s2halo"></div>
+          <div id="s2ring"></div>
+          <div id="m2">SAIL2</div>
+          <div id="w2"><img src="assets/brand/logo_wordmark_white.svg" alt="Automatos A.I." /></div>
+          <div id="mi2" class="lab">Market Intelligence</div>
+          <div id="l2"></div>
+        </div>
+      </section>
+
+      <!-- ================= S3 the tide ================= -->
+      <section id="s3" class="clip" data-start="7.45" data-duration="4.05" data-track-index="2">
+        <div class="inner" id="s3in">
+          <div id="s3grad"></div>
+          <div id="t3a" class="serif sh">It reads the tide</div>
+          <div id="t3b" class="serif it sh">before you sail.</div>
+          <div class="pill" id="p3a">LIVE PUBLIC DATA</div>
+          <div class="pill" id="p3b">DETERMINISTIC CORE</div>
+        </div>
+      </section>
+
+      <!-- ================= S4 the market, computed ================= -->
+      <section id="s4" class="clip" data-start="11.49" data-duration="3.96" data-track-index="2">
+        <div class="inner" id="s4in">
+          <div id="s4grad"></div>
+          <div id="t4" class="serif sh"><span class="w" id="t4a">The market,</span> <span class="w it" id="t4b">computed.</span></div>
+          <div class="glass" id="c4"></div>
+          <div id="c4sym"><span class="serif">BTC</span><span class="mono"> · 1H</span></div>
+          <div id="c4px"><div class="v">LAST_CLOSE</div><div class="k lab">Last close · LAST_TS UTC</div></div>
+          <img id="ch4" src="assets/charts/cockpit.svg" alt="" />
+          <div id="cov4"></div>
+          <div class="stat" id="st1"><div class="k lab">60h high</div><div class="v">HI60</div><div class="tag" id="tg1">COMPUTED</div></div>
+          <div class="stat" id="st2"><div class="k lab">60h low</div><div class="v">LO60</div><div class="tag" id="tg2">COMPUTED</div></div>
+          <div class="stat" id="st3"><div class="k lab">60h change</div><div class="v">CHG60</div><div class="tag" id="tg3">COMPUTED</div></div>
+          <div id="stamp4w"><div id="stamp4" class="serif it" data-layout-allow-overlap>None invented.</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S5 the odds, even when they're against you ================= -->
+      <section id="s5" class="clip" data-start="15.45" data-duration="4.0" data-track-index="2">
+        <div class="inner" id="s5in">
+          <div id="s5grad"></div>
+          <div class="glass" id="c5"></div>
+          <div id="p5t" class="mono">PLAN_TITLE</div>
+          <div id="p5s" class="lab">The plan on screen · 23 Sep 2026</div>
+          <img id="ch5" src="assets/charts/plan.svg" alt="" />
+          <div id="cov5"></div>
+          <div class="pl" id="pl_t1" style="top:PL_T1px" data-layout-allow-overlap>T1 PLAN_T1 · PLAN_T1R</div>
+          <div class="pl" id="pl_en" style="top:PL_ENpx" data-layout-allow-overlap>ENTRY PLAN_ENTRY</div>
+          <div class="pl" id="pl_st" style="top:PL_STpx" data-layout-allow-overlap>STOP PLAN_STOP</div>
+          <div id="odt" class="mono">REPLAYED ODDS · n = PLAN_N</div>
+          <div id="ods" class="lab">What the replay promised at capture</div>
+          <div id="oglow"></div>
+          <div class="orow" id="o1"><div class="ol" style="color:#90af5a">T1 FIRST</div><div class="ot"><div class="of" style="width:PT1%;background:#90af5a"></div></div><div class="ov" style="color:#90af5a">PT1%</div></div>
+          <div class="orow" id="o2"><div class="ol" style="color:#f07a50">STOP FIRST</div><div class="ot"><div class="of" style="width:PSTOP%;background:#e96235"></div></div><div class="ov" style="color:#f07a50">PSTOP%</div></div>
+          <div class="orow" id="o3"><div class="ol" style="color:#d9cfbf">HORIZON</div><div class="ot"><div class="of" style="width:PHOR%;background:#938876"></div></div><div class="ov" style="color:#d9cfbf">PHOR%</div></div>
+          <div id="either" class="lab">Shown either way</div>
+        </div>
+      </section>
+
+      <!-- ================= S6 the captain's log ================= -->
+      <section id="s6" class="clip" data-start="19.45" data-duration="5.55" data-track-index="2">
+        <div class="inner" id="s6in">
+          <div id="s6grad"></div>
+          <div id="t6" class="serif it sh">The captain's log.</div>
+          <div id="t6s" class="lab">LOGGED logged · graded in public</div>
+          <div class="glass" id="c6"></div>
+          <div class="lhead lab" style="left:100px">Chart</div>
+          <div class="lhead lab" style="left:300px">Setup</div>
+          <div class="lhead lab" style="left:616px">Outcome</div>
+          <div class="lhead lab" style="right:100px">R net</div>
+          LEDGER_ROWS
+          <div id="l6f" class="lab">Latest 8 resolved · R net after fees and funding</div>
+          <div id="stamp6w"><div id="stamp6" class="serif it" data-layout-allow-overlap>Frozen at entry.</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S7 sea trials ================= -->
+      <section id="s7" class="clip" data-start="25.0" data-duration="6.3" data-track-index="2">
+        <div class="inner" id="s7in">
+          <div id="t7" class="serif">Sea trials.</div>
+          <div id="t7s" class="lab">BTC · 1H · recorded history, one closed bar at a time</div>
+          <div class="glass" id="c7"></div>
+          <img id="ch7" src="assets/charts/replay.svg" alt="" />
+          <div id="fut7"></div>
+          <div id="cur7"></div>
+          <div id="fut7l" class="lab" data-layout-allow-overlap>The future<br />isn't sent.</div>
+          <div id="yc7" class="lab">Your call</div>
+          <div class="btn" id="b_long">LONG</div>
+          <div id="b_sel" data-layout-allow-overlap>LONG</div>
+          <div class="btn" id="b_short">SHORT</div>
+          <div class="btn" id="b_flat">FLAT</div>
+          <div class="btn" id="b_conf">70%</div>
+          <div class="btn" id="b_commit">COMMIT</div>
+          <div id="rs7" class="lab">The rule says</div>
+          <div class="rsv lab" id="rsv7">Hidden until you commit</div>
+          <div class="rsv lab" id="rsv7b" data-layout-allow-overlap>Shown after your call</div>
+        </div>
+      </section>
+
+      <!-- ================= S8 calm, in every market ================= -->
+      <section id="s8" class="clip" data-start="31.3" data-duration="4.3" data-track-index="2">
+        <div class="inner" id="s8in">
+          <div id="s8grad"></div>
+          <div id="t8a" class="serif sh">Calm,</div>
+          <div id="t8b" class="serif it sh">in every market.</div>
+        </div>
+      </section>
+
+      <!-- ================= S9 end card ================= -->
+      <section id="s9" class="clip" data-start="35.6" data-duration="4.4" data-track-index="2">
+        <div class="inner" id="s9in">
+          <div id="s9shade"></div>
+          <div id="endhalo"></div>
+          <div id="ring"></div>
+          <div id="endmark">SAIL9</div>
+          <div id="endword"><img src="assets/brand/logo_wordmark_white_end.svg" alt="Automatos A.I." /></div>
+          <div class="endtag serif sh"><div id="el1">The market,</div><div id="el2" class="it">computed.</div></div>
+          <div id="url"><div class="u">markets.automatos.app</div><div id="uline"></div><div class="os">MARKET INTELLIGENCE · RESEARCH, NOT SIGNALS</div><div class="nfa">NOT FINANCIAL ADVICE</div></div>
+        </div>
+      </section>
+
+      <!-- ================= captions (lines not already on screen) ================= -->
+      <div class="clip cap" id="cap05" data-start="11.73" data-duration="2.6" data-track-index="5"><div class="cap-in">Every number, computed. None invented.</div></div>
+      <div class="clip cap" id="cap06" data-start="15.63" data-duration="3.2" data-track-index="5"><div class="cap-in">Every plan shows its odds. Even when they're against you.</div></div>
+      <div class="clip cap" id="cap07" data-start="19.63" data-duration="4.9" data-track-index="5"><div class="cap-in">Every plan goes in the captain's log. Frozen at entry, graded in public.</div></div>
+      <div class="clip cap" id="cap08" data-start="25.23" data-duration="2.7" data-track-index="5"><div class="cap-in">Train on real history, one bar at a time.</div></div>
+      <div class="clip cap" id="cap09" data-start="28.24" data-duration="3.0" data-track-index="5"><div class="cap-in">Agents propose. The replay engine decides.</div></div>
+
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="DURS" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const up = (sel, t, d = 0.4, y = 30) => tl.fromTo(sel, { y, opacity: 0 }, { y: 0, opacity: 1, duration: d, ease: "power3.out" }, t);
+      const out = (sel, t, d = 0.25) => tl.to(sel, { opacity: 0, duration: d, ease: "power2.in" }, t);
+      const pop = (sel, t, s = 1.3) => tl.fromTo(sel, { scale: s, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "expo.out" }, t);
+
+      // background + slow push on every still and freeze
+      tl.fromTo("#plane", { backgroundPosition: "0px 0px" }, { backgroundPosition: "0px 1320px", duration: DURV, ease: "none" }, 0);
+      tl.fromTo("#f1img", { scale: 1.0 }, { scale: 1.06, duration: 2.41, ease: "none" }, 5.04);
+      tl.fromTo("#st4img", { scale: 1.04 }, { scale: 1.12, duration: 3.96, ease: "none" }, 11.49);
+      tl.fromTo("#st5img", { scale: 1.1 }, { scale: 1.02, duration: 4.0, ease: "none" }, 15.45);
+      tl.fromTo("#st6img", { scale: 1.02 }, { scale: 1.1, duration: 5.55, ease: "none" }, 19.45);
+      tl.fromTo("#w8", { scale: 1.1 }, { scale: 1.08, duration: 5.04, ease: "none" }, 31.3);
+      tl.fromTo("#f8img", { scale: 1.08 }, { scale: 1.0, duration: 3.66, ease: "power1.out" }, 36.34);
+
+      // ===== S1 (0 – 3.95): the sea doesn't care how sure you are
+      up("#h1a", 0.31, 0.5, 40);
+      up("#h1b", 1.07, 0.5, 40);
+      up("#h2", 2.38, 0.45, 30);
+      out("#s1in", 3.72, 0.22);
+
+      // ===== S2 (3.9 – 7.45): the reveal on the kick
+      tl.fromTo("#s2shade", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 3.9);
+      tl.fromTo("#s2halo", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.8, ease: "power2.out" }, 3.92);
+      pop("#m2", 4.0, 1.35);
+      tl.fromTo("#s2ring", { scale: 0.6, opacity: 0.9 }, { scale: 2.2, opacity: 0, duration: 0.9, ease: "power2.out" }, 4.02);
+      up("#w2", 4.35, 0.5, 24);
+      up("#mi2", 4.9, 0.45, 16);
+      tl.fromTo("#l2", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 5.1);
+      out("#s2in", 7.2, 0.25);
+
+      // ===== S3 (7.45 – 11.5): it reads the tide before you sail
+      up("#t3a", 7.66, 0.45, 30);
+      up("#t3b", 8.5, 0.45, 30);
+      up("#p3a", 9.0, 0.3, 14);
+      up("#p3b", 9.3, 0.3, 14);
+      out("#s3in", 11.28, 0.2);
+
+      // ===== S4 (11.49 – 15.45): the market, computed
+      tl.fromTo("#s4in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 11.49);
+      up("#t4a", 11.55, 0.4, 24);
+      up("#t4b", 11.8, 0.4, 24);
+      tl.fromTo("#cov4", { scaleX: 1 }, { scaleX: 0, duration: 1.2, ease: "power1.inOut" }, 11.7);
+      [["#tg1", 12.2], ["#tg2", 12.35], ["#tg3", 12.5]].forEach(([g, t]) => pop(g, t, 1.5));
+      tl.fromTo("#stamp4", { scale: 1.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, 13.3);
+      out("#s4in", 15.22, 0.22);
+
+      // ===== S5 (15.45 – 19.45): every plan shows its odds, even when they're against you
+      tl.fromTo("#s5in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 15.45);
+      tl.fromTo("#cov5", { scaleX: 1 }, { scaleX: 0, duration: 0.8, ease: "power2.inOut" }, 15.55);
+      [["#pl_t1", 16.1], ["#pl_en", 16.25], ["#pl_st", 16.4]].forEach(([p, t]) => tl.fromTo(p, { x: -18, opacity: 0 }, { x: 0, opacity: 1, duration: 0.25, ease: "power2.out" }, t));
+      up("#odt", 16.45, 0.3, 14);
+      up("#ods", 16.55, 0.3, 10);
+      [["#o1", 16.65], ["#o2", 16.8], ["#o3", 16.95]].forEach(([o, t]) => {
+        up(o, t, 0.25, 12);
+        tl.fromTo(`${o} .of`, { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, t + 0.05);
+      });
+      tl.fromTo("#oglow", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 17.48);
+      up("#either", 17.7, 0.3, 10);
+      out("#s5in", 19.22, 0.22);
+
+      // ===== S6 (19.45 – 25.0): the captain's log
+      tl.fromTo("#s6in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 19.45);
+      up("#t6", 19.63, 0.45, 26);
+      up("#t6s", 20.0, 0.35, 12);
+      for (let i = 0; i < 8; i++) up(`#lr${i}`, 20.3 + i * 0.12, 0.25, 14);
+      up("#l6f", 21.4, 0.3, 8);
+      tl.fromTo("#stamp6", { scale: 1.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, 22.07);
+      out("#s6in", 24.78, 0.22);
+
+      // ===== S7 (25.0 – 31.3): sea trials — the replay trainer
+      tl.fromTo("#s7in", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, 25.0);
+      up("#t7", 25.1, 0.4, 24);
+      up("#t7s", 25.3, 0.3, 10);
+      tl.fromTo("#fut7", { scaleX: 1 }, { scaleX: FUTEND, duration: 2.5, ease: "steps(STEPS)" }, 25.4);
+      tl.fromTo("#cur7", { x: 0 }, { x: CURTRAVEL, duration: 2.5, ease: "steps(STEPS)" }, 25.4);
+      up("#fut7l", 26.7, 0.35, 10);
+      tl.to("#b_sel", { opacity: 1, duration: 0.15 }, 28.3);
+      tl.to("#b_long", { opacity: 0, duration: 0.15 }, 28.3);
+      pop("#b_conf", 28.55, 1.4);
+      tl.to("#b_commit", { scale: 0.92, duration: 0.08, yoyo: true, repeat: 1, ease: "power1.inOut" }, 29.2);
+      tl.to("#rsv7", { opacity: 0, duration: 0.2 }, 29.6);
+      tl.fromTo("#rsv7b", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.25, ease: "power2.out" }, 29.6);
+      out("#s7in", 31.1, 0.2);
+
+      // ===== S8 (31.3 – 35.6): calm, in every market
+      up("#t8a", 31.78, 0.5, 34);
+      up("#t8b", 32.3, 0.5, 30);
+      out("#s8in", 35.35, 0.25);
+
+      // ===== S9 (35.6 – 40): Automatos. The market, computed. (kick on "computed")
+      tl.fromTo("#s9shade", { opacity: 0 }, { opacity: 1, duration: 0.8, ease: "power2.out" }, 35.6);
+      tl.fromTo("#endhalo", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.9, ease: "power2.out" }, 35.65);
+      tl.fromTo("#endmark", { scale: 1.35, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 35.85);
+      tl.fromTo("#ring", { scale: 0.6, opacity: 0.9 }, { scale: 2.2, opacity: 0, duration: 0.9, ease: "power2.out" }, 35.87);
+      up("#endword", 36.2, 0.5, 24);
+      up("#el1", 36.78, 0.45, 30);
+      up("#el2", 37.26, 0.45, 30);
+      up("#url", 37.9, 0.4, 20);
+      tl.fromTo("#uline", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 37.98);
+      tl.to("#endmark", { y: -10, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 38.4);
+      tl.to("#endhalo", { scale: 1.06, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 38.4);
+
+      // ===== captions
+      [["#cap05", 11.73, 2.6], ["#cap06", 15.63, 3.2], ["#cap07", 19.63, 4.9], ["#cap08", 25.23, 2.7], ["#cap09", 28.24, 3.0]].forEach(([c, s, d]) => {
+        tl.fromTo(`${c} .cap-in`, { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.18, ease: "power2.out" }, s);
+        tl.to(`${c} .cap-in`, { opacity: 0, duration: 0.15 }, s + d - 0.15);
+      });
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
+"""
+
+vals = {
+    "DURS": f"{DUR:g}", "DURV": f"{DUR:g}",
+    "SAIL2": sail("gs2", 220), "SAIL9": sail("gs9", 260),
+    "LAST_CLOSE": D["last_close"], "LAST_TS": D["last_ts"], "HI60": D["hi60"], "LO60": D["lo60"], "CHG60": D["chg60"],
+    "PLAN_TITLE": P["title"], "PLAN_T1R": P["t1r"], "PLAN_T1": P["t1"], "PLAN_ENTRY": P["entry"], "PLAN_STOP": P["stop"],
+    "PL_T1": f'{PLAN_TOP + P["y_t1"] - 21:.0f}', "PL_EN": f'{PLAN_TOP + P["y_entry_mid"] - 21:.0f}', "PL_ST": f'{PLAN_TOP + P["y_stop"] - 21:.0f}',
+    "PLANTOP": str(PLAN_TOP),
+    "PLAN_N": str(P["n"]), "PT1": str(P["pT1"]), "PSTOP": str(P["pStop"]), "PHOR": str(P["pHorizon"]),
+    "LOGGED": f'{D["ledger_total_logged"]:,}', "LEDGER_ROWS": "\n          ".join(rows),
+    "CURX0": f"{cursor_x0:.0f}", "FUTW": f"{fut_w:.0f}", "FUTEND": f"{fut_end:.4f}", "CURTRAVEL": f"{steps * slot:.1f}", "STEPS": str(steps),
+}
+html = HTML
+for k in sorted(vals, key=len, reverse=True):
+    html = html.replace(k, vals[k])
+(ROOT / "index.html").write_text(html)
+print("index.html written:", len(html.splitlines()), "lines")

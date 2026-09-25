@@ -1,0 +1,308 @@
+{
+ "project": "Automatos AI — PRD-251 Socials, Wave 1: the video engine",
+ "branchName": "feat/prd-251-w1-video-engine",
+ "baseBranch": "feat/prd-251-socials",
+ "description": "Wave 1 of PRD-251 (docs/PRDS/PRD-251-SOCIALS.md, D1-D17 binding, the owner's Wave 1 answers of 2026-09-23 in its status block). Wave 0 lands on main through PR #783 (test/customer-night → main; #782 closes as landed there). Launched after that, this wave is cut from main and its migration chains onto f049_prd251_merge_heads; launched before, it stacks on feat/prd-251-socials. Diff base for every check: `bash scripts/ralph/acceptance-prd251w1.sh --print-base`. Twenty stories. US-101..US-114, the engine: the media-render service (container + CI job, API, orchestrator client with the render lifecycle, quotas Basic 10 / Pro 60 / Business 240 minutes, compose profile `media`, Railway manifest at 4 vCPU / 8 GB with two renders at once), the media cost lane (S4.4, moved into this wave), templates as data with the four reference templates and the image families, the brand kit, facts with sources, the media capability registry, voice, music, the infographic, and footage from the workspace's Composio toolkits. S1.9 (the 'social video director' skill) is NOT in this loop: the owner's rule is that skills are authored in the automatos-skills repo first, then synced into this repo's seed, and this loop never edits automatos-skills or a generated seed. Nothing here schedules, publishes or adds the full composer — Waves 2 and 3. US-115..US-120, the agent layer (owner, 2026-09-23: reuse what exists; pulled forward from Waves 3-4): brand-kit tools, Socials draft tools (S4.1), social formats in generate_document and a general image tool, the S3.5 post gate, built-in skills synced from automatos-skills, and the Socials marketplace package (two agents, four playbooks, guided setup).",
+ "userStories": [
+  {
+   "id": "US-101",
+   "title": "S1.1a — The media-render service: container and its CI job",
+   "description": "New service services/media-render/ (D3). Copy the workspace-worker patterns: services/workspace-worker/Dockerfile:1 (python:3.12-slim base), :12-16 NodeSource (use setup_22.x — Hyperframes needs Node >= 22), :50-65 the optional-install block, :78-84 HEALTHCHECK/EXPOSE/ENTRYPOINT; main.py:473/508-517 X-Internal-Token middleware with /health exempt. The image carries: ffmpeg (apt); the npm CLI hyperframes pinned EXACTLY at 0.8.62 with its chrome-headless-shell pre-installed at build time (no download at request time); Python kokoro-onnx + espeakng_loader + soundfile + numpy with the Kokoro v1.0 model and voices files fetched at build and hash-checked; espeak-ng data copied to a SHORT real path (e.g. /opt/espeak — espeak-ng truncates data paths at ~160 characters and phonemizer resolves symlinks, so a symlink does not work). ENV HYPERFRAMES_NO_TELEMETRY=1, DO_NOT_TRACK=1, HYPERFRAMES_SKIP_SKILLS=1, HYPERFRAMES_NO_UPDATE_CHECK=1. A 3-second fixture composition in services/media-render/fixtures/ (one paused GSAP timeline registered on window.__timelines['main'], a text element, a short Kokoro line). Add a CI job `media-render` to .github/workflows/test.yml as a sibling top-level job (no needs:), copying the prod-image-parity shape (test.yml:567-594): build the image, run the service's own tests inside it, render the fixture and assert the output with ffprobe. Name it 'media-render — image builds and renders the fixture'. From this story on it is a required job for the wave's gate.",
+   "acceptanceCriteria": [
+    "services/media-render/ builds in CI; the Dockerfile pins hyperframes at exactly 0.8.62 and Node 22.",
+    "The CI job renders the fixture to an MP4 with an h264 video stream at 1080x1920 30 fps, an aac audio stream, and duration 3.0 ± 0.1 s (ffprobe assertions in the job log).",
+    "A boot assertion fails the container if the espeak data path is 160 characters or longer; the telemetry/skills/update-check env vars are set in the image (asserted by a test).",
+    "Kokoro synthesises one line inside the image in CI (a WAV longer than 0.5 s).",
+    "phonemizer and espeak-ng appear only under services/media-render (grep evidence in the commit body): the GPL boundary.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 1,
+   "passes": false,
+   "notes": "Anchors: services/workspace-worker/Dockerfile:1,12-16,41-65,78-84; services/workspace-worker/main.py:79,473,508-517,526-533,1068,1086; .github/workflows/test.yml:23-30,567-594 (no needs: anywhere). Hyperframes composition rules and traps: docs/PRDS/PRD-251A-SOCIALS-REFERENCE-PIPELINE.md stage 7 (one paused timeline; no Math.random/Date.now; data-layout-allow-overlap on the text element itself). Hyperframes first launch of a fresh Chrome can time out on cold images — pre-warm at build."
+  },
+  {
+   "id": "US-102",
+   "title": "S1.1b — The media-render API: check, render, voice, mix, concurrency",
+   "description": "The service's HTTP API (aiohttp, like the worker). POST /render takes a composition bundle: the template's html/css, the variables, brand assets inlined as data: URIs (logo, font files), media inputs as presigned GET URLs to OUR storage only (the service refuses any other host — allowlist from config, never arbitrary URLs), and an audio plan (voice lines, music track id and window, SFX cues). It runs `hyperframes check` first and refuses with 422 carrying the lint/layout/contrast findings; otherwise renders (--quality delivery --fps 30) and returns a job id. GET /render/{id} reports status, the check report and timings; GET /render/{id}/output/{name} streams the file. POST /tts synthesises Kokoro lines (one WAV per line, returns durations; voice and speed parameters, default af_heart at 0.95). The mix is ffmpeg exactly as the reference: voice placed with adelay, music ducked by sidechaincompress (threshold 0.015, ratio 10, attack 10, release 420) at x0.6, SFX, loudnorm I=-14 TP=-1.5 LRA=11. Concurrency (owner, 2026-09-23): at most TWO renders at once overall and ONE per workspace; further jobs queue FIFO. Every limit and timeout is config.",
+   "acceptanceCriteria": [
+    "In the CI job: rendering the fixture bundle through POST /render returns an MP4 whose integrated loudness is -14 ± 1 LUFS (ebur128 in the job log).",
+    "A bundle with a lint error returns 422 with the findings and renders nothing (test).",
+    "A media URL outside the storage allowlist is refused before any fetch (test).",
+    "Three submissions from two workspaces: two run, the third queues; two from the SAME workspace never run at once (test with a stub renderer).",
+    "Missing or wrong X-Internal-Token gets 401; /health is open (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 2,
+   "passes": false,
+   "notes": "The reference mix: docs/PRDS/prd251-reference/mix-reference.py; voice: synth-vo-reference.py. Word timing (energy gaps: 10 ms hops, 4% threshold, gaps >= 70 ms) is how text lands on words — expose it from /tts. The renderer assembles; it never calls a generation provider (D3)."
+  },
+  {
+   "id": "US-103",
+   "title": "S4.4 — The media usage lane (moved into Wave 1 by the owner's plan)",
+   "description": "Add LANE_MEDIA to orchestrator/core/llm/usage_context.py (:33-38) and a track_media helper in core/llm/usage_tracker.py that copies track_rerank (:345): it books cost_override=(usd, 0), tier='direct', and pulls workspace/agent/execution from current_usage_scope(). Renders are booked as units only (rendered seconds, $0) so quotas can read them. Analytics shows 'Media' spend. The budget gate needs no change: modules/policy/budget.py:238 spend_to_date sums every lane (no request_type filter) — prove it with a test.",
+   "acceptanceCriteria": [
+    "A mocked footage job with a $0.46 estimate books $0.46 on the media lane (test).",
+    "A render books its rendered seconds as units at $0 on the media lane (test).",
+    "spend_to_date includes media-lane spend, so the budget gate counts it (test).",
+    "Analytics labels the lane 'Media' (vitest or API test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 3,
+   "passes": false,
+   "notes": "Anchors: core/llm/usage_context.py:33-38; core/llm/usage_tracker.py:205 (track signature), :345 (track_rerank); modules/policy/budget.py:238; modules/policy/gate.py:175,182."
+  },
+  {
+   "id": "US-104",
+   "title": "S1.1c — Orchestrator client, render lifecycle, quotas, compose profile and Railway manifest",
+   "description": "orchestrator/core/media_render_client.py mirrors core/workspace_client.py:18-44 (httpx AsyncClient, X-Internal-Token, timeouts from config; read timeout 900 s). Config beside WORKER_INTERNAL_URL (config.py:771; SOCIALS_RENDER_URL is at :1859): SOCIALS_RENDER_URL already exists from Wave 0; add SOCIALS_RENDER_TOKEN and SOCIALS_RENDER_TIMEOUT_SECONDS, and add every new setting NAME to orchestrator/reports/config-surface.json in sorted position — plus Wave 0's six SOCIALS_* names, which it never added (the guard only warns on a missing name; it fails on a deleted one). orchestrator/scripts/regen_config_surface.py imports config and needs the app's dependencies, so edit the names list by hand: names only, never values. POST /api/socials/posts/{id}/render runs as a background task: draft -> rendering -> needs_approval on success, -> failed with the report on error; the rendered files go to S3 under social-media/{workspace}/{post}/{file} and are registered as Deliverables (video/image types from Wave 0); post.media records them and content_hash covers their digests. Quotas (owner, 2026-09-23): a render_minutes_month field on each tier in config.py _PLAN_TIERS_DEFAULTS (:1938) — basic 10, pro 60, business 240; enterprise (coming-soon, not assignable) and the local edition have none — surfaced by plan_limits_for_tier (services/plan_tiers.py:73-95). A render past the quota is refused BEFORE media-render is called, with a clear message; minutes used are the month's media-lane render units (US-103). The Socials tab shows 'Render minutes: used / quota this month'. docker-compose.yml gets a media-render service under profiles: ['media'] (copy the gotenberg block :448-459 plus the worker's build pattern :357-423), with the backend's SOCIALS_RENDER_URL pointing at it; with the profile off, rendering reports 'Rendering needs the media profile'. infrastructure/railway-manifest.json gets a media-render entry copying agent-workspace-worker (:229-271) and its service_groups/network_topology entries, sized 4 vCPU / 8 GB (owner). Docs: a media-render section in docs/deployment-infrastructure/docker-containerization.md and the media profile in docs/getting-started/self-hosting.md, including the owner's Railway steps (create the service from services/media-render, size, env keys).",
+   "acceptanceCriteria": [
+    "Rendering a post moves it draft -> rendering -> needs_approval, stores the outputs in S3 and registers them as Deliverables (test with media-render mocked).",
+    "A render past the plan's monthly minutes is refused before any call to media-render (test); basic/pro/business read 10/60/240 from config; enterprise and local are unlimited.",
+    "config-surface.json lists SOCIALS_RENDER_TOKEN, SOCIALS_RENDER_TIMEOUT_SECONDS and Wave 0's SOCIALS_* names, sorted; test_config_surface_guard passes; no os.getenv outside config.py.",
+    "`docker compose --profile media config` includes media-render (CI step), and the Railway manifest carries the new service entry.",
+    "The Socials tab shows render minutes used and the quota (vitest); every new route is in the committed route manifest.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 4,
+   "passes": false,
+   "notes": "Anchors: core/workspace_client.py:18-44; config.py:740-741,1938,2029; services/plan_tiers.py:73-95; docker-compose.yml:357-423,448-459,509-510; infrastructure/railway-manifest.json:16-21,229-271,865-876; orchestrator/reports/config-surface.json:416-417. Wave 0: modules/socials/service.py (create_draft :345 … assert_publishable :502), api/socials.py routes :207-383, SocialPost content_hash (core/models/socials.py:113)."
+  },
+  {
+   "id": "US-105",
+   "title": "S1.2a — Social templates as data: the format, the blocks, the dispatch (the wave's ONE migration)",
+   "description": "document_templates.format gains social_image and social_video: the CHECK constraint at core/models/core.py:1532 (check_document_template_format; class DocumentTemplate :1492) plus ONE alembic revision chained onto the BASE's single head (EXPECTED_HEAD in the base's tests/test_prd209_alembic_single_head.py: prd251_socials while stacked on Wave 0, f049_prd251_merge_heads once Wave 0 is on main via the customer-night PR — read it, never assume); move the head pins: tests/test_prd209_alembic_single_head.py EXPECTED_HEAD, and tests/test_prd236_w1_routes.py's guard, which reads the head migration file (today f049_prd251_merge_heads.py) and asserts the EXPECTED_HEAD line. Keep tests/test_prd251_models.py's chained-revisions assertion (~:332, the revisions chained onto kb_multimodal_tables) true: re-check it, never weaken it; and the migration is create_all-first safe (FIXER, 2026-09-23: on the live refresh a backend that had already loaded the new models ran create_all before the migration, and prd251_socials crash-looped on DuplicateTable until 89d89c250): keep a table that exists and add only its missing indexes (the _has_table / _create_missing_indexes shape in prd251_socials.py), ADD COLUMN IF NOT EXISTS for columns (llm_usage_agent_name.py), DROP CONSTRAINT IF EXISTS then ADD CONSTRAINT for the changed CHECK, and insert-if-absent for seeds. For social formats, blocks (core/models/core.py:1515) holds {html, css, variables_schema, sizes, audio_plan}, validated on create and update in modules/documents/template_service.py:23 (the format field is untyped at api/document_generation.py:43,72,81, so validation lives in the service). modules/documents/generation_service.py:112 generate() dispatches social formats to a new generate_social path that builds the render bundle (brand kit tokens as CSS variables, fonts and logo inlined as data: URIs) and calls media-render; WeasyPrint is untouched. Every template reads brand tokens as CSS variables; no template carries a hex colour, a font family or a logo outside var() fallbacks.",
+   "acceptanceCriteria": [
+    "alembic has exactly one head, the new revision, chained onto the base's single head (its EXPECTED_HEAD; f049_prd251_merge_heads on main); the head pins in test_prd209 and test_prd236_w1_routes moved, and test_prd251_models still passes unweakened.",
+    "A test builds every model with create_all first, then runs this revision's upgrade (and runs it twice): both succeed and the CHECK accepts social_image and social_video (the 89d89c250 lesson).",
+    "A social template with a missing or malformed variables_schema is rejected on save (test).",
+    "generate() routes social formats to the media-render path and pdf/docx/xlsx exactly as before (test).",
+    "A test fails any seeded social template containing a hex colour, font family or logo URL outside a var() fallback.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 5,
+   "passes": false,
+   "notes": "Anchors (main 84d8306e4): core/models/core.py:1492 (DocumentTemplate), :1502 (template content), :1519 (tags), :1532 (the format CHECK); api/document_generation.py:117-233; modules/documents/template_service.py:17,23; modules/documents/presets.py (pure helpers); modules/documents/generation_service.py:112,154-161,367. Trap: a new alembic head updates TWO pins — tests/test_prd209_alembic_single_head.py:64 (EXPECTED_HEAD) and tests/test_prd236_w1_routes.py:190-194 (reads the head migration file and asserts the EXPECTED_HEAD line)."
+  },
+  {
+   "id": "US-106",
+   "title": "S1.2b — Seed the four reference video templates (the quality bar)",
+   "description": "Port the compositions in docs/PRDS/prd251-reference/ into seeded document_templates rows (format social_video, 1080x1920 plus the sizes each declares): 'UI story promo' (v1-ui-story.html), 'cinematic product promo' (v2-cinematic-product.html, four footage slots with freeze-frame fallbacks), 'app promo' (academy-app-promo.html, phone frame), and 'data story' (markets-posh.html with its generator: data -> SVG -> HTML). Every hardcoded colour, font, logo, line of copy, clip and data point becomes a variable fed by the brand kit, the post and its sources; the timing structure (hook, reveal on the kick, proof, end card) and the composition rules stay exactly as the references. Seed them as per-workspace rows through the existing starter mechanism (modules/documents/seed_templates.py:211 seed_starter_templates, :293 starter_columns, :305 starter_outcome: a platform-owned row refreshes in place, a user's copy is never touched). document_templates.workspace_id is NOT NULL and starters are seeded only at workspace creation (core/auth/hybrid.py:376-381, core/seeds/seed_local_first_run.py:780), so ALSO seed the social starters when a workspace turns Socials on (Wave 0's PUT /api/workspaces/current/socials) — otherwise existing workspaces never get them. Rendering reads the row, never a file. In the media-render CI job, render a short low-resolution preview of each seeded video template and run `hyperframes check` on the full composition.",
+   "acceptanceCriteria": [
+    "Turning Socials on seeds the four templates into that workspace idempotently (twice = same rows), and GET /templates lists them (test).",
+    "Each passes `hyperframes check` in CI with 0 errors and renders a preview (job log).",
+    "Swapping the brand kit's primary colour changes a sampled pixel of the rendered preview (CI pixel probe).",
+    "The footage slots accept a clip and fall back to the template's own motion graphics when empty (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 6,
+   "passes": false,
+   "notes": "The owner judges these side by side against the originals before Wave 1 closes (Goal 8). Composition traps: PRD-251A stage 7 (the lint table: allow-overlap on text elements, transform-only tweens, fromTo for scaleX reveals, the hatch needs an opaque base, no text under platform UI outside y 240-1560)."
+  },
+  {
+   "id": "US-107",
+   "title": "S1.2c — Seed the image families and remove the automatos-social clone references",
+   "description": "Seed social_image templates: the five automatos-social families (title, definition, stats, quote, announcement) at the sizes in automatos-social/schema.json, plus carousel and fact-card variants — as per-workspace rows reading brand tokens, through the same starter path as US-106. Then remove this repo's code references to the repos/automatos-social clone in the same PR (CLAUDE.md §5): the tool descriptions and examples at modules/tools/discovery/workspace_actions.py:225, modules/tools/execution/exec_workspace.py:295, services/workspace-worker/executor.py:337 and services/workspace-worker/main.py:825 (html_to_png stays; only the automatos-social example goes). Do NOT edit core/seeds/platform-management-skill.md (:1152, :1631): it is generated from automatos-skills by scripts/sync-auto-skill.py, and the owner's rule is that skills change there first. List the seed lines and the html-to-png/social-ops skill lines that must change in the PR body; the owner applies them in automatos-skills and re-syncs.",
+   "acceptanceCriteria": [
+    "Every seeded image template renders a PNG in the media-render CI job and passes `hyperframes check`; they seed through the same starter path as US-106 (test).",
+    "No code reference to repos/automatos-social remains under orchestrator/, frontend/ or services/ outside the generated skill seed, and the seed is untouched (git grep evidence in the commit body).",
+    "The PR body lists the seed and skill lines the owner changes in automatos-skills.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 7,
+   "passes": false,
+   "notes": "Anchors (every reference to the clone on main): code — modules/tools/discovery/workspace_actions.py:225; modules/tools/execution/exec_workspace.py:295; services/workspace-worker/executor.py:337; services/workspace-worker/main.py:825. Generated seed, NOT edited here — core/seeds/platform-management-skill.md:1152,1631. automatos-social's _brand.jsx hardcodes Automatos orange — the ported templates must not."
+  },
+  {
+   "id": "US-108",
+   "title": "S1.3 — Brand kit extension",
+   "description": "Extend modules/documents/brand_kit.py:45 BrandKit in place (D5). The existing font_family IS the body font: keep that key (the PDF renderers already read it; D5 calls it body_font) and add heading_font (empty = use font_family) — never a second body-font field. Also add font_files (uploaded woff2, stored and mirrored like the logo in modules/documents/brand_logo.py and inlined as data: URIs at render time), logo_mark_url (a square mark, separate from the wordmark), social_handles (per toolkit), and voice (three to five tone words plus banned phrases). Same GET/PUT API (api/document_brand_kit.py:81/93) plus a font upload route mirroring the logo routes (:180/214/235). BrandKitDialog.tsx gains the fields and opens from the Socials tab too.",
+   "acceptanceCriteria": [
+    "Validation tests for every new field (font file type and size caps, handle format, tone-word count).",
+    "An uploaded woff2 is stored, served and inlined into a render bundle (test).",
+    "A template renders with the brand kit's heading font (CI render).",
+    "The dialog shows the new fields and opens from the Socials tab (vitest); `npm run build` is proven by CI's prod image job.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 8,
+   "passes": false,
+   "notes": "Anchors: modules/documents/brand_kit.py:45,53,57,65-70,83,98; api/document_brand_kit.py:81,93,154,180,214,235; modules/documents/brand_logo.py; frontend/components/documents/blocks/BrandKitDialog.tsx."
+  },
+  {
+   "id": "US-109",
+   "title": "S1.4 — Facts carry sources: resolution and search",
+   "description": "Wave 0 stores sources and gates unsourced claims. Wave 1 resolves them (D7): each source kind — deliverable, report (agent_reports), document, url, metric at a timestamp — is validated to exist IN THE CALLER'S WORKSPACE when a post is saved or approved, and GET /api/socials/sources?kind=&q= searches candidates for the future composer. agent_reports has no ORM model: query it the way services/report_service.py:149 does (raw SQL), and read report tables from the report file or its metrics JSONB.",
+   "acceptanceCriteria": [
+    "A claim bound to a deleted Deliverable fails validation (test).",
+    "Each source kind resolves in tests; a source from another workspace is refused.",
+    "GET /api/socials/sources returns candidates per kind, workspace-scoped, and is in the route manifest.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 9,
+   "passes": false,
+   "notes": "Anchors: alembic/versions/prd76_agent_reports.py:20-70 (raw table); services/report_service.py:149,191,215; Wave 0 unsourced gating in modules/socials/service.py."
+  },
+  {
+   "id": "US-110",
+   "title": "D16 — The media capability registry (allowlist per toolkit)",
+   "description": "modules/socials/capabilities.py reads the workspace's connected toolkits (core/composio/entity_manager.py:101 get_connected_apps) and the cached action schemas (ComposioActionCache, core/models/composio_cache.py:86) and exposes ONLY allowlisted actions per toolkit, classified as generate_video, generate_image, tts, estimate, status, upload, balance. The allowlist is data (seeded config), covering fal_ai, kieai, higgsfield_mcp, fish_audio and elevenlabs. An unknown toolkit offers nothing. It never overrides the Wave 0 deny list (core/composio/deny_list.py:84 composio_action_denial) — a denied slug is never offered even if allowlisted.",
+   "acceptanceCriteria": [
+    "With fal_ai connected, the registry offers its allowlisted actions and nothing else (test with cached-schema fixtures).",
+    "A denied slug (e.g. HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE) is never offered (test).",
+    "An unknown toolkit offers nothing; the allowlist is data, not code constants in logic.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 10,
+   "passes": false,
+   "notes": "Slugs verified on docs.composio.dev 2026-09-23 (PRD-251 'Composio media toolkits'): fal FAL_AI_SUBMIT_ASYNC_JOB / _QUEUE_GET_STATUS / _GET_QUEUE_REQUEST_RESULT / _UPLOAD_FILE / _ESTIMATE_PRICING; Kie.ai KIEAI_GENERATE_VEO_VIDEO / _GET_VEO_VIDEO_DETAILS / _GENERATE_FLUX_KONTEXT_IMAGE / _GET_FLUX_KONTEXT_IMAGE_DETAILS / _GET_ACCOUNT_CREDITS; Higgsfield HIGGSFIELD_MCP_GENERATE_VIDEO / _GENERATE_IMAGE / _JOBS_WAIT / _JOB_STATUS / _MEDIA_UPLOAD / _BALANCE; Fish Audio FISH_AUDIO_SYNTHESIZE_SPEECH / _LIST_VOICE_MODELS / _GET_ACCOUNT_BALANCE. ElevenLabs (checked 2026-09-23): API-key auth; its 'Text to speech' action (returns a downloadable audio file) is ELEVENLABS_TEXT_TO_SPEECH per composio.dev's integration page, and 'Get voices list' lists voices — confirm both slugs in composio_actions_cache before seeding; if absent, ElevenLabs shows as unavailable. Higgsfield MCP (checked 2026-09-23): DCR OAuth to the customer's own Higgsfield account (not Composio-managed); HIGGSFIELD_MCP_GENERATE_VIDEO takes ONE `params` string; its video models are marketing_studio_video, clipify, seedance_2_5, kling3_0, minimax_h3 (plus hf_mult_motion_control / hf_mult_replace_object); its image models are gpt_image_2 (default), marketing_studio_image, soul_cast, soul_2, soul_id. It does NOT offer Cinema Studio (the reference footage) or Soul Cinema (the $0.006 stills)."
+  },
+  {
+   "id": "US-111",
+   "title": "S1.5 — Voice: Kokoro, or a connected Composio voice toolkit",
+   "description": "The script is split into lines, one audio file per line, whatever the source; scene timing flexes to the audio. Kokoro (media-render POST /tts) is the default. Fish Audio and ElevenLabs are recipes in modules/socials/recipes/voice.py calling ComposioToolExecutor.execute (core/composio/tool_executor.py:344) for the workspace's connection, only through US-110's allowlist; outputs are copied into our storage immediately. No recordings, no Automatos-held voice keys (D11). Fish Audio books its balance difference (FISH_AUDIO_GET_ACCOUNT_BALANCE before/after) on the media lane.",
+   "acceptanceCriteria": [
+    "A render with Kokoro produces speech in every script window (CI render with the fixture script).",
+    "With fish_audio connected and chosen, the same script renders with no other change (Composio mocked in CI).",
+    "Without a voice toolkit, only Kokoro is offered; the others link to the Composio connect flow (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 11,
+   "passes": false,
+   "notes": "Kokoro settings from the reference: af_heart, speed 0.95, lang en-us; check pronunciations with phonemizer (e.g. 'A plus' reads wrong, 'A-plus' reads right). GPL boundary: Kokoro/phonemizer only inside media-render."
+  },
+  {
+   "id": "US-112",
+   "title": "S1.6 — The music library",
+   "description": "A manifest-driven library bundled into the media-render image: services/media-render/music/manifest.json lists each track's title, artist, licence, attribution text, source URL and sha256; the image build fetches every track from its URL and FAILS if a hash differs (no audio files committed to git). Seed with the four tracks the reference videos used (all Sascha Ende, CC BY 4.0, ende.app) — see notes for URLs and hashes; adding more tracks is the owner's choice (open question 5). At build, a numpy structure analysis precomputes cue windows per track (loudness, energy below 150 Hz, the 300-3000 Hz share; drops, breaks and grooves at 0.1 s) into the manifest, so templates can land a reveal on a drop. A CC BY track appends its credit line to the post's default copy.",
+   "acceptanceCriteria": [
+    "Every track in the manifest has licence, attribution, URL and sha256; a mismatched hash fails the image build (test with a bad hash).",
+    "Cue windows exist for every track, and Deep House 003's analysis lists a break overlapping 34.0-35.8 s, the one the Markets reference cut on (CI assertion).",
+    "A rendered video's integrated loudness is -14 ± 1 LUFS (CI).",
+    "A post using a CC BY track carries its credit line in the default copy (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 12,
+   "passes": false,
+   "notes": "Tracks (verified byte-identical 2026-09-23): Where the Night Begins (melodic techno, used in v1) https://ende.app/storage/mp3low/b171474b-0ac5-4daa-a012-28fea778fb86.mp3 sha256 2feeff3d7bfffc24712bf0b9df1efc76a1777973fde3143b061579c4541d6c83; Da Da Da Da Da De De De De (Afro-house, used in v2) https://ende.app/storage/mp3low/ec7b18f5-b8d6-4438-9c8e-081f531564e0.mp3 sha256 5e71ada9dc33cd4fc21e69a38008b4b263d45de8aca2b2b5ed466816f66e9792; Spring of 2026 (tropical house, used in Academy) https://ende.app/storage/mp3low/d130cacc-e8a6-457f-ac48-e21aa9bd67c5.mp3 sha256 ab1805743e5c3a728013ad45e06a80fe6cd22384ea9f2602e4d9209cf585016d; Deep House 003 (deep house, used in Markets) https://ende.app/storage/mp3low/e1168d5d-f775-4a55-856a-dbbf62d115a5.mp3 sha256 ddb3174cb4f2337a04c918902e4a766a427e947c6b04ae8d406317db07b32109. Attribution text: 'Music: \"<title>\" by Sascha Ende (ende.app), licensed CC BY 4.0.' Reference cues (track time): Deep House 003 bass-out breaks 34.0-35.8 s and 67.6-69.5 s (the Markets cut starts the track at 32.0 s); Spring of 2026 drop at 52.9 s; Da Da Da… breakdown at 53.4 s, drop at 62.2 s (PRD-251A stage 3, line 81)."
+  },
+  {
+   "id": "US-113",
+   "title": "S1.7 — The infographic template",
+   "description": "A social_image chart template (bar, line or number grid) bound to a report — its metrics JSONB, or the first markdown table in the report file (a small tested parser) — with every figure source-bound (D7). Use the reference data pattern: data -> SVG shapes -> HTML text (docs/PRDS/prd251-reference/markets-posh-charts.py).",
+   "acceptanceCriteria": [
+    "Given a report with a table, the infographic renders its top 5 rows with the source chip resolved (CI render + test).",
+    "Axis labels fit: `hyperframes check` passes with no layout errors (CI).",
+    "Every number on the rendered chart comes from the bound source (test compares values).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 13,
+   "passes": false,
+   "notes": "agent_reports stores the body in a markdown file (report_service.py:191) and numbers in metrics JSONB — no structured table column."
+  },
+  {
+   "id": "US-114",
+   "title": "S1.8 — Footage and stills from the workspace's Composio toolkits",
+   "description": "Per-toolkit recipes in modules/socials/recipes/footage.py (D12): fal (FAL_AI_SUBMIT_ASYNC_JOB -> FAL_AI_QUEUE_GET_STATUS -> FAL_AI_GET_QUEUE_REQUEST_RESULT; FAL_AI_ESTIMATE_PRICING first), Kie.ai (KIEAI_GENERATE_VEO_VIDEO -> KIEAI_GET_VEO_VIDEO_DETAILS), Higgsfield MCP (HIGGSFIELD_MCP_GENERATE_VIDEO -> HIGGSFIELD_MCP_JOBS_WAIT). Always submit and poll, never a long synchronous call; only US-110's allowlist; the Wave 0 deny list applies. Money (D13): estimate where the toolkit prices a call, then check the post's cap and the workspace's monthly media cap (workspace setting socials.media_monthly_cap_usd with a config default) — over the cap nothing is submitted; after, book the cost on the media lane (US-103), or the balance difference for credit-billed toolkits. Outputs are copied into our storage the moment a job completes (provider URLs expire) and registered as Deliverables; generated clips fill template media slots only (the hook and the b-roll) — product screens stay HTML, every on-screen word is template text. With no generation toolkit connected, footage slots fall back to the template's own motion graphics.",
+   "acceptanceCriteria": [
+    "With fal_ai connected, a template's hook slot is filled by a generated 5 s 9:16 clip and the post's cost carries the estimate (Composio mocked in CI).",
+    "An estimate over the monthly cap submits nothing and says why (test).",
+    "The output is copied into our storage before the job is marked done (test).",
+    "A credit-billed toolkit (Higgsfield MCP) books its balance difference (test).",
+    "With no generation toolkit connected, the footage slots fall back to motion graphics (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 14,
+   "passes": false,
+   "notes": "Composio's Higgsfield reaches Marketing Studio (image and video), Seedance 2.5, Kling 3.0 and Minimax — not Cinema Studio 4.0, which made the reference footage (US-110 notes, checked 2026-09-23). The recipe builds GENERATE_VIDEO's single `params` string; the default model per toolkit is config, set after the owner's small-spend quality test (PRD open question 7). The prompt pattern that produced the reference footage (PRD-251A stage 5): subject and scene, then light, then camera, then 'no readable text, no logos', then the brand's colour words. Never generate product UI. The reference client (estimate -> cap -> submit -> poll -> download) is docs/PRDS/prd251-reference/higgsfield-client-reference.py — reached here ONLY through Composio."
+  },
+  {
+   "id": "US-115",
+   "title": "Agent tools: read and update the brand kit (reuse brand_kit.py; thin wrappers)",
+   "description": "Agents cannot touch the brand kit today: only the REST routes do (api/document_brand_kit.py:81 GET, :93 PUT). Add platform_get_brand_kit and platform_update_brand_kit with the 3-file pattern IN THE DOCUMENTS DOMAIN (no new domain): definitions beside platform_list_templates in modules/tools/discovery/actions_documents.py, handlers in handlers_documents.py, routing in platform_executor.py's _handlers map (:446); register_documents_actions is already wired in platform_actions.py:58-63. The handlers call modules/documents/brand_kit.py (get_brand_kit :83, validate_brand_kit :98) and persist exactly as the REST PUT does — if that persistence lives in the route, move it into brand_kit.py so the route and the tool call ONE function. Update is a partial merge, validated fail-closed; logo_path stays server-managed; the tool uploads nothing (logo and font uploads stay in the UI routes). Permission level mirrors the comparable platform write tools. Exposes the US-108 fields.",
+   "acceptanceCriteria": [
+    "platform_get_brand_kit returns the same payload as GET /api/documents/brand-kit for the workspace (test).",
+    "platform_update_brand_kit with an invalid hex colour is refused with the validator's message and nothing is saved (test).",
+    "An update through the tool is what GET then returns, and the REST route and the tool share one persistence function (test).",
+    "Both tools are registered, routed through platform_executor and dispatched in a test.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 15,
+   "passes": false,
+   "notes": "Anchors: modules/documents/brand_kit.py:45,83,98; api/document_brand_kit.py:81,93,154 (suggestions — the Brand Designer uses them); modules/tools/discovery/actions_documents.py:214 (platform_list_templates, the neighbour); handlers_documents.py; platform_executor.py:446; platform_actions.py:17,58-63. Registration recipe: modules/tools/README.md."
+  },
+  {
+   "id": "US-116",
+   "title": "S4.1 pulled forward — agent tools for Socials drafts (never approve, schedule or publish)",
+   "description": "Agents cannot create a Socials post today (Wave 0 is REST only). Add platform_create_social_post, platform_update_social_post, platform_submit_social_post, platform_get_social_post and platform_list_social_posts (filter by status — the Socials skills' pipeline and voice audits depend on it) with the 3-file pattern: modules/tools/discovery/actions_socials.py + handlers_socials.py, routed in platform_executor.py (:446) and registered in platform_actions.py register_all_actions (:58). The handlers are THIN: they call the Wave 0 service (modules/socials/service.py create_draft, update_post, submit) and the US-104 render lifecycle — never re-implement the status machine, the content hash or the approval reset. Create takes title, per-channel copy, template (id or name), variables, sources (claims bound per D7), optional media Deliverable ids, and render (bool, default true → the US-104 render, quota applies). No tool or parameter approves, schedules or publishes: humans approve in the tab (D6), and the platform publishes (Wave 3). The tools refuse with a clear message when Socials is off for the workspace (Wave 0's switches). The acting agent is recorded in the post's review_log. These tools replace what the old automatos-skills publisher skills did with composio_execute.",
+   "acceptanceCriteria": [
+    "A post created through the tool is listed by the Socials API with the same status, content_hash and sources as a REST-created one (test).",
+    "Editing an approved post through platform_update_social_post resets approval, via the Wave 0 service (test).",
+    "platform_list_social_posts filters by status and returns only the caller's workspace posts (test). platform_submit_social_post moves a draft to needs_approval; no registered tool approves, schedules or publishes, and no socials tool schema has an approve/schedule/publish parameter (test inspects the registry).",
+    "With Socials off for the workspace, every socials tool refuses with a clear message (test).",
+    "render=true triggers the US-104 render and the plan quota applies (test, media-render mocked).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 16,
+   "passes": false,
+   "notes": "Wave 0 anchors (re-verify on the base): modules/socials/service.py create_draft ~:345, update_post ~:384, submit ~:409; approve ~:416 and schedule ~:472 are NOT exposed to agents; api/socials.py:207-383; modules/socials/settings.py require_socials_enabled. PRD S4.1: 'It creates drafts only; the tool has no publish parameter.'"
+  },
+  {
+   "id": "US-117",
+   "title": "Extend two existing tools: social formats in generate_document; images beyond blog covers",
+   "description": "(a) generate_document — schema modules/agents/services/agent_platform_tools.py:209 (format enum pdf/docx/xlsx), handler :721 → DocumentGenerationService.generate(format=...) — gains social_image and social_video. US-105 already dispatches those formats to media-render, so agents render social media through the tool they already use; the result registers a Deliverable as today. Keep every registration of the tool consistent: modules/tools/execution/exec_document.py:29 and modules/tools/formatting/result_formatter.py:742. The playbook step type generate_document (api/recipe_executor.py:1476, _document_step_config) accepts the same formats, so a playbook renders a social template as a FIXED step with variables from earlier steps ({{step_N.field}}). Update the tool description so social video/image requests route to it (semantic tool routing ranks by description). (b) platform_generate_cover_image (modules/tools/discovery/actions_blog.py:180, handlers_blog.py:323; today post_id is required) — make post_id optional: without it the image is stored the same way (core/services/image_store.py) AND registered as an image Deliverable, and the description covers social stills. Do not add a second image tool (CLAUDE.md §4). Its cost path is unchanged.",
+   "acceptanceCriteria": [
+    "generate_document with format social_video and a seeded social template returns a Deliverable (test, media-render mocked).",
+    "A playbook whose generate_document step uses a social template renders with data from a prior step (test).",
+    "platform_generate_cover_image without post_id registers an image Deliverable and touches no blog_posts row (test); with post_id its behaviour and existing tests are unchanged.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 17,
+   "passes": false,
+   "notes": "Verified 2026-09-23: agent_platform_tools.py:209-236 (the enum), :721-790 (fmt = parameters.get('format','pdf') → gen_service.generate(format=fmt)); recipe_executor.py:1475-1490 (step types: 'agent' default and 'generate_document'); actions_blog.py:180-208 (required ['post_id','prompt']); config.BLOG_COVER_MODEL (config.py:279)."
+  },
+  {
+   "id": "US-118",
+   "title": "S3.5 pulled forward — one way out: agents cannot post directly when Socials is on (D14b, owner 2026-09-23)",
+   "description": "Today an agent with a social app connected can post with composio_execute and no approval (the old automatos-skills publisher skills do exactly that). Add a data list of social PUBLISH actions — a system setting socials.post_actions, seeded in this wave's ONE migration (extend US-105's revision; it stays one migration), like Wave 0's deny list. In a workspace with Socials on, an AGENT-initiated Composio call to a listed action is refused before any Composio call, with a structured message: 'Socials is on for this workspace: draft the post with platform_create_social_post; a person approves it in the Socials tab and the platform publishes it.' Put the check beside the Wave 0 deny check on the agent paths: core/composio/tool_executor.py (:394 and :696), its LinkedIn image-workaround branch (:734-738), and playbook steps in api/recipe_executor.py (:753 and the workaround at :771-775). The Wave 0 deny list is untouched and evaluated first. Read actions and uploads are unaffected; a workspace with Socials off behaves exactly as today. The check takes an explicit way through for the platform's own publisher (Wave 3) so it never blocks the approved path — nothing uses that way through yet. An unreadable setting fails CLOSED for Socials-on workspaces (Wave 0's RVW-1 lesson).",
+   "acceptanceCriteria": [
+    "In a Socials-on workspace an agent's INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH is refused with the message and no Composio call is made (test; PRD S3.5).",
+    "The LinkedIn image-workaround path and a playbook step are refused the same way (tests).",
+    "A read action (e.g. LINKEDIN_GET_MY_INFO) and an upload (TWITTER_UPLOAD_MEDIA) still run; a Socials-off workspace posts exactly as before (tests).",
+    "With socials.post_actions unreadable, a Socials-on workspace refuses listed actions (fail closed), and the Wave 0 deny list still wins (tests).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 18,
+   "passes": false,
+   "notes": "Seed list — the publish actions the old skills call (automatos-skills social/{instagram-curator,twitter-engager,linkedin-content-creator}/SKILL.md, checked 2026-09-23): INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH, TWITTER_CREATION_OF_A_POST, LINKEDIN_CREATE_LINKED_IN_POST, LINKEDIN_CREATE_POST. Resolve each against composio_actions_cache before seeding; add TikTok/YouTube publish actions only when the cache confirms their slugs — never guess. Wave 0 deny check call sites: tool_executor.py:394,696; recipe_executor.py:753; client.py:1359; composio_api_service.py:385. User-initiated REST routes (api/composio.py) are not agent paths."
+  },
+  {
+   "id": "US-119",
+   "title": "Built-in skills: the Socials skills load from the platform, synced from automatos-skills (owner, 2026-09-23)",
+   "description": "Exactly one skill is built in today: modules/agents/services/skill_loader.py:931 _BUILTIN_PATHS = {'platform-management': core/seeds/platform-management-skill.md}, refreshed by hash at load (_refresh_builtin_if_stale :935) and synced by scripts/sync-auto-skill.py, which reads the sibling automatos-skills checkout's WORKING TREE (no push needed) and writes a frontmatter-intact copy with a generated-file banner (seed :202-203), plus Auto's doctrine checks. Every other skill reaches a workspace only through a GitHub import. Generalize it, keeping Auto's path and behaviour identical: (a) builtin skills are listed in orchestrator/core/seeds/skills/manifest.json (name → seed file → automatos-skills source path) and _BUILTIN_PATHS is built from it — platform-management stays at its current path; (b) a boot seeder creates missing builtin skill rows (platform-owned; mirror how the Shopify agents' skills are resolved by name, core/seeds/seed_shopify_agents.py:517) and the load path refreshes them by hash; (c) scripts/sync-auto-skill.py becomes scripts/sync-skills.py: it syncs ONLY the skills named on the command line (e.g. `python3 scripts/sync-skills.py social-video-director social-ops`), with the same banner and frontmatter rules; there is no sync-everything mode, and platform-management is synced only when named explicitly, keeping Auto's doctrine checks. WHY: automatos-skills main carries Auto at v2.4.0 (PRD-231's context-diet split, which moved the ops cookbook into team/auto-ops), while this platform's seed is v2.3.0 because PRD-231 is blocked on RVW-1 — a blanket sync would silently strip Auto's ops cookbook. Delete the old script and update its references. The manifest lists the Socials skills the US-120 agents use (names in US-120's notes). THIS LOOP NEVER WRITES SKILL CONTENT: seed files under orchestrator/core/seeds/skills/ arrive only from the owner's sync run; tests use a fixture skill. A builtin row never modifies a git-imported row of the same name.",
+   "acceptanceCriteria": [
+    "platform-management is created and refreshed exactly as before (regression test).",
+    "A fixture builtin skill in a test manifest is created at seed time and refreshed at load after its file changes (test).",
+    "sync-skills.py syncs only the named fixture skills into the seeds folder with the banner, never touches an unnamed entry (platform-management included), and refuses a source with no frontmatter (tests; pure file IO).",
+    "A git-imported skill row with the same name as a builtin is left untouched (test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 19,
+   "passes": false,
+   "notes": "Version trap (checked 2026-09-23): automatos-skills team/auto/SKILL.md is version 2.4.0; orchestrator/core/seeds/platform-management-skill.md is 2.3.0 (banner :202-203). Anchors: skill_loader.py:931-944; scripts/sync-auto-skill.py:2-44 (the rule, DEFAULT_SOURCE :38-41, the banner); core/seeds/platform-management-skill.md:202-203; seed_shopify_agents.py:517-521 (skills resolved by name; missing ones skipped). No test pins sync-auto-skill.py today (checked 2026-09-23). Owner rule (memory feedback-skills-repo-source-of-truth): skills are authored in automatos-skills, never in this repo."
+  },
+  {
+   "id": "US-120",
+   "title": "The Socials package: two agents, four playbooks, guided setup (data, the PRD-230 pattern)",
+   "description": "Seed at boot, idempotently, the Socials marketplace package — all DATA, reusing the PRD-230 machinery. (1) Two marketplace agents on the Shopify pattern (core/seeds/seed_shopify_agents.py: real Agent rows owner_type='marketplace', custom_persona_prompt + use_custom_persona, skills by name, Composio apps via agent_app_assignments; boot-wired like load_seed_data.py:187-188) — NOT marketplace_items: the marketplace API lists and installs Agent rows only (api/marketplace.py list_items/install_item). 'Social Media Director' (slug social-media-director) plans content, writes per-channel copy, picks templates, drafts posts with sources, renders them and submits them for approval, and never publishes. 'Brand Designer' (slug brand-designer) builds and keeps the brand kit (the website via platform_web_fetch, the brand-kit suggestions, platform_update_brand_kit) and checks renders against it. Unlike the Shopify seeder, reconcile skill links on EVERY boot, so builtin skills synced after the first boot attach to the existing marketplace agents. Never attach instagram-curator, twitter-engager, linkedin-content-creator or html-to-png. (2) Four marketplace playbooks — workflow_recipes rows with owner_type='marketplace' (none are seeded anywhere today; mirror the row construction at core/seeds/seed_local_first_run.py:726): 'Brand kit from your website' (Brand Designer); 'Launch video' (the Director writes the script and variables → a generate_document step renders a social_video template → the Director drafts the post with the rendered media and submits it); 'Weekly social posts' (S4.2 pulled forward: reads the week's Deliverables, blog posts and reports, proposes N posts, default 5, across the channels, drafts them with sources and leaves them for approval; seeded unscheduled — the guide offers platform_schedule_playbook); 'Image carousel' (the Director writes the slides → a generate_document step renders the carousel template → draft and submit). (3) The package row (core/seeds/seed_packages.py pattern; boot create-missing at main.py:277): slug 'socials', members = the two agents and four playbooks (plus skills if the installer needs them), setup_manifest = questions (website URL; channels; posting cadence; monthly media cap → socials.media_monthly_cap_usd), required_connects (optional: LinkedIn / X / Instagram for publishing later; one generation toolkit — fal_ai, kieai or higgsfield_mcp; one voice toolkit — fish_audio or elevenlabs), guide_steps (turn Socials on → run 'Brand kit from your website' → run 'Launch video' → approve in the Socials tab), report_templates (a weekly social report).",
+   "acceptanceCriteria": [
+    "POST /api/marketplace/packages/socials/install into a test workspace clones both agents workspace-owned, with persona and skills (fixture skills in tests) (test).",
+    "All four playbooks are cloned by the install — the installer's playbook path (package_installer.py, cascade_recipe_dependencies) is exercised for the first time — and a re-install is idempotent (tests).",
+    "platform_search_packages finds 'socials', and its setup manifest carries the questions, connects and guide steps (test).",
+    "Neither agent carries a publisher skill or html-to-png, and a skill synced after first boot attaches on the next boot (tests).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, and the media-render job once US-101 adds it); record the run id."
+   ],
+   "priority": 20,
+   "passes": false,
+   "notes": "Skills (all builtin via US-119, synced by the owner): Director — social-video-director, social-ops, social-production-workflow, social-template-payloads, social-media-strategist, social-brand-voice, carousel-design-system, image-prompt-engineer, short-video-editing-coach. Brand Designer — brand-kit-builder (new), visual-storyteller, image-prompt-engineer, social-brand-voice. NOT brand-guardian: that skill audits the Automatos platform's own UI copy, not a customer's brand. Anchors: seed_packages.py:64,115,134,137,152,230; dependency_closure.py:81,112,117,124; package_installer.py:9-17,231,307,340; api/marketplace.py:1082 (package install route); models/marketplace_packages.py:41-59; core/models/core.py:1292,1302,1318 (workflow_recipes: table, owner_type, steps JSONB); recipe_executor.py:1475 (step types). Tools the agents rely on: platform_create/update/submit/get_social_post, generate_document, platform_list_templates, platform_get_template_schema, platform_get/update_brand_kit, platform_generate_cover_image, search_knowledge, platform_search_memory, platform_web_fetch, platform_list_deliverables."
+  }
+ ]
+}

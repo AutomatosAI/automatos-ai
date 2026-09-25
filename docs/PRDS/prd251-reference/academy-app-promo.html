@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Automatos Academy — prove it</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Funnel Display"; src: url("assets/fonts/FunnelDisplay.ttf") format("truetype"); font-weight: 300 800; font-style: normal; }
+      @font-face { font-family: "Funnel Sans"; src: url("assets/fonts/FunnelSans.ttf") format("truetype"); font-weight: 300 800; font-style: normal; }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #141d30; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "Funnel Sans", sans-serif; color: #e6edf8; }
+      .clip { position: absolute; inset: 0; }
+      .disp { font-family: "Funnel Display", sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+      .lab { font-family: "Funnel Sans", sans-serif; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
+      .c { color: #ff6b42; }
+      .w { display: inline-block; opacity: 0; }
+
+      /* ---------- persistent background (Academy Night) ---------- */
+      #bg { z-index: 0; }
+      .bg-base { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, #24314c 0%, #1c2740 45%, #141d30 100%); }
+      .bg-floor { position: absolute; left: -540px; right: -540px; top: 1040px; height: 1000px; perspective: 700px; perspective-origin: 50% 0%; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 100%); mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 100%); }
+      .bg-plane { position: absolute; left: 0; right: 0; top: 0; height: 2600px; transform-origin: 50% 0%; transform: rotateX(68deg);
+        background-image: linear-gradient(rgba(169, 191, 221, 0.2) 2px, transparent 2px), linear-gradient(90deg, rgba(169, 191, 221, 0.2) 2px, transparent 2px);
+        background-size: 120px 120px; background-position: 0px 0px; }
+      #glowA { position: absolute; left: -310px; top: 300px; width: 1700px; height: 1700px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(255, 107, 66, 0.2) 0%, rgba(255, 107, 66, 0.06) 35%, transparent 62%); opacity: 0.7; }
+      #glowB { position: absolute; left: 140px; top: -520px; width: 1300px; height: 1300px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(169, 191, 221, 0.18) 0%, transparent 60%); opacity: 0.8; }
+      .grain { position: absolute; inset: 0; opacity: 0.06;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+      .vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, rgba(5, 8, 16, 0.6) 100%); }
+
+      /* ---------- footage ---------- */
+      .vid { z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+      .vwrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+      .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .frz { z-index: 1; overflow: hidden; }
+      .frz img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+      /* ---------- captions ---------- */
+      .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1462px; }
+      .cap-in { max-width: 930px; padding: 16px 28px; border-radius: 20px; background: rgba(20, 29, 48, 0.84); border: 1px solid rgba(169, 191, 221, 0.35);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); font-size: 40px; font-weight: 500; line-height: 1.25; text-align: center; color: #e6edf8; opacity: 0; }
+      .cw { color: #e6edf8; }
+
+      /* ---------- S1: hook ---------- */
+      #s1 { z-index: 3; }
+      .s1-grad { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20, 29, 48, 0.55) 0%, rgba(20, 29, 48, 0) 28%, rgba(20, 29, 48, 0) 46%, rgba(20, 29, 48, 0.85) 72%, rgba(20, 29, 48, 0.96) 100%); }
+      #s1head { position: absolute; left: 72px; right: 72px; top: 1090px; font-size: 104px; line-height: 1.14; }
+      #s1q { position: absolute; left: 72px; right: 72px; top: 1370px; font-size: 104px; line-height: 1.0; color: #ff6b42; opacity: 0; }
+      #flash { position: absolute; inset: 0; background: #e6edf8; opacity: 0; }
+
+      /* ---------- S2: boot (real brain loop) ---------- */
+      #s2 { z-index: 3; }
+      #s2wrap { position: absolute; inset: 0; }
+      .s2-shade { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 40% at 50% 46%, rgba(20, 29, 48, 0) 0%, rgba(20, 29, 48, 0.35) 70%, rgba(20, 29, 48, 0.8) 100%); }
+      #s2lab { position: absolute; left: 0; right: 0; top: 300px; text-align: center; font-size: 32px; color: #e6edf8; opacity: 0; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.6); }
+      #s2t1, #s2t2 { position: absolute; left: 0; right: 0; text-align: center; font-size: 150px; line-height: 1; opacity: 0; text-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); }
+      #s2t1 { top: 1165px; }
+      #s2t2 { top: 1350px; }
+      #s2coach { position: absolute; left: 0; right: 0; top: 1520px; text-align: center; font-size: 28px; color: #a9bfdd; letter-spacing: 0.3em; opacity: 0; }
+
+      /* ---------- phone (S3 today + question, S4 tutor) ---------- */
+      #phoneA { z-index: 3; }
+      .persp { position: absolute; inset: 0; perspective: 1800px; perspective-origin: 50% 40%; }
+      #phone { position: absolute; left: 175px; top: 290px; width: 730px; height: 1130px; border-radius: 70px; background: #141d30; border: 3px solid rgba(169, 191, 221, 0.35);
+        box-shadow: 0 60px 140px rgba(0, 0, 0, 0.6), 0 0 0 10px rgba(20, 29, 48, 0.6), 0 0 120px rgba(169, 191, 221, 0.22); overflow: hidden; opacity: 0; }
+      .scr { position: absolute; inset: 0; padding: 58px 38px 0; }
+      .sbar { display: flex; justify-content: space-between; font-size: 22px; font-weight: 600; color: #e6edf8; padding: 0 12px; }
+      .hdr { margin-top: 26px; display: flex; align-items: center; justify-content: space-between; }
+      .hdr .t { font-size: 24px; color: #a9bfdd; }
+      .dock { position: absolute; left: 90px; right: 90px; bottom: 34px; height: 74px; border-radius: 999px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.25);
+        display: flex; align-items: center; justify-content: space-around; font-size: 20px; color: #9fb0cc; }
+      .dock .on { color: #e6edf8; font-weight: 600; }
+      /* today strip */
+      #today { margin-top: 22px; display: flex; align-items: center; gap: 22px; padding: 22px 24px; border-radius: 28px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.2); opacity: 0; }
+      .ring { position: relative; width: 92px; height: 92px; flex: none; }
+      .ring svg { position: absolute; left: 0; top: 0; }
+      .ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+      #today .k { font-size: 20px; color: #ff8a5c; }
+      #today .v { font-size: 25px; margin-top: 6px; line-height: 1.25; }
+      .streak { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 30px; font-weight: 700; color: #ffa075; }
+      /* question card */
+      #qcard { margin-top: 22px; padding: 26px 26px 22px; border-radius: 28px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.2); opacity: 0; }
+      .chip { display: inline-block; padding: 6px 14px; border-radius: 999px; background: rgba(169, 191, 221, 0.14); color: #a9bfdd; font-size: 18px; }
+      #qcard .ql { font-size: 18px; color: #ff8a5c; margin-top: 16px; }
+      #qcard .qt { font-size: 27px; line-height: 1.32; margin-top: 8px; }
+      .optq { position: relative; margin-top: 12px; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(169, 191, 221, 0.25); font-size: 23px; line-height: 1.25; color: #d6e0ef; opacity: 0; }
+      .optq b { color: #a9bfdd; margin-right: 10px; }
+      #oA .ok { position: absolute; right: 16px; top: 50%; margin-top: -15px; opacity: 0; }
+      #qres { margin-top: 14px; display: flex; align-items: center; gap: 14px; opacity: 0; }
+      #qres .good { font-size: 24px; font-weight: 700; color: #5bbf7a; }
+      #qres .btn { margin-left: auto; padding: 10px 18px; border-radius: 999px; background: rgba(255, 107, 66, 0.16); color: #ffa075; font-size: 20px; }
+      .src { margin-top: 12px; display: flex; justify-content: space-between; font-size: 17px; color: #9fb0cc; }
+      #tap { position: absolute; left: 300px; top: 560px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid #ff6b42; opacity: 0; }
+      /* tutor screen */
+      #tutor { opacity: 0; }
+      #tutor .ttl { font-size: 44px; margin-top: 6px; }
+      .about { margin-top: 18px; display: inline-block; padding: 8px 16px; border-radius: 14px; background: rgba(169, 191, 221, 0.12); color: #a9bfdd; font-size: 20px; }
+      .ub { margin-top: 22px; margin-left: auto; width: fit-content; max-width: 520px; padding: 16px 22px; border-radius: 22px 22px 6px 22px; background: #273c59; font-size: 25px; opacity: 0; }
+      .tb { margin-top: 18px; padding: 20px 22px; border-radius: 22px 22px 22px 6px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.2); font-size: 24px; line-height: 1.38; color: #dde6f3; }
+      .tb .tw { opacity: 0; }
+      .cite { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; opacity: 0; }
+      .cite span { padding: 6px 14px; border-radius: 999px; font-size: 18px; }
+      .cite .a { background: rgba(91, 191, 122, 0.16); color: #7fd49a; }
+      .cite .b { background: rgba(169, 191, 221, 0.14); color: #a9bfdd; }
+      .scope { margin-top: 12px; font-size: 18px; color: #9fb0cc; opacity: 0; }
+      .ask { position: absolute; left: 38px; right: 38px; bottom: 130px; height: 70px; border-radius: 22px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.2); display: flex; align-items: center; padding: 0 12px 0 22px; gap: 10px; font-size: 22px; color: #9fb0cc; }
+      .ask .bt { margin-left: auto; padding: 10px 18px; border-radius: 16px; background: #a9bfdd; color: #141d30; font-weight: 700; font-size: 20px; }
+      .ask .bt2 { padding: 10px 18px; border-radius: 16px; border: 1px solid rgba(169, 191, 221, 0.4); color: #a9bfdd; font-size: 20px; }
+
+      /* ---------- S5: mock + gate (over focus footage) ---------- */
+      #s5 { z-index: 3; }
+      .s5-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20, 29, 48, 0.25) 0%, rgba(20, 29, 48, 0.55) 45%, rgba(20, 29, 48, 0.9) 100%); }
+      #mock, #gate { position: absolute; left: 90px; right: 90px; top: 760px; padding: 36px 36px 32px; border-radius: 32px; background: rgba(28, 39, 64, 0.94); border: 1px solid rgba(169, 191, 221, 0.28);
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 80px rgba(169, 191, 221, 0.15); opacity: 0; }
+      #mock .t { font-size: 58px; }
+      #mock .s { font-size: 30px; color: #a9bfdd; margin-top: 12px; }
+      #begin { position: relative; margin-top: 26px; height: 84px; border-radius: 22px; background: #e6edf8; color: #141d30; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; }
+      #ripple { position: absolute; left: 50%; top: 50%; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; border: 3px solid #ff6b42; opacity: 0; }
+      #gate .k { font-size: 22px; color: #ffa075; }
+      .grow { margin-top: 18px; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 20px; background: #141d30; border: 1px solid rgba(169, 191, 221, 0.2); font-size: 28px; }
+      .dotc { position: relative; width: 40px; height: 40px; flex: none; }
+      .dotc .e { position: absolute; inset: 0; border-radius: 50%; border: 3px solid #4a5f82; }
+      .dotc .f { position: absolute; inset: 0; border-radius: 50%; background: #5bbf7a; display: flex; align-items: center; justify-content: center; opacity: 0; }
+
+      /* ---------- S6: A+ ---------- */
+      #s6 { z-index: 3; }
+      #aplus { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: 460px; line-height: 1; color: #dcc363; text-shadow: 0 0 80px rgba(220, 195, 99, 0.45), 0 20px 60px rgba(0, 0, 0, 0.5); opacity: 0; }
+      #ornot { position: absolute; left: 0; right: 0; top: 1030px; text-align: center; font-size: 96px; color: #a9bfdd; opacity: 0; }
+      #passed { position: absolute; left: 0; right: 0; top: 380px; text-align: center; font-size: 30px; color: #e6edf8; opacity: 0; }
+
+      /* ---------- S7: tracks ---------- */
+      #s7 { z-index: 3; }
+      #tkhead { position: absolute; left: 72px; right: 72px; top: 250px; opacity: 0; }
+      #tkhead .t { font-size: 104px; line-height: 1; }
+      #tkhead .s { font-size: 30px; color: #a9bfdd; margin-top: 18px; }
+      .tgrid { position: absolute; left: 72px; right: 72px; top: 520px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .tk { height: 150px; border-radius: 24px; background: #1c2740; border: 1px solid rgba(169, 191, 221, 0.2); padding: 20px 22px; opacity: 0; }
+      .tk .cd { font-family: "Funnel Display", sans-serif; font-weight: 700; font-size: 34px; color: #e6edf8; }
+      .tk .nm { font-size: 22px; line-height: 1.25; color: #a9bfdd; margin-top: 8px; }
+      .tk.hot { border-color: #ff6b42; box-shadow: 0 0 0 1px #ff6b42, 0 0 50px rgba(255, 107, 66, 0.3); }
+
+      /* ---------- S8: end card over the rooftop ---------- */
+      #s8 { z-index: 3; }
+      .s8-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20, 29, 48, 0.4) 0%, rgba(20, 29, 48, 0) 30%, rgba(20, 29, 48, 0.2) 50%, rgba(20, 29, 48, 0.88) 78%, rgba(20, 29, 48, 0.97) 100%); opacity: 0; }
+      #eicon { position: absolute; left: 420px; top: 560px; width: 240px; height: 240px; opacity: 0; filter: drop-shadow(0 10px 40px rgba(0, 0, 0, 0.5)); }
+      #ename { position: absolute; left: 0; right: 0; top: 1110px; text-align: center; font-size: 84px; opacity: 0; }
+      #efree { position: absolute; left: 0; right: 0; top: 1220px; text-align: center; font-size: 40px; color: #a9bfdd; opacity: 0; }
+      #eprove { position: absolute; left: 0; right: 0; top: 1290px; text-align: center; font-size: 120px; color: #ff6b42; opacity: 0; text-shadow: 0 10px 50px rgba(0, 0, 0, 0.5); }
+      #eurl { position: absolute; left: 0; right: 0; top: 1470px; display: flex; flex-direction: column; align-items: center; gap: 14px; opacity: 0; }
+      #eurl .u { font-size: 44px; font-weight: 600; letter-spacing: 0.02em; }
+      #euline { width: 470px; height: 3px; background: #ff6b42; transform-origin: 0 50%; }
+      #eurl .n { font-size: 20px; color: #9fb0cc; max-width: 840px; text-align: center; line-height: 1.35; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="38" data-width="1080" data-height="1920">
+      <!-- ================= persistent background ================= -->
+      <div id="bg" class="clip" data-start="0" data-duration="38" data-track-index="0">
+        <div class="bg-base"></div>
+        <div id="glowB"></div>
+        <div id="glowA"></div>
+        <div class="bg-floor"><div class="bg-plane" id="plane" data-layout-allow-overflow></div></div>
+        <div class="grain"></div>
+        <div class="vig"></div>
+      </div>
+
+      <!-- ================= footage ================= -->
+      <video id="va1" class="clip vid" src="assets/cine/a1_commute.mp4" data-start="0" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <div id="fa1" class="clip frz" data-start="4.04" data-duration="0.91" data-track-index="1"><img id="fa1img" src="assets/cine/a1_last.jpg" alt="" /></div>
+      <video id="vbrain" class="clip vid" src="assets/academy/hero-loop.mp4" data-start="4.95" data-duration="3.9" data-track-index="1" muted playsinline></video>
+      <video id="va2" class="clip vid" src="assets/cine/a2_desk.mp4" data-start="8.85" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <video id="va3" class="clip vid" src="assets/cine/a3_focus.mp4" data-start="17.1" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <div class="vwrap" id="w4"><video id="va4" class="clip" src="assets/cine/a4_rooftop.mp4" data-start="29.5" data-duration="5.04" data-track-index="1" muted playsinline></video></div>
+      <div id="fa4" class="clip frz" data-start="34.54" data-duration="3.46" data-track-index="1"><img id="fa4img" src="assets/cine/a4_last.jpg" alt="" /></div>
+
+      <!-- ================= S1: Everyone says they know AI. Can you prove it? ================= -->
+      <section id="s1" class="clip" data-start="0" data-duration="4.95" data-track-index="2">
+        <div class="s1-grad"></div>
+        <div id="s1head" class="disp"><span class="w">Everyone</span> <span class="w">says</span> <span class="w">they</span> <span class="w">know</span> <span class="w c">AI.</span></div>
+        <div id="s1q" class="disp">Can you prove it?</div>
+        <div id="flash"></div>
+      </section>
+
+      <!-- ================= S2: Meet Automatos Academy. Train your AI mind. ================= -->
+      <section id="s2" class="clip" data-start="4.95" data-duration="3.9" data-track-index="2">
+        <div id="s2wrap">
+          <div class="s2-shade"></div>
+          <div id="s2lab" class="lab">Automatos Academy</div>
+          <div id="s2t1" class="disp">TRAIN YOUR</div>
+          <div id="s2t2" class="disp"><span class="c">AI</span> MIND</div>
+          <div id="s2coach" class="lab">Academy Coach</div>
+        </div>
+      </section>
+
+      <!-- ================= S3+S4: the app (phone) ================= -->
+      <section id="phoneA" class="clip" data-start="8.85" data-duration="8.25" data-track-index="2">
+        <div class="persp">
+          <div id="phone">
+            <!-- today + question -->
+            <div class="scr" id="scrQ">
+              <div class="sbar"><span>9:41</span><span>● ● ●</span></div>
+              <div class="hdr"><span class="t lab">CCA-F</span><span class="t">☰</span></div>
+              <div id="today">
+                <div class="ring">
+                  <svg width="92" height="92" viewBox="0 0 92 92"><circle cx="46" cy="46" r="38" fill="none" stroke="#24314c" stroke-width="9" /><circle id="ringArc" cx="46" cy="46" r="38" fill="none" stroke="#ff6b42" stroke-width="9" stroke-linecap="round" stroke-dasharray="238.8" stroke-dashoffset="238.8" transform="rotate(-90 46 46)" /></svg>
+                  <div class="pct">68%</div>
+                </div>
+                <div><div class="k lab">Today</div><div class="v">18 reviews · 1 weak-domain drill · ~11 min</div></div>
+                <div class="streak"><svg width="26" height="30" viewBox="0 0 24 28" fill="#ffa075"><path d="M12 1c1 4 6 7 6 13a6 6 0 0 1-12 0c0-3 1.5-5 3-6.5C9 10 9.5 12 11 13c0-4-1-8 1-12z" /></svg>7</div>
+              </div>
+              <div id="qcard">
+                <span class="chip">D1 · Agentic Architecture &amp; Orchestration</span>
+                <div class="ql lab">Question</div>
+                <div class="qt">A product team can fully describe a 3-step pipeline (fetch → transform → notify) with known branching. Which architecture best fits?</div>
+                <div class="optq" id="oA"><b>A</b>A code-orchestrated workflow with tool use
+                  <svg class="ok" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#5bbf7a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg></div>
+                <div class="optq" id="oB"><b>B</b>An open-ended agent that decides the steps</div>
+                <div class="optq" id="oC"><b>C</b>A multi-agent coordinator</div>
+                <div class="optq" id="oD"><b>D</b>A single LLM call with no tools</div>
+                <div id="qres"><span class="good">Correct</span><span class="btn">Ask the tutor about this →</span></div>
+                <div class="src"><span>Cited — entailment-checked</span><span>Verify against official docs ↗</span></div>
+              </div>
+              <div id="tap"></div>
+            </div>
+            <!-- tutor -->
+            <div class="scr" id="tutor">
+              <div class="sbar"><span>9:42</span><span>● ● ●</span></div>
+              <div class="hdr"><span class="t lab">Tutor</span><span class="t">✕</span></div>
+              <div class="ttl disp">Ask the tutor</div>
+              <div class="about">About: “Which architecture best fits?”</div>
+              <div class="ub" id="ub">Why a workflow — not an agent?</div>
+              <div class="tb" id="tb"></div>
+              <div class="cite" id="cite"><span class="a">✓ Cited — entailment-checked</span><span class="b">Verify against official docs ↗</span></div>
+              <div class="scope" id="scope">Exam-domain answers only — not general chat.</div>
+              <div class="ask"><span>Type your question…</span><span class="bt2">Speak</span><span class="bt">Ask</span></div>
+            </div>
+            <div class="dock"><span class="on">Feed</span><span>Library</span><span>Podcast</span><span>Profile</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S5: mock + gate ================= -->
+      <section id="s5" class="clip" data-start="17.1" data-duration="4.1" data-track-index="2">
+        <div class="s5-shade"></div>
+        <div id="mock">
+          <div class="t disp">Exam conditions.</div>
+          <div class="s">60 questions — this takes ~120 minutes.</div>
+          <div id="begin">Begin the mock<div id="ripple"></div></div>
+        </div>
+        <div id="gate">
+          <div class="k lab">The gate — both parts must be green</div>
+          <div class="grow"><div class="dotc"><div class="e"></div><div class="f" id="g1"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#141d30" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>Every domain at 85% or better</div>
+          <div class="grow"><div class="dotc"><div class="e"></div><div class="f" id="g2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#141d30" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>One full mock at 720/1000 or better</div>
+        </div>
+      </section>
+
+      <!-- ================= S6: A+ — or not yet ================= -->
+      <section id="s6" class="clip" data-start="21.2" data-duration="2.15" data-track-index="2">
+        <div id="passed" class="lab">Passed with margin — the A+ standard</div>
+        <div id="aplus" class="disp">A+</div>
+        <div id="ornot" class="disp">— or not yet.</div>
+      </section>
+
+      <!-- ================= S7: ten tracks ================= -->
+      <section id="s7" class="clip" data-start="23.35" data-duration="6.15" data-track-index="2">
+        <div id="tkhead">
+          <div class="t disp">Ten tracks.</div>
+          <div class="s">227 lessons · 85 labs · 1,691 practice questions</div>
+        </div>
+        <div class="tgrid">
+          <div class="tk" id="t1"><div class="cd">CCA-F</div><div class="nm">Claude Certified Architect — Foundations</div></div>
+          <div class="tk" id="t2"><div class="cd">GH-300</div><div class="nm">GitHub Copilot</div></div>
+          <div class="tk" id="t3"><div class="cd">GH-500</div><div class="nm">GitHub Advanced Security</div></div>
+          <div class="tk" id="t4"><div class="cd">GAL</div><div class="nm">Generative AI Leader (Google Cloud)</div></div>
+          <div class="tk" id="t5"><div class="cd">AIGP</div><div class="nm">AI Governance Professional (IAPP)</div></div>
+          <div class="tk" id="t6"><div class="cd">APA</div><div class="nm">Automatos Platform Architect</div></div>
+          <div class="tk" id="t7"><div class="cd">ABF</div><div class="nm">AI Business Foundations</div></div>
+          <div class="tk" id="t8"><div class="cd">AIX</div><div class="nm">AI Explained</div></div>
+          <div class="tk" id="t9"><div class="cd">AIS</div><div class="nm">AI Security — LLM &amp; Agent Security</div></div>
+          <div class="tk" id="t10"><div class="cd">CVF</div><div class="nm">Cross-Vendor Fluency</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S8: end card ================= -->
+      <section id="s8" class="clip" data-start="29.5" data-duration="8.5" data-track-index="2">
+        <div class="s8-shade" id="s8shade"></div>
+        <img id="eicon" src="assets/academy/icon.png" alt="Automatos Academy" />
+        <div id="ename" class="disp">Automatos Academy</div>
+        <div id="efree">Free · Learn by doing.</div>
+        <div id="eprove" class="disp">Prove it.</div>
+        <div id="eurl"><div class="u">academy.automatos.app</div><div id="euline"></div><div class="n">Independent exam prep. Not affiliated with Anthropic, GitHub, Google Cloud or IAPP.</div></div>
+      </section>
+
+      <!-- ================= captions ================= -->
+      <div class="clip cap" id="cap4" data-start="8.92" data-duration="3.6" data-track-index="5"><div class="cap-in">Ten minutes a day. Questions, labs and real scenarios.</div></div>
+      <div class="clip cap" id="cap5" data-start="13.22" data-duration="3.1" data-track-index="5"><div class="cap-in">Stuck? Ask the tutor. Every answer cites its source.</div></div>
+      <div class="clip cap" id="cap6" data-start="17.22" data-duration="3.3" data-track-index="5"><div class="cap-in">Then sit the full mock. Real clock. Real standard.</div></div>
+      <div class="clip cap" id="cap8" data-start="23.42" data-duration="4.5" data-track-index="5"><div class="cap-in"><span class="cw" id="k1">Ten tracks.</span> <span class="cw" id="k2">Claude,</span> <span class="cw" id="k3">GitHub Copilot,</span> <span class="cw" id="k4">Google Cloud,</span> <span class="cw" id="k5">AI governance.</span></div></div>
+
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="38" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      // tutor answer, word by word
+      const answer = "Because every step is known up front — fetch, transform, notify. A code-orchestrated workflow with tool use is predictable and testable. Reach for an agent when the steps can't be known in advance.";
+      const tb = document.getElementById("tb");
+      answer.split(" ").forEach((w, i) => {
+        const s = document.createElement("span");
+        s.className = "tw";
+        s.textContent = (i ? " " : "") + w;
+        tb.appendChild(s);
+      });
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#plane", { backgroundPosition: "0px 0px" }, { backgroundPosition: "0px 1320px", duration: 38, ease: "none" }, 0);
+      tl.fromTo("#fa1img", { scale: 1.0 }, { scale: 1.05, duration: 0.91, ease: "none" }, 4.04);
+      tl.fromTo("#w4", { scale: 1.1 }, { scale: 1.08, duration: 5.04, ease: "none" }, 29.5);
+      tl.fromTo("#fa4img", { scale: 1.08 }, { scale: 1.0, duration: 3.46, ease: "power1.out" }, 34.54);
+
+      // ===== S1 (0 – 4.95)
+      [0.33, 0.75, 0.98, 1.15, 1.4].forEach((t, i) => {
+        tl.fromTo(`#s1head .w:nth-child(${i + 1})`, { y: 44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "power3.out" }, t);
+      });
+      tl.fromTo("#s1q", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 2.63);
+      tl.fromTo("#flash", { opacity: 0 }, { opacity: 0.85, duration: 0.07, yoyo: true, repeat: 1 }, 4.82);
+
+      // ===== S2 (4.95 – 8.85): brain loop + TRAIN YOUR AI MIND
+      tl.fromTo("#s2lab", { y: -20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 5.3);
+      tl.fromTo("#s2t1", { y: 50, opacity: 0, scale: 1.06 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: "power3.out" }, 6.72);
+      tl.fromTo("#s2t2", { y: 50, opacity: 0, scale: 1.06 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: "power3.out" }, 7.12);
+      tl.fromTo("#s2coach", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 7.5);
+      tl.to("#s2wrap", { opacity: 0, scale: 0.94, filter: "blur(8px)", duration: 0.25, ease: "power2.in" }, 8.6);
+
+      // ===== S3 (8.85 – 12.9): Ten minutes a day. Questions, labs and real scenarios.
+      tl.fromTo("#phone", { y: 180, rotationX: 16, opacity: 0 }, { y: 0, rotationX: 0, opacity: 1, duration: 0.55, ease: "power3.out" }, 8.85);
+      tl.fromTo("#today", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 9.05);
+      tl.fromTo("#ringArc", { attr: { "stroke-dashoffset": 238.8 } }, { attr: { "stroke-dashoffset": 76.4 }, duration: 0.9, ease: "power2.out" }, 9.15);
+      tl.fromTo("#qcard", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 10.1);
+      tl.fromTo(".optq", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.25, stagger: 0.12, ease: "power2.out" }, 10.35);
+      tl.fromTo("#tap", { scale: 0.3, opacity: 0.9 }, { scale: 1.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 11.7);
+      tl.to("#oA", { backgroundColor: "rgba(91,191,122,0.16)", borderColor: "#5bbf7a", duration: 0.2 }, 11.72);
+      tl.fromTo("#oA .ok", { scale: 0.4, opacity: 0, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, duration: 0.22, ease: "back.out(3)" }, 11.75);
+      tl.to(["#oB", "#oC", "#oD"], { opacity: 0.45, duration: 0.2 }, 11.75);
+      tl.fromTo("#qres", { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "power2.out" }, 11.9);
+
+      // ===== S4 (12.9 – 17.1): Stuck? Ask the tutor. Every answer cites its source.
+      tl.to("#scrQ", { opacity: 0, x: -60, duration: 0.25, ease: "power2.in" }, 12.9);
+      tl.fromTo("#tutor", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.3, ease: "power3.out" }, 13.05);
+      tl.fromTo("#ub", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "back.out(1.7)" }, 13.4);
+      tl.to("#tb .tw", { opacity: 1, duration: 0.02, stagger: 0.036, ease: "none" }, 13.75);
+      tl.fromTo("#cite", { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "back.out(2)" }, 14.7);
+      tl.fromTo("#scope", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 15.4);
+      tl.to("#phone", { y: -40, scale: 0.96, opacity: 0, duration: 0.3, ease: "power2.in" }, 16.8);
+
+      // ===== S5 (17.1 – 21.2): Then sit the full mock. Real clock. Real standard.
+      tl.fromTo("#mock", { y: 60, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: "back.out(1.4)" }, 17.25);
+      tl.fromTo("#begin", { scale: 1 }, { scale: 0.96, duration: 0.08, yoyo: true, repeat: 1 }, 19.52);
+      tl.fromTo("#ripple", { scale: 0.2, opacity: 0.8 }, { scale: 2.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 19.55);
+      tl.to("#mock", { y: -40, opacity: 0, duration: 0.25, ease: "power2.in" }, 19.8);
+      tl.fromTo("#gate", { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 19.95);
+      tl.fromTo("#g1", { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.2, ease: "back.out(3)" }, 20.2);
+      tl.fromTo("#g2", { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.2, ease: "back.out(3)" }, 20.5);
+      tl.to("#gate", { scale: 1.04, opacity: 0, duration: 0.22, ease: "power2.in" }, 20.95);
+
+      // ===== S6 (21.2 – 23.35): A-plus, or not yet.
+      tl.fromTo("#aplus", { scale: 1.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 21.34);
+      tl.fromTo("#passed", { y: -16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 21.6);
+      tl.fromTo("#ornot", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 22.05);
+      tl.to(["#aplus", "#ornot", "#passed"], { opacity: 0, duration: 0.2 }, 23.12);
+
+      // ===== S7 (23.35 – 29.5): Ten tracks. Claude, GitHub Copilot, Google Cloud, AI governance.
+      tl.fromTo("#tkhead", { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 23.4);
+      tl.fromTo(".tk", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, stagger: 0.07, ease: "power3.out" }, 23.5);
+      [["#t1", 24.52], ["#t2", 25.2], ["#t4", 26.09], ["#t5", 26.93]].forEach(([t, at]) => {
+        tl.to(t, { borderColor: "#FF6B42", boxShadow: "0 0 0 1px #FF6B42, 0 0 50px rgba(255,107,66,0.3)", scale: 1.04, duration: 0.2, ease: "power2.out" }, at);
+        tl.to(t, { scale: 1, duration: 0.3, ease: "power2.out" }, at + 0.25);
+      });
+      tl.to(["#tkhead", ".tgrid"], { opacity: 0, duration: 0.25, ease: "power2.in" }, 29.2);
+
+      // ===== S8 (29.5 – 38): Automatos Academy. Free. Learn by doing. Prove it.
+      tl.fromTo("#s8shade", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 29.5);
+      tl.fromTo("#eicon", { scale: 0.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.6)" }, 29.66);
+      tl.fromTo("#ename", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, 29.72);
+      tl.fromTo("#efree", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 31.16);
+      tl.fromTo("#eprove", { scale: 1.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.4, ease: "expo.out" }, 32.77);
+      tl.fromTo("#eurl", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 33.3);
+      tl.fromTo("#euline", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 33.4);
+      tl.to("#eicon", { y: -10, duration: 1.6, yoyo: true, repeat: 1, ease: "sine.inOut" }, 34.4);
+
+      // ===== captions
+      [["#cap4", 8.92, 3.6], ["#cap5", 13.22, 3.1], ["#cap6", 17.22, 3.3], ["#cap8", 23.42, 4.5]].forEach(([c, s, d]) => {
+        tl.fromTo(`${c} .cap-in`, { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.18, ease: "power2.out" }, s);
+        tl.to(`${c} .cap-in`, { opacity: 0, duration: 0.15 }, s + d - 0.15);
+      });
+      [["#k1", 23.42], ["#k2", 24.52], ["#k3", 25.2], ["#k4", 26.09], ["#k5", 26.93]].forEach(([k, t]) => {
+        tl.to(k, { color: "#FF6B42", duration: 0.08 }, t);
+        tl.to(k, { color: "#E6EDF8", duration: 0.2 }, t + 0.55);
+      });
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

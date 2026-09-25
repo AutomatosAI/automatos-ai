@@ -13,6 +13,14 @@
 >   - the guardrails (D16).
 > - **Dropped:** the owner-recorded voice, and our own provider clients with the API-key route (D11, D12 and D15 as first written).
 >
+> **Wave 1 decisions (owner, 2026-09-23, after Wave 0 shipped as #782):**
+> - **Push forward (owner, later on 2026-09-23):** Wave 1 builds now, stacked on Wave 0 (`feat/prd-251-socials`, #782), without waiting for Wave 0's merge. The owner tests both waves on the socials stack once the current test cycle finishes. Wave 0 then landed on `main` through PR #783 (`test/customer-night` → `main`, #782 closed as landed there), so a Wave 1 launched after it is cut from `main`, and its migration chains onto `f049_prd251_merge_heads`. This replaces the earlier "launch only after Wave 0 is tested and merged".
+> - The renderer is its own Railway service from day one: **4 vCPU / 8 GB, two renders at once** overall, one at a time per workspace.
+> - Monthly render quotas: **Basic 10 min, Pro 60 min, Business 240 min**, as config. Enterprise and the local edition have no quota until the owner sets one.
+> - **Both editions** in Wave 1: the renderer ships as the optional compose profile `media` in the local edition.
+> - **S4.4 (the `media` cost lane) moves into Wave 1**, because S1.8 books footage spend and needs the lane to exist.
+> - **The agent layer moves into Wave 1 (owner, later on 2026-09-23: "reuse what exists").** Add brand-kit tools, Socials draft tools (S4.1), social formats in `generate_document` and a general image tool, the post gate (S3.5), built-in skills synced from `automatos-skills` with no push, and the Socials marketplace package. The package has two agents, Social Media Director and Brand Designer, and four playbooks: brand kit from your website, launch video, weekly social posts (S4.2) and image carousel. The owner tests through the package on his local stack. PRs come later.
+>
 > **Lineage:** `docs/PRDS/prd-content-engine.md:5,132` deferred social distribution to "a separate future PRD". This is that PRD.
 >
 > **Proof of concept (outside the repo):** `Automatos-AI-Platform/brag-output-2026-09-22-225946/`. A 39.5 s, 1080×1920 promo rendered from one HTML composition with Hyperframes, a local Kokoro voice-over, a CC BY music bed with ducking, and captions. It is the reference implementation for the render pipeline in Wave 1 (`composition/index.html`, `composition/scripts/mix.py`, `composition/scripts/synth_vo.py`).
@@ -198,7 +206,7 @@ So a workspace that connects `higgsfield_mcp` could let its agents call the purc
 5. **Scheduled posts appear on the Command Center calendar** and publish on time. A missed slot is reported, never silently posted late.
 6. **Any Composio-connected social toolkit whose actions can carry the post can publish.** Adapters handle LinkedIn, X, Instagram, TikTok and YouTube in Phase 1.
 7. **Dogfood.** Automatos runs its own Web Summit campaign through Socials, with **≥ 3 posts a week across ≥ 3 channels for the 4 weeks before 9 Nov 2026**.
-8. **The reference quality.** Every video matches the three reference videos in PRD-251A §1 (v1 UI story, v2 cinematic Shopify, Academy):
+8. **The reference quality.** Every video matches the four reference videos: the three in PRD-251A §1 (v1 UI story, v2 cinematic Shopify, Academy) and the Markets posh cut made after it (compositions in `docs/PRDS/prd251-reference/`):
    - exact brand colours and type;
    - the product's screens rebuilt sharp, not generated;
    - animated headlines;
@@ -269,7 +277,7 @@ Socials is a fourth tab, `socials`, in both shells. Two switches control it:
   - the five `automatos-social` families (title, definition, stats, quote, announcement) × the sizes in `automatos-social/schema.json`;
   - carousel and fact-card variants;
   - one infographic (a chart from a report's data table);
-  - the three reference videos of PRD-251A §1, as templates: "UI story promo" (v1), "cinematic product promo" (v2, with footage slots) and "app promo" (Academy, with a phone frame). They set the quality bar (Goal 8).
+  - the four reference videos as templates: "UI story promo" (v1), "cinematic product promo" (v2, with footage slots), "app promo" (Academy, with a phone frame) and "data story" (the Markets posh cut: footage and stills with data cards generated from live data). They set the quality bar (Goal 8).
 - All templates read brand tokens as CSS variables. **No template hardcodes a colour, font or logo.**
 - The repo-clone path and the `html-to-png` skill's dependence on it are removed (§5).
 
@@ -377,7 +385,7 @@ It keeps the same GET/PUT API and dialog. The dialog also opens from the Socials
 ### D14 · Agents draft; the Socials tab and the publisher are the only way out
 - `platform_create_social_post`, using the 3-file pattern, lets Auto and agents **draft** posts into `needs_approval`. It never publishes.
 - **When Socials is on,** the executor blocks a direct agent call to any action the registry classifies as a *post action* of a connected social toolkit. It returns "use platform_create_social_post".
-- **Owner confirms D14b** (it changes today's behaviour, where agents can post unapproved).
+- **D14b confirmed by the owner, 2026-09-23.** It changes today's behaviour, where agents can post unapproved. It is built in Wave 1 (US-118).
 
 ### D15 · Free and open source by default; paid tools are switched on by connecting them in Composio
 The owner said two things on 2026-09-23:
@@ -421,7 +429,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
   7. the template and its variables;
   8. QA (`hyperframes check` and a snapshot review);
   9. `platform_create_social_post`, which puts the post in `needs_approval`.
-- **Quality bar (Goal 8):** before Wave 1 closes, an agent following the skill re-makes the three reference videos from their templates. The owner compares them side by side with the originals.
+- **Quality bar (Goal 8):** before Wave 1 closes, an agent following the skill re-makes the four reference videos from their templates. The owner compares them side by side with the originals.
 
 ## Stories## Stories
 
@@ -524,7 +532,8 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
 - It runs `hyperframes check` before `render` and refuses on errors.
 - The orchestrator client (`core/media_render_client.py`) uses a 900 s read timeout and runs as a background task that updates `social_posts.status`.
 - Compose adds profile `media`, and Railway gets a service.
-- **Per-plan render quotas (owner, 2026-09-23):** every plan gets Socials, and plans differ only in monthly render minutes. The quota is a field on each `PLAN_TIERS` entry, config the owner sets, never hardcoded. A render past the quota is refused with a clear message, and the Socials tab shows minutes used out of the quota.
+- **Per-plan render quotas (owner, 2026-09-23):** every plan gets Socials, and plans differ only in monthly render minutes: **Basic 10, Pro 60, Business 240**. The quota is a field on each `PLAN_TIERS` entry, config, never hardcoded. Enterprise and the local edition have none until the owner sets one. A render past the quota is refused with a clear message, and the Socials tab shows minutes used out of the quota.
+- **Sizing (owner, 2026-09-23):** SaaS runs `media-render` as its own Railway service at 4 vCPU / 8 GB, with two renders at once overall and one at a time per workspace; further jobs queue.
 - **Acceptance:**
   - [ ] A render past the workspace plan's monthly quota is refused before `media-render` is called.
   - [ ] Rendering the proof-of-concept composition bundle in CI produces an MP4 of 39.5 s ± 0.05 s at 1080×1920, 30 fps, with an AAC stream.
@@ -540,7 +549,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
   - [ ] A render of each seeded template in each declared size passes `hyperframes check` in CI.
   - [ ] Changing the brand kit's primary colour changes the rendered PNG (pixel probe).
   - [ ] No seeded template contains a hex colour literal outside its fallbacks.
-  - [ ] The three reference templates (D4) render from variables in CI.
+  - [ ] The four reference templates (D4) render from variables in CI.
 - **Editions:** both.
 
 **S1.3 · Brand kit extension (S)**
@@ -605,11 +614,11 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
 - **Editions:** both (local needs `COMPOSIO_KEY`).
 
 **S1.9 · The "social video director" skill (M)** — D17
-- A PR against `automatos-skills` (the source of truth), then a seed sync.
+- Authored in `automatos-skills` (the source of truth), then synced into the platform as a built-in skill with `scripts/sync-skills.py` (US-119; owner, 2026-09-23: built in and synced, no push, PRs later). The writing is outside the Ralph loop: the loop never writes skill content or edits a generated seed.
 - It carries the PRD-251A pipeline as agent instructions, with the reference compositions as worked examples.
 - **Acceptance:**
   - [ ] An agent given only the skill, a brand kit and a brief produces a draft video post in `needs_approval`.
-  - [ ] **Owner sign-off:** an agent re-makes the three reference videos from their templates, and the owner judges them side by side against PRD-251A §1 (Goal 8).
+  - [ ] **Owner sign-off:** an agent re-makes the four reference videos from their templates, and the owner judges them side by side against the originals (Goal 8).
 - **Editions:** both.
 
 ### Wave 2 — the Socials tab
@@ -689,7 +698,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
   - [ ] The presigned URL returns `Content-Type: video/mp4` and `Content-Disposition: inline`, and supports Range requests (checked with a HEAD and a Range GET in CI against MinIO).
 - **Editions:** both (local needs a public bucket for URL-fetch channels).
 
-**S3.5 · One way out (M, needs owner confirmation of D14b)**
+**S3.5 · One way out (M; D14b confirmed 2026-09-23 — built in Wave 1 as US-118)**
 - The executor guard: when Socials is on, a direct agent call to a registry-classified post action returns a structured refusal pointing to `platform_create_social_post`.
 - **Acceptance:**
   - [ ] An agent attempting `INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH` in a Socials workspace gets the refusal, and no Composio call is made.
@@ -698,7 +707,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
 
 ### Wave 4 — agents, automation, cost
 
-**S4.1 · `platform_create_social_post` (S)**
+**S4.1 · `platform_create_social_post` (S; moved into Wave 1 as US-116)**
 - 3-file pattern: `actions_socials.py`, a handler, and Auto keywords.
 - It creates drafts only.
 - **Acceptance:**
@@ -706,7 +715,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
   - [ ] The tool has no publish parameter.
 - **Editions:** both.
 
-**S4.2 · "Weekly social content" Playbook seed (S)**
+**S4.2 · "Weekly social content" Playbook seed (S; moved into Wave 1, US-120's 'Weekly social posts')**
 1. It reads the week's new Deliverables, published blog posts and reports.
 2. It proposes N posts (default 5) across the workspace's channels, spread over the week.
 3. It drafts them, with sources.
@@ -742,10 +751,10 @@ Engagement is scoped here, not specified:
 | Week of | Build | Dogfood |
 |---|---|---|
 | 28 Sep | Wave 0 (S0.1–S0.6) | The proof-of-concept pipeline, run by hand, makes the first Automatos posts |
-| 5 Oct | Wave 1 (S1.1–S1.3, S1.5, S1.8) | Brand kit filled in; Kokoro voice; the first cinematic shots from a connected Composio tool |
+| 5 Oct | Wave 1 (S1.1–S1.3, S1.5, S1.8, S4.4) | Brand kit filled in; Kokoro voice; the first cinematic shots from a connected Composio tool |
 | 12 Oct | Wave 1 (S1.4, S1.6, S1.7, S1.9) + Wave 2 (S2.1–S2.3) | The reference videos re-made by an agent and signed off (Goal 8); posts drafted in the Socials tab |
 | 19 Oct | Wave 3 (S3.1–S3.4) | First scheduled publishes on LinkedIn, X and Instagram |
-| 26 Oct | Wave 4 (S4.1, S4.2, S4.4) + S3.5 + S2.4 | Weekly Playbook drafts the campaign |
+| 26 Oct | S2.4, plus what remains of Wave 4 (S4.1, S4.2 and S3.5 moved into Wave 1) | Weekly Playbook drafts the campaign |
 | 2 Nov | Buffer, fixes, TikTok/YouTube if slipped | Countdown series, stand details, "see it live" |
 
 **Done means CI green, merged, and tested by the owner in both editions** (owner rule). Every wave ends with the owner's test before the next wave starts.
@@ -782,10 +791,10 @@ Engagement is scoped here, not specified:
 
 ## Open questions (owner)
 
-1. ~~**Plans:** which plans get Socials, and what are the render quotas per plan?~~ **Answered 2026-09-23:** all plans (D1). Render quotas per plan are config the owner sets (S1.1); the numbers are still open.
-2. **D14b:** block direct agent posting to social toolkits when Socials is on? The recommendation is yes.
-3. **Local edition:** is it in v1, or SaaS-first with local following?
-4. **SaaS hosting:** `media-render` on Railway. What size, and is the render queue concurrency per workspace?
+1. ~~**Plans:** which plans get Socials, and what are the render quotas per plan?~~ **Answered 2026-09-23:** all plans (D1). Monthly render quotas: Basic 10 min, Pro 60 min, Business 240 min (config; S1.1).
+2. ~~**D14b:** block direct agent posting to social toolkits when Socials is on?~~ **Answered 2026-09-23:** yes, built in Wave 1 (US-118).
+3. ~~**Local edition:** is it in v1, or SaaS-first with local following?~~ **Answered 2026-09-23:** both editions in Wave 1 (compose profile `media`).
+4. ~~**SaaS hosting:** `media-render` on Railway. What size, and is the render queue concurrency per workspace?~~ **Answered 2026-09-23:** its own service, 4 vCPU / 8 GB, two renders at once overall, one per workspace.
 5. **Music:** which tracks make the seeded library, and how is attribution shown?
 6. ~~**LinkedIn image workaround:** workspace-scope it, or delete it in favour of Composio's own image post action?~~ **Answered 2026-09-23:** workspace-scope it (S0.4).
 7. **The default footage tool to recommend to customers:** fal.ai, Kie.ai or Higgsfield. Settled by the quality check in "Verify at build".
@@ -836,7 +845,8 @@ Engagement is scoped here, not specified:
 - **Composio's Higgsfield is the account kind.**
   - `higgsfield_mcp` logs in to the customer's Higgsfield account (credits) and carries a real-money purchase action, which is deny-listed (D16).
   - It is not the platform API key the proof of concept used.
-  - Whether its video action reaches Cinema Studio 4.0 is unverified.
+  - **Checked 2026-09-23 (Composio docs): it does not reach Cinema Studio 4.0.** Its video models are Marketing Studio video, Seedance 2.5, Kling 3.0 and Minimax. Its image models are GPT Image 2 (the default), Marketing Studio image, Soul 2, Soul Cast and Soul ID, with no Soul Cinema. `HIGGSFIELD_MCP_GENERATE_VIDEO` takes a single `params` string. The reference footage therefore needs a Composio stand-in (Kling 3.0 or Seedance 2.5 are the likely picks), chosen by the small-spend quality test (open question 7).
+- **ElevenLabs on Composio uses the customer's API key.** Its "Text to speech" action (`ELEVENLABS_TEXT_TO_SPEECH`) returns a downloadable audio file, and "Get voices list" lists the voices. Confirm both slugs in the action cache before seeding.
 - **Composio's Ayrshare has three tools and no create-post action.** Don't plan publishing through it.
 - **Provider output URLs expire.** Copy every generated file into our storage the moment its job completes.
 - **`UPLOAD_ACTIONS` omits Instagram and TikTok.** Use the adapters; do not widen the global list blindly.
