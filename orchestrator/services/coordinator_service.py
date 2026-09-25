@@ -2431,11 +2431,22 @@ class CoordinatorService:
         # works — nothing to activate here; the I/O phase files it and waits.
         from services.cli_ticket_lane import is_cli_agent
         if is_cli_agent(db, agent_id):
+            # F161: the session opens only its own folder; the ticket lists what
+            # the mission's other steps saved, for its read_step_file tool.
+            from services.step_files import earlier_step_files, step_files_block
+
+            try:
+                files_block = step_files_block(
+                    earlier_step_files(db, workspace_id=run.workspace_id, run_id=run.id, step_task_id=task.id)
+                )
+            except Exception:  # noqa: BLE001 -- the step still runs, without the list
+                logger.warning("[F161] could not list earlier steps' files for task %s", task.id, exc_info=True)
+                files_block = ""
             return {
                 "task": task,
                 "agent_id": agent_id,
                 "agent_runtime": None,
-                "prompt": prompt,
+                "prompt": f"{prompt}\n\n{files_block}" if files_block else prompt,
                 "factory": factory,
                 "attachment_ids": task_attachment_ids,
                 "mode_caps": mode_caps,
