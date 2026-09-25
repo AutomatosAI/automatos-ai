@@ -1285,9 +1285,22 @@ class AgentFactory:
                     query=prompt,
                 )
 
+            # F155: a task run under the widget mark (a widget-born mission's) is
+            # offered only what the widget key's scopes allow and none of the
+            # owner's connected apps, as the widget chat is.
+            from core.security.surface import widget_scopes, widget_turn
+
+            on_widget = widget_turn()
+            if on_widget:
+                from core.security.widget_scopes import widget_tool_surface
+
+                tool_schemas = widget_tool_surface(tool_schemas, widget_scopes())
+
             # Composio hint injection (enriches composio_execute with action enum + hints)
             workspace_id = agent_runtime.workspace_id
-            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            composio_apps = [] if on_widget else [
+                t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"
+            ]
             if composio_apps:
                 if composio_action_names:
                     # Recipe path: pre-resolved action names
@@ -1436,6 +1449,12 @@ class AgentFactory:
                         # PRD-201 S5: the Anthropic memory tool is client-executed —
                         # run it against the durable store with the /memories
                         # traversal guard, never through the platform tool registry.
+                        # F155: so the executor's widget gate never sees it; under
+                        # the widget mark it is refused (the store is the owner's).
+                        if name == "memory" and widget_turn():
+                            from core.security.widget_scopes import WIDGET_REFUSAL
+
+                            return {"success": False, "llm_context": json.dumps({"error": WIDGET_REFUSAL})}
                         if name == "memory":
                             from modules.memory.memory_tool import (
                                 DurableMemoryStoreBackend,
