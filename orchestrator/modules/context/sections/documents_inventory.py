@@ -15,6 +15,11 @@ named the database, and the documents sentence claimed every question about the
 business. The section now names the workspace's active databases and sends a
 number question to ``platform_query_data``; the documents sentence keeps what a
 document says. Without a database the F085 text is unchanged.
+
+F155: on a public widget turn the section names only what the widget key's
+scopes may read: the documents with documents:read (the key's team's and the
+shared ones, never the reports the agents saved), the databases with
+data:query; nothing without either.
 """
 from __future__ import annotations
 
@@ -64,14 +69,21 @@ def databases_sentence(names: List[str]) -> str:
 
 def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
     """The section's text, or None when the workspace holds no documents and no database."""
-    databases = connected_databases(db, workspace_id)
-    held = _documents_held(db, workspace_id)
+    databases = connected_databases(db, workspace_id) if _key_may("data:query") else []
+    held = _documents_held(db, workspace_id) if _key_may("documents:read") else None
     if not held and not databases:
         return None
     if not databases:
         return f"## Documents in this workspace\nThis workspace holds {held}. {_ASK_DOCUMENTS}"
     lines = [f"This workspace holds {held}. {_ASK_DOCUMENTS_BESIDE_DATA}"] if held else []
     return "\n".join(["## Documents and data in this workspace", *lines, databases_sentence(databases)])
+
+
+def _key_may(scope: str) -> bool:
+    """Any turn but a widget one; a widget turn only when its key holds ``scope``."""
+    from core.security.surface import widget_scopes, widget_turn
+
+    return not widget_turn() or scope in widget_scopes()
 
 
 def _documents_held(db: Any, workspace_id: Any) -> Optional[str]:
@@ -81,20 +93,28 @@ def _documents_held(db: Any, workspace_id: Any) -> Optional[str]:
     # `sqlalchemy` is in sys.modules at that moment.
     from sqlalchemy import text
 
+    from core.security.surface import widget_team, widget_turn
+    from core.team_access import TEAM_FILTER_CLAUSE
+
+    # F155: a widget key with a team lock sees its team's documents and the shared ones.
+    lock = widget_team()
+    team_filter = f" {TEAM_FILTER_CLAUSE}" if lock else ""
+    params = {"ws": str(workspace_id), **({"team": lock} if lock else {})}
     counts = db.execute(
         text(f"SELECT (source_type IS NOT DISTINCT FROM 'agent_output') AS report, count(*) FROM documents "
-             f"WHERE workspace_id = CAST(:ws AS uuid) AND {_READY} GROUP BY 1"),
-        {"ws": str(workspace_id)},
+             f"WHERE workspace_id = CAST(:ws AS uuid) AND {_READY}{team_filter} GROUP BY 1"),
+        params,
     ).fetchall()
     by_kind = {bool(report): int(n) for report, n in counts}
-    owners, reports = by_kind.get(False, 0), by_kind.get(True, 0)
+    # The reports the agents saved are the owner's to read, never a widget visitor's.
+    owners, reports = by_kind.get(False, 0), (0 if widget_turn() else by_kind.get(True, 0))
     if owners + reports == 0:
         return None
     titles = [row[0] for row in db.execute(
-        text(f"SELECT filename FROM documents WHERE workspace_id = CAST(:ws AS uuid) AND {_READY} "
+        text(f"SELECT filename FROM documents WHERE workspace_id = CAST(:ws AS uuid) AND {_READY}{team_filter} "
              "AND source_type IS DISTINCT FROM 'agent_output' ORDER BY upload_date DESC NULLS LAST, id DESC "
              "LIMIT :n"),
-        {"ws": str(workspace_id), "n": TITLES_SHOWN},
+        {**params, "n": TITLES_SHOWN},
     ).fetchall()]
     held = []
     if owners:

@@ -222,6 +222,11 @@ class OnboardingSection(BaseSection):
     max_tokens: Optional[int] = 800
 
     async def render(self, ctx: SectionContext) -> str:
+        from core.security.surface import widget_turn
+
+        if widget_turn():
+            # F155: onboarding is the owner's; a widget visitor is never onboarded.
+            return ""
         try:
             return await self._build(ctx)
         except Exception:

@@ -44,6 +44,12 @@ class GraphSection(BaseSection):
             return ""
 
     async def _build(self, ctx: SectionContext) -> str:
+        # F155: a widget turn reads the graph only with its key's documents:read.
+        from core.security.surface import widget_scopes, widget_turn
+
+        if widget_turn() and "documents:read" not in widget_scopes():
+            return ""
+
         # 1. Extract current message
         message = self._extract_current_message(ctx)
         if not message:
@@ -57,9 +63,12 @@ class GraphSection(BaseSection):
         if graph is None or graph.number_of_nodes() == 0:
             return ""
 
-        # 3. PRD-124: filter graph by agent team
+        # 3. PRD-124: filter graph by agent team — F155: on a widget turn the
+        # key's team lock wins (core.team_access.retrieval_team).
+        from core.team_access import retrieval_team
+
         agent_team = getattr(ctx.agent, "team", None) if ctx.agent else None
-        graph = team_filtered_view(graph, agent_team)
+        graph = team_filtered_view(graph, retrieval_team(agent_team))
         if graph.number_of_nodes() == 0:
             return ""
 
