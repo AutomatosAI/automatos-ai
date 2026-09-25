@@ -365,6 +365,17 @@ async def _dispatch_mission_event(
         )
 
 
+WIDGET_SESSION_REFUSAL = (
+    "A mission started from the website chat does not run on a Claude Code session."
+)
+
+
+async def _refuse_widget_session_task() -> Dict[str, Any]:
+    """F155: the I/O result for a widget-born mission's task assigned to a
+    session (CLI) agent — refused, no ticket filed."""
+    return {"status": "error", "error": WIDGET_SESSION_REFUSAL}
+
+
 async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
     """PRD-204 S4: dispatch ``mission_failed`` at the run-failure boundary.
 
@@ -1686,22 +1697,7 @@ class CoordinatorService:
 
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
-                agent_coros = [
-                    # PRD-239 S3: a session agent's task runs as a ticket the Claude
-                    # Code session works (its own DB session, the same timeout).
-                    self._run_cli_ticket(
-                        p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
-                        (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
-                        Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
-                    )
-                    if p.get("cli_agent")
-                    else self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
-                                            p["task"], p["attachment_ids"],
-                                            mode_caps=p["mode_caps"],
-                                            agent_runtime=p.get("agent_runtime"),
-                                            field_context=p.get("field_context"))
-                    for p in prepared
-                ]
+                agent_coros = [self._task_io(p) for p in prepared]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
 
                 # --- Phase 3: Record completions (serial on shared session) ---
@@ -2279,7 +2275,29 @@ class CoordinatorService:
             # never touches the DB — see _get_power_mode_caps / _run_agent_io.
             "mode_caps": mode_caps,
             "field_context": field_context,
+            # F155: where the mission was started, for the I/O phase.
+            "origin": dict(run.config or {}),
         }
+
+    def _task_io(self, p: Dict[str, Any]) -> Any:
+        """The agent I/O for one prepared task. PRD-239 S3: a session agent's
+        task runs as a ticket the Claude Code session works (its own DB
+        session, the same timeout). F155: a widget-born mission's task runs
+        under the widget key's restrictions, and never on a Claude Code
+        session, which those restrictions cannot reach."""
+        from core.security.surface import widget_born
+
+        if p.get("cli_agent"):
+            if widget_born(p.get("origin")):
+                return _refuse_widget_session_task()
+            return self._run_cli_ticket(
+                p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
+                (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
+            )
+        return self._run_agent_io(p["factory"], p["agent_id"], p["prompt"], p["task"], p["attachment_ids"],
+                                  mode_caps=p["mode_caps"], agent_runtime=p.get("agent_runtime"),
+                                  field_context=p.get("field_context"), origin=p.get("origin"))
 
     async def _run_agent_io(
         self,
@@ -2291,6 +2309,7 @@ class CoordinatorService:
         mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
         field_context: Optional[Dict[str, Any]] = None,
+        origin: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
@@ -2308,19 +2327,24 @@ class CoordinatorService:
         # swap in a stale cached runtime under us mid-flight.
         agent_arg: Any = agent_runtime if agent_runtime is not None else agent_id
 
+        # F155: a widget-born mission's task runs under the widget key's scopes
+        # and team lock (core.security.surface.origin_surface).
+        from core.security.surface import origin_surface
+
         try:
-            result = await asyncio.wait_for(
-                factory.execute_with_prompt(
-                    agent=agent_arg,
-                    prompt=prompt,
-                    max_retries=0,
-                    max_tool_iterations=max_iters,
-                    attachment_ids=attachment_ids,
-                    # PRD-178 S1 (F020): bind field tools to THIS task's run.
-                    context=field_context,
-                ),
-                timeout=task_timeout,
-            )
+            with origin_surface(origin):
+                result = await asyncio.wait_for(
+                    factory.execute_with_prompt(
+                        agent=agent_arg,
+                        prompt=prompt,
+                        max_retries=0,
+                        max_tool_iterations=max_iters,
+                        attachment_ids=attachment_ids,
+                        # PRD-178 S1 (F020): bind field tools to THIS task's run.
+                        context=field_context,
+                    ),
+                    timeout=task_timeout,
+                )
         except asyncio.TimeoutError:
             logger.error(
                 "Task %s execution timed out after %ds (agent=%d)",
@@ -2672,12 +2696,9 @@ class CoordinatorService:
         else:
             # F155: a widget-born mission is decided as its widget turn would be
             # (never autonomous), even when planning runs later on the tick.
-            from contextlib import nullcontext
+            from core.security.surface import origin_surface
 
-            from core.security.surface import WIDGET, turn_surface
-
-            widget_born = mission_config.get("origin_surface") == WIDGET
-            with turn_surface(WIDGET) if widget_born else nullcontext():
+            with origin_surface(mission_config):
                 decision = evaluate_approval(
                     db, workspace_id, estimated_cost,
                     override_auto_approve=bool(mission_config.get("auto_approve", False)),

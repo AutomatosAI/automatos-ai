@@ -11,15 +11,22 @@ instruction approves a card (platform_executor), and is offered no admin tier
 it may call at all (core.security.widget_scopes), and its key's team lock,
 which scopes every document it reads (core.team_access.retrieval_team). The mark is a context
 variable, not state on the process-wide tool router, so concurrent turns never
-see each other's; tasks a turn starts inherit it.
+see each other's; tasks a turn starts inherit it. Work a widget turn starts
+that runs later, outside the turn (a mission's tasks on the coordinator tick),
+carries the turn's origin on its config (stamp_origin) and runs under it
+again (origin_surface).
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import FrozenSet, Iterable, Iterator, NamedTuple, Optional
+from typing import Any, Dict, FrozenSet, Iterable, Iterator, Mapping, NamedTuple, Optional
 
 WIDGET = "widget"
+ORIGIN_SURFACE = "origin_surface"
+ORIGIN_SCOPES = "origin_scopes"
+ORIGIN_TEAM = "origin_team"
+_ORIGIN_KEYS = (ORIGIN_SURFACE, ORIGIN_SCOPES, ORIGIN_TEAM)
 
 
 class _Turn(NamedTuple):
@@ -67,3 +74,30 @@ def turn_surface(surface: Optional[str], scopes: Iterable[str] = (), team: Optio
             # started). That context is not this block's to change: writing to
             # it could clear a mark it inherited, so it is left as it is.
             pass
+
+
+def stamp_origin(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """A copy of ``config`` saying where the work was started: on a widget turn
+    its surface, key scopes and team lock; otherwise nothing. Server-set: a
+    caller's values are dropped either way."""
+    stamped = {key: value for key, value in dict(config or {}).items() if key not in _ORIGIN_KEYS}
+    turn = _surface_var.get()
+    if turn.surface == WIDGET:
+        stamped.update({ORIGIN_SURFACE: WIDGET, ORIGIN_SCOPES: sorted(turn.scopes), ORIGIN_TEAM: turn.team})
+    return stamped
+
+
+def widget_born(config: Optional[Mapping[str, Any]]) -> bool:
+    """The work ``config`` describes was started on a widget turn."""
+    return (config or {}).get(ORIGIN_SURFACE) == WIDGET
+
+
+@contextmanager
+def origin_surface(config: Optional[Mapping[str, Any]]) -> Iterator[None]:
+    """Run the block under the turn ``config`` was stamped from: a widget-born
+    run's key scopes and team lock. Anything else runs as it is."""
+    if widget_born(config):
+        with turn_surface(WIDGET, config.get(ORIGIN_SCOPES) or (), config.get(ORIGIN_TEAM)):
+            yield
+    else:
+        yield
