@@ -28,6 +28,14 @@ is rendered again with the primary swapped. The pixel there must match the
 bundle's own token (``primary-on-ink`` on a video's stage, ``primary`` on an
 image's brand stripe) in both renders, and the two must differ.
 
+The heading font (US-108, S1.3: a template renders with the brand kit's heading
+font, an uploaded woff2): the Title card is rendered with a brand kit whose
+``font_files`` carry "CI Block" (``ci_block_font.py``, a woff2 whose every
+character is a solid block), named in ``heading_font``, and with an uploaded
+logo mark in place of the logo. The headline's accent words, the only text in
+``primary-on-paper-large``, must fill their bounding box as solid blocks do,
+where the same words in the kit's own heading font (a real typeface) do not.
+
     python3 scripts/ci/social_template_previews.py --url http://127.0.0.1:8090 --token "$TOKEN" --out "$RUNNER_TEMP/templates"
 """
 
@@ -35,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import importlib.util
 import json
 import struct
 import sys
@@ -63,6 +72,18 @@ KIT: Dict[str, Any] = {
 }
 # The primary the probe swaps in: a blue, as far from the kit's orange as it gets.
 PROBE_PRIMARY = "#2f7bf6"
+# US-108: the heading-font render. The Title card's headline is weight 900 and its
+# accent words are the only text in this token; set in solid blocks, they fill at
+# least this much of their bounding box (anti-aliased edges and the gaps between
+# blocks are the rest), and no real typeface comes close.
+HEADING_FONT_TEMPLATE = "title-card"
+HEADING_FONT_TOKEN = "primary-on-paper-large"
+HEADING_FONT_WEIGHT = 900
+BLOCK_FILL = 0.8
+# A row of the accent words holds at least this many of their pixels; a stray
+# anti-aliased edge elsewhere (the eyebrow's orange triangle on its dark pill
+# blends through the accent colour) never does.
+MIN_ROW_INK = 10
 PROBE_TOKEN_TOLERANCE = 8
 POLL_SECONDS = 2.0
 JOB_WAIT_SECONDS = 900
@@ -150,6 +171,54 @@ def sample(data: bytes, fx: float, fy: float, radius: int = 1) -> Tuple[int, int
 def hex_rgb(value: str) -> Tuple[int, int, int]:
     value = value.lstrip("#")
     return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def _block_font():
+    """``scripts/ci/ci_block_font.py``, loaded by path: the tests load this driver by path too."""
+    spec = importlib.util.spec_from_file_location("ci_block_font", Path(__file__).resolve().with_name("ci_block_font.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def heading_font_kit(kit: Mapping[str, Any]) -> Dict[str, Any]:
+    """``kit`` as a workspace with an uploaded heading font and logo mark has it, render-ready.
+
+    The shape ``brand_kit_for_media_render`` hands the bundle: the woff2 and the
+    mark inlined as data: URIs, and no wordmark logo.
+    """
+    block = _block_font()
+    woff2 = base64.b64encode(block.block_font_woff2()).decode("ascii")
+    face = {"family": block.FAMILY, "weight": HEADING_FONT_WEIGHT, "style": "normal", "data_uri": f"data:font/woff2;base64,{woff2}"}
+    unbranded = {key: value for key, value in kit.items() if key != "logo_url"}
+    return {
+        **unbranded,
+        "heading_font": f'"{block.FAMILY}", {kit["heading_font"]}',
+        "font_files": [face],
+        "logo_mark_url": logo_png(kit["primary_color"]),
+    }
+
+
+def ink_fill(data: bytes, colour: Tuple[int, int, int]) -> Tuple[int, float]:
+    """``(pixels, fill)`` of the text set in ``colour``: its pixels, and how much of their bounding box they fill.
+
+    Only rows holding at least :data:`MIN_ROW_INK` pixels of the colour count as the text's.
+    """
+    width, _, channels, rows = decode_png(data)
+    lines = []
+    for y, row in enumerate(rows):
+        hits = [
+            x for x in range(width)
+            if all(abs(row[x * channels + i] - colour[i]) <= PROBE_TOKEN_TOLERANCE for i in range(3))
+        ]
+        if len(hits) >= MIN_ROW_INK:
+            lines.append((y, hits))
+    if not lines:
+        return 0, 0.0
+    count = sum(len(hits) for _, hits in lines)
+    left, right = min(hits[0] for _, hits in lines), max(hits[-1] for _, hits in lines)
+    top, bottom = lines[0][0], lines[-1][0]
+    return count, count / ((right - left + 1) * (bottom - top + 1))
 
 
 def logo_png(colour: str) -> str:
@@ -257,6 +326,7 @@ def run(renderer: Renderer, out: Path) -> List[str]:
     kit = {**KIT, "logo_url": logo_png(KIT["primary_color"])}
     report: Dict[str, Any] = {}
     failures = run_videos(renderer, out, kit, report) + run_images(renderer, out, kit, report)
+    failures += run_heading_font(renderer, out, kit, report)
     (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
     return failures
 
@@ -339,6 +409,58 @@ def run_images(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
     return failures
 
 
+def _one_png(job: Mapping[str, Any]) -> bytes:
+    if (job["report"].get("check") or {}).get("errors"):
+        raise PreviewFailure("the check passed the job with errors")
+    if len(job["outputs"]) != 1:
+        raise PreviewFailure(f"{len(job['outputs'])} PNGs for one still")
+    return job["outputs"][0].pop("data")
+
+
+def run_heading_font(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Dict[str, Any]) -> List[str]:
+    """US-108 (S1.3): the Title card renders with the brand kit's heading font, an uploaded woff2."""
+    starter = next(s for s in social_starters(SOCIAL_IMAGE) if s["slug"] == HEADING_FONT_TEMPLATE)
+    size = starter["blocks"]["sizes"][0]
+    folder = out / starter["slug"] / "heading-font"
+    folder.mkdir(parents=True, exist_ok=True)
+    font_kit = heading_font_kit(kit)
+    family = font_kit["font_files"][0]["family"]
+    print(f"\n== {starter['name']} at {size} with the heading font {family!r}, an uploaded woff2, and an uploaded logo mark")
+    try:
+        bundle = image_bundle_for(starter, font_kit, size)
+        faces = bundle["brand"].get("fonts") or []
+        if [face["family"] for face in faces] != [family] or bundle["variables"]["brand.logo_mark"] != "assets/brand/logo-mark.png":
+            raise PreviewFailure(f"the bundle does not carry the uploaded font and mark: {faces}, {bundle['variables']['brand.logo_mark']}")
+        print(f"    heading-font token: {bundle['brand']['tokens']['heading-font']}")
+        colour = hex_rgb(bundle["brand"]["tokens"][HEADING_FONT_TOKEN])
+        others = {name: value for name, value in bundle["brand"]["tokens"].items() if value.startswith("#") and name != HEADING_FONT_TOKEN}
+        close = [name for name, value in others.items() if len(value) == 7 and all(abs(a - b) <= PROBE_TOKEN_TOLERANCE for a, b in zip(hex_rgb(value), colour))]
+        if close:
+            raise PreviewFailure(f"{HEADING_FONT_TOKEN} is too close to {close} to tell the accent words apart")
+        base_job = renderer.render(image_bundle_for(starter, kit, size))
+        base = _one_png(base_job)
+        (folder / "kit-heading-font.png").write_bytes(base)
+        job = renderer.render(bundle)
+        print(f"    {_check_summary(job['report'])}")
+        rendered = _one_png(job)
+        (folder / "uploaded-heading-font.png").write_bytes(rendered)
+        base_pixels, base_fill = ink_fill(base, colour)
+        pixels, fill = ink_fill(rendered, colour)
+        print(f"    the accent words ({HEADING_FONT_TOKEN} {bundle['brand']['tokens'][HEADING_FONT_TOKEN]}):")
+        print(f"      in the kit's heading font ({kit['heading_font']}): {base_pixels} px, filling {base_fill:.2f} of their box")
+        print(f"      in the uploaded {family!r}: {pixels} px, filling {fill:.2f} of their box")
+        report["heading_font"] = {"template": starter["slug"], "size": size, "fill": [round(base_fill, 3), round(fill, 3)], "pixels": [base_pixels, pixels]}
+        if not base_pixels or base_fill >= BLOCK_FILL:
+            raise PreviewFailure(f"the kit's own heading font already fills {base_fill:.2f}: the measure cannot tell the fonts apart")
+        if fill < BLOCK_FILL:
+            raise PreviewFailure(f"the headline did not render in the uploaded {family!r} (fill {fill:.2f} < {BLOCK_FILL})")
+        print("      PASS: the headline renders in the brand kit's heading font, the uploaded woff2")
+    except PreviewFailure as exc:
+        print(f"    FAIL: {exc}")
+        return [f"{starter['name']} with the uploaded heading font: {exc}"]
+    return []
+
+
 def probe_image(renderer, starter, kit, probe, folder: Path) -> Dict[str, Any]:
     """The image at its first size, rendered again with the primary swapped: the pixel follows the brand kit."""
     size = starter["blocks"]["sizes"][0]
@@ -416,7 +538,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\nFAILED:\n  " + "\n  ".join(failures))
         return 1
     print("\nevery seeded social video template checked with 0 errors and rendered its preview,")
-    print("and every seeded social image template checked with 0 errors and rendered its PNGs at every size: PASS")
+    print("every seeded social image template checked with 0 errors and rendered its PNGs at every size,")
+    print("and the Title card rendered its headline in the brand kit's uploaded heading font: PASS")
     return 0
 
 

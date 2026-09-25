@@ -971,6 +971,26 @@
       "company": {
         "text": "Contact details for letterheads and footers — {{company.name}}, {{company.address}}, {{company.email}}, {{company.phone}}, {{company.website}}. Company name falls back to your business profile.",
         "docLink": "/deliverables"
+      },
+      "logo_mark": {
+        "text": "The square symbol without the name, as on an app icon (PNG or JPEG, 2 MB max). Social templates show it beside the brand name; without one they show the logo.",
+        "docLink": "/deliverables"
+      },
+      "heading_font": {
+        "text": "The font for headlines, as a CSS font list such as \"Brand Display\", Georgia, serif. Leave it empty to use the body font. Name the family of a font file you upload below to use your own typeface in social posts.",
+        "docLink": "/deliverables"
+      },
+      "fonts": {
+        "text": "Upload your typeface as woff2 files (2 MB each, six at most), one file per weight and style, with the family name the file provides. Social posts embed them, so the render needs no internet access. Uploading the same family, weight and style again replaces that file.",
+        "docLink": "/deliverables"
+      },
+      "handles": {
+        "text": "Your account name on each network, without the @. Each is checked against that network's rules; for LinkedIn give the name after linkedin.com/company/ or linkedin.com/in/.",
+        "docLink": "/deliverables"
+      },
+      "voice": {
+        "text": "Three to five words for how the brand sounds, and the phrases it never uses. The agents that draft your social posts follow them.",
+        "docLink": "/deliverables"
       }
     }
   }

@@ -929,9 +929,15 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload", "/api/knowledge/graph/import")
 # PRD-242 S3: the brand logo is capped at 2 MB by the route; the transport cap
 # stays just above it so an oversized multipart body is refused before the
-# parser spools it (a 50 MB bucket for a 2 MB file is 25x wasted churn).
+# parser spools it (a 50 MB bucket for a 2 MB file is 25x wasted churn). The
+# logo mark's route shares the logo's prefix and cap; PRD-251 D5's font files
+# get theirs.
+from modules.documents.brand_fonts import BRAND_FONTS_ROUTE, MAX_FONT_BYTES
 from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
-PATH_BODY_LIMITS = {BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024}
+PATH_BODY_LIMITS = {
+    BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024,
+    BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
+}
 
 
 def _body_limit_for(path: str) -> int:

@@ -60,7 +60,7 @@ from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
-from modules.documents.brand_logo import brand_kit_for_render
+from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_store, render, service
 from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.settings import require_socials_enabled
@@ -235,10 +235,11 @@ def _render_template(db: Session, ctx: RequestContext, post: SocialPost) -> Any:
 
 
 def _render_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The workspace brand kit from its ``settings``, render-ready (an uploaded
-    logo inlined, which may read storage). It lives in the documents module,
-    which modules/socials may not import, so the render bundle gets it here."""
-    return brand_kit_for_render(get_brand_kit(settings))
+    """The workspace brand kit from its ``settings``, render-ready: the uploaded
+    logo, logo mark and font files inlined (PRD-251 D5), which may read storage.
+    It lives in the documents module, which modules/socials may not import, so
+    the render bundle gets it here."""
+    return brand_kit_for_media_render(get_brand_kit(settings))
 
 
 def _launch_render(job: render.RenderJob) -> None:

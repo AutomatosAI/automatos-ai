@@ -127,6 +127,7 @@ export interface BrandKit {
   secondary_color: string
   accent_color: string
   text_color: string
+  // The body font (PRD-251 D5's body_font): every renderer reads this key.
   font_family: string
   company: {
     name: string
@@ -135,6 +136,35 @@ export interface BrandKit {
     phone: string
     website: string
   }
+  // PRD-251 D5 (S1.3), what a social render reads.
+  // The headings' font; empty means the body font.
+  heading_font: string
+  // Uploaded woff2 files (server-managed: the font routes write them).
+  font_files: BrandFontFile[]
+  // A square mark, separate from the wordmark: a public URL, or an upload at
+  // logo_mark_path (server-managed, streamed from /api/documents/brand-kit/logo-mark).
+  logo_mark_url: string
+  logo_mark_path: string
+  // The brand's handle per Composio toolkit (linkedin, twitter, ...), without the "@".
+  social_handles: Record<string, string>
+  voice: BrandVoice
+}
+
+// One uploaded font file and the face it provides (modules/documents/brand_kit.py BrandFontFile).
+export interface BrandFontFile {
+  id: string
+  family: string
+  weight: number
+  style: 'normal' | 'italic'
+  path: string
+  file_name: string
+  bytes: number
+}
+
+// How the brand sounds: three to five tone words (or none) and the phrases it never uses.
+export interface BrandVoice {
+  tone: string[]
+  banned_phrases: string[]
 }
 
 // GET /api/documents/brand-kit/suggestions — prefill candidates with provenance.

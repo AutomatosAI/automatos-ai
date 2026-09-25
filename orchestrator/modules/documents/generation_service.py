@@ -78,6 +78,7 @@ from core.models.workspaces import Workspace
 from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
+from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.brand_logo import brand_kit_for_render
 from modules.documents.blocks import (
     blocks_from_legacy,
@@ -579,8 +580,9 @@ class DocumentGenerationService:
 
         The template's composition, its variables from ``data`` (one left out
         takes its default) and the workspace brand kit make one render bundle
-        (``core/media_render_bundle.py``): brand tokens as CSS variables, an
-        uploaded logo inlined as a data: URI. A variable with neither a value
+        (``core/media_render_bundle.py``): brand tokens as CSS variables, the
+        uploaded logo, logo mark and font files inlined as data: URIs
+        (``brand_kit_for_media_render``). A variable with neither a value
         nor a default blocks the file before anything renders, like an
         unresolved chip. The month's render minutes are checked before
         media-render is called (``RenderQuotaExceeded``), and the rendered
@@ -616,7 +618,7 @@ class DocumentGenerationService:
             reference=reference,
             blocks=blocks,
             values=resolved.values,
-            brand_kit=brand_kit_for_render(get_brand_kit(getattr(workspace, "settings", None))),
+            brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
             fallback_name=getattr(workspace, "name", None) or "",
             fmt=format,
         )

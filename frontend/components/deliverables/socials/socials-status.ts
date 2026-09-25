@@ -86,6 +86,11 @@ export function canAuthorPosts(role: WorkspaceRole | undefined): boolean {
   return !!role && AUTHOR_ROLES.has(role)
 }
 
+/** PRD-251 S1.3: the brand kit is edited by whoever holds workspace:manage. */
+export function canEditBrandKit(role: WorkspaceRole | undefined): boolean {
+  return !!role && MANAGE_ROLES.has(role)
+}
+
 export interface PostActions {
   edit: boolean
   submit: boolean

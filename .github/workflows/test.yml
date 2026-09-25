@@ -744,7 +744,12 @@ jobs:
       # fact card and a carousel) render for real at every size they declare: the
       # full check, then one full-size PNG per still (a carousel's slides), each
       # read back and measured; the probe swaps the primary under the brand stripe.
-      - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit
+      # US-108 (S1.3): the Title card renders again with a brand kit carrying an
+      # uploaded woff2 (scripts/ci/ci_block_font.py, every glyph a solid block)
+      # named in heading_font, and an uploaded logo mark: the headline's accent
+      # words must fill their box as solid blocks do, and in the kit's own
+      # heading font they must not.
+      - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
         env:
           TOKEN: ci-render-token
         run: |

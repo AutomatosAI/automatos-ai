@@ -557,6 +557,8 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
     assert bundle["variables"] == {
         "headline": "Hi", "stat": 3, "subtitle": "",
         "brand.name": "Acme", "brand.tagline": "Build better", "brand.logo": "assets/brand/logo.png",
+        # US-108: the square mark, which without an uploaded mark is the logo.
+        "brand.logo_mark": "assets/brand/logo.png",
         "size.width": 1080, "size.height": 1920,
     }
     assert bundle["audio"] == BLOCKS["audio_plan"]
@@ -688,8 +690,8 @@ def social_env(monkeypatch, tmp_path):
         monkeypatch.setattr(cfg, "SOCIALS_RENDER_MAX_WAIT_SECONDS", 60, raising=False)
     monkeypatch.setattr(generation_service, "GENERATED_DIR", str(tmp_path))
     monkeypatch.setattr(generation_service, "is_storage_configured", lambda: False)
-    # An uploaded logo, inlined as the render-ready kit carries it (brand_logo.brand_kit_for_render).
-    monkeypatch.setattr(generation_service, "brand_kit_for_render", lambda kit: {**kit, "logo_url": PNG_URI})
+    # An uploaded logo, inlined as the render-ready kit carries it (US-108: brand_fonts.brand_kit_for_media_render).
+    monkeypatch.setattr(generation_service, "brand_kit_for_media_render", lambda kit: {**kit, "logo_url": PNG_URI})
 
     state = SimpleNamespace(events=[], booked=[])
 

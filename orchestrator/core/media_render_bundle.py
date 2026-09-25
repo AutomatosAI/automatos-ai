@@ -4,8 +4,9 @@ PRD-251 S1.2 (D3, D4, D5). One builder for both callers: a Socials post's render
 (``modules/socials/render.py``) and ``generate_document`` with a social format
 (``modules/documents/generation_service.py``). It lives in core because those two
 feature modules may not import each other (``orchestrator/.importlinter``). Each
-caller hands in the workspace brand kit render-ready, an uploaded logo already
-inlined as a data: URI (``modules/documents/brand_logo.brand_kit_for_render``).
+caller hands in the workspace brand kit render-ready, every uploaded brand file
+already inlined as a data: URI
+(``modules/documents/brand_fonts.brand_kit_for_media_render``).
 
 The brand kit becomes:
 
@@ -17,11 +18,14 @@ The brand kit becomes:
   ``on-ink``, ``primary-on-ink`` and the rest), and the light paper a social
   image reads (``paper``, ``on-paper``, ``primary-on-paper`` and the rest);
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
+  an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
-  with its ``@font-face``;
-* the variables ``brand.name``, ``brand.tagline`` and ``brand.logo`` (the staged
-  logo's path, or a transparent pixel when there is no uploaded logo), and
-  ``size.width`` / ``size.height`` for the size being rendered.
+  with its ``@font-face``, so ``var(--brand-heading-font)`` can name an uploaded face;
+* the variables ``brand.name``, ``brand.tagline``, ``brand.logo`` (the staged
+  logo's path, or a transparent pixel when there is no uploaded logo),
+  ``brand.logo_mark`` (the staged mark's path; without a mark, whatever
+  ``brand.logo`` is), and ``size.width`` / ``size.height`` for the size being
+  rendered.
 
 The template becomes the composition, with two things done to it here:
 
@@ -36,9 +40,9 @@ The template becomes the composition, with two things done to it here:
   variable has a value (``core.social_templates.still_moments``): one for a
   card, one per slide for a carousel.
 
-An external ``logo_url`` is never fetched: a render reads only the files its
-bundle carries and our own storage (D9), so a logo reaches a render once it is
-uploaded. Nothing here generates anything: the renderer assembles (D3).
+An external ``logo_url`` or ``logo_mark_url`` is never fetched: a render reads
+only the files its bundle carries and our own storage (D9), so a logo reaches a
+render once it is uploaded. Nothing here generates anything: the renderer assembles (D3).
 """
 from __future__ import annotations
 
@@ -68,6 +72,8 @@ MAX_TOKEN_CHARS = 200
 
 BRAND_DIR = "assets/brand/"
 FONTS_DIR = "assets/brand/fonts/"
+LOGO_NAME = "logo"
+LOGO_MARK_NAME = "logo-mark"
 LOGO_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg"}
 FONT_EXTENSIONS = {
     "font/woff2": "woff2",
@@ -87,6 +93,7 @@ NO_LOGO = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAE
 VAR_BRAND_NAME = "brand.name"
 VAR_BRAND_TAGLINE = "brand.tagline"
 VAR_BRAND_LOGO = "brand.logo"
+VAR_BRAND_LOGO_MARK = "brand.logo_mark"
 VAR_SIZE_WIDTH = "size.width"
 VAR_SIZE_HEIGHT = "size.height"
 
@@ -118,14 +125,21 @@ def _data_uri_type(value: Any) -> Optional[str]:
     return match.group(1).lower() if match else None
 
 
-def _logo(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], str]:
-    """The uploaded logo as a bundle file, and what ``{{ brand.logo }}`` fills in."""
-    uri = kit.get("logo_url")
+def _staged_image(uri: Any, name: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
+    """An uploaded image (a data: URI) as a bundle file named ``name``, and its path; nothing for anything else."""
     ext = LOGO_EXTENSIONS.get(_data_uri_type(uri) or "")
     if ext is None:
-        return [], NO_LOGO
-    path = f"{BRAND_DIR}logo.{ext}"
+        return [], None
+    path = f"{BRAND_DIR}{name}.{ext}"
     return [{"path": path, "data_uri": uri}], path
+
+
+def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], str, str]:
+    """The uploaded logo and logo mark as bundle files, and what ``{{ brand.logo }}`` and ``{{ brand.logo_mark }}`` fill in."""
+    logo_files, logo = _staged_image(kit.get("logo_url"), LOGO_NAME)
+    mark_files, mark = _staged_image(kit.get("logo_mark_url"), LOGO_MARK_NAME)
+    logo = logo or NO_LOGO
+    return logo_files + mark_files, logo, mark or logo
 
 
 def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
@@ -215,13 +229,14 @@ def build_bundle(
     kit = brand_kit or {}
     width, height = render_size(blocks, size)
     html, media = _slots(blocks, slot_media or {})
-    logo_files, logo = _logo(kit)
+    logo_files, logo, logo_mark = _logos(kit)
     font_files, faces = _fonts(kit)
     variables = {
         **dict(values),
         VAR_BRAND_NAME: brand_name(kit, fallback_name),
         VAR_BRAND_TAGLINE: kit.get("tagline") or "",
         VAR_BRAND_LOGO: logo,
+        VAR_BRAND_LOGO_MARK: logo_mark,
         VAR_SIZE_WIDTH: width,
         VAR_SIZE_HEIGHT: height,
     }

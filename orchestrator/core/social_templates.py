@@ -40,7 +40,8 @@ carries a composition in ``blocks``, which media-render renders:
   carousel's optional slides drop out; the first still is always taken.
   Without ``stills`` an image is one still at 0 s (:func:`still_moments`).
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
-  a composition as ``--brand-*`` CSS variables and ``{{ brand.logo }}``.
+  a composition as ``--brand-*`` CSS variables, ``{{ brand.logo }}`` and (D5, the
+  square mark) ``{{ brand.logo_mark }}``.
   :func:`brand_literals` finds a hex colour, a named font family or a logo baked
   into the template outside a ``var()`` fallback, and a template carrying one is
   refused on save.
@@ -82,7 +83,7 @@ BUNDLE_VARIABLE_PREFIXES = ("brand.", "size.")
 
 # Bounds. The media-render service enforces its own on every bundle; these keep
 # a stored template inside them. A reference video carries about 120 pieces of
-# copy (US-106), and media-render takes 200 variables a bundle, five of them the
+# copy (US-106), and media-render takes 200 variables a bundle, six of them the
 # brand and size variables the bundle adds.
 MAX_COMPOSITION_CHARS = 1_000_000
 MAX_VARIABLES = 160

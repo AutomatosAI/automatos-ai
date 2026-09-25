@@ -390,6 +390,7 @@ def test_rendering_a_draft_stores_the_mp4_registers_a_deliverable_and_awaits_app
         "brand.name": "ws-a1",
         "brand.tagline": "",
         "brand.logo": NO_LOGO,
+        "brand.logo_mark": NO_LOGO,
         "size.width": 1080,
         "size.height": 1920,
     }
