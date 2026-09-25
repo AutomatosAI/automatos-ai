@@ -1,0 +1,21 @@
+# Code owners: who reviews what. A review from an owner becomes required only if
+# branch protection turns on "Require review from Code Owners".
+# The last matching pattern wins.
+
+# Default: every change.
+*                                        @AutomatosAI
+
+# Sensitive paths: the maintainers review these whoever else owns an area.
+# Keep them at the end so they win over any broader pattern added above.
+/orchestrator/core/auth/                 @AutomatosAI
+/orchestrator/modules/policy/            @AutomatosAI
+/orchestrator/core/composio/             @AutomatosAI
+/orchestrator/core/credentials/          @AutomatosAI
+/orchestrator/core/storage/              @AutomatosAI
+/orchestrator/services/plan_tiers.py     @AutomatosAI
+/orchestrator/config.py                  @AutomatosAI
+/orchestrator/alembic/versions/          @AutomatosAI
+/orchestrator/.importlinter              @AutomatosAI
+/.github/                                @AutomatosAI
+/AGENTS.md                               @AutomatosAI
+/SECURITY.md                             @AutomatosAI

@@ -6,7 +6,7 @@
 The following files were used as context for generating this wiki page:
 
 - [README.md](README.md)
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/README.md](docs/README.md)
 - [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 
@@ -31,11 +31,11 @@ Sources:
 
 Each major subsystem or component of Automatos AI often has its own dedicated documentation within the `docs/` structure. This ensures that detailed technical information, design choices, and implementation specifics are kept close to the relevant code. Examples include documentation for the memory system, context service, agents, workflows, and tools. This modular approach helps developers quickly find information pertinent to the area of the codebase they are working on.
 
-For example, the `docs/getting-started/self-hosting.md` provides specific instructions for running the local edition of Automatos AI [docs/README.md:7](). Similarly, the `orchestrator/modules/tools/README.md` details the mechanics of adding platform actions [docs/CONTRIBUTING.md:38-39]().
+For example, the `docs/getting-started/self-hosting.md` provides specific instructions for running the local edition of Automatos AI [docs/README.md:7](). Similarly, the `orchestrator/modules/tools/README.md` details the mechanics of adding platform actions [CONTRIBUTING.md:38-39]().
 
 Sources:
 - [docs/README.md:1-108]()
-- [docs/CONTRIBUTING.md:38-39]()
+- [CONTRIBUTING.md:38-39]()
 - [orchestrator/modules/tools/services/__init__.py:1-25]()
 
 ## Runbooks and Operational Documentation
@@ -98,7 +98,7 @@ graph TD
 ```
 Sources:
 - [docs/README.md:1-108]()
-- [docs/CONTRIBUTING.md:1-143]()
+- [CONTRIBUTING.md:1-143]()
 
 ### Bridging Natural Language to Code Entities
 
@@ -122,7 +122,7 @@ graph TD
         CE_RESEARCH_DIR["docs/research/"]
         CE_RUNBOOKS_DIR["docs/runbooks/"]
         CE_COMPLIANCE_DIR["docs/compliance/"]
-        CE_CONTRIB_MD["docs/CONTRIBUTING.md"]
+        CE_CONTRIB_MD["CONTRIBUTING.md"]
         CE_README_MD["docs/README.md"]
         CE_TOOL_SERVICES["orchestrator/modules/tools/services/__init__.py"]
         CE_TOOL_CAP_MAPPER["ToolCapabilityMapper"]
@@ -145,7 +145,7 @@ graph TD
 ```
 Sources:
 - [docs/README.md:1-108]()
-- [docs/CONTRIBUTING.md:1-143]()
+- [CONTRIBUTING.md:1-143]()
 - [orchestrator/modules/tools/services/__init__.py:1-25]()
 
 ---

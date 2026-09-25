@@ -6,7 +6,7 @@
 The following files were used as context for generating this wiki page:
 
 - [README.md](README.md)
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/README.md](docs/README.md)
 - [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
 - [frontend/components/missions/index.ts](frontend/components/missions/index.ts)
