@@ -344,7 +344,6 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 # (server-injected _driving_user_id / _driving_super_admin; see execute()).
 _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook",
-    "platform_create_recipe",
     "platform_invite_member",
     "platform_set_member_role",
 )

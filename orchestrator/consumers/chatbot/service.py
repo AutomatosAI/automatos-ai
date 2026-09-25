@@ -1753,12 +1753,6 @@ class StreamingChatService:
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
             "workspace_write_file", "workspace_exec", "workspace_git",
         }
-        _WORKFLOW_PREFIXES = (
-            "platform_list_recipes",
-            "platform_create_recipe",
-            "platform_execute_recipe",
-        )
-
         # SSE bridge: executor on_event puts AI SDK chunks here, this generator drains.
         sse_queue: "asyncio.Queue[Any]" = asyncio.Queue()
         DONE = object()
@@ -1899,8 +1893,8 @@ class StreamingChatService:
                 tool_data.update(frontend_data)
                 await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
-            # Recipe / workflow tool-update emission.
-            if name.startswith(_WORKFLOW_PREFIXES) or "workflow" in name.lower():
+            # Workflow tool-update emission.
+            if "workflow" in name.lower():
                 _raw = result.get("raw_result") or {}
                 _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or call_id)
                 _wf_status = "completed" if result.get("success") else "failed"

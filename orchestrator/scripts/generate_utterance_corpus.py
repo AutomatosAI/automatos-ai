@@ -60,17 +60,6 @@ COVERAGE_FLOOR_PCT = 90.0    # >= this share of non-su actions must hit the floo
 
 VALID_SOURCES = frozenset({"authored", "example", "phrase_map"})
 
-# Legacy AutoBrain phrase-map keys (pre-canonical "recipe" naming, PRD unregistered)
-# whose vocabulary migrates onto the canonical Playbook actions. Keeps the phrase
-# map's real coverage alive in the corpus without resurrecting dead action names.
-PHRASE_MAP_LEGACY_REMAP: Dict[str, str] = {
-    "platform_list_recipes": "platform_list_playbooks",
-    "platform_execute_recipe": "platform_execute_playbook",
-    "platform_get_recipe_execution": "platform_get_playbook_execution",
-    "platform_delete_recipe": "platform_delete_playbook",
-}
-
-
 # ── registry (lightweight leaf-load — no transformers/torch) ─────────────────
 _LEAF_PKG = "_prd232_corpus_discovery"
 
@@ -294,13 +283,12 @@ def validate(
                 f"{n!r} lives in {cat}.yaml but registry category is {by_name[n].category!r}"
             )
 
-    # Build required phrase sets per non-su action (direct keys + legacy remap).
+    # Build required phrase sets per non-su action.
     required_phrases: Dict[str, List[str]] = {}
     skipped_phrase_keys: Dict[str, str] = {}
     for key, phrases in phrase_map.items():
-        target = key if key in nonsu_names else PHRASE_MAP_LEGACY_REMAP.get(key)
-        if target and target in nonsu_names:
-            required_phrases.setdefault(target, []).extend(phrases)
+        if key in nonsu_names:
+            required_phrases.setdefault(key, []).extend(phrases)
         elif key in su_names:
             skipped_phrase_keys[key] = "su-only action (excluded from corpus)"
         else:

@@ -418,12 +418,12 @@ class SmartIntentClassifier:
             else:
                 hints.append("platform_list_agents")
 
-        # Recipe/workflow queries
-        if any(w in query_lower for w in ["recipe", "recipes", "workflow", "workflows"]):
+        # Playbook queries (people also say recipe or workflow)
+        if any(w in query_lower for w in ["playbook", "playbooks", "recipe", "recipes", "workflow", "workflows"]):
             if any(w in query_lower for w in ["create", "make", "build"]):
-                hints.append("platform_create_recipe")
+                hints.append("platform_create_playbook")
             else:
-                hints.append("platform_list_recipes")
+                hints.append("platform_list_playbooks")
 
         # Analytics/usage queries
         if any(w in query_lower for w in ["usage", "token", "tokens", "cost", "costs", "spend"]):
