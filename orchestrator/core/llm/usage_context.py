@@ -19,6 +19,8 @@ Vocabulary (``request_type`` — the LANE that spent):
   the names they already used)
 * ``session``         a Claude Code session on the user's own subscription
 * ``embedding`` / ``rerank``  retrieval infrastructure
+* ``media``           a Socials media job (PRD-251 D13): a render's seconds at $0,
+  or footage, stills and voice paid on the workspace's own Composio toolkit
 
 ``execution_id`` is ``<kind>:<id>`` (``mission:42``, ``board_task:97``,
 ``chat:<conversation>``) so a lane's spend can be joined back to the thing
@@ -38,6 +40,8 @@ LANE_EMBEDDING = "embedding"
 LANE_RERANK = "rerank"
 # PRD-248: one typed decision (TypeSafe Jev, direct or via OpenRouter).
 LANE_DECISION = "decision"
+# PRD-251 D13 (S4.4): renders, footage, stills and voice for Socials.
+LANE_MEDIA = "media"
 
 # Context ``source`` values that name a lane directly (the callers of
 # ``execute_with_prompt`` already pass these); anything else is passed through

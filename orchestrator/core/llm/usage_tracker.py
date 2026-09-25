@@ -2,8 +2,8 @@
 LLM Usage Tracker (PRD-54 · PRD-236 W1 · analytics cost tracking 2026-09-09)
 ============================================================================
 
-Records every LLM, embedding, rerank and Claude Code session call in
-``llm_usage`` — metered, free and subscription alike — so the Analytics page
+Records every LLM, embedding, rerank, media (PRD-251) and Claude Code session
+call in ``llm_usage`` — metered, free and subscription alike — so the Analytics page
 can say what each lane, agent, model and PROVIDER cost, and what cost nothing.
 
 Rules that used to be violated:
@@ -23,6 +23,7 @@ Rules that used to be violated:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
@@ -173,6 +174,19 @@ def price_call(
     input_cost = (fresh + cache_read * read_mult + cache_write * write_mult) / 1000.0 * per_1k_in
     output_cost = int(output_tokens or 0) / 1000.0 * per_1k_out
     return input_cost, output_cost
+
+
+def _non_negative(value: Any, what: str, provider: str) -> float:
+    """A finite amount >= 0. Anything else books 0 with a warning, so a media row
+    never lowers spend-to-date (a balance difference read the wrong way round)."""
+    try:
+        amount = float(value or 0.0)
+    except (TypeError, ValueError):
+        amount = math.nan
+    if not math.isfinite(amount) or amount < 0:
+        logger.warning("media usage: %s %r from %s booked as 0", what, value, provider)
+        return 0.0
+    return amount
 
 
 def bump_agent_usage_stats(db, agent_id: Optional[int], *, total_tokens: int, total_cost: float) -> None:
@@ -377,6 +391,61 @@ class UsageTracker:
             error_message=error_message,
             tier="direct",
             cost_override=(units / 1000.0 * float(usd_per_1k_units or 0), 0.0),
+        )
+
+    @staticmethod
+    def track_media(
+        *,
+        provider: str,
+        model_id: str,
+        units: float,
+        usd: float = 0.0,
+        latency_ms: Optional[int] = None,
+        status: str = STATUS_SUCCESS,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """One media job on the ``media`` lane (PRD-251 D13, S4.4).
+
+        A render on our media-render service books its rendered SECONDS as
+        units at $0; the monthly render quota counts them. Footage, stills and
+        voice from the workspace's Composio toolkit book their dollars (the
+        toolkit's estimate, or the balance difference for a credit-billed one)
+        as BYOK: every paid media tool is the workspace's own connection (D15).
+        Units are recorded as ``input_tokens`` and priced by the caller, never
+        at a token price; a fractional unit rounds UP so a quota never
+        under-counts. Workspace, agent and execution come from the enclosing
+        ``usage_scope`` (the post's ``social_post:<id>``).
+        """
+        from core.llm.providers import MEDIA_RENDER_PROVIDER
+        from core.llm.usage_context import LANE_MEDIA, current_usage_scope
+
+        scope = current_usage_scope()
+        slug = str(provider or "").strip().lower() or "unknown"
+        spend = _non_negative(usd, "usd", slug)
+        count = math.ceil(_non_negative(units, "units", slug))
+        if resolve_workspace_id(scope.get("workspace_id")) is None:
+            # Media spend is money the budget gate and the quotas must see:
+            # losing a row is loud, never a debug line.
+            logger.warning(
+                "media usage not booked: no workspace in scope for %s/%s ($%.4f, %d units)",
+                slug, model_id, spend, count,
+            )
+            return
+        UsageTracker.track(
+            workspace_id=scope.get("workspace_id"),
+            model_id=model_id,
+            provider=slug,
+            input_tokens=count,
+            output_tokens=0,
+            agent_id=scope.get("agent_id"),
+            execution_id=scope.get("execution_id"),
+            request_type=LANE_MEDIA,
+            latency_ms=latency_ms,
+            status=status,
+            is_byok=slug != MEDIA_RENDER_PROVIDER,
+            error_message=error_message,
+            tier="direct",
+            cost_override=(spend, 0.0),
         )
 
     @staticmethod
