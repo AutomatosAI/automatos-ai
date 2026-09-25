@@ -615,7 +615,12 @@ async def update_agent_model_config(
                     detail=f"Model rejected: {_reason}",
                 )
 
-        # Update model config
+        # Update model config. F141: a model the catalog just vouched for drops a
+        # provider-refusal stamp (the form echoes back what it loaded).
+        if model_id:
+            from core.llm.model_refusals import without_refusal
+
+            model_config = without_refusal(model_config)
         agent.model_config = model_config
         
         # Mark for modification tracking

@@ -190,8 +190,11 @@ def _get_or_create_from_cache(db: Session, model_id: str, provider: Optional[str
     if route not in (None, "openrouter"):
         return None
 
+    # F141: a model OpenRouter stopped listing (the sync made it inactive) never
+    # comes back as an active route through a write path.
     cached = db.query(OpenRouterModelCache).filter(
-        OpenRouterModelCache.model_id == model_id
+        OpenRouterModelCache.model_id == model_id,
+        OpenRouterModelCache.status == "active",
     ).first()
     if not cached:
         return None

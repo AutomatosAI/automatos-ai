@@ -118,6 +118,23 @@ def _is_dispatch_claimable(task) -> bool:
     )
 
 
+def _cannot_take_tasks(db: Session, agent: Any) -> Optional[str]:
+    """F141: an agent whose model is not available (its provider refused it for
+    good, or its route is deprecated) is never handed a task: the task would fail
+    at its first model call. The check failing never blocks an assignment."""
+    try:
+        from core.llm.model_refusals import unavailable_reason
+
+        reason = unavailable_reason(db, agent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[board] model check failed for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return None
+    if not reason:
+        return None
+    return (f"{reason}, so it cannot take this task. Pick another model in its Model tab, "
+            "or give the task to another agent.")
+
+
 def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: str):
     """Resolve an agent NAME to a single ACTIVE agent for a board write.
 
@@ -193,6 +210,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         if ambiguity_error:
             return {"success": False, "error": ambiguity_error}
         if agent:
+            refused = _cannot_take_tasks(db, agent)
+            if refused:
+                return {"success": False, "error": refused}
             assigned_agent_id = agent.id
 
     # Build planning_data if approval_action or other planning fields provided
@@ -612,6 +632,9 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         return {"success": False, "error": ambiguity_error}
     if not agent:
         return {"success": False, "error": f"Agent '{agent_name}' not found"}
+    refused = _cannot_take_tasks(db, agent)
+    if refused:
+        return {"success": False, "error": refused}
 
     task.assigned_agent_id = agent.id
     if task.status == "inbox":

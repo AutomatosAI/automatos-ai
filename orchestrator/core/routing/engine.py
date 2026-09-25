@@ -86,10 +86,51 @@ class UniversalRouter:
 
         F071: every decision leaves through ``_chat_never_routes_to_a_session``,
         so no tier — the cache included — can hand a chat turn to a session
-        agent, which can never be activated in chat.
+        agent, which can never be activated in chat. F141: then through
+        ``_chat_never_routes_to_a_refused_model``, likewise for an agent whose
+        model its provider refused.
         """
         decision = await self._route_through_tiers(envelope)
-        return self._chat_never_routes_to_a_session(envelope, decision)
+        decision = self._chat_never_routes_to_a_session(envelope, decision)
+        return self._chat_never_routes_to_a_refused_model(envelope, decision)
+
+    def _chat_never_routes_to_a_refused_model(
+        self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
+    ) -> Optional[RoutingDecision]:
+        """A chat turn routed to an agent whose model is not available becomes
+        ``orchestrate``: its provider refused the agent's model for good, or the
+        route the agent names is deprecated (core.llm.model_refusals).
+
+        Refresh-3 retest (F141): chat 9c44148f was routed to BEANCOUNTER, whose
+        model OpenRouter does not offer, and got "⚠️ … Pick another model", as
+        every turn routed there would. Scoped to CHAT, as F071 is.
+        """
+        if decision is None or decision.route_type != "agent" or decision.agent_id is None:
+            return decision
+        if envelope.source != ChannelSource.CHATBOT:
+            return decision
+        try:
+            from core.llm.model_refusals import unavailable_reason
+
+            agent = (
+                self._db.query(Agent.name, Agent.configuration, Agent.model_config)
+                .filter(Agent.id == decision.agent_id)
+                .first()
+            )
+            reason = unavailable_reason(self._db, agent) if agent is not None else None
+        except Exception:  # noqa: BLE001 — never let the guard break routing
+            logger.warning("[router] model check failed for agent %s", decision.agent_id, exc_info=True)
+            return decision
+        if not reason:
+            return decision
+        logger.info("[router] F141: %s — handing the chat turn to Auto", reason)
+        return RoutingDecision(
+            route_type="orchestrate",
+            agent_id=None,
+            confidence=decision.confidence,
+            reasoning=f"{reason}, so Auto takes the turn (was: {decision.reasoning})"[:500],
+            intent_category=decision.intent_category,
+        )
 
     def _chat_never_routes_to_a_session(
         self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],

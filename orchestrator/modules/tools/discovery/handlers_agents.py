@@ -403,6 +403,9 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if model_id or temperature is not None:
         mc = dict(agent.model_config or {})
         if model_id:
+            from core.llm.model_refusals import without_refusal
+
+            mc = without_refusal(mc)  # F141: the catalog just vouched for this model
             mc["model_id"] = model_id
             mc["provider"] = route.serving_provider  # PRD-236 W1: the route, never the vendor
             changes.append(f"model -> '{model_id}'")
