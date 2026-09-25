@@ -12,7 +12,9 @@ without one (boot.token_problems).
 
 POST /render answers once the job is staged, spoken, mixed and checked. A
 composition `hyperframes check` refuses gets 422 with the findings and never
-renders. A checked job waits for a render slot: two at once overall, one per
+renders. A bundle with a ``preview`` gets snapshot frames and a short reel
+instead of the full render (US-106), through the same check and the same
+slots. A checked job waits for a render slot: two at once overall, one per
 workspace, first come first served (lanes.py). Staging and the check have
 their own, smaller lane, so the renders' limit is never exceeded by a check.
 """
@@ -129,7 +131,8 @@ async def _render(state: ServiceState, job_id: str, workspace_id: str, granted: 
             "queue_seconds": round(max(0.0, (job.started_at or checked_at) - checked_at), 3),
         }
         state.store.finish(job_id, DONE, outputs=result.outputs, report={**job.report, "timings": timings})
-        logger.info("render %s done for workspace %s in %.1f s", job_id, workspace_id, result.timings.get("render_seconds", 0))
+        seconds = result.timings.get("render_seconds", result.timings.get("preview_seconds", 0))
+        logger.info("render %s done for workspace %s in %.1f s", job_id, workspace_id, seconds)
     except PipelineError as exc:
         _fail(state, job_id, exc.code, str(exc), exc.detail)
     except Exception:

@@ -1,5 +1,11 @@
 """
 Seed built-in starter templates for document generation (PRD-63).
+
+PRD-251 S1.2: the social video starters (``social_starters.py``) are seeded by
+``seed_social_starters`` through the same starter path (``_seed_presets``: a
+platform-owned row refreshes in place, a user's copy is never touched). A
+workspace gets them when it turns Socials on (``PUT /api/workspaces/current/socials``):
+D1 keeps Socials out of sight until then, and the platform switch is off by default.
 """
 
 import logging
@@ -11,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.models.core import DocumentTemplate
 from modules.documents.presets import PRESETS
+from modules.documents.social_starters import social_starters
 from modules.documents.template_summary import STARTER_CREATOR
 
 logger = logging.getLogger(__name__)
@@ -254,8 +261,41 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
     # presets the Studio itself offers. Copy-on-customise, so a platform-owned
     # starter (created_by="system") is refreshed in place when the preset changes;
     # a row a user made under the same name is never touched.
-    refreshed = 0
-    for preset in PRESETS:
+    added, refreshed = _seed_presets(db, workspace_id, PRESETS)
+    created += added
+
+    if created or refreshed:
+        db.commit()
+        logger.info(
+            "Seeded starter templates for workspace %s: %d created, %d refreshed", workspace_id, created, refreshed
+        )
+    return created
+
+
+def seed_social_starters(db: Session, workspace_id: UUID, *, commit: bool = True) -> dict:
+    """Seed the social video starters into a workspace (PRD-251 S1.2); idempotent.
+
+    Called when the workspace turns Socials on. The same starter path as the
+    document presets: a missing starter is created, a platform-owned one that
+    drifted from its seed is refreshed in place, one a person made or deleted
+    under the same name is left alone. Returns the counts. Commits only when
+    something changed, and never with ``commit=False``: the Socials switch
+    commits the switch and the starters together.
+    """
+    created, refreshed = _seed_presets(db, workspace_id, social_starters())
+    if created or refreshed:
+        if commit:
+            db.commit()
+        logger.info(
+            "Seeded social starters for workspace %s: %d created, %d refreshed", workspace_id, created, refreshed
+        )
+    return {"created": created, "refreshed": refreshed}
+
+
+def _seed_presets(db: Session, workspace_id: UUID, presets) -> tuple:
+    """Create or refresh each starter in ``presets`` (``starter_outcome``); ``(created, refreshed)``. No commit."""
+    created = refreshed = 0
+    for preset in presets:
         existing = (
             db.query(DocumentTemplate)
             .filter(
@@ -281,13 +321,7 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
                 setattr(existing, column, value)
             existing.updated_at = datetime.utcnow()
             refreshed += 1
-
-    if created or refreshed:
-        db.commit()
-        logger.info(
-            "Seeded starter templates for workspace %s: %d created, %d refreshed", workspace_id, created, refreshed
-        )
-    return created
+    return created, refreshed
 
 
 def starter_columns(preset: dict) -> dict:

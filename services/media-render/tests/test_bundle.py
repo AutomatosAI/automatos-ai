@@ -268,3 +268,26 @@ def test_sfx_come_from_storage_at_a_volume_up_to_one(settings):
 def test_a_workspace_id_is_required(settings):
     assert "missing workspace_id" in refused(settings, {"composition": {"html": page()}})
     assert "workspace id" in refused(settings, bundle(workspace="../../etc"))
+
+
+def test_a_preview_names_moments_inside_the_composition(settings):
+    parsed = parse_bundle(bundle(preview={"at": [2.5, 0.5, 2.5]}), settings, {})
+    assert parsed.preview.at == (0.5, 2.5)
+    assert parse_bundle(bundle(), settings, {}).preview is None
+
+
+@pytest.mark.parametrize(
+    "preview, message",
+    [
+        pytest.param({"at": []}, "at least one moment", id="no-moments"),
+        pytest.param({"at": [3.0]}, "under 3", id="at-the-end"),
+        pytest.param({"at": [-1]}, "at least 0", id="before-the-start"),
+        pytest.param({"at": ["1"]}, "must be a number", id="not-a-number"),
+        pytest.param({"at": [0.5], "scale": 2}, "unknown field", id="unknown-key"),
+        pytest.param({"frames": 5}, "missing at", id="no-at"),
+        pytest.param("soon", "must be an object", id="not-an-object"),
+        pytest.param({"at": [0.1] * 13}, "the limit is 12", id="too-many"),
+    ],
+)
+def test_a_preview_outside_the_composition_is_refused(settings, preview, message):
+    assert message in refused(settings, bundle(preview=preview))

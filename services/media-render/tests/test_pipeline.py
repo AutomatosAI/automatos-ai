@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import struct
+import subprocess
 from pathlib import Path
 from typing import List
 
@@ -165,5 +167,58 @@ def test_tts_speaks_with_kokoro_through_the_api(settings):
             assert len(line["segments"]) >= 3 and "audio_base64" not in line
             unknown = await client.post("/tts", data=json.dumps({**request, "voice": "zz_nobody"}), headers=AUTH)
             assert unknown.status == 400 and (await unknown.json())["error"] == "voice_refused"
+
+    asyncio.run(go())
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_size(data: bytes):
+    """(width, height) from a PNG's IHDR."""
+    assert data[:8] == PNG_SIGNATURE, data[:8]
+    return struct.unpack(">II", data[16:24])
+
+
+def _pixel(settings, png: Path, x: int, y: int):
+    """One pixel of a PNG as (r, g, b), read with the image's own ffmpeg."""
+    raw = subprocess.run(
+        [settings.ffmpeg_bin, "-v", "error", "-i", str(png), "-vf", f"crop=1:1:{x}:{y}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True,
+        check=True,
+    ).stdout
+    return tuple(raw[:3])
+
+
+def test_a_preview_snapshots_the_checked_composition_at_each_moment(settings, tmp_path):
+    """US-106: the real check, then the real `hyperframes snapshot`: small frames and a short reel."""
+    body = {**fixture_bundle(), "preview": {"at": [2.0, 0.5]}}
+
+    async def go():
+        async with TestClient(TestServer(create_app(settings))) as client:
+            response = await client.post("/render", data=json.dumps(body), headers=AUTH)
+            accepted = await response.json()
+            assert response.status == 202, accepted
+            job = accepted
+            for _ in range(240):
+                job = await (await client.get(f"/render/{accepted['id']}", headers=AUTH)).json()
+                if job["status"] in ("done", "failed"):
+                    break
+                await asyncio.sleep(0.5)
+            print(json.dumps(job, indent=2)[:4000])
+            assert job["status"] == "done", job
+            assert job["report"]["check"]["errors"] == 0
+            assert [output["name"] for output in job["outputs"]] == ["preview-01.png", "preview-02.png", "preview.mp4"]
+            frames, reel = job["outputs"][:2], job["outputs"][2]
+            assert [frame["at"] for frame in frames] == [0.5, 2.0]
+            for frame in frames:
+                data = await (await client.get(frame["path"], headers=AUTH)).read()
+                assert _png_size(data) == (540, 960) == (frame["width"], frame["height"])
+                (tmp_path / frame["name"]).write_bytes(data)
+            # The frames are the composition itself: its brand background, not a blank page.
+            assert all(abs(a - b) <= 3 for a, b in zip(_pixel(settings, tmp_path / "preview-02.png", 8, 8), (0x14, 0x17, 0x1C)))
+            assert reel["probe"]["video_codec"] == "h264" and (reel["width"], reel["height"]) == (540, 960)
+            assert abs(reel["duration"] - 1.0) <= 0.2
+            assert "preview_seconds" in job["report"]["timings"]
 
     asyncio.run(go())

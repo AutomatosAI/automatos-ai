@@ -84,3 +84,12 @@ def test_the_cli_runs_in_the_project_directory(tmp_path):
 def test_a_cli_run_past_its_timeout_is_stopped(tmp_path):
     run = hyperframes.run_cli(["sleep", "30"], tmp_path, 1, capture=True)
     assert run.timed_out and not run.ok and run.seconds < 10
+
+
+def test_a_preview_snapshots_exactly_the_moments_asked_for_without_a_gpu(tmp_path):
+    argv = hyperframes.snapshot_argv(load_settings(), tmp_path, tmp_path / "shots", (0.5, 2.0))
+    assert argv[:3] == ["hyperframes", "snapshot", str(tmp_path)]
+    assert argv[argv.index("--output") + 1] == str(tmp_path / "shots")
+    assert argv[argv.index("--at") + 1] == "0.5,2"
+    assert argv[argv.index("--describe") + 1] == "false"
+    assert "--no-end" in argv and "--no-browser-gpu" in argv

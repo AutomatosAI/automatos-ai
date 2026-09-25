@@ -98,13 +98,25 @@ class _Query:
     def get(self, ident):
         return self._db.lookup(ident)
 
+    # PRD-251 S1.2 (US-106): turning Socials on seeds the social starters, which
+    # look each one up by name first; this workspace holds no templates yet.
+    def filter(self, *_criteria):
+        return self
+
+    def first(self):
+        return None
+
 
 class _FakeDB:
-    """Answers ``db.query(Workspace).get(id)`` and ``db.get(Workspace, id)``."""
+    """Answers ``db.query(Workspace).get(id)`` and ``db.get(Workspace, id)``, and keeps what is added."""
 
     def __init__(self, workspace):
         self.workspace = workspace
         self.commits = 0
+        self.added = []
+
+    def add(self, row):
+        self.added.append(row)
 
     def lookup(self, ident):
         ws = self.workspace

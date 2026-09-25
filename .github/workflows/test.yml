@@ -731,6 +731,49 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
           retention-days: 7
+      # US-106 (S1.2b): the four reference videos, seeded as templates. Each one's
+      # bundle is built by the orchestrator's own seed loader and bundle builder
+      # (standard library only, the runner's python3) from its sample data (the
+      # reference's copy), a Studio Dark brand kit and a drawn logo, with every
+      # footage slot empty. media-render checks the FULL composition (`hyperframes
+      # check`: a 202 means 0 errors) and renders a preview: snapshot frames at the
+      # template's key moments, small, and a short reel. The pixel probe renders
+      # a probed moment again with the brand kit's primary colour swapped and reads
+      # the pixel back (scripts/ci/social_template_previews.py).
+      - name: The seeded video templates pass the check and render their previews; the pixel follows the brand kit
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/templates"
+          mkdir -p "$out"
+          docker run -d --name media-render-templates --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8091:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8091/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-templates; echo "::error::the API never answered /health"; exit 1; fi
+          python3 --version
+          start=$(date +%s)
+          set +e
+          PYTHONPATH=orchestrator python3 scripts/ci/social_template_previews.py \
+            --url http://127.0.0.1:8091 --token "$TOKEN" --out "$out"
+          code=$?
+          set -e
+          echo "the seeded templates: $(( $(date +%s) - start )) s"
+          docker logs media-render-templates 2>&1 | tail -n 80
+          docker rm -f media-render-templates > /dev/null
+          if [ "$code" != 0 ]; then echo "::error::a seeded video template failed its check, its preview or the pixel probe"; fi
+          exit $code
+      - name: Keep the seeded templates' previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-template-previews
+          path: ${{ runner.temp }}/templates
+          if-no-files-found: ignore
+          retention-days: 7
 
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration

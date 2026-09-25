@@ -64,6 +64,7 @@ import services.deliverable_service as deliverable_service  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import Base, get_db  # noqa: E402
+from core.brand_palette import STAGE_TOKENS  # noqa: E402
 from core.media_render_bundle import NO_LOGO, build_bundle  # noqa: E402
 from core.media_render_client import MediaRenderClient, MediaRenderError  # noqa: E402
 from core.media_render_quota import RenderQuotaExceeded  # noqa: E402
@@ -450,6 +451,8 @@ def _seeded_templates():
 
     recorder = _SeedRecorder()
     seed_templates.seed_starter_templates(recorder, WS)
+    # US-106: the social video starters, which turning Socials on seeds through the same path.
+    seed_templates.seed_social_starters(recorder, WS)
     seeded = [(row.name, row.format, row.blocks) for row in recorder.rows]
     seeded += [(p["name"], p["format"], p.get("blocks")) for p in presets.PRESETS]
     seeded += [(t["name"], t["format"], t.get("blocks")) for t in seed_templates.STARTER_TEMPLATES]
@@ -458,9 +461,10 @@ def _seeded_templates():
 
 def test_no_seeded_social_template_hardcodes_a_colour_a_font_or_a_logo():
     seeded = _seeded_templates()
-    # The net runs the real starter seeder, so the social starters US-106 and US-107
-    # seed through it are checked the moment they exist; the tests below prove it bites.
+    # The net runs the real starter seeders, so the social starters US-106 and US-107
+    # seed through them are checked the moment they exist; the tests below prove it bites.
     assert seeded, "the starter seeder wrote nothing: this net is not attached to it"
+    assert sum(1 for _, fmt, _ in seeded if is_social_format(fmt)) >= 4, "the social starters are not under this net"
     for name, fmt, blocks in seeded:
         if not is_social_format(fmt):
             continue
@@ -532,10 +536,14 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
     values = resolve_variables(BLOCKS["variables_schema"], {"headline": "Hi", "stat": 3}).values
     bundle = build_bundle(workspace_id=WS, reference="document_template:x", blocks=BLOCKS, values=values, brand_kit=KIT)
     assert bundle["composition"] == {"html": HTML, "css": BLOCKS["css"]}
-    assert bundle["brand"]["tokens"] == {
+    tokens = bundle["brand"]["tokens"]
+    raw = ("primary", "secondary", "accent", "text", "body-font", "heading-font")
+    assert {name: tokens[name] for name in raw} == {
         "primary": "#ff0000", "secondary": "#00ff00", "accent": "#0000ff", "text": "#111111",
         "body-font": "Inter, sans-serif", "heading-font": "Inter, sans-serif",
     }
+    # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py).
+    assert set(tokens) - set(raw) == set(STAGE_TOKENS)
     assert bundle["brand"]["fonts"] == [
         {"family": "Geist", "weight": "700", "style": "normal", "path": "assets/brand/fonts/font-0.woff2"}
     ]

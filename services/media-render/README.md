@@ -40,7 +40,7 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | Route | Answers |
 |---|---|
 | `GET /health` | the versions, and how many renders are running and queued |
-| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress |
+| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render (see below) |
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
 | `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
@@ -58,6 +58,12 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 - an `<iframe>`, `<object>` or `<form>`;
 - a placeholder with no variable;
 - a text variable inside a `<script>` or an `on*` event handler (only numbers and true/false go there).
+
+**A preview** (US-106) goes through the same stage, voice, mix and check as a render, and the same render slots. Instead of `hyperframes render` it runs `hyperframes snapshot --at …` and returns:
+- `preview-01.png`, `preview-02.png`, …: one frame per moment, in time order, scaled to `MEDIA_RENDER_PREVIEW_WIDTH`, each with its `at`;
+- `preview.mp4`: a short reel of those frames, each held `1 / MEDIA_RENDER_PREVIEW_REEL_FPS` seconds.
+
+The media-render CI job previews every seeded social video template this way (`scripts/ci/social_template_previews.py`).
 
 **The mix** is the reference's ffmpeg graph (`docs/PRDS/prd251-reference/mix-reference.py`):
 - voice placed with `adelay`;
@@ -110,6 +116,7 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_KOKORO_MODEL` / `_VOICES` | `/opt/kokoro/kokoro-v1.0.onnx` / `voices-v1.0.bin` |
 | `MEDIA_RENDER_KOKORO_VOICE` / `_SPEED` / `_LANG` | `af_heart` / `0.95` / `en-us` |
 | `MEDIA_RENDER_QUALITY` / `MEDIA_RENDER_FPS` / `MEDIA_RENDER_WORKERS` | `delivery` / `30` / `auto` |
+| `MEDIA_RENDER_PREVIEW_WIDTH` / `_PREVIEW_MAX_FRAMES` / `_PREVIEW_REEL_FPS` / `_PREVIEW_TIMEOUT_SECONDS` | `540` / `12` / `2` / `120` (the frames' and the reel's ffmpeg steps) |
 
 ## Tests
 
@@ -118,6 +125,7 @@ Nothing runs on a developer machine. The `media-render` CI job:
 2. runs `tests/` inside it: the bundle rules, the queue, and the real `hyperframes check`, ffmpeg mix and Kokoro;
 3. proves the boot assertion and `/health`;
 4. posts the fixture bundle to `POST /render` with the token, timed;
-5. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`).
+5. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`);
+6. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
 
 The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.

@@ -13,7 +13,8 @@
                           "lines": [{"id": "l01", "at": 0.3, "text": "…"},
                                     {"id": "l02", "at": 2.4, "path": "assets/vo/l02.wav"}]},
                 "music": {"track": "<library id>", "start": 32.0},
-                "sfx": [{"path": "assets/sfx/click.ogg", "at": 10.44, "volume": 0.5}]}
+                "sfx": [{"path": "assets/sfx/click.ogg", "at": 10.44, "volume": 0.5}]},
+      "preview": {"at": [1.2, 10.0, 36.5]}      optional: snapshot these moments, not the full render
     }
 
 ``files`` are inlined as data: URIs (the brand kit's logo and font files, small
@@ -22,6 +23,11 @@ only from the allowlisted prefixes; ``parse_bundle`` refuses any other URL
 before anything is fetched. Voice lines are Kokoro text, or a file from a
 workspace's voice toolkit already copied into our storage. Nothing here is
 generated: the renderer assembles (D3).
+
+A ``preview`` asks for frames instead of the video (US-106): the job is
+staged, spoken, mixed and checked exactly as a render is, then snapshots the
+composition at each moment and returns them as small PNGs, with a short reel
+of them (pipeline.RenderPipeline.preview).
 """
 
 from __future__ import annotations
@@ -123,6 +129,11 @@ class AudioPlan:
 
 
 @dataclass(frozen=True)
+class Preview:
+    at: Tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class Bundle:
     workspace_id: str
     reference: Optional[str]
@@ -130,6 +141,7 @@ class Bundle:
     files: Tuple[InlineFile, ...]
     media: Tuple[MediaInput, ...]
     audio: AudioPlan
+    preview: Optional[Preview] = None
 
 
 def _file_path(value: Any, where: str, extensions: FrozenSet[str]) -> str:
@@ -284,6 +296,19 @@ def _audio(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Set
     )
 
 
+def _preview(raw: Any, duration: float, settings: Settings) -> Optional[Preview]:
+    """The moments a preview snapshots: each inside the composition, each once, in order."""
+    if raw is None:
+        return None
+    preview = validate.mapping(raw, "preview")
+    validate.keys(preview, "preview", required=("at",))
+    moments = validate.items(preview["at"], "preview.at", limit=settings.preview_max_frames)
+    if not moments:
+        raise BundleError("preview.at must name at least one moment")
+    at = [validate.number(t, f"preview.at[{i}]", minimum=0, below=duration) for i, t in enumerate(moments)]
+    return Preview(at=tuple(sorted(set(at))))
+
+
 def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track]) -> Bundle:
     """Validate a render bundle. Raises BundleError (HTTP 400) before anything is fetched."""
     body = validate.mapping(payload, "the bundle")
@@ -291,7 +316,7 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track])
         body,
         "the bundle",
         required=("workspace_id", "composition"),
-        optional=("reference", "variables", "brand", "files", "media", "audio"),
+        optional=("reference", "variables", "brand", "files", "media", "audio", "preview"),
     )
     workspace_id = validate.pattern(body["workspace_id"], "workspace_id", WORKSPACE_ID, "a workspace id")
     reference = body.get("reference")
@@ -313,4 +338,5 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track])
         files=files,
         media=media,
         audio=_audio(body.get("audio"), composition.duration, audio_paths, settings, library),
+        preview=_preview(body.get("preview"), composition.duration, settings),
     )

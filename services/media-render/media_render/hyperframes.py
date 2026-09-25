@@ -57,6 +57,23 @@ def render_argv(settings: Settings, project_dir: Path, output: Path) -> List[str
     ]
 
 
+def snapshot_argv(settings: Settings, project_dir: Path, output_dir: Path, at: Sequence[float]) -> List[str]:
+    """PNG frames of the composition at exactly these moments (no end frame, no vision model)."""
+    return [
+        settings.hyperframes_bin,
+        "snapshot",
+        str(project_dir),
+        "--output",
+        str(output_dir),
+        "--at",
+        ",".join(f"{t:g}" for t in at),
+        "--no-end",
+        "--describe",
+        "false",
+        "--no-browser-gpu",
+    ]
+
+
 def check_argv(settings: Settings, project_dir: Path) -> List[str]:
     # Software capture here too: the contrast pass samples the same pixels the render will.
     return [settings.hyperframes_bin, "check", str(project_dir), "--json", "--no-browser-gpu"]

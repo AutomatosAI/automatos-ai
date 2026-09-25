@@ -11,7 +11,10 @@ The brand kit becomes:
 
 * ``brand.tokens``: its colours and fonts. media-render declares each as a
   ``--brand-<name>`` custom property, so a template reads ``var(--brand-primary)``
-  or ``var(--brand-heading-font)`` and never names a colour or a font (D4);
+  or ``var(--brand-heading-font)`` and never names a colour or a font (D4). The
+  kit's colours come as they are, plus the dark stage a social video reads,
+  derived from them with WCAG contrast (``core/brand_palette.py``: ``ink``,
+  ``on-ink``, ``primary-on-ink`` and the rest);
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
   with its ``@font-face``;
@@ -19,17 +22,28 @@ The brand kit becomes:
   logo's path, or a transparent pixel when there is no uploaded logo), and
   ``size.width`` / ``size.height`` for the size being rendered.
 
+The template becomes the composition, with two things done to it here:
+
+* a slot the caller fills (``slot_media``: slot name → a presigned GET URL on
+  our storage) reaches media-render as a media file at the slot's path; a slot
+  left empty has its elements taken out of the html, so the template's own
+  motion graphics play where the footage would have been;
+* the audio plan's voice lines are template text: their ``{{ name }}`` are
+  filled with the variables, and a line that fills in empty is dropped.
+
 An external ``logo_url`` is never fetched: a render reads only the files its
 bundle carries and our own storage (D9), so a logo reaches a render once it is
 uploaded. Nothing here generates anything: the renderer assembles (D3).
 """
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from core.social_templates import parse_size
+from core.brand_palette import stage_palette
+from core.social_templates import fill_text, parse_size, without_slots
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +97,15 @@ def _token(name: str, value: Any) -> Optional[str]:
 
 
 def brand_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
-    """The kit's colours and fonts as the ``--brand-*`` tokens a template reads."""
+    """The kit's colours and fonts as the ``--brand-*`` tokens a template reads, and its video stage."""
     body_font = kit.get("font_family")
     raw: Dict[str, Any] = {token: kit.get(field) for token, field in COLOUR_TOKENS}
     raw[BODY_FONT_TOKEN] = body_font
     # D5: the heading font is optional; without one, headings take the body font.
     raw[HEADING_FONT_TOKEN] = kit.get("heading_font") or body_font
     tokens = {name: _token(name, value) for name, value in raw.items()}
-    return {name: value for name, value in tokens.items() if value is not None}
+    stage = stage_palette(kit)
+    return {**{name: value for name, value in tokens.items() if value is not None}, **stage}
 
 
 def _data_uri_type(value: Any) -> Optional[str]:
@@ -142,6 +157,35 @@ def render_size(blocks: Mapping[str, Any], size: Optional[str] = None) -> Tuple[
     return parse_size(chosen)
 
 
+def _audio(plan: Mapping[str, Any], variables: Mapping[str, Any]) -> Dict[str, Any]:
+    """The audio plan with its voice lines filled in; a line that fills in empty is dropped."""
+    audio = copy.deepcopy(dict(plan))
+    voice = audio.get("voice")
+    if isinstance(voice, dict) and isinstance(voice.get("lines"), list):
+        lines = []
+        for line in voice["lines"]:
+            if isinstance(line, dict) and isinstance(line.get("text"), str):
+                text = fill_text(line["text"], variables)
+                if not text:
+                    continue
+                line = {**line, "text": text}
+            lines.append(line)
+        voice["lines"] = lines
+        if not lines:
+            audio.pop("voice")
+    return audio
+
+
+def _slots(blocks: Mapping[str, Any], slot_media: Mapping[str, str]) -> Tuple[str, List[Dict[str, str]]]:
+    """The html with every empty slot taken out, and the media entries of the filled ones."""
+    slots = blocks.get("slots") or {}
+    unknown = sorted(set(slot_media) - set(slots))
+    if unknown:
+        raise ValueError(f"this template has no slot {', '.join(unknown)}")
+    media = [{"path": slots[name]["path"], "url": url} for name, url in slot_media.items()]
+    return without_slots(blocks["html"], slots, keep=slot_media), media
+
+
 def build_bundle(
     *,
     workspace_id: Any,
@@ -151,15 +195,19 @@ def build_bundle(
     brand_kit: Optional[Mapping[str, Any]],
     fallback_name: str = "",
     size: Optional[str] = None,
+    slot_media: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Any]:
     """The bundle for one render of ``blocks`` (a checked social template) at ``size``.
 
     ``values`` are the template's own variables, already resolved
     (``core.social_templates.resolve_variables``); the brand and size variables
-    are added here and always win over a same-named value.
+    are added here and always win over a same-named value. ``slot_media`` fills
+    slots with footage or stills already in our storage (presigned GET URLs,
+    which media-render checks against its allowlist); every other slot is empty.
     """
     kit = brand_kit or {}
     width, height = render_size(blocks, size)
+    html, media = _slots(blocks, slot_media or {})
     logo_files, logo = _logo(kit)
     font_files, faces = _fonts(kit)
     variables = {
@@ -176,14 +224,17 @@ def build_bundle(
     bundle: Dict[str, Any] = {
         "workspace_id": str(workspace_id),
         "reference": reference,
-        "composition": {"html": blocks["html"], "css": blocks.get("css") or ""},
+        "composition": {"html": html, "css": blocks.get("css") or ""},
         "variables": variables,
         "brand": brand,
     }
     if logo_files or font_files:
         bundle["files"] = logo_files + font_files
-    audio = blocks.get("audio_plan")
-    if isinstance(audio, dict) and audio:
+    if media:
+        bundle["media"] = media
+    plan = blocks.get("audio_plan")
+    audio = _audio(plan, variables) if isinstance(plan, dict) and plan else {}
+    if audio:
         bundle["audio"] = audio
     return bundle
 

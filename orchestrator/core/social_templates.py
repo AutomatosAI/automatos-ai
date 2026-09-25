@@ -12,7 +12,10 @@ carries a composition in ``blocks``, which media-render renders:
         "subtitle": {"type": "text", "default": ""}
       },
       "sizes": ["1080x1920", "1080x1350"],   WIDTHxHEIGHT, the first is the default
-      "audio_plan": {"voice": …, "music": …, "sfx": […]}   social_video only
+      "audio_plan": {"voice": …, "music": …, "sfx": […]},  social_video only
+      "slots": {                             optional: footage and stills a post may supply
+        "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"}
+      }
     }
 
 * **Variables.** A variable is ``text``, a ``number`` or a ``boolean``, and it
@@ -20,15 +23,26 @@ carries a composition in ``blocks``, which media-render renders:
   on screen is template text). A variable with a ``default`` is optional; one
   without must be supplied. ``claim: true`` marks a fact that needs a source (D7).
   The render bundle also sets ``brand.*`` and ``size.*`` for every template
-  (``core/media_render_bundle.py``), so the html may use them undeclared.
+  (``core/media_render_bundle.py``), so the html may use them undeclared. The
+  voice lines of the audio plan are template text too: ``{{ name }}`` in a
+  line's ``text`` is filled with the variable's value (:func:`fill_text`).
+* **Slots.** A slot is a clip or a still the post may supply: generated footage
+  from the workspace's own toolkits (D12), copied into our storage. Every
+  element that shows it is a ``<video …></video>`` or an ``<img …>`` carrying
+  ``data-slot="<name>"`` and ``src`` the slot's path. A filled slot reaches
+  media-render as a media file at that path; an empty one has its elements
+  removed (:func:`without_slots`), and the template's own motion graphics play in
+  its place.
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
   a composition as ``--brand-*`` CSS variables and ``{{ brand.logo }}``.
   :func:`brand_literals` finds a hex colour, a named font family or a logo baked
   into the template outside a ``var()`` fallback, and a template carrying one is
   refused on save.
 
-Pure: no database, no IO. Used by the template service (validation on save),
-the documents generator and a Socials post's render (variables and sizes).
+Pure: no database, no IO, and nothing outside the standard library, so the
+media-render CI job builds the seeded templates' bundles with this very code.
+Used by the template service (validation on save), the documents generator and
+a Socials post's render (variables, sizes and slots).
 """
 from __future__ import annotations
 
@@ -39,11 +53,12 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from core.models.core import SOCIAL_TEMPLATE_FORMATS
+# The two formats a social template has. core/models/core.py reads them from
+# here for the document_templates format CHECK (the prd251_wave1 migration).
+SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
+SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-SOCIAL_IMAGE, SOCIAL_VIDEO = SOCIAL_TEMPLATE_FORMATS
-
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan")
+BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots")
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
 
@@ -60,20 +75,32 @@ VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 BUNDLE_VARIABLE_PREFIXES = ("brand.", "size.")
 
 # Bounds. The media-render service enforces its own on every bundle; these keep
-# a stored template far inside them.
+# a stored template inside them. A reference video carries about 120 pieces of
+# copy (US-106), and media-render takes 200 variables a bundle, five of them the
+# brand and size variables the bundle adds.
 MAX_COMPOSITION_CHARS = 1_000_000
-MAX_VARIABLES = 100
+MAX_VARIABLES = 160
 MAX_TEXT_CHARS = 2000
 MAX_LABEL_CHARS = 200
 MAX_SIZES = 8
 MIN_DIMENSION, MAX_DIMENSION = 16, 4096
 MAX_REPORTED_ERRORS = 50
 
+# Slots: footage and stills a post may supply, each at its own fixed path.
+VIDEO_SLOT, IMAGE_SLOT = "video", "image"
+SLOT_EXTENSIONS = {VIDEO_SLOT: ("mp4", "webm", "mov"), IMAGE_SLOT: ("png", "jpg", "jpeg", "webp")}
+SLOT_TAGS = {VIDEO_SLOT: "video", IMAGE_SLOT: "img"}
+SLOT_SPEC_KEYS = ("kind", "label", "description", "path")
+SLOT_DIR = "assets/slots/"
+MAX_SLOTS = 12
+
 PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 _LEFTOVER = re.compile(r"\{\{[^{}]*\}\}")
 _SIZE = re.compile(r"^(\d{2,4})x(\d{2,4})$")
 _HEAD_CLOSE = re.compile(r"</head\s*>", re.IGNORECASE)
 _ROOT = re.compile(r"""data-composition-id\s*=\s*["']main["']""", re.IGNORECASE)
+_SLOT_ATTRIBUTE = re.compile(r"""(?<![\w-])data-slot\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
+_SRC_ATTRIBUTE = re.compile(r"""(?<![\w-])src\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
 
 
 class SocialTemplateError(ValueError):
@@ -253,6 +280,112 @@ def claim_names(schema: Mapping[str, Any]) -> List[str]:
     return [name for name, spec in schema.items() if isinstance(spec, dict) and spec.get("claim") is True]
 
 
+def _plain(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return "" if value is None else str(value)
+
+
+def fill_text(text: str, variables: Mapping[str, Any]) -> str:
+    """``text`` with each ``{{ name }}`` replaced by its variable as plain text, spaces collapsed.
+
+    For a voice line: it is spoken, never shown as markup, so nothing is escaped.
+    A name with no value fills in as nothing.
+    """
+    filled = PLACEHOLDER.sub(lambda match: _plain(variables.get(match.group(1))), text or "")
+    return " ".join(filled.split())
+
+
+# ── slots ───────────────────────────────────────────────────────────────────
+def _slot_element(kind: str, name: str) -> "re.Pattern[str]":
+    """The one form an element showing slot ``name`` takes: a whole ``<video …></video>`` or an ``<img …>``."""
+    attribute = r"""(?<![\w-])data-slot\s*=\s*(["'])""" + re.escape(name) + r"\1"
+    if kind == VIDEO_SLOT:
+        return re.compile(r"<video\b[^<>]*?" + attribute + r"[^<>]*>\s*</video\s*>", re.IGNORECASE)
+    return re.compile(r"<img\b[^<>]*?" + attribute + r"[^<>]*>", re.IGNORECASE)
+
+
+def slot_names_in(html: str) -> List[str]:
+    """The slot names the html's ``data-slot`` attributes use, each once."""
+    return list(dict.fromkeys(match.group(2) for match in _SLOT_ATTRIBUTE.finditer(html or "")))
+
+
+def without_slots(html: str, slots: Mapping[str, Any], keep: Iterable[str] = ()) -> str:
+    """``html`` without the elements of every slot not in ``keep``: an empty slot is not shown.
+
+    ``slots`` is a checked template's; each of its elements is a whole
+    ``<video …></video>`` or ``<img …>`` (``validate_social_blocks``), so the
+    removal takes exactly those elements and nothing else.
+    """
+    kept = set(keep)
+    for name, spec in slots.items():
+        if name not in kept:
+            html = _slot_element(spec["kind"], name).sub("", html)
+    return html
+
+
+def _slot_spec_errors(name: Any, spec: Any) -> List[Dict[str, str]]:
+    where = f"slots.{name}"
+    if not isinstance(name, str) or not VARIABLE_NAME.match(name):
+        return [_error(where, "a slot name is letters, digits and _ (64 at most), not starting with a digit")]
+    if not isinstance(spec, dict):
+        return [_error(where, 'must be an object such as {"kind": "video", "path": "assets/slots/hook.mp4"}')]
+    errors = [
+        _error(f"{where}.{key}", f"is not a slot setting ({', '.join(SLOT_SPEC_KEYS)})")
+        for key in spec
+        if key not in SLOT_SPEC_KEYS
+    ]
+    for key in ("label", "description"):
+        if key in spec and (not isinstance(spec[key], str) or len(spec[key]) > MAX_LABEL_CHARS):
+            errors.append(_error(f"{where}.{key}", f"must be text of at most {MAX_LABEL_CHARS} characters"))
+    kind = spec.get("kind")
+    if kind not in SLOT_EXTENSIONS:
+        return errors + [_error(f"{where}.kind", f"must be one of {list(SLOT_EXTENSIONS)}")]
+    allowed = [f"{SLOT_DIR}{name}.{ext}" for ext in SLOT_EXTENSIONS[kind]]
+    if spec.get("path") not in allowed:
+        errors.append(_error(f"{where}.path", f"must be one of {', '.join(allowed)}"))
+    return errors
+
+
+def _slot_markup_errors(name: str, spec: Mapping[str, Any], html: str, css: str) -> List[Dict[str, str]]:
+    """Every element showing the slot is one the removal takes whole, and nothing else names its file."""
+    where, kind, path = f"slots.{name}", spec["kind"], spec["path"]
+    tag = SLOT_TAGS[kind]
+    marked = sum(1 for match in _SLOT_ATTRIBUTE.finditer(html) if match.group(2) == name)
+    elements = [match.group(0) for match in _slot_element(kind, name).finditer(html)]
+    if not marked:
+        return [_error(where, f'no element shows this slot: mark its <{tag}> with data-slot="{name}"')]
+    whole = f"<{tag} …></{tag}>" if kind == VIDEO_SLOT else f"<{tag} …>"
+    errors = []
+    if len(elements) != marked:
+        errors.append(_error(where, f'every element marked data-slot="{name}" must be a whole {whole} with nothing inside'))
+    for element in elements:
+        src = _SRC_ATTRIBUTE.search(element)
+        if src is None or src.group(2) != path:
+            errors.append(_error(where, f'an element marked data-slot="{name}" must show src="{path}"'))
+    if html.count(path) != len(elements) or path in (css or ""):
+        errors.append(_error(where, f"{path} is used outside its data-slot elements; an empty slot removes only those"))
+    return errors
+
+
+def _slot_errors(slots: Any, html: str, css: str) -> List[Dict[str, str]]:
+    if slots is None:
+        return [_error("html", f'data-slot="{name}" names no slot in slots') for name in slot_names_in(html)]
+    if not isinstance(slots, dict):
+        return [_error("slots", 'must be an object of slots, e.g. {"hook": {"kind": "video", "path": "assets/slots/hook.mp4"}}')]
+    if len(slots) > MAX_SLOTS:
+        return [_error("slots", f"at most {MAX_SLOTS} slots")]
+    errors = [error for name, spec in slots.items() for error in _slot_spec_errors(name, spec)]
+    if errors:
+        return errors
+    for name, spec in slots.items():
+        errors += _slot_markup_errors(name, spec, html, css)
+    errors += [_error("html", f'data-slot="{name}" names no slot in slots') for name in slot_names_in(html) if name not in slots]
+    return errors
+
+
 # ── the whole template ──────────────────────────────────────────────────────
 def _text_errors(field: str, value: Any, *, required: bool) -> List[Dict[str, str]]:
     if value is None and not required:
@@ -280,11 +413,32 @@ def _audio_errors(plan: Any, fmt: str) -> List[Dict[str, str]]:
         return [_error("audio_plan", "an image has no audio: leave audio_plan out")]
     if not isinstance(plan, dict):
         return [_error("audio_plan", f"must be an object with {', '.join(AUDIO_PLAN_KEYS)}")]
-    return [
+    errors = [
         _error(f"audio_plan.{key}", f"is not part of an audio plan ({', '.join(AUDIO_PLAN_KEYS)})")
         for key in plan
         if key not in AUDIO_PLAN_KEYS
     ]
+    voice = plan.get("voice")
+    if voice is not None and not (isinstance(voice, dict) and isinstance(voice.get("lines"), list)):
+        errors.append(_error("audio_plan.voice", 'must be an object with a list of lines, e.g. {"lines": [{"id": "l01", "at": 0.3, "text": "…"}]}'))
+    return errors
+
+
+def voice_lines(plan: Any) -> List[Mapping[str, Any]]:
+    """The voice lines of an audio plan ([] when it has none)."""
+    voice = plan.get("voice") if isinstance(plan, dict) else None
+    lines = voice.get("lines") if isinstance(voice, dict) else None
+    return [line for line in lines if isinstance(line, dict)] if isinstance(lines, list) else []
+
+
+def _voice_placeholder_errors(plan: Any, schema: Mapping[str, Any]) -> List[Dict[str, str]]:
+    """A voice line's ``{{ name }}`` must be a declared variable, like the html's."""
+    errors: List[Dict[str, str]] = []
+    for i, line in enumerate(voice_lines(plan)):
+        text = line.get("text")
+        if isinstance(text, str):
+            errors += _placeholder_errors(f"audio_plan.voice.lines[{i}].text", text, schema)
+    return errors
 
 
 def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
@@ -308,6 +462,8 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         schema = blocks["variables_schema"]
         errors += _document_errors(html)
         errors += _placeholder_errors("html", html, schema) + _placeholder_errors("css", css or "", schema)
+        errors += _voice_placeholder_errors(blocks.get("audio_plan"), schema)
+        errors += _slot_errors(blocks.get("slots"), html, css or "")
         errors += [_error(field, message) for field, message in brand_literals(html, css or "")]
     if errors:
         raise SocialTemplateError(errors)
@@ -537,19 +693,25 @@ def brand_literals(html: str, css: str = "") -> List[Tuple[str, str]]:
 
 __all__ = [
     "BLOCK_KEYS",
+    "IMAGE_SLOT",
     "InvalidVariableValues",
     "ResolvedVariables",
     "SOCIAL_IMAGE",
     "SOCIAL_TEMPLATE_FORMATS",
     "SOCIAL_VIDEO",
     "SocialTemplateError",
+    "VIDEO_SLOT",
     "brand_literals",
     "claim_names",
+    "fill_text",
     "is_bundle_variable",
     "is_social_format",
     "parse_size",
     "placeholders",
     "resolve_variables",
+    "slot_names_in",
     "strip_var_calls",
     "validate_social_blocks",
+    "voice_lines",
+    "without_slots",
 ]

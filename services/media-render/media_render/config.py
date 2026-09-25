@@ -100,6 +100,12 @@ class Settings:
     max_brand_tokens: int
     tts_max_lines: int
     tts_max_chars: int
+    # A preview (US-106): snapshot frames of the composition instead of the full
+    # render, scaled to this width, joined into a short reel at this many frames a second.
+    preview_width: int
+    preview_max_frames: int
+    preview_reel_fps: int
+    preview_timeout_seconds: int
 
     @property
     def is_production(self) -> bool:
@@ -210,4 +216,8 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         max_brand_tokens=positive_int("MEDIA_RENDER_MAX_BRAND_TOKENS", 64),
         tts_max_lines=positive_int("MEDIA_RENDER_TTS_MAX_LINES", 40),
         tts_max_chars=positive_int("MEDIA_RENDER_TTS_MAX_CHARS", 500),
+        preview_width=positive_int("MEDIA_RENDER_PREVIEW_WIDTH", 540),
+        preview_max_frames=positive_int("MEDIA_RENDER_PREVIEW_MAX_FRAMES", 12),
+        preview_reel_fps=positive_int("MEDIA_RENDER_PREVIEW_REEL_FPS", 2),
+        preview_timeout_seconds=positive_int("MEDIA_RENDER_PREVIEW_TIMEOUT_SECONDS", 120),
     )

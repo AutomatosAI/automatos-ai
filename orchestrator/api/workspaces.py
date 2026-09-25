@@ -504,6 +504,10 @@ async def save_socials_settings(
     Body: ``{"socials": {"enabled": bool}}`` — validated fail-closed (unknown
     keys and a non-boolean ``enabled`` are 400), merged never replace-blind.
     The platform master switch is a system setting, not this route.
+
+    PRD-251 S1.2: turning Socials on also seeds the social video starters into
+    the workspace (``seed_social_starters``, idempotent), in the same commit as
+    the switch: a workspace never has Socials on without its templates.
     """
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
@@ -523,6 +527,10 @@ async def save_socials_settings(
 
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(workspace, "settings")
+    if merged.get("enabled") is True:
+        from modules.documents.seed_templates import seed_social_starters
+
+        seed_social_starters(db, workspace.id, commit=False)
     db.commit()
 
     logger.info("Updated socials settings for workspace %s: %s", workspace.id, merged)

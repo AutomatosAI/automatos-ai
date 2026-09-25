@@ -6,12 +6,18 @@ the Kokoro lines are spoken, the mix is made, and `hyperframes check` runs on
 the result. Any error refuses the job: 422, nothing rendered. A job that passes
 waits for a render slot, then ``render`` runs `hyperframes render` and probes
 the file. The renderer assembles; it never calls a generation provider (D3).
+
+A bundle with a ``preview`` is checked the same way, and then its slot takes
+PNG snapshots of the composition at the moments asked for instead of the full
+render (US-106): each scaled to ``MEDIA_RENDER_PREVIEW_WIDTH``, and a short
+reel of them, held ``1 / MEDIA_RENDER_PREVIEW_REEL_FPS`` seconds each.
 """
 
 from __future__ import annotations
 
 import asyncio
 import shutil
+import subprocess
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,11 +32,16 @@ from .bundle import Bundle, MediaInput
 from .check_report import CheckReportError, parse_check_output
 from .composition import GSAP_PATH, MIX_PATH
 from .config import Settings
+from .hyperframes import LOG_TAIL_CHARS
 from .jobs import Job
 from .media_urls import redact, url_allowed
 from .tts import Speaker
 
 OUTPUT_NAME = "render.mp4"
+PREVIEW_FRAME = "preview-{:02d}.png"
+PREVIEW_FRAMES = "preview-%02d.png"
+PREVIEW_REEL = "preview.mp4"
+SNAPSHOT_DIR = "snapshots"
 CHUNK_BYTES = 1 << 16
 # How far one voice line may run into the next, or past the end, before it counts.
 VOICE_TOLERANCE_SECONDS = 0.05
@@ -276,6 +287,8 @@ class RenderPipeline:
         return CheckOutcome(ok=result.ok, report=report, findings=result.findings)
 
     async def render(self, job: Job) -> RenderResult:
+        if job.bundle.preview is not None:
+            return await self.preview(job)
         settings, composition = self._settings, job.bundle.composition
         output = job.output_dir / OUTPUT_NAME
         job.output_dir.mkdir(parents=True, exist_ok=True)
@@ -310,3 +323,78 @@ class RenderPipeline:
         }
         timings = {"render_seconds": run.seconds, "probe_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=(entry,), timings=timings)
+
+    def _ffmpeg(self, argv: Sequence[str], what: str) -> None:
+        try:
+            proc = subprocess.run(
+                [self._settings.ffmpeg_bin, "-v", "error", "-y", *argv],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self._settings.preview_timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise PipelineError("preview_failed", f"{what} ran past {self._settings.preview_timeout_seconds} s") from None
+        if proc.returncode != 0:
+            raise PipelineError("preview_failed", f"{what} failed", detail=proc.stderr.strip()[-LOG_TAIL_CHARS:])
+
+    async def preview(self, job: Job) -> RenderResult:
+        """Snapshots of the checked composition at the preview's moments, small, and a short reel of them."""
+        settings, composition = self._settings, job.bundle.composition
+        at = job.bundle.preview.at
+        shots = job.dir / SNAPSHOT_DIR
+        job.output_dir.mkdir(parents=True, exist_ok=True)
+        run = await asyncio.to_thread(
+            hyperframes.run_cli,
+            hyperframes.snapshot_argv(settings, job.project_dir, shots, at),
+            job.project_dir,
+            settings.render_timeout_seconds,
+            capture=True,
+        )
+        frames = sorted(shots.glob("frame-*.png")) if shots.is_dir() else []
+        if not run.ok or len(frames) != len(at):
+            if run.timed_out:
+                raise PipelineError("preview_timed_out", f"the snapshots ran past {settings.render_timeout_seconds} s")
+            message = f"hyperframes snapshot took {len(frames)} of {len(at)} frames (exit {run.returncode})"
+            raise PipelineError("preview_failed", message, detail=run.tail())
+        started = time.monotonic()
+        width = settings.preview_width
+        height = int(round(composition.height * width / composition.width / 2)) * 2
+        outputs: List[Dict[str, Any]] = []
+        for index, (frame, moment) in enumerate(zip(frames, at), start=1):
+            name = PREVIEW_FRAME.format(index)
+            target = job.output_dir / name
+            scale = f"scale={width}:{height}:flags=area"
+            await asyncio.to_thread(self._ffmpeg, ["-i", str(frame), "-vf", scale, "-frames:v", "1", str(target)], f"scaling {frame.name}")
+            outputs.append(
+                {"name": name, "kind": "frame", "at": moment, "width": width, "height": height, "bytes": target.stat().st_size}
+            )
+        reel = job.output_dir / PREVIEW_REEL
+        reel_argv = [
+            "-framerate", str(settings.preview_reel_fps), "-start_number", "1", "-i", str(job.output_dir / PREVIEW_FRAMES),
+            "-vf", "format=yuv420p", "-r", str(settings.render_fps), "-c:v", "libx264", "-movflags", "+faststart", str(reel),
+        ]
+        await asyncio.to_thread(self._ffmpeg, reel_argv, "joining the frames into the reel")
+        try:
+            facts = probe.output_facts(
+                await asyncio.to_thread(
+                    probe.probe, reel, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
+                )
+            )
+        except probe.ProbeError as exc:
+            raise PipelineError("preview_failed", str(exc)) from None
+        outputs.append(
+            {
+                "name": PREVIEW_REEL,
+                "kind": "reel",
+                "width": width,
+                "height": height,
+                "bytes": reel.stat().st_size,
+                "duration": facts["duration"],
+                "probe": facts,
+            }
+        )
+        shutil.rmtree(shots, ignore_errors=True)
+        timings = {"preview_seconds": run.seconds, "encode_seconds": round(time.monotonic() - started, 3)}
+        return RenderResult(outputs=tuple(outputs), timings=timings)

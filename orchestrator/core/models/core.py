@@ -10,6 +10,8 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, 
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
+# PRD-251 S1.2: the social template formats live with their contract, which is pure.
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -1490,9 +1492,9 @@ class WorkflowTemplate(Base):
 # ===================================================================
 
 # PRD-251 S1.2 (D4): social_image and social_video templates are compositions
-# the media-render service renders; their ``blocks`` shape is core/social_templates.py.
+# the media-render service renders; their ``blocks`` shape, and the two format
+# names (SOCIAL_TEMPLATE_FORMATS, imported above), are core/social_templates.py.
 # The prd251_wave1 migration moves the CHECK below to this list.
-SOCIAL_TEMPLATE_FORMATS = ("social_image", "social_video")
 DOCUMENT_TEMPLATE_FORMATS = ("pdf", "docx", "xlsx") + SOCIAL_TEMPLATE_FORMATS
 
 
