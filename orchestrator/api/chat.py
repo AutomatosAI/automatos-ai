@@ -220,10 +220,9 @@ async def stream_chat(
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
     logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
     chat_service = ChatService(db)
-    # PRD-122: Admin gate is workspace-scoped, not user-scoped.
-    # caller_context=None lets PlatformActionExecutor fall through to
-    # _workspace_has_admin_owner() which checks if the workspace has an
-    # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
+    # F145: an admin_only tool is an admin's when the call is made for an active
+    # owner/admin of the workspace (the chat threads the driving user) or for a
+    # super admin — core.security.driving_user; no "workspace has an admin" fallback.
     user_id = get_user_id(db, ctx)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:

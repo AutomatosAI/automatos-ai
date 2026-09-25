@@ -727,15 +727,16 @@ class PlatformActionExecutor:
         try:
             from core.workspaces.models import WorkspaceMember
 
-            member = (
-                self.db.query(WorkspaceMember)
-                .filter(
-                    WorkspaceMember.workspace_id == self.workspace_id,
-                    WorkspaceMember.role.in_(("owner", "admin")),
-                    WorkspaceMember.is_active.is_(True),
+            with self.db.begin_nested():  # a failed probe never poisons the caller's transaction
+                member = (
+                    self.db.query(WorkspaceMember)
+                    .filter(
+                        WorkspaceMember.workspace_id == self.workspace_id,
+                        WorkspaceMember.role.in_(("owner", "admin")),
+                        WorkspaceMember.is_active.is_(True),
+                    )
+                    .first()
                 )
-                .first()
-            )
             if member:
                 logger.debug(
                     "[PlatformExecutor] Workspace %s has admin/owner member — "
