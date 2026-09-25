@@ -144,7 +144,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_reject_mission",
-        description="Reject an awaiting-approval mission plan (it transitions to failed). Use when the user declines the proposed plan.",
+        description=("Reject an awaiting-approval mission plan: it never runs and is closed as cancelled, "
+                     "with the reason. Use when the user declines the proposed plan."),
         category="missions",
         parameters={
             "type": "object",
