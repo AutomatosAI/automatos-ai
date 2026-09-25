@@ -247,3 +247,24 @@ def test_a_community_the_locked_team_cannot_see_is_not_found(monkeypatch):
         assert community(1) == {"success": False, "error": "Community 1 not found."}
         assert community(2)["community"]["members"] == ["menu", "faq"]
     assert community(1)["community"]["title"] == "HQ margins"
+
+
+def test_find_tools_on_a_widget_turn_lists_only_the_keys_tools(monkeypatch):
+    from core.security.surface import WIDGET, turn_surface
+    from core.security.widget_scopes import allowed_tools
+    from modules.tools.discovery import action_semantic_index
+    from modules.tools.discovery.handlers_capabilities import find_tools
+
+    def _no_index():
+        raise RuntimeError("keyword ranking for the test")
+
+    monkeypatch.setattr(action_semantic_index, "get_action_semantic_index", _no_index)
+
+    def found(surface):
+        with turn_surface(surface, CHAT):
+            reply = asyncio.run(find_tools(None, uuid4(), {"query": "blog post", "limit": 20}))
+        return {match["action"] for match in reply["matches"]}
+
+    widget = found(WIDGET)
+    assert widget and widget <= allowed_tools(CHAT)
+    assert "platform_create_blog_post" in found(None)
