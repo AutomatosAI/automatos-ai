@@ -341,3 +341,21 @@ def test_disabled_flag_is_noop(monkeypatch):
     assert result["success"] is False
     assert "disabled" in result["message"].lower()
     assert ex.calls == []
+
+
+def test_approve_is_refused_when_the_ledger_cannot_be_read(monkeypatch):
+    """F156: without the ledger the change may already have been applied, so
+    /approve applies nothing and says why."""
+    from services.harness_service import HarnessService
+
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(HarnessService, "_read_applied_tasks", staticmethod(lambda db, workspace_id: None))
+    task = _harness_task(task_id=7)
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    _patch_executor(monkeypatch, ex)
+
+    result = asyncio.run(hc.handle_harness_command(_FakeDB(member=_ADMIN_MEMBER), _WS_ID, "/approve", _RX_ID, _ADMIN))
+
+    assert result == {"success": False,
+                      "message": f"The HARNESS ledger could not be read, so {_RX_ID} was not applied. Try again shortly."}
+    assert "platform_configure_agent_heartbeat" not in ex.actions()

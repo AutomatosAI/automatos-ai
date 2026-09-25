@@ -3,9 +3,9 @@
 F156: which done [HARNESS] board tasks self-management applied, and which
 wait for an owner's or admin's /approve, used to live in
 harness/applied_tasks.json on the workspace volume. It moves here, written only
-by the HARNESS service. The file is no longer read: a task it listed may be
-applied once more, which sets the same absolute value. Idempotent (IF NOT
-EXISTS) so a create_all-first boot is safe.
+by the HARNESS service; the first read for a workspace with nothing here
+imports its old file (HarnessService._import_legacy_ledger), so no change is
+applied twice. Idempotent (IF NOT EXISTS) so a create_all-first boot is safe.
 
 Revision ID: f156_harness_task_ledger
 Revises: f155_chats_widget_key_id

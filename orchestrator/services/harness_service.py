@@ -1647,6 +1647,10 @@ class HarnessService:
                 return
 
             ledger = self._read_applied_tasks(executor.db, workspace_id)
+            if ledger is None:
+                logger.error("[HARNESS] Approved board tasks not applied for %s: the task ledger is unreadable",
+                             workspace_id)
+                return
             # Normalise ids to str: the ledger stores integers and the task API
             # may return either, so one canonical type keeps the membership
             # check exact.
@@ -1793,15 +1797,15 @@ class HarnessService:
         return {}
 
     @staticmethod
-    def _read_applied_tasks(db: Any, workspace_id: UUID) -> Dict[str, Any]:
+    def _read_applied_tasks(db: Any, workspace_id: UUID) -> Optional[Dict[str, Any]]:
         """The task ledger: the done [HARNESS] board tasks already applied, and
         those held for an owner's or admin's /approve (F156: harness_task_ledger,
         written only by this service — no workspace tool reaches it).
 
-        An unreadable ledger reads empty; failing open is safe because every
-        applicable change_type sets an absolute value (so re-applying is a
-        harmless no-op) and placeholder prescriptions are refused by
-        _auto_apply_prescription before any write.
+        None when it cannot be read, and callers then apply nothing: not every
+        change re-applies harmlessly (a routing rule is added again), and a
+        human may have reverted one since. A workspace with nothing in the
+        table has its pre-F156 file imported first (_import_legacy_ledger).
         """
         from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
 
@@ -1811,13 +1815,53 @@ class HarnessService:
                     text("SELECT board_task_id, state FROM harness_task_ledger WHERE workspace_id = CAST(:ws AS uuid)"),
                     {"ws": str(workspace_id)},
                 ).fetchall()
-        except Exception:  # noqa: BLE001 — see the docstring: empty is safe
-            logger.warning("[HARNESS] Task ledger unreadable for %s", workspace_id, exc_info=True)
-            return {"applied_task_ids": [], "needs_approve_task_ids": []}
+        except Exception:  # noqa: BLE001 — unreadable: apply nothing (see the docstring)
+            logger.error("[HARNESS] Task ledger unreadable for %s — nothing is applied", workspace_id, exc_info=True)
+            return None
+        if not rows:
+            rows = HarnessService._import_legacy_ledger(db, workspace_id)
+            if rows is None:
+                return None
         return {
             "applied_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_APPLIED),
             "needs_approve_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_HELD),
         }
+
+    @staticmethod
+    def _import_legacy_ledger(db: Any, workspace_id: UUID) -> Optional[List[Any]]:
+        """F156, once per workspace: the ledger it kept in
+        harness/applied_tasks.json on the workspace volume before the move to
+        the database. Its applied tasks (with their entries) and held tasks are
+        written to harness_task_ledger when the table has none for the
+        workspace, so nothing applied before the move is applied again.
+
+        Returns the (task id, state) pairs it found: [] when there is no file,
+        None when the file cannot be read (callers then apply nothing).
+        """
+        import os
+
+        from config import config
+        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
+
+        path = os.path.join(config.WORKSPACE_VOLUME_PATH, str(workspace_id), "harness", "applied_tasks.json")
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            applied = [str(int(task)) for task in data.get("applied_task_ids") or []]
+            held = [str(int(task)) for task in data.get("needs_approve_task_ids") or [] if str(int(task)) not in applied]
+            entries = {str(e.get("task_id")): e for e in data.get("entries") or [] if isinstance(e, dict)}
+        except Exception:  # noqa: BLE001 — unreadable: apply nothing until it is fixed or removed
+            logger.error("[HARNESS] The pre-F156 ledger for %s cannot be read; nothing is applied until it is "
+                         "fixed or removed (%s)", workspace_id, path, exc_info=True)
+            return None
+        HarnessService._write_applied_tasks(
+            db, workspace_id, [{**entries.get(task, {}), "task_id": task} for task in applied], held,
+        )
+        logger.info("[HARNESS] Imported the pre-F156 ledger for %s: %d applied, %d held",
+                    workspace_id, len(applied), len(held))
+        return [(int(task), LEDGER_APPLIED) for task in applied] + [(int(task), LEDGER_HELD) for task in held]
 
     @staticmethod
     def _write_applied_tasks(
