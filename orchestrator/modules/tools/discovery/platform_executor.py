@@ -853,10 +853,16 @@ class PlatformActionExecutor:
         Args:
             action_name: Registered platform action name.
             params: Action parameters.
-            caller_context: Optional dict with keys user_id, system_role,
-                workspace_role.  Used by the super_admin_only gate (PRD-143)
-                and the admin_only gate (US-003).  If None, super_admin_only
-                and admin_only actions are denied (fail-closed).
+            caller_context: The chat's server-built context
+                (``build_tool_caller_context``): ``user_id`` (the driving
+                user's Clerk id), ``driving_user_id`` (their users.id),
+                ``system_role`` (only ever the literal ``super_admin``) and,
+                on an interactive turn, ``conversation_id``. The
+                super_admin_only gate (PRD-143) reads ``system_role``; the
+                admin_only gate (US-003, F145) reads the driving user's active
+                owner/admin membership. With no caller context,
+                super_admin_only is denied and admin_only passes only under the
+                workspace's opt-in ``agents_inherit_admin`` policy.
         """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
