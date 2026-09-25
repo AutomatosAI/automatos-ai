@@ -114,3 +114,21 @@ def test_an_old_file_that_cannot_be_read_applies_nothing(db_session, seed_worksp
     monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     _old_file(tmp_path, ws, "{ not json")
     assert _tick(db_session, ws, [7]) == []
+
+
+def test_an_old_file_that_cannot_be_read_says_so_on_the_board_once(db_session, seed_workspace, monkeypatch, tmp_path):
+    """Nothing is applied until the file is fixed or removed, and one blocked
+    [HARNESS] card names the file and the fix; later ticks file no second one."""
+    from core.models.core import BoardTask
+    from services.harness_service import LEGACY_LEDGER_FILE, UNREADABLE_LEDGER_TAG
+
+    ws = UUID(seed_workspace())
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    _old_file(tmp_path, ws, "{ not json")
+    assert _tick(db_session, ws, [7]) == []
+    assert _tick(db_session, ws, [7]) == []
+    cards = db_session.query(BoardTask).filter(BoardTask.workspace_id == ws,
+                                               BoardTask.tags.contains([UNREADABLE_LEDGER_TAG])).all()
+    assert [(card.status, card.title.startswith("[HARNESS]")) for card in cards] == [("blocked", True)]
+    assert LEGACY_LEDGER_FILE in cards[0].description and "valid JSON" in cards[0].description

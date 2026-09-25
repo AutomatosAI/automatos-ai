@@ -49,6 +49,23 @@ _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
 # treats it as a *sustained* tool failure worth surfacing (not a one-off).
 _TOOL_FAILURE_MIN_SAMPLES = 5
 
+# F156: the ledger file kept before the move to the database, and the one card
+# that says when it cannot be read (_file_unreadable_ledger_card).
+LEGACY_LEDGER_FILE = "harness/applied_tasks.json"
+UNREADABLE_LEDGER_TAG = "harness-ledger-unreadable"
+UNREADABLE_LEDGER_TITLE = "[HARNESS] Self-management is paused: its old ledger can't be read"
+UNREADABLE_LEDGER_TEXT = (
+    "HARNESS keeps a record of which [HARNESS] changes it has applied. This workspace's older record is "
+    f"the file {LEGACY_LEDGER_FILE} on its volume, which is read once to move it into the database, and it "
+    "can't be read (it isn't valid JSON, or it can't be opened). Without it, a change applied before could "
+    "be applied twice, so HARNESS applies no change here.\n\n"
+    "To restart it, make the file valid JSON again: {\"applied_task_ids\": [...], "
+    "\"needs_approve_task_ids\": [...]}, listing the board task ids of the [HARNESS] changes already "
+    "applied and of those waiting for /approve. HARNESS reads it on its next run (the weekly tick, or an "
+    "/approve). Deleting the file restarts HARNESS too, but then every done [HARNESS] task counts as not "
+    "yet applied, and the changes they describe can be applied again."
+)
+
 # Convergence thresholds
 _CONVERGED_DELTA = 2.0
 _CONVERGED_VARIANCE = 0.02
@@ -1843,7 +1860,7 @@ class HarnessService:
         from config import config
         from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
 
-        path = os.path.join(config.WORKSPACE_VOLUME_PATH, str(workspace_id), "harness", "applied_tasks.json")
+        path = os.path.join(config.WORKSPACE_VOLUME_PATH, str(workspace_id), LEGACY_LEDGER_FILE)
         if not os.path.exists(path):
             return []
         try:
@@ -1855,6 +1872,7 @@ class HarnessService:
         except Exception:  # noqa: BLE001 — unreadable: apply nothing until it is fixed or removed
             logger.error("[HARNESS] The pre-F156 ledger for %s cannot be read; nothing is applied until it is "
                          "fixed or removed (%s)", workspace_id, path, exc_info=True)
+            HarnessService._file_unreadable_ledger_card(db, workspace_id)
             return None
         HarnessService._write_applied_tasks(
             db, workspace_id, [{**entries.get(task, {}), "task_id": task} for task in applied], held,
@@ -1862,6 +1880,32 @@ class HarnessService:
         logger.info("[HARNESS] Imported the pre-F156 ledger for %s: %d applied, %d held",
                     workspace_id, len(applied), len(held))
         return [(int(task), LEDGER_APPLIED) for task in applied] + [(int(task), LEDGER_HELD) for task in held]
+
+    @staticmethod
+    def _file_unreadable_ledger_card(db: Any, workspace_id: UUID) -> None:
+        """F156: the one blocked [HARNESS] card saying why self-management
+        applies nothing in this workspace and how to restart it. Filed once per
+        workspace, never again; best-effort (a card that cannot be filed is
+        logged, and nothing is applied either way)."""
+        from datetime import datetime, timezone
+
+        from core.models.core import BoardTask
+
+        try:
+            if db.query(BoardTask.id).filter(BoardTask.workspace_id == workspace_id,
+                                             BoardTask.tags.contains([UNREADABLE_LEDGER_TAG])).first():
+                return
+            with db.begin_nested():
+                db.add(BoardTask(
+                    workspace_id=workspace_id, title=UNREADABLE_LEDGER_TITLE, description=UNREADABLE_LEDGER_TEXT,
+                    status="blocked", blocked_at=datetime.now(timezone.utc),
+                    blocked_reason=f"{LEGACY_LEDGER_FILE} can't be read", priority="high", review_mode="human",
+                    created_by_type="system", created_by_id="harness", tags=["harness", UNREADABLE_LEDGER_TAG],
+                ))
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.warning("[HARNESS] Could not file the unreadable-ledger card for %s", workspace_id, exc_info=True)
 
     @staticmethod
     def _write_applied_tasks(
