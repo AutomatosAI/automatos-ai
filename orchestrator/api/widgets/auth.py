@@ -116,8 +116,10 @@ async def widget_auth(
         HTTPException 403: Origin not in the key's allowed domains.
     """
 
+    from core.security.log_safe import log_safe
+
     token = _extract_bearer_token(request)
-    origin_for_log = _extract_origin(request) or "?"
+    origin_for_log = log_safe(_extract_origin(request) or "?", 120)
     if not token:
         logger.warning(
             "widget_auth: missing/invalid Authorization header (origin=%s, has_header=%s)",
@@ -130,7 +132,7 @@ async def widget_auth(
         )
 
     workspace_header = request.headers.get("X-Workspace-ID")
-    token_preview = token[:11] + "…" if len(token) > 11 else "(short)"
+    token_preview = log_safe(token[:11], 11) + "…" if len(token) > 11 else "(short)"
 
     # ----- 1. Try JWT session token first --------------------------------
     jwt_payload = _try_jwt(token)
@@ -204,7 +206,7 @@ async def widget_auth(
     if origin and not ApiKeyService.check_domain(api_key_record, origin):
         logger.warning(
             "widget_auth: origin %s not in allowed_domains for key %s",
-            origin,
+            origin_for_log,
             api_key_record.key_prefix,
         )
         raise HTTPException(

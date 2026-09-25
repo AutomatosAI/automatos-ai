@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
+from core.security.log_safe import log_safe
 from core.database.database import get_db
 from integrations import PLUGIN_REGISTRY
 from modules.tools.widget_callback import (
@@ -40,14 +41,8 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "widget_chat"
 
 
-def _short(s: Optional[str], n: int = 80) -> str:
-    """Truncate strings for logging. Avoids dumping huge messages into logs.
-    F155: line breaks and other control characters become spaces, so a value a
-    visitor sends cannot forge a log line."""
-    if s is None:
-        return "<none>"
-    s = "".join(ch if ch.isprintable() else " " for ch in str(s))
-    return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
+# Truncate for logging, with control characters made spaces (F155).
+_short = log_safe
 
 router = APIRouter(tags=["Widget Chat"])
 
@@ -445,7 +440,7 @@ async def widget_chat(
             }
             logger.info(
                 "%s OPEN_CALLBACK_FORM emitted (product_context=%s)",
-                log_extra, product_context,
+                log_extra, _short(product_context, 120),
             )
             return f"event: open-callback-form\ndata: {json.dumps(payload)}\n\n"
 

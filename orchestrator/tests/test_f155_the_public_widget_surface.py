@@ -510,3 +510,17 @@ def test_what_a_visitor_sends_cannot_forge_a_log_line(site, caplog):
     lines = [record.getMessage() for record in caplog.records]
     assert any("REQUEST" in line and "ADMIN LOGIN" in line for line in lines)
     assert not [line for line in lines if "\n" in line or "\r" in line]
+
+
+def test_widget_auth_logs_what_a_visitor_sends_on_one_line(db_session, caplog):
+    import logging
+
+    from api.widgets.auth import widget_auth
+
+    forged = "\r\n[widget] ADMIN LOGIN ok"
+    request = NS(headers={"Authorization": f"Bearer ak_pub_x{forged}", "Origin": f"https://x{forged}"}, state=NS())
+    with caplog.at_level(logging.WARNING, logger="api.widgets.auth"), pytest.raises(HTTPException):
+        asyncio.run(widget_auth(request, db_session))
+    lines = [record.getMessage() for record in caplog.records]
+    assert any("widget_auth" in line and "ADMIN LOGIN" in line for line in lines)
+    assert not [line for line in lines if "\n" in line or "\r" in line]

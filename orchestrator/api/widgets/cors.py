@@ -42,6 +42,7 @@ import time
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
 from config import config
+from core.security.log_safe import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ async def _origin_allowed_dynamic(origin: str, path: str) -> bool:
     except Exception:
         logger.exception(
             "widget CORS: key-allowlist lookup failed for origin %s — failing closed",
-            origin,
+            log_safe(origin, 120),
         )
         return False
     if len(_dynamic_origin_cache) >= _DYNAMIC_CACHE_MAX:
