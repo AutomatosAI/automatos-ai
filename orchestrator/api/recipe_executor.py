@@ -1373,8 +1373,11 @@ async def _execute_recipe_inner(
             try:
                 from core.services.playbook_memory_service import PlaybookMemoryService
                 memory_svc = PlaybookMemoryService(db=db)
+                # F159: the parameter is playbook_id. The call passed recipe_id=,
+                # raised TypeError on every run, and was logged as "skipped", so
+                # no run ever recalled its playbook's past runs.
                 recipe_memories = await memory_svc.retrieve_relevant_memories(
-                    recipe_id=recipe.id,
+                    playbook_id=recipe.id,
                     context={"workspace_id": str(workspace_id), "input_data": input_data}
                 )
                 if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
@@ -1383,7 +1386,8 @@ async def _execute_recipe_inner(
                         recipe_memories["total_memories"], recipe.id,
                     )
             except Exception as exc:
-                logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
+                logger.warning("[recipe_direct] Playbook memory recall failed for recipe %s: %s",
+                               recipe.id, exc, exc_info=True)
 
         # F125: execution_config holds seconds. No unit is guessed from the size;
         # only the floors apply (core/services/playbook_timeouts.py).
