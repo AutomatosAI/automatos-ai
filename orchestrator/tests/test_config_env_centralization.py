@@ -64,6 +64,12 @@ _SWEPT_ENV_VARS = (
     "SOCIALS_MAX_TARGET_ATTEMPTS",
     "SOCIALS_RENDER_URL",
     "SOCIALS_PUBLIC_MEDIA_BUCKET",
+    # PRD-251 Wave 1 S1.1c — the media-render client.
+    "SOCIALS_RENDER_TOKEN",
+    "SOCIALS_RENDER_TIMEOUT_SECONDS",
+    "SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS",
+    "SOCIALS_RENDER_POLL_SECONDS",
+    "SOCIALS_RENDER_MAX_WAIT_SECONDS",
 )
 
 
@@ -402,6 +408,11 @@ _SOCIALS_DEFAULTS = {
     "SOCIALS_MAX_TARGET_ATTEMPTS": 3,
     "SOCIALS_RENDER_URL": "",
     "SOCIALS_PUBLIC_MEDIA_BUCKET": "",
+    "SOCIALS_RENDER_TOKEN": "",
+    "SOCIALS_RENDER_TIMEOUT_SECONDS": 900,
+    "SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS": 10,
+    "SOCIALS_RENDER_POLL_SECONDS": 5,
+    "SOCIALS_RENDER_MAX_WAIT_SECONDS": 1500,
 }
 
 
@@ -424,6 +435,11 @@ def test_socials_defaults(monkeypatch, attr, expected):
         ("SOCIALS_MAX_TARGET_ATTEMPTS", "5", 5),
         ("SOCIALS_RENDER_URL", "http://media-render:8080", "http://media-render:8080"),
         ("SOCIALS_PUBLIC_MEDIA_BUCKET", "socials-public", "socials-public"),
+        ("SOCIALS_RENDER_TOKEN", " render-secret ", "render-secret"),
+        ("SOCIALS_RENDER_TIMEOUT_SECONDS", "1200", 1200),
+        ("SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS", "3", 3),
+        ("SOCIALS_RENDER_POLL_SECONDS", "2", 2),
+        ("SOCIALS_RENDER_MAX_WAIT_SECONDS", "600", 600),
     ],
 )
 def test_socials_env_override(monkeypatch, env_name, raw, expected):

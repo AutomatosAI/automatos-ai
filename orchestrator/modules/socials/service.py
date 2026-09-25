@@ -3,8 +3,11 @@
 * **The status machine.** ``TRANSITIONS`` is the whole table, keyed by action:
   an action moves a post only from the statuses listed for it, and anything
   else raises :class:`IllegalTransition`. Wave 0 moves posts between draft,
-  needs_approval, changes_requested, approved, scheduled and archived.
-  Rendering, publishing, missed and failed arrive with their waves.
+  needs_approval, changes_requested, approved, scheduled and archived. Wave 1
+  renders (S1.1c): ``render`` moves a post that holds no approval to
+  rendering, and the render ends in needs_approval with the rendered files in
+  ``media``, or in failed with the report in ``review_log``. A failed post can
+  be edited and rendered again. Publishing and missed arrive with Wave 3.
 * **The content hash (D6).** ``compute_content_hash`` is sha256 over canonical
   JSON of what is published: copy, variables, sources, format, template_id and
   media. An approval binds to it: the approver sends the hash of the version
@@ -23,6 +26,11 @@
   overrides, and the override is stored and named in ``review_log``.
 * **The publish guard.** ``assert_publishable`` passes only an approved or
   scheduled post whose approval matches its content as it is NOW.
+* **Rendered media (D6).** A finished render writes ``media`` as
+  ``{aspect: [file records]}``, each with its Deliverable id and the sha256 of
+  its bytes, so the content hash (and an approval) binds to the exact files.
+  Records come only from a render (``finish_render``); an edit may set
+  ``media`` only to Deliverable ids, so no client can forge a digest.
 
 No FastAPI here: the API maps these exceptions to status codes. Every review
 action appends to ``review_log``, the history the approval UI shows. JSON
@@ -32,6 +40,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from uuid import UUID
@@ -43,10 +53,12 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 
 # ── statuses ────────────────────────────────────────────────────────────────
 DRAFT = "draft"
+RENDERING = "rendering"
 NEEDS_APPROVAL = "needs_approval"
 CHANGES_REQUESTED = "changes_requested"
 APPROVED = "approved"
 SCHEDULED = "scheduled"
+FAILED = "failed"
 ARCHIVED = "archived"
 
 # review_log actions, which are also the status machine's actions
@@ -58,8 +70,12 @@ ACTION_SCHEDULE = "schedule"
 ACTION_UNSCHEDULE = "unschedule"
 ACTION_EDIT = "edit"
 ACTION_APPROVAL_VOIDED = "approval_voided"
+# S1.1c: a render starts, then ends one way or the other.
+ACTION_RENDER = "render"
+ACTION_RENDER_DONE = "render_done"
+ACTION_RENDER_FAILED = "render_failed"
 
-# Wave 0's whole status machine: action → {from status: to status}. An action
+# The whole status machine: action → {from status: to status}. An action
 # applies only from the statuses listed for it.
 TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_SUBMIT: {DRAFT: NEEDS_APPROVAL, CHANGES_REQUESTED: NEEDS_APPROVAL},
@@ -70,6 +86,16 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_UNSCHEDULE: {SCHEDULED: APPROVED},
     # A content edit voids the approval of an approved or scheduled post.
     ACTION_EDIT: {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL},
+    # Wave 1 (S1.1c): only a post that holds no approval renders. An approved
+    # or scheduled post is edited first, which voids its approval.
+    ACTION_RENDER: {
+        DRAFT: RENDERING,
+        CHANGES_REQUESTED: RENDERING,
+        NEEDS_APPROVAL: RENDERING,
+        FAILED: RENDERING,
+    },
+    ACTION_RENDER_DONE: {RENDERING: NEEDS_APPROVAL},
+    ACTION_RENDER_FAILED: {RENDERING: FAILED},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
@@ -80,7 +106,9 @@ ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
 
 # The statuses a post's content may be edited in. An edit to an approved or
 # scheduled post voids its approval; in the others the post keeps its status.
-EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED})
+# A failed render is fixed by an edit and rendered again. A rendering post is
+# not edited: the render is working from its content.
+EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, FAILED})
 PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
 
 # What the hash covers (D6), and what a post edit may change.
@@ -93,6 +121,12 @@ SOURCE_KINDS = ("deliverable", "report", "document", "url", "metric")
 
 TITLE_MAX_CHARS = 500
 COMMENT_MAX_CHARS = 2000
+
+# A rendered file record in ``media`` (finish_render): its Deliverable, the
+# sha256 of its bytes and what the renderer measured.
+RENDERED_FILE_REQUIRED = ("deliverable_id", "name", "sha256", "bytes")
+RENDERED_FILE_OPTIONAL = ("content_type", "duration", "width", "height")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 # compute_content_hash's output: sha256, lowercase hex.
 CONTENT_HASH_PATTERN = r"^[0-9a-f]{64}$"
@@ -495,6 +529,110 @@ def unschedule(post: SocialPost, actor: str) -> SocialPost:
     _move(post, ACTION_UNSCHEDULE)
     post.scheduled_for = None
     _log(post, actor, ACTION_UNSCHEDULE)
+    return post
+
+
+# ── rendering (S1.1c) ───────────────────────────────────────────────────────
+def assert_can_render(post: Any) -> None:
+    """:class:`IllegalTransition` unless ``post`` may start a render now."""
+    _target(post, ACTION_RENDER)
+
+
+def start_render(post: SocialPost, actor: str) -> SocialPost:
+    """draft, changes_requested, needs_approval or failed → rendering."""
+    _move(post, ACTION_RENDER)
+    _log(post, actor, ACTION_RENDER)
+    return post
+
+
+def _optional_number(record: Mapping[str, Any], key: str, where: str) -> Optional[float]:
+    value = record.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise InvalidPost(f"{where}.{key} must be a non-negative number")
+    return value
+
+
+def _rendered_file(record: Any, where: str) -> Dict[str, Any]:
+    if not isinstance(record, dict):
+        raise InvalidPost(f"{where} must be a rendered file record")
+    unknown = [k for k in record if k not in RENDERED_FILE_REQUIRED + RENDERED_FILE_OPTIONAL]
+    missing = [k for k in RENDERED_FILE_REQUIRED if k not in record]
+    if unknown or missing:
+        raise InvalidPost(f"{where} has unknown keys {unknown!r} or lacks {missing!r}")
+    for key in ("deliverable_id", "name"):
+        if not isinstance(record[key], str) or not record[key].strip():
+            raise InvalidPost(f"{where}.{key} is required")
+    if not isinstance(record["sha256"], str) or not SHA256_PATTERN.match(record["sha256"]):
+        raise InvalidPost(f"{where}.sha256 must be a lowercase sha256")
+    size = record["bytes"]
+    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+        raise InvalidPost(f"{where}.bytes must be a positive whole number")
+    clean: Dict[str, Any] = {key: record[key] for key in RENDERED_FILE_REQUIRED}
+    if record.get("content_type") is not None:
+        if not isinstance(record["content_type"], str):
+            raise InvalidPost(f"{where}.content_type must be a string")
+        clean["content_type"] = record["content_type"]
+    for key in ("duration", "width", "height"):
+        value = _optional_number(record, key, where)
+        if value is not None:
+            clean[key] = value
+    return clean
+
+
+def _rendered_media(media: Any) -> Dict[str, List[Dict[str, Any]]]:
+    """``{aspect: [rendered file records]}``, at least one file."""
+    if not isinstance(media, Mapping) or not media:
+        raise InvalidPost("a render must produce at least one file")
+    clean: Dict[str, List[Dict[str, Any]]] = {}
+    for aspect, records in media.items():
+        if not isinstance(aspect, str) or not aspect.strip():
+            raise InvalidPost("a rendered aspect must be named")
+        if not isinstance(records, (list, tuple)) or not records:
+            raise InvalidPost(f"media.{aspect} must list the rendered files")
+        clean[aspect] = [_rendered_file(r, f"media.{aspect}[{i}]") for i, r in enumerate(records)]
+    return clean
+
+
+def finish_render(
+    post: SocialPost,
+    actor: str,
+    media: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    summary: Optional[str] = None,
+    report: Optional[Mapping[str, Any]] = None,
+) -> SocialPost:
+    """rendering → needs_approval with the rendered files as ``media``.
+
+    ``media`` replaces what the post carried before, and the content hash is
+    recomputed over it, so an approval binds to these exact files (D6).
+    """
+    target = _target(post, ACTION_RENDER_DONE)
+    post.media = _rendered_media(media)
+    post.content_hash = compute_content_hash(post)
+    post.status = target
+    extra = {"report": dict(report)} if report else {}
+    _log(post, actor, ACTION_RENDER_DONE, summary, **extra)
+    return post
+
+
+def fail_render(
+    post: SocialPost,
+    actor: str,
+    message: str,
+    *,
+    report: Optional[Mapping[str, Any]] = None,
+) -> SocialPost:
+    """rendering → failed, with the reason and the renderer's report in ``review_log``.
+
+    The post's content is untouched: edit it and render again.
+    """
+    target = _target(post, ACTION_RENDER_FAILED)
+    text = (message or "The render failed.").strip()[:COMMENT_MAX_CHARS]
+    post.status = target
+    extra = {"report": dict(report)} if report else {}
+    _log(post, actor, ACTION_RENDER_FAILED, text, **extra)
     return post
 
 

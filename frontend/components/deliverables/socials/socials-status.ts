@@ -1,6 +1,8 @@
 /**
  * PRD-251 Wave 0 — the Socials tab's reading of the S0.3 rules: status labels,
  * the order the groups show in, and which actions a role and a status allow.
+ * Wave 1 (S1.1c) adds rendering: a post with a template renders from any status
+ * that holds no approval, and a failed render can be edited and rendered again.
  * The server enforces all of it; this only decides which buttons to show.
  */
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
@@ -22,6 +24,9 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   unschedule: 'Unscheduled',
   edit: 'Edited',
   approval_voided: 'Approval voided by an edit',
+  render: 'Render started',
+  render_done: 'Rendered',
+  render_failed: 'Render failed',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
@@ -66,7 +71,11 @@ const REVIEW_ROLES: ReadonlySet<WorkspaceRole> = new Set<WorkspaceRole>(['owner'
 const SUBMITTABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['draft', 'changes_requested'])
 const REVIEWABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['needs_approval'])
 const EDITABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
-  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled',
+  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'failed',
+])
+// S1.1c: the statuses a render starts from (modules/socials/service.py TRANSITIONS['render']).
+const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
+  'draft', 'changes_requested', 'needs_approval', 'failed',
 ])
 
 export function canTurnOnSocials(role: WorkspaceRole | undefined): boolean {
@@ -81,16 +90,33 @@ export interface PostActions {
   edit: boolean
   submit: boolean
   review: boolean
+  render: boolean
 }
 
-/** The actions `role` may take on a post in `status`. */
-export function postActions(role: WorkspaceRole | undefined, status: SocialPostStatus): PostActions {
+/** The actions `role` may take on a post in `status`; only a post with a template renders. */
+export function postActions(
+  role: WorkspaceRole | undefined,
+  status: SocialPostStatus,
+  hasTemplate = false,
+): PostActions {
   const author = canAuthorPosts(role)
   return {
     edit: author && EDITABLE.has(status),
     submit: author && SUBMITTABLE.has(status),
     review: !!role && REVIEW_ROLES.has(role) && REVIEWABLE.has(status),
+    render: author && hasTemplate && RENDERABLE.has(status),
   }
+}
+
+/** Whether any post is rendering: the list polls until none is. */
+export function anyRendering(posts: ReadonlyArray<SocialPost>): boolean {
+  return posts.some((post) => post.status === 'rendering')
+}
+
+/** "3.5 / 10" (or "3.5" with no quota), minutes to one decimal place. */
+export function formatRenderMinutes(used: number, quota: number | null): string {
+  const fmt = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1))
+  return quota === null ? fmt(used) : `${fmt(used)} / ${fmt(quota)}`
 }
 
 export interface StatusGroup {

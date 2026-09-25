@@ -610,6 +610,26 @@ jobs:
       TEST_IMAGE: media-render:test
     steps:
       - uses: actions/checkout@v4
+      # US-104 (S1.1c): the local edition runs the renderer as the optional
+      # compose profile `media`, and the backend's SOCIALS_RENDER_URL points at it.
+      # Throwaway values for the three `:?`-required secrets; nothing starts.
+      - name: Compose — the media profile runs media-render; the default stack does not
+        env:
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+          API_KEY: ci
+        run: |
+          docker compose version
+          docker compose --profile media config > "$RUNNER_TEMP/compose-media.yml"
+          media=$(docker compose --profile media config --services)
+          plain=$(docker compose config --services)
+          echo "services with --profile media:"; echo "$media" | sed 's/^/  /'
+          echo "$media" | grep -qx media-render || { echo "::error::docker compose --profile media config has no media-render service"; exit 1; }
+          if echo "$plain" | grep -qx media-render; then echo "::error::media-render starts without the media profile"; exit 1; fi
+          grep -qE 'SOCIALS_RENDER_URL: *"?http://media-render:8090' "$RUNNER_TEMP/compose-media.yml" \
+            || { echo "::error::the backend's SOCIALS_RENDER_URL does not point at media-render"; exit 1; }
+          sed -n '/^  media-render:/,/^  [a-z]/p' "$RUNNER_TEMP/compose-media.yml" | head -60
+          echo "docker compose --profile media config includes media-render; the default profile does not: PASS"
       - name: Build the image (default target, as Railway builds it)
         run: |
           start=$(date +%s)

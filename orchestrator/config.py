@@ -1857,6 +1857,19 @@ class Config:
     SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
     # D3: the media-render service (Wave 1). Empty = no renderer configured.
     SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
+    # S1.1c: the client (core/media_render_client.py). The token is sent as
+    # X-Internal-Token and must match the service's own SOCIALS_RENDER_TOKEN
+    # (empty = none sent). The read timeout covers the longest single call:
+    # POST /render answers once the job is staged, spoken, mixed and checked.
+    SOCIALS_RENDER_TOKEN: str = os.getenv("SOCIALS_RENDER_TOKEN", "").strip()
+    SOCIALS_RENDER_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_TIMEOUT_SECONDS", "900"))
+    SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS", "10"))
+    # A render in flight is polled this often, and waited for this long (its
+    # queue time and the render) before the post goes to failed. Keep the wait
+    # under BOOT_REAPER_STALE_MINUTES, so a restart only ever reaps renders no
+    # live process still owns.
+    SOCIALS_RENDER_POLL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_POLL_SECONDS", "5"))
+    SOCIALS_RENDER_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_WAIT_SECONDS", "1500"))
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".
@@ -2086,6 +2099,12 @@ orchestrator_config = config
 # ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
 # so tiers can be tuned live while testing. ``0`` means "unlimited" for
 # max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+#
+# PRD-251 S1.1c (owner, 2026-09-23): every plan gets Socials, and plans differ
+# only in hosting: ``render_minutes_month`` is the monthly render quota
+# (modules/socials/render_quota.py). ``0`` or no key means no quota, as for
+# max_agents: enterprise has none until the owner sets one, and the local
+# edition never has one.
 # ---------------------------------------------------------------------------
 _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
     "basic": {
@@ -2099,6 +2118,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 1,
         "marketplace_depth": 1,
         "budget_usd": 25,
+        "render_minutes_month": 10,
         "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
     },
     "pro": {
@@ -2112,6 +2132,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 5,
         "marketplace_depth": 2,
         "budget_usd": 100,
+        "render_minutes_month": 60,
         "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
     },
     "business": {
@@ -2125,6 +2146,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 0,
         "marketplace_depth": 3,
         "budget_usd": 0,
+        "render_minutes_month": 240,
         "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
     },
     "enterprise": {

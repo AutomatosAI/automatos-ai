@@ -3,7 +3,8 @@
 /**
  * PRD-251 S0.5 — the Socials list: posts grouped by status with counts, newest
  * first, with an empty state; "New draft"; and the selected post's detail with
- * the actions the caller's role allows.
+ * the actions the caller's role allows. S1.1c adds this month's render minutes
+ * under the heading.
  */
 import { useMemo, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
@@ -17,7 +18,8 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
-import { canAuthorPosts, groupPostsByStatus } from './socials-status'
+import { SocialsRenderMinutes } from './socials-render-minutes'
+import { anyRendering, canAuthorPosts, groupPostsByStatus } from './socials-status'
 
 function updatedAgo(post: SocialPost): string {
   try {
@@ -50,6 +52,7 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
           <p className="text-sm text-muted-foreground">
             Every post is approved one by one. An edit after approval sends it back for approval.
           </p>
+          <SocialsRenderMinutes rendering={anyRendering(posts)} />
         </div>
         {canAuthor && !creating && (
           <Button size="sm" onClick={() => setCreating(true)}>

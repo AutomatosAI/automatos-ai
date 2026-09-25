@@ -205,13 +205,17 @@ _VALID_BODY = {
 # ---------------------------------------------------------------------------
 
 
-def test_the_router_serves_every_wave_0_route():
+def test_the_router_serves_every_wave_0_and_wave_1_route():
     assert _router_routes() == sorted(
         [
             ("GET", "/api/socials/posts"),
             ("POST", "/api/socials/posts"),
             ("GET", "/api/socials/posts/{post_id}"),
             ("PATCH", "/api/socials/posts/{post_id}"),
+            # Wave 1 (S1.1c): rendering, the rendered files, the render minutes.
+            ("POST", "/api/socials/posts/{post_id}/render"),
+            ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
+            ("GET", "/api/socials/usage"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

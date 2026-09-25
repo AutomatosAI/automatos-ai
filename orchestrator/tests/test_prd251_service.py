@@ -4,7 +4,8 @@ Pure tests of ``modules/socials/service.py`` and ``modules/socials/publisher.py`
 (transient ORM objects; the two workspace-scoped reads run on in-memory SQLite):
 
 * every allowed transition happens through its action, and illegal ones raise
-  ``IllegalTransition`` — the table IS the whole Wave 0 machine;
+  ``IllegalTransition`` — the table IS the whole machine: Wave 0's, plus Wave 1's
+  render moves (S1.1c; their rules are pinned in test_prd251w1_render_lifecycle.py);
 * ``compute_content_hash`` is canonical JSON over copy, variables, sources,
   format, template_id and media: stable across key order, sensitive to each field;
 * D6 — any content edit of an approved or scheduled post moves it back to
@@ -52,7 +53,9 @@ from modules.socials.service import (  # noqa: E402
     ARCHIVED,
     CHANGES_REQUESTED,
     DRAFT,
+    FAILED,
     NEEDS_APPROVAL,
+    RENDERING,
     SCHEDULED,
     IllegalTransition,
     InvalidPost,
@@ -98,11 +101,18 @@ def _draft(**fields):
     return service.create_draft(_Added(), **base)
 
 
+# A finished render's media (S1.1c): one 9:16 file with its Deliverable and digest.
+_RENDERED = {"9:16": [{"deliverable_id": "d-1", "name": "video-9x16.mp4", "sha256": "a" * 64, "bytes": 1024}]}
+
+
 def _post_in(status: str) -> SocialPost:
     """A post that legitimately reached ``status`` through the service."""
     post = _draft()
     if status == DRAFT:
         return post
+    if status in (RENDERING, FAILED):
+        service.start_render(post, AUTHOR)
+        return post if status == RENDERING else service.fail_render(post, AUTHOR, "The check failed.")
     service.submit(post, AUTHOR)
     if status == NEEDS_APPROVAL:
         return post
@@ -137,10 +147,18 @@ ALLOWED = {
     (SCHEDULED, APPROVED): lambda p: service.unschedule(p, REVIEWER),
     (APPROVED, NEEDS_APPROVAL): _edit_copy,
     (SCHEDULED, NEEDS_APPROVAL): _edit_copy,
+    # Wave 1 (S1.1c): a post that holds no approval renders; the render ends it
+    # in needs_approval or failed.
+    (DRAFT, RENDERING): lambda p: service.start_render(p, AUTHOR),
+    (CHANGES_REQUESTED, RENDERING): lambda p: service.start_render(p, AUTHOR),
+    (NEEDS_APPROVAL, RENDERING): lambda p: service.start_render(p, AUTHOR),
+    (FAILED, RENDERING): lambda p: service.start_render(p, AUTHOR),
+    (RENDERING, NEEDS_APPROVAL): lambda p: service.finish_render(p, AUTHOR, _RENDERED),
+    (RENDERING, FAILED): lambda p: service.fail_render(p, AUTHOR, "The check failed."),
 }
 
 
-def test_the_table_is_exactly_the_wave_0_machine():
+def test_the_table_is_exactly_the_wave_0_and_wave_1_machine():
     table = {(src, dst) for src, dsts in service.ALLOWED_TRANSITIONS.items() for dst in dsts}
     assert table == set(ALLOWED)
     assert service.TRANSITIONS == {
@@ -151,6 +169,9 @@ def test_the_table_is_exactly_the_wave_0_machine():
         "schedule": {APPROVED: SCHEDULED},
         "unschedule": {SCHEDULED: APPROVED},
         "edit": {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL},
+        "render": {DRAFT: RENDERING, CHANGES_REQUESTED: RENDERING, NEEDS_APPROVAL: RENDERING, FAILED: RENDERING},
+        "render_done": {RENDERING: NEEDS_APPROVAL},
+        "render_failed": {RENDERING: FAILED},
     }
 
 
@@ -210,7 +231,10 @@ def test_illegal_transitions_raise_and_change_nothing(status, action):
     assert exc.value.current == status
 
 
-@pytest.mark.parametrize("later_status", ["rendering", "publishing", "published", "partially_published", "failed", "missed"])
+# ``failed`` left this list in Wave 1: a failed render is edited and rendered
+# again (S1.1c). Its every other Wave 0 move stays illegal, pinned in
+# test_prd251w1_render_lifecycle.py::test_a_failed_post_is_edited_and_rendered_again_and_nothing_else.
+@pytest.mark.parametrize("later_status", ["rendering", "publishing", "published", "partially_published", "missed"])
 @pytest.mark.parametrize("action", ["submit", "approve", "edit", "schedule"])
 def test_statuses_of_later_waves_have_no_wave_0_moves(later_status, action):
     post = _post_in(APPROVED)

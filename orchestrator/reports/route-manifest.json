@@ -1,5 +1,5 @@
 {
-  "route_count": 828,
+  "route_count": 831,
   "routes": [
     {
       "method": "GET",
@@ -2066,12 +2066,20 @@
       "path": "/api/socials/posts/{post_id}/approve"
     },
     {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}/media/{file_name}"
+    },
+    {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/publish-now"
     },
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/render"
     },
     {
       "method": "POST",
@@ -2088,6 +2096,10 @@
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/unschedule"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/usage"
     },
     {
       "method": "GET",

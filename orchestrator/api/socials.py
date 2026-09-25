@@ -13,7 +13,16 @@ post is a 404. Review actions (approve, request changes, reject) need
 The lifecycle lives in ``modules/socials/service.py``; this module maps its
 errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 ``content_hash``), UnsourcedClaims → 422 (naming the claims), NotPublishable →
-409, PublishingUnavailable → 501, InvalidPost → 422.
+409, PublishingUnavailable → 501, InvalidPost → 422, NotRenderable → 422,
+RenderQuotaExceeded → 429, RendererUnavailable → 503.
+
+Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
+the month's render minutes (refused before anything reaches media-render),
+storage and the renderer, then moves the post to ``rendering`` and answers 202;
+the render runs in the background (``modules/socials/render.py``) and ends the
+post in ``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}``
+streams a rendered file (the Deliverable's preview link), and ``GET /usage``
+reads the render minutes used and the quota.
 
 An approval binds to the content the approver saw (D6): the approve request
 carries that version's ``content_hash``, and a post that changed before the
@@ -30,12 +39,14 @@ stale copy from erasing entries another writer committed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, NoReturn, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -45,7 +56,9 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
-from modules.socials import service
+from core.models.workspaces import Workspace
+from core.utils.background_tasks import launch_guarded
+from modules.socials import media_store, render, render_quota, service
 from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.settings import require_socials_enabled
 
@@ -62,6 +75,10 @@ CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
 CAN_REVIEW = Depends(require_workspace_permission("socials:approve"))
 
 POST_NOT_FOUND = "Post not found"
+MEDIA_NOT_FOUND = "Media not found"
+MEDIA_STORAGE_UNAVAILABLE = "Media storage unavailable"
+# A re-render replaces a file under the same name, so it is never cached as fresh.
+MEDIA_CACHE_CONTROL = "private, no-cache"
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +160,12 @@ def _raise_for(exc: service.SocialsError) -> NoReturn:
         raise HTTPException(status_code=501, detail=str(exc))
     if isinstance(exc, (service.IllegalTransition, service.NotPublishable)):
         raise HTTPException(status_code=409, detail=str(exc))
-    if isinstance(exc, service.InvalidPost):
+    if isinstance(exc, (service.InvalidPost, render.NotRenderable)):
         raise HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, render_quota.RenderQuotaExceeded):
+        raise HTTPException(status_code=429, detail=str(exc))
+    if isinstance(exc, render.RendererUnavailable):
+        raise HTTPException(status_code=503, detail=str(exc))
     raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -187,6 +208,34 @@ def _commit_unchanged(
         db.rollback()
         _raise_for(service.StaleContent(service.compute_content_hash(_load(db, ctx, post_id))))
     return _save(db, post)
+
+
+def _workspace(db: Session, ctx: RequestContext) -> Workspace:
+    workspace = db.get(Workspace, ctx.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
+
+
+def _render_template(db: Session, ctx: RequestContext, post: SocialPost) -> Any:
+    """The post's template (its ``blocks``), from the caller's workspace only."""
+    template = None
+    if post.template_id is not None:
+        template = (
+            db.query(DocumentTemplate.id, DocumentTemplate.blocks)
+            .filter(DocumentTemplate.id == post.template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+            .first()
+        )
+    if template is None:
+        raise render.NotRenderable("this post has no template to render: choose a social template first")
+    return template
+
+
+def _launch_render(job: render.RenderJob) -> None:
+    """The render runs in the background; its end is written by the task itself."""
+    launch_guarded(
+        render.run_render(job), subsystem="socials", operation="render", workspace_id=job.workspace_id
+    )
 
 
 def _parse_statuses(status: Optional[str]) -> Optional[List[str]]:
@@ -394,3 +443,89 @@ async def publish_social_post_now(
     except service.SocialsError as exc:
         _raise_for(exc)
     return _save(db, post)
+
+
+# ---------------------------------------------------------------------------
+# Rendering (S1.1c)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/posts/{post_id}/render", status_code=202, dependencies=[CAN_UPDATE])
+async def render_social_post(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Render the post in the background: 202 with it in ``rendering``.
+
+    Refused, with nothing changed, when the post holds an approval or is already
+    rendering (409), has no social template (422), the workspace has used its
+    render minutes this month (429, before any call to media-render), or there
+    is no storage or renderer to use (503). The render ends the post in
+    ``needs_approval`` with the files in ``media``, or in ``failed`` with the
+    report in ``review_log``.
+    """
+    post = _load(db, ctx, post_id)
+    actor = _actor(ctx)
+    status, content_hash = post.status, post.content_hash
+    try:
+        service.assert_can_render(post)
+        bundle = render.bundle_for(post, _render_template(db, ctx, post))
+        render_quota.enforce_render_quota(db, _workspace(db, ctx))
+        await render.ensure_renderer()
+        service.start_render(post, actor)
+    except service.SocialsError as exc:
+        _raise_for(exc)
+    saved = _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
+    _launch_render(
+        render.RenderJob(
+            post_id=post.id,
+            workspace_id=post.workspace_id,
+            actor=actor,
+            content_hash=content_hash,
+            title=post.title,
+            format=post.format,
+            bundle=bundle,
+        )
+    )
+    return saved
+
+
+@router.get("/posts/{post_id}/media/{file_name}")
+async def get_social_post_media(
+    post_id: UUID,
+    file_name: str,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """A rendered file of the caller's post, streamed from storage (D9)."""
+    post = _load(db, ctx, post_id)
+    if not media_store.valid_file_name(file_name):
+        raise HTTPException(status_code=404, detail=MEDIA_NOT_FOUND)
+    key = media_store.media_key(post.workspace_id, post.id, file_name)
+    try:
+        stored = await asyncio.to_thread(media_store.MediaStore().open, key)
+    except Exception as exc:  # noqa: BLE001 — storage is down: say so, never a 500 trace
+        logger.error("[Socials] opening %s failed: %s", key, exc, exc_info=True)
+        raise HTTPException(status_code=503, detail=MEDIA_STORAGE_UNAVAILABLE) from exc
+    if stored is None:
+        raise HTTPException(status_code=404, detail=MEDIA_NOT_FOUND)
+    return StreamingResponse(
+        stored.body,
+        media_type=stored.content_type,
+        headers={
+            "Content-Length": str(stored.content_length),
+            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Cache-Control": MEDIA_CACHE_CONTROL,
+        },
+    )
+
+
+@router.get("/usage")
+async def get_socials_usage(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """This month's render minutes used and the plan's quota (``null`` = no quota)."""
+    reading = render_quota.render_quota(db, _workspace(db, ctx))
+    return {"render_minutes": reading.to_dict()}

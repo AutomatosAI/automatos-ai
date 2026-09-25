@@ -493,6 +493,21 @@ export interface WorkspaceSocialsState {
   enabled: boolean
 }
 
+/** This month's render minutes (PRD-251 S1.1c): `quota_minutes` is null when the plan has no quota. */
+export interface SocialRenderMinutes {
+  used_minutes: number
+  used_seconds: number
+  quota_minutes: number | null
+  remaining_minutes: number | null
+  exhausted: boolean
+  period_start: string
+  period_end: string
+}
+
+export interface SocialsUsageResponse {
+  render_minutes: SocialRenderMinutes
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2567,6 +2582,16 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ reason: reason || null }),
     })
+  }
+
+  /** Start a render (S1.1c): answers with the post in `rendering`; the render
+   * ends it in `needs_approval` or `failed`. 429 = no render minutes left this month. */
+  async renderSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+  }
+
+  async getSocialsUsage(): Promise<SocialsUsageResponse> {
+    return this.request<SocialsUsageResponse>('/api/socials/usage')
   }
 }
 

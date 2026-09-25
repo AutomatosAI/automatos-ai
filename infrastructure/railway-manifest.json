@@ -17,6 +17,7 @@
         "automatos-ai-api",
         "automotas-ai-frontend",
         "agent-workspace-worker",
+        "media-render",
         "agent-opt-worker"
       ]
     },
@@ -168,6 +169,8 @@
         "SERVICE_NAME",
         "SHARED_CONTEXT_BACKEND",
         "SLACK_API_KEY",
+        "SOCIALS_RENDER_TOKEN",
+        "SOCIALS_RENDER_URL",
         "TASK_RUNNER_BACKEND",
         "VOICE_ENABLED",
         "VOICE_SERVICE_URL",
@@ -267,6 +270,44 @@
         "WORKER_INTERNAL_TOKEN",
         "WORKSPACE_DEFAULT_QUOTA_GB",
         "WORKSPACE_VOLUME_PATH"
+      ]
+    },
+    "media-render": {
+      "_note": "PRD-251 D3 (S1.1c): the Socials renderer. Owner sizing 2026-09-23: 4 vCPU / 8 GB, ONE replica (its render lanes are in-process: two renders at once overall, one per workspace).",
+      "group": "core",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/services/media-render"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8090,
+      "healthcheck": "/health",
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": 1,
+      "resources": {
+        "vcpu": 4,
+        "memory_gb": 8
+      },
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "ENVIRONMENT",
+        "LOG_LEVEL",
+        "LOG_RELAY_ENABLED",
+        "MEDIA_RENDER_MAX_CONCURRENT_RENDERS",
+        "MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE",
+        "MEDIA_RENDER_MEDIA_URL_PREFIXES",
+        "SERVICE_NAME",
+        "SOCIALS_RENDER_TOKEN"
       ]
     },
     "agent-opt-worker": {
@@ -868,6 +909,7 @@
       "automatos-ai-mem0-pgvector",
       "automatos-ai-mem0-Server",
       "agent-workspace-worker",
+      "media-render",
       "prometheus",
       "loki",
       "alertmanager",
