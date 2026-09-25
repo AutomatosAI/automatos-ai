@@ -393,10 +393,24 @@ SERVER_OWNED_MISSION_CONFIG = frozenset({
 })
 
 
+# F155: what a widget turn's mission never carries: the owner's settings.
+WIDGET_HELD_MISSION_CONFIG = frozenset({"cost_ceiling", "auto_approve"})
+
+
 def _creator_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """A new mission's config as its creator may set it: without the keys in
-    SERVER_OWNED_MISSION_CONFIG."""
-    return {key: value for key, value in (config or {}).items() if key not in SERVER_OWNED_MISSION_CONFIG}
+    SERVER_OWNED_MISSION_CONFIG. F155: where it starts from is server-set too
+    (stamp_origin: a caller's origin keys are dropped, a widget turn's are
+    stamped, so its approval and tasks run under the widget key's restrictions
+    even later on the tick), and a widget turn sets none of the owner's
+    settings (WIDGET_HELD_MISSION_CONFIG)."""
+    from core.security.surface import stamp_origin, widget_turn
+
+    kept = stamp_origin({key: value for key, value in (config or {}).items()
+                         if key not in SERVER_OWNED_MISSION_CONFIG})
+    if widget_turn():
+        kept = {key: value for key, value in kept.items() if key not in WIDGET_HELD_MISSION_CONFIG}
+    return kept
 
 WIDGET_SESSION_REFUSAL = (
     "A mission started from the website chat does not run on a Claude Code session."

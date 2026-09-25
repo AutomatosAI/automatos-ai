@@ -377,22 +377,18 @@ def test_a_widget_turn_cannot_change_a_mission(monkeypatch, handler, decision, e
     called.assert_called_once()
 
 
-def test_a_mission_records_the_surface_it_started_from(monkeypatch):
+def test_a_mission_records_the_surface_it_started_from(mock_db):
     from core.security.surface import WIDGET, turn_surface
-    from modules.tools.discovery import handlers_missions as missions
-
-    monkeypatch.setattr(missions, "_recent_chat_context", lambda *a, **k: [])
-    monkeypatch.setattr("modules.tools.discovery.handlers_watches.auto_create_watch", lambda *a, **k: None)
-    run = NS(id=uuid4(), goal="g", state="awaiting_approval", plan={"tasks": []}, config={})
+    from services.coordinator_service import CoordinatorService
 
     def create(surface, config):
-        coordinator = NS(create_mission=AsyncMock(return_value=run))
-        with turn_surface(surface), patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
-            asyncio.run(missions.create_mission(MagicMock(), uuid4(), {"goal": "g", "config": config}))
-        return coordinator.create_mission.call_args.kwargs["config"]
+        with turn_surface(surface):
+            run = asyncio.run(CoordinatorService().create_mission(db=mock_db, workspace_id=uuid4(), goal="g",
+                                                                  created_by="user_test", config=config))
+        return run.config
 
     assert create(WIDGET, {"async_planning": True})["origin_surface"] == WIDGET
-    assert "origin_surface" not in create(None, {"origin_surface": WIDGET})
+    assert "origin_surface" not in create(None, {"async_planning": True, "origin_surface": WIDGET})
 
 
 @pytest.mark.parametrize("origin,state", [("widget", "awaiting_approval"), (None, "running")])

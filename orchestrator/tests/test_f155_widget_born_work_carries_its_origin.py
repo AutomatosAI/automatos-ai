@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace as NS
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 WIDGET_ORIGIN = {"origin_surface": "widget", "origin_scopes": ["chat", "documents:read"],
@@ -39,28 +39,54 @@ def test_the_origin_is_the_turns_and_never_the_callers():
     assert stamp_origin({**WIDGET_ORIGIN, "goal": "g"}) == {"goal": "g"}
 
 
-def test_a_widget_turns_mission_records_its_origin_and_sets_no_cost_ceiling(monkeypatch):
+def test_a_widget_turns_mission_records_its_origin_and_sets_no_cost_ceiling(monkeypatch, mock_db):
     from modules.tools.discovery import handlers_missions as missions
+    from services.coordinator_service import CoordinatorService
 
     monkeypatch.setattr(missions, "_recent_chat_context", lambda *a, **k: [])
     monkeypatch.setattr("modules.tools.discovery.handlers_watches.auto_create_watch", lambda *a, **k: None)
-    run = NS(id=uuid4(), goal="g", state="awaiting_approval", plan={"tasks": []}, config={})
+    created, create = [], CoordinatorService.create_mission
 
-    def create(in_widget_turn):
-        coordinator = NS(create_mission=AsyncMock(return_value=run))
-        params = {"goal": "g", "config": {"cost_ceiling": 1_000_000, "async_planning": True}}
-        with patch("services.coordinator_service.CoordinatorService", return_value=coordinator):
-            if in_widget_turn:
-                with _widget_turn():
-                    asyncio.run(missions.create_mission(MagicMock(), uuid4(), params))
-            else:
-                asyncio.run(missions.create_mission(MagicMock(), uuid4(), params))
-        return coordinator.create_mission.call_args.kwargs["config"]
+    async def _recorded(self, **kwargs):
+        created.append(await create(self, **kwargs))
+        return created[-1]
 
-    widget = create(True)
+    monkeypatch.setattr(CoordinatorService, "create_mission", _recorded)
+    params = {"goal": "g", "config": {"cost_ceiling": 1_000_000, "async_planning": True}}
+    with _widget_turn():
+        asyncio.run(missions.create_mission(mock_db, uuid4(), params))
+    asyncio.run(missions.create_mission(mock_db, uuid4(), params))
+    widget, owner = (run.config for run in created)
     assert {key: widget.get(key) for key in WIDGET_ORIGIN} == WIDGET_ORIGIN
     assert "cost_ceiling" not in widget
-    assert create(False)["cost_ceiling"] == 1_000_000
+    assert owner["cost_ceiling"] == 1_000_000 and "origin_surface" not in owner
+
+
+FORGED_ORIGIN = {"origin_surface": "widget", "origin_scopes": ["chat"], "origin_team": "franchise-b"}
+
+
+def test_every_creation_path_drops_a_callers_origin_and_stamps_a_widget_turns(mock_db, db_session, seed_workspace):
+    """REST (POST /api/missions, /import-plan) reaches the coordinator without the
+    tool handler: a forged origin_team would re-scope the mission's document reads
+    to another team."""
+    from uuid import UUID
+
+    from services.coordinator_service import CoordinatorService
+
+    coordinator = CoordinatorService()
+    run = asyncio.run(coordinator.create_mission(db=mock_db, workspace_id=uuid4(), goal="g", created_by="user_test",
+                                                 config={"async_planning": True, **FORGED_ORIGIN}))
+    assert run.config == {"async_planning": True}
+    imported = coordinator.import_plan(db=db_session, workspace_id=UUID(seed_workspace()), goal="g",
+                                       plan={"tasks": [{"title": "Draft the letter"}]}, created_by="user_test",
+                                       config=dict(FORGED_ORIGIN))
+    assert imported.config == {"imported_plan": True}
+
+    owners = {"async_planning": True, "cost_ceiling": 1_000_000, "auto_approve": True}
+    with _widget_turn():
+        run = asyncio.run(coordinator.create_mission(db=mock_db, workspace_id=uuid4(), goal="g",
+                                                     created_by="widget", config={**owners, **FORGED_ORIGIN}))
+    assert run.config == {"async_planning": True, **WIDGET_ORIGIN}
 
 
 def _observed_turn():

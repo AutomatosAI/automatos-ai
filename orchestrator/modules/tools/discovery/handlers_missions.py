@@ -159,14 +159,8 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     config = strip_caller_narration_origin(params.get("config"))
     if _origin:
         config["origin_chat_id"] = str(_origin)
-    # F155: where a mission starts from is server-set (stamp_origin), so its
-    # approval and its tasks run under the widget key's restrictions even when
-    # they run later on the coordinator tick. A widget turn sets no cost ceiling.
-    from core.security.surface import stamp_origin, widget_turn
-
-    config = stamp_origin(config)
-    if widget_turn():
-        config = {k: v for k, v in config.items() if k != "cost_ceiling"}
+    # F155: the coordinator server-sets where a mission starts from, and drops a
+    # widget turn's cost ceiling (services.coordinator_service._creator_config).
 
     # Recent conversation context for the planner. The UI suggestion-card already
     # attaches context_messages on its API call; the executor path did not. Narrow
