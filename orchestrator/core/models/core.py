@@ -200,6 +200,13 @@ class LLMUsage(Base):
 
     created_at = Column(DateTime, default=func.now())
 
+    # F153: the mission budget sums a run's rows by execution_id on every
+    # dispatch check (migration llm_usage_execution_index builds it CONCURRENTLY).
+    __table_args__ = (
+        Index("idx_llm_usage_workspace_execution", "workspace_id", "execution_id"),
+        {"extend_existing": True},
+    )
+
 # Database Models
 class Team(Base):
     """PRD-158 S1: a real (small) Teams entity per workspace.

@@ -211,3 +211,48 @@ def test_the_verifiers_calls_are_booked_to_the_mission(mission, monkeypatch):
     asyncio.run(MissionReconciler._verify_completed_tasks(mission.db, mission.run))
     assert [(scope.get("request_type"), scope.get("execution_id"), scope.get("workspace_id")) for scope in seen] == [
         ("verifier", f"mission:{mission.run.id}", mission.ws)]
+
+
+def test_the_budgets_spend_sum_has_its_index(db_session):
+    """The dispatcher sums llm_usage by (workspace_id, execution_id) on every
+    dispatch check."""
+    definition = db_session.execute(text("SELECT indexdef FROM pg_indexes WHERE tablename = 'llm_usage' "
+                                         "AND indexname = 'idx_llm_usage_workspace_execution'")).scalar()
+    assert definition and "(workspace_id, execution_id)" in definition
+
+
+def test_the_index_is_built_concurrently_outside_the_migrations_transaction():
+    from pathlib import Path
+
+    migration = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "llm_usage_execution_index.py"
+    source = migration.read_text()
+    assert "autocommit_block()" in source and "CREATE INDEX CONCURRENTLY IF NOT EXISTS" in source
+
+
+def test_a_failed_concurrent_build_is_dropped_before_it_is_rebuilt(monkeypatch):
+    """A CREATE INDEX CONCURRENTLY that failed part-way leaves an INVALID index of
+    the name; IF NOT EXISTS alone would keep it for good."""
+    import importlib.util
+    from contextlib import contextmanager
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "llm_usage_execution_index.py"
+    spec = importlib.util.spec_from_file_location("llm_usage_execution_index", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    @contextmanager
+    def _outside_the_transaction():
+        yield
+
+    def upgrade(invalid):
+        executed = []
+        monkeypatch.setattr(migration.op, "get_context", lambda: NS(autocommit_block=_outside_the_transaction))
+        monkeypatch.setattr(migration.op, "get_bind",
+                            lambda: NS(execute=lambda *a, **k: NS(first=lambda: (1,) if invalid else None)))
+        monkeypatch.setattr(migration.op, "execute", lambda sql: executed.append(" ".join(str(sql).split()[:3])))
+        migration.upgrade()
+        return executed
+
+    assert upgrade(invalid=True) == ["DROP INDEX CONCURRENTLY", "CREATE INDEX CONCURRENTLY"]
+    assert upgrade(invalid=False) == ["CREATE INDEX CONCURRENTLY"]

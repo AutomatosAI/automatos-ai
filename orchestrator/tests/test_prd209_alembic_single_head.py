@@ -70,7 +70,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # started a conversation (F155).
 # 2026-09-25: f156_harness_task_ledger chains onto that — the HARNESS task ledger
 # moves off the workspace volume into the database (F156).
-EXPECTED_HEAD = "f156_harness_task_ledger"
+# 2026-09-25: llm_usage_execution_index chains onto that — the index the mission
+# budget's spend sum reads, built CONCURRENTLY (F153).
+EXPECTED_HEAD = "llm_usage_execution_index"
 
 
 def _literal(node: ast.AST):

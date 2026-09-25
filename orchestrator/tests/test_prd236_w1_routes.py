@@ -206,10 +206,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     widget_key = (versions / "f155_chats_widget_key_id.py").read_text()
     assert 'down_revision = "f049_prd251_merge_heads"' in widget_key
     # 2026-09-25: f156_harness_task_ledger chains onto that (F156 — the HARNESS
-    # ledger in the database); the guard follows it.
+    # ledger in the database).
     ledger = (versions / "f156_harness_task_ledger.py").read_text()
     assert 'down_revision = "f155_chats_widget_key_id"' in ledger
-    assert 'EXPECTED_HEAD = "f156_harness_task_ledger"' in guard
+    # 2026-09-25: llm_usage_execution_index chains onto that (F153 — the index the
+    # mission budget reads); the guard follows it.
+    index = (versions / "llm_usage_execution_index.py").read_text()
+    assert 'down_revision = "f156_harness_task_ledger"' in index
+    assert 'EXPECTED_HEAD = "llm_usage_execution_index"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
