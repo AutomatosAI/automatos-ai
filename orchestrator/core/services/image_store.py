@@ -41,14 +41,18 @@ from core.storage import ensure_bucket, get_s3_client
 
 logger = logging.getLogger(__name__)
 
+# F179 (C): the store keeps only what its callers save, the raster images and SVG
+# (a Composio output can be one), and refuses anything else. A raster image is
+# served inline; anything else, SVG included, as an attachment.
 MIME_TO_EXT = {
     "image/jpeg": "jpg",
-    "image/jpg": "jpg",
     "image/png": "png",
     "image/gif": "gif",
     "image/webp": "webp",
     "image/svg+xml": "svg",
 }
+RASTER_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_TYPE_ALIASES = {"image/jpg": "image/jpeg"}
 
 IMAGE_KEY_PREFIX = "generated-images"
 POINTER_KEY_PREFIX = "generated-image-pointers"
@@ -65,6 +69,25 @@ _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 _INVALID_RANGE_CODE = "InvalidRange"
 # One range, RFC 9110 form: bytes=a-b, bytes=a- or bytes=-n.
 _SINGLE_BYTE_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+class UnstorableImageType(ValueError):
+    """save_image was given a type the public store does not keep (F179)."""
+
+
+def stored_type(mime_type: str) -> str:
+    """The type ``mime_type`` is stored as; UnstorableImageType outside MIME_TO_EXT."""
+    requested = str(mime_type or "").strip().lower()
+    canonical = _TYPE_ALIASES.get(requested, requested)
+    if canonical not in MIME_TO_EXT:
+        raise UnstorableImageType(f"{mime_type!r} is not an image type the public store keeps")
+    return canonical
+
+
+def served_inline(content_type: Optional[str]) -> bool:
+    """A raster image is shown inline; anything else, an older object too, downloads."""
+    base = str(content_type or "").split(";", 1)[0].strip().lower()
+    return _TYPE_ALIASES.get(base, base) in RASTER_IMAGE_TYPES
 
 
 class ImageRangeNotSatisfiable(Exception):
@@ -155,7 +178,8 @@ class S3ImageStore:
         mime_type: str = "image/png",
         workspace_id: Optional[str] = None,
     ) -> str:
-        ext = MIME_TO_EXT.get(mime_type, "png")
+        mime_type = stored_type(mime_type)
+        ext = MIME_TO_EXT[mime_type]
         image_id = str(uuid4())
         ws = workspace_id or DEFAULT_WORKSPACE_SEGMENT
         key = f"{IMAGE_KEY_PREFIX}/{ws}/{image_id}.{ext}"
