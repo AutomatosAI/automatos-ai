@@ -2600,23 +2600,29 @@ class CoordinatorService:
         wait; the ticket carries on and its result lands on the board."""
         from core.database.database import SessionLocal
         from services.cli_ticket_lane import MISSION_SOURCE_TYPE, run_cli_ticket_and_wait
+        from services.mission_wait import awaiting_session_step
 
         own = SessionLocal()
         try:
-            return await run_cli_ticket_and_wait(
-                own,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                title=(getattr(task, "title", None) or f"Mission task {task.id}")[:255],
-                prompt=prompt,
-                source_type=MISSION_SOURCE_TYPE,
-                source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
-                timeout_s=float(timeout_s) if timeout_s else None,
-                hard_timeout_s=float(hard_timeout_s) if hard_timeout_s else None,
-                tags=["mission"],
-                orchestration_run_id=run_id,
-                orchestration_task_id=task.id,
-            )
+            # F170: which Claude Code step the tick awaits, for missions queued
+            # behind it to name. A record only: set here, cleared in a finally.
+            with awaiting_session_step(run_id=run_id, task_id=task.id, workspace_id=workspace_id,
+                                       title=getattr(task, "title", None)) as saw_ticket:
+                return await run_cli_ticket_and_wait(
+                    own,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=(getattr(task, "title", None) or f"Mission task {task.id}")[:255],
+                    prompt=prompt,
+                    source_type=MISSION_SOURCE_TYPE,
+                    source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
+                    timeout_s=float(timeout_s) if timeout_s else None,
+                    hard_timeout_s=float(hard_timeout_s) if hard_timeout_s else None,
+                    tags=["mission"],
+                    orchestration_run_id=run_id,
+                    orchestration_task_id=task.id,
+                    on_poll=saw_ticket,
+                )
         except Exception as exc:  # noqa: BLE001 — recorded like any other task failure
             logger.error("session-agent ticket failed for task %s: %s", task.id, exc, exc_info=True)
             return {"status": "error", "error": str(exc)}
@@ -3603,6 +3609,10 @@ class CoordinatorService:
             f"Mission approved — starting {_n} task{'s' if _n != 1 else ''}: {(run.goal or '')[:120]}",
             level="run", event="run_started",
         )
+        # F170 (B52): when another mission's Claude Code step holds the tick, say what it waits for.
+        from services.mission_wait import note_wait_at_approval
+
+        note_wait_at_approval(db, run)
 
         logger.info("Mission %s approved by %s → running", run_id, actor_id)
         return run

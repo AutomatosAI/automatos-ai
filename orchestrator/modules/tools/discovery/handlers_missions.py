@@ -423,7 +423,12 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().approve_plan(db, run.id, actor_id)
-        return _ok(updated, "approved → running")
+        result = _ok(updated, "approved → running")
+        # F170: the reply says what it waits for, when another mission's step holds it.
+        from services.mission_wait import wait_note_of
+
+        waiting = wait_note_of(db, updated.id)
+        return {**result, "message": f"{result['message']} {waiting}", "waiting": waiting} if waiting else result
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive

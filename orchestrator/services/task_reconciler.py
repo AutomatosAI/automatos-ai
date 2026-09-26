@@ -90,6 +90,7 @@ class TaskReconciler:
         db = SessionLocal()
         try:
             now = datetime.now(timezone.utc)
+            self._note_waiting_missions(db, now, app_config.MISSION_WAIT_NOTE_AFTER_SECONDS)
 
             # 1. Stalled running executions
             stalled_running = db.execute(
@@ -184,6 +185,23 @@ class TaskReconciler:
             db.rollback()
         finally:
             db.close()
+
+    @staticmethod
+    def _note_waiting_missions(db, now: datetime, wait_after_s: int) -> None:
+        """F170 (B52/B62): a running mission whose steps sit queued behind another
+        mission's Claude Code step says so, once per wait. This job keeps running
+        while the coordinator tick is held by that step. Its own commit; a failure
+        here never touches the reconciliation that follows."""
+        try:
+            from services.mission_wait import narrate_waits, note_waiting_missions
+
+            noted = note_waiting_missions(db, now, wait_after_s)
+            if noted:
+                db.commit()
+                narrate_waits(db, noted)
+        except Exception:  # noqa: BLE001
+            logger.warning("[TaskReconciler] could not note the missions waiting on a session", exc_info=True)
+            db.rollback()
 
     # ------------------------------------------------------------------
     # Handle a single stalled execution
