@@ -19,9 +19,10 @@ after ``seed_builtin_skills`` and before ``seed_packages``. A row it finds is
 left as it is, so live curation survives a redeploy, except the agents' skill
 links: they are reconciled every time, so a built-in skill the owner syncs
 (``scripts/sync-skills.py``) after the first boot attaches on the next one.
-A skill is linked only from a global row of its name; the old publisher skills
-and html-to-png never are (D14: agents draft, the Socials tab and the platform
-publisher are the only way out).
+A skill is linked only from a global row of a name its agent lists, and the
+roster lists only the built-in Socials skills: no skill that posts straight to
+a channel (D14: agents draft, the Socials tab and the platform publisher are
+the only way out).
 
 The Image carousel's render is the post's own (``platform_create_social_post``
 with render true): ``generate_document`` refuses a template that renders several
@@ -42,7 +43,6 @@ from core.models.core import PLAYBOOK_DOCUMENT_STEP, Agent, Skill, WorkflowTempl
 logger = logging.getLogger(__name__)
 
 SEEDED_BY = "seed_socials_package"
-PACKAGE_SLUG = "socials"
 MARKETPLACE = "marketplace"
 DIRECTOR = "social-media-director"
 BRAND_DESIGNER = "brand-designer"
@@ -51,9 +51,6 @@ CREATED = "created"
 PRESENT = "present"
 MISSING_AGENT = "missing_agent"
 HELD_ELSEWHERE = "held_elsewhere"
-
-# D14: these post straight to a channel or render outside media-render. Never attached.
-NEVER_ATTACHED_SKILLS = frozenset({"instagram-curator", "twitter-engager", "linkedin-content-creator", "html-to-png"})
 
 # The seeded social templates the Playbooks render (modules/documents/templates/social/).
 LAUNCH_VIDEO_TEMPLATE = "UI story promo"
@@ -355,17 +352,6 @@ SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
     },
 ]
 
-def _refuse_publisher_skills() -> None:
-    """A roster that names a publisher skill fails at import, not in a workspace."""
-    named = {spec["slug"]: sorted(NEVER_ATTACHED_SKILLS & set(spec["skills"])) for spec in SOCIALS_AGENTS}
-    offending = {slug: skills for slug, skills in named.items() if skills}
-    if offending:
-        raise ValueError(f"Socials agents may never carry {offending}")
-
-
-_refuse_publisher_skills()
-
-
 def playbook_agents(spec: Mapping[str, Any]) -> List[str]:
     """The agent slugs a Playbook's steps run, in step order, once each."""
     slugs: List[str] = []
@@ -413,7 +399,7 @@ def _connect(app_name: str, group: str, note: str, **extra: Any) -> Dict[str, An
 
 
 SOCIALS_PACKAGE: Dict[str, Any] = {
-    "slug": PACKAGE_SLUG,
+    "slug": "socials",
     "name": "Socials",
     "description": (
         "On-brand social posts from your own work: short videos, image cards, carousels and "
@@ -544,9 +530,8 @@ def _ensure_agent(db: Session, spec: Mapping[str, Any]) -> Tuple[Agent, bool]:
     return row, True
 
 
-def _link_skills(db: Session, agent: Agent, names: List[str]) -> Dict[str, List[str]]:
-    """Link the global skill rows of ``names`` the agent lacks: the first listed is its primary."""
-    wanted = [name for name in names if name not in NEVER_ATTACHED_SKILLS]
+def _link_skills(db: Session, agent: Agent, wanted: List[str]) -> Dict[str, List[str]]:
+    """Link the global skill rows of ``wanted`` the agent lacks: the first listed is its primary."""
     rows = (
         db.query(Skill.id, Skill.name)
         .filter(Skill.name.in_(wanted), Skill.workspace_id.is_(None), Skill.is_active.is_(True))

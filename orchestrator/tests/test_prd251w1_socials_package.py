@@ -56,7 +56,6 @@ from core.builtin_skills import load_manifest  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.core import PLAYBOOK_DOCUMENT_STEP, Agent, Skill, WorkflowTemplate  # noqa: E402
 from core.models.marketplace_packages import MarketplacePackage  # noqa: E402
-from core.seeds import seed_socials_package as socials_seed  # noqa: E402
 from core.seeds.seed_builtin_skills import seed_builtin_skills  # noqa: E402
 from core.seeds.seed_packages import PACKAGES, seed_packages  # noqa: E402
 from core.seeds.seed_socials_package import (  # noqa: E402
@@ -64,7 +63,6 @@ from core.seeds.seed_socials_package import (  # noqa: E402
     CAROUSEL_TEMPLATE,
     DIRECTOR,
     LAUNCH_VIDEO_TEMPLATE,
-    NEVER_ATTACHED_SKILLS,
     SOCIALS_AGENTS,
     SOCIALS_PACKAGE,
     SOCIALS_PLAYBOOKS,
@@ -84,6 +82,9 @@ from modules.tools.discovery.action_registry import get_action_registry  # noqa:
 from tests.helpers_playbook_run import WS as RUN_WS, _Session, done, patch_edges, run_playbook  # noqa: E402
 
 INSTALL_ROUTE = "/api/marketplace/packages/socials/install"
+# D14: these post straight to a channel, or render outside media-render. No Socials
+# agent carries one, and the seeds never name them (the acceptance script greps).
+PUBLISHER_SKILLS = frozenset({"instagram-curator", "twitter-engager", "linkedin-content-creator", "html-to-png"})
 PLAYBOOK_IDS = [spec["template_id"] for spec in SOCIALS_PLAYBOOKS]
 SKILL_NAMES = sorted({name for spec in SOCIALS_AGENTS for name in spec["skills"]})
 AGENTS = {spec["slug"]: spec for spec in SOCIALS_AGENTS}
@@ -137,13 +138,10 @@ def test_every_skill_an_agent_links_is_a_builtin_skill_synced_from_automatos_ski
         assert manifest[name].skill_source == f"builtin:{name}"
 
 
-def test_no_agent_names_a_publisher_skill_or_html_to_png_and_a_roster_that_does_fails(monkeypatch):
-    assert NEVER_ATTACHED_SKILLS == {"instagram-curator", "twitter-engager", "linkedin-content-creator", "html-to-png"}
-    assert not NEVER_ATTACHED_SKILLS & set(SKILL_NAMES)
-    tampered = [{**AGENTS[DIRECTOR], "skills": ["social-ops", "twitter-engager"]}]
-    monkeypatch.setattr(socials_seed, "SOCIALS_AGENTS", tampered)
-    with pytest.raises(ValueError, match="twitter-engager"):
-        socials_seed._refuse_publisher_skills()
+def test_no_agent_names_a_publisher_skill_or_html_to_png():
+    assert not PUBLISHER_SKILLS & set(SKILL_NAMES)
+    seed_source = (_ORCH / "core" / "seeds" / "seed_socials_package.py").read_text(encoding="utf-8")
+    assert not [name for name in PUBLISHER_SKILLS if name in seed_source]
 
 
 def test_the_personas_say_what_each_agent_does_and_that_neither_publishes():
@@ -633,7 +631,7 @@ def _sync(manifest: Path, name: str) -> None:
 
 def _publisher_rows(session) -> None:
     """The old publisher skills and html-to-png exist as global skills: never attached."""
-    for name in sorted(NEVER_ATTACHED_SKILLS):
+    for name in sorted(PUBLISHER_SKILLS):
         if session.query(Skill).filter(Skill.name == name, Skill.workspace_id.is_(None)).first() is None:
             session.add(Skill(name=name, description=f"Fixture {name}", skill_type="technical",
                               is_active=True, workspace_id=None, skill_source="fixture"))
@@ -704,7 +702,7 @@ def _assert_installed(session, ws):
         assert clone.name == spec["name"] and clone.owner_id == str(ws)
         assert clone.custom_persona_prompt == spec["custom_persona_prompt"] and clone.use_custom_persona is True
         names = {skill.name for skill in clone.skills}
-        assert names == set(spec["skills"]) and not names & NEVER_ATTACHED_SKILLS
+        assert names == set(spec["skills"]) and not names & PUBLISHER_SKILLS
     enabled = session.execute(
         sa.text("SELECT count(*) FROM workspace_enabled_skills WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": str(ws)}
     ).scalar()
@@ -786,7 +784,7 @@ def test_a_skill_synced_after_the_first_boot_attaches_on_the_next_and_nothing_is
         agents, playbooks = _marketplace_rows(session)
         for spec in SOCIALS_AGENTS:
             names = [s.name for s in agents[spec["slug"]].skills]
-            assert sorted(names) == sorted(spec["skills"]) and not set(names) & NEVER_ATTACHED_SKILLS
+            assert sorted(names) == sorted(spec["skills"]) and not set(names) & PUBLISHER_SKILLS
         assert session.query(Agent).filter(Agent.owner_type == "marketplace", Agent.slug.in_(list(AGENTS))).count() == 2
         assert len(playbooks) == 4
 
