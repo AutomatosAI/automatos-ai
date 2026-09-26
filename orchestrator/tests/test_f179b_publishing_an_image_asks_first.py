@@ -174,3 +174,33 @@ def test_a_file_tool_meets_the_gates_its_workspace_tool_declares(studio, monkeyp
         UnifiedToolExecutor(db_session=studio.db), "read_file", {"path": "notes/plan.md"}, 0,
         workspace_id=studio.ws, caller_context={"mission_id": "m-7"}))
     assert reply["requires_confirmation"] is True and studio.reads == []
+
+
+# ── a floor below the full-autonomy dial ────────────────────────────────────
+
+@pytest.fixture
+def full_autonomy(monkeypatch):
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    monkeypatch.setattr(PlatformActionExecutor, "_full_autonomy", lambda self: True)
+
+
+def test_under_full_autonomy_a_run_still_gets_the_card(studio, full_autonomy):
+    """The TESTER's call: a public link cannot be taken back, so the dial never skips this card."""
+    reply = _publish(studio, {"mission_id": "m-7"})
+    assert reply["requires_confirmation"] is True and studio.stored == []
+
+
+def test_under_full_autonomy_the_owner_asking_in_chat_still_publishes(studio, full_autonomy):
+    reply = _publish(studio, _for(studio.owner, conversation_id="c-1"))
+    assert reply["success"] is True and reply["human_directed"] is True and "autonomous" not in reply
+
+
+def test_the_floor_names_only_publishing():
+    from modules.tools.discovery import get_action_registry
+    from modules.tools.discovery.platform_executor import _dial_skips_the_card
+
+    registry = get_action_registry()
+    assert _dial_skips_the_card(registry.get("workspace_get_public_url"), True) is False
+    assert _dial_skips_the_card(registry.get("platform_delete_memory"), True) is True
+    assert _dial_skips_the_card(registry.get("platform_delete_memory"), False) is False

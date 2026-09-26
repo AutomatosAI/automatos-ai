@@ -530,6 +530,20 @@ def _subject_line(params: Dict[str, Any]) -> str:
     return f" on {', '.join(named[:3])}" if named else ""
 
 
+# F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the
+# full-autonomy dial. These actions ask on every lane nobody is instructing (a
+# ticket, a mission, a playbook) even with the dial on, because what they do
+# cannot be taken back: a public link, once shared, stays shared. An owner's or
+# admin's own chat turn still runs them.
+ASKS_EVEN_UNDER_FULL_AUTONOMY = frozenset({"workspace_get_public_url"})
+
+
+def _dial_skips_the_card(action_def: Any, full_autonomy: bool) -> bool:
+    """Whether the full-autonomy dial skips this action's confirmation card."""
+    return bool(full_autonomy and action_def is not None
+                and action_def.name not in ASKS_EVEN_UNDER_FULL_AUTONOMY)
+
+
 class Cleared(NamedTuple):
     """How a call cleared PlatformActionExecutor.clear: its definition, the
     full-autonomy dial, the grant that said yes, and whether the instructing
@@ -552,7 +566,7 @@ def marked(result: Any, cleared: Cleared) -> Any:
     # universal telemetry hook persists it to tool_execution_logs
     # (router_decision->>'autonomous') — the Wave 4 audit trail
     # records autonomous actions distinctly and queryably.
-    if cleared.full_autonomy and action_def is not None and action_def.requires_confirmation:
+    if _dial_skips_the_card(action_def, cleared.full_autonomy) and action_def.requires_confirmation:
         result = {**result, "autonomous": True}
     # PRD-193 S2: a grant-authorised execution records WHICH grant
     # said yes (router_decision->>'approved_via_grant_id' via the
@@ -987,9 +1001,11 @@ class PlatformActionExecutor:
                     }
 
             # Full-autonomy dial (per-workspace setting). When on: Auto is
-            # treated as admin and the confirmation gate is skipped. Everything
-            # else (hierarchy check, rate limits, destructive backstop) stands.
+            # treated as admin and the confirmation gate is skipped, except for
+            # ASKS_EVEN_UNDER_FULL_AUTONOMY. Everything else (hierarchy check,
+            # rate limits, destructive backstop) stands.
             full_autonomy = self._full_autonomy()
+            dial_skips_the_card = _dial_skips_the_card(action_def, full_autonomy)
 
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
@@ -1019,7 +1035,7 @@ class PlatformActionExecutor:
             human_directed = bool(
                 action_def
                 and action_def.requires_confirmation
-                and not full_autonomy
+                and not dial_skips_the_card
                 and _human_directed_admin(self.db, self.workspace_id, caller_context)
             )
             if human_directed:
@@ -1032,7 +1048,7 @@ class PlatformActionExecutor:
             if (
                 action_def
                 and action_def.requires_confirmation
-                and not full_autonomy
+                and not dial_skips_the_card
                 and not human_directed
             ):
                 # PRD-193 S1/S2 (P2-12): the ask is no longer a dead end.
