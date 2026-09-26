@@ -70,7 +70,8 @@ describe('GET /api/generated-images/[id]', () => {
     expect(response.headers.get('content-security-policy')).toBe(CSP)
   })
 
-  it.each(['../../health', '..%2F..%2Fhealth', 'not-an-id', ID.toUpperCase()])(
+  // An id is lower-case hex; ID has no letters, so its upper-case form is itself.
+  it.each(['../../health', '..%2F..%2Fhealth', 'not-an-id', 'abcdef12-2222-4333-8444-555555555555'.toUpperCase()])(
     'never forwards %s to the backend',
     async (id) => {
       const backend = vi.fn()
