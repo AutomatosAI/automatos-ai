@@ -511,6 +511,7 @@ class MissionPlanner:
         agents: Sequence[Agent],
         config: Optional[Dict[str, Any]] = None,
         db: Any = None,
+        owner_feedback: Optional[str] = None,
     ) -> DecompositionResult:
         """
         Decompose *goal* into a task DAG validated against available *agents*.
@@ -522,6 +523,8 @@ class MissionPlanner:
             config: Optional overrides (unused in v1, reserved for 82B).
             db: Optional DB session — enables the PRD-164 planning context
                 pack (RAG + mission memory + KG) in the decomposition prompt.
+            owner_feedback: F171 — the plans this conversation just turned
+                down, with the owner's reasons (services.turned_down_plans).
 
         Returns:
             DecompositionResult with tasks, dependencies, and token estimate.
@@ -575,6 +578,10 @@ class MissionPlanner:
         staffing = list((config or {}).get("staffing") or [])
         if staffing and template is not None:
             logger.info("MissionPlanner: the owner named who does what; template %s skipped", template.id)
+            template = None
+        # F171: nor of why the owner turned the last plan down.
+        if owner_feedback and template is not None:
+            logger.info("MissionPlanner: the owner turned a plan down; template %s skipped", template.id)
             template = None
         if template is not None:
             logger.info(
@@ -664,6 +671,7 @@ class MissionPlanner:
                 power_mode=power_mode,
                 planning_context=planning_context,
                 staffing=staffing,
+                owner_feedback=owner_feedback,
             )
 
             messages = [
@@ -833,6 +841,7 @@ def _build_decomposition_prompt(
     power_mode: str = "standard",
     planning_context: Optional[str] = None,
     staffing: Optional[List[Dict[str, Any]]] = None,
+    owner_feedback: Optional[str] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
@@ -840,6 +849,9 @@ def _build_decomposition_prompt(
     ]
     if staffing:
         parts.append(_staffing_block(staffing))
+    # F171: the plans this conversation just turned down, and why.
+    if owner_feedback:
+        parts.append(owner_feedback)
 
     # PRD-164 S1: the platform planning pack (RAG + mission memory + KG),
     # assembled by ContextService.build_planning_context — the one assembler.

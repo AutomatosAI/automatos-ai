@@ -2843,6 +2843,14 @@ class CoordinatorService:
         # under its widget key's restrictions (the planning pack's documents,
         # graph and history), even later on the tick.
         from core.security.surface import origin_surface
+        from services.turned_down_plans import turned_down_before, turned_down_block
+
+        # F171 (B34): the plans this conversation just turned down, and why.
+        try:
+            owner_feedback = turned_down_block(turned_down_before(db, run))
+        except Exception:  # noqa: BLE001 -- the plan is still made, without them
+            logger.warning("[F171] could not read the turned-down plans for run %s", run.id, exc_info=True)
+            owner_feedback = ""
 
         try:
             with origin_surface(mission_config):
@@ -2852,6 +2860,7 @@ class CoordinatorService:
                     agents=agents,
                     config=mission_config,
                     db=db,  # PRD-164 S1: enables the planning context pack
+                    owner_feedback=owner_feedback or None,
                 )
         except PlanValidationError:
             transition_run(
