@@ -47,6 +47,11 @@ PURGE_WORKSPACE_SCRIPT = SCRIPTS_DIR / "purge_test_workspace.py"
 # The local operator's own workspace (compose default). A sim run must never
 # address it — provision() refuses an id that resolves to it (PRD-247 D5).
 DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-0000000000c1"
+# F208: the OpenRouter key belongs to c1, the platform key's workspace; a sim
+# workspace has none ("no key configured"). A night has cost $3-11, so preflight
+# refuses to launch one with less than this much credit known.
+PLATFORM_KEY_WORKSPACE_ID = DEFAULT_WORKSPACE_ID
+MIN_BALANCE_USD = float(os.environ.get("SIM_MIN_BALANCE_USD", "5"))
 
 # system_settings rows the cheap-model switch may touch. The table is global
 # (no workspace column), so the runner snapshots these before and restores
