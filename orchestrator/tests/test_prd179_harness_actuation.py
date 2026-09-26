@@ -69,10 +69,6 @@ _WS_ID = "00000000-0000-0000-0000-000000000001"
 _RX_ID = "rx-actuate-1"
 
 
-def _ledger_path(volume, workspace_id=_WS_ID):
-    return os.path.join(str(volume), str(workspace_id), "harness", "applied_tasks.json")
-
-
 def _harness_task(task_id=7, rx_id=_RX_ID, risk=2):
     return {
         "id": task_id,
@@ -101,7 +97,7 @@ class _FakeExecutor:
         self.task_status = {}
         self.task_result = {}
 
-    async def execute(self, action, params):
+    async def execute(self, action, params, caller_context=None):
         self.calls.append((action, params))
         if action == "platform_list_tasks":
             return {"data": self._tasks}
@@ -170,11 +166,10 @@ def _patch_executor(monkeypatch, ex):
     monkeypatch.setattr(hc, "_make_executor", lambda db, workspace_id: ex)
 
 
-def test_harness_prescription_actuates(monkeypatch, tmp_path):
+def test_harness_prescription_actuates(monkeypatch, harness_ledger):
     """Approve → routed through the policy-plane ask verdict → actuates → board
     task done with a non-null result. No 409, no dark direct-apply."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
 
     # Spy on the policy plane so we prove the actuation is GOVERNED — the same
     # evaluate_approval verdict every other governed action passes through.
@@ -220,11 +215,10 @@ def test_harness_prescription_actuates(monkeypatch, tmp_path):
     assert board_row.completed_at is not None
 
 
-def test_actuation_blocked_when_policy_denies(monkeypatch, tmp_path):
+def test_actuation_blocked_when_policy_denies(monkeypatch, harness_ledger):
     """If the policy plane denies the verdict, the prescription does NOT actuate —
     governed activation means the plane can still say no."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
 
     import core.services.approval_policy as ap
 
@@ -247,7 +241,7 @@ def test_actuation_blocked_when_policy_denies(monkeypatch, tmp_path):
     assert result["success"] is False, "a denied verdict must not actuate"
     assert "platform_configure_agent_heartbeat" not in ex.actions()
     assert ex.task_status.get(7) != "done"
-    assert not os.path.exists(_ledger_path(tmp_path))
+    assert harness_ledger.entries == []
 
 
 def test_disabled_flag_still_dark(monkeypatch):

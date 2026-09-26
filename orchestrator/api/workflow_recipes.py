@@ -44,6 +44,13 @@ def _sync_cron_schedule(recipe: WorkflowRecipe):
         logger.error(f"[_sync_cron_schedule] Playbook {recipe.id} is not scheduled: {e}")
 
 
+def _creator_pk(db: Session, ctx) -> Optional[int]:
+    """F133: the ``users.id`` of the person making a playbook, or None."""
+    from core.auth.principal import resolve_user_pk
+
+    return resolve_user_pk(db, ctx)
+
+
 def _check_step_agents(db: Session, workspace_id, steps) -> None:
     """400 when a step names an agent that is not in the workspace, or one that is
     switched off (F135, B67/B87: a switched-off agent was saved onto a step, then ran it)."""
@@ -485,7 +492,9 @@ async def create_workflow_recipe(
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
-            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous")
+            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous"),
+            # F133: the person who made it; its later edits are checked against them.
+            created_by_user_id=_creator_pk(db, ctx),
         )
 
         # Validate steps structure
@@ -635,8 +644,10 @@ async def update_workflow_recipe(
 
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
+        from services.playbook_engine import next_run_note
+
         return {
-            "message": "Recipe updated successfully",
+            "message": "Recipe updated successfully." + next_run_note(db, recipe.id),
             "recipe": recipe.to_dict()
         }
 

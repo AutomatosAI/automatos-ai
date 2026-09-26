@@ -103,7 +103,69 @@ def _is_rate_limited(exc: Exception) -> bool:
 
 class ProviderModelUnavailableError(ValueError):
     """The serving provider does not offer the requested model (a 404, or a 400
-    that says the id is not a valid / known model). PRD-239 S4."""
+    that says the id is not a valid / known model). PRD-239 S4.
+
+    F141: ``definitive`` when the provider's own answer names THIS model and says
+    it does not offer it (``_refused_for_good``). Only a definitive refusal is
+    remembered (core.llm.model_refusals); the looser markers below still word
+    the chat's message."""
+
+    def __init__(self, message: str, *, provider: str = "", model: str = "",
+                 definitive: bool = False, said: str = "") -> None:
+        super().__init__(message)
+        self.provider = provider
+        self.model = model
+        self.definitive = definitive
+        self.said = said
+
+
+# F141: the answers that say the provider does not offer the named model...
+_NOT_OFFERED_PHRASES = (
+    "is not a valid model",
+    "model not found",
+    "no such model",
+    "unknown model",
+    "does not exist",
+)
+# ...and the ones that never do, whatever else they say: the model exists, but not
+# for this request's features, this account's policy or this key's access.
+_NOT_A_CATALOG_ANSWER = (
+    "that support",
+    "requested parameters",
+    "context length",
+    "image input",
+    "data policy",
+    "providers are available",
+    "access",
+    "permission",
+    "not allowed",
+)
+
+
+def _provider_said(exc: Exception) -> str:
+    """The provider's own error message: the body's ``message``, else the text."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("message"), str):
+        return body["message"]
+    return str(exc)
+
+
+def _refused_for_good(exc: Exception, model: str) -> bool:
+    """A 400/404 whose answer names ``model`` and says the provider does not offer
+    it. A bare 404 (a wrong base URL) and a feature, policy or access refusal
+    never count, nor does a rate limit, a 5xx or a timeout (no 400/404)."""
+    if getattr(exc, "status_code", None) not in (400, 404) or not model:
+        return False
+    said = " ".join(_provider_said(exc).split()).lower()
+    wanted = model.lower()
+    if wanted not in said:
+        return False
+    words = said.replace(wanted, " ")          # the provider's words, not the id's
+    if any(marker in words for marker in _NOT_A_CATALOG_ANSWER):
+        return False
+    if said.rstrip(" .") == f"no endpoints found for {wanted}":
+        return True
+    return any(phrase in words for phrase in _NOT_OFFERED_PHRASES)
 
 
 _MODEL_UNAVAILABLE_MARKERS = (
@@ -274,14 +336,19 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     def _model_unavailable_error(self, exc: Exception) -> ProviderModelUnavailableError:
         return ProviderModelUnavailableError(
             f"{self.spec.label} does not offer the model '{self.config.model}' (any more). "
-            "Pick another model in the agent's Model tab."
+            "Pick another model in the agent's Model tab.",
+            provider=self.spec.slug,
+            model=self.config.model or "",
+            definitive=_refused_for_good(exc, self.config.model or ""),
+            said=" ".join(_provider_said(exc).split())[:300],
         )
 
     def _classified(self, exc: Exception) -> Optional[ValueError]:
         """The typed error for a provider refusal we recognise, else None."""
         if _is_rate_limited(exc):
             return self._rate_limit_error(exc)
-        if _is_model_unavailable(exc):
+        # F141: OpenRouter's "No endpoints found for <model>." never says "model".
+        if _is_model_unavailable(exc) or _refused_for_good(exc, self.config.model or ""):
             return self._model_unavailable_error(exc)
         return None
 

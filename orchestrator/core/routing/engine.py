@@ -86,10 +86,51 @@ class UniversalRouter:
 
         F071: every decision leaves through ``_chat_never_routes_to_a_session``,
         so no tier — the cache included — can hand a chat turn to a session
-        agent, which can never be activated in chat.
+        agent, which can never be activated in chat. F141: then through
+        ``_chat_never_routes_to_a_refused_model``, likewise for an agent whose
+        model its provider refused.
         """
         decision = await self._route_through_tiers(envelope)
-        return self._chat_never_routes_to_a_session(envelope, decision)
+        decision = self._chat_never_routes_to_a_session(envelope, decision)
+        return self._chat_never_routes_to_a_refused_model(envelope, decision)
+
+    def _chat_never_routes_to_a_refused_model(
+        self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
+    ) -> Optional[RoutingDecision]:
+        """A chat turn routed to an agent whose model is not available becomes
+        ``orchestrate``: its provider refused the agent's model for good, or the
+        route the agent names is deprecated (core.llm.model_refusals).
+
+        Refresh-3 retest (F141): chat 9c44148f was routed to BEANCOUNTER, whose
+        model OpenRouter does not offer, and got "⚠️ … Pick another model", as
+        every turn routed there would. Scoped to CHAT, as F071 is.
+        """
+        if decision is None or decision.route_type != "agent" or decision.agent_id is None:
+            return decision
+        if envelope.source != ChannelSource.CHATBOT:
+            return decision
+        try:
+            from core.llm.model_refusals import unavailable_reason
+
+            agent = (
+                self._db.query(Agent.name, Agent.configuration, Agent.model_config)
+                .filter(Agent.id == decision.agent_id)
+                .first()
+            )
+            reason = unavailable_reason(self._db, agent) if agent is not None else None
+        except Exception:  # noqa: BLE001 — never let the guard break routing
+            logger.warning("[router] model check failed for agent %s", decision.agent_id, exc_info=True)
+            return decision
+        if not reason:
+            return decision
+        logger.info("[router] F141: %s — handing the chat turn to Auto", reason)
+        return RoutingDecision(
+            route_type="orchestrate",
+            agent_id=None,
+            confidence=decision.confidence,
+            reasoning=f"{reason}, so Auto takes the turn (was: {decision.reasoning})"[:500],
+            intent_category=decision.intent_category,
+        )
 
     def _chat_never_routes_to_a_session(
         self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
@@ -139,6 +180,28 @@ class UniversalRouter:
             intent_category=decision.intent_category,
         )
 
+    def _within_workspace(
+        self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
+    ) -> Optional[RoutingDecision]:
+        """F149: a decision names an agent or playbook of the envelope's workspace,
+        or it is dropped and the next tier runs. Rules, overrides and the cache
+        carry bare ids; nothing else ties them to the message's workspace."""
+        if decision is None:
+            return None
+        from core.security.workspace_scope import agent_in_workspace, playbook_in_workspace
+
+        if decision.route_type == "agent" and decision.agent_id is not None:
+            if not agent_in_workspace(self._db, decision.agent_id, envelope.workspace_id):
+                logger.warning("[router] F149: agent %s is not in workspace %s — dropped",
+                               decision.agent_id, envelope.workspace_id)
+                return None
+        if decision.route_type == "workflow" and decision.workflow_id is not None:
+            if not playbook_in_workspace(self._db, decision.workflow_id, envelope.workspace_id):
+                logger.warning("[router] F149: playbook %s is not in workspace %s — dropped",
+                               decision.workflow_id, envelope.workspace_id)
+                return None
+        return decision
+
     async def _route_through_tiers(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
         """The tier chain itself. Callers use ``route``, which vets the result."""
 
@@ -151,28 +214,28 @@ class UniversalRouter:
         )
 
         # Tier 0 — explicit user overrides
-        decision = self._tier0_override(envelope)
+        decision = self._within_workspace(envelope, self._tier0_override(envelope))
         if decision is not None:
             logger.info("[router] Tier 0 hit (override): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 1 — cache lookup
-        decision = self._tier1_cache(envelope)
+        decision = self._within_workspace(envelope, self._tier1_cache(envelope))
         if decision is not None:
             logger.info("[router] Tier 1 hit (cache): agent_id=%s", decision.agent_id)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 2a — routing rules (source pattern match)
-        decision = self._tier2a_rules(envelope)
+        decision = self._within_workspace(envelope, self._tier2a_rules(envelope))
         if decision is not None:
             logger.info("[router] Tier 2a hit (rule): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
         # Tier 2b — TriggerSubscription (jira_trigger)
-        decision = self._tier2b_trigger_subscription(envelope)
+        decision = self._within_workspace(envelope, self._tier2b_trigger_subscription(envelope))
         if decision is not None:
             logger.info("[router] Tier 2b hit (trigger): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
@@ -185,6 +248,7 @@ class UniversalRouter:
         # Returns (decision, candidates) — candidates are request-local to
         # avoid race conditions under concurrent async requests.
         decision, semantic_candidates = await self._tier2_5_semantic(envelope)
+        decision = self._within_workspace(envelope, decision)
         if decision is not None:
             logger.info(
                 "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
@@ -197,14 +261,14 @@ class UniversalRouter:
         # Skip if Tier 2.5 already found semantic candidates — those go
         # straight to Tier 3 (LLM) which is smarter than keyword matching.
         if not semantic_candidates:
-            decision = self._tier2c_intent_classifier(envelope)
+            decision = self._within_workspace(envelope, self._tier2c_intent_classifier(envelope))
             if decision is not None:
                 logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
                 self._log_decision(envelope, decision, env_hash)
                 return decision
 
         # Tier 3 — LLM classification (fallback)
-        decision = await self._classify_with_llm(envelope, semantic_candidates)
+        decision = self._within_workspace(envelope, await self._classify_with_llm(envelope, semantic_candidates))
         if decision is not None:
             logger.info(
                 "[router] Tier 3 hit (LLM): route_type=%s agent_id=%s confidence=%.2f",

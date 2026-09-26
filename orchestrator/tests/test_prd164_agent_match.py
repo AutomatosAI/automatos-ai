@@ -3,8 +3,9 @@
 Pure, DB-free proof of the extended AgentMatcher:
 
   * golden matrix — 10 task fixtures → expected top agent (ties allowed);
-  * explicit agent_overrides (PRD-163 S4 approval-edited ``agent_role`` naming a
-    roster agent) ALWAYS win, regardless of score and even below threshold;
+  * an agent a person pinned to the task (F142 (c): ``pinned_agent_id``,
+    written when an approval edit names one agent) ALWAYS wins, regardless of
+    score and even below threshold; a role that spells a name never pins;
   * every ranked agent carries a human-readable reason string;
   * the Q21 blend (capability-card similarity + live field signal) renormalizes
     away cleanly when signals are absent — byte-identical to the legacy
@@ -117,7 +118,7 @@ ROSTER = [SCOUT, SCRIBE, VECTOR, FORGE, ATLAS, RECON]
 
 def _rank(*, agent_role=None, required_tools=None, preferred_model=None,
           has_upstream=False, tool_map=None, busy_ids=frozenset(),
-          history_map=None, semantic=None, agents=ROSTER):
+          history_map=None, semantic=None, agents=ROSTER, pinned_agent_id=None):
     return AgentMatcher._rank_with_context(
         agents=agents,
         agent_role=agent_role,
@@ -128,6 +129,7 @@ def _rank(*, agent_role=None, required_tools=None, preferred_model=None,
         busy_agent_ids=busy_ids,
         history_map=history_map or {},
         semantic=semantic,
+        pinned_agent_id=pinned_agent_id,
     )
 
 
@@ -170,8 +172,8 @@ GOLDEN_MATRIX = [
     ("busy agent loses the tie",
      dict(agent_role="research", busy_ids=frozenset({RECON.id})),
      {SCOUT.id}),
-    ("explicit agent_role naming VECTOR overrides a higher-scoring SCOUT",
-     dict(agent_role="vector",
+    ("an agent pinned to VECTOR overrides a higher-scoring SCOUT",
+     dict(agent_role="research", pinned_agent_id=VECTOR.id,
           busy_ids=frozenset({VECTOR.id}),
           history_map={VECTOR.id: 0.1, SCOUT.id: 0.9},
           semantic=_sig(sim={SCOUT.id: 0.95, VECTOR.id: 0.0})),
@@ -215,7 +217,8 @@ def test_ranking_is_deterministic_on_ties():
 
 def test_override_outranks_higher_scorer_and_is_flagged():
     ranked = _rank(
-        agent_role="vector",
+        agent_role="research",
+        pinned_agent_id=VECTOR.id,
         busy_ids=frozenset({VECTOR.id}),
         history_map={VECTOR.id: 0.1, SCOUT.id: 0.9},
         semantic=_sig(sim={SCOUT.id: 0.95, VECTOR.id: 0.0}),
@@ -236,9 +239,9 @@ def test_override_wins_even_below_match_threshold(monkeypatch):
     monkeypatch.setattr(agent_matcher, "_build_history_map",
                         lambda db, ids, **kw: {VECTOR.id: 0.0})
 
-    task = SimpleNamespace(id=uuid4(), agent_role="vector",
-                           input_context={"required_tools": ["github"]})
-    spec = {"agent_role": "vector", "required_tools": ["github"]}
+    task = SimpleNamespace(id=uuid4(), agent_role="research",
+                           input_context={"required_tools": ["github"], "pinned_agent_id": VECTOR.id})
+    spec = {"agent_role": "research", "required_tools": ["github"]}
     semantic = _sig(sim={VECTOR.id: 0.0, SCOUT.id: 0.0})
 
     result = AgentMatcher.match(db=None, task=task, agents=[VECTOR, SCOUT],
@@ -264,7 +267,7 @@ def test_no_override_below_threshold_still_returns_none(monkeypatch):
 
 def test_inactive_agent_is_never_an_override_target():
     sleeper = _agent(7, "SLEEPER", "Disabled twin", status="inactive")
-    ranked = _rank(agent_role="sleeper", agents=ROSTER + [sleeper])
+    ranked = _rank(agent_role="research", pinned_agent_id=sleeper.id, agents=ROSTER + [sleeper])
     assert all(r.agent_id != sleeper.id for r in ranked)
 
 
@@ -372,7 +375,8 @@ def test_build_match_annotation_shape():
 
 def test_build_match_annotation_marks_override():
     ranked = _rank(
-        agent_role="vector",
+        agent_role="research",
+        pinned_agent_id=VECTOR.id,
         busy_ids=frozenset({VECTOR.id}),
         history_map={VECTOR.id: 0.1, SCOUT.id: 0.9},
         semantic=_sig(sim={SCOUT.id: 0.95, VECTOR.id: 0.0}),

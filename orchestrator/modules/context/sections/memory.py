@@ -74,8 +74,12 @@ class MemorySection(BaseSection):
 
     async def _build(self, ctx: SectionContext) -> str:
         # --- Try Context Router first (PRD-79) for chatbot mode ---
+        # F155: never on a widget turn. The router also recalls the workspace's
+        # other conversations (L2) and its daily logs; a widget turn is an
+        # anonymous visitor's and recalls only its agent's own memories (the
+        # SmartMemoryManager path's widget lane).
         chat_id = ctx.kwargs.get("chat_id")
-        context_bundle = await self._try_context_router(ctx, chat_id)
+        context_bundle = None if ctx.widget_mode else await self._try_context_router(ctx, chat_id)
 
         if context_bundle is not None:
             content = self._format_context_bundle(context_bundle, ctx)
@@ -83,8 +87,9 @@ class MemorySection(BaseSection):
             # --- Fallback: SmartMemoryManager ---
             content = await self._build_from_smart_memory(ctx, chat_id)
 
-        # Recipe memories (Mem0 learnings from previous runs) — step 1 only
-        recipe_memories = ctx.kwargs.get("recipe_memories")
+        # Recipe memories (Mem0 learnings from previous runs) — step 1 only;
+        # never on a widget turn (they are the owner's runs).
+        recipe_memories = None if ctx.widget_mode else ctx.kwargs.get("recipe_memories")
         if recipe_memories:
             summary = recipe_memories.get("summary", "")
             if summary and summary != "No relevant memories found":
@@ -231,8 +236,8 @@ class MemorySection(BaseSection):
         # --- Retrieve memories ---
         memory_text = await self._retrieve_memories(manager, ctx)
 
-        # --- Retrieve daily logs ---
-        daily_logs = await self._retrieve_daily_logs(manager, ctx)
+        # --- Retrieve daily logs (the workspace's: never on a widget turn) ---
+        daily_logs = "" if ctx.widget_mode else await self._retrieve_daily_logs(manager, ctx)
 
         # --- Session hydration (Redis) — only in fallback path ---
         session_text = await self._hydrate_session(ctx, chat_id)

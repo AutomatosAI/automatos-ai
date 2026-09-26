@@ -23,6 +23,7 @@ import json
 import logging
 import time
 import uuid as uuid_mod
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -35,6 +36,8 @@ from sqlalchemy.orm import sessionmaker
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.security.surface import origin_surface, widget_scopes, widget_turn
+from core.security.widget_scopes import widget_tool_surface
 from core.services.playbook_scratchpad import answer_for_next_step
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,9 @@ INTERNAL_ERROR_TEXT = (
     "The run stopped on an internal error, so nothing after it ran. "
     "The details are in the server log."
 )
+# F155: a Claude Code session's tools are not the widget key's, so a run a
+# widget turn started never files a session ticket.
+WIDGET_SESSION_REFUSAL = "A playbook started from the website chat does not run on a Claude Code session."
 
 
 def owner_error_text(exc: BaseException) -> str:
@@ -461,6 +467,9 @@ async def _execute_step(
 
     from services.cli_ticket_lane import RECIPE_SOURCE_TYPE, is_cli_agent, run_cli_ticket_and_wait
     if is_cli_agent(db, agent.id):
+        if widget_turn():
+            return {"status": "error", "error": WIDGET_SESSION_REFUSAL,
+                    "execution": {"tokens_used": 0, "tool_calls": [], "messages": []}}
         import uuid as _uuid
 
         return await run_cli_ticket_and_wait(
@@ -531,16 +540,19 @@ async def _execute_step(
 
     # 2. Composio tools — SDK semantic search for per-action function-calling tools.
     #    Falls back to hint-based composio_execute if SDK search returns empty.
-    tool_service = ComposioToolService(db)
+    #    F155: none on a widget turn — the owner's connected apps are not the
+    #    widget key's (the widget chat is never offered them either).
     composio_result = None
-    try:
-        composio_result = tool_service.get_tools_for_step(
-            agent_id=agent.id,
-            workspace_id=workspace_id,
-            task_prompt=prompt_for_hints or clean_prompt,
-        )
-    except Exception as exc:
-        logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
+    if not widget_turn():
+        tool_service = ComposioToolService(db)
+        try:
+            composio_result = tool_service.get_tools_for_step(
+                agent_id=agent.id,
+                workspace_id=workspace_id,
+                task_prompt=prompt_for_hints or clean_prompt,
+            )
+        except Exception as exc:
+            logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
 
     # If SDK search returned tools, inject a simpler scope message.
     # Otherwise fall back to hint-based composio_execute mega-tool.
@@ -550,7 +562,7 @@ async def _execute_step(
             f"[recipe_step] SDK search: strategy={composio_result.strategy} "
             f"actions={len(composio_result.action_set)} search_ms={composio_result.search_ms}"
         )
-    else:
+    elif not widget_turn():
         # Fallback: existing hint service with composio_execute mega-tool
         if composio_result:
             composio_result.strategy = "hint_fallback"
@@ -601,6 +613,10 @@ async def _execute_step(
     else:
         # Fallback: composio_execute + hints (existing behavior)
         tools = list(base_tools)
+    if widget_turn():
+        # F155: what the widget key's scopes allow (the executor refuses
+        # anything else on the resolved action).
+        tools = widget_tool_surface(tools, widget_scopes())
     if scratchpad:
         scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
         if step_order > 1:
@@ -1242,6 +1258,7 @@ async def _execute_recipe_inner(
         db = SessionLocal()
 
     scratchpad = None
+    origin = ExitStack()
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
 
@@ -1266,6 +1283,9 @@ async def _execute_recipe_inner(
         if not execution:
             logger.error(f"[recipe_direct] Execution record not found: {recipe_execution_id}")
             return
+        # F155: a run a widget turn started (its origin is on the row, server-set)
+        # runs under that turn's key scopes and team lock, retries and reruns too.
+        origin.enter_context(origin_surface(execution.execution_metadata))
 
         # Disabled / deleted workspace gate — covers scheduled runs that
         # bypass the request-context middleware. The HTTP entry point also
@@ -1347,21 +1367,27 @@ async def _execute_recipe_inner(
         scratchpad.write_meta(recipe_id, total_steps)
 
         # --- Pre-execution: load Mem0 memories ---
+        # F155: none for a run a widget turn started — they are the owner's runs.
         recipe_memories = None
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            recipe_memories = await memory_svc.retrieve_relevant_memories(
-                recipe_id=recipe.id,
-                context={"workspace_id": str(workspace_id), "input_data": input_data}
-            )
-            if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
-                logger.info(
-                    "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
-                    recipe_memories["total_memories"], recipe.id,
+        if not widget_turn():
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                # F159: the parameter is playbook_id. The call passed recipe_id=,
+                # raised TypeError on every run, and was logged as "skipped", so
+                # no run ever recalled its playbook's past runs.
+                recipe_memories = await memory_svc.retrieve_relevant_memories(
+                    playbook_id=recipe.id,
+                    context={"workspace_id": str(workspace_id), "input_data": input_data}
                 )
-        except Exception as exc:
-            logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
+                if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
+                    logger.info(
+                        "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
+                        recipe_memories["total_memories"], recipe.id,
+                    )
+            except Exception as exc:
+                logger.warning("[recipe_direct] Playbook memory recall failed for recipe %s: %s",
+                               recipe.id, exc, exc_info=True)
 
         # F125: execution_config holds seconds. No unit is guessed from the size;
         # only the floors apply (core/services/playbook_timeouts.py).
@@ -1820,7 +1846,6 @@ async def _execute_recipe_inner(
                         return
 
                     if result.get("status") == "success":
-                        step_result["status"] = "completed"
                         raw_output = result.get("result", "")
                         if isinstance(raw_output, (dict, list)):
                             step_result["output"] = json.dumps(raw_output)
@@ -1834,6 +1859,15 @@ async def _execute_recipe_inner(
                         step_result["tool_calls"] = _normalize_tool_calls(tool_calls_raw)
                         exec_messages = result.get("execution", {}).get("messages", [])
 
+                        # F131: a step can run to its end and still have failed.
+                        failed = step_failure(step_result["tool_calls"], result)
+                        if failed:
+                            last_error = failed
+                            logger.warning(f"[recipe_direct] Step {step_order} failed: {failed}")
+                            attempt += 1
+                            continue
+
+                        step_result["status"] = "completed"
                         success = True
 
                         # Write to scratchpad (auto-extract)
@@ -2032,9 +2066,13 @@ async def _execute_recipe_inner(
         _update_agent_performance_metrics(db, step_results, success=True)
 
         # --- Post-execution: learning + memory storage ---
+        # F155: a run a widget turn started teaches the playbook nothing and
+        # leaves nothing in memory (a widget turn stores none, F154); later runs
+        # would recall it.
         post_exec_config = recipe.execution_config or {}
         learning_result = None
-        if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
+        remembered = not widget_turn()
+        if remembered and (post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False)):
             try:
                 from core.services.playbook_learning_service import PlaybookLearningService
                 learning_svc = PlaybookLearningService(db=db)
@@ -2044,16 +2082,17 @@ async def _execute_recipe_inner(
                 logger.warning(f"[recipe_direct] Auto-learning failed (non-blocking): {e}")
 
         # Store execution memories in Mem0 + L2 short-term
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            await memory_svc.store_execution_memory(
-                recipe_execution_id,
-                learnings=learning_result,
-            )
-            logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
-        except Exception as e:
-            logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
+        if remembered:
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                await memory_svc.store_execution_memory(
+                    recipe_execution_id,
+                    learnings=learning_result,
+                )
+                logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
+            except Exception as e:
+                logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
@@ -2064,6 +2103,7 @@ async def _execute_recipe_inner(
                 f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"
             )
     finally:
+        origin.close()
         # Cleanup scratchpad TTL
         if scratchpad:
             try:
@@ -2199,6 +2239,25 @@ def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
     elif isinstance(data, list):
         return [_resolve_doc_step_variables(item, scratchpad) for item in data]
     return data
+
+
+def step_failure(tool_calls: List[Dict[str, Any]], result: Dict[str, Any]) -> Optional[str]:
+    """Why a step that ran to its end failed, from deterministic signals, or None.
+
+    F131 (night 4): the run's status came from the loop finishing, never from what
+    the steps did. B33, B25: a step's tool call failed in words while the turn
+    ended normally, so the step's 'stop' never fired and the run said complete.
+    B47: a session step never reached Automatos ("No Automatos tools this
+    session") and the run said "Playbook complete". Whether the step's answer
+    MEANS it failed is the PRD-204 watch's job (Gerard's wiring), not this.
+    """
+    if result.get("session_connected") is False:
+        return "the session never reached Automatos, so it ran without any of its tools"
+    if tool_calls and tool_calls[-1].get("success") is False:
+        last = tool_calls[-1]
+        said = " ".join(str(last.get("result") or "").split())[:200]
+        return f"its last tool call, {last.get('action') or 'a tool'}, failed" + (f": {said}" if said else "")
+    return None
 
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:

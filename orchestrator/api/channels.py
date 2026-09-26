@@ -302,6 +302,11 @@ async def connect_channel_for_workspace(
     missing = [f for f in required if not config.get(f)]
     if missing:
         raise ValueError(f"Missing required config fields for {platform}: {missing}")
+    # F149: a channel's default agent is one of its own workspace's.
+    from core.security.workspace_scope import agent_in_workspace
+
+    if default_agent_id not in (None, "") and not agent_in_workspace(db, default_agent_id, workspace_id):
+        raise ValueError("default_agent_id is not an agent of this workspace")
 
     conn_id = uuid4()
     db.execute(
@@ -492,6 +497,11 @@ async def update_channel(
         updates.append("config = :config")
         params["config"] = _json.dumps(new_config)
     if "default_agent_id" in payload:
+        from core.security.workspace_scope import agent_in_workspace
+
+        if payload["default_agent_id"] is not None and not agent_in_workspace(
+                db, payload["default_agent_id"], ctx.workspace_id):
+            raise HTTPException(400, "default_agent_id is not an agent of this workspace")  # F149
         updates.append("default_agent_id = :agent_id")
         params["agent_id"] = payload["default_agent_id"]
 

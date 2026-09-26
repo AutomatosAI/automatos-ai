@@ -49,8 +49,8 @@ _NOTIFY_TASKS: Set["asyncio.Task"] = set()
 # reproduces the original call's identity/telemetry posture — nothing more.
 _CALLER_SNAPSHOT_KEYS = (
     "user_id",
+    "driving_user_id",  # F133: a resumed playbook edit is still made for its person
     "system_role",
-    "workspace_role",
     "conversation_id",
     "turn_id",
 )

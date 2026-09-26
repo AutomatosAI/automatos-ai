@@ -80,6 +80,7 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "required": ["slug"],
         },
         permission_level="write",
+        admin_only=True,  # F151: installs agents, tools and playbooks at once
         promoted=True,
         tags=["marketplace", "packages", "install", "onboarding"],
         examples=[

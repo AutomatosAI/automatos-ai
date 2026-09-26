@@ -68,8 +68,8 @@ def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, toke
 
     `config` mirrors the real OrchestrationRun.config JSONB column (DB default
     '{}'). Defaulting to an empty dict is required: the budget gate reads
-    ``run.config.get("budget_pause_disabled")`` and a bare MagicMock would make
-    that truthy, short-circuiting the gate to "allow".
+    ``run.config`` (its cost ceiling, the session-token count) and a bare
+    MagicMock would answer every key with a truthy mock.
     """
     run = MagicMock()
     run.id = run_id or uuid4()

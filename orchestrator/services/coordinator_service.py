@@ -50,7 +50,7 @@ from core.models.orchestration_enums import (
     DONE_TASK_STATES,
 )
 from modules.coordination import progress_ledger
-from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation
+from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
     DecompositionResult,
@@ -145,6 +145,84 @@ def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
     return {**plan, "tasks": new_tasks}
 
 
+def _pin_the_named_agent(edit: Any, roster: List[Any]) -> Any:
+    """F142 (c): an edit that names ONE active agent (``agent_id``, or an
+    ``agent_role`` spelling an id, slug or name) pins it: the task carries its
+    id, and its name as the role. A capability word or other text pins nothing
+    and clears an earlier pin. A name several active agents share is refused
+    with their ids, never resolved to the lowest one."""
+    if not isinstance(edit, dict):
+        return edit
+    named = edit.get("agent_id") if edit.get("agent_id") is not None else edit.get("agent_role")
+    if named is None:
+        return edit
+    agent, why = resolve_named_agent(str(named), roster)
+    if why:
+        raise ValueError(why)
+    if agent is None:
+        if edit.get("agent_id") is not None:
+            raise ValueError(f"No active agent with id {edit['agent_id']} in this workspace.")
+        return {**edit, "pinned_agent_id": None}
+    return {**{k: v for k, v in edit.items() if k != "agent_id"},
+            "agent_role": agent.name, "pinned_agent_id": agent.id}
+
+
+# F142 (a): how much of the owner's words for one agent's work a mission keeps.
+STAFFING_DUTY_CHARS = 500
+STAFFING_ENTRY_TEXT = ('Each staffing entry names one agent and its work, in the owner\'s words: '
+                       '{"agent": "WRITER", "does": "drafts the club newsletter"}.')
+
+
+class StaffingError(ValueError):
+    """F142 (a): the owner's staffing names no agent, several, or no work."""
+
+
+def resolve_staffing(staffing: Any, roster: List[Any]) -> List[Dict[str, Any]]:
+    """F142 (a): the owner's named staffing, resolved against the workspace's
+    active agents, as [{agent_id, agent_name, does}]. An entry names one agent
+    (by id, slug, or a name only one active agent has) and its work, in the
+    owner's words. A name several active agents share, a name no active agent
+    has, the same agent twice, or an entry without its work is refused, never
+    guessed."""
+    if not staffing:
+        return []
+    from modules.coordination.planner import MAX_TASKS
+
+    if not isinstance(staffing, list) or len(staffing) > MAX_TASKS:
+        raise StaffingError(f"staffing is a list of at most {MAX_TASKS} entries. {STAFFING_ENTRY_TEXT}")
+    resolved: List[Dict[str, Any]] = []
+    for entry in staffing:
+        named = entry.get("agent") if isinstance(entry, dict) else None
+        does = str(entry.get("does") or "").strip() if isinstance(entry, dict) else ""
+        if named is None or not str(named).strip() or not does:
+            raise StaffingError(STAFFING_ENTRY_TEXT)
+        agent, why = resolve_named_agent(str(named), roster, explicit=True)
+        if why:
+            raise StaffingError(why)
+        if agent is None:
+            raise StaffingError(f"No active agent in this workspace is called '{named}'. "
+                             "Name the agent by its name, slug or id.")
+        if any(done["agent_id"] == agent.id for done in resolved):
+            raise StaffingError(f"{agent.name} (id {agent.id}) is named twice; give it one entry with all its work.")
+        resolved.append({"agent_id": agent.id, "agent_name": agent.name, "does": does[:STAFFING_DUTY_CHARS]})
+    return resolved
+
+
+def _staffed_task(planned: Any, staffing: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """F142 (b)/(d2): a planned task's role, description and pin. A task the
+    planner gave a named agent (staffed_by) is pinned to it, as an approval edit
+    pins (input_context.pinned_agent_id, its name as the role), and carries the
+    owner's words for that work verbatim. Any other task is as planned."""
+    staffed_by = getattr(planned, "staffed_by", None)
+    entry = next((e for e in staffing or [] if staffed_by is not None and e["agent_id"] == staffed_by), None)
+    if entry is None:
+        return {"agent_role": planned.agent_role, "description": planned.description, "pin": {}}
+    words = f'The owner\'s words for this work: "{entry["does"]}"'
+    description = f"{planned.description}\n\n{words}" if planned.description else words
+    return {"agent_role": entry["agent_name"], "description": description,
+            "pin": {"pinned_agent_id": entry["agent_id"]}}
+
+
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                           edits: List[Dict[str, Any]]) -> tuple:
     """Apply per-task field edits to OrchestrationTask rows and mirror them into
@@ -193,6 +271,16 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
                 if getattr(task, field, None) != new_val:
                     setattr(task, field, new_val)
                     fields_changed += 1
+        # F142 (c): the agent a person pinned (update_mission_plan resolves it);
+        # None clears a pin. It rides input_context, never agent_role.
+        if "pinned_agent_id" in edit:
+            before = dict(getattr(task, "input_context", None) or {})
+            after = {k: v for k, v in before.items() if k != "pinned_agent_id"}
+            if edit["pinned_agent_id"] is not None:
+                after["pinned_agent_id"] = int(edit["pinned_agent_id"])
+            if after != before:
+                task.input_context = after
+                fields_changed += 1
         edited_rows.add(int(getattr(task, "sequence_number", -1)))
 
     # Mirror the row state back into the plan snapshot (by sequence_number).
@@ -203,7 +291,8 @@ def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
             seq = pt.get("sequence_number")
             row = seq_to_row.get(int(seq)) if seq is not None else None
             if row is not None and int(seq) in edited_rows:
-                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS}}
+                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS},
+                      "pinned_agent_id": (getattr(row, "input_context", None) or {}).get("pinned_agent_id")}
             new_plan_tasks.append(pt)
         plan = {**plan, "tasks": new_plan_tasks}
 
@@ -292,24 +381,17 @@ async def _dispatch_mission_event(
     the outer tick transaction (the tick commits once per run). Failures
     are logged but never block the coordinator.
 
-    Resolves ``run.created_by`` (Clerk user ID) to an integer ``user_id``
+    Resolves ``run.created_by`` (a Clerk user ID, or a local operator's email) to an integer ``user_id``
     so notifications target the mission creator — not the entire workspace.
     """
     try:
-        from core.models.core import User
+        from core.auth.actor import resolve_recorded_person
         from core.services.notification_dispatcher import NotificationDispatcher
 
-        # Resolve Clerk ID → integer user_id so notifications are
-        # scoped to the mission creator, not broadcast workspace-wide.
-        user_id: Optional[int] = None
-        if run.created_by:
-            user_row = (
-                db.query(User.id)
-                .filter(User.clerk_user_id == run.created_by)
-                .first()
-            )
-            if user_row:
-                user_id = user_row[0]
+        # Resolve the creator (a Clerk id, or F166 a local operator's email) to an
+        # integer user_id so notifications are scoped to the mission creator, not
+        # broadcast workspace-wide. An agent id is nobody: the workspace hears it.
+        user_id: Optional[int] = resolve_recorded_person(db, run.created_by)
 
         dispatcher = NotificationDispatcher(db, str(run.workspace_id))
         await dispatcher.dispatch(
@@ -330,6 +412,67 @@ async def _dispatch_mission_event(
             getattr(run, "id", "?"),
             exc_info=True,
         )
+
+
+# F153: run.config keys a mission's creator never sets, on any creation path
+# (_creator_config): the coordinator's own bookkeeping, and skip_verification,
+# which only an approver sets (the approve endpoint). A seeded session-token
+# count would hide spend from the budget, a seeded approval deadline would
+# auto-approve the plan, and a seeded field or output id would point the
+# mission's writes at another field or document.
+SERVER_OWNED_MISSION_CONFIG = frozenset({
+    "session_tokens",
+    "approval_deadline_at",
+    "approval_countdown_seconds",
+    "approval_last_notified_at",
+    "approval_estimated_cost_usd",
+    "field_id",
+    "field_archived",
+    "field_expired_at",
+    "output_ingest",
+    "output_ingest_failed",
+    "output_document_id",
+    "app_bundle_document_id",
+    "emitted_document",
+    "emitted_deliverable_id",
+    "progress_ledger",
+    "template_used",
+    "imported_plan",
+    "skip_verification",
+    # F142 (a): resolved by create_mission/replan_mission (resolve_staffing),
+    # never taken from a caller's config.
+    "staffing",
+})
+
+
+# F155: what a widget turn's mission never carries: the owner's settings.
+WIDGET_HELD_MISSION_CONFIG = frozenset({"cost_ceiling", "auto_approve"})
+
+
+def _creator_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A new mission's config as its creator may set it: without the keys in
+    SERVER_OWNED_MISSION_CONFIG. F155: where it starts from is server-set too
+    (stamp_origin: a caller's origin keys are dropped, a widget turn's are
+    stamped, so its approval and tasks run under the widget key's restrictions
+    even later on the tick), and a widget turn sets none of the owner's
+    settings (WIDGET_HELD_MISSION_CONFIG)."""
+    from core.security.surface import stamp_origin, widget_turn
+
+    kept = stamp_origin({key: value for key, value in (config or {}).items()
+                         if key not in SERVER_OWNED_MISSION_CONFIG})
+    if widget_turn():
+        kept = {key: value for key, value in kept.items() if key not in WIDGET_HELD_MISSION_CONFIG}
+    return kept
+
+WIDGET_SESSION_REFUSAL = (
+    "A mission started from the website chat does not run on a Claude Code session."
+)
+
+
+async def _refuse_widget_session_task() -> Dict[str, Any]:
+    """F155: the I/O result for a widget-born mission's task assigned to a
+    session (CLI) agent — refused, no ticket filed."""
+    return {"status": "error", "error": WIDGET_SESSION_REFUSAL}
 
 
 async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
@@ -614,8 +757,15 @@ async def _store_mission_memory_safe(
     """PRD-131d Phase 1: persist mission summary to L2+L3 memory.
 
     Wrapped in a try/except so memory failures never break a mission transition.
+    F155: a mission a widget turn started leaves nothing in the workspace's
+    memory (a widget turn stores none, F154); later missions would recall it.
     """
     try:
+        from core.security.surface import widget_born
+
+        run = db.get(OrchestrationRun, run_id)
+        if run is not None and widget_born(run.config):
+            return
         from core.services.mission_memory_service import MissionMemoryService
         await MissionMemoryService(db=db).store_mission_summary(
             run_id=run_id,
@@ -664,6 +814,15 @@ class CoordinatorService:
         self._last_field_compaction_at: Optional[datetime] = None  # PRD-166 S1
         self._field = None  # Lazy-init via factory
 
+    @staticmethod
+    def _active_roster(db: Session, workspace_id: UUID) -> List[Agent]:
+        """The workspace's active agents: who a mission's staffing may name."""
+        return (
+            db.query(Agent)
+            .filter(and_(Agent.workspace_id == workspace_id, Agent.status == "active"))
+            .all()
+        )
+
     def _get_field(self):
         """Lazy-init the PRD-108 shared context backend (vector_field or redis)."""
         if self._field is None:
@@ -681,7 +840,16 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
     ) -> Optional[str]:
-        """Create a shared vector field for a mission. Returns field_id or None."""
+        """Create a shared vector field for a mission. Returns field_id or None.
+
+        F155: none for a mission a widget turn started. The field is the
+        workspace's shared memory (planners and heartbeat agents recall it
+        workspace-wide), and a widget turn stores none (F154).
+        """
+        from core.security.surface import widget_born
+
+        if widget_born(run.config):
+            return None
         field = self._get_field()
         if not field:
             return None
@@ -798,7 +966,7 @@ class CoordinatorService:
         # Budget-gate: drop the digest rather than spend tokens we don't have.
         try:
             from modules.coordination.dispatcher import BudgetStatus, MissionDispatcher
-            status = MissionDispatcher._get_budget_status(run)
+            status = MissionDispatcher._get_budget_status(run, db)
         except Exception:
             status, BudgetStatus = None, None
         if status is not None and status in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED):
@@ -1653,22 +1821,7 @@ class CoordinatorService:
 
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
-                agent_coros = [
-                    # PRD-239 S3: a session agent's task runs as a ticket the Claude
-                    # Code session works (its own DB session, the same timeout).
-                    self._run_cli_ticket(
-                        p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
-                        (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
-                        Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
-                    )
-                    if p.get("cli_agent")
-                    else self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
-                                            p["task"], p["attachment_ids"],
-                                            mode_caps=p["mode_caps"],
-                                            agent_runtime=p.get("agent_runtime"),
-                                            field_context=p.get("field_context"))
-                    for p in prepared
-                ]
+                agent_coros = [self._task_io(p) for p in prepared]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
 
                 # --- Phase 3: Record completions (serial on shared session) ---
@@ -2155,7 +2308,7 @@ class CoordinatorService:
                     task.verification_criteria,
                 )
         else:
-            prompt = MissionDispatcher.build_task_prompt(task)
+            prompt = MissionDispatcher.build_task_prompt(task, goal=run.goal)
 
         # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
         # resolved on the serial DB path. Threaded into execute_with_prompt →
@@ -2246,7 +2399,29 @@ class CoordinatorService:
             # never touches the DB — see _get_power_mode_caps / _run_agent_io.
             "mode_caps": mode_caps,
             "field_context": field_context,
+            # F155: where the mission was started, for the I/O phase.
+            "origin": dict(run.config or {}),
         }
+
+    def _task_io(self, p: Dict[str, Any]) -> Any:
+        """The agent I/O for one prepared task. PRD-239 S3: a session agent's
+        task runs as a ticket the Claude Code session works (its own DB
+        session, the same timeout). F155: a widget-born mission's task runs
+        under the widget key's restrictions, and never on a Claude Code
+        session, which those restrictions cannot reach."""
+        from core.security.surface import widget_born
+
+        if p.get("cli_agent"):
+            if widget_born(p.get("origin")):
+                return _refuse_widget_session_task()
+            return self._run_cli_ticket(
+                p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
+                (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
+            )
+        return self._run_agent_io(p["factory"], p["agent_id"], p["prompt"], p["task"], p["attachment_ids"],
+                                  mode_caps=p["mode_caps"], agent_runtime=p.get("agent_runtime"),
+                                  field_context=p.get("field_context"), origin=p.get("origin"))
 
     async def _run_agent_io(
         self,
@@ -2258,6 +2433,7 @@ class CoordinatorService:
         mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
         field_context: Optional[Dict[str, Any]] = None,
+        origin: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
@@ -2275,19 +2451,24 @@ class CoordinatorService:
         # swap in a stale cached runtime under us mid-flight.
         agent_arg: Any = agent_runtime if agent_runtime is not None else agent_id
 
+        # F155: a widget-born mission's task runs under the widget key's scopes
+        # and team lock (core.security.surface.origin_surface).
+        from core.security.surface import origin_surface
+
         try:
-            result = await asyncio.wait_for(
-                factory.execute_with_prompt(
-                    agent=agent_arg,
-                    prompt=prompt,
-                    max_retries=0,
-                    max_tool_iterations=max_iters,
-                    attachment_ids=attachment_ids,
-                    # PRD-178 S1 (F020): bind field tools to THIS task's run.
-                    context=field_context,
-                ),
-                timeout=task_timeout,
-            )
+            with origin_surface(origin):
+                result = await asyncio.wait_for(
+                    factory.execute_with_prompt(
+                        agent=agent_arg,
+                        prompt=prompt,
+                        max_retries=0,
+                        max_tool_iterations=max_iters,
+                        attachment_ids=attachment_ids,
+                        # PRD-178 S1 (F020): bind field tools to THIS task's run.
+                        context=field_context,
+                    ),
+                    timeout=task_timeout,
+                )
         except asyncio.TimeoutError:
             logger.error(
                 "Task %s execution timed out after %ds (agent=%d)",
@@ -2358,7 +2539,9 @@ class CoordinatorService:
         # record_task_completion transitions to FAILED only when retries are
         # exhausted; re-queued retries stay in QUEUED and should not fire here.
         try:
-            if task.state == TaskState.FAILED.value:
+            from core.security.surface import widget_born
+
+            if task.state == TaskState.FAILED.value and not widget_born(run.config):
                 from core.services.mission_memory_service import MissionMemoryService
                 await MissionMemoryService(db=db).store_task_failure(task=task)
         except Exception:
@@ -2404,10 +2587,17 @@ class CoordinatorService:
         task_tokens = result.get("execution", {}).get("tokens_used", 0)
         if task_tokens:
             run.tokens_used = (run.tokens_used or 0) + task_tokens
+            # F153: a runtime (Claude Code session) task runs on the owner's
+            # subscription; its tokens are recorded for visibility, never spent.
+            from modules.coordination.dispatcher import SESSION_TOKENS_KEY, session_tokens
+            from core.cli_runtime import RUNTIME_CLI
+
+            if result.get("runtime") == RUNTIME_CLI:
+                run.config = {**(run.config or {}), SESSION_TOKENS_KEY: session_tokens(run) + int(task_tokens)}
 
             if (
                 run.token_budget_estimate
-                and run.tokens_used > run.token_budget_estimate * 1.5
+                and run.tokens_used - session_tokens(run) > run.token_budget_estimate * 1.5
             ):
                 emit_event(
                     db=db,
@@ -2445,6 +2635,7 @@ class CoordinatorService:
         goal: str,
         created_by: str,
         config: Optional[Dict[str, Any]] = None,
+        staffing: Optional[List[Dict[str, Any]]] = None,
     ) -> OrchestrationRun:
         """
         Create a new mission: plan → create DB rows → board tasks → await approval.
@@ -2455,6 +2646,9 @@ class CoordinatorService:
             goal: Natural-language goal string.
             created_by: Clerk user ID (e.g., 'user_xxx').
             config: Optional mission config overrides.
+            staffing: F142 (a): the owner's named staffing, [{agent, does}];
+                resolved here (resolve_staffing), a ValueError when it names no
+                agent or several.
 
         Returns:
             The created OrchestrationRun.
@@ -2462,7 +2656,10 @@ class CoordinatorService:
         Raises:
             PlanValidationError: if planner cannot produce a valid plan.
         """
-        mission_config = config or {}
+        # F153: the coordinator's own bookkeeping on run.config is never the caller's to set.
+        mission_config = _creator_config(config)
+        if staffing:
+            mission_config["staffing"] = resolve_staffing(staffing, self._active_roster(db, workspace_id))
 
         # Create the run in PENDING state
         run = OrchestrationRun(
@@ -2542,15 +2739,20 @@ class CoordinatorService:
             .all()
         )
 
-        # Decompose goal into task DAG
+        # Decompose goal into task DAG. F155: a widget-born mission is planned
+        # under its widget key's restrictions (the planning pack's documents,
+        # graph and history), even later on the tick.
+        from core.security.surface import origin_surface
+
         try:
-            decomposition = await MissionPlanner.decompose(
-                goal=goal,
-                workspace_id=workspace_id,
-                agents=agents,
-                config=mission_config,
-                db=db,  # PRD-164 S1: enables the planning context pack
-            )
+            with origin_surface(mission_config):
+                decomposition = await MissionPlanner.decompose(
+                    goal=goal,
+                    workspace_id=workspace_id,
+                    agents=agents,
+                    config=mission_config,
+                    db=db,  # PRD-164 S1: enables the planning context pack
+                )
         except PlanValidationError:
             transition_run(
                 db=db,
@@ -2630,10 +2832,15 @@ class CoordinatorService:
                 ceiling=None, estimated_cost=estimated_cost, countdown_seconds=None,
             )
         else:
-            decision = evaluate_approval(
-                db, workspace_id, estimated_cost,
-                override_auto_approve=bool(mission_config.get("auto_approve", False)),
-            )
+            # F155: a widget-born mission is decided as its widget turn would be
+            # (never autonomous), even when planning runs later on the tick.
+            from core.security.surface import origin_surface
+
+            with origin_surface(mission_config):
+                decision = evaluate_approval(
+                    db, workspace_id, estimated_cost,
+                    override_auto_approve=bool(mission_config.get("auto_approve", False)),
+                )
 
         # F034: a mission is the single largest way to start spending. The
         # day's ceiling refuses a NEW auto-approved run; one already running is
@@ -2944,18 +3151,22 @@ class CoordinatorService:
         """Write a decomposition (planner output OR an imported plan) to
         ``run.plan`` + OrchestrationTask / dependency rows. Returns the
         temp_id -> task map. PRD-163 S2: shared by create_mission and import_plan
-        so an imported plan persists the EXACT given DAG (no re-decomposition)."""
+        so an imported plan persists the EXACT given DAG (no re-decomposition).
+        F142 (b): a task the owner staffed is pinned to the named agent."""
+        staffing = (run.config or {}).get("staffing")
+        staffed = {t.temp_id: _staffed_task(t, staffing) for t in decomposition.tasks}
         run.plan = {
             "tasks": [
                 {
                     "temp_id": t.temp_id,
                     "title": t.title,
-                    "description": t.description,
-                    "agent_role": t.agent_role,
+                    "description": staffed[t.temp_id]["description"],
+                    "agent_role": staffed[t.temp_id]["agent_role"],
                     "sequence_number": t.sequence_number,
                     "task_type": t.task_type,
                     "complexity": getattr(t, "complexity", "moderate"),
                     "parallel_group": getattr(t, "parallel_group", None),
+                    **staffed[t.temp_id]["pin"],
                 }
                 for t in decomposition.tasks
             ],
@@ -2974,10 +3185,10 @@ class CoordinatorService:
             task = OrchestrationTask(
                 run_id=run.id,
                 title=planned.title,
-                description=planned.description,
+                description=staffed[planned.temp_id]["description"],
                 task_type=planned.task_type,
                 sequence_number=planned.sequence_number,
-                agent_role=planned.agent_role,
+                agent_role=staffed[planned.temp_id]["agent_role"],
                 state=TaskState.PENDING.value,
                 state_type="initial",
                 verification_criteria=planned.verification_criteria or None,
@@ -2987,6 +3198,7 @@ class CoordinatorService:
                     **({"required_tools": planned.required_tools} if planned.required_tools else {}),
                     **({"definition_of_done": planned.definition_of_done}
                        if getattr(planned, "definition_of_done", None) else {}),
+                    **staffed[planned.temp_id]["pin"],
                 } or None,
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
@@ -3126,7 +3338,7 @@ class CoordinatorService:
             max_concurrent=int(plan.get("max_concurrent", 1)),
         )
 
-        mission_config = {**(config or {}), "imported_plan": True}
+        mission_config = {**_creator_config(config), "imported_plan": True}
         run = OrchestrationRun(
             workspace_id=workspace_id,
             goal=goal,
@@ -3208,6 +3420,12 @@ class CoordinatorService:
             .filter(OrchestrationTask.run_id == run.id)
             .all()
         )
+        roster = (
+            db.query(Agent)
+            .filter(Agent.workspace_id == run.workspace_id, Agent.status == "active")
+            .all()
+        )
+        task_edits = [_pin_the_named_agent(edit, roster) for edit in (task_edits or [])]
         new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
         if fields_changed:
             run.plan = new_plan  # reassign so the JSON column is marked dirty
@@ -3282,13 +3500,19 @@ class CoordinatorService:
         actor_id: str,
         reason: str,
     ) -> OrchestrationRun:
-        """Reject a mission plan. Transitions: awaiting_approval → failed."""
+        """Reject a mission plan. Transitions: awaiting_approval → cancelled.
+
+        F143 (night 4): a plan the owner rejects never ran. It was recorded as
+        failed, so its card went ``failed`` and the watch scored the run (0.5/10)
+        and told the owner it "needs a look". Cancelled, with the owner's reason,
+        is what happened; the watch closes a cancelled target without scoring it.
+        """
         run = self._get_run(db, run_id)
 
         transition_run(
             db=db,
             run=run,
-            new_state=RunState.FAILED,
+            new_state=RunState.CANCELLED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
             reason=reason,
@@ -3356,21 +3580,31 @@ class CoordinatorService:
     ) -> OrchestrationRun:
         """Resume a paused mission.
 
-        If the mission was paused due to budget exceeded, auto-extend the
-        budget by 25% so the dispatcher doesn't immediately re-pause.
+        F153: a run at 80% or more of its budget resumes with the budget raised
+        to twice what it has spent, in the dollars the dispatcher pauses on
+        (MissionDispatcher._cost_used_usd), so it does not pause again at once:
+        an explicit cost_ceiling is raised in dollars, a plan's token estimate
+        to the tokens the flat rate prices at that figure.
         """
+        from modules.policy.pricing import flat_rate_tokens
+
         run = self._get_run(db, run_id)
 
-        # Auto-extend budget when tokens_used >= 80% of budget (prevents re-pause loop)
         budget = run.token_budget_estimate or 0
         used = run.tokens_used or 0
-        if budget > 0 and used >= budget * 0.8:
-            new_budget = int(used * 2.0)
+        spent = MissionDispatcher._cost_used_usd(run, db)
+        ceiling = MissionDispatcher._budget_ceiling_usd(run)
+        extended = ceiling > 0 and spent >= ceiling * 0.8
+        if extended:
+            config = run.config or {}
+            if isinstance(config.get("cost_ceiling"), (int, float)) and config["cost_ceiling"] > 0:
+                run.config = {**config, "cost_ceiling": round(2.0 * spent, 2)}
+            else:
+                run.token_budget_estimate = flat_rate_tokens(2.0 * spent)
             logger.info(
-                "Mission %s: auto-extending budget %d → %d (tokens_used=%d)",
-                run_id, budget, new_budget, used,
+                "Mission %s: budget $%.2f → $%.2f on resume ($%.2f spent)",
+                run_id, ceiling, MissionDispatcher._budget_ceiling_usd(run), spent,
             )
-            run.token_budget_estimate = new_budget
 
         transition_run(
             db=db,
@@ -3387,10 +3621,13 @@ class CoordinatorService:
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
             payload={
-                "budget_extended": budget > 0 and used >= budget,
+                "budget_extended": extended,
                 "old_budget": budget,
                 "new_budget": run.token_budget_estimate,
                 "tokens_used": used,
+                "spent_usd": round(spent, 4),
+                "old_ceiling_usd": round(ceiling, 4),
+                "new_ceiling_usd": round(MissionDispatcher._budget_ceiling_usd(run), 4),
             },
         )
 
@@ -3452,10 +3689,13 @@ class CoordinatorService:
         *,
         actor_type: ActorType = ActorType.HUMAN,
         trigger: str = "human",
+        staffing: Optional[List[Dict[str, Any]]] = None,
     ) -> OrchestrationRun:
         """
         Replan a mission by generating replacement tasks for the failed (or
-        looping) subtree while preserving completed/verified tasks.
+        looping) subtree while preserving completed/verified tasks. F142 (a):
+        ``staffing`` re-staffs it (resolved before anything changes; [] clears
+        it); otherwise the mission's own staffing is kept.
 
         Flow:
           1. Validate: 'failed' state (humans) or RUNNING via the joiner's
@@ -3509,6 +3749,9 @@ class CoordinatorService:
                 f"Mission has been replanned {current_replans} times, "
                 f"maximum is {max_replans}"
             )
+        if staffing is not None:
+            run.config = {**(run.config or {}),
+                          "staffing": resolve_staffing(staffing, self._active_roster(db, run.workspace_id))}
 
         # Transition failed/running → replanning
         transition_run(
@@ -3579,18 +3822,23 @@ class CoordinatorService:
             .all()
         )
 
-        # Call planner to generate replacement tasks
+        # Call planner to generate replacement tasks (F155: under a widget-born
+        # mission's origin, as its first plan is).
+        from core.security.surface import origin_surface
+
         try:
-            decomposition = await MissionPlanner.replan(
-                goal=run.goal,
-                workspace_id=run.workspace_id,
-                agents=agents,
-                completed_outputs=completed_outputs,
-                failed_task_title=failed_task_title,
-                failed_task_reason=failed_task_reason,
-                user_notes=notes,
-                db=db,  # PRD-164 S1: enables the planning context pack
-            )
+            with origin_surface(run.config):
+                decomposition = await MissionPlanner.replan(
+                    goal=run.goal,
+                    workspace_id=run.workspace_id,
+                    agents=agents,
+                    completed_outputs=completed_outputs,
+                    failed_task_title=failed_task_title,
+                    failed_task_reason=failed_task_reason,
+                    user_notes=notes,
+                    db=db,  # PRD-164 S1: enables the planning context pack
+                    staffing=(run.config or {}).get("staffing"),
+                )
         except PlanValidationError:
             # Replan failed — transition back to failed
             transition_run(
@@ -3650,25 +3898,25 @@ class CoordinatorService:
             default=0,
         )
 
-        # Insert new tasks
+        # Insert new tasks (F142 b: a replacement for a named agent's work stays pinned to it)
         temp_id_to_task: dict[str, OrchestrationTask] = {}
         for planned in decomposition.tasks:
             new_seq = max_seq + planned.sequence_number
+            staffed = _staffed_task(planned, (run.config or {}).get("staffing"))
             task = OrchestrationTask(
                 run_id=run.id,
                 title=planned.title,
-                description=planned.description,
+                description=staffed["description"],
                 task_type=planned.task_type,
                 sequence_number=new_seq,
-                agent_role=planned.agent_role,
+                agent_role=staffed["agent_role"],
                 state=TaskState.PENDING.value,
                 state_type="initial",
                 verification_criteria=planned.verification_criteria or None,
-                input_context=(
-                    {"required_tools": planned.required_tools}
-                    if planned.required_tools
-                    else None
-                ),
+                input_context={
+                    **({"required_tools": planned.required_tools} if planned.required_tools else {}),
+                    **staffed["pin"],
+                } or None,
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
                 parallel_group=getattr(planned, "parallel_group", None),
@@ -4377,13 +4625,17 @@ class CoordinatorService:
             return None
 
         verification_service = VerificationService()
+        # F153: the consistency check's calls are the mission's spend, booked to it.
+        from core.llm.usage_context import usage_scope
 
         try:
-            result = await verification_service.verify_cross_task_consistency(
-                run_id=run.id,
-                goal=run.goal or "",
-                task_outputs=task_outputs,
-            )
+            with usage_scope(request_type="verifier", execution_id=f"mission:{run.id}",
+                             workspace_id=run.workspace_id):
+                result = await verification_service.verify_cross_task_consistency(
+                    run_id=run.id,
+                    goal=run.goal or "",
+                    task_outputs=task_outputs,
+                )
 
             # Emit consistency event
             emit_event(

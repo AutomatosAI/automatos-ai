@@ -1,12 +1,44 @@
 """Playbook CRUD + execution handlers for PlatformActionExecutor."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def next_run_note(db, playbook_id) -> str:
+    """F134: the edit reaches the next run when one is in flight (imported lazily,
+    like the engine itself below)."""
+    from services.playbook_engine import next_run_note as note
+
+    return note(db, playbook_id)
+
+
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
+def _playbook_visitor_view(playbook: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a playbook (playbooks:read):
+    what it is for. Never its steps (prompts, agents, error handling, outputs),
+    tags or how often it ran."""
+    created_at = getattr(playbook, "created_at", None)
+    return {"id": playbook.id, "name": playbook.name, "description": (playbook.description or "")[:200],
+            "step_count": len(playbook.steps or []), "created_at": created_at.isoformat() if created_at else None}
+
+
+def _execution_visitor_view(execution: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a playbook run: where it stands.
+    Never its inputs, step outputs or errors."""
+    return {"execution_id": execution.execution_id, "playbook_id": execution.recipe_id, "status": execution.status,
+            "current_step": execution.current_step,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None}
 
 
 async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -21,6 +53,9 @@ async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]
         query = query.filter(WorkflowTemplate.status == status_filter)
 
     playbooks = query.order_by(WorkflowTemplate.id).all()
+    if _widget_turn():
+        return {"success": True, "playbooks": [_playbook_visitor_view(r) for r in playbooks],
+                "count": len(playbooks)}
 
     return {
         "success": True,
@@ -58,6 +93,8 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     playbook = query.first()
     if not playbook:
         return {"success": False, "error": "Playbook not found"}
+    if _widget_turn():
+        return {"success": True, "playbook": _playbook_visitor_view(playbook)}
 
     # Count executions
     exec_count = 0
@@ -110,6 +147,9 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     tags = params.get("tags", [])
     template_id = f"custom-{uuid.uuid4().hex[:8]}"
 
+    # F133: the person the call is made for is the playbook's creator; its later
+    # edits are checked against them. Injected by the executor, never the model.
+    creator = params.get("_driving_user_id")
     playbook = WorkflowTemplate(
         name=name,
         template_id=template_id,
@@ -118,6 +158,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         owner_type="workspace",
         owner_id=str(workspace_id),
         created_by="platform",
+        created_by_user_id=creator if isinstance(creator, int) and not isinstance(creator, bool) else None,
         tags=tags,
         template_definition={"steps": [], "agents": [], "config": {}, "variables": []},
     )
@@ -197,7 +238,8 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         "playbook_id": playbook.id,
         "changes": changes,
         "message": f"Playbook '{playbook.name}' updated: {', '.join(changes)}"
-                   + (f". Schedule: {_schedule_text(playbook.schedule_config)} {schedule_note}" if schedule_note else ""),
+                   + (f". Schedule: {_schedule_text(playbook.schedule_config)} {schedule_note}" if schedule_note else "")
+                   + next_run_note(db, playbook.id),
     }
 
 
@@ -279,7 +321,7 @@ async def add_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, A
         "playbook_id": playbook.id,
         "step_index": order if order < len(steps) else len(steps) - 1,
         "total_steps": len(steps),
-        "message": f"Step added to playbook '{playbook.name}' (now {len(steps)} steps).",
+        "message": f"Step added to playbook '{playbook.name}' (now {len(steps)} steps)." + next_run_note(db, playbook.id),
     }
 
 
@@ -313,10 +355,18 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
             return {"success": False, "error": err}
         params["agent_id"] = valid_id
 
-    step = steps[step_index]
+    step = dict(steps[step_index])  # a new dict: the stored steps are never edited in place
     changes = []
 
-    for field in ("prompt_template", "agent_id", "order", "error_handling", "output_key"):
+    edit, refusal = _prompt_edit(step.get("prompt_template") or "", params, step_index)
+    if refusal:
+        return {"success": False, "error": refusal}
+    if edit is not None:
+        new_prompt, said = edit
+        step["prompt_template"] = new_prompt
+        changes.append(said)
+
+    for field in ("agent_id", "order", "error_handling", "output_key"):
         if field in params and params[field] is not None:
             step[field] = params[field]
             changes.append(f"{field} updated")
@@ -324,6 +374,7 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     if not changes:
         return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
 
+    steps[step_index] = step
     playbook.steps = steps
     flag_modified(playbook, "steps")
     db.flush()
@@ -335,8 +386,45 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
         "playbook_id": playbook.id,
         "step_index": step_index,
         "changes": changes,
-        "message": f"Step {step_index} of '{playbook.name}' updated: {', '.join(changes)}",
+        "message": f"Step {step_index} of '{playbook.name}' updated: {', '.join(changes)}." + next_run_note(db, playbook.id),
     }
+
+
+def _prompt_edit(current: str, params: Dict[str, Any], step_index: int):
+    """The step prompt's new text and what the reply says about it, or a refusal.
+
+    F134 (night 4): "update this step" re-sent the whole prompt from memory and
+    dropped its safety lines (B79, B84). find/replace changes one passage and keeps
+    the rest; a whole-prompt overwrite still works, and its reply names every
+    line it dropped, so nothing goes silently.
+    Returns ((new_text, change_note) or None, refusal or None).
+    """
+    find, replace, whole = params.get("find"), params.get("replace"), params.get("prompt_template")
+    if find is None:
+        if whole is None:
+            return None, None
+        dropped = _dropped_lines(current, whole)
+        if not dropped:
+            return (whole, "prompt_template replaced"), None
+        shown = "; ".join(repr(line[:120]) for line in dropped[:10])
+        more = f" (+{len(dropped) - 10} more)" if len(dropped) > 10 else ""
+        return (whole, f"prompt_template replaced, and it dropped {len(dropped)} "
+                       f"line{'s' if len(dropped) != 1 else ''}: {shown}{more}"), None
+    if whole is not None:
+        return None, "Pass find/replace or prompt_template, not both. Nothing changed."
+    if replace is None:
+        return None, "find needs replace (an empty string removes the text). Nothing changed."
+    found = current.count(find) if find else 0
+    if found != 1:
+        where = "is not in" if found == 0 else f"appears {found} times in"
+        return None, (f"The find text {where} step {step_index}'s prompt, so nothing changed. "
+                      f"The prompt reads: {current[:300]!r}")
+    return (current.replace(find, replace, 1), "prompt_template: one passage replaced"), None
+
+
+def _dropped_lines(before: str, after: str) -> List[str]:
+    kept = {line.strip() for line in after.splitlines()}
+    return [line.strip() for line in before.splitlines() if line.strip() and line.strip() not in kept]
 
 
 async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -380,7 +468,8 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
         "playbook_id": playbook.id,
         "deleted_step_index": step_index,
         "remaining_steps": len(steps),
-        "message": f"Step {step_index} removed from '{playbook.name}' ({len(steps)} steps remaining).",
+        "message": (f"Step {step_index} removed from '{playbook.name}' ({len(steps)} steps remaining)."
+                    + next_run_note(db, playbook.id)),
     }
 
 
@@ -530,7 +619,10 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         )
         return {"status": "error", "error": concurrency.refusal}
 
-    # Create execution record
+    # Create execution record. F155: a run a widget turn starts records the
+    # turn's origin, and its steps run under it (api.recipe_executor).
+    from core.security.surface import stamp_origin
+
     execution_id = f"exec-{uuid.uuid4().hex[:12]}"
     execution = RecipeExecution(
         execution_id=execution_id,
@@ -539,6 +631,7 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         status="pending",
         input_data=input_data,
         triggered_by="platform_action",
+        execution_metadata=stamp_origin(None) or None,
     )
     db.add(execution)
     db.commit()  # Must commit before async task (it opens its own session)
@@ -638,6 +731,8 @@ async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[s
         )
         if not execution:
             return {"success": False, "error": f"Execution '{execution_id}' not found"}
+        if _widget_turn():
+            return {"success": True, "execution": _execution_visitor_view(execution)}
 
         # Summarize step_results (200 char preview per step)
         step_summaries = []
@@ -676,6 +771,9 @@ async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[s
             .limit(5)
             .all()
         )
+        if _widget_turn():
+            return {"success": True, "executions": [_execution_visitor_view(e) for e in executions],
+                    "count": len(executions)}
 
         return {
             "success": True,

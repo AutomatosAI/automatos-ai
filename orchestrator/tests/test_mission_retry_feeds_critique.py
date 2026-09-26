@@ -621,16 +621,17 @@ class TestCrossWorkspaceIsolation:
         return COORDINATOR_PY.read_text()
 
     def test_build_task_prompt_is_single_task_pure(self, dispatcher_src):
-        """The signature is ``build_task_prompt(task)`` — no DB session,
-        no run, no workspace. Anything it reads comes from the single
-        task object, so a workspace cannot leak via the prompt path."""
+        """The signature is ``build_task_prompt(task, goal)`` — no DB session,
+        no run, no workspace. Anything it reads comes from the single task
+        object, plus the goal string the caller takes from that task's own
+        run (F142 d1), so a workspace cannot leak via the prompt path."""
         tree = ast.parse(dispatcher_src)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "build_task_prompt":
-                # Static method with exactly one positional arg ('task').
+                # Static method: the task, and the mission goal as a string.
                 args = [a.arg for a in node.args.args]
-                assert args == ["task"], (
-                    f"build_task_prompt must take exactly one arg (task); "
+                assert args == ["task", "goal"], (
+                    f"build_task_prompt must take only the task and the goal; "
                     f"got {args!r}"
                 )
                 return

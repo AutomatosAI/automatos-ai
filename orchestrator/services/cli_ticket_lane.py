@@ -397,12 +397,17 @@ def exec_result_for(task: Any) -> dict:
     except (TypeError, ValueError):
         tokens = 0
     status = getattr(task, "status", None)
+    from services.cli_host_service import SESSION_CONNECTED_KEY, SESSION_TOOLS_OFFERED_KEY
+
     base = {
         "runtime": RUNTIME_CLI,
         "task_id": task.id,
         "board_status": status,
         "tokens_used": tokens,
         "execution": {"tokens_used": tokens, "tool_calls": [], "messages": []},
+        # F131: True / False when the claim offered Automatos tools, None when it did not say.
+        "session_connected": (bool(ref.get(SESSION_CONNECTED_KEY))
+                              if ref.get(SESSION_TOOLS_OFFERED_KEY) is True else None),
     }
     if status in ("done", "review"):
         result = getattr(task, "result", None) or ""

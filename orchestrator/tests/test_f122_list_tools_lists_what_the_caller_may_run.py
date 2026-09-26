@@ -24,9 +24,20 @@ from modules.tools.discovery.action_registry import ActionDefinition, action_is_
 from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
 SU_PROBE, ADMIN_PROBE = "platform_f122_su_probe", "platform_f122_admin_probe"
-OPERATOR = {"system_role": "user", "workspace_role": "member"}
-OWNER = {"system_role": "user", "workspace_role": "owner"}
-SUPER_ADMIN = {"system_role": "super_admin", "workspace_role": "owner"}
+# F145: a caller is an admin by who the call is made for (core.security.driving_user):
+# user 7 is this workspace's owner, user 8 a member.
+OPERATOR = {"system_role": "user", "driving_user_id": "8"}
+OWNER = {"system_role": "user", "driving_user_id": "7"}
+SUPER_ADMIN = {"system_role": "super_admin", "driving_user_id": "7"}
+
+
+@pytest.fixture(autouse=True)
+def members(monkeypatch):
+    """The membership read, stubbed: user 7 holds the owner row."""
+    import core.security.driving_user as driving_user
+
+    monkeypatch.setattr(driving_user, "driver_is_workspace_admin", lambda db, ws, ctx: bool(ctx) and (
+        ctx.get("system_role") == "super_admin" or ctx.get("driving_user_id") == "7"))
 
 
 @pytest.fixture

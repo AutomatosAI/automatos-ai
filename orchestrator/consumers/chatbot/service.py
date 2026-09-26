@@ -415,14 +415,17 @@ class ChatService:
         title: str,
         visibility: str = "private",
         workspace_id: Optional[uuid.UUID] = None,
+        widget_key_id: Optional[uuid.UUID] = None,
     ) -> Chat:
-        """Create a new chat session scoped to a workspace."""
+        """Create a new chat session scoped to a workspace. A widget passes
+        the key that starts it (F155)."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
             workspace_id=workspace_id,
             title=title,
             visibility=visibility,
+            widget_key_id=widget_key_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -714,7 +717,9 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
 
-    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False,
+                 widget_scopes: Optional[List[str]] = None, widget_team: Optional[str] = None,
+                 widget_agent_lock: Optional[int] = None):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -722,6 +727,13 @@ class StreamingChatService:
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
+        # F155: the widget key's scopes decide what its turns may call, and its
+        # team lock scopes every document they read.
+        self.widget_scopes = tuple(widget_scopes or ())
+        self.widget_team = widget_team
+        # ...and the agent the key is locked to, if any: only that agent's own
+        # plugins reach a widget turn's prompt.
+        self.widget_agent_lock = widget_agent_lock
 
         # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
         # per request (one request == one turn), so these accumulate the turn's
@@ -1445,6 +1457,20 @@ class StreamingChatService:
 
         return use_tools, _composio_result
 
+    def _bind_turn_person(self, user_id: Optional[int]) -> None:
+        """Remember who this turn is for.
+
+        PRD-206 S7: the driving human is the viewer for the Q7 private-scope
+        recall guard (``user_id`` is the INTERNAL integer id — the value the
+        PRD-196 subject tag carries at store time). PRD-233 S6: the same id
+        seeds the greeting (_prepare_llm_messages → resolve_known_user_name).
+        F154: a widget turn is an anonymous visitor's, so it is for nobody —
+        the widget's user_id only owns the chat row.
+        """
+        person = None if self.widget_mode else user_id
+        self._viewer_subject_id = f"user:{person}" if person else None
+        self._driving_user_id = person
+
     # ─────────────────────────────────────────────────────────────────────
     # Post-response: memory, metrics, eval
     # ─────────────────────────────────────────────────────────────────────
@@ -1477,8 +1503,10 @@ class StreamingChatService:
         # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
         subject_id = f"user:{user_id}" if user_id else None
 
-        # Store memory via SmartChatIntegration
-        if latest_text and full_response and smart_chat:
+        # Store memory via SmartChatIntegration. F154: a widget turn is an
+        # anonymous visitor's, so it stores no memory; its transcript stays in
+        # the chat tables.
+        if latest_text and full_response and smart_chat and not self.widget_mode:
             try:
                 _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
                 _mm = smart_chat.orchestrator.memory_manager
@@ -1696,11 +1724,14 @@ class StreamingChatService:
         # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
         # created mid-chat is attributed to THEM (created_by) — not the agent — and
         # plan-ready / awaiting-approval notifications land for the right person.
+        # F154: a widget turn is an anonymous visitor's, so its tool calls are made
+        # for nobody; the widget's user_id only owns the chat row (a foreign key).
+        _driving_user = None if self.widget_mode else user_id
         _driving_clerk: Optional[str] = None
-        if user_id:
+        if _driving_user:
             try:
                 from core.models import User
-                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _row = self.db.query(User.clerk_user_id).filter(User.id == _driving_user).first()
                 _driving_clerk = _row[0] if _row else None
             except Exception:
                 _driving_clerk = None
@@ -1808,7 +1839,7 @@ class StreamingChatService:
                     conversation_id=conversation_id,
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
-                    driving_user_id=user_id,
+                    driving_user_id=_driving_user,
                     prior_action=_prior_action,
                     model_id=_turn_budget.get("model_id"),
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),
@@ -2478,8 +2509,13 @@ class StreamingChatService:
         conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
+        from core.security.surface import WIDGET, turn_surface
 
-        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id):
+        # F155: every tool call of a widget turn carries the widget surface, so the
+        # gates treat it as a visitor's whatever caller context the call built.
+        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
+                turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
+                             self.widget_agent_lock):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2535,13 +2571,7 @@ class StreamingChatService:
         # PRD-185 S7: start the turn with clean retrieval provenance.
         self._reset_turn_retrieval()
 
-        # PRD-206 S7: the driving human as viewer for the Q7 private-scope
-        # recall guard (user_id here is the INTERNAL integer id — the same
-        # value the PRD-196 subject tag carries at store time).
-        self._viewer_subject_id = f"user:{user_id}" if user_id else None
-        # PRD-233 S6: the same integer id seeds the greeting (see
-        # _prepare_llm_messages → resolve_known_user_name).
-        self._driving_user_id = user_id
+        self._bind_turn_person(user_id)
 
         try:
             # Ensure workspace_id is available
@@ -2782,8 +2812,9 @@ class StreamingChatService:
                     )
                     await asyncio.sleep(0)
 
-            # Inject Composio per-action tools
-            if _complexity != Complexity.ATOM:
+            # Inject Composio per-action tools (never on a widget turn: they act
+            # on the owner's connected apps, F155)
+            if _complexity != Complexity.ATOM and not self.widget_mode:
                 use_tools, _composio_result = self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
@@ -2801,6 +2832,13 @@ class StreamingChatService:
                 )
                 use_tools = None
                 _composio_result = None
+
+            # F155: a widget turn is offered only what its key's scopes grant
+            # (the tool executor refuses anything else).
+            if self.widget_mode and use_tools:
+                from core.security.widget_scopes import widget_tool_surface
+
+                use_tools = widget_tool_surface(use_tools, self.widget_scopes) or None
 
             # F025: this turn's ranked actions go in LAST, after every stable
             # block. The dispatcher enum is byte-identical between turns so the

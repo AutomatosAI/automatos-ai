@@ -38,8 +38,6 @@ What it does NOT do (out of agent scope)
   is the [HUMAN GATE] decision in PRD §12.6 (front-door choice + FE
   repoint of ~10 ``api-client.ts`` call sites).
 - **Does NOT delete** the ``modules/workflows/`` twin — same human gate.
-- **Does NOT promote** ``api/api_playbooks.py`` to an execution router —
-  same human gate (the front-door decision).
 
 Design constraint: import-light
 -------------------------------
@@ -135,6 +133,24 @@ class PlaybookEngine:
 
 
 _ENGINE: Optional[PlaybookEngine] = None
+
+
+def next_run_note(db, playbook_id) -> str:
+    """F134 (night 4, B85): a run takes its playbook's steps when it starts, so an
+    edit reaches the NEXT run. "Recipe updated successfully" while the run in
+    flight kept the old step read as if the run had changed. The note says so."""
+    from core.models.core import RecipeExecution
+
+    going = (
+        db.query(RecipeExecution)
+        .filter(RecipeExecution.recipe_id == playbook_id, RecipeExecution.status.in_(("running", "pending")))
+        .count()
+    )
+    if not going:
+        return ""
+    if going == 1:
+        return " A run in progress keeps the steps it started with; this edit applies to the next run."
+    return f" {going} runs in progress keep the steps they started with; this edit applies to the next run."
 
 
 def get_playbook_engine() -> PlaybookEngine:

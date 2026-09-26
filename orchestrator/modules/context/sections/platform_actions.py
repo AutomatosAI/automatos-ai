@@ -63,6 +63,11 @@ class PlatformActionsSection(BaseSection):
             from modules.context.modes import excluded_tool_names
             exclude_names = list(excluded_tool_names(ctx.context_mode))
 
+            from core.security.surface import widget_turn
+
+            if widget_turn():
+                return self._build_widget(exclude_names=exclude_names)
+
             query = ""
             if ctx.kwargs:
                 raw = ctx.kwargs.get("query", "")
@@ -230,6 +235,31 @@ class PlatformActionsSection(BaseSection):
             return _fallback_mode_closed()
         except Exception:
             return False
+
+    _WIDGET_PREAMBLE = (
+        "## Platform Actions\n\n"
+        "Use `platform_execute(action, params)` to call these actions; they are the "
+        "only platform actions this chat may use.\n"
+        "If a call fails, check the error and retry with corrected parameters "
+        "— do not guess or fabricate results.\n\n"
+    )
+
+    def _build_widget(self, exclude_names: Optional[list] = None) -> str:
+        """F155: a widget turn's catalog — only the actions its key's scopes
+        grant (core.security.widget_scopes), the same set the executor allows."""
+        from core.security.surface import widget_scopes
+        from core.security.widget_scopes import allowed_tools
+        from modules.tools.discovery.action_registry import get_action_registry
+
+        granted = sorted(name for name in allowed_tools(widget_scopes()) if name.startswith("platform_"))
+        catalog = get_action_registry().build_filtered_prompt_summary(
+            granted,
+            exclude_admin=True,
+            exclude_promoted=False,
+            include_super_admin=False,
+            exclude_names=exclude_names,
+        )
+        return self._WIDGET_PREAMBLE + catalog if catalog else ""
 
     def _build_pins_text(self, exclude_names: Optional[list] = None) -> str:
         """The closed-pins fallback card: pins + the discovery pointer.

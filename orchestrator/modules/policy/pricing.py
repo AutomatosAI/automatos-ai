@@ -17,6 +17,7 @@ and *closed* for spend, never silently mis-prices.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,16 @@ def flat_rate_per_1k() -> float:
     except Exception:
         logger.warning("[policy.pricing] config read failed — flat rate default", exc_info=True)
         return 0.003
+
+
+def flat_rate_tokens(usd: float) -> int:
+    """The token count the flat rate prices at ``usd`` — the inverse of
+    :func:`price_total_tokens_usd` with no model (F153: a token estimate that
+    stands for a dollar budget)."""
+    rate = flat_rate_per_1k()
+    if rate <= 0:
+        return 0
+    return int(math.ceil(max(0.0, float(usd)) / rate * 1000))
 
 
 def price_total_tokens_usd(db: Any, model_id: Optional[str], total_tokens: int) -> float:

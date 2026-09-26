@@ -43,22 +43,22 @@ def _get_service():
 
 
 def _resolve_agent_team(db: Session, agent_id: Optional[int]) -> Optional[str]:
-    """Look up the agent's team from the DB. Returns None if no team set.
+    """The team that scopes the graph: a widget key's team lock on a widget
+    turn, else the agent's team (core.team_access.retrieval_team).
 
-    PRD-124: agent with team=NULL sees all nodes (no filtering).
+    PRD-124: with neither (an agent with team=NULL) every node is visible.
     """
+    from core.team_access import retrieval_team
+
     if not agent_id:
-        return None
+        return retrieval_team(None)
     try:
         from core.models.core import Agent
         agent = db.query(Agent.team).filter(Agent.id == agent_id).first()
-        if agent and agent.team:
-            from core.team_access import normalize_team
-            return normalize_team(agent.team)
-        return None
+        return retrieval_team(agent.team if agent else None)
     except Exception:
         logger.debug("_resolve_agent_team: failed for agent_id=%s", agent_id)
-        return None
+        return retrieval_team(None)
 
 
 def _get_filtered_graph(graph, agent_team: Optional[str]):
@@ -299,24 +299,29 @@ async def handle_graph_communities(
             )
             return {"success": False, "error": "Corrupt communities data."}
 
-        # PRD-124: filter community members by team visibility
+        # PRD-124: filter community members by team visibility. A graph a
+        # team-scoped call cannot read is an error, never the unfiltered list.
         if agent_team is not None:
             svc = _get_service()
             graph = await svc.load_graph(str(workspace_id))
-            if graph is not None:
-                from modules.knowledge.graph_service import node_is_visible
-                for c in communities:
-                    members = c.get("members", [])
-                    c["members"] = [
-                        m for m in members
-                        if node_is_visible(graph, m, agent_team)
-                    ]
-                    c["member_count"] = len(c["members"])
+            if graph is None:
+                return {"success": False, "error": "The knowledge graph could not be read."}
+            from modules.knowledge.graph_service import node_is_visible
+            for c in communities:
+                members = c.get("members", [])
+                c["members"] = [
+                    m for m in members
+                    if node_is_visible(graph, m, agent_team)
+                ]
+                c["member_count"] = len(c["members"])
 
-        # Filter to specific community if requested
+        # Filter to specific community if requested. F155: a community none of
+        # whose members the caller's team can see is not found (its title and
+        # summary describe what it cannot see).
         if community_id is not None:
             cid = int(community_id)
-            matched = [c for c in communities if c.get("community_id") == cid]
+            matched = [c for c in communities if c.get("community_id") == cid
+                       and (agent_team is None or c.get("members"))]
             if not matched:
                 return {
                     "success": False,
@@ -458,7 +463,9 @@ async def handle_graph_stats(
 ) -> Dict[str, Any]:
     """Return high-level knowledge graph statistics.
 
-    Reads /graph/meta.json via GraphifyService.get_meta().
+    Reads /graph/meta.json via GraphifyService.get_meta(). A team-scoped call
+    (a widget key's team lock, or the agent's team, PRD-124) counts only the
+    nodes that team can see and names only its visible god nodes (F155).
 
     Params: (none required)
     """
@@ -469,6 +476,21 @@ async def handle_graph_stats(
             return {
                 "success": False,
                 "error": "No knowledge graph built for this workspace yet.",
+            }
+
+        team = _resolve_agent_team(db, params.get("_agent_id"))
+        if team is not None:
+            graph = await svc.load_graph(str(workspace_id))
+            if graph is None:
+                return {"success": False, "error": "The knowledge graph could not be read."}
+            view = _get_filtered_graph(graph, team)
+            return {
+                "success": True,
+                "node_count": view.number_of_nodes(),
+                "edge_count": view.number_of_edges(),
+                "god_nodes": [g for g in meta.get("god_nodes", [])
+                              if str(g.get("id") if isinstance(g, dict) else g) in view],
+                "last_built": meta.get("last_built"),
             }
 
         return {

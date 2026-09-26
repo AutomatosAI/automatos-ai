@@ -24,9 +24,10 @@ weighted mean over the components actually present:
                             field rank higher for related tasks
 
 Every ranked agent carries a human-readable ``reason`` string, persisted on
-the task row and surfaced to the PRD-163 approval card. Explicit agent
-overrides (PRD-163 S4 — an approval-edited ``agent_role`` that names a roster
-agent exactly) ALWAYS win, regardless of score and threshold.
+the task row and surfaced to the PRD-163 approval card. An agent a person
+pinned to the task (``input_context.pinned_agent_id``, written when an approval
+edit names one agent; F142 (c)) ALWAYS wins, regardless of score and threshold.
+A role string never pins: a role word or a shared name is routed by capability.
 
 Threshold: 0.4 minimum score to be considered a match (overrides bypass it).
 
@@ -37,7 +38,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_
@@ -106,8 +107,8 @@ _ROLE_SYNONYMS: Dict[str, List[str]] = {
 # Canonical capability vocabulary the mission planner assigns from. Tasks bind
 # to one of these CAPABILITIES (not a specific agent name); the matcher then
 # scores every active agent for the capability and dispatches the best fit.
-# An agent_role that instead names a roster agent EXACTLY is treated as an
-# explicit override (PRD-163 S4 approval edit) and always wins.
+# Only an agent a person pinned (F142 (c), resolve_named_agent at edit time)
+# overrides that.
 CANONICAL_ROLES: frozenset = frozenset(_ROLE_SYNONYMS)
 
 
@@ -271,6 +272,10 @@ class AgentMatcher:
             min_datapoints=Config.COORDINATOR_HISTORY_MIN_DATAPOINTS,
         )
 
+        pinned = spec.get("pinned_agent_id")
+        if pinned is None and isinstance(task.input_context, dict):
+            pinned = task.input_context.get("pinned_agent_id")
+
         ranked = AgentMatcher._rank_with_context(
             agents=agents,
             agent_role=agent_role,
@@ -281,6 +286,7 @@ class AgentMatcher:
             busy_agent_ids=busy_agent_ids,
             history_map=history_map,
             semantic=semantic,
+            pinned_agent_id=pinned,
         )
         _shadow_assignment(task, agents, ranked, agent_role, required_tools)
         return ranked
@@ -297,14 +303,15 @@ class AgentMatcher:
         busy_agent_ids: frozenset,
         history_map: Dict[int, float],
         semantic: Optional[SemanticSignals] = None,
+        pinned_agent_id: Any = None,
     ) -> List[MatchResult]:
         """Pure ranking core (no DB) — unit-tested by the golden matrix.
 
-        Explicit overrides (PRD-163 S4): when ``agent_role`` names an active
-        candidate agent exactly (name or slug, case-insensitive), that agent
-        is ranked first regardless of its blended score.
+        F142 (c): an agent a person pinned to the task (``pinned_agent_id``) is
+        ranked first regardless of its blended score. ``agent_role`` is scored,
+        never an override, even when it spells an agent's name.
         """
-        override_agent_id = _find_override_agent_id(agent_role, agents)
+        override_agent_id = _pinned_agent_id(pinned_agent_id, agents)
 
         similarity_map = semantic.similarity_by_agent if semantic else {}
         field_map = semantic.field_by_agent if semantic else {}
@@ -439,30 +446,47 @@ def build_match_annotation(ranked: Sequence[MatchResult]) -> Dict[str, Any]:
     }
 
 
-def _find_override_agent_id(
-    agent_role: Optional[str], agents: Sequence[Agent]
-) -> Optional[int]:
-    """PRD-163 S4 explicit override: an ``agent_role`` that names an ACTIVE
-    candidate agent exactly (name or slug, case-insensitive). The planner only
-    emits capability roles (CANONICAL_ROLES — see
-    test_planner_capability_routing), so a name here is deliberate human
-    intent from the approval-edit path and must always win.
+def resolve_named_agent(named: Optional[str], agents: Sequence[Agent],
+                        explicit: bool = False) -> Tuple[Optional[Any], Optional[str]]:
+    """F142 (c): the one active agent a person names for a task, by id, slug or
+    name (case-insensitive), as ``(agent, None)``. A capability word
+    (CANONICAL_ROLES) or text naming no agent is ``(None, None)``: it is routed
+    by capability. A name several active agents share is ``(None, why)``, never
+    the lowest id; the caller refuses and asks for the id. ``explicit``: the
+    text is known to name an agent (a mission's staffing), so a capability word
+    that is also an agent's name ("WRITER") names that agent.
     """
-    role = (agent_role or "").strip().lower()
-    if not role:
-        return None
+    role = str(named or "").strip()
+    wanted = role.lower()
+    if not wanted or (wanted in CANONICAL_ROLES and not explicit):
+        return None, None
+    active = [a for a in agents if getattr(a, "status", "active") == "active"]
+    by_id = [a for a in active if wanted.removeprefix("agent:").strip() == str(a.id)]
+    if by_id:
+        return by_id[0], None
+    matches = [a for a in active if (a.name or "").strip().lower() == wanted
+               or (getattr(a, "slug", None) or "").strip().lower() == wanted]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        ids = ", ".join(str(a.id) for a in sorted(matches, key=lambda a: a.id))
+        return None, (f"{len(matches)} active agents are called '{role}' (ids {ids}). "
+                      "Name the one you mean by its id.")
+    return None, None
 
-    matches = [
-        a for a in agents
-        if a.status == "active" and (
-            (a.name or "").strip().lower() == role
-            or (getattr(a, "slug", None) or "").strip().lower() == role
-        )
-    ]
-    if not matches:
+
+def _pinned_agent_id(pinned: Any, agents: Sequence[Agent]) -> Optional[int]:
+    """F142 (c): the agent a person pinned to the task, when it is an active
+    candidate. Only a pin overrides the ranking: a role string never does, so a
+    role word (e.g. 'writer') no longer pins a same-named agent."""
+    try:
+        pinned_id = int(pinned)
+    except (TypeError, ValueError):
         return None
-    # Deterministic when duplicated names exist: lowest id wins.
-    return min(matches, key=lambda a: a.id).id
+    for agent in agents:
+        if agent.id == pinned_id and getattr(agent, "status", "active") == "active":
+            return pinned_id
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -730,8 +754,8 @@ def _compose_reason(
     TASK_ASSIGNED audit trail."""
     if is_override:
         return (
-            f"Explicitly assigned: the plan names agent '{agent_name}' for this "
-            f"task (PRD-163 approval override) — selection bypasses scoring."
+            f"Explicitly assigned: a person chose agent '{agent_name}' for this "
+            f"task — selection bypasses scoring."
         )
 
     clauses: List[str] = []

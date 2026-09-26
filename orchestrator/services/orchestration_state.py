@@ -254,6 +254,14 @@ def transition_run(
             run.stop_reason = stop_reason
         if stop_detail:
             run.stop_detail = stop_detail
+    elif new_state == RunState.PAUSED:
+        # F153: a pause says why, as a stop does (the board card shows it).
+        run.stop_reason = stop_reason
+        run.stop_detail = stop_detail
+    elif new_state == RunState.RUNNING:
+        # A running run has no stop reason: resuming clears the pause's.
+        run.stop_reason = None
+        run.stop_detail = None
 
     # Build event payload
     payload = {}

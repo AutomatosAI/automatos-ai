@@ -264,6 +264,8 @@ class AgentPlatformTools:
         self.logger.info(f"  Parameters: {parameters}")
         
         try:
+            from core.team_access import retrieval_team
+
             if tool_name == "search_knowledge":
                 query = parameters.get("query", "")
                 limit = parameters.get("limit", 5)
@@ -297,7 +299,7 @@ class AgentPlatformTools:
                     top_k=limit,
                     min_similarity=min_similarity,
                     workspace_id=workspace_id,
-                    team=agent_team,
+                    team=retrieval_team(agent_team),  # F155: a widget key's lock wins
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
@@ -403,7 +405,7 @@ class AgentPlatformTools:
                     top_k=limit,
                     min_similarity=min_similarity,
                     workspace_id=workspace_id,
-                    team=agent_team,
+                    team=retrieval_team(agent_team),  # F155: a widget key's lock wins
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)

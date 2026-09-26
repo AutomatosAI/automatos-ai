@@ -1507,6 +1507,10 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
+    # unless it fetched fewer than this share of the models listed before: a
+    # partial answer would otherwise retire the rest of the catalog.
+    OPENROUTER_DELIST_MIN_FETCH_RATIO: float = float(os.getenv("OPENROUTER_DELIST_MIN_FETCH_RATIO", "0.9"))
     # F085-A: how many passages the automatic search brings, and the relevance
     # (the retrieval funnel's final score) a passage needs to reach the prompt.
     KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))

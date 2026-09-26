@@ -848,6 +848,10 @@ def _resolve_workspace_admin(
 
     PRD-143: this fallback may flip is_admin ONLY — is_super_admin is never
     derived from workspace roles (su trap #2, PRD-143 §9)."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():  # F155: a public widget turn is offered no admin tier
+        return False
     if is_admin or not workspace_id or session_used is None:
         return is_admin
     try:

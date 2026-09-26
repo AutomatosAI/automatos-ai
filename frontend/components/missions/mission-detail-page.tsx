@@ -394,6 +394,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
             tokensUsed={mission.tokens_used}
             tokenBudgetEstimate={mission.token_budget_estimate}
             missionState={mission.state}
+            stopDetail={mission.stop_detail}
             onResume={() => resumeMutation.mutate(missionId, {
               onSuccess: () => toast.success('Mission resumed'),
               onError: (err) => toast.error(err.message),

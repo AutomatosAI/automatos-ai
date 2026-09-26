@@ -147,6 +147,9 @@ def test_the_claim_hands_the_session_its_own_credential_once(ticket, new_session
     stored = row.runtime_ref[svc.SESSION_TOKEN_HASH_KEY]
     assert stored == svc.hash_secret(token)
     assert token not in json.dumps(row.runtime_ref)
+    # F131: the ticket records that its session was offered the Automatos tools,
+    # so a session that never reaches them fails its step instead of "completing"
+    assert row.runtime_ref[svc.SESSION_TOOLS_OFFERED_KEY] is True
 
 
 def test_the_token_resolves_to_its_own_running_ticket_and_nothing_else(ticket, new_session):

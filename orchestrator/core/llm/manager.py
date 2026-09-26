@@ -661,6 +661,7 @@ class LLMManager:
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
+            self._remember_refusal(exc)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -680,6 +681,7 @@ class LLMManager:
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
+            self._remember_refusal(exc)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -688,6 +690,25 @@ class LLMManager:
                 ) from exc
 
             raise
+
+    def _remember_refusal(self, exc: Exception) -> None:
+        """F141: the provider refused this model for good (the typed error says so):
+        record it for the route and for the agent that asked, whatever lane the
+        call came from (core.llm.model_refusals)."""
+        if getattr(exc, "definitive", False) is not True:
+            return
+        try:
+            from .model_refusals import record_model_refusal
+            from .usage_context import current_usage_scope
+
+            record_model_refusal(
+                agent_id=self._tracking_ctx.get("agent_id") or current_usage_scope().get("agent_id"),
+                provider=exc.provider,
+                model=exc.model,
+                said=exc.said,
+            )
+        except Exception:  # noqa: BLE001 — never mask the refusal itself
+            logger.warning("[model-refusal] not recorded", exc_info=True)
 
     def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
         """Track LLM usage via UsageTracker and cost audit logger.

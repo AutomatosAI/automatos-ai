@@ -66,7 +66,13 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-23 (PRD-251 Socials): prd251_socials chains onto kb_multimodal_tables too
 # — the ONE Socials migration (the master-switch seed, then the social_posts
 # tables) — and f049_prd251_merge_heads joins it with F125 into the single head.
-EXPECTED_HEAD = "f049_prd251_merge_heads"
+# 2026-09-25: f155_chats_widget_key_id chains onto that — the widget key that
+# started a conversation (F155).
+# 2026-09-25: f156_harness_task_ledger chains onto that — the HARNESS task ledger
+# moves off the workspace volume into the database (F156).
+# 2026-09-25: llm_usage_execution_index chains onto that — the index the mission
+# budget's spend sum reads, built CONCURRENTLY (F153).
+EXPECTED_HEAD = "llm_usage_execution_index"
 
 
 def _literal(node: ast.AST):

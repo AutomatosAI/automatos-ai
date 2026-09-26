@@ -485,7 +485,7 @@ def test_create_mission_tool_auto_creates_watch(workspace, new_session, monkeypa
     seeded_run.plan = {"tasks": []}
     s.commit()
 
-    async def _fake_create_mission(self, db, workspace_id, goal, created_by, config=None):
+    async def _fake_create_mission(self, db, workspace_id, goal, created_by, config=None, staffing=None):
         return seeded_run
 
     monkeypatch.setattr(CoordinatorService, "create_mission", _fake_create_mission)

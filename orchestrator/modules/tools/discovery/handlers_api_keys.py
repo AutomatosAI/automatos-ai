@@ -1,11 +1,11 @@
 """SDK API-key handlers for PlatformActionExecutor (PRD-143 S11).
 
-List/create/revoke the workspace's SDK API keys (PRD-37) by delegating to
+List and revoke the workspace's SDK API keys (PRD-37) by delegating to
 ``core.services.api_key_service.ApiKeyService`` — the exact service layer
-``api/api_keys.py`` uses, so key generation, masking and workspace scoping
-cannot drift between the dashboard and Auto. The full key appears exactly
-once, in the create result, straight from the service (same contract as the
-REST route); list returns masked prefixes only.
+``api/api_keys.py`` uses, so masking and workspace scoping cannot drift
+between the dashboard and Auto. List returns masked prefixes only. There is
+no create handler (F151): a key's full value exists only in its create
+response, so keys are created in Settings, never through the LLM context.
 
 BYOK provider keys (api/user_api_keys.py) are deliberately NOT exposed as
 tools: adding one requires pasting a raw provider secret into the
@@ -31,56 +31,6 @@ async def list_api_keys(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": True, "keys": keys, "count": len(keys)}
     except Exception as exc:
         logger.error("[api_keys] list_api_keys failed: %s", exc, exc_info=True)
-        return {"success": False, "error": str(exc)}
-
-
-async def create_api_key(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Create an SDK API key. Mirrors the router's validation: key_type in
-    {public, server}, public keys need allowed_domains, permission scopes
-    come from api.api_keys.VALID_PERMISSIONS (imported, never duplicated)."""
-    name = (params.get("name") or "").strip()
-    key_type = params.get("key_type") or "server"
-    permissions = params.get("permissions") or []
-    allowed_domains = params.get("allowed_domains")
-
-    if not name:
-        return {"success": False, "error": "name is required"}
-    if key_type not in ("public", "server"):
-        return {"success": False, "error": f"key_type must be 'public' or 'server', got {key_type!r}"}
-    if key_type == "public" and not allowed_domains:
-        return {"success": False, "error": "Public keys require a non-empty allowed_domains list"}
-
-    try:
-        from api.api_keys import VALID_PERMISSIONS
-
-        invalid = [p for p in permissions if p not in VALID_PERMISSIONS]
-        if invalid:
-            return {
-                "success": False,
-                "error": f"Invalid permissions: {invalid}. Valid: {VALID_PERMISSIONS}",
-            }
-
-        from core.services.api_key_service import ApiKeyService
-
-        result = ApiKeyService.create_api_key(
-            db=db,
-            workspace_id=workspace_id,
-            name=name,
-            key_type=key_type,
-            permissions=list(permissions),
-            allowed_domains=allowed_domains,
-        )
-        return {
-            "success": True,
-            "key": result,
-            "message": (
-                "API key created. The full key is shown here exactly once — "
-                "store it now; only the masked prefix is retrievable later."
-            ),
-        }
-    except Exception as exc:
-        db.rollback()
-        logger.error("[api_keys] create_api_key failed: %s", exc, exc_info=True)
         return {"success": False, "error": str(exc)}
 
 

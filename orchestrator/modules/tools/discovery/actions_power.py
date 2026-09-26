@@ -36,6 +36,7 @@ def register_power_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F151: the workspace's cost dial
         tags=["power_mode", "configuration", "cost", "quality"],
         examples=[
             "set the workspace to max power mode",

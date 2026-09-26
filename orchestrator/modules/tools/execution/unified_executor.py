@@ -418,6 +418,24 @@ class UnifiedToolExecutor:
                 caller_context=caller_context, trace=trace,
             )
 
+    def _widget_gate(self, tool_name: str, parameters: Any, trace: str) -> Optional[Dict[str, Any]]:
+        """The refusal for a widget turn calling what its key's scopes do not
+        grant (core.security.widget_scopes); None when the call may run."""
+        from core.security.surface import widget_scopes, widget_turn
+
+        if not widget_turn():
+            return None
+        from core.security.widget_scopes import WIDGET_REFUSAL, widget_may_call
+
+        effective_name = self._resolve_effective_call(tool_name, parameters)[0]
+        if widget_may_call(effective_name, widget_scopes()):
+            return None
+        logger.warning(
+            "[tool-trace %s] widget turn refused '%s' (resolved '%s'): not granted by the key's scopes",
+            trace, tool_name, effective_name,
+        )
+        return {"success": False, "permission_denied": True, "error": WIDGET_REFUSAL, "tool": tool_name}
+
     def _resolve_effective_call(
         self, tool_name: str, parameters: Any
     ) -> tuple:
@@ -741,6 +759,12 @@ class UnifiedToolExecutor:
             if tool_name in TOOL_ALIASES:
                 logger.info(f"[tool-trace {trace}] '{tool_name}' is not a tool — running {TOOL_ALIASES[tool_name]}")
                 tool_name = TOOL_ALIASES[tool_name]
+
+            # F155: a public widget turn runs only what its key's scopes grant,
+            # judged on the resolved action (platform_execute's included).
+            _widget_block = self._widget_gate(tool_name, parameters, trace)
+            if _widget_block is not None:
+                return _widget_block
 
             # PRD-174 W4 — the single policy chokepoint. When the plane is ON,
             # EVERY tool call (platform, workspace, Composio, registry) is

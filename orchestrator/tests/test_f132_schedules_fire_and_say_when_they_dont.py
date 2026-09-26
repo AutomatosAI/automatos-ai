@@ -53,6 +53,9 @@ class _Query:
     def get(self, _id):
         return self.first()
 
+    def count(self):
+        return 0                      # no run in flight (F134's note reads this)
+
 
 class _Db:
     def __init__(self, playbooks=(), settings=None):

@@ -118,6 +118,23 @@ def _is_dispatch_claimable(task) -> bool:
     )
 
 
+def _cannot_take_tasks(db: Session, agent: Any) -> Optional[str]:
+    """F141: an agent whose model is not available (its provider refused it for
+    good, or its route is deprecated) is never handed a task: the task would fail
+    at its first model call. The check failing never blocks an assignment."""
+    try:
+        from core.llm.model_refusals import unavailable_reason
+
+        reason = unavailable_reason(db, agent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[board] model check failed for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return None
+    if not reason:
+        return None
+    return (f"{reason}, so it cannot take this task. Pick another model in its Model tab, "
+            "or give the task to another agent.")
+
+
 def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: str):
     """Resolve an agent NAME to a single ACTIVE agent for a board write.
 
@@ -193,6 +210,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         if ambiguity_error:
             return {"success": False, "error": ambiguity_error}
         if agent:
+            refused = _cannot_take_tasks(db, agent)
+            if refused:
+                return {"success": False, "error": refused}
             assigned_agent_id = agent.id
 
     # Build planning_data if approval_action or other planning fields provided
@@ -222,8 +242,12 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     db.commit()
     db.refresh(task)
 
-    # Auto-approve: execute the approval action immediately, skip human review
-    auto_approve = params.get("auto_approve", False)
+    # Auto-approve: execute the approval action immediately, skip human review.
+    # F155: a public widget visitor's call is never an approval; the task waits.
+    from core.security.surface import widget_turn
+
+    auto_approve_held = bool(params.get("auto_approve")) and widget_turn()
+    auto_approve = params.get("auto_approve", False) and not auto_approve_held
     if auto_approve and planning_data and planning_data.get("approval_action"):
         approval_action = planning_data["approval_action"]
         action_type = approval_action.get("type")
@@ -279,6 +303,8 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         "status": task.status,
         "title": task.title,
     }
+    if auto_approve_held:
+        result["auto_approve"] = "not applied: a call from the public widget is no approval"
 
     # PRD-224 US-005: an ASSIGN-lane assigned ticket is auto-supervised — attach a
     # run_and_report board_task watch here (in the create transaction path) so the
@@ -336,6 +362,24 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     return result
 
 
+def task_visitor_view(task: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a board task (tasks:read): what
+    it is and where it stands. Never its description, prompt, result, errors,
+    tags, who works it or how (a session's tools and files)."""
+    def _at(name: str) -> Optional[str]:
+        value = getattr(task, name, None)
+        return str(value) if value else None
+
+    return {"id": task.id, "title": (task.title or "")[:150], "status": task.status,
+            "created_at": _at("created_at"), "started_at": _at("started_at"), "completed_at": _at("completed_at")}
+
+
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
 async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List board tasks with optional filters."""
     from core.models.core import BoardTask
@@ -372,6 +416,11 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
         ).first()
         if agent:
             query = query.filter(BoardTask.assigned_agent_id == agent.id)
+        elif _widget_turn():
+            # F155: a widget turn cannot tell a name no agent has from an agent
+            # with no tickets: who the agents are is agents:read's, not tasks:read's.
+            return {"success": True, "tasks": [], "total": 0, "total_matching": 0,
+                    "limit": min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)}
         else:
             return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
 
@@ -383,6 +432,9 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     except Exception:  # noqa: BLE001 — a count failure never fails the listing
         total_matching = None
     tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
+    if _widget_turn():
+        return {"success": True, "tasks": [task_visitor_view(t) for t in tasks], "total": len(tasks),
+                "total_matching": total_matching if total_matching is not None else len(tasks), "limit": limit}
 
     # Enrich with agent names
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
@@ -442,7 +494,8 @@ def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
     last_tool = None
     if isinstance(tools, (list, tuple)) and tools:
         last = tools[-1]
-        last_tool = last.get("name") if isinstance(last, dict) else str(last)
+        # F168: the host's entries carry ``tool``; ``name`` is the older shape.
+        last_tool = (last.get("tool") or last.get("name")) if isinstance(last, dict) else str(last)
     files = ref.get("files_touched") or []
     return {
         "id": task.id,
@@ -517,15 +570,17 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
 
     started = time.monotonic()
     waited = 0
+    visitor = _widget_turn()
     while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
-        await turn_progress.emit(turn_id, _progress_line(task_card(task, agent_name), waited))
+        await turn_progress.emit(turn_id, (f"#{task.id} is still running · {waited} s" if visitor
+                                           else _progress_line(task_card(task, agent_name), waited)))
         await asyncio.sleep(min(poll, limit - waited))
         waited = int(time.monotonic() - started)
         task = _load()
         if not task:
             return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
 
-    card = task_card(task, agent_name)
+    card = task_visitor_view(task) if visitor else task_card(task, agent_name)
     terminal = task.status in WAIT_TERMINAL_STATUSES
     return {
         "success": True,
@@ -558,6 +613,8 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
+    if _widget_turn():
+        return {"success": True, "task": task_visitor_view(task)}
 
     # Resolve agent name
     agent_name = None
@@ -612,6 +669,9 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         return {"success": False, "error": ambiguity_error}
     if not agent:
         return {"success": False, "error": f"Agent '{agent_name}' not found"}
+    refused = _cannot_take_tasks(db, agent)
+    if refused:
+        return {"success": False, "error": refused}
 
     task.assigned_agent_id = agent.id
     if task.status == "inbox":

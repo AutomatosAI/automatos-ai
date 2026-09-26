@@ -178,7 +178,11 @@ async def invite_member_to_workspace(
     if max_members != -1 and current_members >= max_members:
         raise ValueError(f"Workspace has reached member limit ({max_members})")
 
-    valid_roles = [r.value for r in WorkspaceRole]
+    # F152: a workspace has one owner, so nobody is invited as another — here,
+    # where REST and the platform_invite_member tool both come through.
+    if str(role).strip().lower() == WorkspaceRole.OWNER.value:
+        raise ValueError("Nobody is invited as the owner: invite them as an admin, editor or viewer.")
+    valid_roles = [r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER]
     if role not in valid_roles:
         raise ValueError(f"Invalid role: {role}. Must be one of {valid_roles}")
 

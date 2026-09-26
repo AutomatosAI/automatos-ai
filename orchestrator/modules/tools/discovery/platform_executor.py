@@ -88,7 +88,6 @@ from modules.tools.discovery.handlers_members import (  # PRD-143 S11
 )
 from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
     list_api_keys,
-    create_api_key,
     revoke_api_key,
 )
 from modules.tools.discovery.handlers_monitoring import (
@@ -331,7 +330,6 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
     # Playbook edits.
     "platform_update_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
     "platform_delete_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
-    "platform_update_recipe":              (TARGET_PLAYBOOK, "recipe_id"),
     "platform_add_playbook_step":          (TARGET_PLAYBOOK, "playbook_id"),
     "platform_update_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
     "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
@@ -340,6 +338,16 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
     "platform_update_task":                (TARGET_TASK, "task_id"),
     "platform_update_task_status":         (TARGET_TASK, "task_id"),
 }
+
+
+# F133 / F148: the actions whose handlers are told who the call is made for
+# (server-injected _driving_user_id / _driving_super_admin; see execute()).
+_DRIVER_AWARE_ACTIONS = (
+    "platform_create_playbook",
+    "platform_create_recipe",
+    "platform_invite_member",
+    "platform_set_member_role",
+)
 
 
 # PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
@@ -353,6 +361,37 @@ OPERATOR_CONSENT_ACTIONS = (
     "platform_update_task_status",
     "platform_schedule_task",
 )
+
+
+def _person_for_mission(db, caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
+    """F166: who a mission action is made for, as the mission records it — the
+    chat's Clerk id, or on the local edition (no Clerk id) the person's email, read
+    from the server-threaded ``driving_user_id``. The email is what the local REST
+    API records (``created_by = ctx.user.id``). Never the bare ``users.id``: a digit
+    string in ``created_by`` is already an agent id wherever no person drove the
+    action. A widget turn is made for nobody (F155); an unreadable user is nobody."""
+    from core.security.driving_user import driving_user_id
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return None
+    ctx = caller_context if isinstance(caller_context, dict) else {}
+    if ctx.get("user_id"):
+        return str(ctx["user_id"])
+    user = driving_user_id(ctx)
+    if user is None:
+        return None
+    try:
+        from core.models.core import User
+
+        with db.begin_nested():  # a failed lookup never poisons the caller's transaction
+            row = db.query(User.email).filter(User.id == user).first()
+    except Exception:  # noqa: BLE001 — fails closed: nobody, so F036 still leaves it to the owner
+        logger.warning("[PlatformExecutor] no email for driving user %s — the call is made for nobody", user,
+                       exc_info=True)
+        return None
+    email = str(row[0] or "").strip() if row else ""
+    return email or None
 
 
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
@@ -401,6 +440,10 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     unresolvable principal, any lookup error — keeps the ask. The su tier is
     untouched (its gate runs earlier and never consults this).
     """
+    from core.security.surface import widget_turn
+
+    if widget_turn():  # F155: a widget visitor's instruction is no approval
+        return False
     ctx = caller_context if isinstance(caller_context, dict) else {}
     if not ctx.get("conversation_id"):
         return False
@@ -414,7 +457,12 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
 def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
     """PRD-143's super-admin predicate: only a literal system_role ==
     'super_admin' passes. There is no fallback, and no caller_context refuses.
-    The gate and platform_list_tools' listing (F122) both read this one."""
+    The gate and platform_list_tools' listing (F122) both read this one. A
+    public widget turn never passes, whatever its context names (F155)."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return False
     return (caller_context or {}).get("system_role") == "super_admin"
 
 
@@ -482,9 +530,7 @@ class PlatformActionExecutor:
             "platform_list_agents": list_agents,
             "platform_recommend_agent": recommend_agent,  # PRD-234 S3
             "platform_get_agent": get_agent,
-            "platform_list_recipes": list_playbooks,
             "platform_list_playbooks": list_playbooks,
-            "platform_get_recipe": get_playbook,
             "platform_get_playbook": get_playbook,
             "platform_get_llm_usage": get_llm_usage,
             "platform_get_cost_breakdown": get_cost_breakdown,
@@ -500,15 +546,10 @@ class PlatformActionExecutor:
             # Write actions
             "platform_create_agent": create_agent,
             "platform_update_agent": update_agent,
-            "platform_create_recipe": create_playbook,
             "platform_create_playbook": create_playbook,
-            "platform_update_recipe": update_playbook,
             "platform_update_playbook": update_playbook,
-            "platform_add_recipe_step": add_playbook_step,
             "platform_add_playbook_step": add_playbook_step,
-            "platform_update_recipe_step": update_playbook_step,
             "platform_update_playbook_step": update_playbook_step,
-            "platform_delete_recipe_step": delete_playbook_step,
             "platform_delete_playbook_step": delete_playbook_step,
             "platform_schedule_playbook": schedule_playbook,
             "platform_store_memory": store_memory,
@@ -532,14 +573,11 @@ class PlatformActionExecutor:
             "platform_list_datasources": list_datasources,
             "platform_workspace_stats": workspace_stats,
             # Self-management
-            "platform_execute_recipe": execute_playbook,
             "platform_execute_playbook": execute_playbook,
-            "platform_get_recipe_execution": get_playbook_execution,
             "platform_get_playbook_execution": get_playbook_execution,
             "platform_get_system_health": get_system_health,
             "platform_delete_document": delete_document,
             "platform_reprocess_document": reprocess_document,
-            "platform_delete_recipe": delete_playbook,
             "platform_delete_playbook": delete_playbook,
             "platform_get_activity_feed": get_activity_feed,
             # Marketplace discovery & workspace inventory (PRD-71)
@@ -698,7 +736,6 @@ class PlatformActionExecutor:
             "platform_list_system_settings": list_system_settings,
             "platform_update_system_setting": update_system_setting,
             "platform_list_api_keys": list_api_keys,
-            "platform_create_api_key": create_api_key,
             "platform_revoke_api_key": revoke_api_key,
             "platform_uninstall_plugin": uninstall_plugin,
             # Wave 2: Auto reporting preferences + send-notification wrapper
@@ -731,22 +768,23 @@ class PlatformActionExecutor:
     def _workspace_has_admin_owner(self) -> bool:
         """Check if the workspace owner has an admin/owner role.
 
-        Used when no caller_context is available (heartbeat, agent factory).
-        Agents inherit admin privileges from their workspace owner.
+        Read only under the policy plane's opt-in ``agents_inherit_admin``
+        policy (see ``_agent_inherits_admin``): there is an admin to inherit from.
         Fail-closed: returns False on any error.
         """
         try:
             from core.workspaces.models import WorkspaceMember
 
-            member = (
-                self.db.query(WorkspaceMember)
-                .filter(
-                    WorkspaceMember.workspace_id == self.workspace_id,
-                    WorkspaceMember.role.in_(("owner", "admin")),
-                    WorkspaceMember.is_active.is_(True),
+            with self.db.begin_nested():  # a failed probe never poisons the caller's transaction
+                member = (
+                    self.db.query(WorkspaceMember)
+                    .filter(
+                        WorkspaceMember.workspace_id == self.workspace_id,
+                        WorkspaceMember.role.in_(("owner", "admin")),
+                        WorkspaceMember.is_active.is_(True),
+                    )
+                    .first()
                 )
-                .first()
-            )
             if member:
                 logger.debug(
                     "[PlatformExecutor] Workspace %s has admin/owner member — "
@@ -772,48 +810,49 @@ class PlatformActionExecutor:
         when the workspace's explicit, default-OFF ``agents_inherit_admin``
         policy is set (and there really is an admin/owner to inherit from).
 
-        Plane OFF ⇒ historical behaviour (always fall back to the owner check)
-        so the rollout is byte-for-byte reversible.
+        F145: that policy is the ONLY inheritance path. With the plane off, or
+        when the policy cannot be read, an agent acting for nobody is not an
+        admin; the old plane-off fallback made it one in every workspace that
+        has an owner or admin member.
         """
         try:
             from modules.policy import policy_plane_enabled
 
-            if policy_plane_enabled():
-                from modules.policy.policy_document import load_policy_document
+            if not policy_plane_enabled():
+                return False
+            from modules.policy.policy_document import load_policy_document
 
-                doc = load_policy_document(self.db, self.workspace_id)
-                if not doc.agents_inherit_admin:
-                    return False  # explicit default-off policy → agent is NOT admin
-                return self._workspace_has_admin_owner()
+            doc = load_policy_document(self.db, self.workspace_id)
+            return bool(doc.agents_inherit_admin) and self._workspace_has_admin_owner()
         except Exception:
             logger.warning(
-                "[PlatformExecutor] agents_inherit_admin policy read failed for %s "
-                "— falling back to legacy owner check", self.workspace_id,
-                exc_info=True,
+                "[PlatformExecutor] agents_inherit_admin policy read failed for %s — not admin",
+                self.workspace_id, exc_info=True,
             )
-        # Plane OFF (or read failure): historical always-fallback behaviour.
-        return self._workspace_has_admin_owner()
+            return False
 
     def _caller_is_admin(self, caller_context: Optional[Dict[str, Any]], full_autonomy: bool) -> bool:
         """US-003's admin predicate. The admin gate and platform_list_tools'
-        listing (F122) both read this one."""
+        listing (F122) both read this one.
+
+        F145: a call is an admin's when it is made for a workspace owner/admin
+        (the driving user's active membership, read fresh) or for the server-side
+        super_admin role (core.security.driving_user). It used to read a
+        ``workspace_role`` the chat's context never carries, so an owner read as
+        non-admin. Full autonomy is the owner's explicit grant. With no caller
+        context, only the plane's opt-in inheritance applies.
+        """
+        from core.security.surface import widget_turn
+
+        if widget_turn():  # F155: a public widget's visitor is never an admin
+            return False
         if full_autonomy:
-            # Workspace dialled to full autonomy — Auto runs as admin.
             return True
-        if caller_context is not None:
-            # Explicit caller identity — check roles directly.
-            # A dict with no role keys means "known non-admin user".
-            return (
-                caller_context.get("workspace_role") in ("owner", "admin")
-                or caller_context.get("system_role") == "admin"
-            )
-        # No caller_context (heartbeat, agent factory, etc.).
-        # PRD-174 F014: the "agents inherit admin from the workspace
-        # owner" fallback is no longer implicit — under the policy
-        # plane it applies ONLY when the explicit, default-OFF
-        # ``agents_inherit_admin`` workspace policy is set. Plane OFF
-        # keeps the historical always-fallback behaviour.
-        return self._agent_inherits_admin()
+        if caller_context is None:
+            return self._agent_inherits_admin()
+        from core.security.driving_user import driver_is_workspace_admin
+
+        return driver_is_workspace_admin(self.db, self.workspace_id, caller_context)
 
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
@@ -872,6 +911,14 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+            # Every gate below reads action_def, so a handler with no registered
+            # ActionDefinition is refused as unknown (fail-closed).
+            if action_def is None:
+                logger.warning(
+                    "[PlatformExecutor] '%s' has a handler but no registered action — refused",
+                    action_name,
+                )
+                return {"success": False, "error": f"Unknown platform action: {action_name}"}
 
             # PRD-143: Super-admin gate — fail-closed, BEFORE and independent
             # of the admin gate below. The ONLY principal that passes is a
@@ -915,6 +962,9 @@ class PlatformActionExecutor:
                     return {
                         "success": False,
                         "permission_denied": True,
+                        # F151: machine-readable, so a lane (HARNESS) can hold the
+                        # change for an owner's or admin's approval.
+                        "required_role": "owner_or_admin",
                         "error": (
                             f"Action '{action_name}' requires workspace admin or owner role."
                         ),
@@ -1087,6 +1137,7 @@ class PlatformActionExecutor:
                             target_id=target_id,
                             change_type="update" if action_def.permission_level == "write" else "delete",
                             source="platform_tool",
+                            caller_context=caller_context,
                         )
                     except Exception as e:
                         # Fail closed: a permission check that errors must DENY, never
@@ -1115,24 +1166,30 @@ class PlatformActionExecutor:
                         }
                     if not decision.allowed:
                         logger.warning(
-                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s "
+                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s (%s) "
                             "target=%s (#%d of %d) reason=%s",
-                            action_name, actor_id, target_type, idx, n_targets, decision.reason,
+                            action_name, actor_id, decision.actor_name, target_type, idx, n_targets,
+                            decision.reason,
                         )
                         return {
                             "success": False,
                             "permission_denied": True,
                             "reason": decision.reason,
                             "escalation_target": decision.escalation_target,
+                            # F133: a refusal that says how to get it done, when it has one.
                             "error": (
-                                f"Action '{action_name}' denied — {decision.reason}. "
-                                + (
-                                    f"Route this through the {decision.escalation_target} "
-                                    "for arbitration."
-                                    if decision.escalation_target
-                                    else ""
-                                )
-                            ).strip(),
+                                f"Action '{action_name}' denied ({decision.reason}). {decision.message}"
+                                if decision.message
+                                else (
+                                    f"Action '{action_name}' denied — {decision.reason}. "
+                                    + (
+                                        f"Route this through the {decision.escalation_target} "
+                                        "for arbitration."
+                                        if decision.escalation_target
+                                        else ""
+                                    )
+                                ).strip()
+                            ),
                         }
 
         # Rate limit write/destructive actions — scoped per (workspace, agent)
@@ -1234,8 +1291,10 @@ class PlatformActionExecutor:
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via
-        # caller_context['user_id']; inject it as _created_by so the handler sets
-        # created_by / actor to the user, not the agent.
+        # caller_context['user_id'] (on the local edition, which has no Clerk
+        # id, only the internal driving_user_id: their email is recorded); inject
+        # it as _created_by so the handler sets created_by / actor to the user,
+        # not the agent.
         _MISSION_ATTRIBUTED = (
             "platform_create_mission",
             "platform_approve_mission",
@@ -1254,9 +1313,26 @@ class PlatformActionExecutor:
             # workflows) where caller_context carries no user_id. Grep-verified
             # no legitimate params-side producer exists.
             params = {k: v for k, v in params.items() if k != "_created_by"}
-            _driver = (caller_context or {}).get("user_id")
-            if _driver:
-                params = {**params, "_created_by": str(_driver)}
+            # F166: with the Clerk id alone, every local chat approval arrived
+            # with no person behind it and F036 refused it. A board ticket or a
+            # workflow threads no driver, so F036 still refuses their approvals.
+            _person = _person_for_mission(self.db, caller_context)
+            if _person:
+                params = {**params, "_created_by": _person}
+
+        # F133 / F148: who the call is made for, for the handlers that record or
+        # check it: a playbook's creator (created_by_user_id), an invitation's
+        # sender, the owner a role change needs. From the server-built context
+        # only: caller-supplied values are ALWAYS stripped first.
+        if action_name in _DRIVER_AWARE_ACTIONS and isinstance(params, dict):
+            from core.security.driving_user import driving_user_id
+
+            params = {k: v for k, v in params.items() if k not in ("_driving_user_id", "_driving_super_admin")}
+            _user = driving_user_id(caller_context)
+            if _user is not None:
+                params = {**params, "_driving_user_id": _user}
+            if isinstance(caller_context, dict) and _caller_is_super_admin(caller_context):
+                params = {**params, "_driving_super_admin": True}
 
         # PRD-205 S4: capture the originating conversation for watch-creating
         # actions (direct create + the launches whose handlers auto-create a
@@ -1270,7 +1346,6 @@ class PlatformActionExecutor:
             "platform_create_watch",
             "platform_create_mission",
             "platform_execute_playbook",
-            "platform_execute_recipe",
             "platform_schedule_task",
             # PRD-224 US-005: the ASSIGN-lane ticket auto-attaches a watch whose
             # verdict must post back to THIS conversation.

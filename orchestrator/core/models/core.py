@@ -200,6 +200,13 @@ class LLMUsage(Base):
 
     created_at = Column(DateTime, default=func.now())
 
+    # F153: the mission budget sums a run's rows by execution_id on every
+    # dispatch check (migration llm_usage_execution_index builds it CONCURRENTLY).
+    __table_args__ = (
+        Index("idx_llm_usage_workspace_execution", "workspace_id", "execution_id"),
+        {"extend_existing": True},
+    )
+
 # Database Models
 class Team(Base):
     """PRD-158 S1: a real (small) Teams entity per workspace.
@@ -1168,6 +1175,9 @@ class Chat(Base):
     # the checkpoint distill (idle sweep + platform_checkpoint_thread); read by
     # the S3 resume payload. NULL until the thread has been checkpointed.
     summary = Column(JSONB, nullable=True)
+    # F155: the widget key that started this conversation. A widget key reads
+    # and resumes only the conversations it started; NULL is no key's.
+    widget_key_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")

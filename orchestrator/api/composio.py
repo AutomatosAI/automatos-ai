@@ -847,6 +847,7 @@ async def handle_webhook(
                 agent_id=decision.agent_id,
                 content=envelope.content,
                 metadata=envelope.metadata,
+                workspace_id=envelope.workspace_id,
             )
         )
     elif decision.route_type == "workflow" and decision.workflow_id is not None:
@@ -877,11 +878,17 @@ async def _dispatch_agent(
     agent_id: int,
     content: str,
     metadata: Dict[str, Any],
+    workspace_id: Any,
 ) -> None:
     """Execute an agent in the background for a webhook-triggered request."""
     try:
+        from core.security.workspace_scope import agent_in_workspace
         from modules.agents.factory.agent_factory import AgentFactory
         with get_db_session() as db:
+            # F149: a trigger runs only an agent of the trigger's workspace.
+            if not agent_in_workspace(db, agent_id, workspace_id):
+                logger.warning("[webhook] Agent %s is not in workspace %s — not run", agent_id, workspace_id)
+                return
             # PRD-234 S3: a Claude Code agent's trigger becomes a board ticket
             # (the factory refuses cli agents by design); nothing runs here.
             from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, source_id_for
@@ -943,7 +950,8 @@ async def _dispatch_workflow(
         # UI-created recipe dispatch (workflow_recipes table)
         with get_db_session() as db:
             recipe_row = db.query(WorkflowRecipe).filter(
-                WorkflowRecipe.id == workflow_id
+                WorkflowRecipe.id == workflow_id,
+                WorkflowRecipe.workspace_id == envelope.workspace_id,  # F149
             ).first()
             if recipe_row:
                 from uuid import uuid4 as _uuid4
@@ -979,6 +987,12 @@ async def _dispatch_workflow(
                     workspace_id=envelope.workspace_id,
                     input_data={"content": envelope.content, **envelope.metadata},
                 )
+                return
+            # F149: another workspace's playbook is refused here, never handed to
+            # the standard dispatch below.
+            if db.query(WorkflowRecipe.id).filter(WorkflowRecipe.id == workflow_id).first():
+                logger.warning("[webhook] Playbook %s is not in workspace %s — not run",
+                               workflow_id, envelope.workspace_id)
                 return
 
         # Standard workflow dispatch (no matching recipe)
@@ -1022,6 +1036,12 @@ async def subscribe_to_trigger(
     """
     Subscribe to a Composio trigger.
     """
+    # F149: a subscription routes only to this workspace's agents and playbooks.
+    from core.security.workspace_scope import routing_target_error
+
+    refused = routing_target_error(db, ctx.workspace_id, request.agent_id, request.workflow_id)
+    if refused:
+        raise HTTPException(status_code=400, detail=refused.replace("target_", ""))
     client = get_composio_client()
     entity_manager = EntityManager(db)
     

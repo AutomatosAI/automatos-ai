@@ -1,5 +1,5 @@
 {
-  "route_count": 828,
+  "route_count": 825,
   "routes": [
     {
       "method": "GET",
@@ -1871,14 +1871,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/playbooks"
-    },
-    {
-      "method": "POST",
-      "path": "/api/playbooks/mine"
-    },
-    {
-      "method": "GET",
       "path": "/api/policy/abtest/get"
     },
     {
@@ -2812,10 +2804,6 @@
     {
       "method": "GET",
       "path": "/api/widgets/config"
-    },
-    {
-      "method": "POST",
-      "path": "/api/widgets/data/execute"
     },
     {
       "method": "POST",

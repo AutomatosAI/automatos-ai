@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import itertools
 from types import SimpleNamespace
 
 _ORCH = Path(__file__).resolve().parents[1]
@@ -44,9 +45,13 @@ def _skill(name: str) -> SimpleNamespace:
     return SimpleNamespace(name=name)
 
 
+_AGENT_IDS = itertools.count(1)  # F142 (c): the roster shows each agent's id
+
+
 def _agent(name, description, *, skills=(), tags=(), status="active",
            model_id="gpt-4o") -> SimpleNamespace:
     return SimpleNamespace(
+        id=next(_AGENT_IDS),
         name=name,
         description=description,
         skills=[_skill(s) for s in skills],

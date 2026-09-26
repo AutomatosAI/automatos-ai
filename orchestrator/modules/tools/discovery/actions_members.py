@@ -63,7 +63,9 @@ def register_members_actions(registry: ActionRegistry) -> None:
             "required": ["email"],
         },
         permission_level="write",
-        requires_confirmation=False,
+        # F148: REST's members:invite is an owner's or admin's; so is this, confirmed.
+        requires_confirmation=True,
+        admin_only=True,
         tags=["team", "members", "invite", "onboarding"],
         examples=[
             "invite jane@acme.com to the workspace",
@@ -98,6 +100,9 @@ def register_members_actions(registry: ActionRegistry) -> None:
         },
         permission_level="destructive",
         requires_confirmation=True,
+        # F148: REST's members:change_role is the owner's alone; the handler checks
+        # the owner, this keeps every non-admin out before the card.
+        admin_only=True,
         tags=["team", "members", "roles", "permissions"],
         examples=[
             "make John an admin",

@@ -107,7 +107,9 @@ async def invite_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": False, "error": "email is required"}
 
     try:
-        inviter_internal_id = _workspace_owner_user_id(db, workspace_id)
+        # F148: the person the call is made for sends the invitation (as REST
+        # records its caller); the owner only when a lane names nobody.
+        inviter_internal_id = params.get("_driving_user_id") or _workspace_owner_user_id(db, workspace_id)
         if inviter_internal_id is None:
             return {
                 "success": False,
@@ -156,6 +158,14 @@ async def set_member_role(db: Session, workspace_id: UUID, params: Dict[str, Any
     except (TypeError, ValueError):
         return {"success": False, "error": f"member_id must be an integer, got {member_id!r}"}
 
+    # F148: REST's members:change_role is the owner's alone (plus the platform
+    # super admin's bypass). The executor injects who the call is made for.
+    driver = params.get("_driving_user_id")
+    if params.get("_driving_super_admin") is not True and (
+            driver is None or driver != _workspace_owner_user_id(db, workspace_id)):
+        return {"success": False,
+                "error": "Only the workspace owner changes member roles. Ask the owner, or have them do it in chat."}
+
     try:
         from core.workspaces.models import WorkspaceMember
         from modules.policy.roles import WorkspaceRole
@@ -186,7 +196,7 @@ async def set_member_role(db: Session, workspace_id: UUID, params: Dict[str, Any
         db.commit()
 
         _audit(
-            db, workspace_id, _workspace_owner_user_id(db, workspace_id),
+            db, workspace_id, driver or _workspace_owner_user_id(db, workspace_id),
             "member:role_changed", resource_id=member.id,
             details={"old_role": old_role, "new_role": new_role},
         )
