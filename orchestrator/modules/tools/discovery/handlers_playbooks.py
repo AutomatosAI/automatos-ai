@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import func
@@ -116,7 +116,7 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     steps = playbook.steps or []
     from core.services.playbook_inputs import contract_of
 
-    return {
+    result = {
         "success": True,
         "playbook": {
             "id": playbook.id,
@@ -141,6 +141,10 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             "total_executions": exec_count,
         },
     }
+    namesakes = _namesakes_note(db, workspace_id, playbook, sought="the one you want")
+    if namesakes:
+        result["namesakes"] = namesakes
+    return result
 
 
 def _playbooks_called(db: Session, workspace_id: UUID, name: Any) -> List[Any]:
@@ -156,6 +160,25 @@ def _playbooks_called(db: Session, workspace_id: UUID, name: Any) -> List[Any]:
         .order_by(WorkflowTemplate.id)
         .all()
     )
+
+
+def _namesakes_note(db: Session, workspace_id: UUID, playbook: Any, *, sought: str) -> Optional[str]:
+    """F203 (night 6): 'New Cafe Onboarding' was two playbooks, 102 and 103, and the
+    record-card step was 103's; an edit of 102 found no third step and Auto said it
+    had put one back. Wherever a playbook is read or a step is not there, its
+    namesakes are named. None when it has none."""
+    namesakes = _playbooks_called(db, workspace_id, playbook.name)
+    if len(namesakes) < 2:
+        return None
+    ids = ", ".join(str(namesake.id) for namesake in namesakes)
+    others = ", ".join(str(namesake.id) for namesake in namesakes if namesake.id != playbook.id)
+    return f"{len(namesakes)} playbooks are named '{playbook.name}' (ids {ids}); {sought} may be on {others}."
+
+
+def _step_out_of_range(db: Session, workspace_id: UUID, playbook: Any, step_index: int, steps: List[Any]) -> str:
+    refusal = f"step_index {step_index} out of range (0-{len(steps)-1})"
+    note = _namesakes_note(db, workspace_id, playbook, sought="the step you want")
+    return f"{refusal}. {note}" if note else refusal
 
 
 def _playbook_namesakes_refusal(namesakes: List[Any]) -> str:
@@ -413,7 +436,7 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
 
     steps = list(playbook.steps or [])
     if step_index < 0 or step_index >= len(steps):
-        return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
+        return {"success": False, "error": _step_out_of_range(db, workspace_id, playbook, step_index, steps)}
 
     if "agent_id" in params and params["agent_id"] is not None:
         valid_id, err = await _validate_agent_id(db, workspace_id, params["agent_id"])
@@ -518,7 +541,7 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
 
     steps = list(playbook.steps or [])
     if step_index < 0 or step_index >= len(steps):
-        return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
+        return {"success": False, "error": _step_out_of_range(db, workspace_id, playbook, step_index, steps)}
 
     removed = steps.pop(step_index)
 
