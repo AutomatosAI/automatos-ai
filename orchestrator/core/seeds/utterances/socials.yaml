@@ -1,0 +1,207 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: socials)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: socials              registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: post·tweet·caption·carousel,
+#                  approval·sign-off·review, render·re-render)
+#
+# PRD-251 US-116 (S4.1): agents draft Socials posts; a person approves them in
+# the Socials tab and the platform publishes. No action here approves,
+# schedules or publishes.
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: socials
+actions:
+  platform_create_social_post:
+  - text: draft a LinkedIn post about our launch
+    source: example
+  - text: make a social video announcing the new feature
+    source: example
+  - text: create a social post from this week's report
+    source: example
+  - text: draft a social post
+    source: phrase_map
+  - text: create a social post
+    source: phrase_map
+  - text: new social post
+    source: phrase_map
+  - text: social media post about
+    source: phrase_map
+  - text: draft a linkedin post
+    source: phrase_map
+  - text: write an Instagram post for the product launch
+    source: authored
+  - text: put together a tweet about our funding news
+    source: authored
+  - text: draft posts for LinkedIn and X about the webinar
+    source: authored
+  - text: make a short video for our socials about the new pricing
+    source: authored
+  - text: turn the quarterly report into an infographic post
+    source: authored
+  - text: create an image carousel explaining our onboarding steps
+    source: authored
+  - text: draft a fact card post with the churn figure from the report
+    source: authored
+  - text: prepare a social video using the app promo template
+    source: authored
+  - text: make a TikTok about the feature release
+    source: authored
+  - text: draft a launch video post and render it
+    source: authored
+  - text: write up a social post about the hiring news for review
+    source: authored
+  - text: get a customer story post ready for LinkedIn
+    source: authored
+  platform_update_social_post:
+  - text: change the copy of that social post
+    source: example
+  - text: fix the headline on the draft social post and render it again
+    source: example
+  - text: add a source for the figure in the social post
+    source: example
+  - text: edit the LinkedIn text on the launch post
+    source: authored
+  - text: shorten the tweet version of the social post
+    source: authored
+  - text: swap the template on that post to the cinematic one
+    source: authored
+  - text: the reviewer asked for changes, update the post copy
+    source: authored
+  - text: re-render the social video after the fix
+    source: authored
+  - text: the social post render failed, fix it and render again
+    source: authored
+  - text: change the voice on the video post to our ElevenLabs voice
+    source: authored
+  - text: update the headline variable on the social video
+    source: authored
+  - text: rebind the infographic post to the latest report
+    source: authored
+  - text: replace the Instagram caption on the draft post
+    source: authored
+  - text: set the footage prompt for the hero shot on the video post
+    source: authored
+  - text: correct the figure on the fact card post
+    source: authored
+  - text: tweak the hashtags in the social post
+    source: authored
+  platform_submit_social_post:
+  - text: send the social post for approval
+    source: example
+  - text: submit that draft social post for review
+    source: example
+  - text: the social post is ready, put it up for approval
+    source: example
+  - text: submit the LinkedIn post for sign-off
+    source: authored
+  - text: send the draft post to the approval queue
+    source: authored
+  - text: ask for approval on the Instagram carousel
+    source: authored
+  - text: get the social post reviewed
+    source: authored
+  - text: put the tweet up for review
+    source: authored
+  - text: hand the draft post over for approval
+    source: authored
+  - text: send the video post to the Socials tab for approval
+    source: authored
+  - text: request sign-off on the social media post
+    source: authored
+  - text: submit the post so someone can approve it
+    source: authored
+  - text: the copy is final, send it for review
+    source: authored
+  - text: resubmit the social post after the edits
+    source: authored
+  - text: the reviewer's changes are in, send the post back for approval
+    source: authored
+  platform_get_social_post:
+  - text: show me that social post
+    source: example
+  - text: what's the status of the launch video post?
+    source: example
+  - text: why did the social post fail to render?
+    source: example
+  - text: open the LinkedIn post draft
+    source: authored
+  - text: what did the reviewer say about the social post?
+    source: authored
+  - text: show the copy of the Instagram post
+    source: authored
+  - text: has the social video finished rendering?
+    source: authored
+  - text: what sources does the social post cite?
+    source: authored
+  - text: read the post the reviewer sent back
+    source: authored
+  - text: who drafted this social post?
+    source: authored
+  - text: is the carousel post approved yet?
+    source: authored
+  - text: show the rendered media for the video post
+    source: authored
+  - text: what's in the history of that social post?
+    source: authored
+  - text: get the details of the draft social post
+    source: authored
+  - text: which template does the social post use?
+    source: authored
+  - text: check the social post's render report
+    source: authored
+  platform_list_social_posts:
+  - text: which social posts are waiting for approval?
+    source: example
+  - text: list our social media drafts
+    source: example
+  - text: show the social posts a reviewer sent back
+    source: example
+  - text: list social posts
+    source: phrase_map
+  - text: show social posts
+    source: phrase_map
+  - text: social posts awaiting approval
+    source: phrase_map
+  - text: what's in the Socials approval queue?
+    source: authored
+  - text: which social posts failed to render?
+    source: authored
+  - text: show every scheduled social post
+    source: authored
+  - text: how many social posts are drafts?
+    source: authored
+  - text: list the posts that need changes
+    source: authored
+  - text: what social posts did we publish this month?
+    source: authored
+  - text: show all LinkedIn posts in Socials
+    source: authored
+  - text: any social videos still rendering?
+    source: authored
+  - text: list the approved social posts
+    source: authored
+  - text: which posts are waiting on a reviewer?
+    source: authored
+  - text: show me the archived social posts
+    source: authored
+  - text: list recent social media posts
+    source: authored

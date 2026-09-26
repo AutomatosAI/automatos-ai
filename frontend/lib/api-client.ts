@@ -445,6 +445,33 @@ export interface SocialReviewEntry {
   comment: string | null
 }
 
+/** D11 (S1.5): the voice toolkit a post is spoken with; `null` on the post is Kokoro, the template's own voice. */
+export interface SocialPostVoice {
+  toolkit: string
+  voice_id: string
+  name?: string
+}
+
+/**
+ * D12 (S1.8): footage or a still a post asks one of its template's slots to be
+ * filled with. A client writes `prompt`; a render records the rest once the
+ * file is in our storage (`status: 'done'`), and reuses it while the prompt stands.
+ */
+export interface SocialPostFootage {
+  prompt: string
+  status?: 'done'
+  toolkit?: string
+  model?: string
+  deliverable_id?: string
+  name?: string
+  sha256?: string
+  bytes?: number
+  content_type?: string
+  estimate_usd?: number
+  cost_usd?: number
+  generated_at?: string
+}
+
 export interface SocialPost {
   id: string
   workspace_id: string
@@ -457,6 +484,9 @@ export interface SocialPost {
   variables: Record<string, unknown>
   sources: Record<string, unknown>
   media: Record<string, unknown>
+  voice?: SocialPostVoice | null
+  /** Slot name → the footage it asks for; `null` plays the template's own motion graphics. */
+  footage?: Record<string, SocialPostFootage> | null
   status: SocialPostStatus
   content_hash: string
   approved_hash: string | null
@@ -485,12 +515,62 @@ export interface UpdateSocialPostInput {
   title?: string
   brief?: string | null
   copy?: SocialPostCopy
+  /** `null` (or `{ toolkit: 'kokoro' }`) speaks with Kokoro. */
+  voice?: SocialPostVoice | { toolkit: 'kokoro' } | null
+  /** Slot name → `{ prompt }`; `null` asks for no footage. */
+  footage?: Record<string, { prompt: string }> | null
+}
+
+/** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
+export type SocialVoiceSourceStatus = 'available' | 'connect' | 'unavailable'
+
+export interface SocialVoiceSource {
+  toolkit: string
+  label: string
+  /** available: choose it; connect: connect it in Composio first; unavailable: connected, but `reason`. */
+  status: SocialVoiceSourceStatus
+  builtin: boolean
+  /** Whether the toolkit lists its voices here (otherwise a voice id is typed in). */
+  lists_voices: boolean
+  reason?: string | null
+}
+
+export interface SocialVoiceSourcesResponse {
+  sources: SocialVoiceSource[]
+  problem: string | null
+}
+
+/** GET /api/socials/voices/{toolkit}: a connected voice toolkit's own voices. */
+export interface SocialToolkitVoice {
+  id: string
+  name: string
+  description?: string | null
+}
+
+export interface SocialToolkitVoicesResponse {
+  toolkit: string
+  voices: SocialToolkitVoice[]
 }
 
 /** The `socials` block of GET /api/workspaces/current (D1): the platform master switch and this workspace's. */
 export interface WorkspaceSocialsState {
   available: boolean
   enabled: boolean
+}
+
+/** This month's render minutes (PRD-251 S1.1c): `quota_minutes` is null when the plan has no quota. */
+export interface SocialRenderMinutes {
+  used_minutes: number
+  used_seconds: number
+  quota_minutes: number | null
+  remaining_minutes: number | null
+  exhausted: boolean
+  period_start: string
+  period_end: string
+}
+
+export interface SocialsUsageResponse {
+  render_minutes: SocialRenderMinutes
 }
 
 class ApiClient {
@@ -2567,6 +2647,27 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ reason: reason || null }),
     })
+  }
+
+  /** Start a render (S1.1c): answers with the post in `rendering`; the render
+   * ends it in `needs_approval` or `failed`. 429 = no render minutes left this month. */
+  async renderSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+  }
+
+  async getSocialsUsage(): Promise<SocialsUsageResponse> {
+    return this.request<SocialsUsageResponse>('/api/socials/usage')
+  }
+
+  /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */
+  async getSocialVoiceSources(): Promise<SocialVoiceSourcesResponse> {
+    return this.request<SocialVoiceSourcesResponse>('/api/socials/voices')
+  }
+
+  /** A connected voice toolkit's voices, optionally only those whose name holds `query`. */
+  async listSocialToolkitVoices(toolkit: string, query?: string): Promise<SocialToolkitVoicesResponse> {
+    const q = query && query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
+    return this.request<SocialToolkitVoicesResponse>(`/api/socials/voices/${encodeURIComponent(toolkit)}${q}`)
   }
 }
 

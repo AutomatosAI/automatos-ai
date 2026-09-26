@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Cinematic product promo</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251 S1.2 (D4): the "cinematic product promo" template, ported from docs/PRDS/prd251-reference/v2-cinematic-product.html.
+         Every colour and font reads the brand kit; the var() fallbacks are the reference's Studio Dark.
+         Four footage slots (hook, reveal, morning, end): a filled slot plays its clip and holds the last
+         frame to the end of its window; an empty slot is taken out, and the background plays instead. */
+      :root {
+        --ink: var(--brand-ink, #1a1714);
+        --paper: var(--brand-on-ink, #f0e8db);
+        --muted: var(--brand-on-ink-muted, #b0a38d);
+        --dim: var(--brand-on-ink-dim, #938876);
+        --accent: var(--brand-primary-on-ink, #e96235);
+        --accent-text: var(--brand-primary-light, #f07a50);
+        --ok: var(--brand-accent-on-ink, #90af5a);
+        --info: var(--brand-info, #81a9da);
+        --progress: var(--brand-progress, #e0c152);
+        --deep: color-mix(in srgb, var(--ink) 69%, black);
+        --top: color-mix(in srgb, var(--ink) 95%, var(--paper));
+        --card: color-mix(in srgb, var(--ink) 96%, var(--paper));
+        --raised: color-mix(in srgb, var(--ink) 91%, var(--paper));
+        --block: color-mix(in srgb, var(--ink) 86%, var(--paper));
+        --line: color-mix(in srgb, var(--ink) 84%, var(--paper));
+        --outline: color-mix(in srgb, var(--ink) 72%, var(--paper));
+        --display: var(--brand-heading-font, serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      .serif { font-family: var(--display); font-weight: 500; letter-spacing: -0.015em; }
+      .mono { font-family: var(--mono); }
+      em { font-style: italic; }
+      .o { color: var(--accent); }
+      .w { display: inline-block; opacity: 0; }
+
+      /* ---------- persistent background ---------- */
+      #bg { z-index: 0; }
+      .bg-base { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, var(--top) 0%, var(--ink) 55%, var(--deep) 100%); }
+      .bg-floor { position: absolute; left: -540px; right: -540px; top: 1040px; height: 1000px; perspective: 700px; perspective-origin: 50% 0%; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); }
+      .bg-plane { position: absolute; left: 0; right: 0; top: 0; height: 2600px; transform-origin: 50% 0%; transform: rotateX(68deg);
+        background-image: linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 2px, transparent 2px), linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent) 2px, transparent 2px);
+        background-size: 120px 120px; background-position: 0px 0px; }
+      #glowA { position: absolute; left: -310px; top: 260px; width: 1700px; height: 1700px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 35%, transparent 62%); opacity: 0.55; }
+      #glowB { position: absolute; left: 240px; top: -500px; width: 1200px; height: 1200px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--info) 10%, transparent) 0%, transparent 60%); opacity: 0.6; }
+      .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, color-mix(in srgb, var(--paper) 2.8%, transparent) 0px, color-mix(in srgb, var(--paper) 2.8%, transparent) 2px, transparent 2px, transparent 6px); }
+      .grain { position: absolute; inset: 0; opacity: 0.07;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+      .vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, color-mix(in srgb, black 60%, transparent) 100%); }
+
+      /* ---------- footage slots (a clip scaled to cover; an empty slot leaves the background) ---------- */
+      .media { z-index: 1; }
+      .vid { width: 100%; height: 100%; object-fit: cover; }
+      .vwrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+      .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .filmgrain { position: absolute; inset: 0; z-index: 2; opacity: 0.05; pointer-events: none;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+
+      /* ---------- captions ---------- */
+      .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1452px; }
+      .cap-in { max-width: 920px; padding: 16px 28px; border-radius: 18px; background: color-mix(in srgb, var(--ink) 80%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+        box-shadow: 0 12px 40px color-mix(in srgb, black 45%, transparent); font-size: 42px; font-weight: 500; line-height: 1.25; text-align: center; color: var(--paper); opacity: 0; }
+      .cw { color: var(--paper); }
+
+      /* ---------- S1: the hook, over the hook footage ---------- */
+      #s1 { z-index: 3; }
+      .s1-grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 50%, transparent) 0%, transparent 26%, transparent 44%, color-mix(in srgb, var(--ink) 86%, transparent) 70%, color-mix(in srgb, var(--ink) 96%, transparent) 100%); }
+      .notif { position: absolute; left: 72px; right: 72px; top: 250px; display: flex; gap: 20px; align-items: center; padding: 24px 28px; border-radius: 28px;
+        background: color-mix(in srgb, var(--card) 82%, transparent); border: 1px solid color-mix(in srgb, var(--paper) 14%, transparent); box-shadow: 0 30px 80px color-mix(in srgb, black 50%, transparent), 0 0 60px color-mix(in srgb, var(--accent) 18%, transparent); opacity: 0; }
+      .notif .ic { width: 64px; height: 64px; border-radius: 16px; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 78%, black)); color: var(--paper); display: flex; align-items: center; justify-content: center; flex: none; }
+      .notif .t1 { font-size: 31px; font-weight: 600; }
+      .notif .t2 { font-size: 25px; color: var(--muted); margin-top: 4px; }
+      .notif .tm { margin-left: auto; align-self: flex-start; font-family: var(--mono); font-size: 22px; color: var(--dim); }
+      #s1head { position: absolute; left: 72px; right: 72px; top: 1060px; font-size: 112px; line-height: 1.0; }
+      #s1have { position: absolute; left: 72px; right: 72px; top: 1470px; font-size: 86px; line-height: 1.05; font-style: italic; color: var(--accent); opacity: 0; }
+      #s1black { position: absolute; inset: 0; background: color-mix(in srgb, var(--deep) 60%, black); opacity: 0; }
+      #crt { position: absolute; left: 0; top: 958px; width: 1080px; height: 4px; background: var(--paper); box-shadow: 0 0 30px 6px color-mix(in srgb, var(--accent) 80%, transparent); opacity: 0; }
+
+      /* ---------- S2: the reveal on the kick, over the reveal footage ---------- */
+      #s2 { z-index: 3; }
+      #s2wrap { position: absolute; inset: 0; }
+      #s2dim { position: absolute; inset: 0; background: var(--deep); opacity: 0.35; }
+      #s2dot { position: absolute; left: 529px; top: 949px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+        box-shadow: 0 0 24px 6px color-mix(in srgb, var(--accent) 75%, transparent), 0 0 80px 20px color-mix(in srgb, var(--accent) 35%, transparent); }
+      #s2halo { position: absolute; left: 140px; top: 560px; width: 800px; height: 800px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent) 45%, transparent) 0%, color-mix(in srgb, var(--accent) 12%, transparent) 40%, transparent 65%); opacity: 0; }
+      #s2markwrap { position: absolute; left: 400px; top: 797px; width: 280px; height: 326px; opacity: 0; }
+      #s2mark { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; }
+      #s2word { position: absolute; left: 0; right: 0; top: 1168px; display: flex; justify-content: center; opacity: 0; }
+      .wordmark { font-family: var(--body); font-weight: 700; font-size: 56px; line-height: 1.2; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; color: var(--paper); }
+      #s2tag { position: absolute; left: 80px; right: 80px; top: 1262px; text-align: center; font-size: 62px; line-height: 1.12; text-shadow: 0 4px 28px color-mix(in srgb, black 75%, transparent); }
+
+      /* ---------- S3: the ask, in chat ---------- */
+      #s3 { z-index: 3; }
+      .persp { position: absolute; inset: 0; perspective: 1800px; perspective-origin: 50% 40%; }
+      #chat { position: absolute; left: 60px; top: 300px; width: 960px; height: 1060px; border-radius: 30px; background: var(--card); border: 1px solid var(--line);
+        box-shadow: 0 50px 140px color-mix(in srgb, black 65%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 90px color-mix(in srgb, var(--accent) 14%, transparent); overflow: hidden; opacity: 0; }
+      .chat-top { height: 92px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; background: var(--raised); border-bottom: 1px solid var(--line); }
+      .crumb { font-family: var(--mono); font-size: 19px; letter-spacing: 0.06em; color: var(--muted); }
+      .crumb b { color: var(--paper); font-weight: 500; }
+      .pill { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); font-family: var(--mono); font-size: 17px; letter-spacing: 0.1em; color: var(--muted); }
+      .pill .n { color: var(--accent-text); }
+      .chat-body { position: absolute; left: 0; right: 0; top: 92px; bottom: 150px; }
+      #greet { position: absolute; left: 60px; right: 60px; top: 330px; text-align: center; font-size: 46px; line-height: 1.2; color: var(--dim); opacity: 0; }
+      .msg { position: absolute; display: flex; gap: 18px; opacity: 0; }
+      #muser { right: 30px; top: 40px; flex-direction: row-reverse; }
+      #mauto { left: 30px; top: 290px; }
+      .av { width: 60px; height: 60px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; }
+      .av.u { background: var(--info); color: var(--ink); }
+      .av.a { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 78%, black)); color: var(--paper); }
+      .bub { position: relative; border-radius: 22px; padding: 22px 26px; font-size: 30px; line-height: 1.35; }
+      #muser .bub { background: color-mix(in srgb, var(--paper) 10%, transparent); border-top-right-radius: 6px; max-width: 700px; }
+      #mauto .bub { background: color-mix(in srgb, var(--ink) 55%, transparent); border: 1px solid var(--line); border-top-left-radius: 6px; width: 760px; }
+      #think { position: absolute; left: 26px; top: 26px; display: flex; align-items: center; gap: 10px; font-size: 26px; color: var(--muted); }
+      .td { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: block; opacity: 0.25; }
+      #reply { opacity: 0; }
+      .trail { margin-top: 18px; display: flex; flex-direction: column; gap: 14px; }
+      .row { display: flex; align-items: center; gap: 14px; font-size: 25px; color: var(--muted); opacity: 0; }
+      .row .lbl { color: var(--paper); }
+      .row .dur { margin-left: auto; font-family: var(--mono); font-size: 20px; color: var(--dim); }
+      .ico { width: 30px; height: 30px; position: relative; flex: none; }
+      .ico svg { position: absolute; left: 0; top: 0; }
+      .ico .sp { color: var(--info); }
+      .ico .ok { opacity: 0; color: var(--ok); }
+      #route { margin-top: 22px; display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); font-family: var(--mono); font-size: 22px; color: var(--paper); opacity: 0; }
+      #route svg { color: var(--accent); flex: none; }
+      .compose { position: absolute; left: 26px; right: 26px; bottom: 26px; height: 112px; border-radius: 22px; background: var(--ink); border: 1px solid var(--line); }
+      #ph { position: absolute; left: 28px; top: 36px; font-size: 28px; color: var(--dim); }
+      #typed { position: absolute; left: 28px; right: 120px; top: 18px; font-size: 28px; line-height: 1.3; color: var(--paper); }
+      #typed span { opacity: 0; }
+      #send { position: absolute; right: 22px; top: 22px; width: 66px; height: 66px; border-radius: 50%; background: var(--accent); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+
+      /* ---------- S4: the right agent takes it (the board) ---------- */
+      #s4 { z-index: 3; }
+      #s4wrap { position: absolute; inset: 0; }
+      .eyebrow { font-family: var(--mono); font-size: 21px; letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase; }
+      .h1 { font-family: var(--display); font-weight: 500; letter-spacing: -0.015em; font-size: 80px; line-height: 1; margin-top: 14px; }
+      #cchead { position: absolute; left: 72px; right: 72px; top: 250px; opacity: 0; }
+      #stats { position: absolute; left: 72px; right: 72px; top: 420px; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 18px; background: color-mix(in srgb, var(--card) 88%, transparent); opacity: 0; }
+      .stat { padding: 16px 20px; border-right: 1px solid var(--line); }
+      .stat:last-child { border-right: none; }
+      .stat .k { font-family: var(--mono); font-size: 17px; letter-spacing: 0.12em; color: var(--dim); }
+      .stat .v { position: relative; height: 46px; margin-top: 6px; font-family: var(--mono); font-size: 38px; line-height: 46px; color: var(--paper); }
+      .stat .v span { position: absolute; left: 0; top: 0; opacity: 0; }
+      .stat .v span.on { opacity: 1; }
+      .stat .v .hot { color: var(--accent); }
+      .cols { position: absolute; left: 72px; top: 580px; width: 936px; height: 820px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      .col { border-radius: 20px; background: color-mix(in srgb, var(--raised) 60%, transparent); border: 1px solid var(--line); padding: 14px 12px; opacity: 0; }
+      .col-h { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 18px; letter-spacing: 0.1em; color: var(--muted); padding: 4px 8px; }
+      .col-h i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+      .tone-info { background: var(--info); }
+      .tone-progress { background: var(--progress); }
+      .tone-ok { background: var(--ok); }
+      .tone-accent { background: var(--accent); }
+      .card { position: absolute; left: 78px; width: 288px; height: 176px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); padding: 16px 16px 14px;
+        box-shadow: 0 16px 40px color-mix(in srgb, black 45%, transparent); opacity: 0; }
+      .card .ty { font-family: var(--mono); font-size: 15px; letter-spacing: 0.08em; color: var(--dim); display: flex; justify-content: space-between; }
+      .card .ty .hi { color: var(--accent-text); }
+      .card .t { font-family: var(--display); font-weight: 500; font-size: 27px; line-height: 1.12; margin-top: 10px; height: 62px; overflow: hidden; }
+      .card .ag { position: absolute; left: 16px; right: 16px; bottom: 14px; height: 26px; font-family: var(--mono); font-size: 16px; letter-spacing: 0.08em; color: var(--muted); }
+      .card .un, .card .as { position: absolute; left: 0; top: 0; right: 30px; height: 26px; display: flex; align-items: center; gap: 10px; }
+      .card .un { color: var(--dim); }
+      .card .as { opacity: 0; color: var(--paper); }
+      .card .sw { width: 14px; height: 14px; border-radius: 4px; display: block; }
+      .card .st { position: absolute; right: 0; top: 0; width: 26px; height: 26px; }
+      .card .st svg { position: absolute; left: 0; top: 0; opacity: 0; }
+      .card .st .sp { color: var(--accent); }
+      .card .st .ok { color: var(--ok); }
+
+      /* ---------- S5: they ask you first ---------- */
+      #s5 { z-index: 5; }
+      #dim { position: absolute; inset: 0; background: var(--deep); opacity: 0; }
+      #ask { position: absolute; left: 70px; top: 470px; width: 940px; border-radius: 26px; background: var(--card); border: 1px solid var(--line);
+        box-shadow: 0 50px 140px color-mix(in srgb, black 70%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 100px color-mix(in srgb, var(--accent) 18%, transparent); padding: 34px 36px 30px; opacity: 0; }
+      .ask-h { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 21px; color: var(--muted); letter-spacing: 0.04em; }
+      .ask-h svg { color: var(--muted); flex: none; }
+      .ask-h .need { margin-left: auto; padding: 6px 14px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-text); font-size: 17px; letter-spacing: 0.12em; }
+      .ask-q { font-family: var(--display); font-weight: 500; font-size: 52px; line-height: 1.1; margin-top: 22px; }
+      .block { margin-top: 22px; border-radius: 16px; background: var(--block); padding: 18px 20px; }
+      .block .k { font-family: var(--mono); font-size: 18px; letter-spacing: 0.1em; color: var(--progress); }
+      .block .r { font-size: 24px; color: var(--muted); margin-top: 10px; }
+      .opt { position: relative; margin-top: 18px; height: 84px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 29px; font-weight: 500; }
+      #optA { background: var(--paper); color: var(--ink); }
+      #optB { border: 1px solid var(--outline); color: var(--paper); }
+      .own { margin-top: 16px; text-align: center; font-size: 21px; color: var(--dim); text-decoration: underline; text-underline-offset: 6px; }
+      #ripple { position: absolute; left: 400px; top: 2px; width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
+      #cursor { position: absolute; left: 420px; top: 30px; width: 54px; height: 60px; opacity: 0; }
+      #cursor path { fill: var(--paper); stroke: var(--ink); }
+      #toast { margin-top: 20px; height: 80px; border-radius: 18px; background: var(--raised); border: 1px solid color-mix(in srgb, var(--ok) 65%, transparent); display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 26px; color: var(--paper); opacity: 0; }
+      #toast svg { color: var(--ok); flex: none; }
+
+      /* ---------- S6: night to morning, over the morning footage ---------- */
+      #s6 { z-index: 3; }
+      #s6wrap { position: absolute; inset: 0; }
+      #s6shade { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--deep) 78%, transparent) 0%, color-mix(in srgb, var(--deep) 40%, transparent) 34%, color-mix(in srgb, var(--deep) 55%, transparent) 70%, color-mix(in srgb, var(--deep) 85%, transparent) 100%); }
+      .ney { position: absolute; left: 0; right: 0; top: 330px; height: 40px; font-family: var(--mono); font-size: 24px; letter-spacing: 0.2em; color: var(--paper); }
+      .ney div { position: absolute; left: 0; right: 0; top: 0; text-align: center; }
+      #ney2 { opacity: 0; }
+      #nclock { position: absolute; left: 0; right: 0; top: 390px; height: 230px; display: flex; justify-content: center; font-family: var(--mono); font-size: 200px; font-weight: 500; color: var(--paper); text-shadow: 0 0 50px color-mix(in srgb, var(--accent) 45%, transparent), 0 6px 30px color-mix(in srgb, black 60%, transparent); opacity: 0; }
+      .hh, .mm { position: relative; width: 250px; height: 230px; overflow: hidden; }
+      #hstrip { position: absolute; left: 0; top: 0; width: 250px; }
+      #hstrip div { height: 230px; line-height: 230px; text-align: center; }
+      /* The colon's glyph can be wider than its column in a wide mono font: centre it (an overflowing line
+         is otherwise start-aligned, and it would run over the minutes). */
+      .colon { width: 90px; line-height: 230px; display: flex; justify-content: center; }
+      .mm div { position: absolute; left: 0; right: 0; top: 0; height: 230px; line-height: 230px; text-align: center; }
+      #mm2 { opacity: 0; }
+      .list { position: absolute; left: 100px; right: 100px; top: 700px; display: flex; flex-direction: column; gap: 16px; }
+      .li { display: flex; align-items: center; gap: 22px; height: 98px; padding: 0 26px; border-radius: 18px; background: color-mix(in srgb, var(--ink) 82%, transparent); border: 1px solid color-mix(in srgb, var(--paper) 14%, transparent); font-size: 29px; opacity: 0; }
+      .badge { position: relative; width: 44px; height: 44px; flex: none; }
+      .badge .num { position: absolute; left: 0; top: 0; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--outline); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 20px; color: var(--dim); }
+      .badge .ok { position: absolute; left: 0; top: 0; width: 44px; height: 44px; border-radius: 50%; background: var(--ok); color: var(--ink); display: flex; align-items: center; justify-content: center; opacity: 0; }
+
+      /* ---------- S7: the work that landed ---------- */
+      #s7 { z-index: 3; }
+      #s7wrap { position: absolute; inset: 0; }
+      #dlhead { position: absolute; left: 72px; right: 72px; top: 250px; opacity: 0; }
+      .hero { font-family: var(--display); font-weight: 500; font-size: 54px; line-height: 1.12; margin-top: 20px; }
+      .hero b { color: var(--accent); font-weight: 500; }
+      .pills { display: flex; gap: 12px; margin-top: 20px; }
+      .pills span { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); font-family: var(--mono); font-size: 18px; color: var(--muted); }
+      .grid { position: absolute; left: 72px; right: 72px; top: 650px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .rc { position: relative; height: 330px; border-radius: 20px; background: var(--card); border: 1px solid var(--line); padding: 20px; box-shadow: 0 20px 50px color-mix(in srgb, black 45%, transparent); opacity: 0; overflow: hidden; }
+      .rc .top { display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 16px; letter-spacing: 0.1em; color: var(--muted); }
+      .rc .tag { padding: 4px 12px; border-radius: 999px; background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
+      .rc .thumb { margin-top: 16px; height: 140px; border-radius: 12px; background: var(--ink); border: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+      .rc .thumb i { display: block; height: 12px; border-radius: 6px; background: var(--block); }
+      .rc .thumb i.a { background: var(--accent); height: 20px; width: 55%; }
+      .rc .tt { font-family: var(--display); font-weight: 500; font-size: 30px; line-height: 1.12; margin-top: 16px; }
+      .sheen { position: absolute; left: 0; top: -60px; width: 120px; height: 460px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--paper) 12%, transparent), transparent); opacity: 0; }
+
+      /* ---------- S8: the team ---------- */
+      #s8 { z-index: 3; }
+      #s8wrap { position: absolute; inset: 0; }
+      .hl { position: absolute; left: 72px; right: 72px; top: 300px; }
+      .hl .ln { font-family: var(--display); font-weight: 500; letter-spacing: -0.02em; font-size: 84px; line-height: 1.06; opacity: 0; }
+      .hl .ln em { color: var(--accent); }
+      .roster { position: absolute; left: 72px; top: 790px; width: 936px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .agc { position: relative; height: 176px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); padding: 18px; opacity: 0; overflow: hidden; }
+      .agc .ic { width: 46px; height: 46px; border-radius: 12px; background: var(--raised); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+      .agc .nm { font-family: var(--mono); font-size: 20px; letter-spacing: 0.08em; margin-top: 16px; color: var(--paper); white-space: nowrap; }
+      .agc .stt { position: relative; height: 24px; margin-top: 10px; font-size: 18px; color: var(--dim); }
+      .agc .stt div { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 8px; }
+      .agc .stt .wk { opacity: 0; color: var(--accent-text); }
+      .agc .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
+      .agc .bar { position: absolute; left: 18px; right: 18px; bottom: 16px; height: 6px; border-radius: 3px; background: var(--block); overflow: hidden; }
+      .agc .bar b { display: block; width: 100%; height: 100%; background: var(--accent); transform-origin: 0 50%; }
+
+      /* ---------- S9: the end card, over the end footage ---------- */
+      #s9 { z-index: 3; }
+      #s9wrap { position: absolute; inset: 0; }
+      #s9shade { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 45% at 50% 42%, color-mix(in srgb, var(--deep) 62%, transparent) 0%, color-mix(in srgb, var(--deep) 25%, transparent) 70%, color-mix(in srgb, var(--deep) 5%, transparent) 100%), linear-gradient(180deg, color-mix(in srgb, var(--deep) 35%, transparent) 0%, transparent 30%, transparent 55%, color-mix(in srgb, var(--deep) 80%, transparent) 100%); opacity: 0; }
+      #endhalo { position: absolute; left: 40px; top: 250px; width: 1000px; height: 1000px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent) 36%, transparent) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 38%, transparent 64%); opacity: 0; }
+      #ring { position: absolute; left: 340px; top: 551px; width: 400px; height: 400px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 85%, transparent); opacity: 0; }
+      #endmark { position: absolute; left: 410px; top: 590px; width: 260px; height: 303px; opacity: 0; }
+      #endmark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+      #endword { position: absolute; left: 0; right: 0; top: 950px; display: flex; justify-content: center; opacity: 0; }
+      .endtag { position: absolute; left: 70px; right: 70px; top: 1080px; text-align: center; font-family: var(--display); font-weight: 500; font-size: 74px; line-height: 1.08; text-shadow: 0 4px 30px color-mix(in srgb, black 55%, transparent); }
+      .endtag div { opacity: 0; }
+      #el2 { font-style: italic; color: var(--accent-text); }
+      #url { position: absolute; left: 0; right: 0; top: 1330px; display: flex; flex-direction: column; align-items: center; gap: 16px; opacity: 0; }
+      #url .u { font-family: var(--mono); font-size: 50px; color: var(--paper); letter-spacing: 0.02em; text-shadow: 0 4px 24px color-mix(in srgb, black 60%, transparent); }
+      #uline { width: 380px; height: 3px; background: var(--accent); transform-origin: 0 50%; }
+      #url .os { font-family: var(--mono); font-size: 24px; letter-spacing: 0.16em; color: var(--paper); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="40" data-width="1080" data-height="1920">
+      <!-- ================= persistent background ================= -->
+      <div id="bg" class="clip" data-start="0" data-duration="40" data-track-index="0">
+        <div class="bg-base"></div>
+        <div id="glowB"></div>
+        <div id="glowA"></div>
+        <div class="bg-floor"><div class="bg-plane" id="plane" data-layout-allow-overflow></div></div>
+        <div class="scan"></div>
+        <div class="grain"></div>
+        <div class="vig"></div>
+      </div>
+
+      <!-- ================= footage slots: a clip that ends early holds its last frame ================= -->
+      <video id="cv1" class="clip vid media" data-slot="hook" src="assets/slots/hook.mp4" data-start="0" data-duration="3.45" data-track-index="1" muted playsinline></video>
+      <div class="vwrap" id="w2"><video id="cv2" class="clip" data-slot="reveal" src="assets/slots/reveal.mp4" data-start="3.45" data-duration="5.75" data-track-index="1" muted playsinline></video></div>
+      <video id="cv3" class="clip vid media" data-slot="morning" src="assets/slots/morning.mp4" data-start="20.6" data-duration="3" data-track-index="1" muted playsinline></video>
+      <div class="vwrap" id="w4"><video id="cv4" class="clip" data-slot="end" src="assets/slots/end.mp4" data-start="31.9" data-duration="8.1" data-track-index="1" muted playsinline></video></div>
+      <div class="filmgrain"></div>
+
+      <!-- ================= S1: the hook, over the hook footage ================= -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.45" data-track-index="2">
+        <div class="s1-grad"></div>
+        <div class="notif" id="n2"><div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg></div><div><div class="t1">{{ notice_1_title }}</div><div class="t2">{{ notice_1_detail }}</div></div><div class="tm">{{ notice_1_time }}</div></div>
+        <div class="notif" id="n1"><div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg></div><div><div class="t1">{{ notice_2_title }}</div><div class="t2">{{ notice_2_detail }}</div></div><div class="tm">{{ notice_2_time }}</div></div>
+        <div id="s1head" class="serif"><span id="s1a">{{ hook_line }}</span> <em class="o" id="s1b">{{ hook_accent }}</em></div>
+        <div id="s1have" class="serif">{{ hook_turn }}</div>
+        <div id="s1black"></div>
+        <div id="crt"></div>
+      </section>
+
+      <!-- ================= S2: the reveal on the kick, over the reveal footage ================= -->
+      <section id="s2" class="clip" data-start="3.45" data-duration="5.75" data-track-index="2">
+        <div id="s2wrap">
+          <div id="s2dim"></div>
+          <div id="s2halo"></div>
+          <div id="s2dot"></div>
+          <div id="s2markwrap"><img id="s2mark" src="{{ brand.logo_mark }}" alt="" /></div>
+          <div id="s2word"><div class="wordmark" id="s2name">{{ brand.name }}</div></div>
+          <div id="s2tag" class="serif"><span id="s2t1">{{ tagline_lead }}</span> <em class="o" id="s2t2">{{ tagline_accent }}</em> <span id="s2t3">{{ tagline_tail }}</span></div>
+        </div>
+      </section>
+
+      <!-- ================= S3: tell Auto what you need ================= -->
+      <section id="s3" class="clip" data-start="9.2" data-duration="2.95" data-track-index="2">
+        <div class="persp">
+          <div id="chat">
+            <div class="chat-top">
+              <div class="crumb">{{ chat_crumb }} <b>{{ chat_title }}</b></div>
+              <div class="pill">{{ chat_counter_label }} <span class="n">{{ chat_counter }}</span></div>
+            </div>
+            <div class="chat-body">
+              <div id="greet" class="serif">{{ chat_greeting }}</div>
+              <div class="msg" id="muser">
+                <div class="av u">
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" /></svg>
+                </div>
+                <div class="bub" id="request">{{ chat_request }}</div>
+              </div>
+              <div class="msg" id="mauto">
+                <div class="av a">
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.1L22 12l-7.6 2.9L12 22l-2.4-7.1L2 12l7.6-2.9z" /></svg>
+                </div>
+                <div class="bub">
+                  <div id="think"><span class="td" id="td1"></span><span class="td" id="td2"></span><span class="td" id="td3"></span><span>{{ chat_thinking }}</span></div>
+                  <div id="reply">
+                    <div>{{ chat_reply }}</div>
+                    <div class="trail">
+                      <div class="row" id="r1">
+                        <div class="ico">
+                          <svg class="sp" id="sp1" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                          <svg class="ok" id="ok1" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+                        </div>
+                        <span class="lbl">{{ step_1_label }}</span><span>{{ step_1_detail }}</span><span class="dur">{{ step_1_time }}</span>
+                      </div>
+                      <div class="row" id="r2">
+                        <div class="ico">
+                          <svg class="sp" id="sp2" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                          <svg class="ok" id="ok2" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+                        </div>
+                        <span class="lbl">{{ step_2_label }}</span><span>{{ step_2_detail }}</span><span class="dur">{{ step_2_time }}</span>
+                      </div>
+                      <div class="row" id="r3">
+                        <div class="ico">
+                          <svg class="sp" id="sp3" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                          <svg class="ok" id="ok3" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+                        </div>
+                        <span class="lbl">{{ step_3_label }}</span><span>{{ step_3_detail }}</span><span class="dur">{{ step_3_time }}</span>
+                      </div>
+                    </div>
+                    <div id="route">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" /></svg>
+                      {{ route_label }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="compose">
+              <div id="ph">{{ chat_placeholder }}</div>
+              <div id="typed"></div>
+              <div id="send">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S4: the right agent takes it (the board) ================= -->
+      <section id="s4" class="clip" data-start="12.15" data-duration="8.45" data-track-index="2">
+        <div id="s4wrap" data-layout-allow-occlusion>
+          <div id="cchead">
+            <div class="eyebrow">{{ board_eyebrow }}</div>
+            <div class="h1">{{ board_title }}</div>
+          </div>
+          <div id="stats">
+            <div class="stat"><div class="k">{{ board_working_label }}</div>
+              <div class="v"><span id="wk0" class="on">0</span><span id="wk1">1</span><span id="wk2">2</span><span id="wk3">3</span><span id="wk4" class="hot">4</span><span id="wk3b">3</span></div></div>
+            <div class="stat"><div class="k">{{ board_agents_label }}</div><div class="v"><span class="on">{{ board_agents }}</span></div></div>
+            <div class="stat"><div class="k">{{ board_queue_label }}</div>
+              <div class="v"><span id="q4" class="on">4</span><span id="q3">3</span><span id="q2">2</span><span id="q1">1</span><span id="q0">0</span></div></div>
+            <div class="stat"><div class="k">{{ board_attention_label }}</div>
+              <div class="v"><span id="at0" class="on">0</span><span id="at1" class="hot">1</span></div></div>
+          </div>
+          <div class="cols">
+            <div class="col"><div class="col-h" data-layout-allow-overlap><i class="tone-info"></i>{{ board_column_1 }}</div></div>
+            <div class="col"><div class="col-h" data-layout-allow-overlap><i class="tone-progress"></i>{{ board_column_2 }}</div></div>
+            <div class="col"><div class="col-h" data-layout-allow-overlap><i class="tone-ok"></i>{{ board_column_3 }}</div></div>
+          </div>
+
+          <div class="card" id="c1" style="top:648px">
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_1_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_1_flag }}</span></div>
+            <div class="t" data-layout-allow-overlap>{{ task_1_title }}</div>
+            <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-info"></i>{{ task_1_agent }}</div>
+              <div class="st">
+                <svg class="sp" id="c1sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                <svg class="ok" id="c1ok" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+              </div></div>
+          </div>
+          <div class="card" id="c2" style="top:832px">
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_2_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_2_flag }}</span></div>
+            <div class="t" data-layout-allow-overlap>{{ task_2_title }}</div>
+            <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-progress"></i>{{ task_2_agent }}</div>
+              <div class="st"><svg class="sp" id="c2sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
+          </div>
+          <div class="card" id="c3" style="top:1016px">
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_3_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_3_flag }}</span></div>
+            <div class="t" data-layout-allow-overlap>{{ task_3_title }}</div>
+            <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-accent"></i>{{ task_3_agent }}</div>
+              <div class="st"><svg class="sp" id="c3sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
+          </div>
+          <div class="card" id="c4" style="top:1200px">
+            <div class="ty" data-layout-allow-overlap><span data-layout-allow-overlap>{{ task_4_kind }}</span><span class="hi" data-layout-allow-overlap>{{ task_4_flag }}</span></div>
+            <div class="t" data-layout-allow-overlap>{{ task_4_title }}</div>
+            <div class="ag"><div class="un" data-layout-allow-overlap>{{ task_unassigned }}</div><div class="as" data-layout-allow-overlap><i class="sw tone-ok"></i>{{ task_4_agent }}</div>
+              <div class="st"><svg class="sp" id="c4sp" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S5: when it matters, they ask you first ================= -->
+      <section id="s5" class="clip" data-start="17.3" data-duration="3.3" data-track-index="3">
+        <div id="dim"></div>
+        <div id="ask">
+          <div class="ask-h">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" /></svg>
+            {{ ask_meta }}
+            <span class="need">{{ ask_badge }}</span>
+          </div>
+          <div class="ask-q">{{ ask_question }}</div>
+          <div class="block">
+            <div class="k">{{ ask_block_title }}</div>
+            <div class="r">{{ ask_block_line_1 }}</div>
+            <div class="r">{{ ask_block_line_2 }}</div>
+          </div>
+          <div class="opt" id="optA">{{ ask_option_a }}
+            <div id="ripple"></div>
+            <svg id="cursor" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg"><path d="M3 2 L3 21 L8.2 16.2 L11.6 23.4 L14.6 22 L11.3 15 L18 15 Z" stroke-width="1.4" stroke-linejoin="round" /></svg>
+          </div>
+          <div class="opt" id="optB">{{ ask_option_b }}</div>
+          <div class="own">{{ ask_own_words }}</div>
+          <div id="toast">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+            {{ ask_toast }}
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S6: by morning, the work is done ================= -->
+      <section id="s6" class="clip" data-start="20.6" data-duration="3" data-track-index="2">
+        <div id="s6wrap">
+          <div id="s6shade"></div>
+          <div class="ney"><div id="ney1">{{ night_date }}</div><div id="ney2">{{ morning_date }}</div></div>
+          <div id="nclock">
+            <div class="hh"><div id="hstrip" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+            <div class="colon">:</div>
+            <div class="mm" data-layout-allow-overlap><div id="mm1" data-layout-allow-overlap>{{ night_minute }}</div><div id="mm2" data-layout-allow-overlap>{{ morning_minute }}</div></div>
+          </div>
+          <div class="list">
+            <div class="li"><div class="badge"><div class="num">1</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_1 }}</div>
+            <div class="li"><div class="badge"><div class="num">2</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_2 }}</div>
+            <div class="li"><div class="badge"><div class="num">3</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_3 }}</div>
+            <div class="li"><div class="badge"><div class="num">4</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_4 }}</div>
+            <div class="li"><div class="badge"><div class="num">5</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_5 }}</div>
+            <div class="li"><div class="badge"><div class="num">6</div><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ done_6 }}</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S7: every draft, report and page, in one place ================= -->
+      <section id="s7" class="clip" data-start="23.6" data-duration="3.9" data-track-index="2">
+        <div id="s7wrap">
+          <div id="dlhead">
+            <div class="eyebrow">{{ outputs_eyebrow }}</div>
+            <div class="h1">{{ outputs_title }}</div>
+            <div class="hero">{{ outputs_lead }} <b>{{ outputs_count }}</b> {{ outputs_tail }}</div>
+            <div class="pills"><span>{{ outputs_pill_1 }}</span><span>{{ outputs_pill_2 }}</span><span>{{ outputs_pill_3 }}</span><span>{{ outputs_pill_4 }}</span></div>
+          </div>
+          <div class="grid">
+            <div class="rc" id="rc1"><div class="top"><span>{{ output_1_agent }}</span><span class="tag">{{ output_1_kind }}</span></div>
+              <div class="thumb"><i style="width:92%"></i><i style="width:78%"></i><i style="width:86%"></i><i style="width:60%"></i><i style="width:72%"></i></div>
+              <div class="tt">{{ output_1_title }}</div><div class="sheen" id="sh1"></div></div>
+            <div class="rc" id="rc2"><div class="top"><span>{{ output_2_agent }}</span><span class="tag">{{ output_2_kind }}</span></div>
+              <div class="thumb"><i class="a"></i><i style="width:96%"></i><i style="width:88%"></i><i style="width:70%"></i></div>
+              <div class="tt">{{ output_2_title }}</div><div class="sheen" id="sh2"></div></div>
+            <div class="rc" id="rc3"><div class="top"><span>{{ output_3_agent }}</span><span class="tag">{{ output_3_kind }}</span></div>
+              <div class="thumb"><i class="a" style="width:100%"></i><i style="width:64%"></i><i style="width:82%"></i><i style="width:48%"></i></div>
+              <div class="tt">{{ output_3_title }}</div><div class="sheen" id="sh3"></div></div>
+            <div class="rc" id="rc4"><div class="top"><span>{{ output_4_agent }}</span><span class="tag">{{ output_4_kind }}</span></div>
+              <div class="thumb"><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i></div>
+              <div class="tt">{{ output_4_title }}</div><div class="sheen" id="sh4"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S8: hire / equip / let them work ================= -->
+      <section id="s8" class="clip" data-start="27.5" data-duration="4.4" data-track-index="2">
+        <div id="s8wrap">
+          <div class="hl">
+            <div class="ln" id="hl1">{{ team_line_1 }}</div>
+            <div class="ln" id="hl2">{{ team_line_2 }} <em>{{ team_line_2_accent }}</em></div>
+            <div class="ln" id="hl3">{{ team_line_3 }} <em>{{ team_line_3_accent }}</em></div>
+          </div>
+          <div class="roster" id="roster" data-names="{{ team_roster }}" data-idle="{{ team_idle }}" data-busy="{{ team_busy }}"></div>
+        </div>
+      </section>
+
+      <!-- ================= S9: the end card ================= -->
+      <section id="s9" class="clip" data-start="31.9" data-duration="8.1" data-track-index="2">
+        <div id="s9wrap">
+          <div id="s9shade"></div>
+          <div id="endhalo"></div>
+          <div id="ring"></div>
+          <div id="endmark"><img id="endlogo" src="{{ brand.logo_mark }}" alt="" /></div>
+          <div id="endword"><div class="wordmark" id="endname">{{ brand.name }}</div></div>
+          <div class="endtag"><div id="el1">{{ end_line }}</div><div id="el2">{{ end_accent }}</div></div>
+          <div id="url"><div class="u">{{ end_url }}</div><div id="uline"></div><div class="os">{{ end_note }}</div></div>
+        </div>
+      </section>
+
+      <!-- ================= captions (the voice lines not already on screen) ================= -->
+      <div class="clip cap" id="cap4" data-start="9.3" data-duration="1.5" data-track-index="5"><div class="cap-in">{{ cap_ask }}</div></div>
+      <div class="clip cap" id="cap5a" data-start="12.33" data-duration="1.25" data-track-index="5"><div class="cap-in">{{ cap_handoff }}</div></div>
+      <div class="clip cap" id="cap5b" data-start="13.85" data-duration="2.55" data-track-index="5"><div class="cap-in"><span class="cw" id="k1">{{ beat_1 }}</span> <span class="cw" id="k2">{{ beat_2 }}</span> <span class="cw" id="k3">{{ beat_3 }}</span> <span class="cw" id="k4">{{ beat_4 }}</span></div></div>
+      <div class="clip cap" id="cap6" data-start="17.42" data-duration="1.95" data-track-index="5"><div class="cap-in">{{ cap_question }}</div></div>
+      <div class="clip cap" id="cap7" data-start="20.92" data-duration="1.55" data-track-index="5"><div class="cap-in">{{ cap_morning }}</div></div>
+      <div class="clip cap" id="cap8" data-start="23.72" data-duration="2.95" data-track-index="5"><div class="cap-in">{{ cap_outputs }}</div></div>
+
+      <!-- ================= audio: the pre-mixed voice, music and sfx ================= -->
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="40" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the DOM the timeline animates, built once from the template's own text ----------
+      const byId = (id) => document.getElementById(id);
+      const rootStyle = getComputedStyle(document.documentElement);
+      const tone = (name) => rootStyle.getPropertyValue(name).trim();
+      const ACCENT = tone("--accent");
+      const PAPER = tone("--paper");
+      const OK = tone("--ok");
+      function rgba(hex, alpha) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+        return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + alpha + ")" : hex;
+      }
+      // One span per word of each element, in order: the words land one by one.
+      function words(...ids) {
+        const spans = [];
+        ids.forEach((id) => {
+          const el = byId(id);
+          const parts = el.textContent.trim().split(/\s+/).filter(Boolean);
+          el.textContent = "";
+          parts.forEach((part, i) => {
+            if (i) el.appendChild(document.createTextNode(" "));
+            const span = document.createElement("span");
+            span.className = "w";
+            span.textContent = part;
+            el.appendChild(span);
+            spans.push(span);
+          });
+        });
+        return spans;
+      }
+      // The word times of the reference, continued at the same pace for longer copy.
+      function wordAt(times, i) {
+        if (i < times.length) return times[i];
+        const step = times.length > 1 ? (times[times.length - 1] - times[0]) / (times.length - 1) : 0.2;
+        return times[times.length - 1] + (i - times.length + 1) * step;
+      }
+      // A wordmark set in text: sized from its length so the brand name fits the frame on one line.
+      function fitWordmark(id, maxPx, widthPx) {
+        const el = byId(id);
+        const chars = Math.max(1, el.textContent.trim().length);
+        el.style.fontSize = Math.max(24, Math.min(maxPx, Math.floor(widthPx / (chars * 0.86)))) + "px";
+      }
+      fitWordmark("s2name", 56, 900);
+      fitWordmark("endname", 60, 900);
+
+      // The request types itself into the composer, then lands as the message.
+      const typedEl = byId("typed");
+      const typedChars = Array.from(byId("request").textContent.trim());
+      typedChars.forEach((ch) => {
+        const s = document.createElement("span");
+        s.textContent = ch;
+        typedEl.appendChild(s);
+      });
+      const typeStagger = Math.min(0.0105, 0.9 / Math.max(1, typedChars.length));
+
+      // The hours roll from the night to the morning.
+      const H0 = {{ night_hour }};
+      const H1 = {{ morning_hour }};
+      const hstrip = byId("hstrip");
+      const hours = [];
+      for (let h = H0, n = 0; n < 24; h = (h + 1) % 24, n += 1) {
+        hours.push(h);
+        if (h === H1) break;
+      }
+      hours.forEach((h) => {
+        const d = document.createElement("div");
+        d.textContent = String(h).padStart(2, "0");
+        hstrip.appendChild(d);
+      });
+
+      // The team: one card per name, each at work.
+      const rosterEl = byId("roster");
+      const names = rosterEl.dataset.names.split(",").map((n) => n.trim()).filter(Boolean).slice(0, 9);
+      const loads = [0.82, 0.64, 0.4, 0.9, 0.72, 0.58, 0.5, 0.68, 0.36];
+      const botIcon =
+        '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+      names.forEach((name, i) => {
+        const card = document.createElement("div");
+        card.className = "agc";
+        card.id = "ag" + i;
+        const icon = document.createElement("div");
+        icon.className = "ic";
+        icon.innerHTML = botIcon;
+        const label = document.createElement("div");
+        label.className = "nm";
+        label.textContent = name;
+        const status = document.createElement("div");
+        status.className = "stt";
+        status.setAttribute("data-layout-allow-overlap", "");
+        [["ac", "tone-ok", rosterEl.dataset.idle], ["wk", "tone-accent", rosterEl.dataset.busy]].forEach(([cls, dot, text]) => {
+          const line = document.createElement("div");
+          line.className = cls;
+          line.setAttribute("data-layout-allow-overlap", "");
+          const i2 = document.createElement("i");
+          i2.className = "dot " + dot;
+          line.appendChild(i2);
+          line.appendChild(document.createTextNode(text));
+          status.appendChild(line);
+        });
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const fill = document.createElement("b");
+        fill.id = "agb" + i;
+        bar.appendChild(fill);
+        card.append(icon, label, status, bar);
+        rosterEl.appendChild(card);
+      });
+
+      const hookWords = words("s1a", "s1b");
+      const tagWords = words("s2t1", "s2t2", "s2t3");
+
+      // ---------- one paused root timeline ----------
+      const tl = gsap.timeline({ paused: true });
+
+      // background, and the camera moves on the footage (an empty slot's wrapper is empty)
+      tl.fromTo("#plane", { backgroundPosition: "0px 0px" }, { backgroundPosition: "0px 1440px", duration: 40, ease: "none" }, 0);
+      tl.fromTo("#w2", { scale: 1.0 }, { scale: 1.05, duration: 0.75, ease: "none" }, 8.45);
+      tl.fromTo("#w4", { scale: 1.12 }, { scale: 1.1, duration: 5, ease: "none" }, 31.9);
+      tl.to("#w4", { scale: 1.0, duration: 3.1, ease: "power1.out" }, 36.9);
+
+      // ===== S1 (0 – 3.45): the hook, and the turn
+      tl.fromTo("#n2", { y: -40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "back.out(1.6)" }, 0.35);
+      tl.to("#n2", { y: 170, scale: 0.94, opacity: 0.72, duration: 0.35, ease: "power3.out" }, 1.0);
+      tl.fromTo("#n1", { y: -40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "back.out(1.6)" }, 1.02);
+      hookWords.forEach((w, i) => {
+        tl.fromTo(w, { y: 44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "power3.out" }, wordAt([0.33, 0.55, 0.95, 1.2, 1.5], i));
+      });
+      tl.fromTo("#s1have", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "power3.out" }, 2.42);
+      // lights out on the music breakdown
+      tl.to("#s1black", { opacity: 1, duration: 0.1, ease: "power2.in" }, 3.25);
+      tl.fromTo("#crt", { opacity: 0, scaleX: 1 }, { opacity: 1, duration: 0.03 }, 3.3);
+      tl.to("#crt", { scaleX: 0.02, backgroundColor: ACCENT, duration: 0.12, ease: "power3.in" }, 3.33);
+
+      // ===== S2 (3.45 – 9.2): the reveal on the kick
+      tl.fromTo("#s2dot", { scale: 0.5 }, { scale: 1, duration: 0.2, ease: "back.out(3)" }, 3.45);
+      tl.to("#s2dot", { scale: 1.3, duration: 0.24, yoyo: true, repeat: 1, ease: "sine.inOut" }, 3.67);
+      tl.to("#s2dim", { opacity: 0.62, duration: 0.6, ease: "power2.out" }, 4.1);
+      tl.to("#s2dot", { scale: 7, opacity: 0, duration: 0.4, ease: "power2.in" }, 4.15);
+      tl.fromTo("#s2halo", { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.8, ease: "power2.out" }, 4.25);
+      tl.to("#s2markwrap", { opacity: 1, duration: 0.05 }, 4.3);
+      tl.fromTo("#s2markwrap", { scale: 0.9 }, { scale: 1, duration: 1.2, ease: "power2.out" }, 4.3);
+      tl.fromTo("#s2mark", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "back.out(1.6)" }, 4.32);
+      tl.fromTo("#s2word", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 4.85);
+      tagWords.forEach((w, i) => {
+        tl.fromTo(w, { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, wordAt([5.55, 5.72, 6.08, 6.38, 6.56, 7.16, 7.5], i));
+      });
+      tl.to("#s2dim", { opacity: 0.86, duration: 0.8, ease: "power1.inOut" }, 6.9);
+      tl.to("#glowA", { opacity: 0.9, scale: 1.1, duration: 1.2, ease: "sine.inOut" }, 7.6);
+      tl.to("#s2markwrap", { scale: 1.05, duration: 1.0, ease: "sine.inOut" }, 7.7);
+      tl.to("#s2wrap", { opacity: 0, scale: 0.92, filter: "blur(8px)", duration: 0.28, ease: "power2.in" }, 8.9);
+      tl.to("#glowA", { opacity: 0.5, scale: 1, duration: 0.6 }, 9.1);
+
+      // ===== S3 (9.2 – 12.15): tell Auto what you need
+      tl.fromTo("#chat", { y: 160, rotationX: 14, opacity: 0 }, { y: 0, rotationX: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 9.2);
+      tl.to("#greet", { opacity: 1, duration: 0.3 }, 9.3);
+      tl.to("#ph", { opacity: 0, duration: 0.08 }, 9.42);
+      tl.to("#typed span", { opacity: 1, duration: 0.01, stagger: typeStagger, ease: "none" }, 9.45);
+      tl.fromTo("#send", { scale: 1 }, { scale: 0.84, duration: 0.07, yoyo: true, repeat: 1 }, 10.38);
+      tl.to("#typed", { opacity: 0, duration: 0.1 }, 10.44);
+      tl.to("#greet", { opacity: 0, duration: 0.15 }, 10.42);
+      tl.fromTo("#muser", { y: 24, scale: 0.96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.3, ease: "back.out(1.7)" }, 10.46);
+      tl.fromTo("#mauto", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "power3.out" }, 10.66);
+      ["#td1", "#td2", "#td3"].forEach((d, i) => {
+        tl.fromTo(d, { opacity: 0.25 }, { opacity: 1, duration: 0.12, yoyo: true, repeat: 1, ease: "sine.inOut" }, 10.68 + i * 0.07);
+      });
+      tl.to("#think", { opacity: 0, duration: 0.08 }, 10.96);
+      tl.to("#reply", { opacity: 1, duration: 0.16 }, 10.98);
+      [["#r1", "#sp1", "#ok1", 11.05], ["#r2", "#sp2", "#ok2", 11.3], ["#r3", "#sp3", "#ok3", 11.55]].forEach(([r, sp, ok, t]) => {
+        tl.fromTo(r, { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.16, ease: "power2.out" }, t);
+        tl.fromTo(sp, { rotation: 0, transformOrigin: "50% 50%" }, { rotation: 360, duration: 0.3, ease: "none" }, t);
+        tl.to(sp, { opacity: 0, duration: 0.04 }, t + 0.3);
+        tl.fromTo(ok, { scale: 0.4, opacity: 0, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, duration: 0.18, ease: "back.out(3)" }, t + 0.3);
+      });
+      tl.fromTo("#route", { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.24, ease: "back.out(2)" }, 11.85);
+      tl.to("#chat", { scale: 1.14, opacity: 0, filter: "blur(10px)", duration: 0.13, ease: "power2.in" }, 12.02);
+
+      // ===== S4 (12.15 – 20.6): the right agent takes it, beat by beat
+      tl.fromTo("#s4wrap", { scale: 1 }, { scale: 1.035, duration: 5.2, ease: "none" }, 12.15);
+      tl.fromTo("#cchead", { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 12.17);
+      tl.fromTo("#stats", { y: -20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 12.25);
+      tl.fromTo("#s4 .col", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.06, ease: "power3.out" }, 12.18);
+      tl.fromTo(".card", { y: 80, scale: 0.9, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.45, stagger: 0.08, ease: "back.out(1.5)" }, 12.2);
+      ["#c1", "#c2", "#c3", "#c4"].forEach((c, i) => {
+        const t = 12.62 + i * 0.14;
+        tl.to(c + " .un", { opacity: 0, duration: 0.1 }, t);
+        tl.fromTo(c + " .as", { opacity: 0, x: -10 }, { opacity: 1, x: 0, duration: 0.2, ease: "power2.out" }, t);
+      });
+      const moves = [["#c1", "#c1sp", 13.92, "#wk1", "#q3"], ["#c2", "#c2sp", 14.56, "#wk2", "#q2"], ["#c3", "#c3sp", 15.1, "#wk3", "#q1"], ["#c4", "#c4sp", 15.65, "#wk4", "#q0"]];
+      const wkIds = ["#wk0", "#wk1", "#wk2", "#wk3", "#wk4"];
+      const qIds = ["#q4", "#q3", "#q2", "#q1", "#q0"];
+      moves.forEach(([c, sp, t, wk, q], i) => {
+        tl.to(c, { x: 318, duration: 0.4, ease: "power3.inOut" }, t);
+        tl.fromTo(c, { boxShadow: "0 16px 40px rgba(0,0,0,.45)" }, { boxShadow: "0 16px 60px " + rgba(ACCENT, 0.45), duration: 0.2, yoyo: true, repeat: 1, immediateRender: false }, t);
+        tl.to(sp, { opacity: 1, duration: 0.1 }, t + 0.28);
+        tl.fromTo(sp, { rotation: 0, transformOrigin: "50% 50%" }, { rotation: 360 * 6, duration: 3.2, ease: "none" }, t + 0.28);
+        tl.set(wkIds[i], { opacity: 0 }, t + 0.28);
+        tl.set(wk, { opacity: 1 }, t + 0.28);
+        tl.set(qIds[i], { opacity: 0 }, t + 0.28);
+        tl.set(q, { opacity: 1 }, t + 0.28);
+      });
+      tl.to("#c1", { x: 636, duration: 0.45, ease: "power3.inOut" }, 16.6);
+      tl.to("#c1sp", { opacity: 0, duration: 0.05 }, 16.95);
+      tl.fromTo("#c1ok", { scale: 0.4, opacity: 0, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, duration: 0.22, ease: "back.out(3)" }, 16.97);
+      tl.set("#wk4", { opacity: 0 }, 16.97);
+      tl.set("#wk3b", { opacity: 1 }, 16.97);
+      tl.set("#at0", { opacity: 0 }, 17.4);
+      tl.set("#at1", { opacity: 1 }, 17.4);
+      tl.to("#s4wrap", { opacity: 0, duration: 0.25 }, 20.35);
+
+      // ===== S5 (17.3 – 20.6): when it matters, they ask you first
+      tl.to("#dim", { opacity: 0.74, duration: 0.3 }, 17.3);
+      tl.fromTo("#ask", { y: 80, scale: 0.94, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.45, ease: "back.out(1.4)" }, 17.35);
+      tl.fromTo("#cursor", { x: 300, y: 340, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.65, ease: "power3.inOut" }, 18.35);
+      tl.fromTo("#optA", { scale: 1 }, { scale: 0.96, duration: 0.08, yoyo: true, repeat: 1 }, 19.02);
+      tl.fromTo("#ripple", { scale: 0.2, opacity: 0.8 }, { scale: 2.4, opacity: 0, duration: 0.45, ease: "power2.out" }, 19.05);
+      tl.to("#optA", { backgroundColor: OK, duration: 0.2 }, 19.1);
+      tl.fromTo("#toast", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "back.out(2)" }, 19.3);
+      tl.to("#ask", { y: -60, opacity: 0, duration: 0.28, ease: "power2.in" }, 20.3);
+      tl.to("#dim", { opacity: 1, duration: 0.25 }, 20.33);
+
+      // ===== S6 (20.6 – 23.6): by morning, it's done
+      tl.fromTo("#nclock", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, 20.65);
+      tl.fromTo("#hstrip", { y: 0 }, { y: -230 * (hours.length - 1), duration: 1.7, ease: "power2.inOut" }, 20.8);
+      tl.to("#ney1", { opacity: 0, duration: 0.15 }, 21.2);
+      tl.fromTo("#ney2", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 21.25);
+      tl.to("#mm1", { y: -60, opacity: 0, duration: 0.15 }, 22.45);
+      tl.fromTo("#mm2", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.2 }, 22.45);
+      document.querySelectorAll("#s6 .li").forEach((li, i) => {
+        tl.fromTo(li, { x: -30, opacity: 0 }, { x: 0, opacity: 1, duration: 0.25, ease: "power2.out" }, 20.7 + i * 0.08);
+        tl.fromTo(li.querySelector(".ok"), { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.22, ease: "back.out(3)" }, 21.3 + i * 0.2);
+        tl.to(li.querySelector(".num"), { opacity: 0, duration: 0.1 }, 21.3 + i * 0.2);
+      });
+      tl.to("#s6wrap", { opacity: 0, duration: 0.22 }, 23.36);
+
+      // ===== S7 (23.6 – 27.5): every report, reply and reorder, in one place
+      tl.fromTo("#dlhead", { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 23.62);
+      [["#rc1", "#sh1", 23.75], ["#rc2", "#sh2", 24.7], ["#rc3", "#sh3", 25.6], ["#rc4", "#sh4", 26.3]].forEach(([rc, sh, t]) => {
+        tl.fromTo(rc, { y: 60, scale: 0.94, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.45, ease: "back.out(1.5)" }, t);
+        tl.fromTo(sh, { x: -160, opacity: 1 }, { x: 560, opacity: 1, duration: 0.8, ease: "power2.inOut" }, t + 0.25);
+      });
+      tl.to("#s7wrap", { opacity: 0, scale: 0.97, duration: 0.25, ease: "power2.in" }, 27.25);
+
+      // ===== S8 (27.5 – 31.9): hire the agents, equip them, let them work
+      tl.fromTo(".agc", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.05, ease: "power3.out" }, 27.55);
+      [["#hl1", 27.67], ["#hl2", 28.82], ["#hl3", 30.15]].forEach(([el, t]) => {
+        tl.fromTo(el, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, t);
+      });
+      names.forEach((name, i) => {
+        tl.to("#ag" + i + " .ac", { opacity: 0, duration: 0.12 }, 30.15 + i * 0.04);
+        tl.to("#ag" + i + " .wk", { opacity: 1, duration: 0.12 }, 30.15 + i * 0.04);
+        tl.fromTo("#agb" + i, { scaleX: 0 }, { scaleX: loads[i], duration: 1.1, ease: "power2.out" }, 30.2 + i * 0.04);
+      });
+      tl.to("#s8wrap", { opacity: 0, scale: 0.96, duration: 0.25, ease: "power2.in" }, 31.65);
+
+      // ===== S9 (31.9 – 40): the end card, over the end footage
+      tl.fromTo("#s9shade", { opacity: 0 }, { opacity: 1, duration: 0.8, ease: "power2.out" }, 31.9);
+      tl.fromTo("#endhalo", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.9, ease: "power2.out" }, 32.0);
+      tl.fromTo("#endmark", { scale: 1.35, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 32.46);
+      tl.fromTo("#ring", { scale: 0.6, opacity: 0.9 }, { scale: 2.2, opacity: 0, duration: 0.9, ease: "power2.out" }, 32.48);
+      tl.fromTo("#endword", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 32.85);
+      tl.fromTo("#el1", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, 33.48);
+      tl.fromTo("#el2", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, 34.32);
+      tl.fromTo("#url", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 35.2);
+      tl.fromTo("#uline", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 35.28);
+      tl.to("#endmark", { y: -10, duration: 1.6, yoyo: true, repeat: 1, ease: "sine.inOut" }, 35.9);
+      tl.to("#endhalo", { scale: 1.08, duration: 1.5, yoyo: true, repeat: 1, ease: "sine.inOut" }, 35.6);
+
+      // ===== captions
+      [["#cap4", 9.3, 1.5], ["#cap5a", 12.33, 1.25], ["#cap5b", 13.85, 2.55], ["#cap6", 17.42, 1.95], ["#cap7", 20.92, 1.55], ["#cap8", 23.72, 2.95]].forEach(([c, s, d]) => {
+        tl.fromTo(c + " .cap-in", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.18, ease: "power2.out" }, s);
+        tl.to(c + " .cap-in", { opacity: 0, duration: 0.15 }, s + d - 0.15);
+      });
+      [["#k1", 13.92], ["#k2", 14.56], ["#k3", 15.1], ["#k4", 15.65]].forEach(([k, t]) => {
+        tl.to(k, { color: ACCENT, duration: 0.08 }, t);
+        tl.to(k, { color: PAPER, duration: 0.2 }, t + 0.5);
+      });
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

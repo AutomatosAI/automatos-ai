@@ -55,6 +55,7 @@ RASTER_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/w
 _TYPE_ALIASES = {"image/jpg": "image/jpeg"}
 
 IMAGE_KEY_PREFIX = "generated-images"
+IMAGE_ROUTE = "/api/generated-images"
 POINTER_KEY_PREFIX = "generated-image-pointers"
 DEFAULT_WORKSPACE_SEGMENT = "default"
 DEFAULT_CONTENT_TYPE = "image/png"
@@ -127,6 +128,23 @@ def parse_byte_range(header: Optional[str]) -> Optional[str]:
     return f"bytes={start}-{end}"
 
 
+def image_extension(mime_type: str) -> str:
+    """The file extension an image of ``mime_type`` is saved with."""
+    return MIME_TO_EXT.get(mime_type, "png")
+
+
+def image_key(image_id: str, mime_type: str, workspace_id: Optional[str] = None) -> str:
+    """generated-images/{ws}/{id}.{ext}: where :meth:`S3ImageStore.save_image`
+    puts an image (an image Deliverable's file_path names it too, PRD-251 US-117)."""
+    ws = workspace_id or DEFAULT_WORKSPACE_SEGMENT
+    return f"{IMAGE_KEY_PREFIX}/{ws}/{image_id}.{image_extension(mime_type)}"
+
+
+def generated_image_path(image_id: str) -> str:
+    """The app route that serves a saved image by id (api/generated_images.py)."""
+    return f"{IMAGE_ROUTE}/{image_id}"
+
+
 def _is_image_id(image_id: str) -> bool:
     """Only the canonical uuid4 strings save_image mints — anything else (a
     fragment, a path) never reaches the bucket."""
@@ -179,10 +197,8 @@ class S3ImageStore:
         workspace_id: Optional[str] = None,
     ) -> str:
         mime_type = stored_type(mime_type)
-        ext = MIME_TO_EXT[mime_type]
         image_id = str(uuid4())
-        ws = workspace_id or DEFAULT_WORKSPACE_SEGMENT
-        key = f"{IMAGE_KEY_PREFIX}/{ws}/{image_id}.{ext}"
+        key = image_key(image_id, mime_type, workspace_id)
         image_bytes = base64.b64decode(base64_data)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: ensure_bucket(self.bucket))

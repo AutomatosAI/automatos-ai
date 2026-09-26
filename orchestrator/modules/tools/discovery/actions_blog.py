@@ -177,16 +177,22 @@ def register_blog_actions(registry: ActionRegistry) -> None:
         accepts=("config",),
     ))
 
+    # PRD-251 US-117: the one image tool. Without a post_id it makes a still in
+    # the aspect ratio asked for and registers it as an image Deliverable.
+    # The aspect enum repeats handlers_blog.IMAGE_ASPECT_RATIOS as literals (this
+    # registry stays stdlib-light for the utterance linter; a test pins them).
     registry.register(ActionDefinition(
         name="platform_generate_cover_image",
         description=(
-            "Generate and attach a cover image to an existing blog post. "
-            "Single tool call: builds an image using the configured "
-            "BLOG_COVER_MODEL (default Gemini Nano Banana Pro, overridable "
-            "per-deployment), saves it to the platform image store, and "
-            "updates the post's cover_image_url. Use this after a draft has "
-            "been created via platform_publish_blog_post — the resulting "
-            "post_id is the input here."
+            "Generate an image with the configured image model (BLOG_COVER_MODEL, "
+            "default Gemini Nano Banana Pro, overridable per-deployment) and save it "
+            "to the platform image store. With a post_id: a 16:9 cover for that blog "
+            "post, set as its cover_image_url — use this after a draft has been "
+            "created via platform_publish_blog_post. Without a post_id: a still for a "
+            "social post, a carousel or a slide, in the aspect ratio you ask for, "
+            "saved to Deliverables; its deliverable_id can go into a social post's "
+            "media under that ratio. The image carries no words: text belongs to "
+            "the template or the post."
         ),
         category="blog",
         parameters={
@@ -194,28 +200,49 @@ def register_blog_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "post_id": {
                     "type": "string",
-                    "description": "UUID of the blog post to generate a cover for.",
+                    "description": (
+                        "UUID of the blog post to generate a cover for. Leave it out "
+                        "for an image that is not a blog cover."
+                    ),
                 },
                 "prompt": {
                     "type": "string",
                     "description": (
                         "Image direction — describe the visual concept. Will be "
-                        "wrapped with framing instructions (16:9, abstract, no "
+                        "wrapped with framing instructions (the aspect ratio, no "
                         "embedded text) before being sent to the image model."
                     ),
                 },
+                "aspect_ratio": {
+                    "type": "string",
+                    "enum": ["16:9", "1:1", "4:5", "9:16"],
+                    "description": (
+                        "The image's shape without a post_id (default 16:9): 9:16 "
+                        "for stories and reels, 4:5 or 1:1 for feed posts, 16:9 for "
+                        "links and slides. A blog cover is always 16:9."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "What the image is called in Deliverables when there is no "
+                        "post_id (default: the start of the prompt)."
+                    ),
+                },
             },
-            "required": ["post_id", "prompt"],
+            "required": ["prompt"],
         },
         permission_level="write",
         requires_confirmation=False,
         promoted=True,
-        tags=["blog", "image", "cover", "design", "content"],
+        tags=["blog", "image", "cover", "design", "content", "social", "still"],
         examples=[
             "generate a cover image for the latest draft",
             "create cover art for post abc123",
             "make a blog cover image",
             "add a cover image to my blog post",
+            "generate a 4:5 image for an instagram post",
+            "make a 9:16 still for our story",
         ],
     ))
 

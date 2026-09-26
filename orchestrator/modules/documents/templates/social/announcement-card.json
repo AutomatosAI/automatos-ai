@@ -1,0 +1,123 @@
+{
+  "name": "Announcement card",
+  "description": "A launch or release: a status pill, a big headline, a supporting line and up to three numbered features, on the brand's paper. Ported from the automatos-social announcement family.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "status": {
+      "type": "text",
+      "label": "Status",
+      "description": "A short status in the outlined pill, e.g. SHIPPED v2.4. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. NEW:|PARALLEL|MISSIONS.",
+      "max_chars": 80
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "subline": {
+      "type": "text",
+      "label": "Supporting line",
+      "description": "One or two sentences under the headline. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "feature_1_title": {
+      "type": "text",
+      "label": "Feature 1 heading",
+      "description": "The heading of feature 1.",
+      "max_chars": 60
+    },
+    "feature_1_body": {
+      "type": "text",
+      "label": "Feature 1 text",
+      "description": "One or two sentences under it.",
+      "max_chars": 180
+    },
+    "feature_2_title": {
+      "type": "text",
+      "label": "Feature 2 heading",
+      "description": "The heading of feature 2.",
+      "max_chars": 60
+    },
+    "feature_2_body": {
+      "type": "text",
+      "label": "Feature 2 text",
+      "description": "One or two sentences under it.",
+      "max_chars": 180
+    },
+    "feature_3_title": {
+      "type": "text",
+      "label": "Feature 3 heading",
+      "description": "The heading of feature 3. Leave empty for none.",
+      "default": "",
+      "max_chars": 60
+    },
+    "feature_3_body": {
+      "type": "text",
+      "label": "Feature 3 text",
+      "description": "One or two sentences under it. Leave empty for none.",
+      "default": "",
+      "max_chars": 180
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Read the changelog. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "sample_data": {
+    "eyebrow": "PRODUCT LAUNCH",
+    "status": "SHIPPED v2.4",
+    "headline": "NEW:|PARALLEL|MISSIONS.",
+    "headline_accent": "NEW:",
+    "subline": "Run up to nine agents in parallel on a single Mission. Shared field memory keeps them in sync.",
+    "feature_1_title": "Nine at once",
+    "feature_1_body": "Up to nine specialist agents per Mission, each with its own tools and goal.",
+    "feature_2_title": "Shared field memory",
+    "feature_2_body": "Agents read and write one memory band, so they stay in sync without extra orchestration.",
+    "feature_3_title": "Works with your Playbooks",
+    "feature_3_body": "Wrap any Playbook step in a Mission block, and it runs as before.",
+    "counter": "",
+    "handle": "@automatos.app",
+    "cta": "Read the changelog"
+  }
+}

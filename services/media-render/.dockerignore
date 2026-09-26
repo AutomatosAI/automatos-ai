@@ -1,0 +1,9 @@
+# The CI helpers run on the runner, not in the image.
+ci/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+# The Hyperframes CLI loads a .env from its working directory: never ship one.
+.env
+.env.*

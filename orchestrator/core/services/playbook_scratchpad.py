@@ -166,6 +166,19 @@ class PlaybookScratchpad:
         existing[key] = value
         self._hset(field, json.dumps(existing))
 
+    def step_exports(self, step_order: int) -> Dict[str, str]:
+        """The keys step ``step_order`` saved with scratchpad_write (PRD-251 US-117).
+
+        Read it before :meth:`write_step_results`, which replaces the step's
+        field with every export so far.
+        """
+        raw = self._hget(f"step_{step_order}:exports")
+        try:
+            exports = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return exports if isinstance(exports, dict) else {}
+
     def get_exports(self) -> Dict[str, str]:
         """Return all exports across all steps (flat dict)."""
         all_data = self._hgetall()

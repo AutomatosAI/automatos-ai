@@ -20,7 +20,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/tests/test_p2w2_family_gates.py](orchestrator/tests/test_p2w2_family_gates.py)
 - [orchestrator/tests/test_playbook_launch_parity.py](orchestrator/tests/test_playbook_launch_parity.py)
 - [orchestrator/tests/test_prd226_doctrine.py](orchestrator/tests/test_prd226_doctrine.py)
-- [scripts/sync-auto-skill.py](scripts/sync-auto-skill.py)
+- [scripts/sync-skills.py](scripts/sync-skills.py)
 
 </details>
 
@@ -122,10 +122,10 @@ When a user authenticates for the first time, the system auto-provisions a perso
 Every workspace contains exactly one "Auto" agent (slug `auto-{workspace_id}`). This agent serves as the workspace's central orchestrator and the target for the "Orchestrator Soul" settings [orchestrator/core/seeds/seed_auto_agent.py:1-16]().
 
 *   **System Agent:** Marked with `is_system_agent=True` and hidden from the Roster UI [orchestrator/core/seeds/seed_auto_agent.py:12-16]().
-*   **Platform Skills:** Automatically assigned the `platform-management` skill, enabling it to manage workspace resources [orchestrator/core/seeds/platform-management-skill.md:1-132](). The content of this skill is synced from the `automatos-skills` repository using `scripts/sync-auto-skill.py` [scripts/sync-auto-skill.py:1-29]().
+*   **Platform Skills:** Automatically assigned the `platform-management` skill, enabling it to manage workspace resources [orchestrator/core/seeds/platform-management-skill.md:1-132](). The content of this skill is synced from the `automatos-skills` repository by `python3 scripts/sync-skills.py platform-management`, which syncs only the built-in skills it is given by name (the list is `orchestrator/core/seeds/skills/manifest.json`) [scripts/sync-skills.py]().
 *   **Context:** Uses a custom persona (the "Soul") which is composed of a base voice and the "Manager's Doctrine" [orchestrator/core/seeds/seed_auto_agent.py:81-106](). The doctrine is a set of nine management principles embedded in the agent's identity [orchestrator/core/seeds/seed_auto_agent.py:63-80]().
 
-**Sources:** [orchestrator/core/seeds/seed_auto_agent.py:1-175](), [orchestrator/api/workspaces.py:62-67](), [orchestrator/core/seeds/platform-management-skill.md:1-132](), [scripts/sync-auto-skill.py:1-29]()
+**Sources:** [orchestrator/core/seeds/seed_auto_agent.py:1-175](), [orchestrator/api/workspaces.py:62-67](), [orchestrator/core/seeds/platform-management-skill.md:1-132](), [scripts/sync-skills.py]()
 
 ---
 

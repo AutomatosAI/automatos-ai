@@ -108,6 +108,20 @@ class SocialPost(Base):
     sources = Column(_json_type(), nullable=False, default=dict)
     # {aspect: [deliverable ids]}
     media = Column(_json_type(), nullable=False, default=dict)
+    # D11 (Wave 1, S1.5): the voice a render speaks the script with. NULL is
+    # Kokoro, the template's own voice; {"toolkit", "voice_id", "name"} is a
+    # voice toolkit the workspace has connected in Composio. A render setting,
+    # not content: the rendered files' digests carry what it changed into the hash.
+    # Added by the prd251_wave1 migration.
+    voice = Column(_json_type(), nullable=True)
+    # S1.8 (D12, Wave 1): footage and stills for the template's slots from the
+    # workspace's Composio generation toolkit. {slot: {"prompt"}} is what the
+    # post asks for; a render generates it, copies the file into our storage,
+    # and records it there ("status": "done", its Deliverable, sha256, what it
+    # cost). NULL: every slot plays the template's own motion graphics. A render
+    # setting like voice: outside the content hash, which binds the rendered
+    # files. Added by the prd251_wave1 migration.
+    footage = Column(_json_type(), nullable=True)
 
     status = Column(String(32), nullable=False, default="draft", server_default="draft")
     content_hash = Column(String(64), nullable=False)
@@ -140,6 +154,8 @@ class SocialPost(Base):
             "variables": self.variables or {},
             "sources": self.sources or {},
             "media": self.media or {},
+            "voice": self.voice or None,
+            "footage": self.footage or None,
             "status": self.status,
             "content_hash": self.content_hash,
             "approved_hash": self.approved_hash,

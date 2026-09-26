@@ -20,7 +20,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
 - [orchestrator/tests/test_prd226_doctrine.py](orchestrator/tests/test_prd226_doctrine.py)
 - [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
-- [scripts/sync-auto-skill.py](scripts/sync-auto-skill.py)
+- [scripts/sync-skills.py](scripts/sync-skills.py)
 
 </details>
 
@@ -38,7 +38,7 @@ Sources:
 * [orchestrator/core/seeds/seed_local_first_run.py:1-155]()
 * [docker-entrypoint.sh:1-143]()
 * [orchestrator/tests/test_prd226_doctrine.py:1-156]()
-* [scripts/sync-auto-skill.py:1-118]()
+* [scripts/sync-skills.py]()
 
 ## Purpose and Scope
 
@@ -113,7 +113,7 @@ The `platform-management` skill is an always-on skill that provides the `Auto` a
 *   Playbook management (`platform_list_playbooks`, `platform_create_playbook`, `platform_execute_playbook`, etc.) [orchestrator/core/seeds/platform-management-skill.md:66-87]()
 *   Task and Mission management (`platform_create_task`, `platform_list_missions`, `platform_approve_mission`, etc.) [orchestrator/core/seeds/platform-management-skill.md:88-132]()
 
-The content of this skill is synchronized from the `automatos-skills` repository using the `scripts/sync-auto-skill.py` script [scripts/sync-auto-skill.py:1-16](). This script ensures that the version in the codebase is always up-to-date with the authoritative source.
+The content of this skill is synchronized from the `automatos-skills` repository by `python3 scripts/sync-skills.py platform-management` [scripts/sync-skills.py](). The script syncs only the built-in skills named on its command line (the list lives in `orchestrator/core/seeds/skills/manifest.json`); Auto's skill is synced only when named, after its doctrine self-checks pass.
 
 ### Manager's Doctrine
 
@@ -127,7 +127,7 @@ graph TD
     D -- _FRIENDLY_FALLBACK + MANAGER_DOCTRINE_BLOCK --> E[Agent.custom_persona_prompt];
     C --> F[Ensure platform-management-skill assigned];
     F --> G[platform-management-skill.md];
-    G -- Synchronized by --> H[scripts/sync-auto-skill.py];
+    G -- Synchronized by --> H[scripts/sync-skills.py platform-management];
     H --> I[automatos-skills/team/auto/SKILL.md];
 ```
 
@@ -137,7 +137,7 @@ Sources:
 * [orchestrator/core/seeds/seed_auto_agent.py:1-128]()
 * [orchestrator/core/seeds/platform-management-skill.md:1-132]()
 * [orchestrator/tests/test_prd226_doctrine.py:38-47]()
-* [scripts/sync-auto-skill.py:1-16]()
+* [scripts/sync-skills.py]()
 
 ## Workspace Seeding (Starter Content)
 

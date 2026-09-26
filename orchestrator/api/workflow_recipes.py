@@ -1747,17 +1747,11 @@ async def install_recipe_from_marketplace(
 
         recipe_name = f"{marketplace_recipe.name} (Copy)" if name_exists else marketplace_recipe.name
 
-        # Generate unique template_id
+        # Generate unique template_id: unique across every workspace, not per workspace.
+        from services.package_installer import free_template_id
+
         base_template_id = marketplace_recipe.template_id.replace('marketplace-', '')
-        template_id = base_template_id
-        counter = 1
-        while db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.template_id == template_id,
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.owner_type == 'workspace'
-        ).first():
-            template_id = f"{base_template_id}-{counter}"
-            counter += 1
+        template_id = free_template_id(db, base_template_id, ctx.workspace_id)
 
         # Clone recipe to workspace
         cloned_recipe = WorkflowRecipe(

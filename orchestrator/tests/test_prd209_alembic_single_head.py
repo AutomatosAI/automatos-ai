@@ -72,7 +72,12 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # moves off the workspace volume into the database (F156).
 # 2026-09-25: llm_usage_execution_index chains onto that — the index the mission
 # budget's spend sum reads, built CONCURRENTLY (F153).
-EXPECTED_HEAD = "llm_usage_execution_index"
+# 2026-09-25 (PRD-251 Wave 1): prd251_wave1 chains onto f049_prd251_merge_heads too
+# — the ONE migration of the video engine wave (document_templates.format gains
+# social_image / social_video).
+# 2026-09-26: prd251w1_merge_heads joins llm_usage_execution_index and
+# prd251_wave1 into the single head (a merge revision, no operations).
+EXPECTED_HEAD = "prd251w1_merge_heads"
 
 
 def _literal(node: ast.AST):

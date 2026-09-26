@@ -40,13 +40,13 @@ _INTENT_TO_REGISTRY_CATEGORIES: Dict[Intent, List[str]] = {
     Intent.DATA_QUERY: ["analytics", "database", "graph", "field", "reports"],
     Intent.SEARCH: ["discovery", "documents", "graph", "memory", "workspace_files"],
     Intent.EXTERNAL_ACTION: ["integrations", "notifications", "marketplace", "skills"],
-    Intent.CREATION: ["documents", "reports", "blog", "workspace_files", "playbooks"],
+    Intent.CREATION: ["documents", "reports", "blog", "socials", "workspace_files", "playbooks"],
     Intent.MEMORY_RECALL: ["memory", "field"],
     Intent.MULTI_STEP: [
         "agents", "missions", "tasks", "playbooks", "workspace", "workspace_files",
         "analytics", "reports", "documents", "graph", "memory", "field",
         "marketplace", "skills", "monitoring", "infrastructure", "integrations",
-        "discovery", "scheduling", "governance", "notifications", "blog",
+        "discovery", "scheduling", "governance", "notifications", "blog", "socials",
     ],
 }
 

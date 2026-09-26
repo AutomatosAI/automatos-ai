@@ -1,0 +1,19 @@
+{
+  "workspace_id": "media-render-fixture",
+  "reference": "the committed fixture script (CI)",
+  "composition": {},
+  "variables": {"headline": "One line, one window"},
+  "brand": {"tokens": {"bg": "#14171c", "text": "#f3efe6", "accent": "#e96235"}},
+  "audio": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [
+        {"id": "l01", "at": 0.3, "text": "Rendered on brand, in three seconds."},
+        {"id": "l02", "at": 2.2, "text": "Every line lands in its own window."},
+        {"id": "l03", "at": 5.0, "text": "Whatever the voice."},
+        {"id": "l04", "at": 6.6, "text": "The scene keeps its time."}
+      ]
+    }
+  }
+}

@@ -14,6 +14,8 @@ Uses ToolResultFormatter for consistent result formatting across all tools.
 
 import logging
 from typing import Dict, Any, List, Optional
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
@@ -55,6 +57,12 @@ class AgentPlatformTools:
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools for function calling"""
+        from core.models.core import DOCUMENT_TEMPLATE_FORMATS
+        from modules.tools.registry.tool_registry import (
+            GENERATE_DOCUMENT_DESCRIPTION,
+            GENERATE_DOCUMENT_FORMAT_DESCRIPTION,
+        )
+
         return [
             {
                 "name": "search_knowledge",
@@ -207,7 +215,7 @@ class AgentPlatformTools:
 
             {
                 "name": "generate_document",
-                "description": "Generate a polished PDF, DOCX, or XLSX document from data. Use when the user asks for a report, invoice, export, or any formatted document.",
+                "description": GENERATE_DOCUMENT_DESCRIPTION,
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -217,8 +225,8 @@ class AgentPlatformTools:
                         },
                         "format": {
                             "type": "string",
-                            "enum": ["pdf", "docx", "xlsx"],
-                            "description": "Output format"
+                            "enum": list(DOCUMENT_TEMPLATE_FORMATS),
+                            "description": GENERATE_DOCUMENT_FORMAT_DESCRIPTION,
                         },
                         "template_name": {
                             "type": "string",
@@ -230,7 +238,7 @@ class AgentPlatformTools:
                         },
                         "data": {
                             "type": "object",
-                            "description": "Data to populate the template. For block templates, supply the data.* fields the template references (see platform_get_template_schema)."
+                            "description": "Data to populate the template. For block templates, supply the data.* fields the template references (see platform_get_template_schema). For a social template, supply its variables by name (platform_get_template_schema lists them); one left out takes its default."
                         }
                     },
                     "required": ["title", "format", "data"]
@@ -733,12 +741,27 @@ class AgentPlatformTools:
                     )
 
             elif tool_name == "generate_document":
+                from core.social_templates import is_social_format
+
                 title = parameters.get("title", "Document")
                 fmt = parameters.get("format", "pdf")
                 data = parameters.get("data", {})
                 template_name = parameters.get("template_name")
                 template_id_raw = parameters.get("template_id")
                 has_template = bool(template_name or template_id_raw)
+
+                # PRD-251 US-117: a social image or video is its template, rendered.
+                if is_social_format(fmt) and not has_template:
+                    return ToolResultFormatter.standardize_result(
+                        {
+                            "success": False,
+                            "error": (
+                                f"A {fmt} is rendered from a {fmt} template: pass its template_id or "
+                                f"template_name (platform_list_templates with format {fmt} lists them)."
+                            ),
+                        },
+                        tool_name,
+                    )
 
                 # Guard: reject empty data only on the NO-template fallback path, where
                 # the document is built purely from sections/content. A chosen template

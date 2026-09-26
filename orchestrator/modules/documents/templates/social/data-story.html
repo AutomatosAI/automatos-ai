@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Data story</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251 S1.2 (D4): the "data story" template, ported from docs/PRDS/prd251-reference/markets-posh.html and its
+         generator (markets-posh-build.py, markets-posh-charts.py). The generator lives here now: at setup the script
+         turns the post's price bars and plan levels into the chart shapes (SVG) and the figures (HTML text), so every
+         number on screen is computed from the data the post supplies, and none is typed.
+         Every colour and font reads the brand kit; the var() fallbacks are the reference's Studio Dark.
+         Six media slots: footage (hook, tide, end) holds its last frame; stills (still_1..3) push in slowly. */
+      :root {
+        --ink: var(--brand-ink, #1a1714);
+        --paper: var(--brand-on-ink, #f0e8db);
+        --muted: var(--brand-on-ink-muted, #b0a38d);
+        --dim: var(--brand-on-ink-dim, #938876);
+        --accent: var(--brand-primary-on-ink, #e96235);
+        --accent-text: var(--brand-primary-light, #f07a50);
+        --ok: var(--brand-accent-on-ink, #90af5a);
+        --info: var(--brand-info, #81a9da);
+        --deep: color-mix(in srgb, var(--ink) 69%, black);
+        --top: color-mix(in srgb, var(--ink) 95%, var(--paper));
+        --chart: color-mix(in srgb, var(--ink) 98%, var(--paper));
+        --track: color-mix(in srgb, var(--ink) 92%, var(--paper));
+        --raised: color-mix(in srgb, var(--ink) 96%, var(--paper));
+        --display: var(--brand-heading-font, serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      .inner { position: absolute; inset: 0; }
+      .serif { font-family: var(--display); font-weight: 500; letter-spacing: -0.015em; }
+      .it { font-style: italic; color: var(--accent-text); }
+      .mono { font-family: var(--mono); }
+      .lab { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.14em; }
+      .sh { text-shadow: 0 4px 30px color-mix(in srgb, black 55%, transparent); }
+
+      /* ---------- persistent background ---------- */
+      #bg { z-index: 0; }
+      .bg-base { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, var(--top) 0%, var(--ink) 55%, var(--deep) 100%); }
+      .bg-floor { position: absolute; left: -540px; right: -540px; top: 1040px; height: 1000px; perspective: 700px; perspective-origin: 50% 0%; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); }
+      .bg-plane { position: absolute; left: 0; right: 0; top: 0; height: 2600px; transform-origin: 50% 0%; transform: rotateX(68deg);
+        background-image: linear-gradient(color-mix(in srgb, var(--accent) 20%, transparent) 2px, transparent 2px), linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, transparent) 2px, transparent 2px); background-size: 120px 120px; }
+      #glowA { position: absolute; left: -310px; top: 260px; width: 1700px; height: 1700px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 35%, transparent 62%); opacity: 0.5; }
+      .grain { position: absolute; inset: 0; opacity: 0.07;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+      .vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, color-mix(in srgb, black 60%, transparent) 100%); }
+
+      /* ---------- footage and stills (an empty slot leaves the background) ---------- */
+      .vid { z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+      .vwrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+      .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .frz { z-index: 1; overflow: hidden; }
+      .frz .push { position: absolute; inset: 0; }
+      .frz img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .filmgrain { position: absolute; inset: 0; z-index: 2; opacity: 0.05; pointer-events: none;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>"); }
+
+      /* ---------- glass cards, pills and captions ---------- */
+      .glass { position: absolute; left: 60px; width: 960px; border-radius: 28px; background: color-mix(in srgb, var(--ink) 86%, transparent); border: 1px solid color-mix(in srgb, var(--paper) 16%, transparent); box-shadow: 0 30px 90px color-mix(in srgb, black 50%, transparent); }
+      .pill { position: absolute; font-family: var(--mono); font-size: 24px; letter-spacing: 0.12em; color: var(--paper); padding: 10px 22px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--paper) 40%, transparent); background: color-mix(in srgb, var(--ink) 72%, transparent); opacity: 0; }
+      .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1452px; }
+      .cap-in { max-width: 920px; padding: 16px 28px; border-radius: 18px; background: color-mix(in srgb, var(--ink) 84%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+        box-shadow: 0 12px 40px color-mix(in srgb, black 45%, transparent); font-size: 36px; font-weight: 500; line-height: 1.28; text-align: center; color: var(--paper); opacity: 0; }
+
+      /* ---------- the charts: shapes only, all text is HTML ---------- */
+      .chartsvg { position: absolute; overflow: visible; }
+      .chartsvg .gridline { stroke: color-mix(in srgb, var(--paper) 7%, transparent); }
+      .chartsvg .bull { stroke: var(--info); fill: var(--info); }
+      .chartsvg .bear { stroke: var(--accent); fill: var(--accent); }
+      .chartsvg .zone { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+      .chartsvg .stop { stroke: var(--accent-text); }
+      .chartsvg .target { stroke: var(--ok); }
+
+      /* ---------- S1: the hook ---------- */
+      #s1 { z-index: 3; }
+      #s1grad { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 40%, color-mix(in srgb, var(--deep) 50%, transparent) 58%, color-mix(in srgb, var(--deep) 88%, transparent) 100%); }
+      .h1l { position: absolute; left: 72px; right: 72px; font-size: 92px; line-height: 1.1; opacity: 0; }
+      #h1a { top: 1120px; } #h1b { top: 1222px; }
+      #h2 { position: absolute; left: 72px; right: 72px; top: 1372px; font-size: 80px; line-height: 1.1; opacity: 0; }
+
+      /* ---------- S2: the reveal ---------- */
+      #s2 { z-index: 3; }
+      #s2shade { position: absolute; inset: 0; background: radial-gradient(ellipse 85% 55% at 50% 46%, color-mix(in srgb, var(--deep) 78%, transparent) 0%, color-mix(in srgb, var(--deep) 55%, transparent) 60%, color-mix(in srgb, var(--deep) 30%, transparent) 100%); opacity: 0; }
+      #s2halo { position: absolute; left: 40px; top: 220px; width: 1000px; height: 1000px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 34%, transparent) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 38%, transparent 64%); opacity: 0; }
+      #s2ring { position: absolute; left: 360px; top: 490px; width: 360px; height: 360px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 85%, transparent); opacity: 0; }
+      #m2 { position: absolute; left: 430px; top: 540px; width: 220px; height: 256px; object-fit: contain; opacity: 0; }
+      #w2 { position: absolute; left: 0; right: 0; top: 870px; display: flex; justify-content: center; opacity: 0; }
+      .wordmark { font-family: var(--body); font-weight: 700; font-size: 60px; line-height: 1.2; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; color: var(--paper); }
+      #mi2 { position: absolute; left: 0; right: 0; top: 1000px; text-align: center; font-size: 34px; letter-spacing: 0.36em; color: var(--paper); opacity: 0; }
+      #l2 { position: absolute; left: 390px; width: 300px; top: 1072px; height: 3px; background: var(--accent); transform-origin: 50% 50%; }
+
+      /* ---------- S3: the tide ---------- */
+      #s3 { z-index: 3; }
+      #s3grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--deep) 90%, transparent) 0%, color-mix(in srgb, var(--deep) 72%, transparent) 32%, transparent 50%, transparent 62%, color-mix(in srgb, var(--deep) 70%, transparent) 100%); }
+      #t3a { position: absolute; left: 72px; right: 72px; top: 330px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t3b { position: absolute; left: 72px; right: 72px; top: 436px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #p3a { left: 72px; top: 1300px; } #p3b { left: 470px; top: 1300px; }
+
+      /* ---------- S4: the market, computed ---------- */
+      #s4 { z-index: 3; }
+      #s4grad { position: absolute; inset: 0; background: color-mix(in srgb, var(--deep) 50%, transparent); }
+      #t4 { position: absolute; left: 72px; right: 72px; top: 318px; font-size: 88px; line-height: 1.08; white-space: nowrap; }
+      #t4 .w { display: inline-block; opacity: 0; }
+      #c4 { top: 450px; height: 960px; }
+      #c4sym { position: absolute; left: 100px; top: 486px; font-size: 60px; }
+      #c4sym .mono { font-size: 30px; color: var(--muted); }
+      #c4px { position: absolute; right: 100px; top: 482px; text-align: right; }
+      #c4px .v { font-family: var(--mono); font-size: 56px; line-height: 1; }
+      #c4px .k { font-size: 20px; color: var(--muted); margin-top: 10px; }
+      #ch4 { left: 90px; top: 590px; width: 900px; height: 560px; }
+      #cov4 { position: absolute; left: 90px; top: 590px; width: 900px; height: 560px; background: var(--chart); transform-origin: 100% 50%; }
+      .stat { position: absolute; top: 1190px; width: 280px; }
+      .stat .k { font-size: 20px; color: var(--muted); }
+      .stat .v { font-family: var(--display); font-size: 52px; line-height: 1.2; }
+      .tag { display: inline-block; margin-top: 4px; font-family: var(--mono); font-size: 17px; letter-spacing: 0.12em; color: var(--accent-text); border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 8px; padding: 2px 10px; opacity: 0; }
+      #st1 { left: 100px; } #st2 { left: 400px; } #st3 { left: 700px; }
+      #stamp4w { position: absolute; left: 0; right: 0; top: 800px; display: flex; justify-content: center; transform: rotate(-4deg); }
+      #stamp4 { font-size: 72px; padding: 6px 40px 14px; border: 3px solid var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--ink) 92%, transparent); opacity: 0; }
+
+      /* ---------- S5: the odds, even when they're against you ---------- */
+      #s5 { z-index: 3; }
+      #s5grad { position: absolute; inset: 0; background: color-mix(in srgb, var(--deep) 45%, transparent); }
+      #c5 { top: 320px; height: 1090px; }
+      #p5t { position: absolute; left: 100px; top: 352px; font-size: 32px; letter-spacing: 0.06em; }
+      #p5s { position: absolute; left: 100px; top: 402px; font-size: 20px; color: var(--muted); }
+      #ch5 { left: 90px; top: 450px; width: 900px; height: 520px; }
+      #cov5 { position: absolute; left: 90px; top: 450px; width: 900px; height: 520px; background: var(--chart); transform-origin: 100% 50%; }
+      .pl { position: absolute; left: 104px; font-family: var(--mono); font-size: 24px; padding: 6px 16px; border-radius: 10px; background: color-mix(in srgb, var(--ink) 90%, transparent); opacity: 0; }
+      #pl_t1 { color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 70%, transparent); }
+      #pl_en { color: var(--accent-text); border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); }
+      #pl_st { color: var(--accent-text); border: 1px dashed color-mix(in srgb, var(--accent-text) 80%, transparent); }
+      #odt { position: absolute; left: 100px; top: 1004px; font-size: 28px; letter-spacing: 0.08em; opacity: 0; }
+      #ods { position: absolute; left: 100px; top: 1046px; font-size: 20px; color: var(--muted); opacity: 0; }
+      .orow { position: absolute; left: 100px; right: 100px; height: 56px; opacity: 0; }
+      .orow .ol { position: absolute; left: 0; top: 10px; font-family: var(--mono); font-size: 26px; letter-spacing: 0.08em; }
+      .orow .ot { position: absolute; left: 240px; top: 20px; width: 470px; height: 20px; border-radius: 10px; background: var(--track); overflow: hidden; }
+      .orow .of { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 10px; transform-origin: 0 50%; }
+      .orow .ov { position: absolute; right: 0; top: -4px; font-family: var(--display); font-size: 48px; line-height: 1.2; }
+      #o1 { top: 1094px; } #o2 { top: 1160px; } #o3 { top: 1226px; }
+      #o1 .ol, #o1 .ov { color: var(--ok); } #o1 .of { background: var(--ok); }
+      #o2 .ol, #o2 .ov { color: var(--accent-text); } #o2 .of { background: var(--accent); }
+      #o3 .ol, #o3 .ov { color: var(--muted); } #o3 .of { background: var(--dim); }
+      #oglow { position: absolute; left: 80px; width: 920px; top: 1152px; height: 70px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); opacity: 0; }
+      #either { position: absolute; left: 100px; top: 1316px; font-size: 22px; color: var(--accent-text); opacity: 0; }
+
+      /* ---------- S6: the log ---------- */
+      #s6 { z-index: 3; }
+      #s6grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--deep) 78%, transparent) 0%, color-mix(in srgb, var(--deep) 55%, transparent) 30%, color-mix(in srgb, var(--deep) 60%, transparent) 100%); }
+      #t6 { position: absolute; left: 72px; top: 318px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t6s { position: absolute; left: 76px; top: 444px; font-size: 24px; color: var(--muted); opacity: 0; }
+      #c6 { top: 500px; height: 900px; }
+      .lhead { position: absolute; top: 540px; font-size: 18px; color: var(--muted); }
+      .lrow { position: absolute; left: 60px; right: 60px; height: 88px; border-top: 1px solid color-mix(in srgb, var(--paper) 12%, transparent); opacity: 0; }
+      .lrow .lc { position: absolute; left: 40px; top: 26px; font-size: 28px; font-weight: 500; }
+      .lrow .ls { position: absolute; left: 240px; top: 29px; font-size: 22px; color: var(--muted); }
+      .lrow .lo { position: absolute; left: 556px; top: 24px; font-size: 20px; letter-spacing: 0.08em; padding: 4px 14px; border-radius: 999px; border: 1px solid; }
+      .lrow .lr { position: absolute; right: 40px; top: 12px; font-size: 42px; line-height: 1.3; }
+      .t-profit { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 70%, transparent); }
+      .t-loss { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent-text) 70%, transparent); }
+      .t-muted { color: var(--muted); border-color: color-mix(in srgb, var(--muted) 45%, transparent); }
+      #l6f { position: absolute; left: 100px; top: 1320px; font-size: 18px; color: var(--muted); opacity: 0; }
+      #stamp6w { position: absolute; right: 90px; top: 452px; transform: rotate(-4deg); }
+      #stamp6 { font-size: 40px; padding: 2px 22px 8px; border: 2px solid var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--ink) 94%, transparent); opacity: 0; }
+
+      /* ---------- S7: sea trials ---------- */
+      #s7 { z-index: 3; }
+      #t7 { position: absolute; left: 72px; top: 318px; font-size: 96px; line-height: 1.08; opacity: 0; }
+      #t7s { position: absolute; left: 76px; top: 448px; font-size: 22px; color: var(--muted); opacity: 0; }
+      #c7 { top: 500px; height: 620px; }
+      #ch7 { left: 90px; top: 550px; width: 900px; height: 520px; }
+      #fut7 { position: absolute; top: 540px; height: 540px; transform-origin: 100% 50%;
+        background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent) 0 12px, transparent 12px 24px), var(--chart); }
+      #cur7 { position: absolute; top: 530px; width: 4px; height: 560px; background: var(--accent); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent); }
+      #fut7l { position: absolute; left: 690px; top: 744px; width: 290px; text-align: center; font-size: 28px; line-height: 1.35; color: var(--accent-text); opacity: 0; }
+      #yc7 { position: absolute; left: 70px; top: 1146px; font-size: 20px; color: var(--muted); }
+      .btn { position: absolute; top: 1184px; height: 84px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--paper) 30%, transparent); color: var(--paper); font-family: var(--mono); font-size: 28px; letter-spacing: 0.08em; display: flex; align-items: center; justify-content: center; background: var(--raised); }
+      #b_long { left: 70px; width: 190px; } #b_short { left: 276px; width: 190px; } #b_flat { left: 482px; width: 170px; }
+      #b_conf { left: 668px; width: 120px; color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 60%, transparent); opacity: 0; }
+      #b_commit { left: 804px; width: 206px; color: var(--ink); background: var(--paper); border-color: var(--paper); }
+      #b_sel { position: absolute; left: 70px; top: 1184px; width: 190px; height: 84px; border-radius: 16px; background: var(--accent); color: var(--ink); font-family: var(--mono); font-size: 28px; letter-spacing: 0.08em; display: flex; align-items: center; justify-content: center; opacity: 0; }
+      #rs7 { position: absolute; left: 70px; top: 1294px; font-size: 20px; color: var(--muted); }
+      .rsv { position: absolute; left: 70px; top: 1330px; width: 940px; height: 62px; border-radius: 14px; display: flex; align-items: center; padding-left: 24px; font-size: 22px; }
+      #rsv7 { color: var(--muted); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--paper) 6%, transparent) 0 12px, var(--raised) 12px 24px); border: 1px dashed color-mix(in srgb, var(--paper) 35%, transparent); }
+      #rsv7b { color: var(--accent-text); background: var(--raised); border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); opacity: 0; }
+
+      /* ---------- S8: calm ---------- */
+      #s8 { z-index: 3; }
+      #s8grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--deep) 72%, transparent) 0%, color-mix(in srgb, var(--deep) 30%, transparent) 32%, transparent 50%); }
+      #t8a { position: absolute; left: 72px; top: 360px; font-size: 132px; line-height: 1.05; opacity: 0; }
+      #t8b { position: absolute; left: 72px; top: 510px; font-size: 104px; line-height: 1.05; opacity: 0; }
+
+      /* ---------- S9: the end card ---------- */
+      #s9 { z-index: 3; }
+      #s9shade { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 45% at 50% 42%, color-mix(in srgb, var(--deep) 64%, transparent) 0%, color-mix(in srgb, var(--deep) 28%, transparent) 70%, color-mix(in srgb, var(--deep) 6%, transparent) 100%), linear-gradient(180deg, color-mix(in srgb, var(--deep) 35%, transparent) 0%, transparent 30%, transparent 60%, color-mix(in srgb, var(--deep) 55%, transparent) 100%); opacity: 0; }
+      #endhalo { position: absolute; left: 40px; top: 220px; width: 1000px; height: 1000px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 36%, transparent) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 38%, transparent 64%); opacity: 0; }
+      #ring { position: absolute; left: 340px; top: 521px; width: 400px; height: 400px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 85%, transparent); opacity: 0; }
+      #endmark { position: absolute; left: 410px; top: 560px; width: 260px; height: 303px; opacity: 0; }
+      #endmark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+      #endword { position: absolute; left: 0; right: 0; top: 920px; display: flex; justify-content: center; opacity: 0; }
+      .endtag { position: absolute; left: 70px; right: 70px; top: 1050px; text-align: center; font-size: 80px; line-height: 1.08; }
+      .endtag div { opacity: 0; }
+      #url { position: absolute; left: 0; right: 0; top: 1300px; display: flex; flex-direction: column; align-items: center; gap: 14px; opacity: 0; }
+      #url .u { font-family: var(--mono); font-size: 50px; color: var(--paper); letter-spacing: 0.02em; text-shadow: 0 4px 24px color-mix(in srgb, black 60%, transparent); }
+      #uline { width: 420px; height: 3px; background: var(--accent); transform-origin: 0 50%; }
+      #url .os { font-family: var(--mono); font-size: 24px; letter-spacing: 0.16em; color: var(--paper); }
+      #url .nfa { font-family: var(--mono); font-size: 20px; letter-spacing: 0.16em; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="40" data-width="1080" data-height="1920">
+      <div id="bg" class="clip" data-start="0" data-duration="40" data-track-index="0">
+        <div class="bg-base"></div>
+        <div id="glowA"></div>
+        <div class="bg-floor"><div class="bg-plane" id="plane" data-layout-allow-overflow></div></div>
+        <div class="grain"></div>
+        <div class="vig"></div>
+      </div>
+
+      <!-- ================= footage and stills: a clip that ends early holds its last frame ================= -->
+      <div class="vwrap" id="w1"><video id="cv1" class="clip" data-slot="hook" src="assets/slots/hook.mp4" data-start="0" data-duration="7.45" data-track-index="1" muted playsinline></video></div>
+      <video id="cv3" class="clip vid" data-slot="tide" src="assets/slots/tide.mp4" data-start="7.45" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <div id="st4" class="clip frz" data-start="11.49" data-duration="3.96" data-track-index="1"><div class="push" id="st4push"><img data-slot="still_1" data-layout-allow-overflow src="assets/slots/still_1.png" alt="" /></div></div>
+      <div id="st5" class="clip frz" data-start="15.45" data-duration="4.0" data-track-index="1"><div class="push" id="st5push"><img data-slot="still_2" data-layout-allow-overflow src="assets/slots/still_2.png" alt="" /></div></div>
+      <div id="st6" class="clip frz" data-start="19.45" data-duration="5.55" data-track-index="1"><div class="push" id="st6push"><img data-slot="still_3" data-layout-allow-overflow src="assets/slots/still_3.png" alt="" /></div></div>
+      <div class="vwrap" id="w8"><video id="cv8" class="clip" data-slot="end" src="assets/slots/end.mp4" data-start="31.3" data-duration="8.7" data-track-index="1" muted playsinline></video></div>
+      <div class="filmgrain"></div>
+
+      <!-- the price bars every chart and figure is computed from (data, never shown as text) -->
+      <div id="series" data-bars="{{ chart_bars }}" hidden></div>
+
+      <!-- ================= S1: the hook ================= -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.95" data-track-index="2">
+        <div class="inner" id="s1in">
+          <div id="s1grad"></div>
+          <div class="h1l serif sh" id="h1a">{{ hook_line_1 }}</div>
+          <div class="h1l serif sh" id="h1b">{{ hook_line_2 }}</div>
+          <div id="h2" class="serif it sh">{{ hook_accent }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S2: the reveal on the kick ================= -->
+      <section id="s2" class="clip" data-start="3.9" data-duration="3.55" data-track-index="2">
+        <div class="inner" id="s2in">
+          <div id="s2shade"></div>
+          <div id="s2halo"></div>
+          <div id="s2ring"></div>
+          <img id="m2" src="{{ brand.logo_mark }}" alt="" />
+          <div id="w2"><div class="wordmark" id="w2name">{{ brand.name }}</div></div>
+          <div id="mi2" class="lab">{{ product_name }}</div>
+          <div id="l2"></div>
+        </div>
+      </section>
+
+      <!-- ================= S3: the tide ================= -->
+      <section id="s3" class="clip" data-start="7.45" data-duration="4.05" data-track-index="2">
+        <div class="inner" id="s3in">
+          <div id="s3grad"></div>
+          <div id="t3a" class="serif sh">{{ tide_line }}</div>
+          <div id="t3b" class="serif it sh">{{ tide_accent }}</div>
+          <div class="pill" id="p3a">{{ tide_pill_1 }}</div>
+          <div class="pill" id="p3b">{{ tide_pill_2 }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S4: the market, computed ================= -->
+      <section id="s4" class="clip" data-start="11.49" data-duration="3.96" data-track-index="2">
+        <div class="inner" id="s4in">
+          <div id="s4grad"></div>
+          <div id="t4" class="serif sh"><span class="w" id="t4a">{{ computed_line }}</span> <span class="w it" id="t4b">{{ computed_accent }}</span></div>
+          <div class="glass" id="c4"></div>
+          <div id="c4sym"><span class="serif">{{ chart_symbol }}</span><span class="mono"> · {{ chart_timeframe }}</span></div>
+          <div id="c4px"><div class="v" id="lastClose"></div><div class="k lab">{{ last_close_label }} · {{ data_as_of }}</div></div>
+          <svg class="chartsvg" id="ch4" viewBox="0 0 900 560" width="900" height="560" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="cov4"></div>
+          <div class="stat" id="st1"><div class="k lab">{{ stat_high_label }}</div><div class="v" id="statHigh"></div><div class="tag" id="tg1">{{ stat_tag }}</div></div>
+          <div class="stat" id="st2"><div class="k lab">{{ stat_low_label }}</div><div class="v" id="statLow"></div><div class="tag" id="tg2">{{ stat_tag }}</div></div>
+          <div class="stat" id="st3"><div class="k lab">{{ stat_change_label }}</div><div class="v" id="statChange"></div><div class="tag" id="tg3">{{ stat_tag }}</div></div>
+          <div id="stamp4w"><div id="stamp4" class="serif it" data-layout-allow-overlap>{{ computed_stamp }}</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S5: the odds, even when they're against you ================= -->
+      <section id="s5" class="clip" data-start="15.45" data-duration="4.0" data-track-index="2">
+        <div class="inner" id="s5in">
+          <div id="s5grad"></div>
+          <div class="glass" id="c5"></div>
+          <div id="p5t" class="mono">{{ plan_title }}</div>
+          <div id="p5s" class="lab">{{ plan_subtitle }}</div>
+          <svg class="chartsvg" id="ch5" viewBox="0 0 900 520" width="900" height="520" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="cov5"></div>
+          <div class="pl" id="pl_t1" data-layout-allow-overlap>{{ plan_target_label }} <span id="planTarget"></span></div>
+          <div class="pl" id="pl_en" data-layout-allow-overlap>{{ plan_entry_label }} <span id="planEntry"></span></div>
+          <div class="pl" id="pl_st" data-layout-allow-overlap>{{ plan_stop_label }} <span id="planStop"></span></div>
+          <div id="odt" class="mono">{{ odds_title }}</div>
+          <div id="ods" class="lab">{{ odds_note }}</div>
+          <div id="oglow"></div>
+          <div class="orow" id="o1"><div class="ol">{{ odds_1_label }}</div><div class="ot"><div class="of" id="of1"></div></div><div class="ov" id="ov1"></div></div>
+          <div class="orow" id="o2"><div class="ol">{{ odds_2_label }}</div><div class="ot"><div class="of" id="of2"></div></div><div class="ov" id="ov2"></div></div>
+          <div class="orow" id="o3"><div class="ol">{{ odds_3_label }}</div><div class="ot"><div class="of" id="of3"></div></div><div class="ov" id="ov3"></div></div>
+          <div id="either" class="lab">{{ odds_footer }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S6: the log ================= -->
+      <section id="s6" class="clip" data-start="19.45" data-duration="5.55" data-track-index="2">
+        <div class="inner" id="s6in">
+          <div id="s6grad"></div>
+          <div id="t6" class="serif it sh">{{ ledger_title }}</div>
+          <div id="t6s" class="lab">{{ ledger_subtitle }}</div>
+          <div class="glass" id="c6"></div>
+          <div class="lhead lab" style="left:100px">{{ ledger_head_1 }}</div>
+          <div class="lhead lab" style="left:300px">{{ ledger_head_2 }}</div>
+          <div class="lhead lab" style="left:616px">{{ ledger_head_3 }}</div>
+          <div class="lhead lab" style="right:100px">{{ ledger_head_4 }}</div>
+          <div class="lrow" id="lr0" style="top:600px" data-row="{{ ledger_1 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr1" style="top:688px" data-row="{{ ledger_2 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr2" style="top:776px" data-row="{{ ledger_3 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr3" style="top:864px" data-row="{{ ledger_4 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr4" style="top:952px" data-row="{{ ledger_5 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr5" style="top:1040px" data-row="{{ ledger_6 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr6" style="top:1128px" data-row="{{ ledger_7 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div class="lrow" id="lr7" style="top:1216px" data-row="{{ ledger_8 }}"><div class="lc mono" data-layout-allow-overlap></div><div class="ls mono" data-layout-allow-overlap></div><div class="lo mono" data-layout-allow-overlap></div><div class="lr serif" data-layout-allow-overlap></div></div>
+          <div id="l6f" class="lab">{{ ledger_footer }}</div>
+          <div id="stamp6w"><div id="stamp6" class="serif it" data-layout-allow-overlap>{{ ledger_stamp }}</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S7: sea trials ================= -->
+      <section id="s7" class="clip" data-start="25.0" data-duration="6.3" data-track-index="2">
+        <div class="inner" id="s7in">
+          <div id="t7" class="serif">{{ replay_title }}</div>
+          <div id="t7s" class="lab">{{ replay_subtitle }}</div>
+          <div class="glass" id="c7"></div>
+          <svg class="chartsvg" id="ch7" viewBox="0 0 900 520" width="900" height="520" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="fut7"></div>
+          <div id="cur7"></div>
+          <div id="fut7l" class="lab" data-layout-allow-overlap>{{ replay_future_1 }}<br />{{ replay_future_2 }}</div>
+          <div id="yc7" class="lab">{{ replay_your_call }}</div>
+          <div class="btn" id="b_long">{{ replay_long }}</div>
+          <div id="b_sel" data-layout-allow-overlap>{{ replay_long }}</div>
+          <div class="btn" id="b_short">{{ replay_short }}</div>
+          <div class="btn" id="b_flat">{{ replay_flat }}</div>
+          <div class="btn" id="b_conf">{{ replay_confidence }}</div>
+          <div class="btn" id="b_commit">{{ replay_commit }}</div>
+          <div id="rs7" class="lab">{{ replay_rule }}</div>
+          <div class="rsv lab" id="rsv7">{{ replay_hidden }}</div>
+          <div class="rsv lab" id="rsv7b" data-layout-allow-overlap>{{ replay_shown }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S8: calm ================= -->
+      <section id="s8" class="clip" data-start="31.3" data-duration="4.3" data-track-index="2">
+        <div class="inner" id="s8in">
+          <div id="s8grad"></div>
+          <div id="t8a" class="serif sh">{{ calm_line }}</div>
+          <div id="t8b" class="serif it sh">{{ calm_accent }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S9: the end card ================= -->
+      <section id="s9" class="clip" data-start="35.6" data-duration="4.4" data-track-index="2">
+        <div class="inner" id="s9in">
+          <div id="s9shade"></div>
+          <div id="endhalo"></div>
+          <div id="ring"></div>
+          <div id="endmark"><img id="endlogo" src="{{ brand.logo_mark }}" alt="" /></div>
+          <div id="endword"><div class="wordmark" id="endname">{{ brand.name }}</div></div>
+          <div class="endtag serif sh"><div id="el1">{{ end_line }}</div><div id="el2" class="it">{{ end_accent }}</div></div>
+          <div id="url"><div class="u">{{ end_url }}</div><div id="uline"></div><div class="os">{{ end_note }}</div><div class="nfa">{{ end_disclaimer }}</div></div>
+        </div>
+      </section>
+
+      <!-- ================= captions (the voice lines not already on screen) ================= -->
+      <div class="clip cap" id="cap05" data-start="11.73" data-duration="2.6" data-track-index="5"><div class="cap-in">{{ cap_numbers }}</div></div>
+      <div class="clip cap" id="cap06" data-start="15.63" data-duration="3.2" data-track-index="5"><div class="cap-in">{{ cap_odds }}</div></div>
+      <div class="clip cap" id="cap07" data-start="19.63" data-duration="4.9" data-track-index="5"><div class="cap-in">{{ cap_log }}</div></div>
+      <div class="clip cap" id="cap08" data-start="25.23" data-duration="2.7" data-track-index="5"><div class="cap-in">{{ cap_train }}</div></div>
+      <div class="clip cap" id="cap09" data-start="28.24" data-duration="3.0" data-track-index="5"><div class="cap-in">{{ cap_decides }}</div></div>
+
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="40" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: data -> chart shapes (SVG) -> figures (HTML), built once, deterministic ----------
+      const byId = (id) => document.getElementById(id);
+      const MINUS = "−";
+      const fmt = (p) => String(Math.round(Math.abs(p))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      function fitWordmark(id, maxPx, widthPx) {
+        const el = byId(id);
+        const chars = Math.max(1, el.textContent.trim().length);
+        el.style.fontSize = Math.max(24, Math.min(maxPx, Math.floor(widthPx / (chars * 0.86)))) + "px";
+      }
+      fitWordmark("w2name", 60, 900);
+      fitWordmark("endname", 60, 900);
+
+      // The bars: "open,high,low,close" each, separated by ";" (the post's data, from its source).
+      const bars = byId("series").dataset.bars.split(";").map((bar) => bar.split(",").map(Number))
+        .filter((v) => v.length === 4 && v.every(Number.isFinite))
+        .map(([o, h, l, c]) => ({ o, h: Math.max(h, o, c), l: Math.min(l, o, c), c }));
+      const safe = bars.length ? bars : [{ o: 0, h: 1, l: 0, c: 1 }];
+
+      function domain(list, extra, pad) {
+        const lo = Math.min(...list.map((b) => b.l), ...extra);
+        const hi = Math.max(...list.map((b) => b.h), ...extra);
+        const span = Math.max(hi - lo, 1e-9);
+        return [lo - span * pad, hi + span * pad];
+      }
+      // Candles scaled into a w x h box over [lo, hi]; the shapes carry classes, the stylesheet colours them.
+      function candles(svgId, list, lo, hi, w, h, extra) {
+        const padX = 6;
+        const slot = (w - 2 * padX) / list.length;
+        const body = Math.max(3, slot * 0.62);
+        const y = (p) => h - ((p - lo) / (hi - lo)) * h;
+        const parts = [];
+        for (let i = 1; i < 5; i++) {
+          const gy = ((h * i) / 5).toFixed(1);
+          parts.push('<line class="gridline" x1="0" y1="' + gy + '" x2="' + w + '" y2="' + gy + '" stroke-width="1"/>');
+        }
+        parts.push(extra ? extra(y) : "");
+        list.forEach((b, i) => {
+          const cx = padX + slot * i + slot / 2;
+          const cls = b.c >= b.o ? "bull" : "bear";
+          const top = y(Math.max(b.o, b.c));
+          const bottom = y(Math.min(b.o, b.c));
+          parts.push('<line class="' + cls + '" x1="' + cx.toFixed(1) + '" y1="' + y(b.h).toFixed(1) + '" x2="' + cx.toFixed(1) + '" y2="' + y(b.l).toFixed(1) + '" stroke-width="2"/>');
+          parts.push('<rect class="' + cls + '" x="' + (cx - body / 2).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + body.toFixed(1) + '" height="' + Math.max(2, bottom - top).toFixed(1) + '" rx="1"/>');
+        });
+        byId(svgId).innerHTML = parts.join("");
+        return { y, slot };
+      }
+
+      // S4: every bar, and the figures computed from them.
+      const [lo4, hi4] = domain(safe, [], 0.06);
+      candles("ch4", safe, lo4, hi4, 900, 560);
+      const first = safe[0];
+      const last = safe[safe.length - 1];
+      const change = first.o ? ((last.c - first.o) / first.o) * 100 : 0;
+      byId("lastClose").textContent = fmt(last.c);
+      byId("statHigh").textContent = fmt(Math.max(...safe.map((b) => b.h)));
+      byId("statLow").textContent = fmt(Math.min(...safe.map((b) => b.l)));
+      byId("statChange").textContent = (change >= 0 ? "+" : MINUS) + Math.abs(change).toFixed(1) + "%";
+
+      // S5: the last 24 bars with the plan's zone, stop and target, and the plan's figures.
+      const ENTRY_LOW = {{ plan_entry_low }};
+      const ENTRY_HIGH = {{ plan_entry_high }};
+      const STOP = {{ plan_stop }};
+      const TARGET = {{ plan_target }};
+      const PLAN_TOP = 450;
+      const recent = safe.slice(-24);
+      const [lo5, hi5] = domain(recent, [STOP, TARGET, ENTRY_LOW, ENTRY_HIGH], 0.08);
+      const plan = candles("ch5", recent, lo5, hi5, 900, 520, (y) =>
+        '<rect class="zone" x="0" y="' + y(ENTRY_HIGH).toFixed(1) + '" width="900" height="' + (y(ENTRY_LOW) - y(ENTRY_HIGH)).toFixed(1) + '"/>' +
+        '<line class="stop" x1="0" y1="' + y(STOP).toFixed(1) + '" x2="900" y2="' + y(STOP).toFixed(1) + '" stroke-width="3" stroke-dasharray="14 10"/>' +
+        '<line class="target" x1="0" y1="' + y(TARGET).toFixed(1) + '" x2="900" y2="' + y(TARGET).toFixed(1) + '" stroke-width="3" stroke-dasharray="14 10"/>'
+      );
+      const entryMid = (ENTRY_LOW + ENTRY_HIGH) / 2;
+      const risk = entryMid - STOP;
+      const reward = risk ? (TARGET - entryMid) / risk : 0;
+      byId("planTarget").textContent = fmt(TARGET) + " · " + reward.toFixed(1) + "R";
+      byId("planEntry").textContent = fmt(ENTRY_LOW) + " – " + fmt(ENTRY_HIGH);
+      byId("planStop").textContent = fmt(STOP);
+      byId("pl_t1").style.top = Math.round(PLAN_TOP + plan.y(TARGET) - 21) + "px";
+      byId("pl_en").style.top = Math.round(PLAN_TOP + plan.y(entryMid) - 21) + "px";
+      byId("pl_st").style.top = Math.round(PLAN_TOP + plan.y(STOP) - 21) + "px";
+      [[{{ odds_1_percent }}, "1"], [{{ odds_2_percent }}, "2"], [{{ odds_3_percent }}, "3"]].forEach(([pct, n]) => {
+        const p = Math.max(0, Math.min(100, pct));
+        byId("of" + n).style.width = p + "%";
+        byId("ov" + n).textContent = Math.round(p) + "%";
+      });
+
+      // S6: each log row is "chart | setup | outcome | R"; its tone follows the sign of R.
+      document.querySelectorAll("#s6 .lrow").forEach((row) => {
+        const [chart = "", setup = "", outcome = "", r = ""] = row.dataset.row.split("|").map((part) => part.trim());
+        const tone = /^\+/.test(r) ? "profit" : /^[-−]/.test(r) ? "loss" : "muted";
+        row.querySelector(".lc").textContent = chart;
+        row.querySelector(".ls").textContent = setup;
+        row.querySelector(".lo").textContent = outcome;
+        row.querySelector(".lo").classList.add("t-" + tone);
+        row.querySelector(".lr").textContent = r;
+        row.querySelector(".lr").classList.add("t-" + tone);
+      });
+
+      // S7: the first 40 bars, revealed one closed bar at a time from bar 16 (fewer bars: from 40% in).
+      const replay = safe.slice(0, 40);
+      const [lo7, hi7] = domain(replay, [], 0.06);
+      const replayChart = candles("ch7", replay, lo7, hi7, 900, 520);
+      const startBar = Math.min(16, Math.floor(replay.length * 0.4));
+      const STEPS = Math.max(1, Math.min(9, replay.length - startBar - 1));
+      const slot = replayChart.slot;
+      const cursorX0 = 90 + 6 + startBar * slot;
+      const futureWidth = Math.max(1, 990 - cursorX0);
+      const futureEnd = Math.max(0, (990 - (cursorX0 + STEPS * slot)) / futureWidth);
+      byId("fut7").style.left = cursorX0.toFixed(0) + "px";
+      byId("fut7").style.width = futureWidth.toFixed(0) + "px";
+      byId("cur7").style.left = cursorX0.toFixed(0) + "px";
+
+      // ---------- one paused root timeline ----------
+      const tl = gsap.timeline({ paused: true });
+      const up = (sel, t, d = 0.4, y = 30) => tl.fromTo(sel, { y, opacity: 0 }, { y: 0, opacity: 1, duration: d, ease: "power3.out" }, t);
+      const out = (sel, t, d = 0.25) => tl.to(sel, { opacity: 0, duration: d, ease: "power2.in" }, t);
+      const pop = (sel, t, s = 1.3) => tl.fromTo(sel, { scale: s, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "expo.out" }, t);
+
+      // background, and a slow push on every clip's hold and every still (an empty slot's wrapper is empty)
+      tl.fromTo("#plane", { backgroundPosition: "0px 0px" }, { backgroundPosition: "0px 1320px", duration: 40, ease: "none" }, 0);
+      tl.fromTo("#w1", { scale: 1.0 }, { scale: 1.06, duration: 2.41, ease: "none" }, 5.04);
+      tl.fromTo("#st4push", { scale: 1.04 }, { scale: 1.12, duration: 3.96, ease: "none" }, 11.49);
+      tl.fromTo("#st5push", { scale: 1.1 }, { scale: 1.02, duration: 4.0, ease: "none" }, 15.45);
+      tl.fromTo("#st6push", { scale: 1.02 }, { scale: 1.1, duration: 5.55, ease: "none" }, 19.45);
+      tl.fromTo("#w8", { scale: 1.1 }, { scale: 1.08, duration: 5.04, ease: "none" }, 31.3);
+      tl.to("#w8", { scale: 1.0, duration: 3.66, ease: "power1.out" }, 36.34);
+
+      // ===== S1 (0 – 3.95): the hook
+      up("#h1a", 0.31, 0.5, 40);
+      up("#h1b", 1.07, 0.5, 40);
+      up("#h2", 2.38, 0.45, 30);
+      out("#s1in", 3.72, 0.22);
+
+      // ===== S2 (3.9 – 7.45): the reveal on the kick
+      tl.fromTo("#s2shade", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 3.9);
+      tl.fromTo("#s2halo", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.8, ease: "power2.out" }, 3.92);
+      pop("#m2", 4.0, 1.35);
+      tl.fromTo("#s2ring", { scale: 0.6, opacity: 0.9 }, { scale: 2.2, opacity: 0, duration: 0.9, ease: "power2.out" }, 4.02);
+      up("#w2", 4.35, 0.5, 24);
+      up("#mi2", 4.9, 0.45, 16);
+      tl.fromTo("#l2", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 5.1);
+      out("#s2in", 7.2, 0.25);
+
+      // ===== S3 (7.45 – 11.5): it reads the tide before you sail
+      up("#t3a", 7.66, 0.45, 30);
+      up("#t3b", 8.5, 0.45, 30);
+      up("#p3a", 9.0, 0.3, 14);
+      up("#p3b", 9.3, 0.3, 14);
+      out("#s3in", 11.28, 0.2);
+
+      // ===== S4 (11.49 – 15.45): the market, computed
+      tl.fromTo("#s4in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 11.49);
+      up("#t4a", 11.55, 0.4, 24);
+      up("#t4b", 11.8, 0.4, 24);
+      tl.fromTo("#cov4", { scaleX: 1 }, { scaleX: 0, duration: 1.2, ease: "power1.inOut" }, 11.7);
+      [["#tg1", 12.2], ["#tg2", 12.35], ["#tg3", 12.5]].forEach(([g, t]) => pop(g, t, 1.5));
+      tl.fromTo("#stamp4", { scale: 1.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, 13.3);
+      out("#s4in", 15.22, 0.22);
+
+      // ===== S5 (15.45 – 19.45): every plan shows its odds, even when they're against you
+      tl.fromTo("#s5in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 15.45);
+      tl.fromTo("#cov5", { scaleX: 1 }, { scaleX: 0, duration: 0.8, ease: "power2.inOut" }, 15.55);
+      [["#pl_t1", 16.1], ["#pl_en", 16.25], ["#pl_st", 16.4]].forEach(([p, t]) => tl.fromTo(p, { x: -18, opacity: 0 }, { x: 0, opacity: 1, duration: 0.25, ease: "power2.out" }, t));
+      up("#odt", 16.45, 0.3, 14);
+      up("#ods", 16.55, 0.3, 10);
+      [["#o1", "#of1", 16.65], ["#o2", "#of2", 16.8], ["#o3", "#of3", 16.95]].forEach(([o, f, t]) => {
+        up(o, t, 0.25, 12);
+        tl.fromTo(f, { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, t + 0.05);
+      });
+      tl.fromTo("#oglow", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 17.48);
+      up("#either", 17.7, 0.3, 10);
+      out("#s5in", 19.22, 0.22);
+
+      // ===== S6 (19.45 – 25.0): the log
+      tl.fromTo("#s6in", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 19.45);
+      up("#t6", 19.63, 0.45, 26);
+      up("#t6s", 20.0, 0.35, 12);
+      for (let i = 0; i < 8; i++) up("#lr" + i, 20.3 + i * 0.12, 0.25, 14);
+      up("#l6f", 21.4, 0.3, 8);
+      tl.fromTo("#stamp6", { scale: 1.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, 22.07);
+      out("#s6in", 24.78, 0.22);
+
+      // ===== S7 (25.0 – 31.3): sea trials, the replay trainer
+      tl.fromTo("#s7in", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, 25.0);
+      up("#t7", 25.1, 0.4, 24);
+      up("#t7s", 25.3, 0.3, 10);
+      tl.fromTo("#fut7", { scaleX: 1 }, { scaleX: futureEnd, duration: 2.5, ease: "steps(" + STEPS + ")" }, 25.4);
+      tl.fromTo("#cur7", { x: 0 }, { x: STEPS * slot, duration: 2.5, ease: "steps(" + STEPS + ")" }, 25.4);
+      up("#fut7l", 26.7, 0.35, 10);
+      tl.to("#b_sel", { opacity: 1, duration: 0.15 }, 28.3);
+      tl.to("#b_long", { opacity: 0, duration: 0.15 }, 28.3);
+      pop("#b_conf", 28.55, 1.4);
+      tl.to("#b_commit", { scale: 0.92, duration: 0.08, yoyo: true, repeat: 1, ease: "power1.inOut" }, 29.2);
+      tl.to("#rsv7", { opacity: 0, duration: 0.2 }, 29.6);
+      tl.fromTo("#rsv7b", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.25, ease: "power2.out" }, 29.6);
+      out("#s7in", 31.1, 0.2);
+
+      // ===== S8 (31.3 – 35.6): calm, in every market
+      up("#t8a", 31.78, 0.5, 34);
+      up("#t8b", 32.3, 0.5, 30);
+      out("#s8in", 35.35, 0.25);
+
+      // ===== S9 (35.6 – 40): the end card, the kick on its last word
+      tl.fromTo("#s9shade", { opacity: 0 }, { opacity: 1, duration: 0.8, ease: "power2.out" }, 35.6);
+      tl.fromTo("#endhalo", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.9, ease: "power2.out" }, 35.65);
+      tl.fromTo("#endmark", { scale: 1.35, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 35.85);
+      tl.fromTo("#ring", { scale: 0.6, opacity: 0.9 }, { scale: 2.2, opacity: 0, duration: 0.9, ease: "power2.out" }, 35.87);
+      up("#endword", 36.2, 0.5, 24);
+      up("#el1", 36.78, 0.45, 30);
+      up("#el2", 37.26, 0.45, 30);
+      up("#url", 37.9, 0.4, 20);
+      tl.fromTo("#uline", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 37.98);
+      tl.to("#endmark", { y: -10, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 38.4);
+      tl.to("#endhalo", { scale: 1.06, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 38.4);
+
+      // ===== captions
+      [["#cap05", 11.73, 2.6], ["#cap06", 15.63, 3.2], ["#cap07", 19.63, 4.9], ["#cap08", 25.23, 2.7], ["#cap09", 28.24, 3.0]].forEach(([c, s, d]) => {
+        tl.fromTo(c + " .cap-in", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.18, ease: "power2.out" }, s);
+        tl.to(c + " .cap-in", { opacity: 0, duration: 0.15 }, s + d - 0.15);
+      });
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

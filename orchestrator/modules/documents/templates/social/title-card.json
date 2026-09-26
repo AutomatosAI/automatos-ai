@@ -1,0 +1,28 @@
+{
+  "name": "Title card",
+  "description": "A big editorial statement on the brand's paper: an eyebrow, a headline with accent words in the brand colour, and a supporting line. A carousel cover or a single hook post. Ported from the automatos-social title family.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": ["1080x1350", "1080x1920", "1200x628", "1600x900"],
+  "variables_schema": {
+    "eyebrow": {"type": "text", "label": "Eyebrow", "description": "A short label in the dark pill above the headline, e.g. AI ARCHITECTURE 2026. Leave empty for none.", "default": "", "max_chars": 40},
+    "headline": {"type": "text", "label": "Headline", "description": "The big statement. Use | to break the line, e.g. AGENT|HARNESS.|THE OS|FOR AI.", "max_chars": 80},
+    "headline_accent": {"type": "text", "label": "Accent words", "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.", "default": "", "max_chars": 40},
+    "subline": {"type": "text", "label": "Supporting line", "description": "One or two sentences under the headline. Leave empty for none.", "default": "", "max_chars": 220},
+    "counter": {"type": "text", "label": "Page counter", "description": "For a post in a series, e.g. 01 / 10. Leave empty for none.", "default": "", "max_chars": 12},
+    "handle": {"type": "text", "label": "Handle", "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.", "default": "", "max_chars": 40},
+    "cta": {"type": "text", "label": "Call to action", "description": "The footer's call to action, e.g. Swipe to start. Leave empty for none.", "default": "", "max_chars": 48}
+  },
+  "sample_data": {
+    "eyebrow": "AI ARCHITECTURE 2026",
+    "headline": "AGENT|HARNESS.|THE OS|FOR AI.",
+    "headline_accent": "HARNESS.",
+    "subline": "The model is the brain. The harness is everything else, and it is the piece of your AI system that decides how well it works.",
+    "counter": "01 / 10",
+    "handle": "@automatos.app",
+    "cta": "Swipe to start"
+  },
+  "preview": {
+    "probe": {"x": 0.5, "y": 0.003, "token": "primary", "what": "the brand stripe along the top edge"}
+  }
+}

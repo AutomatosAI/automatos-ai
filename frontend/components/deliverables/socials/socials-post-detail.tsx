@@ -6,6 +6,10 @@
  * comment) and reject. Saving a copy change on an approved or scheduled post
  * voids the approval (D6) — the server moves it back to Needs approval. Approve
  * sends the content_hash of the version shown here, so it approves only that.
+ * S1.1c: a post with a template renders; the render ends it in Needs approval,
+ * or in Failed with the reason shown here and in the history.
+ * S1.5: a video post's voice is chosen here: Kokoro, or a voice toolkit the
+ * workspace has connected in Composio (SocialsVoicePicker).
  */
 import { useEffect, useState, type FormEvent } from 'react'
 import { formatDistanceToNow } from 'date-fns'
@@ -17,6 +21,7 @@ import { badgeVariants } from '@/components/ui/badge'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import {
+  useRenderSocialPost,
   useSocialPostAction,
   useUpdateSocialPost,
   type SocialPostAction,
@@ -27,7 +32,9 @@ import {
   SOCIAL_STATUS_LABELS,
   canAuthorPosts,
   postActions,
+  speaksAScript,
 } from './socials-status'
+import { SocialsVoicePicker } from './socials-voice-picker'
 
 interface SocialsPostDetailProps {
   post: SocialPost
@@ -43,10 +50,18 @@ function timeAgo(iso: string | null | undefined): string {
   }
 }
 
+/** The reason the last render gave for failing, if the post is failed. */
+function lastRenderFailure(post: SocialPost): string | null {
+  if (post.status !== 'failed') return null
+  const entry = [...(post.review_log ?? [])].reverse().find((e) => e.action === 'render_failed')
+  return entry?.comment ?? null
+}
+
 export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
-  const actions = postActions(role, post.status)
+  const actions = postActions(role, post.status, !!post.template_id)
   const update = useUpdateSocialPost()
   const act = useSocialPostAction()
+  const startRender = useRenderSocialPost()
   const savedBase = post.copy?.base ?? ''
   const [base, setBase] = useState(savedBase)
   const [askingChanges, setAskingChanges] = useState(false)
@@ -58,7 +73,9 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
   }, [post.id, savedBase])
 
   const dirty = base !== savedBase
-  const busy = update.isLoading || act.isLoading
+  const busy = update.isLoading || act.isLoading || startRender.isLoading
+  const renderFailure = lastRenderFailure(post)
+  const rendered = Object.keys(post.media ?? {}).length > 0
   const approvalAtStake = post.status === 'approved' || post.status === 'scheduled'
 
   const run = (action: SocialPostAction) =>
@@ -94,6 +111,17 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
         {post.brief && <p className="text-sm text-muted-foreground">{post.brief}</p>}
       </header>
 
+      {post.status === 'rendering' && (
+        <p className="text-sm text-muted-foreground" role="status">
+          Rendering. This can take a few minutes; the post moves to Needs approval when it is done.
+        </p>
+      )}
+      {renderFailure && (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
+          The last render failed: {renderFailure}
+        </p>
+      )}
+
       <div className="space-y-1.5">
         {actions.edit ? (
           <>
@@ -116,10 +144,22 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
         )}
       </div>
 
+      {speaksAScript(post) && <SocialsVoicePicker post={post} editable={actions.edit} />}
+
       <div className="flex flex-wrap gap-2">
         {actions.edit && (
           <Button size="sm" variant="outline" onClick={saveCopy} disabled={!dirty || busy}>
             Save copy
+          </Button>
+        )}
+        {actions.render && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => startRender.mutate({ postId: post.id })}
+            disabled={busy || dirty}
+          >
+            {rendered || post.status === 'failed' ? 'Render again' : 'Render'}
           </Button>
         )}
         {actions.submit && (

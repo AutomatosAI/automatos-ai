@@ -65,6 +65,47 @@ actions:
     source: authored
   - text: delete the file i uploaded yesterday
     source: authored
+  platform_get_brand_kit:
+  - text: what's our brand kit?
+    source: example
+  - text: which colours and fonts does our brand use?
+    source: example
+  - text: what tone of voice should our posts have?
+    source: example
+  - text: show me the brand kit
+    source: authored
+  - text: what are our brand colours?
+    source: authored
+  - text: what's our primary brand colour?
+    source: authored
+  - text: which font do we use for headings?
+    source: authored
+  - text: what's the hex code for our accent colour?
+    source: authored
+  - text: do we have a logo in the brand kit?
+    source: authored
+  - text: what social handles are on file for the brand?
+    source: authored
+  - text: what's our instagram handle?
+    source: authored
+  - text: which phrases are banned in our brand voice?
+    source: authored
+  - text: what tone words describe our brand?
+    source: authored
+  - text: pull up the brand guidelines
+    source: authored
+  - text: check the brand kit before you write the post
+    source: authored
+  - text: what's our tagline?
+    source: authored
+  - text: is the brand kit filled in yet?
+    source: authored
+  - text: what does the brand kit suggest from our business profile?
+    source: authored
+  - text: read our brand settings
+    source: authored
+  - text: what company contact details are in the brand kit?
+    source: authored
   platform_get_template_schema:
   - text: what fields does the Branded Letter template need?
     source: example
@@ -325,6 +366,47 @@ actions:
   - text: does any document explain how to reset a password?
     source: authored
   - text: "answer from our docs: what is the warranty period?"
+    source: authored
+  platform_update_brand_kit:
+  - text: 'set our primary brand colour to #0055aa'
+    source: example
+  - text: our tone of voice is warm, plain and confident
+    source: example
+  - text: add our instagram handle to the brand kit
+    source: example
+  - text: 'change the accent colour to #e4572e'
+    source: authored
+  - text: update the brand kit with our new tagline
+    source: authored
+  - text: use Inter for body text
+    source: authored
+  - text: make the heading font Playfair Display
+    source: authored
+  - text: 'our twitter handle is @acmehq'
+    source: authored
+  - text: set the linkedin handle to acme-inc
+    source: authored
+  - text: never use the phrase game-changer in our posts
+    source: authored
+  - text: ban the words synergy and disruptive from our copy
+    source: authored
+  - text: 'save these brand colours: navy, white and orange'
+    source: authored
+  - text: update the company email in the brand kit
+    source: authored
+  - text: set the brand name to Acme Studio
+    source: authored
+  - text: 'use this logo url for the brand: https://acme.com/logo.png'
+    source: authored
+  - text: fill in the brand kit from our website
+    source: authored
+  - text: remove our tiktok handle from the brand kit
+    source: authored
+  - text: 'change the text colour to #222222'
+    source: authored
+  - text: our brand voice should sound friendly and precise
+    source: authored
+  - text: set up our brand kit
     source: authored
   platform_upload_document:
   - text: add this FAQ to the knowledge base

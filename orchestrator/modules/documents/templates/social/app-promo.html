@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>App promo</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251 S1.2 (D4): the "app promo" template, ported from docs/PRDS/prd251-reference/academy-app-promo.html.
+         Every colour and font reads the brand kit; the var() fallbacks are the reference's Academy Night.
+         Five footage slots (hook, app_loop, desk, focus, end): a filled slot plays its clip and holds the last
+         frame to the end of its window; an empty slot is taken out, and the background plays instead. */
+      :root {
+        --ink: var(--brand-ink, #141d30);
+        --paper: var(--brand-on-ink, #e6edf8);
+        --muted: var(--brand-on-ink-muted, #9fb0cc);
+        --accent: var(--brand-primary-on-ink, #ff6b42);
+        --accent-text: var(--brand-primary-light, #ff8a5c);
+        --accent-2: var(--brand-accent-on-ink, #a9bfdd);
+        --ok: var(--brand-success, #5bbf7a);
+        --ok-text: var(--brand-success-light, #7fd49a);
+        --gold: var(--brand-highlight, #dcc363);
+        --deep: color-mix(in srgb, var(--ink) 40%, black);
+        --top: color-mix(in srgb, var(--ink) 88%, var(--accent-2));
+        --card: color-mix(in srgb, var(--ink) 93%, var(--accent-2));
+        --bubble: color-mix(in srgb, var(--ink) 81%, var(--accent-2));
+        --ring-off: color-mix(in srgb, var(--ink) 60%, var(--accent-2));
+        --display: var(--brand-heading-font, sans-serif);
+        --body: var(--brand-body-font, sans-serif);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      .disp { font-family: var(--display); font-weight: 700; letter-spacing: -0.02em; }
+      .lab { font-family: var(--body); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
+      .c { color: var(--accent); }
+      .w { display: inline-block; opacity: 0; }
+
+      /* ---------- persistent background ---------- */
+      #bg { z-index: 0; }
+      .bg-base { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, var(--top) 0%, var(--card) 45%, var(--ink) 100%); }
+      .bg-floor { position: absolute; left: -540px; right: -540px; top: 1040px; height: 1000px; perspective: 700px; perspective-origin: 50% 0%; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 100%); }
+      .bg-plane { position: absolute; left: 0; right: 0; top: 0; height: 2600px; transform-origin: 50% 0%; transform: rotateX(68deg);
+        background-image: linear-gradient(color-mix(in srgb, var(--accent-2) 20%, transparent) 2px, transparent 2px), linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 20%, transparent) 2px, transparent 2px);
+        background-size: 120px 120px; background-position: 0px 0px; }
+      #glowA { position: absolute; left: -310px; top: 300px; width: 1700px; height: 1700px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent) 20%, transparent) 0%, color-mix(in srgb, var(--accent) 6%, transparent) 35%, transparent 62%); opacity: 0.7; }
+      #glowB { position: absolute; left: 140px; top: -520px; width: 1300px; height: 1300px; border-radius: 50%;
+        background: radial-gradient(circle, color-mix(in srgb, var(--accent-2) 18%, transparent) 0%, transparent 60%); opacity: 0.8; }
+      .grain { position: absolute; inset: 0; opacity: 0.06;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+      .vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, color-mix(in srgb, var(--deep) 60%, transparent) 100%); }
+
+      /* ---------- footage slots (a clip scaled to cover; an empty slot leaves the background) ---------- */
+      .vid { z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+      .vwrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+      .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+      /* ---------- captions ---------- */
+      .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1462px; }
+      .cap-in { max-width: 930px; padding: 16px 28px; border-radius: 20px; background: color-mix(in srgb, var(--ink) 84%, transparent); border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+        box-shadow: 0 12px 40px color-mix(in srgb, black 45%, transparent); font-size: 40px; font-weight: 500; line-height: 1.25; text-align: center; color: var(--paper); opacity: 0; }
+      .cw { color: var(--paper); }
+
+      /* ---------- S1: the hook, over the hook footage ---------- */
+      #s1 { z-index: 3; }
+      .s1-grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 55%, transparent) 0%, transparent 28%, transparent 46%, color-mix(in srgb, var(--ink) 85%, transparent) 72%, color-mix(in srgb, var(--ink) 96%, transparent) 100%); }
+      #s1head { position: absolute; left: 72px; right: 72px; top: 1090px; font-size: 104px; line-height: 1.14; }
+      #s1q { position: absolute; left: 72px; right: 72px; top: 1370px; font-size: 104px; line-height: 1.0; color: var(--accent); opacity: 0; }
+      #flash { position: absolute; inset: 0; background: var(--paper); opacity: 0; }
+
+      /* ---------- S2: the reveal, over the app's own loop ---------- */
+      #s2 { z-index: 3; }
+      #s2wrap { position: absolute; inset: 0; }
+      .s2-shade { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 40% at 50% 46%, transparent 0%, color-mix(in srgb, var(--ink) 35%, transparent) 70%, color-mix(in srgb, var(--ink) 80%, transparent) 100%); }
+      #s2lab { position: absolute; left: 0; right: 0; top: 300px; text-align: center; font-size: 32px; color: var(--paper); opacity: 0; text-shadow: 0 2px 18px color-mix(in srgb, black 85%, transparent), 0 0 4px color-mix(in srgb, black 60%, transparent); }
+      #s2t1, #s2t2 { position: absolute; left: 0; right: 0; text-align: center; font-size: 150px; line-height: 1; opacity: 0; text-shadow: 0 8px 40px color-mix(in srgb, black 60%, transparent); }
+      #s2t1 { top: 1165px; }
+      #s2t2 { top: 1350px; }
+      #s2coach { position: absolute; left: 0; right: 0; top: 1520px; text-align: center; font-size: 28px; color: var(--accent-2); letter-spacing: 0.3em; opacity: 0; }
+
+      /* ---------- the phone (S3 today and a question, S4 the tutor) ---------- */
+      #phoneA { z-index: 3; }
+      .persp { position: absolute; inset: 0; perspective: 1800px; perspective-origin: 50% 40%; }
+      #phone { position: absolute; left: 175px; top: 290px; width: 730px; height: 1130px; border-radius: 70px; background: var(--ink); border: 3px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+        box-shadow: 0 60px 140px color-mix(in srgb, black 60%, transparent), 0 0 0 10px color-mix(in srgb, var(--ink) 60%, transparent), 0 0 120px color-mix(in srgb, var(--accent-2) 22%, transparent); overflow: hidden; opacity: 0; }
+      .scr { position: absolute; inset: 0; padding: 58px 38px 0; }
+      .sbar { display: flex; justify-content: space-between; font-size: 22px; font-weight: 600; color: var(--paper); padding: 0 12px; }
+      .hdr { margin-top: 26px; display: flex; align-items: center; justify-content: space-between; }
+      .hdr .t { font-size: 24px; color: var(--accent-2); }
+      .dock { position: absolute; left: 90px; right: 90px; bottom: 34px; height: 74px; border-radius: 999px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 25%, transparent);
+        display: flex; align-items: center; justify-content: space-around; font-size: 20px; color: var(--muted); }
+      .dock .on { color: var(--paper); font-weight: 600; }
+      #today { margin-top: 22px; display: flex; align-items: center; gap: 22px; padding: 22px 24px; border-radius: 28px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); opacity: 0; }
+      .ring { position: relative; width: 92px; height: 92px; flex: none; }
+      .ring svg { position: absolute; left: 0; top: 0; }
+      .ring .track { stroke: var(--ring-off); }
+      .ring .arc { stroke: var(--accent); }
+      .ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+      #today .k { font-size: 20px; color: var(--accent-text); }
+      #today .v { font-size: 25px; margin-top: 6px; line-height: 1.25; }
+      .streak { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 30px; font-weight: 700; color: var(--accent-text); }
+      .streak svg { fill: currentColor; }
+      #qcard { margin-top: 22px; padding: 26px 26px 22px; border-radius: 28px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); opacity: 0; }
+      .chip { display: inline-block; padding: 6px 14px; border-radius: 999px; background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); font-size: 18px; }
+      #qcard .ql { font-size: 18px; color: var(--accent-text); margin-top: 16px; }
+      #qcard .qt { font-size: 27px; line-height: 1.32; margin-top: 8px; }
+      .optq { position: relative; margin-top: 12px; padding: 14px 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--accent-2) 25%, transparent); font-size: 23px; line-height: 1.25; color: var(--paper); opacity: 0; }
+      .optq b { color: var(--accent-2); margin-right: 10px; }
+      #oA .ok { position: absolute; right: 16px; top: 50%; margin-top: -15px; opacity: 0; color: var(--ok); }
+      #qres { margin-top: 14px; display: flex; align-items: center; gap: 14px; opacity: 0; }
+      #qres .good { font-size: 24px; font-weight: 700; color: var(--ok); }
+      #qres .btn { margin-left: auto; padding: 10px 18px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text); font-size: 20px; }
+      .src { margin-top: 12px; display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); }
+      #tap { position: absolute; left: 300px; top: 560px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
+      #tutor { opacity: 0; }
+      #tutor .ttl { font-size: 44px; margin-top: 6px; }
+      .about { margin-top: 18px; display: inline-block; padding: 8px 16px; border-radius: 14px; background: color-mix(in srgb, var(--accent-2) 12%, transparent); color: var(--accent-2); font-size: 20px; }
+      .ub { margin-top: 22px; margin-left: auto; width: fit-content; max-width: 520px; padding: 16px 22px; border-radius: 22px 22px 6px 22px; background: var(--bubble); font-size: 25px; opacity: 0; }
+      .tb { margin-top: 18px; padding: 20px 22px; border-radius: 22px 22px 22px 6px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: 24px; line-height: 1.38; color: var(--paper); }
+      .tb .tw { opacity: 0; }
+      .cite { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; opacity: 0; }
+      .cite span { padding: 6px 14px; border-radius: 999px; font-size: 18px; }
+      .cite .a { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok-text); }
+      .cite .b { background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); }
+      .scope { margin-top: 12px; font-size: 18px; color: var(--muted); opacity: 0; }
+      .ask { position: absolute; left: 38px; right: 38px; bottom: 130px; height: 70px; border-radius: 22px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); display: flex; align-items: center; padding: 0 12px 0 22px; gap: 10px; font-size: 22px; color: var(--muted); }
+      .ask .bt { margin-left: auto; padding: 10px 18px; border-radius: 16px; background: var(--accent-2); color: var(--ink); font-weight: 700; font-size: 20px; }
+      .ask .bt2 { padding: 10px 18px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent); color: var(--accent-2); font-size: 20px; }
+
+      /* ---------- S5: the mock and the gate, over the focus footage ---------- */
+      #s5 { z-index: 3; }
+      .s5-shade { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 25%, transparent) 0%, color-mix(in srgb, var(--ink) 55%, transparent) 45%, color-mix(in srgb, var(--ink) 90%, transparent) 100%); }
+      #mock, #gate { position: absolute; left: 90px; right: 90px; top: 760px; padding: 36px 36px 32px; border-radius: 32px; background: color-mix(in srgb, var(--card) 94%, transparent); border: 1px solid color-mix(in srgb, var(--accent-2) 28%, transparent);
+        box-shadow: 0 40px 120px color-mix(in srgb, black 60%, transparent), 0 0 80px color-mix(in srgb, var(--accent-2) 15%, transparent); opacity: 0; }
+      #mock .t { font-size: 58px; }
+      #mock .s { font-size: 30px; color: var(--accent-2); margin-top: 12px; }
+      #begin { position: relative; margin-top: 26px; height: 84px; border-radius: 22px; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; }
+      #ripple { position: absolute; left: 50%; top: 50%; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
+      #gate .k { font-size: 22px; color: var(--accent-text); }
+      .grow { margin-top: 18px; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 20px; background: var(--ink); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: 28px; }
+      .dotc { position: relative; width: 40px; height: 40px; flex: none; }
+      .dotc .e { position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--ring-off); }
+      .dotc .f { position: absolute; inset: 0; border-radius: 50%; background: var(--ok); color: var(--ink); display: flex; align-items: center; justify-content: center; opacity: 0; }
+
+      /* ---------- S6: the grade ---------- */
+      #s6 { z-index: 3; }
+      #aplus { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: 460px; line-height: 1; color: var(--gold); text-shadow: 0 0 80px color-mix(in srgb, var(--gold) 45%, transparent), 0 20px 60px color-mix(in srgb, black 50%, transparent); opacity: 0; }
+      #ornot { position: absolute; left: 0; right: 0; top: 1030px; text-align: center; font-size: 96px; color: var(--accent-2); opacity: 0; }
+      #passed { position: absolute; left: 0; right: 0; top: 380px; text-align: center; font-size: 30px; color: var(--paper); opacity: 0; }
+
+      /* ---------- S7: the tracks ---------- */
+      #s7 { z-index: 3; }
+      #tkhead { position: absolute; left: 72px; right: 72px; top: 250px; opacity: 0; }
+      #tkhead .t { font-size: 104px; line-height: 1; }
+      #tkhead .s { font-size: 30px; color: var(--accent-2); margin-top: 18px; }
+      .tgrid { position: absolute; left: 72px; right: 72px; top: 520px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .tk { height: 150px; border-radius: 24px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); padding: 20px 22px; opacity: 0; }
+      .tk .cd { font-family: var(--display); font-weight: 700; font-size: 34px; color: var(--paper); }
+      .tk .nm { font-size: 22px; line-height: 1.25; color: var(--accent-2); margin-top: 8px; }
+
+      /* ---------- S8: the end card, over the end footage ---------- */
+      #s8 { z-index: 3; }
+      .s8-shade { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 40%, transparent) 0%, transparent 30%, color-mix(in srgb, var(--ink) 20%, transparent) 50%, color-mix(in srgb, var(--ink) 88%, transparent) 78%, color-mix(in srgb, var(--ink) 97%, transparent) 100%); opacity: 0; }
+      #eicon { position: absolute; left: 420px; top: 560px; width: 240px; height: 240px; object-fit: contain; opacity: 0; filter: drop-shadow(0 10px 40px color-mix(in srgb, black 50%, transparent)); }
+      #ename { position: absolute; left: 0; right: 0; top: 1110px; text-align: center; font-size: 84px; opacity: 0; }
+      #efree { position: absolute; left: 0; right: 0; top: 1220px; text-align: center; font-size: 40px; color: var(--accent-2); opacity: 0; }
+      #eprove { position: absolute; left: 0; right: 0; top: 1290px; text-align: center; font-size: 120px; color: var(--accent); opacity: 0; text-shadow: 0 10px 50px color-mix(in srgb, black 50%, transparent); }
+      #eurl { position: absolute; left: 0; right: 0; top: 1470px; display: flex; flex-direction: column; align-items: center; gap: 14px; opacity: 0; }
+      #eurl .u { font-size: 44px; font-weight: 600; letter-spacing: 0.02em; }
+      #euline { width: 470px; height: 3px; background: var(--accent); transform-origin: 0 50%; }
+      #eurl .n { font-size: 20px; color: var(--muted); max-width: 840px; text-align: center; line-height: 1.35; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="38" data-width="1080" data-height="1920">
+      <!-- ================= persistent background ================= -->
+      <div id="bg" class="clip" data-start="0" data-duration="38" data-track-index="0">
+        <div class="bg-base"></div>
+        <div id="glowB"></div>
+        <div id="glowA"></div>
+        <div class="bg-floor"><div class="bg-plane" id="plane" data-layout-allow-overflow></div></div>
+        <div class="grain"></div>
+        <div class="vig"></div>
+      </div>
+
+      <!-- ================= footage slots: a clip that ends early holds its last frame ================= -->
+      <div class="vwrap" id="w1"><video id="va1" class="clip" data-slot="hook" src="assets/slots/hook.mp4" data-start="0" data-duration="4.95" data-track-index="1" muted playsinline></video></div>
+      <video id="vloop" class="clip vid" data-slot="app_loop" src="assets/slots/app_loop.mp4" data-start="4.95" data-duration="3.9" data-track-index="1" muted playsinline></video>
+      <video id="va2" class="clip vid" data-slot="desk" src="assets/slots/desk.mp4" data-start="8.85" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <video id="va3" class="clip vid" data-slot="focus" src="assets/slots/focus.mp4" data-start="17.1" data-duration="4.04" data-track-index="1" muted playsinline></video>
+      <div class="vwrap" id="w4"><video id="va4" class="clip" data-slot="end" src="assets/slots/end.mp4" data-start="29.5" data-duration="8.5" data-track-index="1" muted playsinline></video></div>
+
+      <!-- ================= S1: the hook, and the question ================= -->
+      <section id="s1" class="clip" data-start="0" data-duration="4.95" data-track-index="2">
+        <div class="s1-grad"></div>
+        <div id="s1head" class="disp"><span id="s1a">{{ hook_line }}</span> <span class="c" id="s1b">{{ hook_accent }}</span></div>
+        <div id="s1q" class="disp">{{ hook_question }}</div>
+        <div id="flash"></div>
+      </section>
+
+      <!-- ================= S2: the reveal on the drop ================= -->
+      <section id="s2" class="clip" data-start="4.95" data-duration="3.9" data-track-index="2">
+        <div id="s2wrap">
+          <div class="s2-shade"></div>
+          <div id="s2lab" class="lab">{{ app_name }}</div>
+          <div id="s2t1" class="disp">{{ slogan_line_1 }}</div>
+          <div id="s2t2" class="disp"><span class="c">{{ slogan_accent }}</span> {{ slogan_line_2 }}</div>
+          <div id="s2coach" class="lab">{{ slogan_note }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S3 and S4: the app, on the phone ================= -->
+      <section id="phoneA" class="clip" data-start="8.85" data-duration="8.25" data-track-index="2">
+        <div class="persp">
+          <div id="phone">
+            <!-- today, and a question -->
+            <div class="scr" id="scrQ">
+              <div class="sbar"><span>{{ phone_time }}</span><span>● ● ●</span></div>
+              <div class="hdr"><span class="t lab">{{ course_code }}</span><span class="t">☰</span></div>
+              <div id="today">
+                <div class="ring">
+                  <svg width="92" height="92" viewBox="0 0 92 92"><circle class="track" cx="46" cy="46" r="38" fill="none" stroke-width="9" /><circle class="arc" id="ringArc" cx="46" cy="46" r="38" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="238.8" stroke-dashoffset="238.8" transform="rotate(-90 46 46)" /></svg>
+                  <div class="pct" id="ringPct"></div>
+                </div>
+                <div><div class="k lab">{{ today_label }}</div><div class="v">{{ today_detail }}</div></div>
+                <div class="streak"><svg width="26" height="30" viewBox="0 0 24 28"><path d="M12 1c1 4 6 7 6 13a6 6 0 0 1-12 0c0-3 1.5-5 3-6.5C9 10 9.5 12 11 13c0-4-1-8 1-12z" /></svg>{{ streak }}</div>
+              </div>
+              <div id="qcard">
+                <span class="chip">{{ question_topic }}</span>
+                <div class="ql lab">{{ question_label }}</div>
+                <div class="qt">{{ question_text }}</div>
+                <div class="optq" id="oA"><b>A</b>{{ option_a }}
+                  <svg class="ok" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg></div>
+                <div class="optq" id="oB"><b>B</b>{{ option_b }}</div>
+                <div class="optq" id="oC"><b>C</b>{{ option_c }}</div>
+                <div class="optq" id="oD"><b>D</b>{{ option_d }}</div>
+                <div id="qres"><span class="good">{{ result_label }}</span><span class="btn">{{ tutor_button }}</span></div>
+                <div class="src"><span>{{ source_note }}</span><span>{{ source_link }}</span></div>
+              </div>
+              <div id="tap"></div>
+            </div>
+            <!-- the tutor -->
+            <div class="scr" id="tutor">
+              <div class="sbar"><span>{{ phone_time_later }}</span><span>● ● ●</span></div>
+              <div class="hdr"><span class="t lab">{{ tutor_header }}</span><span class="t">✕</span></div>
+              <div class="ttl disp">{{ tutor_title }}</div>
+              <div class="about">{{ tutor_about }}</div>
+              <div class="ub" id="ub">{{ tutor_question }}</div>
+              <div class="tb" id="tb">{{ tutor_answer }}</div>
+              <div class="cite" id="cite"><span class="a">{{ cite_ok }}</span><span class="b">{{ cite_link }}</span></div>
+              <div class="scope" id="scope">{{ tutor_scope }}</div>
+              <div class="ask"><span>{{ ask_placeholder }}</span><span class="bt2">{{ ask_speak }}</span><span class="bt">{{ ask_send }}</span></div>
+            </div>
+            <div class="dock"><span class="on">{{ dock_1 }}</span><span>{{ dock_2 }}</span><span>{{ dock_3 }}</span><span>{{ dock_4 }}</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= S5: the mock and the gate ================= -->
+      <section id="s5" class="clip" data-start="17.1" data-duration="4.1" data-track-index="2">
+        <div class="s5-shade"></div>
+        <div id="mock">
+          <div class="t disp">{{ mock_title }}</div>
+          <div class="s">{{ mock_detail }}</div>
+          <div id="begin">{{ mock_button }}<div id="ripple"></div></div>
+        </div>
+        <div id="gate">
+          <div class="k lab">{{ gate_title }}</div>
+          <div class="grow"><div class="dotc"><div class="e"></div><div class="f" id="g1"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ gate_1 }}</div>
+          <div class="grow"><div class="dotc"><div class="e"></div><div class="f" id="g2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div></div>{{ gate_2 }}</div>
+        </div>
+      </section>
+
+      <!-- ================= S6: the grade, or not yet ================= -->
+      <section id="s6" class="clip" data-start="21.2" data-duration="2.15" data-track-index="2">
+        <div id="passed" class="lab">{{ grade_note }}</div>
+        <div id="aplus" class="disp">{{ grade }}</div>
+        <div id="ornot" class="disp">{{ grade_caveat }}</div>
+      </section>
+
+      <!-- ================= S7: the tracks ================= -->
+      <section id="s7" class="clip" data-start="23.35" data-duration="6.15" data-track-index="2">
+        <div id="tkhead">
+          <div class="t disp">{{ tracks_title }}</div>
+          <div class="s">{{ tracks_detail }}</div>
+        </div>
+        <div class="tgrid">
+          <div class="tk" id="t1"><div class="cd">{{ track_1_code }}</div><div class="nm">{{ track_1_name }}</div></div>
+          <div class="tk" id="t2"><div class="cd">{{ track_2_code }}</div><div class="nm">{{ track_2_name }}</div></div>
+          <div class="tk" id="t3"><div class="cd">{{ track_3_code }}</div><div class="nm">{{ track_3_name }}</div></div>
+          <div class="tk" id="t4"><div class="cd">{{ track_4_code }}</div><div class="nm">{{ track_4_name }}</div></div>
+          <div class="tk" id="t5"><div class="cd">{{ track_5_code }}</div><div class="nm">{{ track_5_name }}</div></div>
+          <div class="tk" id="t6"><div class="cd">{{ track_6_code }}</div><div class="nm">{{ track_6_name }}</div></div>
+          <div class="tk" id="t7"><div class="cd">{{ track_7_code }}</div><div class="nm">{{ track_7_name }}</div></div>
+          <div class="tk" id="t8"><div class="cd">{{ track_8_code }}</div><div class="nm">{{ track_8_name }}</div></div>
+          <div class="tk" id="t9"><div class="cd">{{ track_9_code }}</div><div class="nm">{{ track_9_name }}</div></div>
+          <div class="tk" id="t10"><div class="cd">{{ track_10_code }}</div><div class="nm">{{ track_10_name }}</div></div>
+        </div>
+      </section>
+
+      <!-- ================= S8: the end card ================= -->
+      <section id="s8" class="clip" data-start="29.5" data-duration="8.5" data-track-index="2">
+        <div class="s8-shade" id="s8shade"></div>
+        <img id="eicon" src="{{ brand.logo_mark }}" alt="" />
+        <div id="ename" class="disp">{{ app_name }}</div>
+        <div id="efree">{{ end_line }}</div>
+        <div id="eprove" class="disp">{{ end_accent }}</div>
+        <div id="eurl"><div class="u">{{ end_url }}</div><div id="euline"></div><div class="n">{{ end_note }}</div></div>
+      </section>
+
+      <!-- ================= captions (the voice lines not already on screen) ================= -->
+      <div class="clip cap" id="cap4" data-start="8.92" data-duration="3.6" data-track-index="5"><div class="cap-in">{{ cap_practice }}</div></div>
+      <div class="clip cap" id="cap5" data-start="13.22" data-duration="3.1" data-track-index="5"><div class="cap-in">{{ cap_tutor }}</div></div>
+      <div class="clip cap" id="cap6" data-start="17.22" data-duration="3.3" data-track-index="5"><div class="cap-in">{{ cap_mock }}</div></div>
+      <div class="clip cap" id="cap8" data-start="23.42" data-duration="4.5" data-track-index="5"><div class="cap-in"><span class="cw" id="k1">{{ beat_1 }}</span> <span class="cw" id="k2">{{ beat_2 }}</span> <span class="cw" id="k3">{{ beat_3 }}</span> <span class="cw" id="k4">{{ beat_4 }}</span> <span class="cw" id="k5">{{ beat_5 }}</span></div></div>
+
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="38" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the DOM the timeline animates, built once from the template's own text ----------
+      const byId = (id) => document.getElementById(id);
+      const rootStyle = getComputedStyle(document.documentElement);
+      const tone = (name) => rootStyle.getPropertyValue(name).trim();
+      const ACCENT = tone("--accent");
+      const PAPER = tone("--paper");
+      const OK = tone("--ok");
+      function rgba(hex, alpha) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+        return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + alpha + ")" : hex;
+      }
+      // One span per word of each element, in order: the words land one by one.
+      function words(...ids) {
+        const spans = [];
+        ids.forEach((id) => {
+          const el = byId(id);
+          const parts = el.textContent.trim().split(/\s+/).filter(Boolean);
+          el.textContent = "";
+          parts.forEach((part, i) => {
+            if (i) el.appendChild(document.createTextNode(" "));
+            const span = document.createElement("span");
+            span.className = "w";
+            span.textContent = part;
+            el.appendChild(span);
+            spans.push(span);
+          });
+        });
+        return spans;
+      }
+      function wordAt(times, i) {
+        if (i < times.length) return times[i];
+        const step = times.length > 1 ? (times[times.length - 1] - times[0]) / (times.length - 1) : 0.2;
+        return times[times.length - 1] + (i - times.length + 1) * step;
+      }
+
+      // Today's progress ring: the arc and the figure come from the one number.
+      const PERCENT = Math.max(0, Math.min(100, {{ today_percent }}));
+      const RING = 238.8;
+      byId("ringPct").textContent = Math.round(PERCENT) + "%";
+
+      const hookWords = words("s1a", "s1b");
+      // The tutor's answer types itself out, word by word.
+      const answerEl = byId("tb");
+      const answer = answerEl.textContent.trim().split(/\s+/).filter(Boolean);
+      answerEl.textContent = "";
+      answer.forEach((word, i) => {
+        const span = document.createElement("span");
+        span.className = "tw";
+        span.textContent = (i ? " " : "") + word;
+        answerEl.appendChild(span);
+      });
+      const answerStagger = Math.min(0.036, 0.9 / Math.max(1, answer.length));
+
+      // ---------- one paused root timeline ----------
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#plane", { backgroundPosition: "0px 0px" }, { backgroundPosition: "0px 1320px", duration: 38, ease: "none" }, 0);
+      // the camera moves on the footage (an empty slot's wrapper is empty)
+      tl.fromTo("#w1", { scale: 1.0 }, { scale: 1.05, duration: 0.91, ease: "none" }, 4.04);
+      tl.fromTo("#w4", { scale: 1.1 }, { scale: 1.08, duration: 5.04, ease: "none" }, 29.5);
+      tl.to("#w4", { scale: 1.0, duration: 3.46, ease: "power1.out" }, 34.54);
+
+      // ===== S1 (0 – 4.95): the hook, and the question
+      hookWords.forEach((w, i) => {
+        tl.fromTo(w, { y: 44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "power3.out" }, wordAt([0.33, 0.75, 0.98, 1.15, 1.4], i));
+      });
+      tl.fromTo("#s1q", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 2.63);
+      tl.fromTo("#flash", { opacity: 0 }, { opacity: 0.85, duration: 0.07, yoyo: true, repeat: 1 }, 4.82);
+
+      // ===== S2 (4.95 – 8.85): the reveal on the drop
+      tl.fromTo("#s2lab", { y: -20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 5.3);
+      tl.fromTo("#s2t1", { y: 50, opacity: 0, scale: 1.06 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: "power3.out" }, 6.72);
+      tl.fromTo("#s2t2", { y: 50, opacity: 0, scale: 1.06 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: "power3.out" }, 7.12);
+      tl.fromTo("#s2coach", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 7.5);
+      tl.to("#s2wrap", { opacity: 0, scale: 0.94, filter: "blur(8px)", duration: 0.25, ease: "power2.in" }, 8.6);
+
+      // ===== S3 (8.85 – 12.9): today, and a question
+      tl.fromTo("#phone", { y: 180, rotationX: 16, opacity: 0 }, { y: 0, rotationX: 0, opacity: 1, duration: 0.55, ease: "power3.out" }, 8.85);
+      tl.fromTo("#today", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 9.05);
+      tl.fromTo("#ringArc", { attr: { "stroke-dashoffset": RING } }, { attr: { "stroke-dashoffset": RING * (1 - PERCENT / 100) }, duration: 0.9, ease: "power2.out" }, 9.15);
+      tl.fromTo("#qcard", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 10.1);
+      tl.fromTo(".optq", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.25, stagger: 0.12, ease: "power2.out" }, 10.35);
+      tl.fromTo("#tap", { scale: 0.3, opacity: 0.9 }, { scale: 1.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 11.7);
+      tl.to("#oA", { backgroundColor: rgba(OK, 0.16), borderColor: OK, duration: 0.2 }, 11.72);
+      tl.fromTo("#oA .ok", { scale: 0.4, opacity: 0, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, duration: 0.22, ease: "back.out(3)" }, 11.75);
+      tl.to(["#oB", "#oC", "#oD"], { opacity: 0.45, duration: 0.2 }, 11.75);
+      tl.fromTo("#qres", { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "power2.out" }, 11.9);
+
+      // ===== S4 (12.9 – 17.1): ask the tutor
+      tl.to("#scrQ", { opacity: 0, x: -60, duration: 0.25, ease: "power2.in" }, 12.9);
+      tl.fromTo("#tutor", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.3, ease: "power3.out" }, 13.05);
+      tl.fromTo("#ub", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "back.out(1.7)" }, 13.4);
+      tl.to("#tb .tw", { opacity: 1, duration: 0.02, stagger: answerStagger, ease: "none" }, 13.75);
+      tl.fromTo("#cite", { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: "back.out(2)" }, 14.7);
+      tl.fromTo("#scope", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 15.4);
+      tl.to("#phone", { y: -40, scale: 0.96, opacity: 0, duration: 0.3, ease: "power2.in" }, 16.8);
+
+      // ===== S5 (17.1 – 21.2): the mock, then the gate
+      tl.fromTo("#mock", { y: 60, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: "back.out(1.4)" }, 17.25);
+      tl.fromTo("#begin", { scale: 1 }, { scale: 0.96, duration: 0.08, yoyo: true, repeat: 1 }, 19.52);
+      tl.fromTo("#ripple", { scale: 0.2, opacity: 0.8 }, { scale: 2.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 19.55);
+      tl.to("#mock", { y: -40, opacity: 0, duration: 0.25, ease: "power2.in" }, 19.8);
+      tl.fromTo("#gate", { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 19.95);
+      tl.fromTo("#g1", { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.2, ease: "back.out(3)" }, 20.2);
+      tl.fromTo("#g2", { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.2, ease: "back.out(3)" }, 20.5);
+      tl.to("#gate", { scale: 1.04, opacity: 0, duration: 0.22, ease: "power2.in" }, 20.95);
+
+      // ===== S6 (21.2 – 23.35): the grade, or not yet
+      tl.fromTo("#aplus", { scale: 1.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 21.34);
+      tl.fromTo("#passed", { y: -16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 21.6);
+      tl.fromTo("#ornot", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: "power3.out" }, 22.05);
+      tl.to(["#aplus", "#ornot", "#passed"], { opacity: 0, duration: 0.2 }, 23.12);
+
+      // ===== S7 (23.35 – 29.5): the tracks, each named track lit on its beat
+      tl.fromTo("#tkhead", { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 23.4);
+      tl.fromTo(".tk", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, stagger: 0.07, ease: "power3.out" }, 23.5);
+      [["#t1", 24.52], ["#t2", 25.2], ["#t4", 26.09], ["#t5", 26.93]].forEach(([t, at]) => {
+        tl.to(t, { borderColor: ACCENT, boxShadow: "0 0 0 1px " + ACCENT + ", 0 0 50px " + rgba(ACCENT, 0.3), scale: 1.04, duration: 0.2, ease: "power2.out" }, at);
+        tl.to(t, { scale: 1, duration: 0.3, ease: "power2.out" }, at + 0.25);
+      });
+      tl.to(["#tkhead", ".tgrid"], { opacity: 0, duration: 0.25, ease: "power2.in" }, 29.2);
+
+      // ===== S8 (29.5 – 38): the end card
+      tl.fromTo("#s8shade", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 29.5);
+      tl.fromTo("#eicon", { scale: 0.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.6)" }, 29.66);
+      tl.fromTo("#ename", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, 29.72);
+      tl.fromTo("#efree", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 31.16);
+      tl.fromTo("#eprove", { scale: 1.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.4, ease: "expo.out" }, 32.77);
+      tl.fromTo("#eurl", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 33.3);
+      tl.fromTo("#euline", { scaleX: 0 }, { scaleX: 1, duration: 0.55, ease: "power2.out" }, 33.4);
+      tl.to("#eicon", { y: -10, duration: 1.6, yoyo: true, repeat: 1, ease: "sine.inOut" }, 34.4);
+
+      // ===== captions
+      [["#cap4", 8.92, 3.6], ["#cap5", 13.22, 3.1], ["#cap6", 17.22, 3.3], ["#cap8", 23.42, 4.5]].forEach(([c, s, d]) => {
+        tl.fromTo(c + " .cap-in", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.18, ease: "power2.out" }, s);
+        tl.to(c + " .cap-in", { opacity: 0, duration: 0.15 }, s + d - 0.15);
+      });
+      [["#k1", 23.42], ["#k2", 24.52], ["#k3", 25.2], ["#k4", 26.09], ["#k5", 26.93]].forEach(([k, t]) => {
+        tl.to(k, { color: ACCENT, duration: 0.08 }, t);
+        tl.to(k, { color: PAPER, duration: 0.2 }, t + 0.55);
+      });
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

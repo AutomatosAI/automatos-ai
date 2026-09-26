@@ -3,21 +3,25 @@
 /**
  * PRD-251 S0.5 — the Socials list: posts grouped by status with counts, newest
  * first, with an empty state; "New draft"; and the selected post's detail with
- * the actions the caller's role allows.
+ * the actions the caller's role allows. S1.1c adds this month's render minutes
+ * under the heading; S1.3 opens the brand kit (D5) from here for a role that
+ * edits it.
  */
 import { useMemo, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { Loader2, Plus, Share2 } from 'lucide-react'
+import { Loader2, Palette, Plus, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { badgeVariants } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
-import { canAuthorPosts, groupPostsByStatus } from './socials-status'
+import { SocialsRenderMinutes } from './socials-render-minutes'
+import { anyRendering, canAuthorPosts, canEditBrandKit, groupPostsByStatus } from './socials-status'
 
 function updatedAgo(post: SocialPost): string {
   try {
@@ -31,11 +35,13 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
   const { data, isLoading, isError, error } = useSocialPosts()
   const [creating, setCreating] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [brandKitOpen, setBrandKitOpen] = useState(false)
 
   const posts = useMemo(() => data?.posts ?? [], [data])
   const groups = useMemo(() => groupPostsByStatus(posts), [posts])
   const selected = posts.find((post) => post.id === selectedId) ?? null
   const canAuthor = canAuthorPosts(role)
+  const canBrand = canEditBrandKit(role)
 
   const handleDraftDone = (post: SocialPost | null) => {
     setCreating(false)
@@ -50,14 +56,25 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
           <p className="text-sm text-muted-foreground">
             Every post is approved one by one. An edit after approval sends it back for approval.
           </p>
+          <SocialsRenderMinutes rendering={anyRendering(posts)} />
         </div>
-        {canAuthor && !creating && (
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus className="mr-1.5 h-4 w-4" aria-hidden />
-            New draft
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canBrand && (
+            <Button size="sm" variant="outline" onClick={() => setBrandKitOpen(true)}>
+              <Palette className="mr-1.5 h-4 w-4" aria-hidden />
+              Brand kit
+            </Button>
+          )}
+          {canAuthor && !creating && (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+              New draft
+            </Button>
+          )}
+        </div>
       </div>
+
+      {canBrand && <BrandKitDialog open={brandKitOpen} onOpenChange={setBrandKitOpen} />}
 
       {creating && <SocialsNewDraft onDone={handleDraftDone} />}
 

@@ -1,0 +1,867 @@
+{
+  "name": "UI story promo",
+  "description": "A 39.5 s vertical product story told with animated product screens and no footage: the hook on a clock, the reveal on the kick, a request in chat, the board taking it, a question for you, the work done by morning, what landed, the team, and the end card. Ported from the v1 reference video (PRD-251A). Its music is \"Where the Night Begins\" by Sascha Ende (CC BY 4.0) from 190.1 s, as in the reference; the post's copy carries its credit.",
+  "format": "social_video",
+  "category": "social",
+  "sizes": [
+    "1080x1920"
+  ],
+  "variables_schema": {
+    "hook_eyebrow": {
+      "type": "text",
+      "label": "Hook: eyebrow above the clock",
+      "max_chars": 44,
+      "description": "Mono caps line, e.g. the day and the business name."
+    },
+    "hook_time_before": {
+      "type": "text",
+      "label": "Hook: the clock before the cut",
+      "max_chars": 5,
+      "description": "HH:MM, the minute before the hook's moment."
+    },
+    "hook_time_after": {
+      "type": "text",
+      "label": "Hook: the clock after the cut",
+      "max_chars": 5,
+      "description": "HH:MM, the hook's moment."
+    },
+    "hook_line": {
+      "type": "text",
+      "label": "Hook: the headline",
+      "max_chars": 32,
+      "description": "Spoken and shown word by word; the accent words follow it."
+    },
+    "hook_accent": {
+      "type": "text",
+      "label": "Hook: the accent words",
+      "max_chars": 12,
+      "description": "Shown in the brand colour, in italics, after the headline.",
+      "default": ""
+    },
+    "problem_line": {
+      "type": "text",
+      "label": "Problem: the line",
+      "max_chars": 24,
+      "description": "The turn after the hook, spoken and shown word by word."
+    },
+    "problem_accent": {
+      "type": "text",
+      "label": "Problem: the accent words",
+      "max_chars": 14,
+      "default": ""
+    },
+    "tagline_lead": {
+      "type": "text",
+      "label": "Reveal: the tagline before its accent",
+      "max_chars": 32,
+      "description": "Under the logo and the brand name, word by word."
+    },
+    "tagline_accent": {
+      "type": "text",
+      "label": "Reveal: the tagline's accent word",
+      "max_chars": 16,
+      "default": ""
+    },
+    "tagline_tail": {
+      "type": "text",
+      "label": "Reveal: the tagline after its accent",
+      "max_chars": 20,
+      "default": ""
+    },
+    "chat_crumb": {
+      "type": "text",
+      "label": "Chat: the breadcrumb",
+      "max_chars": 30,
+      "default": "OPERATIONS · Conversations ›"
+    },
+    "chat_title": {
+      "type": "text",
+      "label": "Chat: the conversation's title",
+      "max_chars": 28
+    },
+    "chat_counter_label": {
+      "type": "text",
+      "label": "Chat: the counter's label",
+      "max_chars": 12,
+      "default": "AUTO NOW"
+    },
+    "chat_counter": {
+      "type": "text",
+      "label": "Chat: the counter",
+      "max_chars": 3,
+      "default": "3"
+    },
+    "chat_greeting": {
+      "type": "text",
+      "label": "Chat: Auto's greeting",
+      "max_chars": 60,
+      "description": "Shown before the request is typed."
+    },
+    "chat_request": {
+      "type": "text",
+      "label": "Chat: the request",
+      "max_chars": 100,
+      "description": "Typed into the composer, then sent as the user's message."
+    },
+    "chat_thinking": {
+      "type": "text",
+      "label": "Chat: the thinking label",
+      "max_chars": 16,
+      "default": "Thinking"
+    },
+    "chat_reply": {
+      "type": "text",
+      "label": "Chat: Auto's reply",
+      "max_chars": 40,
+      "default": "On it. Here's the plan."
+    },
+    "step_1_label": {
+      "type": "text",
+      "label": "Chat: step 1",
+      "max_chars": 22,
+      "default": "Checking memory"
+    },
+    "step_1_detail": {
+      "type": "text",
+      "label": "Chat: step 1's detail",
+      "max_chars": 24,
+      "description": "Starts with ' · ', e.g. '· 4 notes'."
+    },
+    "step_1_time": {
+      "type": "text",
+      "label": "Chat: step 1's time",
+      "max_chars": 6,
+      "default": "0.4s"
+    },
+    "step_2_label": {
+      "type": "text",
+      "label": "Chat: step 2",
+      "max_chars": 22,
+      "default": "Searching docs"
+    },
+    "step_2_detail": {
+      "type": "text",
+      "label": "Chat: step 2's detail",
+      "max_chars": 24,
+      "description": "Starts with ' · ', e.g. '· 4 notes'."
+    },
+    "step_2_time": {
+      "type": "text",
+      "label": "Chat: step 2's time",
+      "max_chars": 6,
+      "default": "0.9s"
+    },
+    "step_3_label": {
+      "type": "text",
+      "label": "Chat: step 3",
+      "max_chars": 22,
+      "default": "platform create task"
+    },
+    "step_3_detail": {
+      "type": "text",
+      "label": "Chat: step 3's detail",
+      "max_chars": 24,
+      "description": "Starts with ' · ', e.g. '· 4 notes'."
+    },
+    "step_3_time": {
+      "type": "text",
+      "label": "Chat: step 3's time",
+      "max_chars": 6,
+      "default": "1.2s"
+    },
+    "route_label": {
+      "type": "text",
+      "label": "Chat: where the work was routed",
+      "max_chars": 32,
+      "description": "e.g. 'Routed to: NEWSROOM 87%'."
+    },
+    "chat_placeholder": {
+      "type": "text",
+      "label": "Chat: the composer's placeholder",
+      "max_chars": 30,
+      "default": "Send a message..."
+    },
+    "board_eyebrow": {
+      "type": "text",
+      "label": "Board: eyebrow",
+      "max_chars": 44,
+      "description": "The workspace, the date and the time, e.g. 'Operations · Tue 22 Sep · 22:47 London'."
+    },
+    "board_title": {
+      "type": "text",
+      "label": "Board: title",
+      "max_chars": 24,
+      "default": "Command Centre"
+    },
+    "board_working_label": {
+      "type": "text",
+      "label": "Board: WORKING label",
+      "max_chars": 12,
+      "default": "WORKING"
+    },
+    "board_agents_label": {
+      "type": "text",
+      "label": "Board: AGENTS label",
+      "max_chars": 12,
+      "default": "AGENTS"
+    },
+    "board_agents": {
+      "type": "text",
+      "label": "Board: the number of agents",
+      "max_chars": 3,
+      "default": "9"
+    },
+    "board_queue_label": {
+      "type": "text",
+      "label": "Board: QUEUE label",
+      "max_chars": 12,
+      "default": "QUEUE"
+    },
+    "board_attention_label": {
+      "type": "text",
+      "label": "Board: ATTENTION label",
+      "max_chars": 12,
+      "default": "ATTENTION"
+    },
+    "board_column_1": {
+      "type": "text",
+      "label": "Board: column 1",
+      "max_chars": 14,
+      "default": "ASSIGNED"
+    },
+    "board_column_2": {
+      "type": "text",
+      "label": "Board: column 2",
+      "max_chars": 14,
+      "default": "IN PROGRESS"
+    },
+    "board_column_3": {
+      "type": "text",
+      "label": "Board: column 3",
+      "max_chars": 14,
+      "default": "DONE"
+    },
+    "task_1_kind": {
+      "type": "text",
+      "label": "Board: task 1's kind",
+      "max_chars": 12,
+      "default": "☑ TASK"
+    },
+    "task_1_flag": {
+      "type": "text",
+      "label": "Board: task 1's flag",
+      "max_chars": 10,
+      "description": "e.g. '· HIGH'.",
+      "default": ""
+    },
+    "task_1_title": {
+      "type": "text",
+      "label": "Board: task 1's title",
+      "max_chars": 40,
+      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+    },
+    "task_1_agent": {
+      "type": "text",
+      "label": "Board: task 1's agent",
+      "max_chars": 16,
+      "description": "The agent that takes it, in caps."
+    },
+    "task_2_kind": {
+      "type": "text",
+      "label": "Board: task 2's kind",
+      "max_chars": 12,
+      "default": "☑ TASK"
+    },
+    "task_2_flag": {
+      "type": "text",
+      "label": "Board: task 2's flag",
+      "max_chars": 10,
+      "description": "e.g. '· HIGH'.",
+      "default": ""
+    },
+    "task_2_title": {
+      "type": "text",
+      "label": "Board: task 2's title",
+      "max_chars": 40,
+      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+    },
+    "task_2_agent": {
+      "type": "text",
+      "label": "Board: task 2's agent",
+      "max_chars": 16,
+      "description": "The agent that takes it, in caps."
+    },
+    "task_3_kind": {
+      "type": "text",
+      "label": "Board: task 3's kind",
+      "max_chars": 12,
+      "default": "☑ TASK"
+    },
+    "task_3_flag": {
+      "type": "text",
+      "label": "Board: task 3's flag",
+      "max_chars": 10,
+      "description": "e.g. '· HIGH'.",
+      "default": ""
+    },
+    "task_3_title": {
+      "type": "text",
+      "label": "Board: task 3's title",
+      "max_chars": 40,
+      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+    },
+    "task_3_agent": {
+      "type": "text",
+      "label": "Board: task 3's agent",
+      "max_chars": 16,
+      "description": "The agent that takes it, in caps."
+    },
+    "task_4_kind": {
+      "type": "text",
+      "label": "Board: task 4's kind",
+      "max_chars": 12,
+      "default": "☑ TASK"
+    },
+    "task_4_flag": {
+      "type": "text",
+      "label": "Board: task 4's flag",
+      "max_chars": 10,
+      "description": "e.g. '· HIGH'.",
+      "default": ""
+    },
+    "task_4_title": {
+      "type": "text",
+      "label": "Board: task 4's title",
+      "max_chars": 40,
+      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+    },
+    "task_4_agent": {
+      "type": "text",
+      "label": "Board: task 4's agent",
+      "max_chars": 16,
+      "description": "The agent that takes it, in caps."
+    },
+    "task_unassigned": {
+      "type": "text",
+      "label": "Board: the unassigned label",
+      "max_chars": 16,
+      "default": "● UNASSIGNED"
+    },
+    "ask_meta": {
+      "type": "text",
+      "label": "Ask: who asks",
+      "max_chars": 36,
+      "description": "e.g. 'Agent #274 · board_task:297'."
+    },
+    "ask_badge": {
+      "type": "text",
+      "label": "Ask: the badge",
+      "max_chars": 12,
+      "default": "NEEDS YOU"
+    },
+    "ask_question": {
+      "type": "text",
+      "label": "Ask: the question",
+      "max_chars": 60
+    },
+    "ask_block_title": {
+      "type": "text",
+      "label": "Ask: what it blocks",
+      "max_chars": 36,
+      "description": "e.g. 'BLOCKING 2 DOWNSTREAM TASKS'."
+    },
+    "ask_block_line_1": {
+      "type": "text",
+      "label": "Ask: blocked line 1",
+      "max_chars": 56,
+      "description": "Starts with '↳ '."
+    },
+    "ask_block_line_2": {
+      "type": "text",
+      "label": "Ask: blocked line 2",
+      "max_chars": 56,
+      "description": "Starts with '↳ '."
+    },
+    "ask_option_a": {
+      "type": "text",
+      "label": "Ask: the answer chosen",
+      "max_chars": 44
+    },
+    "ask_option_b": {
+      "type": "text",
+      "label": "Ask: the other answer",
+      "max_chars": 40
+    },
+    "ask_own_words": {
+      "type": "text",
+      "label": "Ask: the free-answer link",
+      "max_chars": 40,
+      "default": "Answer in your own words instead"
+    },
+    "ask_toast": {
+      "type": "text",
+      "label": "Ask: the confirmation",
+      "max_chars": 40,
+      "default": "Answered — the agent is resuming"
+    },
+    "night_date": {
+      "type": "text",
+      "label": "Morning: the night's date line",
+      "max_chars": 28,
+      "description": "e.g. 'TUE 22 SEP · LONDON'."
+    },
+    "morning_date": {
+      "type": "text",
+      "label": "Morning: the morning's date line",
+      "max_chars": 28
+    },
+    "night_hour": {
+      "type": "number",
+      "label": "Morning: the night's hour",
+      "min": 0,
+      "max": 23,
+      "description": "The clock rolls from this hour to the morning's.",
+      "default": 22
+    },
+    "night_minute": {
+      "type": "text",
+      "label": "Morning: the night's minutes",
+      "max_chars": 2,
+      "default": "47"
+    },
+    "morning_hour": {
+      "type": "number",
+      "label": "Morning: the morning's hour",
+      "min": 0,
+      "max": 23,
+      "default": 7
+    },
+    "morning_minute": {
+      "type": "text",
+      "label": "Morning: the morning's minutes",
+      "max_chars": 2,
+      "default": "00"
+    },
+    "done_1": {
+      "type": "text",
+      "label": "Morning: done item 1",
+      "max_chars": 42
+    },
+    "done_2": {
+      "type": "text",
+      "label": "Morning: done item 2",
+      "max_chars": 42
+    },
+    "done_3": {
+      "type": "text",
+      "label": "Morning: done item 3",
+      "max_chars": 42
+    },
+    "done_4": {
+      "type": "text",
+      "label": "Morning: done item 4",
+      "max_chars": 42
+    },
+    "done_5": {
+      "type": "text",
+      "label": "Morning: done item 5",
+      "max_chars": 42
+    },
+    "done_6": {
+      "type": "text",
+      "label": "Morning: done item 6",
+      "max_chars": 42
+    },
+    "outputs_eyebrow": {
+      "type": "text",
+      "label": "Outputs: eyebrow",
+      "max_chars": 44,
+      "default": "Outputs · The work that landed"
+    },
+    "outputs_title": {
+      "type": "text",
+      "label": "Outputs: title",
+      "max_chars": 24,
+      "default": "Deliverables"
+    },
+    "outputs_lead": {
+      "type": "text",
+      "label": "Outputs: the line before the count",
+      "max_chars": 24,
+      "description": "e.g. 'Your team made'."
+    },
+    "outputs_count": {
+      "type": "text",
+      "label": "Outputs: the count, in the brand colour",
+      "max_chars": 14,
+      "description": "e.g. '6 things'.",
+      "claim": true
+    },
+    "outputs_tail": {
+      "type": "text",
+      "label": "Outputs: the line after the count",
+      "max_chars": 16,
+      "description": "e.g. 'today'."
+    },
+    "outputs_pill_1": {
+      "type": "text",
+      "label": "Outputs: filter 1",
+      "max_chars": 12,
+      "default": "Reports"
+    },
+    "outputs_pill_2": {
+      "type": "text",
+      "label": "Outputs: filter 2",
+      "max_chars": 12,
+      "default": "Drafts"
+    },
+    "outputs_pill_3": {
+      "type": "text",
+      "label": "Outputs: filter 3",
+      "max_chars": 12,
+      "default": "Pages"
+    },
+    "outputs_pill_4": {
+      "type": "text",
+      "label": "Outputs: filter 4",
+      "max_chars": 12,
+      "default": "Sheets"
+    },
+    "output_1_agent": {
+      "type": "text",
+      "label": "Outputs: card 1's agent",
+      "max_chars": 16
+    },
+    "output_1_kind": {
+      "type": "text",
+      "label": "Outputs: card 1's kind",
+      "max_chars": 10
+    },
+    "output_1_title": {
+      "type": "text",
+      "label": "Outputs: card 1's title",
+      "max_chars": 36
+    },
+    "output_2_agent": {
+      "type": "text",
+      "label": "Outputs: card 2's agent",
+      "max_chars": 16
+    },
+    "output_2_kind": {
+      "type": "text",
+      "label": "Outputs: card 2's kind",
+      "max_chars": 10
+    },
+    "output_2_title": {
+      "type": "text",
+      "label": "Outputs: card 2's title",
+      "max_chars": 36
+    },
+    "output_3_agent": {
+      "type": "text",
+      "label": "Outputs: card 3's agent",
+      "max_chars": 16
+    },
+    "output_3_kind": {
+      "type": "text",
+      "label": "Outputs: card 3's kind",
+      "max_chars": 10
+    },
+    "output_3_title": {
+      "type": "text",
+      "label": "Outputs: card 3's title",
+      "max_chars": 36
+    },
+    "output_4_agent": {
+      "type": "text",
+      "label": "Outputs: card 4's agent",
+      "max_chars": 16
+    },
+    "output_4_kind": {
+      "type": "text",
+      "label": "Outputs: card 4's kind",
+      "max_chars": 10
+    },
+    "output_4_title": {
+      "type": "text",
+      "label": "Outputs: card 4's title",
+      "max_chars": 36
+    },
+    "team_line_1": {
+      "type": "text",
+      "label": "Team: line 1",
+      "max_chars": 24,
+      "default": "Hire the agents."
+    },
+    "team_line_2": {
+      "type": "text",
+      "label": "Team: line 2",
+      "max_chars": 16,
+      "default": "Equip them with"
+    },
+    "team_line_2_accent": {
+      "type": "text",
+      "label": "Team: line 2's accent",
+      "max_chars": 10,
+      "default": "skills."
+    },
+    "team_line_3": {
+      "type": "text",
+      "label": "Team: line 3",
+      "max_chars": 14,
+      "default": "Let them"
+    },
+    "team_line_3_accent": {
+      "type": "text",
+      "label": "Team: line 3's accent",
+      "max_chars": 10,
+      "default": "work."
+    },
+    "team_roster": {
+      "type": "text",
+      "label": "Team: the agents",
+      "max_chars": 160,
+      "description": "Up to nine agent names in caps, separated by commas."
+    },
+    "team_idle": {
+      "type": "text",
+      "label": "Team: the idle status",
+      "max_chars": 10,
+      "default": "active"
+    },
+    "team_busy": {
+      "type": "text",
+      "label": "Team: the working status",
+      "max_chars": 10,
+      "default": "working"
+    },
+    "end_line": {
+      "type": "text",
+      "label": "End card: line 1",
+      "max_chars": 26
+    },
+    "end_accent": {
+      "type": "text",
+      "label": "End card: line 2, in the brand colour",
+      "max_chars": 26
+    },
+    "end_url": {
+      "type": "text",
+      "label": "End card: the address",
+      "max_chars": 28
+    },
+    "end_note": {
+      "type": "text",
+      "label": "End card: the small print",
+      "max_chars": 36,
+      "default": ""
+    },
+    "cap_ask": {
+      "type": "text",
+      "label": "Caption and voice: the chat",
+      "max_chars": 48
+    },
+    "cap_handoff": {
+      "type": "text",
+      "label": "Caption and voice: the hand-off",
+      "max_chars": 48
+    },
+    "beat_1": {
+      "type": "text",
+      "label": "Caption and voice: beat 1",
+      "max_chars": 16,
+      "description": "Highlights as the voice says it; board task 1 moves on it."
+    },
+    "beat_2": {
+      "type": "text",
+      "label": "Caption and voice: beat 2",
+      "max_chars": 16,
+      "description": "Highlights as the voice says it; board task 2 moves on it."
+    },
+    "beat_3": {
+      "type": "text",
+      "label": "Caption and voice: beat 3",
+      "max_chars": 16,
+      "description": "Highlights as the voice says it; board task 3 moves on it."
+    },
+    "beat_4": {
+      "type": "text",
+      "label": "Caption and voice: beat 4",
+      "max_chars": 16,
+      "description": "Highlights as the voice says it; board task 4 moves on it."
+    },
+    "cap_question": {
+      "type": "text",
+      "label": "Caption and voice: the question",
+      "max_chars": 48
+    },
+    "cap_morning": {
+      "type": "text",
+      "label": "Caption and voice: the morning",
+      "max_chars": 48
+    },
+    "cap_outputs": {
+      "type": "text",
+      "label": "Caption and voice: the outputs",
+      "max_chars": 48
+    }
+  },
+  "audio_plan": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [
+        {
+          "id": "l01",
+          "at": 0.3,
+          "text": "{{ hook_line }} {{ hook_accent }}"
+        },
+        {
+          "id": "l02",
+          "at": 2.22,
+          "text": "{{ problem_line }} {{ problem_accent }}"
+        },
+        {
+          "id": "l03",
+          "at": 5.47,
+          "text": "{{ tagline_lead }} {{ tagline_accent }} {{ tagline_tail }}"
+        },
+        {
+          "id": "l04",
+          "at": 8.7,
+          "text": "{{ cap_ask }}"
+        },
+        {
+          "id": "l05",
+          "at": 12.78,
+          "text": "{{ cap_handoff }} {{ beat_1 }} {{ beat_2 }} {{ beat_3 }} {{ beat_4 }}"
+        },
+        {
+          "id": "l06",
+          "at": 18.52,
+          "text": "{{ cap_question }}"
+        },
+        {
+          "id": "l07",
+          "at": 21.55,
+          "text": "{{ cap_morning }}"
+        },
+        {
+          "id": "l08",
+          "at": 24.42,
+          "text": "{{ cap_outputs }}"
+        },
+        {
+          "id": "l09",
+          "at": 27.94,
+          "text": "{{ team_line_1 }} {{ team_line_2 }} {{ team_line_2_accent }} {{ team_line_3 }} {{ team_line_3_accent }}"
+        },
+        {
+          "id": "l10",
+          "at": 32.3,
+          "text": "{{ brand.name }}. {{ end_line }} {{ end_accent }}"
+        }
+      ]
+    },
+    "music": {
+      "track": "where-the-night-begins",
+      "start": 190.1,
+      "fade_in": 0.03,
+      "fade_out": 2.1
+    }
+  },
+  "sample_data": {
+    "hook_eyebrow": "FRIDAY · HARBOURLINE COFFEE ROASTERS",
+    "hook_time_before": "17:59",
+    "hook_time_after": "18:00",
+    "hook_line": "You clock off at",
+    "hook_accent": "six.",
+    "problem_line": "Your business",
+    "problem_accent": "doesn't.",
+    "tagline_lead": "An operating system for",
+    "tagline_accent": "autonomous",
+    "tagline_tail": "agent teams.",
+    "chat_title": "Harvest Club launch",
+    "chat_greeting": "Hey Gerard, what can I do for you today?",
+    "chat_request": "Launch the Harvest Club this week — site copy, a blog post and a plan.",
+    "step_1_detail": "· 4 notes",
+    "step_2_detail": "· Harvest Club brief",
+    "step_3_detail": "· 6 tasks",
+    "route_label": "Routed to: NEWSROOM 87%",
+    "board_eyebrow": "Operations · Tue 22 Sep · 22:47 London",
+    "task_1_flag": "· HIGH",
+    "task_1_title": "Churn — why three people left",
+    "task_1_agent": "RESEARCHER",
+    "task_2_title": "Blog post — the Ethiopian lot",
+    "task_2_agent": "WRITER",
+    "task_3_kind": "PLAYBOOK",
+    "task_3_title": "Build the Harbourline website — one page",
+    "task_3_agent": "HAMMER",
+    "task_4_title": "Price the Harvest Club tiers",
+    "task_4_agent": "COUNTINGHOUSE",
+    "ask_meta": "Agent #274 · board_task:297",
+    "ask_question": "Which prices go on the Harvest Club page?",
+    "ask_block_title": "BLOCKING 2 DOWNSTREAM TASKS",
+    "ask_block_line_1": "↳ Draft Harvest Club Website Copy · blocked",
+    "ask_block_line_2": "↳ Build the Harbourline website — one page · blocked",
+    "ask_option_a": "Taster 12 · House 22 · Roasters Table 28",
+    "ask_option_b": "Hold until Monday",
+    "night_date": "TUE 22 SEP · LONDON",
+    "morning_date": "WED 23 SEP · LONDON",
+    "done_1": "Churn — why three people left",
+    "done_2": "Blog post — the Ethiopian lot",
+    "done_3": "Build the Harbourline website — one page",
+    "done_4": "Price the Harvest Club tiers",
+    "done_5": "Monday dispatch checklist as one page",
+    "done_6": "Draft reply to the importer (do not send)",
+    "outputs_lead": "Your team made",
+    "outputs_count": "6 things",
+    "outputs_tail": "today",
+    "output_1_agent": "RESEARCHER",
+    "output_1_kind": "RESEARCH",
+    "output_1_title": "Churn — why three people left",
+    "output_2_agent": "WRITER",
+    "output_2_kind": "DRAFT",
+    "output_2_title": "Blog post — the Ethiopian lot",
+    "output_3_agent": "HAMMER",
+    "output_3_kind": "WEBSITE",
+    "output_3_title": "Harbourline — one page",
+    "output_4_agent": "COUNTINGHOUSE",
+    "output_4_kind": "SHEET",
+    "output_4_title": "Harvest Club pricing",
+    "team_roster": "HAMMER, COUNTINGHOUSE, CLUB SECRETARY, RESEARCHER, NEWSROOM, WRITER, OPS, SHOPKEEPER, TRACKER",
+    "end_line": "Your business, running —",
+    "end_accent": "even when you're not.",
+    "end_url": "automatos.app",
+    "end_note": "OPEN SOURCE · APACHE 2.0",
+    "cap_ask": "Tell Auto what you need.",
+    "cap_handoff": "The right agent takes it.",
+    "beat_1": "Research.",
+    "beat_2": "Writing.",
+    "beat_3": "The website.",
+    "beat_4": "The books.",
+    "cap_question": "When it matters, they ask you first.",
+    "cap_morning": "By morning, the work is done.",
+    "cap_outputs": "Every draft, report and page, in one place."
+  },
+  "preview": {
+    "at": [
+      1.2,
+      6.2,
+      10.0,
+      16.0,
+      20.5,
+      23.5,
+      27.0,
+      31.0,
+      36.5
+    ],
+    "probe": {
+      "at": 10.0,
+      "x": 961,
+      "y": 1278,
+      "token": "primary-on-ink",
+      "what": "the composer's send button, filled with the brand colour"
+    }
+  }
+}

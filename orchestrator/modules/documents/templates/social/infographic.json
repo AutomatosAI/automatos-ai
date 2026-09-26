@@ -1,0 +1,193 @@
+{
+  "name": "Infographic",
+  "description": "A chart of a report's top rows on the brand's paper: a bar chart, a line or a number grid, with a chip naming the report. Bind it to a report and its data table (the first table in the report) or its metrics fill the rows: every figure is the report's own, exactly as written, and a claim bound to it. A render checks the chart still matches its report. Five rows at most.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. SEPTEMBER IN NUMBERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. WHERE OUR|REACH CAME|FROM.",
+      "max_chars": 80
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "subtitle": {
+      "type": "text",
+      "label": "Subtitle",
+      "description": "What the figures measure, e.g. Unique accounts reached, per channel. Binding a report fills in its figures' column name; change it freely.",
+      "default": "",
+      "max_chars": 120
+    },
+    "chart": {
+      "type": "text",
+      "label": "Chart",
+      "description": "bar, line or grid. A bar or a line compares figures in one unit (a bar: none negative); the grid shows any figures. A chart its figures cannot make shows as the grid.",
+      "default": "bar",
+      "max_chars": 5
+    },
+    "row_1_label": {
+      "type": "text",
+      "label": "Row 1 label",
+      "description": "Row 1's name, as the report has it: its table's first column, or a metric's name.",
+      "max_chars": 40
+    },
+    "row_1_value": {
+      "type": "text",
+      "label": "Row 1 figure",
+      "description": "Row 1's figure, exactly as the report wrote it, e.g. 48,210 or 5.2%. A claim: bind it to the report.",
+      "claim": true,
+      "max_chars": 24
+    },
+    "row_2_label": {
+      "type": "text",
+      "label": "Row 2 label",
+      "description": "Row 2's name, as the report has it. Leave empty (with its figure) for a shorter chart.",
+      "default": "",
+      "max_chars": 40
+    },
+    "row_2_value": {
+      "type": "text",
+      "label": "Row 2 figure",
+      "description": "Row 2's figure, exactly as the report wrote it, e.g. 48,210 or 5.2%. A claim: bind it to the report.",
+      "default": "",
+      "claim": true,
+      "max_chars": 24
+    },
+    "row_3_label": {
+      "type": "text",
+      "label": "Row 3 label",
+      "description": "Row 3's name, as the report has it. Leave empty (with its figure) for a shorter chart.",
+      "default": "",
+      "max_chars": 40
+    },
+    "row_3_value": {
+      "type": "text",
+      "label": "Row 3 figure",
+      "description": "Row 3's figure, exactly as the report wrote it, e.g. 48,210 or 5.2%. A claim: bind it to the report.",
+      "default": "",
+      "claim": true,
+      "max_chars": 24
+    },
+    "row_4_label": {
+      "type": "text",
+      "label": "Row 4 label",
+      "description": "Row 4's name, as the report has it. Leave empty (with its figure) for a shorter chart.",
+      "default": "",
+      "max_chars": 40
+    },
+    "row_4_value": {
+      "type": "text",
+      "label": "Row 4 figure",
+      "description": "Row 4's figure, exactly as the report wrote it, e.g. 48,210 or 5.2%. A claim: bind it to the report.",
+      "default": "",
+      "claim": true,
+      "max_chars": 24
+    },
+    "row_5_label": {
+      "type": "text",
+      "label": "Row 5 label",
+      "description": "Row 5's name, as the report has it. Leave empty (with its figure) for a shorter chart.",
+      "default": "",
+      "max_chars": 40
+    },
+    "row_5_value": {
+      "type": "text",
+      "label": "Row 5 figure",
+      "description": "Row 5's figure, exactly as the report wrote it, e.g. 48,210 or 5.2%. A claim: bind it to the report.",
+      "default": "",
+      "claim": true,
+      "max_chars": 24
+    },
+    "source_caption": {
+      "type": "text",
+      "label": "Source caption",
+      "description": "The word before the source in its chip, e.g. Source.",
+      "default": "Source",
+      "max_chars": 24
+    },
+    "source_label": {
+      "type": "text",
+      "label": "Source",
+      "description": "The report the figures come from, as it resolves: its title and the day it was made. Binding a report fills it in, and a render checks it.",
+      "max_chars": 90
+    },
+    "note": {
+      "type": "text",
+      "label": "Note",
+      "description": "A line under the chart, e.g. The top 5 of the 6 channels we posted on. Leave empty for none.",
+      "default": "",
+      "max_chars": 140
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Save this post. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "data": {
+    "rows": 5,
+    "label": "row_{n}_label",
+    "value": "row_{n}_value",
+    "source": "source_label",
+    "header": "subtitle",
+    "chart": "chart"
+  },
+  "sample_data": {
+    "eyebrow": "SEPTEMBER IN NUMBERS",
+    "headline": "WHERE OUR|REACH CAME|FROM",
+    "headline_accent": "REACH",
+    "subtitle": "Unique accounts reached, per channel",
+    "chart": "bar",
+    "row_1_label": "Instagram",
+    "row_1_value": "48,210",
+    "row_2_label": "LinkedIn",
+    "row_2_value": "21,480",
+    "row_3_label": "TikTok",
+    "row_3_value": "19,305",
+    "row_4_label": "Threads",
+    "row_4_value": "7,940",
+    "row_5_label": "X",
+    "row_5_value": "6,115",
+    "source_caption": "Source",
+    "source_label": "Harbourline Coffee — September social report · 2026-09-21",
+    "note": "The top 5 of the 6 channels we posted on.",
+    "counter": "",
+    "handle": "@harbourline",
+    "cta": "Save this post"
+  }
+}

@@ -11,7 +11,10 @@ and sweeps the three durable-launch surfaces:
   - **wizard profile** stuck ``scraping``/``scanning`` → ``failed`` +
     ``quality_findings`` (the wizard's own failure convention);
   - **workflow execution** stuck ``pending``/``running`` → ``failed`` +
-    ``error_message`` + ``completed_at``.
+    ``error_message`` + ``completed_at``;
+  - **social post** stuck ``rendering`` (PRD-251 S1.1c) → ``failed``, the reason
+    in its ``review_log`` (the post lifecycle's own render failure), so it can
+    be edited and rendered again.
 
 A row is reaped only once it has been in-flight longer than
 ``BOOT_REAPER_STALE_MINUTES`` — long enough that no legitimately running job
@@ -208,6 +211,38 @@ def _reap_recipe_executions(db, cutoff: datetime, now: datetime) -> int:
     return len(stale)
 
 
+def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
+    """Sweep ``social_posts`` stuck in ``rendering`` — PRD-251 S1.1c.
+
+    The render runs as a background task of the process that started it; a
+    restart kills it and nothing else ends the render. ``updated_at`` is bumped
+    when the post enters ``rendering``, and a live render never outlasts
+    ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays under the stale cutoff, so
+    a reaped post has no task left to finish it. The failure goes through the
+    post lifecycle (``fail_render``), which writes the reason to ``review_log``.
+    """
+    from core.models.socials import SocialPost
+    from modules.socials import service as socials
+
+    rows = db.query(SocialPost).filter(SocialPost.status == socials.RENDERING).all()
+    stale = [r for r in rows if r.status == socials.RENDERING and _is_stale(r.updated_at, cutoff)]
+    for r in stale:
+        socials.fail_render(
+            r,
+            _ORPHAN_REASON,
+            "The render was lost when the server restarted. Render again.",
+            report={"code": _ORPHAN_REASON},
+        )
+    if stale:
+        record_error(
+            subsystem="socials",
+            operation="boot_reap",
+            error=OrphanedRunError(f"reaped {len(stale)} orphaned social render(s)"),
+            extra={"reaped_ids": [str(r.id) for r in stale], "reason": _ORPHAN_REASON},
+        )
+    return len(stale)
+
+
 async def _run_surface(
     db,
     cutoff: datetime,
@@ -252,6 +287,8 @@ async def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     # RecipeExecution log so an in-flight playbook cannot silently die when
     # the process restarts (§H DoD #3 + §A E1).
     reaped += await _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
+    # PRD-251 S1.1c: a post whose render task died with the old process.
+    reaped += await _run_surface(db, cutoff, now, "socials", _reap_social_renders)
 
     if reaped:
         try:

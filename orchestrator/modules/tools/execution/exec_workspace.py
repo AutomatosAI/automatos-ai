@@ -475,9 +475,8 @@ async def execute_workspace_action(
                         "success": False,
                         "error": (
                             f"url points to a .{ext} file — this tool renders HTML pages "
-                            f"to PNG. Pass the HTML template URL with query params, e.g. "
-                            f"file:///workspaces/{{id}}/repos/automatos-social/render/"
-                            f"index.html?template=...&size=..."
+                            f"to PNG. Pass the URL of an HTML page in the workspace, e.g. "
+                            f"file:///workspaces/{{id}}/deliverables/charts/revenue.html"
                         ),
                         "tool": tool_name,
                     }
