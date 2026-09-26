@@ -38,6 +38,8 @@ export interface MissionApprovalTask {
   title: string
   agent_role?: string
   sequence?: number
+  /** F162 (c): the plan task's id; side-by-side tasks share a sequence */
+  temp_id?: string
   /** PRD-164 S2: agent-match preview — who would run this task and why */
   match_agent?: string
   match_reason?: string
