@@ -5,7 +5,6 @@ Extracted from unified_executor.py.
 
 import base64
 import logging
-import mimetypes
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -161,11 +160,35 @@ async def _with_directory_hint(client: Any, path: str, result: dict) -> dict:
     return result
 
 
+# F179 (A): only a raster image is ever made public, recognised by its first bytes,
+# never by its name. Anything else (a customer CSV, a page, an SVG) is refused.
+PUBLIC_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+ONLY_IMAGES_ARE_PUBLIC = (
+    "Only images can be made public; share a document through its Deliverables link."
+)
+
+
+def public_image_type(data: bytes) -> Optional[str]:
+    """The raster image type these bytes are (png, jpeg, gif, webp), or None."""
+    for signature, mime in PUBLIC_IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
-    """Download a workspace file and upload to public image store.
+    """Download a workspace IMAGE and upload it to the public image store.
 
     Returns a publicly accessible URL that external services (Instagram,
-    Twitter, etc.) can fetch without authentication.
+    Twitter, etc.) can fetch without authentication. Only a raster image
+    (png, jpeg, gif, webp, recognised by its bytes) is published (F179).
     """
     result = await client.download_file(path)
     if result.get("success") is False:
@@ -175,10 +198,9 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
     if not file_bytes:
         return {"success": False, "error": "File is empty", "tool": "workspace_get_public_url"}
 
-    content_type = result.get("content_type", "")
-    if not content_type or content_type == "application/octet-stream":
-        guessed, _ = mimetypes.guess_type(path)
-        content_type = guessed or "image/png"
+    content_type = public_image_type(file_bytes)
+    if content_type is None:
+        return {"success": False, "error": ONLY_IMAGES_ARE_PUBLIC, "tool": "workspace_get_public_url"}
 
     b64_data = base64.b64encode(file_bytes).decode("ascii")
 
