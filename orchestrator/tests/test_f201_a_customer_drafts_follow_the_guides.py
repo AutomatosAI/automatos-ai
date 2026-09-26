@@ -125,3 +125,32 @@ def test_a_change_an_action_did_is_left_as_it_is(finish):
 def test_a_ticket_that_is_not_a_customer_draft_is_not_checked(finish):
     said = "I have also updated the checklist with the count check you asked for."
     assert finish(said, title="Tom's Monday checklist", description="Add the count check.").result == said
+
+
+# ── any wording (TESTER, after the F100 read) ──────────────────────────────
+
+@pytest.mark.parametrize("brief", [
+    "Write the newsletter", "Newsletter for this fortnight, please", "Can you put together the October announcement?",
+    "Write a subscriber email about the price change", "Write this week's post about the Guji",
+    "Draft the blog post about how we pick the club coffee"])
+def test_a_newsletter_announcement_subscriber_email_or_post_is_a_customer_draft(brief):
+    """F100's newsletter (banned word, wrong sign-off) came from a brief the
+    first pattern would not have read as a draft."""
+    from services.draft_guides import is_customer_draft
+
+    assert is_customer_draft(brief)
+
+
+@pytest.mark.parametrize("brief", ["Check the post office opening hours", "Update the postage rates in the checklist",
+                                   "Write the post office a note about collection times"])
+def test_the_mail_is_not_a_post(brief):
+    from services.draft_guides import is_customer_draft
+
+    assert not is_customer_draft(brief)
+
+
+def test_write_the_newsletter_reads_the_guides_before_the_agent_writes(guides):
+    from services.draft_guides import guides_for_draft
+
+    prompt = asyncio.run(guides_for_draft(None, WS, 330, "Write the newsletter"))
+    assert "## Your workspace's guides, searched before you draft" in prompt and "never promise an amount" in prompt

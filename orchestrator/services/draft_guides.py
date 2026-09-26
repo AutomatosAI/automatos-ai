@@ -41,10 +41,21 @@ CHECK_BEFORE_SENDING = ("\n\nCheck before sending: the draft says something was 
                         "did that. Do it first, or change the wording to what will happen.")
 
 
+# Asks that are for customers whatever their wording ("Write the newsletter").
+# "post" counts as a piece of writing, never the mail ("post office", "postage").
+_CUSTOMER_FACING = re.compile(
+    r"\bnewsletters?\b|\bannouncements?\b|\bsubscriber (?:e-?mails?|updates?|letters?)\b"
+    r"|\b(?:blog|social(?: media)?|instagram|facebook|linkedin|twitter)\s+posts?\b"
+    r"|\b(?:write|draft|put together)\s+(?:a|an|the|this|our|next)\s+(?:[\w'’-]+\s+){0,2}posts?\b"
+    r"(?!\s*(?:office|code|box))",
+    re.I)
+
+
 def is_customer_draft(brief: object) -> bool:
-    """A brief that asks for a draft, reply or message for a customer."""
+    """A brief that asks for a draft, reply or message for a customer. A
+    newsletter, announcement, subscriber email or post is one in any wording."""
     text = str(brief or "")
-    return bool(_DRAFT_ASK.search(text) and _FOR_A_CUSTOMER.search(text))
+    return bool(_CUSTOMER_FACING.search(text) or (_DRAFT_ASK.search(text) and _FOR_A_CUSTOMER.search(text)))
 
 
 async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
