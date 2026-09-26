@@ -220,7 +220,10 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         changes.append("schedule_config updated")
 
     if not changes:
-        return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
+        from modules.tools.discovery.action_registry import nothing_changed
+
+        return {"success": False, "error": nothing_changed("platform_update_playbook", "playbook_id"),
+                "playbook_id": playbook.id}
 
     db.flush()
     if params.get("schedule_config") is not None:
@@ -368,7 +371,10 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
             changes.append(f"{field} updated")
 
     if not changes:
-        return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
+        from modules.tools.discovery.action_registry import nothing_changed
+
+        return {"success": False, "playbook_id": playbook.id,
+                "error": nothing_changed("platform_update_playbook_step", "playbook_id", "step_index")}
 
     steps[step_index] = step
     playbook.steps = steps

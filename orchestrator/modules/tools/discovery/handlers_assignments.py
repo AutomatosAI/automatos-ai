@@ -317,9 +317,11 @@ async def configure_agent_heartbeat(db: Session, workspace_id: UUID, params: Dic
         changes.append("checklist updated")
 
     if not changes:
+        from modules.tools.discovery.action_registry import nothing_changed
+
         return {
-            "success": True,
-            "message": "No changes specified",
+            "success": False,
+            "error": nothing_changed("platform_configure_agent_heartbeat", "agent_id", "agent_name"),
             "current_heartbeat": hb,
             "agent_id": agent.id,
         }
