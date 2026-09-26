@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Any, Dict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -919,6 +919,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         from api.board_tasks import keep_previous_run
 
         keep_previous_run(task, why="moved to in progress", by="an agent")
+        run_id = uuid4().hex
         won = db.execute(
             text(
                 "UPDATE board_tasks "
@@ -926,11 +927,13 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
                 "    started_at = COALESCE(started_at, :now), "
                 "    completed_at = NULL, error_message = NULL, result = NULL, "
                 "    blocked_at = NULL, blocked_reason = NULL, "
-                "    updated_at = :now "
+                "    updated_at = :now, "
+                # F209: the run this claim starts; finalize writes only for it
+                "    runtime_ref = COALESCE(runtime_ref, '{}'::jsonb) || jsonb_build_object('run_id', CAST(:run_id AS text)) "
                 "WHERE id = :id AND status <> 'in_progress' "
                 "RETURNING id"
             ),
-            {"id": int(task_id), "now": now},
+            {"id": int(task_id), "now": now, "run_id": run_id},
         ).fetchone()
         db.commit()
 
@@ -948,6 +951,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
                 workspace_id=str(workspace_id),
                 prompt=prompt,
                 review_mode=review_mode,
+                run_id=run_id,
             )
             launched = True
         # If we lost, the dispatcher already claimed + launched this row — no second

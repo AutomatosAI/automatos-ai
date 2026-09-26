@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -36,7 +36,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
     WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
     consent_for_created_ticket, record_operator_consent,
 )
-from services.board_dispatcher import notify_task_available
+from services.board_dispatcher import RUN_ID_KEY, notify_task_available
 from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
@@ -682,6 +682,8 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     body = await request.json()
+    if body.get("status") == "in_progress" and task.status != "in_progress":
+        _hold_before_starting(db, task)
     status_before = task.status  # F190 review: a repeat of in_progress launches nothing
 
     # F060: this route accepted any key, returned 200 and echoed the task back,
@@ -736,6 +738,7 @@ async def update_task(
             # F190: a new run starts clean, as PATCH /status does; the last run's
             # outcome goes on record (keep_previous_run) and off the card.
             keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))
+            _new_run(task)  # F209: the run this move starts
             task.started_at = datetime.now(timezone.utc)
             task.completed_at = None
             task.error_message = None
@@ -857,6 +860,7 @@ async def update_task(
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
+            run_id=(task.runtime_ref or {}).get(RUN_ID_KEY),
         )
 
     logger.info("[BoardTasks] Updated task %d", task.id)
@@ -1093,6 +1097,26 @@ PREVIOUS_RUNS_KEPT = 5
 PREVIOUS_RESULT_CHARS = 4000
 
 
+def _new_run(task: Any) -> str:
+    """Stamp a fresh run id on ``task`` for the run about to start (committed by the caller)."""
+    run_id = uuid4().hex
+    task.runtime_ref = {**(task.runtime_ref or {}), RUN_ID_KEY: run_id}
+    return run_id
+
+
+def _hold_before_starting(db: Session, task: BoardTask) -> None:
+    """F209 review: a move into in_progress takes the row (without waiting) and
+    re-reads it, so a PATCH never starts a run the dispatcher has just claimed:
+    the fresh status says in_progress and nothing starts. The dispatcher's claim
+    skips the row until this request commits. A row another writer holds right
+    now (a finalize, a claim) is a 409, never a wait on the event loop (F105)."""
+    try:
+        db.refresh(task, with_for_update={"skip_locked": True})
+    except InvalidRequestError:
+        raise HTTPException(status_code=409, detail=(
+            f"Ticket #{task.id} is being started or finished right now; try again in a moment."))
+
+
 def keep_previous_run(task: Any, *, why: str, by: str, now: Optional[datetime] = None) -> None:
     """Put a finished ticket's status, result and finish time on record in
     ``planning_data.previous_runs`` (rebuilt, never mutated in place) before
@@ -1256,15 +1280,34 @@ def _running_now(db: Session, task: BoardTask) -> bool:
     return False
 
 
-def _redispatch_task(db: Session, task: BoardTask) -> None:
+def _redispatch_task(db: Session, task: BoardTask) -> bool:
     """Reset a task to a fresh ``assigned`` claim and wake the dispatch loop.
 
     The shared core of the Run-Now route and the PRD-224 US-003 watch
     corrective re-run: clears the lease, attempt count, and lifecycle
     timestamps, commits, then NOTIFYs the committed row so the dispatch loop
     claims it. Recipe-mirror rows are driven by the recipe executor, never
-    board-dispatched. Caller guarantees no run holds the task (``_running_now``).
+    board-dispatched.
+
+    F209: the caller's ``_running_now`` read was unlocked, so a claim landing
+    after it had its live run reset and claimed again (two runs, two results).
+    The row is locked and re-checked here; False, and nothing reset, when a run
+    holds it. The ticket's run id is cleared, so the run it replaces cannot
+    finalize it.
     """
+    # SKIP LOCKED, never a wait: a finalize holds this row across awaits, and a
+    # blocking wait from sync SQLAlchemy would freeze the event loop (F105). A row
+    # another writer holds right now is a run finishing, or being claimed.
+    held = (
+        db.query(BoardTask.status, BoardTask.lease_until, BoardTask.source_type, BoardTask.source_id)
+        .filter(BoardTask.id == task.id)
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if held is None or _running_now(db, held):
+        db.rollback()
+        return False
+    task.runtime_ref = {**(task.runtime_ref or {}), RUN_ID_KEY: None}
     task.status = "assigned"
     task.lease_until = None
     task.attempts = 0
@@ -1276,6 +1319,7 @@ def _redispatch_task(db: Session, task: BoardTask) -> None:
         notify_task_available(db, workspace_id=task.workspace_id, task_id=task.id)
     db.commit()
     db.refresh(task)
+    return True
 
 
 @router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
@@ -1327,7 +1371,9 @@ async def run_task_now(
     rerun = was in FINISHED
     if rerun:
         keep_previous_run(task, why="run now", by=_operator_ref(ctx))
-    _redispatch_task(db, task)
+    if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
+        raise HTTPException(status_code=409, detail=(
+            f"Ticket #{task_id} is starting or finishing a run right now; nothing was reset."))
 
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
@@ -1387,6 +1433,8 @@ async def update_task_status(
 
     body = await request.json()
     new_status = _text_of(body.get("status"), "status")
+    if new_status == "in_progress" and task.status != "in_progress":
+        _hold_before_starting(db, task)
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     if new_status == "in_progress" and not task.assigned_agent_id:
@@ -1405,6 +1453,7 @@ async def update_task_status(
     task.status = new_status
     end_session_claim(task, old_status, new_status)
     if starting:
+        _new_run(task)  # F209: the run this move starts
         task.started_at = datetime.now(timezone.utc)
         task.completed_at = None
         task.error_message = None
@@ -1455,6 +1504,7 @@ async def update_task_status(
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
+            run_id=(task.runtime_ref or {}).get(RUN_ID_KEY),
         )
 
     return {"id": task.id, "status": task.status}
@@ -1521,7 +1571,7 @@ async def cancel_task(
 
 # ── Immediate execution (fire-and-forget) ────────────────────────────
 
-async def _lease_heartbeat(task_id: int) -> None:
+async def _lease_heartbeat(task_id: int, run_id: Optional[str] = None) -> None:
     """PRD-171 F024: keep a long-running task's dispatch lease alive.
 
     Runs concurrently with the execution and renews ``lease_until`` every half
@@ -1545,7 +1595,7 @@ async def _lease_heartbeat(task_id: int) -> None:
             # half a lease window. A live lease is what "already running" means.
             hb = SessionLocal()
             try:
-                if not renew_lease(hb, task_id, lease_seconds=lease_seconds):
+                if not renew_lease(hb, task_id, lease_seconds=lease_seconds, run_id=run_id):
                     # Row is no longer in_progress (finished/failed/requeued) —
                     # nothing more to renew.
                     break
@@ -1860,6 +1910,7 @@ async def finalize_board_task_run(
     exec_result: Optional[Dict[str, Any]],
     review_mode: str = "auto",
     force_review: bool = False,
+    run_id: Optional[str] = None,
 ) -> Optional[str]:
     """PRD-234 S1a: the ONE completion writer for a board-task run.
 
@@ -1893,6 +1944,14 @@ async def finalize_board_task_run(
     # and the later commit overwriting the earlier one.
     task = db.get(BoardTask, task_id, with_for_update=True, populate_existing=True)
     if not task or task.status != "in_progress":
+        return None
+    # F209: a run that no longer holds the ticket (Run Now or a lease sweep re-ran
+    # it) never writes over the run that does. Callers with no run id (a CLI
+    # session's result, the reconciler, the boot reaper) are not checked.
+    if run_id is not None and (task.runtime_ref or {}).get(RUN_ID_KEY) != run_id:
+        logger.warning("[BoardTasks] Task %d: run %s finished but the ticket is on run %s; not written",
+                       task_id, run_id, (task.runtime_ref or {}).get(RUN_ID_KEY))
+        db.rollback()  # let go of the row: the run that holds it finalizes next
         return None
 
     if exec_status == "error":
@@ -2038,6 +2097,7 @@ def _launch_task_execution(
     prompt: str,
     review_mode: str = "auto",
     attachment_ids: Optional[list] = None,  # PRD-127
+    run_id: Optional[str] = None,  # F209: the run this launch is; finalize writes only for it
 ):
     """Launch agent execution for a board task as a background coroutine."""
 
@@ -2045,7 +2105,7 @@ def _launch_task_execution(
         from core.database.database import SessionLocal
         db = SessionLocal()
         # PRD-171 F024: heartbeat the dispatch lease for the life of the run.
-        heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id))
+        heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id, run_id))
         try:
             # PRD-181 S2 (F060): board-task approval gate. Before an autonomous
             # board task executes, run it through the SAME approval primitive
@@ -2105,6 +2165,7 @@ def _launch_task_execution(
                 task_id=task_id,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                run_id=run_id,
                 exec_result=exec_result,
                 review_mode=review_mode,
             )

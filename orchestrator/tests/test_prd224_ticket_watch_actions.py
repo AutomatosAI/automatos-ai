@@ -43,6 +43,9 @@ class _FakeQuery:
     def filter(self, *a, **k):
         return self
 
+    def with_for_update(self, *a, **k):  # F209: the redispatch's locked re-read
+        return self
+
     def first(self):
         return self._result
 

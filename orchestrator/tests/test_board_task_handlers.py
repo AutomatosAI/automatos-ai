@@ -224,6 +224,9 @@ class _FakeQ:
     def get(self, *_a):
         return self._r
 
+    def with_for_update(self, *a, **k):  # F209: the redispatch's locked re-read
+        return self
+
     def update(self, values, synchronize_session=None):
         # F195's compare-and-set on a seeded row: nothing else is deciding it here.
         return 1 if self._r is not None else 0
@@ -259,9 +262,9 @@ class _FakeSession:
         self._claim_race_lost = claim_race_lost
         self.executes = []
 
-    def query(self, model):
+    def query(self, *entities):  # a model, or F209's locked re-read of a ticket's columns
         from core.models import Agent
-        if model is Agent:
+        if entities[0] is Agent:
             return _FakeQ(self._agent)
         return _FakeQ(self._task)
 
@@ -276,7 +279,7 @@ class _FakeSession:
     def commit(self):
         self.commits += 1
 
-    def refresh(self, obj):
+    def refresh(self, obj, **_):  # F209: a start re-reads the row (with_for_update)
         if getattr(obj, "id", None) is None:
             obj.id = 4242
 
@@ -1381,7 +1384,7 @@ class _RosterDB:
     def commit(self):
         self.commits += 1
 
-    def refresh(self, obj):
+    def refresh(self, obj, **_):  # F209: a start re-reads the row (with_for_update)
         if getattr(obj, "id", None) is None:
             obj.id = 4242
 
