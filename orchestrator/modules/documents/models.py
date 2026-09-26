@@ -3,7 +3,7 @@ Data models for the Document Generation module (PRD-63).
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class UnresolvedDeliverableError(Exception):
@@ -58,3 +58,7 @@ class GeneratedDocument:
     template_id: Optional[str] = None
     template_name: Optional[str] = None
     s3_key: Optional[str] = None
+    # PRD-251 S1.6: the library track a social video mixed ({track, title,
+    # licence, credit}), recorded on its Deliverable's ``extra.music``; ``credit``
+    # is the line a post that uses the video must carry (None for CC0).
+    music: Optional[Dict[str, Any]] = None

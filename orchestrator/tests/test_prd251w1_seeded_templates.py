@@ -87,6 +87,7 @@ from core.social_templates import (  # noqa: E402
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
 from media_render.media_urls import parse_prefixes  # noqa: E402
+from media_render.music import load_library  # noqa: E402
 from modules.documents import seed_templates  # noqa: E402
 from modules.documents.social_starters import (  # noqa: E402
     SOCIAL_IMAGE_STARTER_SLUGS,
@@ -142,6 +143,19 @@ def _renderer_settings():
     from dataclasses import replace
 
     return replace(load_settings({}), media_url_prefixes=parse_prefixes(STORAGE))
+
+
+@pytest.fixture(scope="module")
+def music_library(tmp_path_factory):
+    """media-render's music library as the image carries it (US-112): the committed
+    tracks, each a stub file (the build fetches the real ones), with no analysis."""
+    root = tmp_path_factory.mktemp("music")
+    tracks = []
+    for entry in json.loads((_MEDIA_RENDER / "music" / "manifest.json").read_text())["tracks"]:
+        (root / f"{entry['id']}.mp3").write_bytes(b"stub")
+        tracks.append({**entry, "file": f"{entry['id']}.mp3"})
+    (root / "manifest.json").write_text(json.dumps({"tracks": tracks}))
+    return load_library(str(root))
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +460,7 @@ def test_turning_socials_on_seeds_the_four_templates_once_and_get_templates_list
 # ---------------------------------------------------------------------------
 
 
-def test_an_empty_slot_falls_back_to_the_templates_own_motion_graphics():
+def test_an_empty_slot_falls_back_to_the_templates_own_motion_graphics(music_library):
     starter = _starter("cinematic-product-promo")
     bundle = _bundle(starter)
     page = bundle["composition"]["html"]
@@ -457,11 +471,11 @@ def test_an_empty_slot_falls_back_to_the_templates_own_motion_graphics():
         assert kept in page, kept
     # The camera moves act on the (now empty) wrappers, so nothing targets a missing element.
     assert 'id="w2"' in page and 'id="w4"' in page
-    parsed = parse_bundle(bundle, _renderer_settings(), {})
+    parsed = parse_bundle(bundle, _renderer_settings(), music_library)
     assert parsed.media == () and parsed.composition.duration == 40.0
 
 
-def test_a_filled_slot_takes_the_clip_and_keeps_its_element():
+def test_a_filled_slot_takes_the_clip_and_keeps_its_element(music_library):
     starter = _starter("cinematic-product-promo")
     url = STORAGE + "social-media/ws/post/hook.mp4?X-Amz-Signature=abc"
     bundle = _bundle(starter, slot_media={"hook": url})
@@ -469,23 +483,27 @@ def test_a_filled_slot_takes_the_clip_and_keeps_its_element():
     assert bundle["media"] == [{"path": "assets/slots/hook.mp4", "url": url}]
     assert re.search(r'<video id="cv1"[^>]*data-slot="hook"[^>]*src="assets/slots/hook\.mp4"', page)
     assert page.count("data-slot=") == 1, "only the filled slot's element stays"
-    parsed = parse_bundle(bundle, _renderer_settings(), {})
+    parsed = parse_bundle(bundle, _renderer_settings(), music_library)
     assert [(m.path, m.url) for m in parsed.media] == [("assets/slots/hook.mp4", url)]
     with pytest.raises(ValueError, match="no slot"):
         _bundle(starter, slot_media={"b_roll": url})
 
 
 @pytest.mark.parametrize("slug", list(REFERENCE_OF))
-def test_media_render_takes_every_starter_with_its_slots_empty_or_filled(slug):
+def test_media_render_takes_every_starter_with_its_slots_empty_or_filled(slug, music_library):
     starter = _starter(slug)
     slots = starter["blocks"].get("slots") or {}
     settings = _renderer_settings()
     for filled in ({}, {name: f"{STORAGE}{name}.bin?sig=1" for name in slots}):
         bundle = _bundle(starter, slot_media=filled)
-        parsed = parse_bundle(bundle, settings, {})
+        parsed = parse_bundle(bundle, settings, music_library)
         assert len(parsed.media) == len(filled)
         assert parsed.composition.width == 1080 and parsed.composition.height == 1920
         assert len(parsed.audio.voice.lines) == len(starter["blocks"]["audio_plan"]["voice"]["lines"])
+        # US-112: the reference's own track, from the library, with its credit.
+        cue = starter["blocks"]["audio_plan"]["music"]
+        assert (parsed.audio.music.track, parsed.audio.music.start) == (cue["track"], cue["start"])
+        assert parsed.audio.music.about["credit_required"] is True
 
 
 def test_the_image_slots_of_the_data_story_are_stills():
@@ -615,14 +633,14 @@ def _driver():
     return module
 
 
-def test_the_ci_driver_builds_a_checked_preview_bundle_for_every_seeded_video():
+def test_the_ci_driver_builds_a_checked_preview_bundle_for_every_seeded_video(music_library):
     driver = _driver()
     kit = {**driver.KIT, "logo_url": driver.logo_png(driver.KIT["primary_color"])}
     settings = _renderer_settings()
     probed = []
     for starter in social_starters("social_video"):
         bundle = driver.bundle_for(starter, kit, starter["preview"]["at"])
-        parsed = parse_bundle(bundle, settings, {})
+        parsed = parse_bundle(bundle, settings, music_library)
         assert parsed.preview.at == tuple(sorted(starter["preview"]["at"]))
         assert [f.path for f in parsed.files] == ["assets/brand/logo.png"]
         probe = starter["preview"].get("probe")

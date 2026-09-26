@@ -37,6 +37,11 @@ a save or a render with a voice the workspace cannot speak with now answers
 toolkits, and the allowlisted ones to connect), and ``GET /voices/{toolkit}``
 a toolkit's own voices (``modules/socials/recipes/voice.py``).
 
+Music credit (S1.6): a CC BY track needs its credit wherever the video is
+published. Every save appends to the post's copy the credit lines the music of
+its media asks for (``modules/socials/credits.py``: each rendered file records
+its music on its Deliverable), and a render appends its own music's line.
+
 An approval binds to the content the approver saw (D6): the approve request
 carries that version's ``content_hash``, and a post that changed before the
 click answers 409.
@@ -77,6 +82,7 @@ from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_store, render, service
+from modules.socials import credits as post_credits
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.publisher import PublishingUnavailable, publish_post
@@ -284,6 +290,18 @@ async def _check_voice(db: Session, ctx: RequestContext, voice: Any) -> None:
         voice_recipes.plan_for(clean, await _capabilities(db, ctx))
 
 
+def _credited(db: Session, ctx: RequestContext, changes: Dict[str, Any], post: Optional[SocialPost] = None) -> Dict[str, Any]:
+    """``changes`` whose copy carries the credit lines the post's media asks for
+    after this save (S1.6): the media the save sets, else the post's own."""
+    media = changes["media"] if "media" in changes or post is None else post.media
+    lines = post_credits.media_credits(db, ctx.workspace_id, media)
+    if not lines:
+        return changes
+    copy_before = changes["copy"] if "copy" in changes or post is None else post.copy
+    credited = service.with_credits(copy_before, lines)
+    return changes if credited is copy_before else {**changes, "copy": credited}
+
+
 def _launch_render(job: render.RenderJob) -> None:
     """The render runs in the background; its end is written by the task itself."""
     launch_guarded(
@@ -332,13 +350,15 @@ async def create_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Create a draft. Every source must resolve in the workspace (D7)."""
+    """Create a draft. Every source must resolve in the workspace (D7). The copy
+    carries the credit lines its media's music asks for (S1.6)."""
     _check_template(db, ctx, body.template_id)
     fields = body.model_dump(by_alias=True)
     try:
         await _check_voice(db, ctx, fields["voice"])
         if fields["sources"]:
             post_sources.require_resolved(db, ctx.workspace_id, fields["sources"])
+        fields = _credited(db, ctx, fields)
         post = service.create_draft(db, workspace_id=ctx.workspace_id, created_by=_actor(ctx), **fields)
     except service.SocialsError as exc:
         _raise_for(exc)
@@ -365,7 +385,8 @@ async def update_social_post(
     adds or changes must resolve in the workspace (D7); one it keeps as it was
     is checked again at approval. A voice toolkit the edit names must be one the
     workspace can speak with now (D11); the voice is a render setting, so
-    changing it alone voids nothing."""
+    changing it alone voids nothing. The copy keeps the credit lines its
+    media's music asks for (S1.6): an edit that drops one gets it back."""
     post = _load(db, ctx, post_id)
     status, content_hash = post.status, post.content_hash
     changes = body.model_dump(exclude_unset=True, by_alias=True)
@@ -377,6 +398,7 @@ async def update_social_post(
             await _check_voice(db, ctx, changes["voice"])
         if changes.get("sources"):
             post_sources.require_resolved(db, ctx.workspace_id, changes["sources"], unchanged_from=post.sources)
+        changes = _credited(db, ctx, changes, post)
         service.update_post(post, _actor(ctx), changes)
     except service.SocialsError as exc:
         _raise_for(exc)

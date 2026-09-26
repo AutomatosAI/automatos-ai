@@ -1,6 +1,6 @@
 {
   "name": "Cinematic product promo",
-  "description": "A 40 s vertical product story that opens and closes on footage: the hook over a clip, the reveal on the kick, the request in chat, the board, a question for you, the morning over a clip, what landed, the team, and the end card over a closing shot. Four footage slots come from the workspace's own generation tools; an empty slot falls back to the template's motion graphics. Ported from the v2 reference video (PRD-251A).",
+  "description": "A 40 s vertical product story that opens and closes on footage: the hook over a clip, the reveal on the kick, the request in chat, the board, a question for you, the morning over a clip, what landed, the team, and the end card over a closing shot. Four footage slots come from the workspace's own generation tools; an empty slot falls back to the template's motion graphics. Ported from the v2 reference video (PRD-251A). Its music is \"Da Da Da Da Da De De De De\" by Sascha Ende (CC BY 4.0) from 50.05 s, as in the reference; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -796,6 +796,12 @@
           "text": "{{ brand.name }}. {{ end_line }} {{ end_accent }}"
         }
       ]
+    },
+    "music": {
+      "track": "da-da-da-da-da-de-de-de-de",
+      "start": 50.05,
+      "fade_in": 0.02,
+      "fade_out": 1.7
     }
   },
   "sample_data": {

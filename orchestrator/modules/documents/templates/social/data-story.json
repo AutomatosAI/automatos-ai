@@ -1,6 +1,6 @@
 {
   "name": "Data story",
-  "description": "A 40 s vertical data story: footage and stills behind data cards that the template draws from the post's own data (price bars and plan levels become chart shapes, and every figure on screen is computed from them). The hook, the reveal on the kick, the data, the odds, the log, a replay, and the end card. Six media slots; an empty slot falls back to the template's motion graphics. Ported from the Markets posh cut (PRD-251A).",
+  "description": "A 40 s vertical data story: footage and stills behind data cards that the template draws from the post's own data (price bars and plan levels become chart shapes, and every figure on screen is computed from them). The hook, the reveal on the kick, the data, the odds, the log, a replay, and the end card. Six media slots; an empty slot falls back to the template's motion graphics. Ported from the Markets posh cut (PRD-251A). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s, as in the reference; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -560,6 +560,12 @@
           "text": "{{ brand.name }}. {{ end_line }} {{ end_accent }}"
         }
       ]
+    },
+    "music": {
+      "track": "deep-house-003",
+      "start": 32.0,
+      "fade_in": 0.08,
+      "fade_out": 1.2
     }
   },
   "sample_data": {

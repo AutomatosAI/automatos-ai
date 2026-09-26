@@ -12,6 +12,7 @@ voice lines are spoken here with Kokoro, and the mix is made here with ffmpeg.
 | Container and CI job (S1.1a, US-101) | this directory, `media-render` in `.github/workflows/test.yml` | the image builds, boots, speaks and renders |
 | API (S1.1b, US-102) | `media_render/server.py`, `bundle.py`, `pipeline.py`, `audio.py`, `lanes.py` | `/render`, `/tts`, the check gate, the mix, concurrency |
 | Orchestrator client (S1.1c, US-104) | `orchestrator/core/media_render_client.py` | render lifecycle, quotas, compose, Railway |
+| Music library (S1.6, US-112) | `music/manifest.json`, `media_render/music_build.py`, `music.py` | every track hash-checked at build, cue windows, the credit a render reports |
 
 ## What the image carries
 
@@ -24,6 +25,7 @@ Every version is pinned. The build records them in `/opt/media-render/versions.j
 - **ffmpeg** encodes the video and makes the mix.
 - **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files are fetched at build and checked against `kokoro/SHA256SUMS`.
 - **GSAP 3.14.2** drives each composition's single paused timeline. It is staged into every render from `/opt/media-render/vendor`.
+- **The music library** (S1.6, US-112) at `/opt/media-render/music`: every track named in `music/manifest.json`, fetched at build and checked against its sha256 (see below).
 
 These Hyperframes settings are switched off in the image. Boot refuses to start without them:
 - `HYPERFRAMES_NO_TELEMETRY`
@@ -84,6 +86,33 @@ A still has no sound, so a bundle with `still` and an `audio` plan is refused, a
 
 loudnorm runs in two passes, and the mix is padded past 3 s for it; `audio.py` says why.
 
+## The music library
+
+`music/manifest.json` (committed) lists each track: `id` (what an audio plan names), `title`, `artist`, `licence` (`CC-BY-4.0` or `CC0-1.0`), `attribution` (the credit line), `url` (https) and `sha256`. No audio file is committed to git.
+
+The image build runs `media_render/music_build.py`:
+1. it checks every track's fields: an attribution must name the title and the artist, and a CC BY track's must name its licence;
+2. it fetches each track from its `url` and compares its sha256 with the manifest's. **A mismatch fails the build**;
+3. it decodes each track with ffmpeg and analyses it with numpy in 0.1 s frames: loudness, the energy below 150 Hz and the 300-3,000 Hz share (PRD-251A stage 3). From them come the cue windows, in track seconds:
+   - `breaks`: the bass drops out for 1 s or more, then comes back (a cut lands there);
+   - `breakdowns`: the same for 4 s or more;
+   - `drops`: where the bass comes back after either, or after an intro without it (land a reveal on it);
+   - `grooves`: 4 s or more with the bass in and the mids no busier than the track's middle (a voice-over sits well there);
+4. it writes `/opt/media-render/music/manifest.json`: the source fields, the licence's name and URL, `credit_required`, the file, the `duration`, the `cues` and a 2-second `map` of the three measures.
+
+A template plays a track with `audio_plan.music = {"track": "<id>", "start": <track seconds>, "fade_in"?, "fade_out"?}`: a cue at `t` in the track lands at `t - start` in the video. Boot refuses a library track with an unknown licence or no attribution.
+
+A render that mixes a track reports it: `report.music = {track, title, artist, licence, licence_url, attribution, credit_required, start, end}`. The orchestrator appends a CC BY track's attribution to the copy of the post it lands in (`orchestrator/core/music_credit.py`).
+
+| Track | Licence | The reference that used it |
+|---|---|---|
+| `where-the-night-begins` | CC BY 4.0, Sascha Ende | UI story promo (v1), from 190.1 s |
+| `da-da-da-da-da-de-de-de-de` | CC BY 4.0, Sascha Ende | Cinematic product promo (v2), from 50.05 s |
+| `spring-of-2026` | CC BY 4.0, Sascha Ende | App promo (Academy), from 47.9 s |
+| `deep-house-003` | CC BY 4.0, Sascha Ende | Data story (Markets), from 32.0 s |
+
+Adding a track is the owner's call (PRD-251 open question 5): add its entry with the sha256 of the file at its URL; the next image build fetches, checks and analyses it.
+
 **Concurrency** (owner, 2026-09-23): at most two renders at once overall and one per workspace. Further jobs queue first come, first served. A queued job never waits behind another workspace's queued job.
 
 Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS`.
@@ -94,7 +123,7 @@ Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS
 - the espeak-ng data path is 160 characters or longer, measured after symlinks are resolved. espeak-ng truncates longer paths. The image copies the data to `/opt/espeak`;
 - any of the four Hyperframes switches is not `1`;
 - `ENVIRONMENT=production` and `SOCIALS_RENDER_TOKEN` is unset. Outside production, a missing token leaves every route open, and a warning is logged;
-- the music library's manifest names a track that is missing or outside the library.
+- the music library's manifest names a track that is missing or outside the library, or one with an unknown licence or no attribution.
 
 ## Commands
 
@@ -103,6 +132,7 @@ python -m media_render serve            # the HTTP service (default); /health is
 python -m media_render boot-check       # the boot assertions only
 python -m media_render fixture-bundle   # print fixtures/fixture as a POST /render body
 python -m media_render fixture-bundle script   # fixtures/script: four lines, each in its window (US-111)
+python -m media_render fixture-bundle music    # fixtures/music: the script over Deep House 003 from 32.0 s (US-112)
 ```
 
 ## Settings
@@ -136,11 +166,13 @@ All of them are read in `media_render/config.py`.
 
 Nothing runs on a developer machine. The `media-render` CI job:
 1. builds the image;
-2. runs `tests/` inside it: the bundle rules, the queue, and the real `hyperframes check`, ffmpeg mix and Kokoro;
-3. proves the boot assertion and `/health`;
-4. posts the fixture bundle to `POST /render` with the token, timed;
-5. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`);
-6. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
-7. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
+2. checks the music library the build wrote against `music/manifest.json` (every track as committed, with cue windows, and Deep House 003's break at 34.0-35.8 s), then builds the image again from a manifest with one wrong sha256 and requires that build to fail (`ci/assert_music.py`);
+3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro;
+4. proves the boot assertion and `/health`;
+5. posts the fixture bundle to `POST /render` with the token, timed;
+6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`);
+7. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
+8. renders the music fixture (`fixtures/music`, US-112): the MP4's integrated loudness must be -14 ± 1 LUFS, and its report must name Deep House 003 with its CC BY credit line;
+9. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, with its reference track mixed in (the report names it, and the mix measures -14 ± 1 LUFS), and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
 
 The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.

@@ -1,6 +1,7 @@
 # media-render (PRD-251 D3): turns a template, the brand kit, the voice and the
 # music into a finished MP4 or PNG. It ASSEMBLES; it never generates: footage,
-# stills and premium voice reach it as files, never as provider calls.
+# stills and premium voice reach it as files, never as provider calls. The music
+# is a licensed library fetched and hash-checked at build (S1.6), never generated.
 #
 # Patterns from services/workspace-worker/Dockerfile: the python:3.12-slim base,
 # NodeSource, the chrome library list, HEALTHCHECK/EXPOSE/ENTRYPOINT.
@@ -93,6 +94,15 @@ RUN set -eux; \
     test -f /opt/espeak/phontab; \
     test ! -L /opt/espeak; \
     chmod -R a+rX /opt/espeak
+
+# The music library (PRD-251 S1.6). Every track in music/manifest.json is fetched
+# from its source URL and checked against its sha256: a mismatch FAILS the build,
+# and no audio file is committed to git. Each track is then analysed (numpy, and
+# ffmpeg to decode) into the cue windows a template lands on: breaks, breakdowns,
+# drops and grooves at 0.1 s. The service reads /opt/media-render/music/manifest.json.
+COPY music/manifest.json media_render/music_build.py /opt/media-render/build/
+RUN python /opt/media-render/build/music_build.py /opt/media-render/build/manifest.json /opt/media-render/music \
+    && chmod -R a+rX /opt/media-render/music
 
 COPY . .
 RUN python -m media_render.versions --browser /opt/chrome/chrome-headless-shell \

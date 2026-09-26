@@ -12,7 +12,7 @@ carries a composition in ``blocks``, which media-render renders:
         "subtitle": {"type": "text", "default": ""}
       },
       "sizes": ["1080x1920", "1080x1350"],   WIDTHxHEIGHT, the first is the default
-      "audio_plan": {"voice": …, "music": …, "sfx": […]},  social_video only
+      "audio_plan": {"voice": …, "music": {"track": "deep-house-003", "start": 32.0}, "sfx": […]},  social_video only
       "slots": {                             optional: footage and stills a post may supply
         "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"}
       },
@@ -68,6 +68,12 @@ SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills")
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
+# The music cue (S1.6): a track of media-render's music library by id, and the
+# second of the track the video starts at, with its fades. media-render checks
+# that the id is in its library and that the window fits the track.
+MUSIC_CUE_KEYS = ("track", "start", "fade_in", "fade_out")
+MUSIC_TRACK_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MUSIC_TRACK_ID_MAX_CHARS = 64
 
 TEXT, NUMBER, BOOLEAN = "text", "number", "boolean"
 VARIABLE_TYPES = (TEXT, NUMBER, BOOLEAN)
@@ -509,6 +515,29 @@ def _audio_errors(plan: Any, fmt: str) -> List[Dict[str, str]]:
     voice = plan.get("voice")
     if voice is not None and not (isinstance(voice, dict) and isinstance(voice.get("lines"), list)):
         errors.append(_error("audio_plan.voice", 'must be an object with a list of lines, e.g. {"lines": [{"id": "l01", "at": 0.3, "text": "…"}]}'))
+    if plan.get("music") is not None:
+        errors += _music_errors(plan["music"])
+    return errors
+
+
+def _music_errors(music: Any) -> List[Dict[str, str]]:
+    """A music cue names a library track and where in it the video starts (S1.6)."""
+    if not isinstance(music, dict):
+        return [_error("audio_plan.music", 'must name a music library track, e.g. {"track": "deep-house-003", "start": 32.0}')]
+    errors = [
+        _error(f"audio_plan.music.{key}", f"is not part of a music cue ({', '.join(MUSIC_CUE_KEYS)})")
+        for key in music
+        if key not in MUSIC_CUE_KEYS
+    ]
+    track = music.get("track")
+    if not isinstance(track, str) or len(track) > MUSIC_TRACK_ID_MAX_CHARS or not MUSIC_TRACK_ID.match(track):
+        errors.append(_error("audio_plan.music.track", "must be a music library track id, e.g. deep-house-003"))
+    for key in ("start", "fade_in", "fade_out"):
+        value = music.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0
+        ):
+            errors.append(_error(f"audio_plan.music.{key}", "must be a number of seconds, 0 or more"))
     return errors
 
 

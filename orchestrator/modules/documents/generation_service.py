@@ -63,6 +63,7 @@ from config import config
 from core.media_render_bundle import build_bundle
 from core.media_render_client import MediaRenderClient
 from core.media_render_quota import book_render_seconds, enforce_render_quota
+from core.music_credit import credit_for_render
 from core.social_templates import (
     SOCIAL_IMAGE,
     SOCIAL_VIDEO,
@@ -215,6 +216,9 @@ class DocumentGenerationService:
 
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
+        credit = (result.music or {}).get("credit")
+        if credit:  # PRD-251 S1.6: a CC BY track's credit goes wherever the video does
+            result.content = f"{result.content.rstrip()}\n\n{credit}\n"
         # PRD-242 S4: attribution rides the result so callers (tool result,
         # Deliverable extra, playbook step output) can say WHICH template filled it.
         if template is not None:
@@ -295,6 +299,10 @@ class DocumentGenerationService:
                 extra["template_id"] = str(template_id)
             if getattr(result, "template_name", None):
                 extra["template_name"] = result.template_name
+            # PRD-251 S1.6: the music a social video mixed; a post that attaches
+            # this Deliverable carries its credit line (modules/socials/credits.py).
+            if getattr(result, "music", None):
+                extra["music"] = dict(result.music)
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,
@@ -589,7 +597,11 @@ class DocumentGenerationService:
         seconds are booked on the media lane after, like a Socials post's render.
         An image renders as one still (US-107); a template that renders several
         (a carousel's slides) is refused: a document is one file, and a Socials
-        post's render keeps every slide.
+        post's render keeps every slide. The library track a video mixed rides
+        the result (``music``, S1.6): its Deliverable records it, so a post that
+        attaches the video carries a CC BY track's credit line; a report that
+        asks for credit and gives no line, or does not name the track the bundle
+        asked for, fails the render (``MusicCreditMissing``).
         """
         if template is None or getattr(template, "format", None) != format:
             raise ValueError(f"{format} renders a {format} template: pass its template_id or template_name")
@@ -632,8 +644,9 @@ class DocumentGenerationService:
                 max_wait_seconds=config.SOCIALS_RENDER_MAX_WAIT_SECONDS,
                 poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS,
             )
+            music = credit_for_render(bundle, finished.get("report"))
         except BaseException:
-            output_path.unlink(missing_ok=True)  # never leave a half-fetched file behind
+            output_path.unlink(missing_ok=True)  # never leave a half-fetched (or uncredited) file behind
             raise
         book_render_seconds(
             workspace_id=workspace_id,
@@ -641,7 +654,9 @@ class DocumentGenerationService:
             seconds=_rendered_seconds(finished),
             latency_ms=int((time.monotonic() - started) * 1000),
         )
-        return self._build_result(str(output_path), file_type, title, workspace_id, template_lane=SOCIAL_LANE)
+        result = self._build_result(str(output_path), file_type, title, workspace_id, template_lane=SOCIAL_LANE)
+        result.music = music.extra() if music is not None else None
+        return result
 
     # ------------------------------------------------------------------
     # Helpers

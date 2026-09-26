@@ -15,10 +15,13 @@ which runs in the background:
 2. poll the job every ``SOCIALS_RENDER_POLL_SECONDS`` until it ends;
 3. fetch every output, taking its sha256 on the way, then copy each into our
    storage, ``social-media/{workspace}/{post}/{file}`` (D9), and register it as
-   a Deliverable. Nothing is stored until every output has arrived whole;
+   a Deliverable, which records the music it mixed (S1.6). Nothing is stored
+   until every output has arrived whole;
 4. finish the post with a compare-and-set: ``rendering`` → ``needs_approval``
-   with the files as ``media`` (the content hash covers their digests), or
-   ``rendering`` → ``failed`` with the report in ``review_log``;
+   with the files as ``media`` (the content hash covers their digests) and, when
+   the music is a CC BY track, its credit line appended to the copy
+   (``core/music_credit.py``), or ``rendering`` → ``failed`` with the report in
+   ``review_log``. A report that asks for credit and gives no line fails it;
 5. book the rendered seconds on the ``media`` lane at $0 (US-103), the units
    the quota counts.
 
@@ -47,7 +50,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from uuid import UUID
 
 from config import config
@@ -63,6 +66,7 @@ from core.media_render_client import (
     MediaRenderUnavailable,
 )
 from core.media_render_quota import book_render_seconds
+from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
@@ -210,7 +214,7 @@ def _report(*, findings: Any = (), report: Optional[Mapping[str, Any]] = None) -
         out["findings"] = [_finding(f) for f in listed[:MAX_REPORTED_FINDINGS]]
         out["findings_total"] = len(listed)
     source = report or {}
-    for key in ("check", "timings"):
+    for key in ("check", "timings", "music"):
         if isinstance(source.get(key), dict):
             out[key] = dict(source[key])
     return out
@@ -309,9 +313,29 @@ def stored_file_name(job: RenderJob, output: Mapping[str, Any], *, several: bool
     return f"{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
 
 
-def _register(session_factory: Callable[[], Any], job: RenderJob, key: str, file_name: str, entry: Dict[str, Any]) -> str:
+def _music_of(job: RenderJob, finished: Mapping[str, Any]) -> Optional[MusicCredit]:
+    """The music the render mixed (S1.6). A CC BY track the report gives no credit
+    line for, or a report that does not name the track the bundle asked for, fails the render."""
+    try:
+        return credit_for_render(job.bundle, finished.get("report"))
+    except MusicCreditMissing as exc:
+        logger.error("[Socials] the render of post %s: %s", job.post_id, exc)
+        raise RenderFailure("music_credit_missing", f"The render's music needs its credit line: {exc}. Nothing was stored.") from exc
+
+
+def _register(
+    session_factory: Callable[[], Any],
+    job: RenderJob,
+    key: str,
+    file_name: str,
+    entry: Dict[str, Any],
+    music: Optional[MusicCredit] = None,
+) -> str:
     from services.deliverable_service import DeliverableService, _infer_artifact_type
 
+    extra: Dict[str, Any] = {"social_post_id": str(job.post_id), "sha256": entry["sha256"], "aspect": entry["aspect"]}
+    if music is not None:
+        extra["music"] = music.extra()
     db = session_factory()
     try:
         result = DeliverableService(db, job.workspace_id).register(
@@ -325,7 +349,7 @@ def _register(session_factory: Callable[[], Any], job: RenderJob, key: str, file
             file_size_bytes=entry["bytes"],
             preview_url=media_route(job.post_id, file_name),
             preview_type="file",
-            extra={"social_post_id": str(job.post_id), "sha256": entry["sha256"], "aspect": entry["aspect"]},
+            extra=extra,
         )
     finally:
         db.close()
@@ -340,11 +364,13 @@ async def _store_outputs(
     session_factory: Callable[[], Any],
     job: RenderJob,
     record: Dict[str, Any],
+    music: Optional[MusicCredit] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch every output, then store and register each; the post's ``media``.
 
     Every file is fetched (and checked) before any is stored, so a missing or
     empty output never leaves another behind in storage or in Deliverables.
+    Each Deliverable records ``music``, the track the render mixed (S1.6).
     """
     outputs = [o for o in (record.get("outputs") or []) if isinstance(o, dict) and o.get("name")]
     if not outputs:
@@ -378,7 +404,7 @@ async def _store_outputs(
                 logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
                 raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
             entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}
-            deliverable_id = await asyncio.to_thread(_register, session_factory, job, key, file_name, entry)
+            deliverable_id = await asyncio.to_thread(_register, session_factory, job, key, file_name, entry, music)
             file_record: Dict[str, Any] = {
                 "deliverable_id": deliverable_id,
                 "name": file_name,
@@ -421,10 +447,12 @@ def _finish(
     media: Optional[Mapping[str, List[Dict[str, Any]]]] = None,
     report: Optional[Mapping[str, Any]] = None,
     failure: Optional[RenderFailure] = None,
+    credits: Sequence[str] = (),
 ) -> Optional[str]:
     """End the render on the post, a compare-and-set on ``rendering`` and the
     start hash: the status it ended in, or ``None`` when the post moved on
-    (nothing is written then). Files the post cannot record fail it instead."""
+    (nothing is written then). Files the post cannot record fail it instead.
+    ``credits`` join the post's copy (the render's CC BY music, S1.6)."""
     db = session_factory()
     try:
         post = service.get_post(db, job.workspace_id, job.post_id)
@@ -434,7 +462,9 @@ def _finish(
             return None
         if failure is None:
             try:
-                service.finish_render(post, job.actor, media or {}, summary=_summary(media or {}), report=report)
+                service.finish_render(
+                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits
+                )
             except service.InvalidPost as exc:
                 failure = RenderFailure("bad_output", f"The rendered files could not be recorded: {exc}")
         if failure is not None:
@@ -486,11 +516,12 @@ async def run_render(
         bundle = await _voiced(job, store, factory)
         accepted = await _submit(client, bundle, deadline)
         finished = await _wait(client, job, accepted, deadline)
-        return finished, await _store_outputs(client, store, factory, job, finished)
+        music = _music_of(job, finished)
+        return finished, music, await _store_outputs(client, store, factory, job, finished, music)
 
     try:
         try:
-            finished, media = await asyncio.wait_for(render_and_store(), timeout=budget)
+            finished, music, media = await asyncio.wait_for(render_and_store(), timeout=budget)
         except asyncio.TimeoutError:
             raise RenderFailure("timed_out", f"The render did not finish within {budget // 60} minutes.") from None
     except RenderFailure as failure:
@@ -503,7 +534,8 @@ async def run_render(
         await asyncio.to_thread(_finish, factory, job, failure=failure)
         raise
     report = _report(report=finished.get("report") if isinstance(finished.get("report"), dict) else None)
-    ended = await asyncio.to_thread(_finish, factory, job, media=media, report=report)
+    credits = [music.line] if music is not None and music.line else []
+    ended = await asyncio.to_thread(_finish, factory, job, media=media, report=report, credits=credits)
     if ended != service.NEEDS_APPROVAL:
         return False
     # latency: the whole render, from submit to the files in storage.

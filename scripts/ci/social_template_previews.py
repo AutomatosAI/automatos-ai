@@ -22,6 +22,11 @@ workspace gets it, at every size it declares: a still bundle, the full check
 (202 = no errors), and the PNGs it returns, one per still (a carousel's
 slides), each read back and measured against the size.
 
+The music (US-112, S1.6): a video whose audio plan names a library track is
+mixed with it for the preview. The job's report must name that track, with its
+licence and the credit line a post carries, and the mix must measure -14 +/- 1
+LUFS (loudnorm's own measurement of the mix the video plays).
+
 The pixel probe (S1.2: changing the brand kit's primary colour changes the
 render): a template whose seed names a probe (a spot the brand colour fills)
 is rendered again with the primary swapped. The pixel there must match the
@@ -314,6 +319,28 @@ def image_bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], size: s
     )
 
 
+LUFS_TARGET = -14.0
+LUFS_TOLERANCE = 1.0
+
+
+def check_music(starter: Mapping[str, Any], report: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The template's library track in the job's report, with its credit, and the mix at -14 +/- 1 LUFS."""
+    wanted = ((starter["blocks"].get("audio_plan") or {}).get("music") or {}).get("track")
+    if not wanted:
+        return None
+    music = report.get("music") or {}
+    if music.get("track") != wanted:
+        raise PreviewFailure(f"the audio plan names {wanted}, the report's music is {json.dumps(music)}")
+    if not music.get("attribution") or not music.get("licence"):
+        raise PreviewFailure(f"the report gives {wanted} no licence or attribution: {json.dumps(music)}")
+    lufs = (report.get("audio") or {}).get("integrated_lufs")
+    if not isinstance(lufs, (int, float)) or abs(lufs - LUFS_TARGET) > LUFS_TOLERANCE:
+        raise PreviewFailure(f"the mix measured {lufs} LUFS, not {LUFS_TARGET:g} +/- {LUFS_TOLERANCE:g}")
+    print(f"    music: {wanted} from {music.get('start')} s to {music.get('end')} s, the mix at {lufs} LUFS; "
+          f"credit ({music.get('licence')}): {music.get('attribution')}")
+    return {"track": wanted, "window": [music.get("start"), music.get("end")], "lufs": lufs, "credit": music.get("attribution")}
+
+
 def _check_summary(report: Mapping[str, Any]) -> str:
     check = report.get("check") or {}
     sections = ", ".join(
@@ -352,6 +379,9 @@ def run_videos(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
                       + (f", at {output['at']} s" if "at" in output else f", {output.get('duration')} s reel"))
             print(f"    timings: {json.dumps(job['report'].get('timings'))}; {job['seconds']} s in all")
             report[starter["slug"]] = {"check": job["report"].get("check"), "outputs": job["outputs"], "timings": job["report"].get("timings")}
+            music = check_music(starter, job["report"])
+            if music:
+                report[starter["slug"]]["music"] = music
             probe = preview.get("probe")
             if probe:
                 report[starter["slug"]]["probe"] = probe_primary(renderer, starter, kit, bundle, job, probe, folder)

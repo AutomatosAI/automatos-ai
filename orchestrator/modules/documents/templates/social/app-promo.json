@@ -1,6 +1,6 @@
 {
   "name": "App promo",
-  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the Academy reference video (PRD-251A).",
+  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the Academy reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -565,6 +565,12 @@
           "text": "{{ end_voice }}"
         }
       ]
+    },
+    "music": {
+      "track": "spring-of-2026",
+      "start": 47.9,
+      "fade_in": 0.3,
+      "fade_out": 1.7
     }
   },
   "sample_data": {

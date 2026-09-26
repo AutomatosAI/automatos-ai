@@ -9,6 +9,10 @@ rendered. A job that passes waits for a render slot, then ``render`` runs
 `hyperframes render` and probes the file. The renderer assembles; it never
 calls a generation provider (D3).
 
+The report names the library track the mix plays, with its licence and
+attribution line (``music_report``, S1.6), so the post it lands in can carry
+a CC BY track's credit.
+
 A bundle with a ``preview`` is checked the same way, and then its slot takes
 PNG snapshots of the composition at the moments asked for instead of the full
 render (US-106): each scaled to ``MEDIA_RENDER_PREVIEW_WIDTH``, and a short
@@ -211,6 +215,16 @@ def voice_findings(
     return tuple(findings)
 
 
+def music_report(bundle: Bundle) -> Optional[Dict[str, Any]]:
+    """The library track the mix plays, the window it plays (track seconds), its
+    licence and its attribution line (S1.6): a CC BY track's credit reaches the
+    post's copy from here. ``None`` when the plan has no music."""
+    cue = bundle.audio.music
+    if cue is None:
+        return None
+    return {**cue.about, "track": cue.track, "start": cue.start, "end": round(cue.start + bundle.composition.duration, 3)}
+
+
 def mix_plan(bundle: Bundle, lines: Sequence[PlacedLine], project_dir: Path) -> audio.MixPlan:
     plan = bundle.audio
     music = plan.music
@@ -320,6 +334,9 @@ class RenderPipeline:
         with _timed(timings, "voice_seconds"):
             lines = await self._voice(job)
         report: Dict[str, Any] = {"voice": [line.report() for line in lines], "timings": timings}
+        music = music_report(bundle)
+        if music is not None:
+            report["music"] = music
         findings = voice_findings(lines, bundle.composition.duration, max_tempo=settings.voice_max_tempo)
         if findings:
             return _refused(findings, report)

@@ -243,7 +243,12 @@ def _library(tmp_path, duration):
     music = tmp_path / "music"
     music.mkdir()
     (music / "bed.mp3").write_bytes(b"not really audio")
-    manifest = {"tracks": [{"id": "deep-house-003", "file": "bed.mp3", "duration": duration}]}
+    track = {
+        "id": "deep-house-003", "file": "bed.mp3", "duration": duration, "title": "Deep House 003",
+        "artist": "Sascha Ende", "licence": "CC-BY-4.0",
+        "attribution": 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.',
+    }
+    manifest = {"tracks": [track]}
     (music / "manifest.json").write_text(json.dumps(manifest))
     return load_library(str(music))
 
@@ -252,6 +257,9 @@ def test_music_comes_from_the_library(settings, tmp_path):
     library = _library(tmp_path, 120.0)
     cue = parse_bundle(bundle(audio={"music": {"track": "deep-house-003", "start": 32.0}}), settings, library).audio.music
     assert (cue.track, cue.start, cue.fade_in, cue.fade_out) == ("deep-house-003", 32.0, 0.02, 1.7)
+    # The cue carries the library's word on the track: the report's licence and credit line (S1.6).
+    assert cue.about["credit_required"] is True and cue.about["licence"] == "CC BY 4.0"
+    assert cue.about["attribution"] == 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.'
     assert "not in the music library" in refused(settings, bundle(audio={"music": {"track": "nope"}}), library)
     late = bundle(audio={"music": {"track": "deep-house-003", "start": 118.5}})
     assert "runs past its end" in refused(settings, late, library)

@@ -40,6 +40,11 @@
   ``modules/socials/recipes/voice.py`` whether the workspace can speak with
   it). It is a render setting, not content: it is outside the hash, and what
   it changes reaches the hash through the next render's file digests.
+* **Music credit (Wave 1 S1.6).** A CC BY track asks for credit wherever the
+  video is published: ``with_credits`` appends its line to the post's copy,
+  the base text and every channel's own text, once. A render appends the line
+  of the music it mixed (``finish_render``); a save appends those of the media
+  it names (``modules/socials/credits.py``).
 
 No FastAPI here: the API maps these exceptions to status codes. Every review
 action appends to ``review_log``, the history the approval UI shows. JSON
@@ -449,6 +454,33 @@ def unsourced_claims(post: Any, unresolved: Optional[Iterable[str]] = None) -> L
     )
 
 
+# ── music credit (S1.6) ─────────────────────────────────────────────────────
+def _credited(text: Any, lines: Sequence[str]) -> Any:
+    if not isinstance(text, str):
+        return text  # not copy the validators take (null included): left for them to refuse
+    body = text.rstrip()
+    missing = [line for line in lines if line not in body]
+    if not missing:
+        return text
+    return "\n\n".join(([body] if body else []) + missing)
+
+
+def with_credits(copy: Any, lines: Iterable[str]) -> Any:
+    """``copy`` with each credit line at the end of its base text (one it lacks
+    starts as the lines) and of every channel's own text that lacks it: a new
+    object. A line already there is not added again, and copy with nothing to
+    add comes back as it was."""
+    wanted = [line for line in dict.fromkeys(lines) if isinstance(line, str) and line]
+    if not wanted or (copy is not None and not isinstance(copy, dict)):
+        return copy
+    out = dict(copy or {})
+    out["base"] = _credited(out.get("base", ""), wanted)
+    channels = out.get("channels")
+    if isinstance(channels, dict) and channels:
+        out["channels"] = {name: _credited(text, wanted) for name, text in channels.items()}
+    return out if out != (copy or {}) else copy
+
+
 # ── the lifecycle ───────────────────────────────────────────────────────────
 def create_draft(
     db: Any,
@@ -685,17 +717,26 @@ def finish_render(
     *,
     summary: Optional[str] = None,
     report: Optional[Mapping[str, Any]] = None,
+    credits: Sequence[str] = (),
 ) -> SocialPost:
     """rendering → needs_approval with the rendered files as ``media``.
 
     ``media`` replaces what the post carried before, and the content hash is
     recomputed over it, so an approval binds to these exact files (D6).
+    ``credits`` are the lines the render's music asks for (S1.6, a CC BY
+    track): they join the copy the approver reviews, and the history says so.
     """
     target = _target(post, ACTION_RENDER_DONE)
     post.media = _rendered_media(media)
+    credited = with_credits(post.copy, credits)
+    added = credited is not post.copy
+    if added:
+        post.copy = credited
     post.content_hash = compute_content_hash(post)
     post.status = target
-    extra = {"report": dict(report)} if report else {}
+    extra: Dict[str, Any] = {"report": dict(report)} if report else {}
+    if added:
+        extra["credits_added"] = [line for line in dict.fromkeys(credits) if line]
     _log(post, actor, ACTION_RENDER_DONE, summary, **extra)
     return post
 

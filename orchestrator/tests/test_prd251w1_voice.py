@@ -158,6 +158,16 @@ COMPOSITION = {
 }
 
 
+# US-112: media-render reports the library track a render mixes (COMPOSITION names Deep House 003),
+# and a render whose report does not name it fails closed (core/music_credit.credit_for_render).
+MUSIC_REPORT = {
+    "track": "deep-house-003", "title": "Deep House 003", "artist": "Sascha Ende", "licence": "CC BY 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.',
+    "credit_required": True, "start": 32.0, "end": 38.0,
+}
+
+
 def _mp3(tag: str) -> bytes:
     """An MP3 as a voice toolkit returns one: an ID3 header, then frames."""
     return b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff\xfb\x90\x64" + tag.encode() * 64
@@ -238,7 +248,8 @@ class Renderer:
             self.stored_at_submit.append(sorted(self.store.objects))
             return httpx.Response(202, json={"id": JOB_ID, "status": "checking", "outputs": [], "report": {}})
         if request.method == "GET" and path == f"/render/{JOB_ID}":
-            return httpx.Response(200, json={"id": JOB_ID, "status": "done", "outputs": [OUTPUT], "report": {"check": {"ok": True}}})
+            report = {"check": {"ok": True}, "music": MUSIC_REPORT}
+            return httpx.Response(200, json={"id": JOB_ID, "status": "done", "outputs": [OUTPUT], "report": report})
         if request.method == "GET" and path == f"/render/{JOB_ID}/output/render.mp4":
             return httpx.Response(200, content=MP4)
         return httpx.Response(404, json={"error": "not_found"})

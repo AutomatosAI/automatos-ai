@@ -39,7 +39,7 @@ A still has no sound, so it takes no audio plan, and it is its own preview.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
@@ -118,6 +118,9 @@ class MusicCue:
     start: float
     fade_in: float
     fade_out: float
+    # The library's word on the track (music.Track.report): its title, licence
+    # and attribution, which the job report carries for the post's credit line.
+    about: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -283,7 +286,7 @@ def _music(raw: Any, duration: float, library: Mapping[str, Track]) -> Optional[
         raise BundleError("audio.music fades last longer than the composition")
     if track.duration is not None and start + duration > track.duration:
         raise BundleError(f"audio.music: {track.id} lasts {track.duration:g} s; a window from {start:g} s runs past its end")
-    return MusicCue(track=track.id, path=track.path, start=start, fade_in=fade_in, fade_out=fade_out)
+    return MusicCue(track=track.id, path=track.path, start=start, fade_in=fade_in, fade_out=fade_out, about=track.report())
 
 
 def _sfx(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Settings) -> Tuple[SfxCue, ...]:
