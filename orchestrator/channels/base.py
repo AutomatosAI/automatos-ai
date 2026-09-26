@@ -196,6 +196,7 @@ class BaseChannelAdapter(ABC):
                             "connection_id": self.connection_id,
                         },
                         attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
+                        conversation=True,  # F182: a person's message recalls as a chat turn does
                     )
                     response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
 

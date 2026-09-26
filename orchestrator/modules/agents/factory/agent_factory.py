@@ -1126,6 +1126,9 @@ class AgentFactory:
         composio_action_names: Optional[set] = None,
         context_mode: Optional[str] = None,  # ContextMode enum value — overrides default TASK_EXECUTION
         attachment_ids: Optional[List[str]] = None,  # PRD-127: ephemeral attachments
+        # F182: a person's message (a channel), which recalls as a chat turn does;
+        # autonomous work never reads another conversation as its facts.
+        conversation: bool = False,
         # Legacy params — accepted but ignored (callers may still pass them)
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
@@ -1189,7 +1192,7 @@ class AgentFactory:
             return await self._execute_with_prompt_scoped(
                 agent_runtime, agent_id, agent_name, prompt, system_prompt, context, use_memory,
                 max_retries, max_tool_iterations, composio_action_names, context_mode,
-                attachment_ids, start_time,
+                attachment_ids, start_time, conversation,
             )
 
     async def _execute_with_prompt_scoped(
@@ -1207,6 +1210,7 @@ class AgentFactory:
         context_mode: Optional[str],
         attachment_ids: Optional[List[str]],
         start_time: float,
+        conversation: bool = False,
     ) -> Dict[str, Any]:
         """The body of ``execute_with_prompt`` (unchanged), run inside its usage scope."""
         try:
@@ -1240,6 +1244,7 @@ class AgentFactory:
                         # Narrow the dispatcher enum to task-relevant actions —
                         # without a query this lane shipped all 137 every run.
                         query=prompt,
+                        conversation=conversation,
                     )
                     # PRD-201 S4: carry the assembler's cache-stable prefix on the
                     # system message so the Anthropic client can place its
