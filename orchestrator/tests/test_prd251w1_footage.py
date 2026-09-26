@@ -523,7 +523,13 @@ def _render(env, post_id, store):
         ) as http:
             return await render.run_render(job, client=MediaRenderClient(http), store=store, session_factory=env.factory)
 
-    return asyncio.run(go()), renderer, job
+    result = asyncio.run(go())
+    # run_render books the rendered seconds on the best-effort threads, and their
+    # session shares this fixture's one SQLite connection (StaticPool): its close
+    # can roll back whatever the test writes next (CI run 36220301412 lost the next
+    # post's template that way). Let that write land first.
+    best_effort.drain(timeout=5)
+    return result, renderer, job
 
 
 def _post(env, post_id):
