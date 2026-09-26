@@ -154,6 +154,40 @@ jobs:
       - name: Coverage ratchet (measured baseline)
         run: python scripts/check_coverage_baseline.py
 
+  # AGENTS.md → the engineering rules, held on the lines a change touches (a ratchet:
+  # existing code meets them the next time someone edits it). ruff runs through
+  # diff-quality (changed lines only; ruff.toml holds the rules), then the code-shape
+  # check (function length, nesting, file size). Pinned tools, no app dependencies.
+  # The base is the pull request's base branch, or main on a branch push.
+  code-standards:
+    name: Code standards on changed lines (ruff, function length, nesting) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history, for the diff against the base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the linters (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff==0.16.9" "diff-cover==10.6.0"
+
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
+
+      - name: ruff on changed lines (diff-quality)
+        run: diff-quality --violations=ruff.check --compare-branch="origin/${GITHUB_BASE_REF:-main}" --fail-under=100
+
+      - name: Function length, nesting and file size on changed Python
+        run: python scripts/ci/check_changed_code_shape.py --base "origin/${GITHUB_BASE_REF:-main}"
+
   # PRD-160 S5 — NL2SQL regression eval. NON-REQUIRED (same posture as the test
   # net). Self-contained: it seeds an in-memory SQLite DB, so it needs no
   # Postgres service. The always-on checks prove every golden SQL executes and
@@ -1023,6 +1057,16 @@ jobs:
       # HARD gate — fails on a NEW frontend call to a non-existent backend path.
       - name: Frontend route-contract (consumes route-manifest.json)
         run: node scripts/check-route-contract.js
+
+      # HARD gate on changed lines only (AGENTS.md → Code shape): function length
+      # (components 150), depth, new-file size, and the apiClient-only rule that the
+      # full ESLint run above only reports. Needs the base branch and enough history
+      # for the merge-base.
+      - name: Code shape and apiClient on changed lines (ESLint)
+        run: |
+          git fetch --no-tags --unshallow origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}" \
+            || git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
+          node scripts/check-changed-lines-eslint.js "origin/${GITHUB_BASE_REF:-main}"
 
   # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
   # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)

@@ -95,7 +95,7 @@ These systems are crucial for delivering a trustworthy platform in customer envi
 
 ---
 
-## 4. Contribution Guidelines — `docs/CONTRIBUTING.md`
+## 4. Contribution Guidelines — `CONTRIBUTING.md`
 
 Development and maintenance of the Automatos AI codebase are governed by the contribution guide, which outlines:
 
