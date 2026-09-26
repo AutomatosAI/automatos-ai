@@ -93,6 +93,9 @@ class RunOutputBundle:
     mechanics_reliability: float    # 0-1 rule-based
     executor_model: Optional[str] = None
     empty: bool = False
+    # F202: what the run was asked to work on (a playbook run's inputs, F182);
+    # None when the target has no inputs of its own.
+    inputs: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +204,30 @@ Rules:
 """
 
 
+def _inputs_section(inputs: Optional[Dict[str, Any]]) -> str:
+    """F202: the run's inputs, which the output is judged against. Night 6: a
+    welcome email to the wrong café passed at 1.00; the judge never saw which café."""
+    if inputs is None:
+        return ""
+    given = _compact(inputs, 2000) if inputs else "none given"
+    return (f"\n## The run's inputs\n{given}\n"
+            "Judge the output against these: work about a different customer, place, product or date than "
+            "they name is not complete. With none given, the output must not have picked one itself.\n")
+
+
+def placeholder_verdict(placeholders: List[str], output_hash: str = "") -> RunVerdict:
+    """F202: a run whose output still holds a template's placeholders scores 0."""
+    shown = ", ".join(placeholders[:5])
+    dims = {dim: 0.0 for dim in LLM_DIMENSIONS}
+    return RunVerdict(
+        score=0.0,
+        dimension_scores=dims,
+        reasoning=f"The output still has placeholders where its content belongs ({shown}), so it is not finished.",
+        caveats=[f"Unfilled placeholder: {p}" for p in placeholders[:5]],
+        output_hash=output_hash,
+    )
+
+
 def build_run_judge_prompt(
     *,
     success_criteria: str,
@@ -214,7 +241,7 @@ def build_run_judge_prompt(
     return f"""\
 ## What was asked (success criteria / intent)
 {success_criteria}
-
+{_inputs_section(bundle.inputs)}
 ## What ran
 A {bundle.kind} that reached terminal state '{bundle.terminal_state}'.
 Mechanical reliability (computed from step/task records, for context only --
@@ -468,6 +495,7 @@ class RunVerdictService:
             mechanics_reliability=max(0.0, min(1.0, mechanics)),
             executor_model=executor_model,
             empty=not text.strip(),
+            inputs=dict(execution.input_data or {}),
         )
 
     # ------------------------------------------------------------------
@@ -493,6 +521,12 @@ class RunVerdictService:
             return None
 
         output_hash = _hash_output(bundle.text)
+        # F202: placeholders fail the run before any judge is paid for.
+        from core.services.placeholders import template_placeholders
+
+        placeholders = template_placeholders(bundle.text)
+        if placeholders:
+            return placeholder_verdict(placeholders, output_hash)
         cache_key = (str(getattr(watch, "id", "")), output_hash)
         cached = self._cache.get(cache_key)
         if cached is not None:

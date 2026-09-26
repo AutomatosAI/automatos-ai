@@ -23,6 +23,22 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not title or not content:
         return {"success": False, "error": "title and content are required"}
 
+    # F202 (night 6): a summary was filed and announced still reading "[Insert
+    # insights from Task 1148 here]". A report with a template's placeholders is
+    # not finished.
+    from core.services.placeholders import template_placeholders
+
+    placeholders = template_placeholders(f"{title}\n{content}")
+    if placeholders:
+        return {
+            "success": False,
+            "error": ("The report still has placeholders where its content belongs: "
+                      + ", ".join(placeholders[:5])
+                      + ". Fill each one from the work (look it up first if you need to), or say plainly "
+                        "what is not known, then submit it again."),
+            "placeholders": placeholders,
+        }
+
     valid_types = {"standup", "research", "incident", "summary", "delivery", "audit", "onboarding"}
     if report_type not in valid_types:
         return {"success": False, "error": f"report_type must be one of: {', '.join(sorted(valid_types))}"}
