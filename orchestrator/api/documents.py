@@ -237,6 +237,10 @@ async def handle_request(
         # same id, the new text, the old source kept in its history.
         from services.document_versions import replace_document, replaceable_document, replaced_message
 
+        # F181: a spreadsheet is also copied into the workspace, where agents
+        # count it with code (services.spreadsheet_workspace). Best effort.
+        from services.spreadsheet_workspace import SPREADSHEET_TYPES, copy_to_workspace
+
         replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
         if replaced is not None:
             version = await replace_document(
@@ -245,6 +249,8 @@ async def handle_request(
                 replaced_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
                 tags=tag_list, description=description,
             )
+            if file_type in SPREADSHEET_TYPES:
+                await copy_to_workspace(ctx.workspace_id, file.filename, content)
             return DocumentUploadResponse(
                 document_id=replaced.id,
                 filename=replaced.filename,
@@ -310,7 +316,10 @@ async def handle_request(
             document.status = "failed"
             processing_error = str(e)[:200]
             db.commit()
-        
+
+        if file_type in SPREADSHEET_TYPES:
+            await copy_to_workspace(ctx.workspace_id, file.filename, content)
+
         return DocumentUploadResponse(
             document_id=document.id,
             filename=document.filename,

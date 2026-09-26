@@ -501,6 +501,16 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not doc:
         return {"success": False, "error": "Document not found"}
 
+    # F181 (night 6): a spreadsheet is counted with code on its copy in the
+    # workspace (made here from the stored upload if missing), never from pages.
+    from services.spreadsheet_workspace import COUNT_WITH_CODE, workspace_copies
+
+    copies = await workspace_copies(workspace_id, doc)
+    counted: Dict[str, Any] = {}
+    if copies:
+        counted = {"workspace_path": copies[0]["workspace_path"], "row_count": copies[0]["row_count"],
+                   "count_with_code": COUNT_WITH_CODE, **({"sheets": copies} if len(copies) > 1 else {})}
+
     rows = db.execute(
         sa_text(
             "SELECT chunk_index, content FROM document_chunks "
@@ -509,6 +519,10 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
         {"doc_id": document_id},
     ).fetchall()
     if not rows:
+        if counted:  # its copy is readable even before the knowledge base has it
+            return {"success": True, "document_id": document_id, "source_id": document_id,
+                    "filename": doc.original_filename or doc.filename, "file_type": doc.file_type,
+                    **counted, "content": "", "total_pages": 0, "has_more": False}
         return {"success": False, "error": "Document has no readable content yet"}
 
     # Pack chunks into deterministic, token-budgeted pages (never split a chunk).
@@ -555,6 +569,7 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
         "has_more": page < total_pages - 1,
         "next_page": page + 1 if page < total_pages - 1 else None,
         "chunk_range": {"start": current["start"], "end": current["end"]},
+        **counted,
         "content": current["content"],
         "staleness": {
             "uploaded_at": doc.upload_date.isoformat() if doc.upload_date else None,

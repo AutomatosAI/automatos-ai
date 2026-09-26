@@ -37,6 +37,10 @@ _ASK_DOCUMENTS = ("For a question about the business, a document, or how the pro
                   "search them with search_knowledge first and name the file you used.")
 _ASK_DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, "
                               "search them with search_knowledge first and name the file you used.")
+# F181 (night 6): #1115 totalled a club's orders from the first pages of the
+# export (47.06 kg; the file says about 100.3). A spreadsheet is counted in code.
+_COUNT_SPREADSHEETS = ("A spreadsheet (CSV or Excel) is counted or totalled with code, never searched: "
+                       "platform_read_document gives its copy's workspace_path and its row count.")
 
 
 def connected_databases(db: Any, workspace_id: Any) -> List[str]:
@@ -73,9 +77,10 @@ def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
     held = _documents_held(db, workspace_id) if _key_may("documents:read") else None
     if not held and not databases:
         return None
+    count = f" {_COUNT_SPREADSHEETS}" if held and _holds_a_spreadsheet(db, workspace_id) else ""
     if not databases:
-        return f"## Documents in this workspace\nThis workspace holds {held}. {_ASK_DOCUMENTS}"
-    lines = [f"This workspace holds {held}. {_ASK_DOCUMENTS_BESIDE_DATA}"] if held else []
+        return f"## Documents in this workspace\nThis workspace holds {held}. {_ASK_DOCUMENTS}{count}"
+    lines = [f"This workspace holds {held}. {_ASK_DOCUMENTS_BESIDE_DATA}{count}"] if held else []
     return "\n".join(["## Documents and data in this workspace", *lines, databases_sentence(databases)])
 
 
@@ -123,6 +128,23 @@ def _documents_held(db: Any, workspace_id: Any) -> Optional[str]:
     if reports:
         held.append(f"{reports} report{'s' if reports != 1 else ''} its agents saved")
     return " and ".join(held)
+
+
+def _holds_a_spreadsheet(db: Any, workspace_id: Any) -> bool:
+    """Whether a ready CSV or Excel file is among the documents it may read."""
+    from sqlalchemy import text
+
+    from core.security.surface import widget_team
+    from core.team_access import TEAM_FILTER_CLAUSE
+
+    lock = widget_team()
+    team_filter = f" {TEAM_FILTER_CLAUSE}" if lock else ""
+    params = {"ws": str(workspace_id), **({"team": lock} if lock else {})}
+    return bool(db.execute(
+        text(f"SELECT EXISTS (SELECT 1 FROM documents WHERE workspace_id = CAST(:ws AS uuid) AND {_READY}"
+             f"{team_filter} AND file_type IN ('csv', 'spreadsheet'))"),
+        params,
+    ).scalar())
 
 
 class DocumentsInventorySection(BaseSection):
