@@ -98,7 +98,9 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "dependency closure (its LLM, skills, plugins) — workspace-owned and "
             "editable, idempotent. Its connected apps come back as guided connect "
             "steps, never auto-connected. Browse first with "
-            "platform_browse_marketplace_agents. Provide agent_id or agent_name."
+            "platform_browse_marketplace_agents. Provide agent_id or agent_name. "
+            "A package's team is installed with platform_install_package, never "
+            "one agent at a time."
         ),
         category="marketplace",
         parameters={

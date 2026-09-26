@@ -259,6 +259,32 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
 # --------------------------------------------------------------------------- #
 
 
+def _package_named(db: Any, ref: str) -> Any:
+    """The package whose slug or name is ``ref`` (any case), or None."""
+    from services.marketplace_packages import get_by_slug, list_packages
+
+    wanted = str(ref).strip().lower()
+    by_slug = get_by_slug(db, wanted)
+    if by_slug is not None and str(getattr(by_slug, "slug", "")).lower() == wanted:
+        return by_slug
+    return next((p for p in list_packages(db) if str(getattr(p, "name", "")).strip().lower() == wanted), None)
+
+
+def _install_the_package_instead(package: Any, ref: str) -> Dict[str, Any]:
+    """F200 (night 6): asked for 'Shopify Management' as one agent, the refusal
+    offered its three agents, and Auto installed them one by one: no skills, no
+    tools, no store-URL question, no connect card, no plan check. A package name
+    is answered with the package's own install."""
+    count = len(_package_agent_refs(package))
+    return {
+        "success": False,
+        "use_package": package.slug,
+        "error": (f"'{ref}' is a package, not an agent. Install it with platform_install_package "
+                  f"(slug '{package.slug}'): that sets up its {count} agents with their skills, tools and "
+                  "connections together, and checks the plan first. Don't install its agents one at a time."),
+    }
+
+
 async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_install_marketplace_agent — install one marketplace agent with its
     full closure (US-005). Provide agent_id or agent_name."""
@@ -273,6 +299,9 @@ async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Di
     try:
         manifest = await install_marketplace_agent(db, workspace_id, ref, user_id=None)
     except PackageInstallError as exc:
+        package = _package_named(db, ref) if "not found" in str(exc).lower() else None
+        if package is not None:
+            return _install_the_package_instead(package, ref)
         if "not found" in str(exc).lower():
             from modules.tools.discovery.handlers_marketplace import browse_marketplace_agents
             from modules.tools.discovery.not_found_candidates import find_candidates, not_found_error
