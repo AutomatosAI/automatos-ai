@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -36,6 +37,16 @@ from worker_config import workspace_root
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUOTA_GB = int(os.environ.get("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
+
+
+def is_workspace_id(value: object) -> bool:
+    """F173: only a canonical UUID (lower case, with dashes) may name a workspace
+    directory. Anything else could climb out of the volume root ("..") or give
+    one workspace two directories (upper case, bare hex)."""
+    try:
+        return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
 
 
 class WorkspaceManager:

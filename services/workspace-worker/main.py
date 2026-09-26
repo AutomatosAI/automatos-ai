@@ -230,12 +230,22 @@ class WorkspaceWorker:
 
     async def _execute_task(self, payload: Dict[str, Any]) -> None:
         """Execute a single workspace task."""
-        from workspace_manager import WorkspaceManager
+        from workspace_manager import WorkspaceManager, is_workspace_id
         from executor import WorkspaceToolExecutor
 
         task_id = payload["task_id"]
         workspace_id = payload["workspace_id"]
         start_time = time.monotonic()
+
+        # F173: a queued task names its workspace directory too, so it meets the
+        # same rule as the HTTP routes before anything is made on the volume.
+        if not is_workspace_id(workspace_id):
+            error_msg = "Invalid workspace id"
+            logger.warning("Task %s refused: workspace id is not a canonical UUID", task_id[:8])
+            await self._write_result(task_id, workspace_id, {"status": "failed", "error": error_msg})
+            await self._update_status(task_id, "failed", error=error_msg)
+            await self._publish_event(task_id, "error", {"error": error_msg})
+            return
 
         # Check if task was cancelled while queued
         status_key = TASK_STATUS_KEY.format(task_id=task_id)
@@ -465,7 +475,7 @@ class WorkspaceWorker:
     async def _health_server(self) -> None:
         """HTTP server for health checks and file browsing endpoints."""
         from aiohttp import web
-        from workspace_manager import WorkspaceManager, SecurityError
+        from workspace_manager import WorkspaceManager, SecurityError, is_workspace_id
 
         volume_path = str(workspace_root())
         max_file_size = 2 * 1024 * 1024  # 2 MB
@@ -502,6 +512,21 @@ class WorkspaceWorker:
         def _guess_language(filename: str) -> str:
             from pathlib import Path as P
             return _lang_map.get(P(filename).suffix.lower(), "plaintext")
+
+        def _open_workspace(request):
+            """F173: the request's workspace, provisioned on first use, or the
+            response that refuses it. A workspace made by the signup wizard has
+            no directory here until something opens it (the backend's PRD-130
+            note: no worker container is provisioned for it), and only the file
+            listing and the task runner used to provision one, so its first
+            report or file write got 404 "Workspace not found". Only a
+            canonical UUID may name a workspace directory."""
+            workspace_id = request.match_info["workspace_id"]
+            if not is_workspace_id(workspace_id):
+                return None, web.json_response({"error": "Invalid workspace id"}, status=400)
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            ws_manager.ensure_workspace_exists()
+            return ws_manager, None
 
         # Auth middleware — reject requests without valid internal token
         @web.middleware
@@ -541,12 +566,11 @@ class WorkspaceWorker:
             """
             from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
             rel_path = request.query.get("path", ".")
-
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
-            ws_manager.ensure_workspace_exists()
-            ws_dir = P(volume_path) / workspace_id
+            ws_dir = P(volume_path) / ws_manager.workspace_id
 
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
@@ -598,18 +622,14 @@ class WorkspaceWorker:
             from pathlib import Path as P
             import mimetypes
 
-            workspace_id = request.match_info["workspace_id"]
             rel_path = request.query.get("path")
             if not rel_path:
                 return web.json_response({"error": "path query param required"}, status=400)
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
-            ws_dir = P(volume_path) / workspace_id
-
-            if not ws_dir.is_dir():
-                return web.json_response(
-                    {"error": "Workspace directory not found"}, status=404
-                )
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
+            ws_dir = P(volume_path) / ws_manager.workspace_id
 
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
@@ -654,12 +674,10 @@ class WorkspaceWorker:
         async def exec_handler(request):
             """POST /workspaces/{workspace_id}/exec — run a sandboxed command."""
             from executor import WorkspaceToolExecutor
-            from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             try:
                 body = await request.json()
@@ -673,7 +691,6 @@ class WorkspaceWorker:
             cwd = body.get("cwd")
             timeout = min(int(body.get("timeout", 120)), 300)
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
             result = await executor.execute_command(command, timeout=timeout, cwd=cwd)
             return web.json_response(result)
@@ -681,12 +698,10 @@ class WorkspaceWorker:
         async def write_file_handler(request):
             """POST /workspaces/{workspace_id}/files/write — write a file."""
             from executor import WorkspaceToolExecutor
-            from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             try:
                 body = await request.json()
@@ -700,7 +715,6 @@ class WorkspaceWorker:
             if content is None:
                 return web.json_response({"error": "content is required"}, status=400)
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
             result = await executor.write_file(path, content)
             if result.get("error"):
@@ -710,12 +724,10 @@ class WorkspaceWorker:
         async def grep_handler(request):
             """GET /workspaces/{workspace_id}/files/grep — search file contents."""
             from executor import WorkspaceToolExecutor
-            from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             pattern = request.query.get("pattern", "").strip()
             if not pattern:
@@ -725,7 +737,6 @@ class WorkspaceWorker:
             include = request.query.get("include", "")
             max_results = min(int(request.query.get("max_results", "50")), 200)
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
 
             # Build grep command
@@ -772,12 +783,10 @@ class WorkspaceWorker:
         async def git_handler(request):
             """POST /workspaces/{workspace_id}/git — execute a git operation."""
             from executor import WorkspaceToolExecutor
-            from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             try:
                 body = await request.json()
@@ -798,7 +807,6 @@ class WorkspaceWorker:
                     status=400,
                 )
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
 
             if operation == "clone":
@@ -832,12 +840,10 @@ class WorkspaceWorker:
             Response: see WorkspaceToolExecutor.html_to_png().
             """
             from executor import WorkspaceToolExecutor
-            from pathlib import Path as P
 
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             try:
                 body = await request.json()
@@ -863,7 +869,6 @@ class WorkspaceWorker:
                     {"error": "viewport.w and viewport.h must be integers"}, status=400,
                 )
 
-            ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
             result = await executor.html_to_png(
                 url=url,
@@ -881,19 +886,18 @@ class WorkspaceWorker:
 
         async def download_file_handler(request):
             """GET /workspaces/{workspace_id}/files/download — raw binary download."""
-            from pathlib import Path as P
-
-            workspace_id = request.match_info["workspace_id"]
-            ws_dir = P(volume_path) / workspace_id
-            if not ws_dir.is_dir():
-                return web.json_response({"error": "Workspace not found"}, status=404)
+            ws_manager, refused = _open_workspace(request)
+            if refused is not None:
+                return refused
 
             rel_path = request.query.get("path", "").strip()
             if not rel_path:
                 return web.json_response({"error": "path parameter required"}, status=400)
 
-            target = (ws_dir / rel_path).resolve()
-            if not str(target).startswith(str(ws_dir.resolve())):
+            # The same traversal guard as the listing and content routes.
+            try:
+                target = ws_manager.resolve_safe_path(rel_path)
+            except SecurityError:
                 return web.json_response({"error": "Path traversal denied"}, status=403)
             if not target.is_file():
                 return web.json_response({"error": "File not found"}, status=404)
