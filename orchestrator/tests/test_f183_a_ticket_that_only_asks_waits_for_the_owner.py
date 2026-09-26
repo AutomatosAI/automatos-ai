@@ -66,7 +66,7 @@ class _Session:
     def query(self, *_a, **_k):
         return self
 
-    def get(self, _id):
+    def get(self, *_a, **_k):
         return self.task
 
     def filter(self, *_a, **_k):

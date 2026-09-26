@@ -242,6 +242,12 @@ class _Query:
     def first(self):
         return self.found
 
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return []
+
     def count(self):
         return 0
 
@@ -250,7 +256,7 @@ class _DB:
     def __init__(self, playbook):
         self.playbook, self.added = playbook, []
 
-    def query(self, model):
+    def query(self, *entities):
         return _Query(self.playbook)
 
     def add(self, obj):
