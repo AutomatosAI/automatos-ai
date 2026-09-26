@@ -478,6 +478,7 @@ async def _execute_step(
     from core.composio.tool_executor import resolve_file_uploads
     from core.composio.client import get_composio_client
     from core.composio.deny_list import composio_action_denial_async
+    from core.composio.post_gate import post_action_refusal
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -775,10 +776,19 @@ async def _execute_step(
                 # PRD-251 S0.6 (D16): a denied action never runs — not from the
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
                 _denial = await composio_action_denial_async(tool_name)
+                # PRD-251 S3.5 (D14b): with Socials on, the step's agent drafts a
+                # post and a person approves it; it never publishes one directly —
+                # not from the dedup cache, the LinkedIn workaround or the spine.
+                # After the deny list, which always wins.
+                _post_refusal = None if _denial else await post_action_refusal(tool_name, workspace_id)
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
                     logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
+                elif _post_refusal:
+                    result_text = f"Error executing {tool_name}: {_post_refusal}"
+                    exec_ms = 0
+                    logger.warning(f"[recipe_step] Socials post gate refused {tool_name}")
                 elif _dedup_key in _composio_call_cache:
                     result_text = _composio_call_cache[_dedup_key]
                     exec_ms = 0

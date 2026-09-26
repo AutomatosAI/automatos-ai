@@ -1927,6 +1927,10 @@ class Config:
     # (core/composio/deny_list.py). A warm cache answers every Composio call from
     # memory, so no call waits on system_settings; an edit applies within this.
     COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS: int = int(os.getenv("COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS", "30"))
+    # S3.5 (D14b): how long the Socials post gate's list of posting actions (the
+    # socials.post_actions system setting) is cached per process
+    # (core/composio/post_gate.py). An edit applies within this, with no restart.
+    SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS: int = int(os.getenv("SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS", "30"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

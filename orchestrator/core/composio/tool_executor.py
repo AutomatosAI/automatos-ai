@@ -27,6 +27,7 @@ from sqlalchemy import func
 
 from core.composio.client import ComposioClient, get_composio_client
 from core.composio.deny_list import composio_action_denial_async, denied_result
+from core.composio.post_gate import post_action_refusal, refused_result
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +352,15 @@ class ComposioToolExecutor:
             "execution_time_ms": int((time.time() - start_time) * 1000),
         }
 
+    @staticmethod
+    def _post_refused(refusal: str, action: str, start_time: float) -> Dict[str, Any]:
+        """The Socials post gate's refusal (PRD-251 D14b) in execute()'s result shape."""
+        return {
+            **refused_result(refusal),
+            "action": action,
+            "execution_time_ms": int((time.time() - start_time) * 1000),
+        }
+
     async def execute(
         self,
         action: str,
@@ -358,18 +368,24 @@ class ComposioToolExecutor:
         agent_id: int,
         workspace_id: UUID,
         app_name: Optional[str] = None,
-        skip_validation: bool = False
+        skip_validation: bool = False,
+        *,
+        way_through: Optional[object] = None,
     ) -> Dict[str, Any]:
         """
         Execute a Composio action.
-        
+
         Args:
             action: Action name (e.g., "github_list_repos")
             params: Action parameters
             agent_id: Agent ID for access validation
             workspace_id: Workspace UUID for entity resolution
             skip_validation: Skip access validation (use carefully)
-            
+            way_through: The Socials post gate's way through (PRD-251 D14b,
+                core/composio/post_gate.py). Only the platform's own publisher
+                passes it (Wave 3), for a post a person approved; no agent path
+                does. The Wave 0 deny list applies whatever it says.
+
         Returns:
             Execution result in standard format
         """
@@ -394,6 +410,12 @@ class ComposioToolExecutor:
         denial = await composio_action_denial_async(action_upper)
         if denial:
             return self._refused(denial, action_upper, start_time)
+        # PRD-251 S3.5 (D14b): with Socials on, an agent drafts a post and a person
+        # approves it; no agent publishes one directly. After the deny list, which
+        # always wins.
+        refusal = await post_action_refusal(action_upper, workspace_id, way_through=way_through)
+        if refusal:
+            return self._post_refused(refusal, action_upper, start_time)
         requested_action = action_upper
 
         # Prefer explicit app_name passed from composio_execute() call;
@@ -695,11 +717,15 @@ class ComposioToolExecutor:
         # another action (an unprefixed or slug-form match, the auto-map, a
         # display-name rebuild). The list holds the action that runs — checked
         # again before the entity lookup, file uploads, the LinkedIn workaround
-        # (which never passes through the checked client) and the SDK.
+        # (which never passes through the checked client) and the SDK. So is the
+        # Socials post gate's (S3.5, D14b), after it.
         if action_upper != requested_action:
             denial = await composio_action_denial_async(action_upper)
             if denial:
                 return self._refused(denial, action_upper, start_time)
+            refusal = await post_action_refusal(action_upper, workspace_id, way_through=way_through)
+            if refusal:
+                return self._post_refused(refusal, action_upper, start_time)
 
         # Get entity
         try:

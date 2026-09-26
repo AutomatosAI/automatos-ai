@@ -22,6 +22,13 @@
   for them (``modules/socials/recipes/footage.py``). NULL: every slot plays the
   template's own motion graphics. Nullable JSON (JSONB on Postgres), added only
   when missing.
+* S3.5 (US-118, D14b): seeds the Socials post gate's list (category
+  ``socials``, key ``post_actions``): the Composio actions that publish a post on
+  Instagram, X and LinkedIn, as a JSON list of action slugs
+  (``core/composio/post_gate.py`` reads it). In a workspace with Socials on, an
+  agent's direct call to a listed action is refused before any Composio call;
+  it drafts the post, a person approves it in the Socials tab and the platform
+  publishes it. Data a super-admin edits, like the Wave 0 deny list.
 
 Create_all-first safe (the 89d89c250 lesson: on the 2026-09-23 refresh a backend
 that had already loaded the new models ran ``create_all`` before the migration,
@@ -110,6 +117,26 @@ SOCIALS_MEDIA_ACTIONS_SEED = {
     },
 }
 
+# D14b: the Composio actions that PUBLISH a post on a social channel. The publish
+# actions the old publisher skills call (automatos-skills social/instagram-curator,
+# twitter-engager, linkedin-content-creator); the other actions docs.composio.dev
+# lists as publishing a post on those three channels (checked 2026-09-26); and the
+# LinkedIn posting slugs the executor names. Media uploads, containers, comments,
+# replies, reposts, DMs and reads are not listed. TikTok and YouTube publish actions
+# join when composio_actions_cache confirms their slugs (the story's notes: never
+# guess). A slug no workspace's cached action schemas hold matches nothing.
+SOCIALS_POST_ACTIONS_SEED = [
+    "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
+    "INSTAGRAM_CREATE_POST",
+    "TWITTER_CREATION_OF_A_POST",
+    "LINKEDIN_CREATE_LINKED_IN_POST",
+    "LINKEDIN_CREATE_POST",
+    "LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE",
+    "LINKEDIN_CREATE_VIDEO_POST",
+    "LINKEDIN_CREATE_IMAGE_POST",
+    "LINKEDIN_CREATE_SHARE",
+]
+
 
 def format_check(formats: Sequence[str]) -> str:
     """The CHECK's SQL, written the way the model writes it."""
@@ -127,6 +154,7 @@ def _replace_format_check(formats: Sequence[str], *, validate: bool) -> None:
 def settings_seed() -> tuple:
     """The system-settings rows this revision seeds."""
     media_actions = json.dumps(SOCIALS_MEDIA_ACTIONS_SEED)
+    post_actions = json.dumps(SOCIALS_POST_ACTIONS_SEED)
     return (
         {
             "category": "socials",
@@ -145,6 +173,28 @@ def settings_seed() -> tuple:
             "is_sensitive": False,
             "is_required": True,
             "default_value": media_actions,
+        },
+        {
+            "category": "socials",
+            "key": "post_actions",
+            "value": post_actions,
+            "value_type": "json",
+            "description": (
+                "Socials post gate (PRD-251 S3.5, D14b): the Composio actions that publish "
+                "a post on a social channel, as a JSON list of action slugs. In a workspace "
+                "with Socials on, an agent's direct call to a listed action is refused before "
+                "any Composio call: it drafts the post with platform_create_social_post, a "
+                "person approves it in the Socials tab and the platform publishes it. Media "
+                "uploads, containers, comments, replies, reposts, DMs and reads are not "
+                "listed; an upload action that publishes by itself belongs here. A value "
+                "that is not a JSON list refuses every Composio call in Socials-on "
+                "workspaces until it is fixed, and the Composio deny list always wins. "
+                "Takes effect within the cache TTL (30 s by default) — no restart or "
+                "redeploy."
+            ),
+            "is_sensitive": False,
+            "is_required": True,
+            "default_value": post_actions,
         },
     )
 

@@ -85,19 +85,30 @@ def socials_master_default() -> str:
     return "true" if config.SOCIALS_ENABLED_DEFAULT else "false"
 
 
-def socials_master_enabled() -> bool:
-    """The platform master switch: the ``socials.enabled`` system setting.
+def socials_master_switch() -> bool:
+    """The platform master switch, read strictly: raises when the read cannot
+    complete.
 
     A readable row decides: ``"true"`` is on, any other value is off. No row, or
-    an empty value, takes ``config.SOCIALS_ENABLED_DEFAULT``. A read that cannot
-    complete is off, whatever the default, and is logged at ERROR. Never raises.
+    an empty value, takes ``config.SOCIALS_ENABLED_DEFAULT``. For a guard that
+    must tell "off" from "could not read": the Socials post gate
+    (``core/composio/post_gate.py``) refuses when it cannot tell, where Socials
+    OFF would let an agent post.
+    """
+    value = read_system_setting(SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED)
+    return str(value or socials_master_default()).strip().lower() == "true"
+
+
+def socials_master_enabled() -> bool:
+    """The platform master switch (``socials_master_switch``), where a read that
+    cannot complete is off, whatever the default, and is logged at ERROR. Never
+    raises.
     """
     try:
-        value = read_system_setting(SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED)
+        return socials_master_switch()
     except Exception:  # noqa: BLE001 — any read that did not complete fails closed
         logger.error(MASTER_READ_FAILED_LOG, SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED, exc_info=True)
         return False
-    return str(value or socials_master_default()).strip().lower() == "true"
 
 
 @dataclass(frozen=True)

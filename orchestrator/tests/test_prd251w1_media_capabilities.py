@@ -529,7 +529,10 @@ def test_an_unknown_capability_is_a_programming_error(env):
 
 
 def test_the_seed_lives_in_the_one_wave_migration_and_the_registry_reads_it():
-    (row,) = WAVE1.settings_seed()
+    # The same revision seeds the Socials post gate's list too (US-118, D14b).
+    rows = {row["key"]: row for row in WAVE1.settings_seed()}
+    assert set(rows) == {KEY_MEDIA_ACTIONS, "post_actions"}
+    row = rows[KEY_MEDIA_ACTIONS]
     assert (row["category"], row["key"], row["value_type"]) == (
         SettingCategory.SOCIALS.value,
         KEY_MEDIA_ACTIONS,
@@ -580,21 +583,29 @@ def _rows(conn):
     ).fetchall()
 
 
+def _media_row(conn):
+    (row,) = [r for r in _rows(conn) if r.key == KEY_MEDIA_ACTIONS]
+    return row
+
+
 def test_the_seed_is_insert_if_absent_and_never_overwrites_an_edit():
     engine = _settings_engine()
     try:
         with engine.begin() as conn:
             WAVE1.seed_settings(conn, WAVE1.settings_seed())
             WAVE1.seed_settings(conn, WAVE1.settings_seed())  # a re-run adds nothing
-            (row,) = _rows(conn)
-            assert (row.key, row.created_by) == (KEY_MEDIA_ACTIONS, "prd251_wave1")
+            # The allowlist, and the Socials post gate's list (US-118) beside it.
+            assert [(r.key, r.created_by) for r in _rows(conn)] == [
+                (KEY_MEDIA_ACTIONS, "prd251_wave1"),
+                ("post_actions", "prd251_wave1"),
+            ]
+            row = _media_row(conn)
             assert json.loads(row.value) == SEED
 
             table = SystemSetting.__table__
             conn.execute(table.update().where(table.c.id == row.id).values(value='{"runway": {}}'))
             WAVE1.seed_settings(conn, WAVE1.settings_seed())
-            (row,) = _rows(conn)
-            assert row.value == '{"runway": {}}'
+            assert _media_row(conn).value == '{"runway": {}}'
     finally:
         engine.dispose()
 
