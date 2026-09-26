@@ -657,7 +657,8 @@ def build_checklist(
     items: list[dict[str, Any]] = [
         {
             "id": "connect_second_app",
-            "label": "Connect a second app",
+            # F188: with none connected, the first one is what is left to do.
+            "label": "Connect an app" if connections_count == 0 else "Connect a second app",
             "done": connections_count >= 2,
         },
         {
