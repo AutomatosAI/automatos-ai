@@ -187,6 +187,13 @@ def _ns(**kw):
     return types.SimpleNamespace(**kw)
 
 
+def _live_lease():
+    """A claim a run is renewing (F176: what "already running" means)."""
+    from datetime import datetime, timedelta, timezone
+
+    return datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
 def _stub_task(**kw):
     base = dict(
         id=1,
@@ -536,7 +543,9 @@ def test_run_now_rejects_already_running_task():
     from fastapi import HTTPException
     import pytest as _p
 
-    task = BoardTask(id=23, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    # F176: running means a run holds it (a live lease), not the status word alone
+    task = BoardTask(id=23, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4,
+                     lease_until=_live_lease())
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=4), task=task)
     with _p.raises(HTTPException) as ei:
@@ -1750,7 +1759,8 @@ def test_run_now_on_a_running_ticket_says_what_is_happening():
     from fastapi import HTTPException
     import pytest as _p
 
-    task = BoardTask(id=33, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    task = BoardTask(id=33, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4,
+                     lease_until=_live_lease())
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     with _p.raises(HTTPException) as ei:
         asyncio.run(bt.run_task_now(33, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))

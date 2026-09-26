@@ -1012,6 +1012,40 @@ async def reject_task(
     }
 
 
+def _recipe_execution_of(source_id: str) -> str:
+    """A playbook step's run id: ``recipe:<execution_id>:<step>``, or the bare id."""
+    parts = str(source_id or "").split(":")
+    return parts[1] if len(parts) >= 3 and parts[0] == "recipe" else str(source_id or "")
+
+
+def _running_now(db: Session, task: BoardTask) -> bool:
+    """F176 (night 6): whether a run really holds this ticket — a live claim (the
+    dispatch lease every run renews from its first moment, and a CLI host renews
+    for its session) or, for a playbook step, its playbook run still going. The
+    status word alone is not a run: #1094 read 'in_progress' with no claim and no
+    execution, and Run Now answered "already running"."""
+    if task.status != "in_progress":
+        return False
+    if task.source_type in _NON_EXECUTABLE_SOURCE_TYPES and task.source_type != "recipe":
+        # A mission's step: the mission engine runs it, never the board (PRD-171
+        # F025). It holds no board lease, so the lease cannot speak for it, and
+        # re-dispatching it would run the step twice (review HIGH).
+        return True
+    lease = task.lease_until
+    if lease is not None:
+        lease = lease if lease.tzinfo else lease.replace(tzinfo=timezone.utc)
+        if lease > datetime.now(timezone.utc):
+            return True
+    if task.source_type == "recipe" and task.source_id:
+        from sqlalchemy import text as sa_text
+
+        return db.execute(
+            sa_text("SELECT 1 FROM recipe_executions WHERE execution_id = :e AND status IN ('pending', 'running')"),
+            {"e": _recipe_execution_of(task.source_id)},
+        ).first() is not None
+    return False
+
+
 def _redispatch_task(db: Session, task: BoardTask) -> None:
     """Reset a task to a fresh ``assigned`` claim and wake the dispatch loop.
 
@@ -1019,7 +1053,7 @@ def _redispatch_task(db: Session, task: BoardTask) -> None:
     corrective re-run: clears the lease, attempt count, and lifecycle
     timestamps, commits, then NOTIFYs the committed row so the dispatch loop
     claims it. Recipe-mirror rows are driven by the recipe executor, never
-    board-dispatched. Caller guarantees the task is not already in_progress.
+    board-dispatched. Caller guarantees no run holds the task (``_running_now``).
     """
     task.status = "assigned"
     task.lease_until = None
@@ -1054,7 +1088,7 @@ async def run_task_now(
         raise HTTPException(status_code=404, detail="Task not found")
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
-    if task.status == "in_progress":
+    if _running_now(db, task):
         raise HTTPException(
             status_code=409,
             detail=f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes.",
@@ -1067,6 +1101,7 @@ async def run_task_now(
         actor=_operator_ref(ctx), why=WHY_RUN_NOW,
     )
     was = task.status
+    stale = was == "in_progress"  # F176: the word said running, but no run held it
     rerun = was in FINISHED
     if rerun:
         keep_previous_run(task, why="run now", by=_operator_ref(ctx))
@@ -1081,7 +1116,9 @@ async def run_task_now(
         "rerun_of": was if rerun else None,
         "message": (
             f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
-            "ticket's history." if rerun else f"Ticket #{task.id} started."
+            "ticket's history." if rerun
+            else f"Ticket #{task.id} said in progress, but nothing was running it — started it now." if stale
+            else f"Ticket #{task.id} started."
         ),
     }
 
@@ -1265,7 +1302,9 @@ async def _lease_heartbeat(task_id: int) -> None:
     interval = max(1.0, lease_seconds / 2)
     try:
         while True:
-            await asyncio.sleep(interval)
+            # F176: renew FIRST, so a directly launched run (a drag to In Progress,
+            # the status tool) holds a live claim from its first moment, not after
+            # half a lease window. A live lease is what "already running" means.
             hb = SessionLocal()
             try:
                 if not renew_lease(hb, task_id, lease_seconds=lease_seconds):
@@ -1280,6 +1319,7 @@ async def _lease_heartbeat(task_id: int) -> None:
                 hb.rollback()
             finally:
                 hb.close()
+            await asyncio.sleep(interval)
     except asyncio.CancelledError:
         raise
 
