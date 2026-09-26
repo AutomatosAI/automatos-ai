@@ -328,13 +328,25 @@ class AgentPlatformTools:
                     try:
                         from sqlalchemy import text as _text
                         rows = self.db.execute(
-                            _text("SELECT id, filename, file_path FROM documents WHERE id = ANY(:ids)"),
+                            _text("SELECT id, filename, file_path, source_type FROM documents WHERE id = ANY(:ids)"),
                             {"ids": list(doc_ids)},
                         ).fetchall()
                         for row in rows:
-                            doc_name_cache[row[0]] = {"filename": row[1], "file_path": row[2]}
+                            doc_name_cache[row[0]] = {"filename": row[1], "file_path": row[2], "source_type": row[3]}
                     except Exception as e:
                         self.logger.warning(f"  ⚠️ Failed to look up document names: {e}")
+
+                # F188 (night 6): the owner's own documents answering is onboarding's
+                # payoff; a workspace at boom moves on (its own session, off the loop).
+                from core.security.surface import widget_turn
+
+                if workspace_id and not widget_turn() and any(
+                        info.get("source_type") != "agent_output" for info in doc_name_cache.values()):
+                    import asyncio
+
+                    from services.onboarding_state import note_payoff
+
+                    await asyncio.to_thread(note_payoff, workspace_id, "its own documents answered a question")
 
                 # Convert chunks to raw dicts — include document_id and real filename
                 raw_results = []
