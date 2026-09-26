@@ -1740,7 +1740,7 @@ class AgentFactory:
 
         F105: both lookups run off the loop (core.composio.off_loop).
         """
-        from core.composio.off_loop import composio_lookup
+        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
 
         agent_id = agent_runtime.agent_id
         try:
@@ -1751,7 +1751,8 @@ class AgentFactory:
                     agent_id=agent_id,
                     workspace_id=workspace_id,
                     task_prompt=original_user_prompt,
-                )
+                ),
+                step=f"agent run (agent {agent_id}): tool search",
             )
 
             if composio_result and composio_result.tools:
@@ -1776,6 +1777,8 @@ class AgentFactory:
                 )
                 return
 
+        except ComposioLookupTimeout:
+            return  # warned where it gave up; the hints would wait on the same SDK
         except Exception as e:
             self.logger.warning(f"ComposioToolService failed, falling back to hints: {e}")
 
@@ -1788,7 +1791,8 @@ class AgentFactory:
                     agent_id=agent_id,
                     prompt=original_user_prompt,
                     workspace_id=workspace_id,
-                )
+                ),
+                step=f"agent run (agent {agent_id}): action hints",
             )
 
             if hint_result.hint_lines:
@@ -1810,6 +1814,8 @@ class AgentFactory:
                 f"constrained_actions={len(hint_result.matched_actions)}, "
                 f"apps={hint_result.allowed_apps}"
             )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the run goes on without Composio tools
         except Exception as e:
             self.logger.warning(f"Failed to inject Composio hints: {e}")
 

@@ -160,6 +160,13 @@ class ComposioClient:
                         # Mirror the pin on `composio` above so the OpenAI-provider
                         # variant doesn't drift back to "latest" for shopify.
                         toolkit_versions={"default": "latest", "shopify": "20260414_00"},
+                        # F105: this handle serves only a turn's lookups (searches,
+                        # schemas, for_turn action lists), which a turn waits on for
+                        # COMPOSIO_LOOKUP_TIMEOUT_SECONDS at most: its calls give up
+                        # as soon, un-retried, so a hung call frees its thread. The
+                        # SDK's own default is 60 s a try, three tries.
+                        timeout=config.COMPOSIO_LOOKUP_TIMEOUT_SECONDS,
+                        max_retries=0,
                     )
         return self._toolset
     
@@ -825,28 +832,33 @@ class ComposioClient:
 
         return items
     
-    def get_app_actions(self, app_name: str) -> List[Dict[str, Any]]:
+    def get_app_actions(self, app_name: str, *, for_turn: bool = False) -> List[Dict[str, Any]]:
         """
         Get all actions available for an app.
-        
+
         Args:
             app_name: App name (e.g., "github")
-            
+            for_turn: F105 — a turn's lookup (the hint enrichment) asks through the
+                lookup handle, whose calls give up after
+                COMPOSIO_LOOKUP_TIMEOUT_SECONDS un-retried; the routes and the
+                metadata sync keep the SDK's default timeout and retries.
+
         Returns:
             List of actions with metadata
         """
-        if not self.composio:
+        sdk = self.toolset if for_turn else self.composio
+        if not sdk:
             return []
-        
+
         try:
             # For listing available actions, use a placeholder user_id
             # The new API requires user_id, but for discovery we can use a temporary one
             # Actions are the same regardless of user - user matters only for execution
             placeholder_user_id = "discovery_placeholder"
-            
+
             # New API: composio.tools.get(user_id, toolkits=[app_name])
             # Set a high limit to get all actions (default is only 20!)
-            tools = self.composio.tools.get(
+            tools = sdk.tools.get(
                 user_id=placeholder_user_id,
                 toolkits=[app_name],
                 limit=5000  # Get all actions (many apps exceed 500)

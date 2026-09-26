@@ -29,7 +29,7 @@ class _AppActions:
         self.answers = list(answers)
         self.asked = []
 
-    def get_app_actions(self, app):
+    def get_app_actions(self, app, **kwargs):
         self.asked.append(app)
         return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
 

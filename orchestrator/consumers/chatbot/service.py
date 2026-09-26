@@ -1397,6 +1397,8 @@ class StreamingChatService:
         Returns (updated use_tools, composio_result). F105: both lookups run
         off the loop (core.composio.off_loop).
         """
+        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+
         _composio_result = None
         _tool_hints = (
             complexity_assessment.tool_hints
@@ -1405,7 +1407,6 @@ class StreamingChatService:
         )
         try:
             if latest_text and agent_id and self.workspace_id and not skip_composio:
-                from core.composio.off_loop import composio_lookup
                 from modules.tools.services.composio_tool_service import ComposioToolService
 
                 workspace_id = self.workspace_id
@@ -1418,7 +1419,8 @@ class StreamingChatService:
                         workspace_id=workspace_id,
                         task_prompt=_search_prompt,
                         tool_hints=_tool_hints,
-                    )
+                    ),
+                    step=f"chat turn (agent {agent_id}): tool search",
                 )
                 if _composio_result and _composio_result.tools:
                     if use_tools:
@@ -1445,7 +1447,8 @@ class StreamingChatService:
                             agent_id=agent_id,
                             prompt=latest_text,
                             workspace_id=workspace_id,
-                        )
+                        ),
+                        step=f"chat turn (agent {agent_id}): action hints",
                     )
                     if hint_result.hint_lines:
                         llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -1453,6 +1456,8 @@ class StreamingChatService:
                             f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} "
                             f"apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}"
                         )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the turn goes on without Composio tools
         except Exception as exc:
             logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 

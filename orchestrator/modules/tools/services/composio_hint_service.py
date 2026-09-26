@@ -716,15 +716,18 @@ class ComposioHintService:
 
         from core.composio import lookup_cache
         from core.composio.client import get_composio_client
+        from core.composio.off_loop import note_apps
         client = get_composio_client()
 
         enriched = 0
         for app, actions in apps_to_actions.items():
             try:
-                # F105: an app's actions are fetched once per TTL, not every turn.
+                # F105: an app's actions are fetched once per TTL, not every turn,
+                # through the lookup handle (bounded, so a hung call frees its thread).
                 sdk_tools = lookup_cache.APP_ACTIONS.get(app)
                 if sdk_tools is None:
-                    sdk_tools = client.get_app_actions(app)
+                    note_apps([app])
+                    sdk_tools = client.get_app_actions(app, for_turn=True)
                     if sdk_tools:  # an empty list may be a failed fetch: ask again next turn
                         lookup_cache.APP_ACTIONS.put(app, sdk_tools)
                 if not sdk_tools:

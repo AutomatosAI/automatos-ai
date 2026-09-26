@@ -1530,6 +1530,10 @@ class Config:
     # ...and an app's action list or a step search, once fetched, is answered
     # from memory for this long (core.composio.lookup_cache).
     COMPOSIO_LOOKUP_CACHE_TTL_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_CACHE_TTL_SECONDS", "600"))
+    # ...and a turn waits at most this long for one; then it goes on without
+    # Composio tools. The SDK's lookup calls give up after as long, un-retried,
+    # so a hung call frees its thread too.
+    COMPOSIO_LOOKUP_TIMEOUT_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_TIMEOUT_SECONDS", "20"))
     # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
     # unless it fetched fewer than this share of the models listed before: a
     # partial answer would otherwise retire the rest of the catalog.

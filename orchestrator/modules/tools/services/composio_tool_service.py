@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from core.composio.client import get_composio_client
 from core.composio.entity_manager import EntityManager
+from core.composio.off_loop import note_apps
 from core.models.composio_cache import AgentAppAssignment
 from core.models.core import Agent
 
@@ -142,6 +143,7 @@ class ComposioToolService:
             explicit_names = self._extract_action_names(task_prompt, app_prefixes)
 
             if explicit_names:
+                note_apps(allowed_apps)  # F105: named if the lookup times out
                 lookup_results = client.get_action_schemas_by_name(
                     action_names=list(explicit_names),
                     entity_id=entity_id,
@@ -184,6 +186,7 @@ class ComposioToolService:
                     )
 
             # 5. SDK semantic search — scoped to hinted apps (or all if no hints)
+            note_apps(search_apps)
             search_results = client.search_actions_for_step(
                 search_query=task_prompt[:200],
                 app_names=search_apps,
@@ -216,6 +219,7 @@ class ComposioToolService:
                     "broadening to all %d apps for agent=%s",
                     len(allowed_apps), agent_id,
                 )
+                note_apps(allowed_apps)
                 search_results = client.search_actions_for_step(
                     search_query=task_prompt[:200],
                     app_names=[a.lower() for a in allowed_apps],
