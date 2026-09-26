@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     from openai import AzureOpenAI
@@ -64,7 +64,7 @@ class AzureProvider(BaseLLMProvider):
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens
+                    "max_tokens": request_max_tokens(self.config)
                 }
                 # PRD-17: Add tools if provided
                 if tools:
@@ -120,7 +120,7 @@ class AzureProvider(BaseLLMProvider):
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens
+                "max_tokens": request_max_tokens(self.config)
             }
             
             response = self.client.chat.completions.create(**kwargs)

@@ -2463,6 +2463,16 @@ async def _fail_execution(
             RecipeExecution.execution_id == execution_id
         ).first()
         if execution:
+            # F197: a credit failure is said in plain words (the raw text is in the
+            # log), and a scheduled run that hit it is marked to go again once
+            # credit is back.
+            from core.llm.credit import is_out_of_credit, mark_for_rerun, plain_failure
+
+            if is_out_of_credit(error_message):
+                logger.warning(f"[F197] {execution_id} stopped on credit: {error_message}")
+                error_message = plain_failure(error_message, scheduled=mark_for_rerun(execution))
+            else:
+                error_message = plain_failure(error_message)
             execution.status = 'failed'
             execution.error_message = error_message
             execution.completed_at = datetime.now(timezone.utc)

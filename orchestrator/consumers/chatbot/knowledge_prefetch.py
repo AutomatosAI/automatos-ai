@@ -125,12 +125,14 @@ async def prefetch(
     enabled: bool,
     limit: int,
     min_score: float,
+    question_only: bool = True,
+    header: Optional[str] = None,
 ) -> Optional[Prefetch]:
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
     or the search failed. ``search`` runs search_knowledge with the given args
     and returns the tool router's result (``raw_result`` / ``frontend_data``)."""
-    if not enabled or not is_question(message):
+    if not enabled or (question_only and not is_question(message)):
         return None
     try:
         if documents_in(db, workspace_id) < 1:
@@ -159,7 +161,8 @@ async def prefetch(
         from modules.tools.formatting.result_formatter import ToolResultFormatter
 
         body = ToolResultFormatter.format_for_llm({"success": True, "results": kept}, PREFETCH_TOOL)
-        header = f"{PREFETCH_HEADER} {PREFETCH_DATABASE_NOTE}" if _has_database(db, workspace_id) else PREFETCH_HEADER
+        if header is None:
+            header = f"{PREFETCH_HEADER} {PREFETCH_DATABASE_NOTE}" if _has_database(db, workspace_id) else PREFETCH_HEADER
         message_for_model = {"role": "system", "content": f"{header}\n\n{body}"}
     return Prefetch(args=args, message=message_for_model, passages=len(kept), files=files, found=len(found),
                     elapsed_ms=elapsed, frontend_data=result.get("frontend_data"))

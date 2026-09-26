@@ -390,6 +390,18 @@ class WatchDecider:
             DEFAULT_ALLOWED_ACTIONS.get(watch.target_type, ["escalate"])
         )
 
+    def _placeholders(self, db: Session, watch) -> List[str]:
+        """The template placeholders the watched run's output still holds."""
+        try:
+            from core.services.placeholders import template_placeholders
+            from modules.coordination.run_verdict import RunVerdictService
+
+            bundle = RunVerdictService.collect_run_output(db, watch)
+            return template_placeholders(bundle.text) if bundle is not None else []
+        except Exception:  # noqa: BLE001 — the check never breaks a decision
+            logger.debug("[F202] placeholder check skipped", exc_info=True)
+            return []
+
     def _verdicts(self):
         if self._verdict_service is None:
             from modules.coordination.run_verdict import RunVerdictService
@@ -420,9 +432,17 @@ class WatchDecider:
             verdict = await self._score(db, watch)
 
         completed = terminal_state in _COMPLETED_STATES
+        # F202: an output that still holds a template's placeholders never
+        # passes, scored or not, judge or no judge.
+        placeholders = self._placeholders(db, watch) if completed else []
+        if placeholders:
+            from modules.coordination.run_verdict import placeholder_verdict
+
+            verdict = placeholder_verdict(placeholders)
         scored = verdict is not None and verdict.score is not None
         passed = bool(
             completed
+            and not placeholders
             and (
                 not flags["scores"]
                 or not scored  # judge unavailable -> close by outcome

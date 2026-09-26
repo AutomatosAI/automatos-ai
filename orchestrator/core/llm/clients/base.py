@@ -80,6 +80,15 @@ class LLMConfig:
     presence_penalty: Optional[float] = None  # Encourage new topics (0.0-2.0)
     stop: Optional[list] = None  # Stop sequences
     timeout: Optional[int] = None  # Request timeout in seconds
+    output_ceiling: Optional[int] = None  # The model's own output maximum, when known (F196)
+
+
+def request_max_tokens(config: Any) -> int:
+    """F196: the max_tokens a request sends. It is this call's budget when the
+    manager set one (core.llm.output_budget), else the config's own value."""
+    from core.llm.output_budget import current_call_budget
+
+    return current_call_budget() or config.max_tokens
 
 
 @dataclass

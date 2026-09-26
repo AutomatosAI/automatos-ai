@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
+from services.pasted_data import pasted_data_rule
 from services.ticket_owner_ask import ticket_answers_block
 from services.ticket_redo import redo_block
 
@@ -633,6 +634,10 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
         out = []
         for t in claimed:
             prompt = t.raw_prompt or t.description or t.title
+            # F199: data pasted into the brief is counted and totalled with code.
+            pasted = pasted_data_rule(t.description or prompt)
+            if pasted:
+                prompt = f"{prompt}\n\n{pasted}"
             # F183: a ticket the owner's answer re-queued runs with the answer.
             answers = ticket_answers_block(getattr(t, "planning_data", None))
             if answers:

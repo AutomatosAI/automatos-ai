@@ -17,6 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -2553,8 +2554,13 @@ class CoordinatorService:
         # and team lock (core.security.surface.origin_surface).
         from core.security.surface import origin_surface
 
+        # F196: a mission's final write (its synthesis task) is a long deliverable.
+        from core.llm.output_budget import LONG_DELIVERABLE, output_purpose
+
+        writes_the_deliverable = getattr(task, "task_type", None) == TaskType.SYNTHESIS.value
         try:
-            with origin_surface(origin):
+            with origin_surface(origin), (output_purpose(LONG_DELIVERABLE) if writes_the_deliverable
+                                          else contextlib.nullcontext()):
                 result = await asyncio.wait_for(
                     factory.execute_with_prompt(
                         agent=agent_arg,

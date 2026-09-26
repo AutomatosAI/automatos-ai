@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     import anthropic
@@ -234,7 +234,7 @@ class AnthropicProvider(BaseLLMProvider):
             def _call():
                 kwargs = {
                     "model": self.config.model,
-                    "max_tokens": self.config.max_tokens,
+                    "max_tokens": request_max_tokens(self.config),
                     "temperature": self.config.temperature,
                     # PRD-201 S4: emit cache_control on the stable prefix. This IS
                     # the Anthropic client, so the marker is inherently on the
@@ -313,7 +313,7 @@ class AnthropicProvider(BaseLLMProvider):
             
             response = self.client.messages.create(
                 model=self.config.model,
-                max_tokens=self.config.max_tokens,
+                max_tokens=request_max_tokens(self.config),
                 temperature=self.config.temperature,
                 system=system_message,
                 messages=user_messages

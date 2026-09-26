@@ -133,6 +133,18 @@ class NotificationDispatcher:
         ``slack``, ``webhook``, ``channel:<uuid>``). Silent and failed
         destinations are not included.
         """
+        # F197: running out of model credit reaches the bell once per outage,
+        # in plain words (night 6: 17 raw 402 notices in 14 minutes).
+        from core.llm.credit import (
+            CREDIT_EVENTS, OUT_OF_CREDIT, OUTAGE_NOTICE, OUTAGE_TITLE, first_notice_of_outage, is_out_of_credit,
+        )
+
+        if event_type in CREDIT_EVENTS and is_out_of_credit(message):
+            if not first_notice_of_outage(self.workspace_id):
+                logger.info("[F197] %s held back: the bell already says credit ran out", event_type)
+                return {"dispatched_to": [], "held_back": OUT_OF_CREDIT}
+            title, message = OUTAGE_TITLE, OUTAGE_NOTICE
+
         # Wave 2 — auto_reporting overrides.
         # If settings load fails, _load_auto_reporting returns {}; treat that
         # as disabled rather than enabled, otherwise a transient load error

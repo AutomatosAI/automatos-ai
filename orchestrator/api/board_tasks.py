@@ -1896,8 +1896,10 @@ async def finalize_board_task_run(
         return None
 
     if exec_status == "error":
+        from core.llm.credit import plain_failure  # F197: plain words on the ticket
+
         task.status = "failed"
-        task.error_message = str(
+        task.error_message = plain_failure(
             exec_result.get("error") or "Agent execution failed"
         )[:500]
         task.completed_at = datetime.now(timezone.utc)
@@ -1970,6 +1972,23 @@ async def finalize_board_task_run(
     if nothing_done:
         task.result = f"{task.result or ''}\n\n{nothing_done}".strip()
         force_review = True
+    # F199: figures called verified or checked that no code computed in this run
+    # say so. A result that does not list its actions (a Claude Code session,
+    # which runs code itself) is left as it is.
+    from services.pasted_data import unverified_figures_note
+
+    ran = (exec_result.get("execution") or {}).get("actions")
+    unverified = unverified_figures_note(llm_text, ran) if ran is not None else None
+    if unverified:
+        task.result = f"{task.result or ''}{unverified}".strip()
+    # F201: a customer draft that says an action was done that no action in its
+    # run did says so; the loop already nudged it once (F108).
+    from services.draft_guides import check_before_sending
+
+    before_sending = (check_before_sending(f"{getattr(task, 'title', '')}\n{getattr(task, 'description', '')}",
+                                           llm_text, ran) if ran is not None else None)
+    if before_sending:
+        task.result = f"{task.result or ''}{before_sending}".strip()
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier
@@ -2061,11 +2080,14 @@ def _launch_task_execution(
                 return
 
             from modules.agents.factory.agent_factory import AgentFactory
+            from services.draft_guides import guides_for_draft
 
+            # F201: a draft for a customer is written from the workspace's guides.
+            run_prompt = await guides_for_draft(db, workspace_id, agent_id, prompt)
             factory = AgentFactory(db_session=db)
             exec_result = await factory.execute_with_prompt(
                 agent=agent_id,
-                prompt=prompt,
+                prompt=run_prompt,
                 context={
                     "source": "board_task",
                     "task_id": task_id,
@@ -2108,8 +2130,10 @@ def _launch_task_execution(
                 if task and task.status == "in_progress":
                     # PRD-161 S3: fail honestly — a crashed execution becomes
                     # terminal 'failed', not a silent 'done' with an error blob.
+                    from core.llm.credit import plain_failure  # F197: plain words on the ticket
+
                     task.status = "failed"
-                    task.error_message = str(e)[:500]
+                    task.error_message = plain_failure(e)[:500]
                     task.completed_at = datetime.now(timezone.utc)
                     db.commit()
                     await _dispatch_task_failed(db, workspace_id, task)

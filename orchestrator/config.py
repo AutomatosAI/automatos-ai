@@ -1100,8 +1100,13 @@ class Config:
     # were billed in full ($9.06 of a $9.60 line). Extraction gets its own,
     # lower ceiling, and a prompt that fits inside it.
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
-    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
-    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
+    # F206 (night 6): 20 of 25 calls ended at the cap. 25 nodes and 40 edges run
+    # to about 68 lines, and the cap held about 36, so what was cut was mostly
+    # edges. The contract now fits the cap: a full answer (node about 43
+    # tokens, edge 61, hyperedge 80, cl100k) is about 1,670, about 83% of 2,000.
+    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "14"))
+    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "16"))
+    GRAPH_EXTRACTION_MAX_HYPEREDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_HYPEREDGES", "1"))
     # F051: a call that yields no parseable line is retried ONCE with the
     # ceiling lifted, rather than discarded after being paid for.
     GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS", "6000"))

@@ -224,9 +224,9 @@ object, no array, no code fence, no commentary. Each line must be independently
 valid JSON and must fit on one line, so that if your answer is cut short only
 the final line is lost:
 
-{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}}
+{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule"}}
 {{"kind": "edge", "source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the document>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
-{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}}
+{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9}}
 
 Write the most important entities FIRST, then their relationships — if you run
 out of room, what survives should be what matters most.
@@ -243,7 +243,7 @@ Rules:
 - Do not hallucinate entities not present in the document
 - Prefer specific labels over generic ones ("30-Day Refund Window" not "Time Limit")
 - RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the document in "relation_label" (e.g. relation "produces", relation_label "ships with every order").
-- Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per document.
+- Add a hyperedge when 3+ nodes participate in a shared concept/flow/pattern, within the BUDGET below.
 
 {output_budget}
 
@@ -270,9 +270,9 @@ Output JSONL — ONE complete JSON object per line, nothing else. No wrapping
 object, no array, no code fence, no commentary. Each line must be independently
 valid JSON and fit on one line, so a cut answer loses only its final line:
 
-{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "entity|action|outcome|issue", "source_file": "<report_path>"}}
+{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "entity|action|outcome|issue"}}
 {{"kind": "edge", "source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the report>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
-{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<report_path>"}}
+{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9}}
 
 Write the most important entities FIRST, then their relationships.
 
@@ -284,7 +284,7 @@ Rules:
 - Mark uncertain relationships as AMBIGUOUS (confidence_score: 0.1–0.3)
 - Do not hallucinate entities not present in the report
 - RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the report in "relation_label" (e.g. relation "causes", relation_label "timed out because of").
-- Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per report.
+- Add a hyperedge when 3+ nodes participate in a shared concept/flow/pattern, within the BUDGET below.
 
 {output_budget}
 
@@ -526,13 +526,14 @@ def _output_budget() -> str:
     from config import config as app_config
 
     return (
-        "BUDGET: return at most {nodes} nodes and {edges} edges — the most "
-        "load-bearing ones, not everything you can find. One object per line, "
-        "no indentation, no commentary. If you run out of room the last line is "
-        "the only thing lost, so never split an object across lines."
+        "BUDGET: return at most {nodes} nodes, {edges} edges and {hyperedges} hyperedge(s). The answer "
+        "has a hard length limit and this is what fits: choose the entities and the relationships that "
+        "matter most, rather than listing everything you can find. One object per line, no indentation, "
+        "no commentary, and never split an object across lines."
     ).format(
-        nodes=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_NODES", 25) or 25),
-        edges=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_EDGES", 40) or 40),
+        nodes=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_NODES", 14) or 14),
+        edges=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_EDGES", 16) or 16),
+        hyperedges=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_HYPEREDGES", 1) or 1),
     )
 
 
