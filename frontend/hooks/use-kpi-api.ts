@@ -70,6 +70,8 @@ export interface DecisionsNeededData {
   reports_count: number
   missions_count: number
   items: DecisionsNeededItem[]
+  /** F207: set when the list could not be loaded (never a silent 0). */
+  error?: string
 }
 
 // ============= QUERY KEYS =============

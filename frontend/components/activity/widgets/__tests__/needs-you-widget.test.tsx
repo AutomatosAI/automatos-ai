@@ -18,6 +18,7 @@ import { NeedsYouWidget } from '@/components/activity/widgets/needs-you-widget'
 beforeEach(() => {
   data.decisions.data = undefined; data.gates.data = undefined
   data.questions.data = undefined; data.reviews.data = undefined
+  ;(data.decisions as any).isError = false
 })
 afterEach(cleanup)
 
@@ -49,6 +50,21 @@ describe('NeedsYouWidget', () => {
     expect(screen.getByText('1 waiting')).toBeInTheDocument()
     expect(screen.getByText('In review · 1')).toBeInTheDocument()
     expect(screen.getByText('Monday dispatch').closest('a')).toHaveAttribute('href', '/command-center?tab=board')
+  })
+
+  it('says the decisions could not be loaded instead of "nothing on your plate" (F207)', () => {
+    data.decisions.data = { total: 0, reports_count: 0, missions_count: 0, items: [],
+      error: 'The decisions waiting for you could not be loaded. Try again shortly.' }
+    render(<NeedsYouWidget period="1d" />)
+    expect(screen.queryByText('Nothing on your plate. Grab a tea.')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('could not be loaded')
+  })
+
+  it('treats a decisions request that failed the same way (F207)', () => {
+    ;(data.decisions as any).isError = true
+    render(<NeedsYouWidget period="1d" />)
+    expect(screen.queryByText('Nothing on your plate. Grab a tea.')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('could not be loaded')
   })
 
   it('hides a family that has nothing', () => {
