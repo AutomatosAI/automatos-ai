@@ -117,11 +117,35 @@ def test_each_of_night_6s_zero_tool_claims_is_a_claim(at):
     assert claimed_action_not_done(ZERO_TOOL_CLAIMS[at], set())
 
 
-def test_a_first_reply_that_ran_no_tool_goes_through_the_loop():
+def _routes(reply, *, calls=None, tools=TOOLS, owner="Please put the newsletter on the board for review."):
+    from consumers.chatbot.service import StreamingChatService
+
+    svc = StreamingChatService.__new__(StreamingChatService)
+    svc.workspace_id = WS
+    return asyncio.run(svc._first_reply_goes_through_the_loop(_round(reply, calls), tools, [], owner))
+
+
+@pytest.mark.parametrize("at", list(ZERO_TOOL_CLAIMS))
+def test_each_of_night_6s_zero_tool_first_replies_goes_through_the_loop(rows, at):
+    assert _routes(ZERO_TOOL_CLAIMS[at]) is True
+
+
+def test_a_first_reply_naming_an_id_that_does_not_exist_goes_through_the_loop(rows):
+    assert _routes("Your newsletter is Task ID 1100, in the assigned column.") is True
+
+
+def test_a_plain_answer_a_tool_call_or_a_turn_without_tools_does_not(rows):
+    assert _routes("Tuesday had 5 orders, and I'd check the refunded one before counting it.") is False
+    assert _routes(ZERO_TOOL_CLAIMS["03:11:48"], calls=[{"id": "c1", "function": {"name": "platform_execute",
+                                                                                   "arguments": "{}"}}]) is False
+    assert _routes(ZERO_TOOL_CLAIMS["03:11:48"], tools=None) is False
+
+
+def test_the_turn_routes_its_first_reply_through_that_check():
     from consumers.chatbot import service
 
     turn = inspect.getsource(service.StreamingChatService)
-    assert "claimed_action_not_done(response.content, {name for name, _args in _prefetched})" in turn
+    assert "_first_reply_check = await self._first_reply_goes_through_the_loop(" in turn
     assert "if response.tool_calls or _first_reply_check:" in turn
 
 
@@ -147,12 +171,22 @@ def test_a_retry_that_owns_up_needs_no_correction(rows):
     assert final["_f187"].correction is None
 
 
-def test_the_correction_is_in_the_saved_answer_and_its_log_names_the_reply():
+def test_the_saved_answer_gains_the_correction():
+    from consumers.chatbot.service import StreamingChatService
+
+    answer = _round("I've created the task on your board, as I said.")
+    assert StreamingChatService._answer_additions(Verdict(tools=0, claim="put on the board"), answer) == [
+        "\n\n" + NOTHING_DONE]
+    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == []   # tier 3: a log
+    assert StreamingChatService._answer_additions(None, answer) == []
+
+
+def test_the_turn_saves_the_additions_and_logs_the_verdict_with_the_reply_id():
     from consumers.chatbot import service
 
     turn = inspect.getsource(service.StreamingChatService)
-    corrected = turn.index('full_response = f"{full_response}\\n\\n{_correction}"')
-    assert corrected < turn.index("assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)")
+    added = turn.index("for _addition in self._answer_additions(f187_verdict, final_round):")
+    assert added < turn.index("assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)")
     assert "f187_verdict.log(getattr(_saved, \"id\", None))" in turn
 
 

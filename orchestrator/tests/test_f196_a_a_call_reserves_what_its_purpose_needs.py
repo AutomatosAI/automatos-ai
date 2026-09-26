@@ -230,12 +230,12 @@ def test_a_cut_answer_is_logged_and_flagged_and_its_final_writer_says_so(setting
 
 
 def test_the_chat_and_an_agent_run_add_the_note_to_the_finished_answer():
-    from consumers.chatbot import service
+    from consumers.chatbot.service import StreamingChatService
     from modules.agents.factory import agent_factory
 
-    chat = inspect.getsource(service.StreamingChatService)
-    noted = chat.index("_cut = cut_note_for(final_round)")
-    assert noted < chat.index("assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)")
+    cut = NS(content="Here is the newsletter: …", tool_calls=None, finish_reason="length", cut=8000)
+    assert StreamingChatService._answer_additions(None, cut) == [
+        "\n\n[Cut here: this answer reached its 8,000-token limit.]"]
     run = inspect.getsource(agent_factory.AgentFactory)
     assert run.index("Completed %d continuation(s)") < run.index("_cut = cut_note_for(response)")
 
