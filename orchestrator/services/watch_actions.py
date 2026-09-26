@@ -240,6 +240,12 @@ async def run_board_task_action(
         return WatchActionOutcome(
             action=action, escalated=True, error="target task missing"
         )
+    from api.board_tasks import mission_runs_it
+
+    owned = mission_runs_it(db, task)
+    if owned:  # the board never runs a mission's step, a watch's re-run included
+        await escalate_watch_now(db, watch, reason=owned)
+        return WatchActionOutcome(action=action, escalated=True, detail="a mission runs this ticket")
     if task.assigned_agent_id is None:
         await escalate_watch_now(
             db, watch, reason=f"task {watch.target_id} has no assigned agent to re-run"

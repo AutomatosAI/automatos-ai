@@ -657,6 +657,9 @@ async def update_task(
             raise HTTPException(status_code=422, detail="assigned_agent_id must be an agent's id, or null")
     if body.get("status") == "in_progress" and not agent_after:
         raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)
+    owned = mission_runs_it(db, task) if body.get("status") in STARTING_STATUSES else None
+    if owned:
+        raise HTTPException(status_code=409, detail=owned)
 
     if "review_feedback" in body:
         # The reviewer's verdict. The dispatcher folds it into the prompt of the
@@ -1035,6 +1038,42 @@ def _recipe_execution_of(source_id: str) -> str:
     return parts[1] if len(parts) >= 3 and parts[0] == "recipe" else str(source_id or "")
 
 
+# The mission's own ticket, its steps' mirrors, and a CLI agent's mission step.
+MISSION_TICKET_TYPES = frozenset({"orchestration", "orchestration_task", "mission"})
+GOAL_ON_A_REFUSAL_CHARS = 80
+# Statuses that start work: the board never moves a mission's ticket into them.
+STARTING_STATUSES = frozenset({"assigned", "in_progress"})
+
+
+def mission_runs_it(db: Session, task: Any) -> Optional[str]:
+    """Why the board never runs a mission's ticket (the mission's own, or one of its
+    steps), naming the mission; None for any other ticket. The mission engine runs
+    its steps (PRD-171 F025): Run Now re-dispatched an assigned or blocked step
+    through the board, so it ran outside its mission."""
+    if getattr(task, "source_type", None) not in MISSION_TICKET_TYPES:
+        return None
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+    run_id = getattr(task, "orchestration_run_id", None)
+    step_id = getattr(task, "orchestration_task_id", None)
+    if run_id is None and step_id is not None:
+        step = db.get(OrchestrationTask, step_id)
+        run_id = step.run_id if step is not None else None
+    # Only this workspace's mission is ever named (review LOW).
+    run = db.query(OrchestrationRun).filter(
+        OrchestrationRun.id == run_id, OrchestrationRun.workspace_id == task.workspace_id,
+    ).first() if run_id is not None else None
+    if run is None:
+        run_id = None
+    goal = (run.goal or "").strip()[:GOAL_ON_A_REFUSAL_CHARS] if run is not None else ""
+    what = "the mission" if task.source_type == "orchestration" else "a step of the mission"
+    return (
+        f"Ticket #{task.id} is {what}{f' “{goal}”' if goal else ''}: the mission runs its steps, "
+        f"not the board. Retry or change it from the mission"
+        f"{f' (/missions/{run_id})' if run_id is not None else ''}."
+    )
+
+
 def _running_now(db: Session, task: BoardTask) -> bool:
     """F176 (night 6): whether a run really holds this ticket — a live claim (the
     dispatch lease every run renews from its first moment, and a CLI host renews
@@ -1103,6 +1142,9 @@ async def run_task_now(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    owned = mission_runs_it(db, task)
+    if owned:
+        raise HTTPException(status_code=409, detail=owned)
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
     if _running_now(db, task):
@@ -1181,6 +1223,9 @@ async def update_task_status(
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     if new_status == "in_progress" and not task.assigned_agent_id:
         raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
+    owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
+    if owned:
+        raise HTTPException(status_code=409, detail=owned)
 
     old_status = task.status
     if new_status == "in_progress":

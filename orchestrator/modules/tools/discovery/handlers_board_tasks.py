@@ -847,7 +847,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # PRD-227 US-001: agent-side vocabulary reaches parity with the HTTP path by
     # reusing its VALID_STATUSES set — so 'blocked'/'failed' are accepted and any
     # future status the HTTP path adds is accepted identically, never drifting.
-    from api.board_tasks import NO_AGENT_NO_PROGRESS, VALID_STATUSES
+    from api.board_tasks import NO_AGENT_NO_PROGRESS, STARTING_STATUSES, VALID_STATUSES, mission_runs_it
     if new_status not in VALID_STATUSES:
         return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {sorted(VALID_STATUSES)}"}
 
@@ -867,6 +867,10 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # progress' with nothing running it.
     if new_status == "in_progress" and not task.assigned_agent_id:
         return {"success": False, "error": NO_AGENT_NO_PROGRESS}
+    # The mission runs its steps: never started here, where in_progress launches it.
+    owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
+    if owned:
+        return {"success": False, "error": owned}
 
     old_status = task.status
 

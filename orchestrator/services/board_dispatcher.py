@@ -75,6 +75,21 @@ def recipe_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
     return f"AND {alias}.source_type <> 'recipe'"
 
 
+# The mission engine runs its own steps (PRD-171 F025): the dispatch loop never
+# claims a mission's mirror tickets, whoever set one 'assigned' (a PATCH, a tool,
+# a grant's re-queue). A CLI agent's step is run by its host for the mission, and
+# its card may be the step's mirror itself (F094); the mission's own ticket never.
+MISSION_MIRROR_TYPES = ("orchestration", "orchestration_task")
+CLI_CLAIMABLE_MIRRORS = ("orchestration_task",)
+
+
+def mission_mirror_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
+    barred = [kind for kind in MISSION_MIRROR_TYPES
+              if not (runtime == RUNTIME_CLI and kind in CLI_CLAIMABLE_MIRRORS)]
+    kinds = ", ".join(f"'{kind}'" for kind in barred)
+    return f"AND {alias}.source_type NOT IN ({kinds})"
+
+
 def provider_predicate_sql(providers: Optional[Sequence[str]], alias: str = "board_tasks") -> str:
     """CLI adapter design §8.2: a host claims only the tickets of agents whose CLI
     it serves (``capabilities.providers``). ``None`` = no filter (the API runtime,
@@ -148,8 +163,8 @@ def claim_tasks(
     # Recipe-mirror tickets of API agents are driven by the recipe executor, never
     # the board — but a session agent's playbook step IS a ticket its host must
     # claim (PRD-239 S3): the exclusion applies to the API runtime only.
-    recipe_sql = recipe_exclusion_sql(runtime, alias="board_tasks")
-    recipe_sql_t = recipe_exclusion_sql(runtime, alias="t")
+    recipe_sql = recipe_exclusion_sql(runtime, alias="board_tasks") + " " + mission_mirror_exclusion_sql(runtime, "board_tasks")
+    recipe_sql_t = recipe_exclusion_sql(runtime, alias="t") + " " + mission_mirror_exclusion_sql(runtime, "t")
     ws_sql = "AND workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_sql_t = "AND t.workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_params = {"ws": str(workspace_id)} if workspace_id is not None else {}
