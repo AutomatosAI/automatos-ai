@@ -1892,8 +1892,14 @@ class HarnessService:
         from core.models.core import BoardTask
 
         try:
+            # One card whoever gets here first: a concurrent caller (an /approve
+            # during the weekly tick, another worker) waits on this lock, then
+            # finds the card. The lock ends with the transaction.
+            db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                       {"key": f"{UNREADABLE_LEDGER_TAG}:{workspace_id}"})
             if db.query(BoardTask.id).filter(BoardTask.workspace_id == workspace_id,
                                              BoardTask.tags.contains([UNREADABLE_LEDGER_TAG])).first():
+                db.commit()  # the lock goes with it
                 return
             with db.begin_nested():
                 db.add(BoardTask(

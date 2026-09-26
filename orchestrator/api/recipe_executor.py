@@ -504,6 +504,7 @@ async def _execute_step(
         handle_scratchpad_write,
         handle_scratchpad_read,
     )
+    from services.playbook_owner_ask import ASK_ACTION, NOT_RUN_AFTER_ASK, ask_call_params, take_ask
 
     # 0. Activate agent via factory — gives us the agent's LLM manager
     factory = AgentFactory(db_session=db)
@@ -635,6 +636,7 @@ async def _execute_step(
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
     response = None
+    owner_ask: Optional[Dict[str, Any]] = None  # F140: the step's question to the owner
 
     for iteration in range(max_iterations):
         if recipe_execution_id:
@@ -731,6 +733,24 @@ async def _execute_step(
                     jde,
                 )
                 tool_args = {}
+
+            # F140: a step asks the owner through its run, never through a subject
+            # it would have to name (night 4: B15/B23 were refused, and five of six
+            # calls came with params={}). The run stops after this turn.
+            ask_params = ask_call_params(tool_name, tool_args) if recipe_execution_id else None
+            if ask_params is not None:
+                ask, result_text = take_ask(ask_params)
+                owner_ask = owner_ask or ask
+                all_tool_calls.append({"action": ASK_ACTION, "params": ask_params, "result": result_text,
+                                       "success": ask is not None})
+                messages.append({"role": "tool", "tool_call_id": tool_id, "content": result_text})
+                continue
+            if owner_ask is not None:  # nothing acts after the step asked
+                all_tool_calls.append({"action": tool_args.get("action", tool_name),
+                                       "params": tool_args.get("params", tool_args),
+                                       "result": NOT_RUN_AFTER_ASK, "success": False})
+                messages.append({"role": "tool", "tool_call_id": tool_id, "content": NOT_RUN_AFTER_ASK})
+                continue
 
             # Handle scratchpad tools inline (no tool_router needed)
             if tool_name == SCRATCHPAD_TOOL_NAME and scratchpad:
@@ -935,6 +955,8 @@ async def _execute_step(
             })
 
         logger.info(f"[recipe_step] Tool iteration {iteration + 1}: {len(response.tool_calls)} calls")
+        if owner_ask is not None:
+            break  # F140: the owner is asked; this step goes no further
 
     # 8. Return with full message history for S3 logging
     content = (response.content or "") if response else ""
@@ -957,6 +979,7 @@ async def _execute_step(
     return {
         "status": "success",
         "result": content,
+        "owner_ask": owner_ask,
         "execution": {
             "tokens_used": tokens,
             "tool_calls": all_tool_calls,
@@ -1406,6 +1429,11 @@ async def _execute_recipe_inner(
             f"total={total_timeout_sec:.0f}s (configured: step={raw_step:.0f}s, total={raw_total:.0f}s)"
         )
 
+        # F140: a rerun after the owner answered carries the answers in every step's prompt.
+        from services.playbook_owner_ask import NEEDS_YOU, owner_answers_block, owner_question, stop_for_owner
+
+        owner_answers = owner_answers_block(execution.execution_metadata)
+
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
         step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
@@ -1799,11 +1827,15 @@ async def _execute_recipe_inner(
                     return
                 continue
 
+            if owner_answers:  # after the F055 check: an answer is the owner's text, not a template
+                clean_step_prompt = f"{clean_step_prompt}\n\n{owner_answers}"
+
             # Execute with retries
             attempt = 0
             success = False
             last_error = None
             exec_messages = []
+            owner_ask = None
 
             while attempt <= max_retries and not success:
                 if attempt > 0:
@@ -1859,6 +1891,13 @@ async def _execute_recipe_inner(
                         step_result["tool_calls"] = _normalize_tool_calls(tool_calls_raw)
                         exec_messages = result.get("execution", {}).get("messages", [])
 
+                        # F140: a step that asks the owner stops the run and asks them,
+                        # never retried. Before F131's rule: B4's step 1 failed to read
+                        # the file AND asked for its path; the owner can answer that.
+                        owner_ask = owner_question(step_result["output"], result, prompt_template)
+                        if owner_ask is not None:
+                            break
+
                         # F131: a step can run to its end and still have failed.
                         failed = step_failure(step_result["tool_calls"], result)
                         if failed:
@@ -1897,6 +1936,20 @@ async def _execute_recipe_inner(
             # Finalize step result
             step_result["duration_ms"] = int((time.time() - step_start) * 1000)
             step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+            if owner_ask is not None:
+                step_result["status"] = "failed"
+                step_result["error"] = f"{NEEDS_YOU} {owner_ask['question']}"
+                step_results.append(_build_compact_step_result(step_result))
+                _persist_step_results(db, execution, step_results)
+                asked = await stop_for_owner(
+                    db, execution=execution, recipe=recipe, step_order=step_order, agent_id=agent_id,
+                    agent_name=agent_name, ask=owner_ask, step_results=step_results,
+                    step_calls=step_result["tool_calls"],
+                )
+                if not asked:
+                    await _fail_execution(db, recipe_execution_id, step_result["error"], step_results=step_results)
+                return
 
             if not success:
                 step_result["status"] = "failed"

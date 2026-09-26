@@ -22,7 +22,9 @@ def register_asks_actions(registry: ActionRegistry) -> None:
             "name) and returns immediately with an ask id; it does NOT wait for the "
             "answer. Keep the question a short markdown decision (a sentence or two, "
             "options if there are discrete choices) — never paste a report. Use it "
-            "sparingly: prefer deciding yourself when you reasonably can."
+            "sparingly: prefer deciding yourself when you reasonably can. In a playbook "
+            "step the run is the subject: pass only the question; the run stops after "
+            "that step, and the owner's answer runs the playbook again from step 1."
         ),
         category="governance",
         parameters={

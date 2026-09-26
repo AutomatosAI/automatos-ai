@@ -736,10 +736,11 @@ class UnifiedToolExecutor:
             tenant_id: UUID of the tenant (reserved for future use)
             workspace_id: UUID of the workspace for scoping
             trace_id: Optional trace ID for log correlation
-            caller_context: Optional dict with keys user_id, system_role,
-                workspace_role. Forwarded to PlatformActionExecutor for
-                admin_only gating.  If None, executor falls back to
-                workspace-scoped admin check.
+            caller_context: The chat's server-built context (``user_id``,
+                ``driving_user_id``, ``system_role``, ``conversation_id``).
+                Forwarded to PlatformActionExecutor for its super_admin_only
+                and admin_only gates; see its execute() for what each reads
+                and what happens without one.
 
         Returns:
             Tool execution result with standard format

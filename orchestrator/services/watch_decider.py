@@ -551,6 +551,7 @@ class WatchDecider:
         terminal executions; notify on a status flip."""
         from core.models.core import RecipeExecution
         from core.models.watch_enums import WatchEventType
+        from services.playbook_owner_ask import ended_with_an_outcome
         from services.watch_notifications import dispatch_watch_notification
         from services.watch_service import WatchService
 
@@ -559,6 +560,7 @@ class WatchDecider:
             .filter(
                 RecipeExecution.recipe_id == playbook.id,
                 RecipeExecution.status.in_(("completed", "failed")),
+                ended_with_an_outcome(RecipeExecution),  # F140: a stop to ask is no flip
             )
             .order_by(RecipeExecution.started_at.desc())
             .limit(2)

@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field, field_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, validator
 from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
@@ -119,7 +119,17 @@ class MissionCreateRequest(BaseModel):
     )
 
 
+PLAN_EDITS_GO_TO_THE_PLAN = (
+    "Approve takes no plan edits: send them to PATCH /api/missions/{mission_id}/plan first, then approve."
+)
+
+
 class MissionApproveRequest(BaseModel):
+    # F165 (night 5): the Approve button's `modifications` were dropped without a
+    # word, since this body ignored unknown keys. Edits go to the plan route first
+    # (PRD-163 S4/Q57); a body carrying anything else is refused and says why.
+    model_config = ConfigDict(extra="forbid")
+
     max_concurrent_override: Optional[int] = Field(
         None, ge=1, le=10, description="Override max_concurrent for this mission"
     )
@@ -129,6 +139,13 @@ class MissionApproveRequest(BaseModel):
     skip_verification: Optional[bool] = Field(
         None, description="Skip task verification (for benchmarks/testing)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _edits_go_to_the_plan(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "modifications" in data:
+            raise ValueError(PLAN_EDITS_GO_TO_THE_PLAN)
+        return data
 
 
 # PRD-163 S4/Q57: approval-time plan editing. The old `modifications`-on-approve

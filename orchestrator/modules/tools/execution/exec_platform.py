@@ -36,11 +36,12 @@ async def execute_platform_action(
     """Execute a platform action via PlatformActionExecutor.
 
     Args:
-        caller_context: Optional dict with keys user_id, system_role, workspace_role.
-            Used for admin_only permission gating (US-002/US-003).
-            If None, falls back to workspace-scoped check via
-            _workspace_has_admin_owner() — admin workspace grants access,
-            non-admin workspace denies.
+        caller_context: The chat's server-built context (``user_id``,
+            ``driving_user_id``, ``system_role``, ``conversation_id``). The
+            admin_only gate (US-002/US-003, F145) reads the driving user's
+            active owner/admin membership; with no caller context, an agent is
+            an admin only under the workspace's opt-in ``agents_inherit_admin``
+            policy.
         agent_id: ID of the calling agent. Injected as ``_agent_id`` (and
             ``_agent_name`` resolved from DB) into params so handlers like
             ``platform_submit_report`` can attribute the call. Without this,

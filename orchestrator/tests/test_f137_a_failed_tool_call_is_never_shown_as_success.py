@@ -50,7 +50,8 @@ def test_the_run_record_shows_the_failed_drafts_as_errors(monkeypatch):
 
 
 def test_every_tool_call_the_step_records_carries_its_flag():
-    """The scratchpad tools, the LinkedIn workaround, the Composio spine and the router."""
+    """The scratchpad tools, the LinkedIn workaround, the Composio spine, the router,
+    and F140's ask to the owner and the calls not run after it."""
     tree = ast.parse(Path(rex.__file__).read_text())
     records = [
         node.args[0] for node in ast.walk(tree)
@@ -58,7 +59,7 @@ def test_every_tool_call_the_step_records_carries_its_flag():
         and isinstance(node.func.value, ast.Name) and node.func.value.id == "all_tool_calls"
         and node.args and isinstance(node.args[0], ast.Dict)
     ]
-    assert len(records) == 5
+    assert len(records) == 7
     for record in records:
         keys = {k.value for k in record.keys if isinstance(k, ast.Constant)}
         assert "success" in keys, f"line {record.lineno}: {sorted(keys)}"

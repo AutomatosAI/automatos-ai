@@ -1507,6 +1507,15 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F140: a playbook step's whole answer at most this long, ending by asking for
+    # what it needs, stops the run and asks the owner. Night 4's 12 asks were at
+    # most 402 characters; a longer answer is the step's work, even if it ends
+    # on a question.
+    PLAYBOOK_OWNER_ASK_MAX_CHARS: int = int(os.getenv("PLAYBOOK_OWNER_ASK_MAX_CHARS", "600"))
+    # F105: document-vector searches run on this many threads of their own, never
+    # on the loop; the local search is a full scan (F107) that holds a pool
+    # connection for its whole length, so this also caps how many run at once.
+    DOCUMENT_SEARCH_THREADS: int = int(os.getenv("DOCUMENT_SEARCH_THREADS", "4"))
     # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
     # unless it fetched fewer than this share of the models listed before: a
     # partial answer would otherwise retire the rest of the catalog.
