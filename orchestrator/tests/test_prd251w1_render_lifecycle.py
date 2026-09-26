@@ -1042,7 +1042,7 @@ def test_the_reaper_sweeps_social_renders_with_the_other_surfaces():
         def commit(self):
             pass
 
-    reaper.reap_orphaned_runs(_Session(), now=datetime(2026, 9, 25, 12, tzinfo=timezone.utc))
+    asyncio.run(reaper.reap_orphaned_runs(_Session(), now=datetime(2026, 9, 25, 12, tzinfo=timezone.utc)))
     assert SocialPost in swept
 
 

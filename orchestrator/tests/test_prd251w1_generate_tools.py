@@ -92,7 +92,8 @@ from tests.helpers_playbook_run import _Session, done, patch_edges  # noqa: E402
 WS = uuid.UUID("00000000-0000-0000-0000-0000000117a1")
 TEMPLATE_ID = uuid.UUID("00000000-0000-0000-0000-0000000117b1")
 POST_ID = uuid.UUID("00000000-0000-0000-0000-0000000117c1")
-AGENT = SimpleNamespace(id=7, workspace_id=WS, user_id=None, name="Social Media Director", configuration={})
+AGENT = SimpleNamespace(id=7, workspace_id=WS, user_id=None, name="Social Media Director", configuration={},
+                        status="active")
 DATA_STORY = next(s for s in social_starters("social_video") if s["slug"] == "data-story")
 
 RENDER_URL = "http://media-render:8090"
@@ -342,7 +343,8 @@ def _run_launch_video(monkeypatch, *, document_step, saved):
     card = SimpleNamespace(id=1170, status="in_progress", result=None, error_message=None,
                            review_feedback=None, completed_at=None)
     session = _Session({
-        WorkflowTemplate: [SimpleNamespace(id=PLAYBOOK_ID, name="Launch video", steps=steps, execution_config={})],
+        WorkflowTemplate: [SimpleNamespace(id=PLAYBOOK_ID, name="Launch video", steps=steps, execution_config={},
+                                           inputs=None)],
         RecipeExecution: [execution],
         Workspace: [_workspace_row()],
         Agent: [AGENT],

@@ -505,7 +505,7 @@ def _one_step_run(monkeypatch, *, inputs, prompt):
         WorkflowTemplate: [SimpleNamespace(id=120, name="Weekly social posts", steps=steps, execution_config={}, inputs=inputs)],
         RecipeExecution: [execution],
         Workspace: [SimpleNamespace(deleted_at=None, paused_at=None, paused_reason=None)],
-        Agent: [SimpleNamespace(id=7, name="Social Media Director", configuration={})],
+        Agent: [SimpleNamespace(id=7, name="Social Media Director", configuration={}, status="active")],
         BoardTask: [SimpleNamespace(id=1200, status="in_progress", result=None, error_message=None,
                                     review_feedback=None, completed_at=None)],
     })
@@ -528,7 +528,8 @@ def test_an_input_without_a_default_is_still_named_not_invented(monkeypatch):
     spec = PLAYBOOKS["Launch video"]
     execution, prompts = _one_step_run(monkeypatch, inputs=spec["inputs"], prompt=spec["steps"][0]["prompt_template"])
     assert execution.status == "failed" and prompts == []
-    assert "{input.launch}" in execution.error_message
+    # F182: the run asks the owner for it by name before step 1, and invents nothing.
+    assert "- launch:" in execution.error_message
 
 
 def test_every_step_stamps_the_runs_progress(monkeypatch):

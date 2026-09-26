@@ -158,7 +158,8 @@ def test_the_one_wave_revision_chains_onto_the_base_head():
         for p in VERSIONS.glob("*.py")
         if re.search(rf"^down_revision\s*=\s*['\"]{BASE_HEAD}['\"]", p.read_text(encoding="utf-8"), re.M)
     ]
-    assert chained == ["prd251_wave1.py"]
+    # The night fixes' first revision (F155) chains onto the same base.
+    assert sorted(chained) == ["f155_chats_widget_key_id.py", "prd251_wave1.py"]
 
 
 def test_the_migration_and_the_model_declare_the_same_formats():

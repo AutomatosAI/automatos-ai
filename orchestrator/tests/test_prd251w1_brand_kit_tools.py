@@ -99,12 +99,14 @@ def api(monkeypatch):
     return SimpleNamespace(client=TestClient(app), db=db, workspace=workspace)
 
 
-def _dispatch(db, action, params):
-    """Run a platform action the way an agent's call runs: through the executor."""
+def _dispatch(db, action, params, *, for_an_admin=True):
+    """Run a platform action the way an agent's call runs: through the executor.
+    platform_update_brand_kit is an owner's or admin's (PUT /brand-kit is
+    workspace:manage, F151), so the call is made for an admin unless a test says not."""
     executor = PlatformActionExecutor(db, WS)
-    with patch.object(PlatformActionExecutor, "_full_autonomy", return_value=False), patch(
-        "core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)
-    ):
+    with patch.object(PlatformActionExecutor, "_full_autonomy", return_value=False), patch.object(
+        PlatformActionExecutor, "_caller_is_admin", return_value=for_an_admin
+    ), patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
         return asyncio.run(executor.execute(action, params))
 
 
@@ -238,6 +240,11 @@ def test_an_update_through_the_tool_is_what_get_returns_and_the_put_shares_its_w
     assert api.client.get(KIT_ROUTE).json()["tagline"] == "Made better"
 
 
+def test_a_call_made_for_no_admin_cannot_change_the_kit(api):
+    result = _dispatch(api.db, "platform_update_brand_kit", {"primary_color": "#112233"}, for_an_admin=False)
+    assert result["success"] is False and result.get("permission_denied") is True
+
+
 def test_only_brand_kit_py_assigns_the_workspace_settings():
     """The routes (the PUT, the logo, mark and font uploads and deletes) and the tool
     save through save_brand_kit; neither assigns the settings itself."""
@@ -259,8 +266,9 @@ def test_both_tools_are_registered_and_routed_to_their_handlers():
     assert read is not None and write is not None
     assert (read.category, read.permission_level, read.requires_confirmation) == ("documents", "read", False)
     assert (write.category, write.permission_level) == ("documents", "write")
-    # The write tool is gated like the comparable workspace-setting writers.
-    for comparable in ("platform_update_widget_config", "platform_update_workspace_settings"):
+    # The write tool is gated like the workspace-settings writer: an owner's or
+    # admin's, as PUT /brand-kit is (F147/F151).
+    for comparable in ("platform_update_workspace_settings",):
         other = registry.get(comparable)
         assert (write.permission_level, write.requires_confirmation, write.admin_only, write.super_admin_only) == (
             other.permission_level, other.requires_confirmation, other.admin_only, other.super_admin_only
