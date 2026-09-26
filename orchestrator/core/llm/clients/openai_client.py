@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     from openai import OpenAI
@@ -69,8 +69,6 @@ class OpenAIProvider(BaseLLMProvider):
                 "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
             )
         
-        import asyncio
-        loop = asyncio.get_running_loop()
         try:
             def _call():
                 kwargs = {
@@ -120,7 +118,7 @@ class OpenAIProvider(BaseLLMProvider):
                 return self.client.chat.completions.create(**kwargs)
             
             try:
-                response = await loop.run_in_executor(None, _call)
+                response = await run_blocking(_call)
             except Exception as e:
                 msg = str(e)
                 if "context_length_exceeded" in msg or "maximum context length" in msg:

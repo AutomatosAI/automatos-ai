@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     import anthropic
@@ -217,12 +217,10 @@ class AnthropicProvider(BaseLLMProvider):
                 "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
             )
         
-        import asyncio
         from core.llm.prompt_cache import build_cached_system
         from core.llm.request_scope import is_headless_run
         from modules.memory.memory_tool import memory_tool_definition
 
-        loop = asyncio.get_running_loop()
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
             # PRD-201 S4: the assembler's cache-stable prefix, if the caller
@@ -266,7 +264,7 @@ class AnthropicProvider(BaseLLMProvider):
                     kwargs["tools"] = anthropic_tools
                 return self.client.messages.create(**kwargs)
 
-            response = await loop.run_in_executor(None, _call)
+            response = await run_blocking(_call)
             
             # PRD-17: Extract tool calls if present
             tool_calls = None

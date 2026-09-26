@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     from openai import OpenAI
@@ -55,8 +55,6 @@ class GrokProvider(BaseLLMProvider):
                 "Please configure 'development_xai' credential or set XAI_API_KEY env var."
             )
         
-        import asyncio
-        loop = asyncio.get_running_loop()
         
         try:
             def _call():
@@ -79,7 +77,7 @@ class GrokProvider(BaseLLMProvider):
                     kwargs["tool_choice"] = "auto"
                 return self.client.chat.completions.create(**kwargs)
             
-            response = await loop.run_in_executor(None, _call)
+            response = await run_blocking(_call)
             
             # Extract tool calls if present
             tool_calls = None

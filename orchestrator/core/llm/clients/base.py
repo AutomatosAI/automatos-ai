@@ -6,8 +6,11 @@ Abstract base class for all LLM provider implementations.
 Now also includes embedding provider support.
 """
 
+import asyncio
+import contextvars
+import functools
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -89,6 +92,23 @@ def request_max_tokens(config: Any) -> int:
     from core.llm.output_budget import current_call_budget
 
     return current_call_budget() or config.max_tokens
+
+
+_T = TypeVar("_T")
+
+
+async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
+    """Run a provider's blocking SDK call on the default executor, in a copy of
+    the caller's context.
+
+    F196, reopened after the refresh-6 build: loop.run_in_executor does not
+    carry context variables into its thread. The request, built in the thread,
+    read no per-call budget (core.llm.output_budget) and sent the config's
+    max_tokens. The digest asked 8,000 instead of 1,024. The log context
+    (req/ws/agent) was empty on the same lines.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(contextvars.copy_context().run, fn, *args))
 
 
 @dataclass

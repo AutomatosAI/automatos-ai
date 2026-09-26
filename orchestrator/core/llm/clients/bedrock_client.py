@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     import boto3
@@ -267,8 +267,6 @@ class BedrockProvider(BaseLLMProvider):
                 "Please configure 'development_aws' credential or set AWS env vars."
             )
         
-        import asyncio
-        loop = asyncio.get_running_loop()
         
         try:
             # Convert to appropriate format based on model
@@ -291,7 +289,7 @@ class BedrockProvider(BaseLLMProvider):
                 )
                 return json.loads(response['body'].read())
             
-            response_body = await loop.run_in_executor(None, _call)
+            response_body = await run_blocking(_call)
             
             # Parse response based on model type
             if self._is_claude_model():

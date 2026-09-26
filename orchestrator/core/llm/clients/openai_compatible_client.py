@@ -20,7 +20,7 @@ silent fallbacks (PRD-236 Q2: free must never silently become paid).
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 from core.llm import providers as registry
 from core.llm.reasoning import coalesce_reasoning, reasoning_from_fields, split_think_tags
 
@@ -452,9 +452,6 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         """Generate a response (OpenAI-compatible chat completions)."""
         self._require_client()
 
-        import asyncio
-        loop = asyncio.get_running_loop()
-
         try:
             def _call():
                 kwargs = self._request_kwargs(messages, tools)
@@ -485,7 +482,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         return self.client.chat.completions.create(**kwargs)
                     raise
 
-            response = await loop.run_in_executor(None, _call)
+            response = await run_blocking(_call)
 
             if not response.choices:
                 raise ValueError(
@@ -625,7 +622,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
         async def _produce():
             try:
-                await loop.run_in_executor(None, _run_stream)
+                await run_blocking(_run_stream)
             except Exception as exc:  # surfaced to the consumer below
                 loop.call_soon_threadsafe(handoff.put_nowait, exc)
             finally:

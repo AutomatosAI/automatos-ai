@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     import google.generativeai as genai
@@ -50,8 +50,6 @@ class GoogleProvider(BaseLLMProvider):
                 "Please configure 'development_google' credential or set GOOGLE_API_KEY env var."
             )
         
-        import asyncio
-        loop = asyncio.get_running_loop()
         
         try:
             # Convert messages to Gemini format
@@ -68,7 +66,7 @@ class GoogleProvider(BaseLLMProvider):
                 )
                 return response
             
-            response = await loop.run_in_executor(None, _call)
+            response = await run_blocking(_call)
             
             content = response.text if response.text else ""
             
