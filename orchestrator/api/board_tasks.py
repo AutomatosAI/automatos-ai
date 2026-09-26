@@ -16,7 +16,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
+from sqlalchemy import func, text
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 
 from config import config
@@ -847,6 +848,137 @@ async def delete_task(
 
 # ── Status shortcut (drag-and-drop) ─────────────────────────────────
 
+def _decide(db: Session, task: BoardTask, *, seen: str, values: Dict[str, Any]) -> bool:
+    """Apply ``values`` to ``task`` only while its status is still ``seen``, the
+    status the deciding request read (F195). The request that wins acts on the
+    ticket; one that lost matches 0 rows, its read is refreshed, and the caller
+    answers ``already_decided``. The in-memory row is synced either way."""
+    flipped = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == task.id, BoardTask.workspace_id == task.workspace_id,
+                BoardTask.status == seen)
+        .update({getattr(BoardTask, key): value for key, value in values.items()},
+                synchronize_session=False)
+    )
+    if not flipped:
+        db.rollback()
+        try:
+            db.refresh(task)
+        except InvalidRequestError:  # deleted while it was being decided
+            raise HTTPException(status_code=404, detail="Task not found")
+        return False
+    for key, value in values.items():
+        setattr(task, key, value)
+    return True
+
+
+def already_decided(task: BoardTask) -> HTTPException:
+    return HTTPException(status_code=422, detail=(
+        f"Ticket #{task.id} was already decided (status: {task.status}); nothing ran again."))
+
+
+def _record_approval(db: Session, task_id: int, *, decided_at: datetime,
+                     action_result: Optional[Dict[str, Any]]) -> bool:
+    """Put the approval's result on the ticket only while it is still this
+    approval's 'done' (F195): a send-back that landed while the action ran keeps
+    the ticket as it sent it back. True when the ticket is still this approval's."""
+    kept = (func.coalesce(func.nullif(BoardTask.result, ""), json.dumps(action_result))
+            if action_result else BoardTask.result)
+    return bool(
+        db.query(BoardTask)
+        .filter(BoardTask.id == task_id, BoardTask.status == "done", BoardTask.completed_at == decided_at)
+        .update({BoardTask.result: kept}, synchronize_session=False)
+    )
+
+
+async def _announce_approval(db: Session, workspace_id: Any, task: BoardTask) -> None:
+    """PRD-128's task_complete for an approved ticket. The approval is already on
+    record (F195 commits it first), so a notice that fails is logged, never a 500."""
+    try:
+        await _dispatch_task_complete(db, workspace_id, task)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — the approval stands either way
+        db.rollback()
+        logger.warning("[BoardTasks] Task %d approved; its task_complete notice failed: %s", task.id, exc,
+                       exc_info=True)
+
+
+def _reopen_review(db: Session, task_id: int, *, decided_at: datetime,
+                   finished_before: Optional[datetime]) -> None:
+    """The approval's action failed: the ticket goes back to review as it was, so
+    it can be approved again, unless something else has moved it since this
+    approval's ``decided_at``."""
+    db.rollback()
+    db.query(BoardTask).filter(
+        BoardTask.id == task_id, BoardTask.status == "done", BoardTask.completed_at == decided_at,
+    ).update({BoardTask.status: "review", BoardTask.completed_at: finished_before}, synchronize_session=False)
+    db.commit()
+
+
+async def _run_approval_action(db: Session, ctx: RequestContext, approval_action: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a review ticket's ``approval_action`` (publish a blog post, start a blog
+    mission) and say what it did; an HTTPException says why it could not."""
+    action_type = approval_action.get("type")
+    try:
+        if action_type == "publish_blog":
+            from core.services.blog_service import BlogService
+            post_id = approval_action.get("post_id")
+            if not post_id:
+                raise HTTPException(status_code=422, detail="approval_action missing post_id")
+            svc = BlogService(db, ctx.workspace_id)
+            post = svc.publish_post(UUID(post_id))
+            if not post:
+                raise HTTPException(status_code=404, detail=f"Blog post {post_id} not found")
+            logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
+            return {
+                "type": "publish_blog",
+                "post_id": str(post.id),
+                "title": post.title,
+                "slug": post.slug,
+                "status": post.status,
+                "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
+            }
+        if action_type == "create_blog":
+            # Used by VECTOR (and any agent) to suggest a blog topic for
+            # founder approval. On approve, fire the standard blog mission.
+            from modules.tools.discovery.handlers_blog import (
+                create_blog_post_from_topic,
+            )
+            topic = approval_action.get("topic")
+            category = approval_action.get("category") or "AI & Automation"
+            if not topic:
+                raise HTTPException(status_code=422, detail="approval_action missing topic")
+            user_id = ctx.user.clerk_user_id if ctx.user else None
+            result = await create_blog_post_from_topic(
+                db,
+                ctx.workspace_id,
+                {"topic": topic, "category": category, "_user_id": user_id},
+            )
+            if not result.get("success"):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Blog mission start failed: {result.get('error', 'unknown')}",
+                )
+            logger.info(
+                "[BoardTasks] Approved: created blog mission %s for topic '%s'",
+                result.get("mission_id"), topic,
+            )
+            return {
+                "type": "create_blog",
+                "mission_id": result.get("mission_id"),
+                "topic": topic,
+                "category": category,
+                "task_count": result.get("task_count", 0),
+            }
+        logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
+        return {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[BoardTasks] Approval action failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Approval action failed: {e}")
+
+
 @router.post("/{task_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_task(
     task_id: int,
@@ -872,85 +1004,32 @@ async def approve_task(
 
     body = await request.json()
     action_result = None
-
-    # Execute approval_action if present
     approval_action = (task.planning_data or {}).get("approval_action")
-    if approval_action:
-        action_type = approval_action.get("type")
-        try:
-            if action_type == "publish_blog":
-                from core.services.blog_service import BlogService
-                post_id = approval_action.get("post_id")
-                if not post_id:
-                    raise HTTPException(status_code=422, detail="approval_action missing post_id")
-                svc = BlogService(db, ctx.workspace_id)
-                post = svc.publish_post(UUID(post_id))
-                if not post:
-                    raise HTTPException(status_code=404, detail=f"Blog post {post_id} not found")
-                action_result = {
-                    "type": "publish_blog",
-                    "post_id": str(post.id),
-                    "title": post.title,
-                    "slug": post.slug,
-                    "status": post.status,
-                    "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
-                }
-                logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
-            elif action_type == "create_blog":
-                # Used by VECTOR (and any agent) to suggest a blog topic for
-                # founder approval. On approve, fire the standard blog mission.
-                from modules.tools.discovery.handlers_blog import (
-                    create_blog_post_from_topic,
-                )
-                topic = approval_action.get("topic")
-                category = approval_action.get("category") or "AI & Automation"
-                if not topic:
-                    raise HTTPException(status_code=422, detail="approval_action missing topic")
-                user_id = ctx.user.clerk_user_id if ctx.user else None
-                result = await create_blog_post_from_topic(
-                    db,
-                    ctx.workspace_id,
-                    {"topic": topic, "category": category, "_user_id": user_id},
-                )
-                if not result.get("success"):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Blog mission start failed: {result.get('error', 'unknown')}",
-                    )
-                action_result = {
-                    "type": "create_blog",
-                    "mission_id": result.get("mission_id"),
-                    "topic": topic,
-                    "category": category,
-                    "task_count": result.get("task_count", 0),
-                }
-                logger.info(
-                    "[BoardTasks] Approved: created blog mission %s for topic '%s'",
-                    result.get("mission_id"), topic,
-                )
-            else:
-                logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
-                action_result = {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error("[BoardTasks] Approval action failed: %s", e, exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Approval action failed: {e}")
 
-    # Move to done
-    task.status = "done"
-    task.completed_at = datetime.now(timezone.utc)
-    if action_result:
-        task.result = json.dumps(action_result) if not task.result else task.result
-
-    # PRD-128: dispatch task_complete before commit so notification row
-    # joins the same transaction as the task update.
-    await _dispatch_task_complete(db, ctx.workspace_id, task)
-
+    # F195: the approval that moves the ticket out of review is the one that acts
+    # on it. The move is committed before the action runs (the action can await an
+    # LLM), so a second click finds the ticket decided instead of acting again.
+    task_id, finished_before, decided_at = task.id, task.completed_at, datetime.now(timezone.utc)
+    if not _decide(db, task, seen="review", values={"status": "done", "completed_at": decided_at}):
+        raise already_decided(task)
     db.commit()
+
+    try:
+        if approval_action:
+            action_result = await _run_approval_action(db, ctx, approval_action)
+        still_approved = _record_approval(db, task_id, decided_at=decided_at, action_result=action_result)
+        db.commit()  # the action's own writes and the ticket's result, together
+    except Exception:
+        _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
+        raise
     db.refresh(task)
 
-    logger.info("[BoardTasks] Task %d approved and moved to done", task.id)
+    if not still_approved:
+        logger.warning("[BoardTasks] Task %d: the approval's action ran, but the ticket was moved while it "
+                       "ran (now: %s); its result was left as it is", task.id, task.status)
+    else:
+        await _announce_approval(db, ctx.workspace_id, task)
+        logger.info("[BoardTasks] Task %d approved and moved to done", task.id)
     return {
         "success": True,
         "task_id": task.id,
@@ -1020,11 +1099,15 @@ async def reject_task(
 
     body = await request.json()
     feedback = (body.get("feedback") or "").strip()
-    if task.status == "done":
+    seen = task.status
+    if seen == "done":
         keep_previous_run(task, why="sent back", by=_operator_ref(ctx))
 
     # Q44: back to the same agent for another attempt, feedback in context.
-    task.status = "assigned"
+    # F195: only from the status this request saw, so a second click (or an
+    # approval that landed first) finds the ticket already decided.
+    if not _decide(db, task, seen=seen, values={"status": "assigned"}):
+        raise already_decided(task)
     task.started_at = None
     task.completed_at = None
     task.result = None

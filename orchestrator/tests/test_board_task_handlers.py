@@ -224,6 +224,10 @@ class _FakeQ:
     def get(self, *_a):
         return self._r
 
+    def update(self, values, synchronize_session=None):
+        # F195's compare-and-set on a seeded row: nothing else is deciding it here.
+        return 1 if self._r is not None else 0
+
     def all(self):
         # A single seeded agent models the one active row the name query returns;
         # None models an empty result. P224-RVW-4's _resolve_active_agent_by_name
