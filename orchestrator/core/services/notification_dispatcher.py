@@ -369,14 +369,19 @@ class NotificationDispatcher:
         agent_name: Optional[str],
         status: str,
     ) -> None:
-        """Insert an in-app notification row. Does NOT commit."""
+        """Insert an in-app notification row. Does NOT commit.
+
+        F209: its time is when it is written (clock_timestamp()). The column's
+        default, now(), is the transaction's START: a run's task_complete,
+        written minutes into a long transaction, sorted before things that
+        happened earlier and read "N min ago" from when the run began."""
         self.db.execute(
             text(
                 "INSERT INTO notifications "
                 "(workspace_id, user_id, event_type, title, message, "
-                " link_type, link_id, agent_id, agent_name, status) "
+                " link_type, link_id, agent_id, agent_name, status, created_at) "
                 "VALUES (:ws_id, :user_id, :event_type, :title, :message, "
-                " :link_type, :link_id, :agent_id, :agent_name, :status)"
+                " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp())"
             ),
             {
                 "ws_id": self.workspace_id,
