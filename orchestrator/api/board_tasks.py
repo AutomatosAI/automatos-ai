@@ -1944,6 +1944,16 @@ async def finalize_board_task_run(
         or ""
     )
 
+    # F210: nothing awaits while the row is locked below. The lock is taken
+    # synchronously, so a second ending of this ticket in the same process (or any
+    # write to its row) would block the event loop while the holder waits to
+    # resume: a freeze until a DB timeout. The named-file check reads the
+    # workspace, so it runs first; task_complete and the report run after the
+    # commit that closes the run.
+    file_check = None
+    if exec_status not in ("error", "cancelled"):
+        file_check = await _named_file_check(db, task_id, workspace_id, llm_text)
+
     # F175 review (MEDIUM): three writers close a run here (its own result, a CLI
     # host's result, the stall sweep). Lock the row so a second writer waits for the
     # first, sees its ending, and leaves it, instead of both reading in_progress
@@ -2012,21 +2022,11 @@ async def finalize_board_task_run(
     # blocked as platform_ask_human parks one, and the answer re-runs it.
     from services.ticket_owner_ask import park_if_the_result_asks
 
+    # F210: parking commits before it awaits (stage_question), so no lock is held
+    # across a suspension here either.
     if await park_if_the_result_asks(db, task=task, workspace_id=workspace_id, agent_id=agent_id,
                                      output=str(llm_text or ""), exec_result=exec_result):
         return task.status
-    # F014 (night 1, #153): a result that names a file the workspace does not
-    # have is not finished work, however well it reads.
-    from services.result_files import check_named_files
-
-    try:
-        file_check = await check_named_files(
-            task, str(llm_text or ""), workspace_id, db=db,
-            projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
-        )
-    except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
-        logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
-        file_check = None
     if file_check is not None:
         task.result = f"{task.result or ''}\n\n{file_check.note}".strip()
         force_review = force_review or file_check.review
@@ -2061,14 +2061,35 @@ async def finalize_board_task_run(
     # depending which field you read, because a retry that succeeded never
     # cleared error_message.
     task.error_message = None
+    status = task.status
+    db.commit()  # F210: the ending is written and the row let go before anything awaits
     # PRD-128: dispatch task_complete only on terminal 'done'
-    if task.status == "done":
+    if status == "done":
         await _dispatch_task_complete(db, workspace_id, task)
     # Persist a report row for every completed task so it surfaces
     # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
     await _auto_create_task_report(db, workspace_id, task, exec_result)
     db.commit()
-    return task.status
+    return status
+
+
+async def _named_file_check(db: Session, task_id: int, workspace_id: str, llm_text: Any) -> Any:
+    """F014 (night 1, #153): a result that names a file the workspace does not have
+    is not finished work, however well it reads. Run before finalize locks the row
+    (F210): it reads the workspace, and nothing awaits under that lock."""
+    from services.result_files import check_named_files
+
+    task = db.get(BoardTask, task_id, populate_existing=True)
+    if not task or task.status != "in_progress":
+        return None
+    try:
+        return await check_named_files(
+            task, str(llm_text or ""), workspace_id, db=db,
+            projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
+        logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
+        return None
 
 
 def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
