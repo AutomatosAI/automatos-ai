@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 NOTIFY_CHANNEL = "board_task_available"
 MAX_ADOPTED_FILES = 20
 
+# F209: a ticket's current run, in ``runtime_ref``. Every start stamps a fresh one
+# (this claim, a PATCH into in_progress, the status tool) and a redispatch clears
+# it, so a run that no longer holds the ticket can never finalize it. The claim
+# SQL below spells the same key.
+RUN_ID_KEY = "run_id"
+
 # Priority ordering for claim selection — highest urgency, then oldest first.
 # Inlined as data (no hardcoded behaviour elsewhere); mirrors the board's
 # urgent > high > medium > low taxonomy.
@@ -245,7 +251,10 @@ def claim_tasks(
                    attempts    = t.attempts + 1,
                    lease_until = :lease_until,
                    started_at  = COALESCE(t.started_at, :now),
-                   updated_at  = :now
+                   updated_at  = :now,
+                   -- F209: each claim is its own run; finalize writes only for it.
+                   runtime_ref = COALESCE(t.runtime_ref, '{{}}'::jsonb)
+                                 || jsonb_build_object('run_id', gen_random_uuid()::text)
              WHERE t.id IN ({locked})
          RETURNING t.id
             """
@@ -465,7 +474,7 @@ def _notify_swept(db: Session, task_ids: List[int], status: str, event: str) -> 
         logger.debug("[dispatch] sweep notify failed for %s", task_ids, exc_info=True)
 
 
-def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:
+def renew_lease(db: Session, task_id: int, *, lease_seconds: int, run_id: Optional[str] = None) -> bool:
     """PRD-171 F024: extend a still-running task's lease (a live heartbeat).
 
     The lease (``BOARD_DISPATCH_LEASE_SECONDS``, default 600s) is the crash
@@ -492,10 +501,12 @@ def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:
                    updated_at  = :now
              WHERE id = :task_id
                AND status = 'in_progress'
+               -- F209: a run renews only the claim it holds, never a newer run's
+               AND (CAST(:run_id AS text) IS NULL OR runtime_ref->>'run_id' = :run_id)
          RETURNING id
             """
         ),
-        {"new_lease": new_lease, "now": now, "task_id": task_id},
+        {"new_lease": new_lease, "now": now, "task_id": task_id, "run_id": run_id},
     ).fetchall()
     db.commit()
     renewed = bool(rows)
@@ -656,6 +667,7 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
                     "prompt": prompt,
                     "review_mode": t.review_mode or "auto",
                     "attachment_ids": t.attachment_ids or [],
+                    "run_id": (getattr(t, "runtime_ref", None) or {}).get(RUN_ID_KEY),
                 }
             )
         db.commit()  # persist consumed review_feedback
@@ -679,6 +691,7 @@ def _launch_one(task: dict) -> None:
         prompt=task["prompt"],
         review_mode=task["review_mode"],
         attachment_ids=task["attachment_ids"],
+        run_id=task.get("run_id"),
     )
 
 

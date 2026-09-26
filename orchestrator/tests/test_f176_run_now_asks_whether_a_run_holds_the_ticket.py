@@ -100,7 +100,7 @@ def test_a_run_holds_its_claim_from_its_first_moment():
 
     with patch("core.database.database.SessionLocal", MagicMock()), \
             patch("services.board_dispatcher.renew_lease",
-                  lambda db, task_id, lease_seconds: renewed.append(task_id) or True), \
+                  lambda db, task_id, lease_seconds, **_: renewed.append(task_id) or True), \
             patch.object(bt.asyncio, "sleep", _stop):
         with pytest.raises(asyncio.CancelledError):
             asyncio.run(bt._lease_heartbeat(1094))

@@ -299,7 +299,12 @@ async def run_board_task_action(
     try:
         from api.board_tasks import _redispatch_task
 
-        _redispatch_task(db, task)
+        if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
+            await escalate_watch_now(
+                db, watch,
+                reason=f"task {watch.target_id} is starting or finishing a run — not re-dispatching",
+            )
+            return WatchActionOutcome(action=action, escalated=True, detail="task already running")
     except Exception as exc:  # noqa: BLE001 -- outcome-shaped, we escalate
         logger.error(
             "[WatchActions] board re-run failed for task %s",

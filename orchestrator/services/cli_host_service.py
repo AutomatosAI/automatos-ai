@@ -38,7 +38,7 @@ from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
-from services.board_dispatcher import claim_tasks, renew_lease
+from services.board_dispatcher import RUN_ID_KEY, claim_tasks, renew_lease
 from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
@@ -916,6 +916,16 @@ def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     return prompt
 
 
+def _claim_attempt(task: BoardTask, prior: Dict[str, Any]) -> int:
+    """F209: the number of this claim, which the host echoes with its result. It
+    never repeats on a ticket. Run Now resets ``attempts`` to 0 (and a usage-limit
+    pause refunds one), so a re-claim was numbered like the session it replaced,
+    and that session's late result passed apply_result's stale-attempt check and
+    finished the ticket under the new run. ``attempts`` stays the retry budget."""
+    before = prior.get("attempt")
+    return max(int(task.attempts or 0), before + 1 if isinstance(before, int) else 0)
+
+
 def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]:
     """Claim up to ``limit`` ``cli`` tickets of this host's workspace for it.
 
@@ -972,7 +982,8 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "model": cfg.get(CONFIG_MODEL_KEY),
             "host_id": str(host.id),
             "session_id": session_id,
-            "attempt": int(task.attempts or 0),
+            "attempt": _claim_attempt(task, prior),
+            RUN_ID_KEY: prior.get(RUN_ID_KEY),  # F209: the claim's run, stamped by claim_tasks
             "claimed_at": _iso(_now()),
             # PRD-239 S6c: an agent without a folder runs where the workspace says
             # (the projects folder by default), else the host's sessions/<ticket>.
@@ -2380,6 +2391,10 @@ async def apply_result(
         agent_id=task.assigned_agent_id,
         exec_result=exec_result,
         review_mode=task.review_mode or "auto",
+        # F209: finalize only while the ticket is still on the run this result was
+        # written under; a redispatch and re-claim since the commit above make it
+        # another run's (finalize re-reads the row under its lock).
+        run_id=ref.get(RUN_ID_KEY),
         # PRD-245 S0.3 (D6): review only when a held command went unanswered or
         # was denied (an unclassifiable refusal counts as one — fail closed) —
         # or when the turn produced nothing at all (night 1, finding 14): no

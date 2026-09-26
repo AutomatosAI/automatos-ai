@@ -101,18 +101,26 @@ def test_run_now_redispatch_writes_the_no_host_line_for_a_cli_agent(monkeypatch)
 
     task = SimpleNamespace(id=92, status="failed", assigned_agent_id=15, workspace_id="ws",
                            source_type="chat", lease_until="x", attempts=3, completed_at="x",
-                           started_at="x", blocked_reason=None)
+                           started_at="x", blocked_reason=None, runtime_ref=None)
+    class _Held:  # F209: the redispatch re-reads the row under a lock first
+        def __init__(self, t): self._t = t
+        def filter(self, *a, **k): return self
+        def with_for_update(self, *a, **k): return self
+        def first(self): return self._t
     class _DB:
+        def __init__(self, t): self._t = t
+        def query(self, *a): return _Held(self._t)
         def commit(self): pass
         def refresh(self, t): pass
     monkeypatch.setattr(bt, "_agent_runtime_kind", lambda db, aid: bt.RUNTIME_CLI)
     monkeypatch.setattr(bt, "notify_task_available", lambda *a, **k: None)
     monkeypatch.setattr(lane, "host_online", lambda db, ws: False)
-    bt._redispatch_task(_DB(), task)
+    bt._redispatch_task(_DB(task), task)
     assert task.status == "assigned" and task.attempts == 0 and task.blocked_reason == NO_HOST_REASON
 
     api_task = SimpleNamespace(id=93, status="failed", assigned_agent_id=2, workspace_id="ws", source_type="chat",
-                               lease_until=None, attempts=0, completed_at=None, started_at=None, blocked_reason=None)
+                               lease_until=None, attempts=0, completed_at=None, started_at=None, blocked_reason=None,
+                               runtime_ref=None)
     monkeypatch.setattr(bt, "_agent_runtime_kind", lambda db, aid: bt.RUNTIME_API)
-    bt._redispatch_task(_DB(), api_task)
+    bt._redispatch_task(_DB(api_task), api_task)
     assert api_task.blocked_reason is None
