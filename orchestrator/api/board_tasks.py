@@ -225,6 +225,12 @@ async def _auto_create_task_report(
             if stripped:
                 summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
                 break
+        # F197: a failed task's result is blank, so its report is summarised by
+        # why it failed. The summary used to fall back to "**Task:** …", and the
+        # bell could not tell a credit outage it had already announced.
+        if summary is None and task.error_message:
+            first = str(task.error_message).strip().splitlines()[0]
+            summary = (first[:497] + "...") if len(first) > 497 else first
 
         svc = ReportService(db, workspace_id)
         report_result = await svc.create_report(
