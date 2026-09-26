@@ -1519,6 +1519,10 @@ class Config:
     # most 402 characters; a longer answer is the step's work, even if it ends
     # on a question.
     PLAYBOOK_OWNER_ASK_MAX_CHARS: int = int(os.getenv("PLAYBOOK_OWNER_ASK_MAX_CHARS", "600"))
+    # F183: an answer that says what it lacks, asks for it and puts its work off
+    # until it has it ("Once I have …, I will …") is an ask up to this long,
+    # wherever its questions sit. Night 6's #1097 was 662 characters.
+    OWNER_ASK_DEFERRED_MAX_CHARS: int = int(os.getenv("OWNER_ASK_DEFERRED_MAX_CHARS", "1200"))
     # F105: document-vector searches run on this many threads of their own, never
     # on the loop; the local search is a full scan (F107) that holds a pool
     # connection for its whole length, so this also caps how many run at once.

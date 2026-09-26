@@ -81,6 +81,12 @@ _REQUEST = re.compile(r"\b(?:please|could you|can you|would you|will you)\b[^?\n
                       r"|\blet me know\b|\btell me\b", re.IGNORECASE)
 _DRAFTING_STEP = re.compile(r"\b(?:draft|drafts|drafted|compose|reply|caption|post|tweet|message|email|emails"
                             r"|e-mail|sms|letter|newsletter|announcement)\b", re.IGNORECASE)
+# (b') F183: ...or says its work waits for the answer. Night 6's #1097 listed four
+# questions mid-answer, then "Without this information, I can only create a very
+# generic draft. Once I have a better understanding …, I will draft the newsletter".
+_DEFERRED = re.compile(r"\b(?:once|as soon as|when) (?:I|you)\b[^.\n]{0,120}?\bI(?:'ll| will)\b"
+                       r"|\bwithout (?:this|that|these|those|the|your|more|further) "
+                       r"(?:information|info|details?|input|answers?|context)\b", re.IGNORECASE)
 
 # A call's name without one of these verbs changed something; the scratchpad,
 # the ask and pre_exec belong to the run itself.
@@ -145,15 +151,30 @@ def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
     from config import config
 
     text = text.replace("’", "'")
-    if not text or len(text) > config.PLAYBOOK_OWNER_ASK_MAX_CHARS:
+    if not text or _DRAFT.search(text):
         return False
-    if not text.splitlines()[-1].strip().rstrip("*_) ").endswith("?"):
+    if _defers_to_the_owner(text):
+        return True
+    if len(text) > config.PLAYBOOK_OWNER_ASK_MAX_CHARS:
         return False
-    if _DRAFT.search(text):
+    if not _is_question(text.splitlines()[-1]):
         return False
     if _NEED.search(text):
         return True
     return bool(_REQUEST.search(text)) and not _DRAFTING_STEP.search(prompt_template or "")
+
+
+def _is_question(line: str) -> bool:
+    return line.strip().rstrip("*_) ").endswith("?")
+
+
+def _defers_to_the_owner(text: str) -> bool:
+    """F183: says what it lacks, asks for it, and puts the work off until it has
+    it. The questions may sit mid-answer, the promise last."""
+    from config import config
+
+    return (len(text) <= config.OWNER_ASK_DEFERRED_MAX_CHARS and bool(_NEED.search(text))
+            and bool(_DEFERRED.search(text)) and any(_is_question(line) for line in text.splitlines()))
 
 
 # ---------------------------------------------------------------------------

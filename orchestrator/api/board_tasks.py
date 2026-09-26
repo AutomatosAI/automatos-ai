@@ -1648,6 +1648,15 @@ async def finalize_board_task_run(
         return task.status
 
     task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
+    task.error_message = None
+    # F183 (night 6, #1097): a result that only asks the owner is not finished
+    # work either. The ticket waits behind its question (Questions + Telegram),
+    # blocked as platform_ask_human parks one, and the answer re-runs it.
+    from services.ticket_owner_ask import park_if_the_result_asks
+
+    if await park_if_the_result_asks(db, task=task, workspace_id=workspace_id, agent_id=agent_id,
+                                     output=str(llm_text or ""), exec_result=exec_result):
+        return task.status
     # F014 (night 1, #153): a result that names a file the workspace does not
     # have is not finished work, however well it reads.
     from services.result_files import check_named_files

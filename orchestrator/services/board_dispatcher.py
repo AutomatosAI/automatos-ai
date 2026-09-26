@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
+from services.ticket_owner_ask import ticket_answers_block
 
 logger = logging.getLogger(__name__)
 
@@ -616,6 +617,10 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
         out = []
         for t in claimed:
             prompt = t.raw_prompt or t.description or t.title
+            # F183: a ticket the owner's answer re-queued runs with the answer.
+            answers = ticket_answers_block(getattr(t, "planning_data", None))
+            if answers:
+                prompt = f"{prompt}\n\n{answers}"
             if t.review_feedback:
                 # Q44: a rejected task redoes the work with reviewer feedback in
                 # context. Consume it so the correction applies to this run only.

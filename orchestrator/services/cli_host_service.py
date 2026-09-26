@@ -894,10 +894,16 @@ def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[st
 
 
 def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
+    from services.ticket_owner_ask import ticket_answers_block
+
     prompt = task.raw_prompt or task.description or task.title or ""
     answers = _answers_fold_in(task)
     if answers:
         prompt = f"{prompt}\n\n{answers}"
+    # F183: the owner's answers from Questions (a parked ticket re-queued by one).
+    owners = ticket_answers_block(getattr(task, "planning_data", None))
+    if owners:
+        prompt = f"{prompt}\n\n{owners}"
     if field_memory:
         prompt = f"{prompt}\n\n{field_memory}"
     if task.review_feedback:
