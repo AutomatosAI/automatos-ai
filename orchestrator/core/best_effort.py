@@ -28,7 +28,7 @@ import functools
 import logging
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional, Set
 
 from config import config
@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 _POOL_POLL_S = 0.05
 
 _lock = threading.Lock()
+# A write's future is told done before its callback (_finished) runs; drain()
+# waits on this for the callback, so a failed write's log line is in by then.
+_settled = threading.Condition(_lock)
 _executor: Optional[ThreadPoolExecutor] = None
 _pending: Set[Future] = set()
 
@@ -78,10 +81,11 @@ def _submit(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
 
 
 def _finished(future: Future) -> None:
-    with _lock:
-        _pending.discard(future)
     if not future.cancelled() and future.exception() is not None:
         logger.warning("best-effort write failed: %r", future.exception())
+    with _settled:
+        _pending.discard(future)
+        _settled.notify_all()
 
 
 def _loop_running() -> bool:
@@ -113,7 +117,14 @@ def awaitable_off_loop(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def drain(timeout: float = 5.0) -> bool:
-    """Wait for the writes handed over so far (tests, shutdown); True if all finished."""
-    with _lock:
-        pending = list(_pending)
-    return not wait(pending, timeout=timeout).not_done
+    """Wait for the writes handed over so far, their failure log lines included
+    (tests, shutdown); True if all finished."""
+    deadline = time.monotonic() + timeout
+    with _settled:
+        handed_over = set(_pending)
+        while handed_over & _pending:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            _settled.wait(left)
+    return True
