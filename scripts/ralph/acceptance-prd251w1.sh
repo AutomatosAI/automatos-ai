@@ -117,8 +117,11 @@ font_route_exists() {
 # The Auto skill seed is GENERATED from automatos-skills by the sync script;
 # the owner's rule is that skills change there first, never here.
 no_clone_refs_outside_seed() {
+  # Code only: the tests that pin the clone's absence name it, and so may the
+  # generated skill seeds (synced from automatos-skills, US-119).
   ! git grep -q 'repos/automatos-social' -- orchestrator frontend services \
-      ':(exclude)orchestrator/core/seeds/platform-management-skill.md'
+      ':(exclude)orchestrator/tests' ':(exclude)orchestrator/core/seeds/platform-management-skill.md' \
+      ':(exclude)orchestrator/core/seeds/skills'
 }
 # D15: paid tools only through the workspace's Composio connection.
 no_provider_clients() {
@@ -205,8 +208,9 @@ every_commit_signed() {
   done
 }
 no_wave2_code() {
+  # Code only: this script's own pattern line is in the diff too.
   git diff --quiet "$BASE"..HEAD -- orchestrator/modules/socials/publisher.py \
-    && ! git diff "$BASE"..HEAD | grep -qE '^\+.*social-publish-'
+    && ! git diff "$BASE"..HEAD -- orchestrator/ frontend/ services/ | grep -qE '^\+.*social-publish-'
 }
 # The pushed HEAD's test.yml run must carry every required job, each green.
 # Polls up to 40 min (a full run takes ~10-20 with the media-render image build).
@@ -260,8 +264,18 @@ no_second_image_tool() {
 }
 socials_tools_cannot_publish() {
   [ -f "$DISC/actions_socials.py" ] || return 1
+  # No tool this wave adds is named approve/schedule/publish. The tree already has
+  # platform_publish_blog_post, platform_approve_mission, platform_schedule_playbook
+  # and platform_schedule_task (on the base), none of them a post's.
   ! grep -qE '"(approve|approved|approval|schedule|scheduled_at|publish|publish_now)"[[:space:]]*:' "$DISC/actions_socials.py" \
-    && ! git grep -qE 'name="platform_(approve|schedule|publish)[a-z_]*"' -- "$DISC"
+    && ! git diff -U0 "$BASE"..HEAD -- "$DISC" | grep -E '^\+[^+]' | grep -qE 'name="platform_(approve|schedule|publish)[a-z_]*"'
+}
+# US-117: generate_document's format enum is DOCUMENT_TEMPLATE_FORMATS (core/models/core.py),
+# which carries core/social_templates.py's two social formats.
+generate_document_takes_social_formats() {
+  grep -q 'list(DOCUMENT_TEMPLATE_FORMATS)' orchestrator/modules/agents/services/agent_platform_tools.py \
+    && grep -qE '^DOCUMENT_TEMPLATE_FORMATS = .*SOCIAL_TEMPLATE_FORMATS' orchestrator/core/models/core.py \
+    && grep -qF 'SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"' orchestrator/core/social_templates.py
 }
 post_gate_seeded() {
   local added
@@ -384,8 +398,7 @@ for t in platform_create_social_post platform_update_social_post platform_submit
 done
 check "register_all_actions wires the socials tools" "grep -q 'actions_socials' $DISC/platform_actions.py"
 check "no tool approves, schedules or publishes a post" "socials_tools_cannot_publish"
-check "generate_document accepts social_image and social_video" \
-  "grep -q 'social_video' orchestrator/modules/agents/services/agent_platform_tools.py && grep -q 'social_image' orchestrator/modules/agents/services/agent_platform_tools.py"
+check "generate_document accepts social_image and social_video" "generate_document_takes_social_formats"
 check "the image tool no longer requires a blog post" "cover_image_post_id_optional"
 check "no second image tool" "no_second_image_tool"
 check "the post gate's action list is seeded in the wave's migration" "post_gate_seeded"

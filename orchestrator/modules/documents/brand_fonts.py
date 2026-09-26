@@ -19,7 +19,7 @@ fonts (``font_files`` becomes ``[{family, weight, style, data_uri}]``), the
 shapes ``core/media_render_bundle.py`` reads. A render reads only what its
 bundle carries (D9), so the fonts never have to be fetched.
 
-Nothing here reads ``os.getenv`` — storage settings come through ``config``.
+Storage settings come through ``config``; nothing here reads the environment.
 """
 
 from __future__ import annotations
