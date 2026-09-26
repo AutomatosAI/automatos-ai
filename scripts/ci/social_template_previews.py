@@ -39,8 +39,9 @@ chip naming the report), so its renders above ARE a report's table rendered;
 the driver checks that binding against the seed. Then it binds more fixture
 reports with the orchestrator's own parser and binder (``core.report_tables``,
 ``core.chart_binding``): a line of a monthly table, a number grid of a
-percentage column, and a stress table whose labels are longer than the
-template holds and whose figures are the widest, as a bar, a line and a grid.
+percentage column, a stress table whose labels are longer than the template
+holds, as a bar, a line and a grid, and a table of 20-character figures (a
+currency code and cents) as a grid and a bar.
 Each renders at every size with 0 check errors (the axis labels fit), and
 every figure the bundle puts on the chart is the report's own cell, the chip
 naming the report.
@@ -406,6 +407,19 @@ PROGRAMME_REPORT: Dict[str, str] = {
         "| Print | $1,200.00 |\n"
     ),
 }
+# The widest figures a row holds: 20 characters of a 24-character limit, a currency code and cents.
+REVENUE_REPORT: Dict[str, str] = {
+    "title": "Northwind Studio \u2014 revenue by region, fiscal year 2026",
+    "as_of": "2026-09-25T12:00:00+00:00",
+    "markdown": (
+        "| Region | Revenue |\n| --- | ---: |\n"
+        "| North America | USD 1,234,567,890.12 |\n"
+        "| Europe, Middle East and Africa | USD 987,654,321.09 |\n"
+        "| Asia Pacific | USD 876,543,210.98 |\n"
+        "| Latin America | USD 123,456,789.01 |\n"
+        "| Rest of world | USD 12,345,678.90 |\n"
+    ),
+}
 # The starter's sample data is this binding (its renders at every size, above, are a report's table).
 SAMPLE_BINDING = (CHANNEL_REPORT, "Reach", "bar")
 # (name, report, the figures' column, the kind): the other bindings, each rendered at every size.
@@ -415,6 +429,8 @@ INFOGRAPHIC_RENDERS = (
     ("programmes-bar", PROGRAMME_REPORT, None, "bar"),
     ("programmes-line", PROGRAMME_REPORT, None, "line"),
     ("programmes-grid", PROGRAMME_REPORT, None, "grid"),
+    ("revenue-grid", REVENUE_REPORT, None, "grid"),
+    ("revenue-bar", REVENUE_REPORT, None, "bar"),
 )
 # Each bound render's own copy (the rest is the starter's sample copy), so a preview reads as a post would.
 RENDER_COPY: Dict[str, Dict[str, str]] = {
@@ -426,6 +442,10 @@ RENDER_COPY: Dict[str, Dict[str, str]] = {
                        "note": "The top 5 of 6 programmes, in the report's order."},
 }
 RENDER_COPY["programmes-line"] = RENDER_COPY["programmes-grid"] = RENDER_COPY["programmes-bar"]
+RENDER_COPY["revenue-grid"] = RENDER_COPY["revenue-bar"] = {
+    "eyebrow": "REVENUE BY REGION", "headline": "WHERE THE|REVENUE CAME|FROM", "headline_accent": "REVENUE",
+    "note": "Each figure as the finance report wrote it.",
+}
 
 
 def bind_fixture(starter: Mapping[str, Any], report: Mapping[str, str], column: Optional[str], kind: str) -> Tuple[Dict[str, str], Series]:
