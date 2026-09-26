@@ -8,6 +8,9 @@ the calendar and published through the workspace's own Composio connections.
   guard ``assert_publishable``.
 - :mod:`modules.socials.sources`: a claim's source resolved in the caller's
   workspace (S1.4), and the source picker's search.
+- :mod:`modules.socials.report_charts`: a chart bound to a report (S1.7): the
+  report's top rows filling a chart template (the infographic), and the check
+  that a render shows the report's rows as the report has them now.
 - :mod:`modules.socials.capabilities`: the media capability registry (D16) —
   which actions of the workspace's connected Composio toolkits Socials may call,
   and what for (an allowlist per toolkit, under the deny list).

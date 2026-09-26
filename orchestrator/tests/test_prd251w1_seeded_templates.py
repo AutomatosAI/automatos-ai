@@ -13,8 +13,8 @@ Pins:
   template; the starter's sample data carries the reference's own copy, and it
   fills every variable a render needs.
 * **Seeding (AC 1).** Turning Socials on seeds the four into the workspace in the
-  switch's own commit, with the seven image templates US-107 adds beside them
-  (test_prd251w1_image_templates.py); turning it on twice leaves the same rows;
+  switch's own commit, with the eight image templates US-107 and US-113 add
+  beside them (test_prd251w1_image_templates.py); turning it on twice leaves the same rows;
   a person's own template of the same name is never touched. On real Postgres
   (``@integration``): the rows land once, and ``GET /api/documents/templates``
   lists them.
@@ -99,8 +99,10 @@ from modules.documents.template_summary import STARTER_CREATOR, summarize_templa
 
 WS = uuid.UUID("00000000-0000-0000-0000-0000000001a6")
 STARTER_NAMES = ["UI story promo", "Cinematic product promo", "App promo", "Data story"]
-# US-107: the image templates seed through the same path, after the videos.
-IMAGE_STARTER_NAMES = ["Title card", "Definition card", "Stats card", "Quote card", "Announcement card", "Fact card", "Carousel"]
+# US-107 (and US-113's infographic): the image templates seed through the same path, after the videos.
+IMAGE_STARTER_NAMES = [
+    "Title card", "Definition card", "Stats card", "Quote card", "Announcement card", "Fact card", "Carousel", "Infographic",
+]
 ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
 REFERENCE_OF = {
@@ -281,14 +283,14 @@ def test_the_social_starters_seed_through_the_starter_path_once():
     assert seed_templates.seed_social_starters(db, WS) == {"created": len(ALL_STARTER_NAMES), "refreshed": 0}
     assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
     starters = social_starters()
-    assert len(starters) == len(db.rows) == 11
+    assert len(starters) == len(db.rows) == 12
     for row, starter in zip(db.rows, starters):
         assert (row.workspace_id, row.format, row.category, row.created_by) == (WS, starter["format"], "social", STARTER_CREATOR)
         assert row.blocks == starter["blocks"] and row.sample_data == starter["sample_data"]
-    assert [row.format for row in db.rows] == ["social_video"] * 4 + ["social_image"] * 7
+    assert [row.format for row in db.rows] == ["social_video"] * 4 + ["social_image"] * 8
     # Twice is the same rows: nothing added, nothing refreshed, nothing committed.
     assert seed_templates.seed_social_starters(db, WS) == {"created": 0, "refreshed": 0}
-    assert len(db.rows) == 11 and db.commits == 1
+    assert len(db.rows) == 12 and db.commits == 1
 
 
 def test_a_drifted_starter_is_refreshed_and_a_persons_own_is_never_touched():

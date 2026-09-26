@@ -2,12 +2,13 @@
 
 Pins:
 
-* **The seven starters.** The five automatos-social families (title, definition,
-  stats, quote, announcement) and two variants (a fact card, a carousel), each a
-  ``social_image`` at the four sizes of automatos-social's schema.json
-  (1080x1350, 1080x1920, 1200x628, 1600x900), each passing the template contract
-  and the brand rule (D4). They seed through the same starter path as the
-  videos (test_prd251w1_seeded_templates.py pins the eleven rows).
+* **The eight starters.** The five automatos-social families (title, definition,
+  stats, quote, announcement), two variants (a fact card, a carousel) and the
+  infographic (US-113, test_prd251w1_infographic.py), each a ``social_image`` at
+  the four sizes of automatos-social's schema.json (1080x1350, 1080x1920,
+  1200x628, 1600x900), each passing the template contract and the brand rule
+  (D4). They seed through the same starter path as the videos
+  (test_prd251w1_seeded_templates.py pins the twelve rows).
 * **Every word is a variable.** No text node of a card's markup is anything
   but a ``{{ placeholder }}``; the sample data fills every variable; the
   figures are claims (D7).
@@ -89,6 +90,7 @@ IMAGE_NAMES = {
     "announcement-card": "Announcement card",
     "fact-card": "Fact card",
     "carousel": "Carousel",
+    "infographic": "Infographic",
 }
 KIT = {
     "name": "Automatos",
@@ -138,11 +140,11 @@ def _renderer_settings():
 
 
 # ---------------------------------------------------------------------------
-# The seven starters
+# The eight starters
 # ---------------------------------------------------------------------------
 
 
-def test_the_five_families_and_two_variants_are_seeded_as_social_image_starters():
+def test_the_five_families_two_variants_and_the_infographic_are_seeded_as_social_image_starters():
     images = _images()
     assert [s["slug"] for s in images] == list(SOCIAL_IMAGE_STARTER_SLUGS) == list(IMAGE_NAMES)
     assert [s["name"] for s in images] == list(IMAGE_NAMES.values())
@@ -193,6 +195,7 @@ def test_every_word_on_a_card_is_a_variable(slug):
 def test_the_figures_on_the_cards_are_claims():
     assert claim_names(_starter("stats-card")["blocks"]["variables_schema"]) == ["stat_1_value", "stat_2_value", "stat_3_value"]
     assert claim_names(_starter("fact-card")["blocks"]["variables_schema"]) == ["fact_value"]
+    assert claim_names(_starter("infographic")["blocks"]["variables_schema"]) == [f"row_{n}_value" for n in range(1, 6)]
 
 
 @pytest.mark.parametrize("slug", list(IMAGE_NAMES))

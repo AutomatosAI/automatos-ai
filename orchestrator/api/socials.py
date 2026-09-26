@@ -15,7 +15,8 @@ errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 ``content_hash``), UnsourcedClaims → 422 (naming the claims), SourcesNotFound →
 422 (naming each claim and why), NotPublishable → 409, PublishingUnavailable →
 501, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
-RendererUnavailable → 503.
+RendererUnavailable → 503, ReportNotFound → 404, ChartNotBindable → 422,
+ReportUnreadable → 503.
 
 Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
 unless it resolves in the caller's workspace (``modules/socials/sources.py``);
@@ -41,6 +42,13 @@ Music credit (S1.6): a CC BY track needs its credit wherever the video is
 published. Every save appends to the post's copy the credit lines the music of
 its media asks for (``modules/socials/credits.py``: each rendered file records
 its music on its Deliverable), and a render appends its own music's line.
+
+A chart bound to a report (S1.7, D7): ``GET /sources/reports/{id}/chart``
+fills a chart template (the Infographic) from a report of the workspace: its
+top rows, each figure a claim bound to the report, and the chip naming it
+(``modules/socials/report_charts.py``). A render of a chart whose first figure
+is bound to a report is refused (422) unless the chart shows that report's rows
+as the report has them now, so every number on it comes from its source.
 
 An approval binds to the content the approver saw (D6): the approve request
 carries that version's ``content_hash``, and a post that changed before the
@@ -78,11 +86,13 @@ from core.media_render_bundle import voice_script
 from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
+from core.social_templates import SocialTemplateError, validate_social_blocks
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_store, render, service
 from modules.socials import credits as post_credits
+from modules.socials import report_charts
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.publisher import PublishingUnavailable, publish_post
@@ -202,6 +212,12 @@ def _raise_for(exc: Exception) -> NoReturn:
     if isinstance(exc, render_quota.RenderQuotaExceeded):
         raise HTTPException(status_code=429, detail=str(exc))
     if isinstance(exc, render.RendererUnavailable):
+        raise HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, report_charts.ReportNotFound):
+        raise HTTPException(status_code=404, detail=f"Report not found: {exc}")
+    if isinstance(exc, report_charts.ChartNotBindable):
+        raise HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, report_charts.ReportUnreadable):
         raise HTTPException(status_code=503, detail=str(exc))
     raise HTTPException(status_code=400, detail=str(exc))
 
@@ -547,7 +563,9 @@ async def render_social_post(
     """Render the post in the background: 202 with it in ``rendering``.
 
     Refused, with nothing changed, when the post holds an approval or is already
-    rendering (409), has no social template (422), names a voice toolkit the
+    rendering (409), has no social template (422), is a chart bound to a report
+    that no longer shows the report's rows or names it (422, saying which row
+    differs; 503 when the report's file cannot be read), names a voice toolkit the
     workspace cannot speak with now (422, saying why), the workspace has used
     its render minutes this month (429, before any call to media-render), or
     there is no storage or renderer to use (503). The render ends the post in
@@ -564,6 +582,10 @@ async def render_social_post(
         workspace = _workspace(db, ctx)
         brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
         bundle = render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "")
+        # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
+        await report_charts.check_bound_chart(
+            db, ctx.workspace_id, render.composition_of(template), post.sources, bundle["variables"]
+        )
         # D11: a voice toolkit speaks the script before the render; resolved now,
         # so a toolkit the workspace cannot use is refused with nothing changed.
         voice_plan = None
@@ -694,3 +716,51 @@ async def search_social_sources(
         raise HTTPException(status_code=422, detail=f"kind must be one of {list(service.SOURCE_KINDS)}")
     candidates = post_sources.search(db, ctx.workspace_id, kind=kind, q=q, limit=limit)
     return {"candidates": candidates, "total": len(candidates)}
+
+
+def _chart_template(db: Session, ctx: RequestContext, template_id: UUID) -> Dict[str, Any]:
+    """A social template of the caller's workspace, checked: the chart a report fills (S1.7)."""
+    template = (
+        db.query(DocumentTemplate.format, DocumentTemplate.blocks)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    blocks = render.composition_of(template)
+    if blocks is None:
+        raise HTTPException(status_code=422, detail="template_id is not a social template in this workspace")
+    try:
+        return validate_social_blocks(blocks, template.format)
+    except SocialTemplateError as exc:
+        raise HTTPException(status_code=422, detail=f"this template cannot be used: {exc}") from exc
+
+
+@router.get("/sources/reports/{report_id}/chart", dependencies=[CAN_READ_SOURCES])
+async def chart_social_source_report(
+    report_id: str,
+    template_id: UUID = Query(..., description="A chart template of this workspace (one with a data block)"),
+    chart: Optional[str] = Query(None, description="bar, line or grid; the template's own when the figures fit it"),
+    column: Optional[str] = Query(None, max_length=report_charts.COLUMN_MAX_CHARS, description="The figures' column, by its header"),
+    part: Optional[str] = Query(None, description="table or metrics; the report's table when its file has one"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """A chart template filled from a report of the caller's workspace (S1.7, D7).
+
+    The report's data table (the first markdown table in its file; its first
+    column the labels, ``column`` or its first numeric column the figures) or
+    its metrics. The top rows, as many as the template shows, exactly as the
+    report wrote them. ``variables`` and ``sources`` are the post's own shapes:
+    each figure shown is a claim bound to the report, every row variable is set
+    (past the report's rows, to empty), and the chip names the report as it
+    resolves. A render checks the chart still matches the report. 404 when the
+    report is not in the workspace; 422 when its data cannot fill the chart (and
+    why: no table, no numeric column, figures a bar or a line cannot compare).
+    """
+    blocks = _chart_template(db, ctx, template_id)
+    try:
+        binding = await report_charts.bind_report(
+            db, ctx.workspace_id, report_id, blocks, chart=chart, column=column, part=part
+        )
+    except service.SocialsError as exc:
+        _raise_for(exc)
+    return binding.to_dict()

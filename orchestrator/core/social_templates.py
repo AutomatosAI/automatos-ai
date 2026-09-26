@@ -17,6 +17,7 @@ carries a composition in ``blocks``, which media-render renders:
         "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"}
       },
       "stills": [{"at": 0.5}, {"at": 1.5, "when": "point_3"}]   social_image only: one PNG each
+      "data": {"rows": 5, "label": "row_{n}_label", "value": "row_{n}_value", "source": "source_label"}
     }
 
 * **Variables.** A variable is ``text``, a ``number`` or a ``boolean``, and it
@@ -39,6 +40,9 @@ carries a composition in ``blocks``, which media-render renders:
   A still with ``when`` is taken only when that variable has a value, so a
   carousel's optional slides drop out; the first still is always taken.
   Without ``stills`` an image is one still at 0 s (:func:`still_moments`).
+* **Data.** A chart bound to a report (S1.7) names the variables that hold its
+  rows, its source chip and its kind (``core/chart_binding.py``): the report's
+  top rows fill them, and a render checks they still match the report.
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
   a composition as ``--brand-*`` CSS variables, ``{{ brand.logo }}`` and (D5, the
   square mark) ``{{ brand.logo_mark }}``.
@@ -60,12 +64,14 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from core.chart_binding import data_errors
+
 # The two formats a social template has. core/models/core.py reads them from
 # here for the document_templates format CHECK (the prd251_wave1 migration).
 SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
 SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills")
+BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data")
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
 # The music cue (S1.6): a track of media-render's music library by id, and the
@@ -582,6 +588,7 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         errors += _voice_placeholder_errors(blocks.get("audio_plan"), schema)
         errors += _slot_errors(blocks.get("slots"), html, css or "")
         errors += _still_errors(blocks.get("stills"), fmt, schema, html)
+        errors += data_errors(blocks["data"], schema) if "data" in blocks else []
         errors += [_error(field, message) for field, message in brand_literals(html, css or "")]
     if errors:
         raise SocialTemplateError(errors)

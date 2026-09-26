@@ -33,6 +33,18 @@ is rendered again with the primary swapped. The pixel there must match the
 bundle's own token (``primary-on-ink`` on a video's stage, ``primary`` on an
 image's brand stripe) in both renders, and the two must differ.
 
+The infographic (US-113, S1.7: a chart bound to a report). The Infographic's
+sample data is the binding of a fixture report's table (its top five rows, the
+chip naming the report), so its renders above ARE a report's table rendered;
+the driver checks that binding against the seed. Then it binds more fixture
+reports with the orchestrator's own parser and binder (``core.report_tables``,
+``core.chart_binding``): a line of a monthly table, a number grid of a
+percentage column, and a stress table whose labels are longer than the
+template holds and whose figures are the widest, as a bar, a line and a grid.
+Each renders at every size with 0 check errors (the axis labels fit), and
+every figure the bundle puts on the chart is the report's own cell, the chip
+naming the report.
+
 The heading font (US-108, S1.3: a template renders with the brand kit's heading
 font, an uploaded woff2): the Title card is rendered with a brand kit whose
 ``font_files`` carry "CI Block" (``ci_block_font.py``, a woff2 whose every
@@ -59,7 +71,9 @@ import zlib
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from core.chart_binding import chart_values, chip_text, max_chars_of, shown_rows, spec_of
 from core.media_render_bundle import build_bundle
+from core.report_tables import Series, first_table, parse_figure, table_series
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables
 from modules.documents.social_starters import social_starters
 
@@ -349,10 +363,165 @@ def _check_summary(report: Mapping[str, Any]) -> str:
     return f"hyperframes check: {check.get('errors')} error(s), {check.get('warnings')} warning(s) [{sections}]"
 
 
+# ── the infographic (US-113, S1.7) ─────────────────────────────────────────
+INFOGRAPHIC = "infographic"
+# The reports the infographic is bound to: a title, when it was made, and its file (markdown).
+CHANNEL_REPORT: Dict[str, str] = {
+    "title": "Harbourline Coffee — September social report",
+    "as_of": "2026-09-21T09:30:00+00:00",
+    "markdown": (
+        "# Harbourline Coffee — September social report\n\n"
+        "Every channel we posted on in September, busiest first. Reach counts the unique accounts each channel reached.\n\n"
+        "| Channel | Posts | Reach | Engagement rate |\n"
+        "| --- | ---: | ---: | ---: |\n"
+        "| Instagram | 14 | 48,210 | 5.2% |\n"
+        "| LinkedIn | 9 | 21,480 | 3.9% |\n"
+        "| TikTok | 6 | 19,305 | 6.8% |\n"
+        "| Threads | 8 | 7,940 | 2.4% |\n"
+        "| X | 11 | 6,115 | 1.7% |\n"
+        "| YouTube Shorts | 2 | 3,020 | 4.4% |\n\n"
+        "Next month: two more Shorts a week.\n"
+    ),
+}
+TREND_REPORT: Dict[str, str] = {
+    "title": "Harbourline Coffee — followers, May to September",
+    "as_of": "2026-09-30T17:05:00+00:00",
+    "markdown": (
+        "## Followers at each month's end\n\n"
+        "| Month | Followers |\n|:--|--:|\n"
+        "| May | 8,120 |\n| June | 9,480 |\n| July | 11,905 |\n| August | 13,260 |\n| September | 16,340 |\n"
+    ),
+}
+# The stress: labels longer than the template holds (cut, with an ellipsis), the widest figures, a long title.
+PROGRAMME_REPORT: Dict[str, str] = {
+    "title": "Northwind Studio — marketing programmes, spend to date, all regions, fiscal year 2026",
+    "as_of": "2026-09-24T08:00:00+00:00",
+    "markdown": (
+        "| Programme | Spend to date |\n| --- | ---: |\n"
+        "| Customer success stories from the Lisbon launch week | $1,204,560.75 |\n"
+        "| Partner webinars with the regional distributors in Iberia | $986,410.20 |\n"
+        "| Always-on brand campaign across every paid social channel | $874,002.00 |\n"
+        "| Founder-led posts and replies on the two biggest networks | $512,950.55 |\n"
+        "| Retargeting for visitors who read the pricing page twice | $98,745.10 |\n"
+        "| Print | $1,200.00 |\n"
+    ),
+}
+# The starter's sample data is this binding (its renders at every size, above, are a report's table).
+SAMPLE_BINDING = (CHANNEL_REPORT, "Reach", "bar")
+# (name, report, the figures' column, the kind): the other bindings, each rendered at every size.
+INFOGRAPHIC_RENDERS = (
+    ("followers-line", TREND_REPORT, None, "line"),
+    ("engagement-grid", CHANNEL_REPORT, "Engagement rate", "grid"),
+    ("programmes-bar", PROGRAMME_REPORT, None, "bar"),
+    ("programmes-line", PROGRAMME_REPORT, None, "line"),
+    ("programmes-grid", PROGRAMME_REPORT, None, "grid"),
+)
+
+
+def bind_fixture(starter: Mapping[str, Any], report: Mapping[str, str], column: Optional[str], kind: str) -> Tuple[Dict[str, str], Series]:
+    """The chart variables a workspace's binding gives (``modules/socials/report_charts.bind_report``), from the fixture."""
+    blocks = starter["blocks"]
+    spec = spec_of(blocks)
+    series = table_series(first_table(report["markdown"]), column=column, limit=spec.rows)
+    values = chart_values(spec, blocks["variables_schema"], series, kind=kind, title=report["title"], as_of=report["as_of"])
+    return values, series
+
+
+def check_sample_binding(starter: Mapping[str, Any]) -> None:
+    """The seed's sample chart is the channel report's binding, row for row, chip and kind."""
+    report, column, kind = SAMPLE_BINDING
+    values, _ = bind_fixture(starter, report, column, kind)
+    spec = spec_of(starter["blocks"])
+    sample = starter["sample_data"]
+    wanted = {name: value for name, value in values.items() if name != spec.header}
+    got = {name: sample.get(name, "") for name in wanted}
+    if got != wanted:
+        raise PreviewFailure(f"the seed's sample chart is not the channel report's binding: {got} != {wanted}")
+
+
+def check_chart_from_report(bundle: Mapping[str, Any], starter: Mapping[str, Any], report: Mapping[str, str], series: Series) -> List[Tuple[str, str]]:
+    """Every figure the chart shows is the report's own cell (and every label its row's), and the chip names the report."""
+    blocks = starter["blocks"]
+    spec = spec_of(blocks)
+    shown = shown_rows(spec, bundle["variables"])
+    table = first_table(report["markdown"])
+    column = table.headers.index(series.value_header)
+    for n, (label, value) in enumerate(shown, start=1):
+        if n > len(series.rows):
+            if (label, value) != ("", ""):
+                raise PreviewFailure(f"row {n} shows {label!r} {value!r}; the report has no row {n} on the chart")
+            continue
+        cells = table.rows[n - 1]
+        if value != cells[column] or parse_figure(value).value != parse_figure(cells[column]).value:
+            raise PreviewFailure(f"row {n}'s figure {value!r} is not the report's {cells[column]!r}")
+        if label != cells[0] and not (label.endswith("…") and cells[0].startswith(label[:-1].rstrip())):
+            raise PreviewFailure(f"row {n}'s label {label!r} is not the report's {cells[0]!r}")
+    chip = chip_text(report["title"], report["as_of"], max_chars_of(blocks["variables_schema"], spec.source))
+    if bundle["variables"].get(spec.source) != chip:
+        raise PreviewFailure(f"the chip reads {bundle['variables'].get(spec.source)!r}, not the report's {chip!r}")
+    return shown
+
+
+def chart_bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], size: str, values: Mapping[str, str]) -> Dict[str, Any]:
+    """The Infographic at ``size`` with its chart bound to a report: the sample copy, the report's rows."""
+    resolved = resolve_variables(starter["blocks"]["variables_schema"], {**starter["sample_data"], **values})
+    if resolved.missing or resolved.invalid:
+        raise PreviewFailure(f"the binding leaves {resolved.missing} missing, {resolved.invalid} invalid")
+    return build_bundle(
+        workspace_id="ci-social-templates",
+        reference=f"seeded template: {starter['name']} {size}, bound to a report",
+        blocks=starter["blocks"],
+        values=resolved.values,
+        brand_kit=kit,
+        size=size,
+        fmt=SOCIAL_IMAGE,
+    )
+
+
+def run_infographic(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Dict[str, Any]) -> List[str]:
+    """US-113 (S1.7): the Infographic bound to fixture reports, rendered as a line, a grid and a stress table, at every size."""
+    starter = next(s for s in social_starters(SOCIAL_IMAGE) if s["slug"] == INFOGRAPHIC)
+    entry: Dict[str, Any] = report.setdefault(INFOGRAPHIC, {}).setdefault("bound", {})
+    failures: List[str] = []
+    try:
+        check_sample_binding(starter)
+        print(f"\nThe {starter['name']}'s sample chart is the channel report's binding (column {SAMPLE_BINDING[1]!r}, {SAMPLE_BINDING[2]}): PASS")
+    except PreviewFailure as exc:
+        print(f"    FAIL: {exc}")
+        failures.append(f"{starter['name']}: {exc}")
+    for name, source, column, kind in INFOGRAPHIC_RENDERS:
+        values, series = bind_fixture(starter, source, column, kind)
+        for size in starter["blocks"]["sizes"]:
+            folder = out / INFOGRAPHIC / name
+            folder.mkdir(parents=True, exist_ok=True)
+            print(f"\n== {starter['name']} bound to {source['title']!r} ({series.value_header}, {kind}) at {size}")
+            try:
+                bundle = chart_bundle_for(starter, kit, size, values)
+                shown = check_chart_from_report(bundle, starter, source, series)
+                data = _one_png(_checked(renderer, bundle))
+                if png_size(data) != parse_size(size):
+                    raise PreviewFailure(f"the PNG is {png_size(data)}, not {size}")
+                (folder / f"{size}.png").write_bytes(data)
+                print(f"    rows: {shown}")
+                print(f"    chip: {bundle['variables'][spec_of(starter['blocks']).source]!r}; every figure is the report's own cell: PASS")
+                entry.setdefault(name, {})[size] = {"rows": shown, "bytes": len(data)}
+            except PreviewFailure as exc:
+                print(f"    FAIL: {exc}")
+                failures.append(f"{starter['name']} {name} at {size}: {exc}")
+    return failures
+
+
+def _checked(renderer: Renderer, bundle: Mapping[str, Any]) -> Dict[str, Any]:
+    job = renderer.render(bundle)
+    print(f"    {_check_summary(job['report'])}")
+    return job
+
+
 def run(renderer: Renderer, out: Path) -> List[str]:
     kit = {**KIT, "logo_url": logo_png(KIT["primary_color"])}
     report: Dict[str, Any] = {}
     failures = run_videos(renderer, out, kit, report) + run_images(renderer, out, kit, report)
+    failures += run_infographic(renderer, out, kit, report)
     failures += run_heading_font(renderer, out, kit, report)
     (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
     return failures
@@ -569,6 +738,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     print("\nevery seeded social video template checked with 0 errors and rendered its preview,")
     print("every seeded social image template checked with 0 errors and rendered its PNGs at every size,")
+    print("the Infographic, bound to a report, showed the report's own rows and chip as a bar, a line and a grid at every size,")
     print("and the Title card rendered its headline in the brand kit's uploaded heading font: PASS")
     return 0
 

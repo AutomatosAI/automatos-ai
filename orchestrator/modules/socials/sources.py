@@ -148,7 +148,7 @@ def _iso(value: Any) -> Optional[str]:
     return (when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when.astimezone(timezone.utc)).isoformat()
 
 
-def _metrics(raw: Any) -> Dict[str, Any]:
+def report_metrics(raw: Any) -> Dict[str, Any]:
     """``agent_reports.metrics``: a dict on Postgres (JSONB), text on SQLite."""
     if isinstance(raw, dict):
         return raw
@@ -319,7 +319,7 @@ def _resolve_metric(db: Any, workspace_id: UUID, ref: str, as_of: Optional[datet
         {"workspace_id": str(workspace_id), "as_of": as_of, "key_pattern": key_pattern, "limit": METRIC_SCAN_REPORTS},
     ).fetchall()
     for row in rows:
-        value = _metrics(row.metrics).get(ref)
+        value = report_metrics(row.metrics).get(ref)
         if _is_figure(value):
             return _metric_source(ref, value, row)
     raise SourceNotResolved(f"no report in this workspace carries the metric {ref!r} as of {as_of.isoformat()}")
@@ -446,7 +446,7 @@ def _search_metrics(db: Any, workspace_id: UUID, text: str, limit: int) -> List[
     seen: set = set()
     found: List[ResolvedSource] = []
     for row in rows:
-        for name, value in _metrics(row.metrics).items():
+        for name, value in report_metrics(row.metrics).items():
             if name in seen or needle not in name.lower() or not _is_figure(value):
                 continue
             seen.add(name)

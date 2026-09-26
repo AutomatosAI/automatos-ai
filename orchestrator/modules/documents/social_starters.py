@@ -10,11 +10,14 @@ The images (US-107): the five automatos-social families ported from its JSX
 (title, definition, stats, quote, announcement) and two variants, a fact card
 and a carousel, each at the four sizes of automatos-social's schema.json
 (1080x1350, 1080x1920, 1200x628, 1600x900) on the brand kit's paper palette.
+The infographic (US-113, S1.7) joins them: a chart of a report's top rows (a
+bar chart, a line or a number grid), its ``data`` block naming the variables a
+report fills (``core/chart_binding.py``).
 
 Each is two seed files under ``templates/social/``: ``<slug>.html``, the
 composition, and ``<slug>.json``: its name, description, format, category,
-sizes, variables_schema, slots, audio_plan, stills and sample_data (the copy a
-preview renders). The seed files are read once, checked against
+sizes, variables_schema, slots, audio_plan, stills, data and sample_data (the
+copy a preview renders). The seed files are read once, checked against
 the template contract (``core/social_templates.py``), and written to
 ``document_templates`` rows by ``seed_templates.seed_social_starters``.
 Rendering reads the row, never these files (CLAUDE.md §4: no file hacks for DB
@@ -53,10 +56,11 @@ SOCIAL_IMAGE_STARTER_SLUGS: Tuple[str, ...] = (
     "announcement-card",
     "fact-card",
     "carousel",
+    "infographic",
 )
 SOCIAL_STARTER_SLUGS: Tuple[str, ...] = SOCIAL_VIDEO_STARTER_SLUGS + SOCIAL_IMAGE_STARTER_SLUGS
 # The composition's own keys in a seed file; everything else describes the row.
-BLOCK_FIELDS = ("variables_schema", "sizes", "audio_plan", "slots", "stills")
+BLOCK_FIELDS = ("variables_schema", "sizes", "audio_plan", "slots", "stills", "data")
 ROW_FIELDS = ("name", "description", "format", "category", "sample_data")
 
 
