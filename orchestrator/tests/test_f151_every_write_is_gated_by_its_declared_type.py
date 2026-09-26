@@ -92,8 +92,11 @@ def test_an_editor_or_a_lane_for_nobody_is_refused(cafe, action, params, caller)
 
 
 def test_an_admins_new_channel_waits_for_its_card(cafe):
+    """Made for an admin but instructed by nobody in chat (no conversation): the card
+    stands. An admin who instructs it in a chat turn is the approval, local and SaaS
+    alike (F166b)."""
     reply, handler = _run(cafe, "platform_connect_channel", {"platform": "telegram", "config": {}},
-                          _for(cafe.admin))
+                          {"driving_user_id": str(cafe.admin)})
     assert reply.get("requires_confirmation") is True
     handler.assert_not_called()
 

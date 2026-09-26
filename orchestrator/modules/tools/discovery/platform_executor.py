@@ -438,6 +438,13 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     Everything else — agent-initiated lanes, editors/viewers, a missing or
     unresolvable principal, any lookup error — keeps the ask. The su tier is
     untouched (its gate runs earlier and never consults this).
+
+    F166's twin (refresh 5): the local edition has no Clerk id, so the owner's own
+    instruction still got a card. There, the person typing is the chat's
+    server-threaded ``driving_user_id``: an active owner/admin of this workspace, or
+    the super admin the local operator is — the admin gate's own predicate (F145).
+    A Clerk principal keeps the Clerk path, unchanged. On SaaS a turn with no Clerk
+    id (a failed lookup, a row never linked to Clerk) keeps the ask, as before.
     """
     from core.security.surface import widget_turn
 
@@ -447,10 +454,18 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     if not ctx.get("conversation_id"):
         return False
     clerk_id = ctx.get("user_id")
-    if not clerk_id or not isinstance(clerk_id, str):
+    if clerk_id:
+        if not isinstance(clerk_id, str):
+            return False
+        role = _workspace_role_for_clerk(db, workspace_id, clerk_id)
+        return role in ("owner", "admin")
+    from config import config as app_config
+
+    if not app_config.IS_LOCAL_EDITION:
         return False
-    role = _workspace_role_for_clerk(db, workspace_id, clerk_id)
-    return role in ("owner", "admin")
+    from core.security.driving_user import driver_is_workspace_admin
+
+    return driver_is_workspace_admin(db, workspace_id, ctx)
 
 
 def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
