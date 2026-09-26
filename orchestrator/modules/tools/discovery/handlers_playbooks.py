@@ -84,6 +84,7 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         pass
 
     steps = playbook.steps or []
+    from core.services.playbook_inputs import contract_of
 
     return {
         "success": True,
@@ -93,6 +94,8 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             "template_id": playbook.template_id,
             "description": playbook.description,
             "tags": playbook.tags or [],
+            # F182: what each run needs (declared, else read from the steps)
+            "inputs": contract_of(playbook),
             "step_count": len(steps),
             "steps": [
                 {
@@ -120,6 +123,13 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         return {"success": False, "error": "Missing required: name and description"}
 
     tags = params.get("tags", [])
+    inputs = params.get("inputs")
+    if inputs is not None:  # F182: what each run needs
+        from core.services.playbook_inputs import inputs_problem
+
+        problem = inputs_problem(inputs)
+        if problem:
+            return {"success": False, "error": problem}
     template_id = f"custom-{uuid.uuid4().hex[:8]}"
 
     # F133: the person the call is made for is the playbook's creator; its later
@@ -135,6 +145,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         created_by="platform",
         created_by_user_id=creator if isinstance(creator, int) and not isinstance(creator, bool) else None,
         tags=tags,
+        inputs=inputs,
         template_definition={"steps": [], "agents": [], "config": {}, "variables": []},
     )
     db.add(playbook)
@@ -149,6 +160,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
             "name": playbook.name,
             "template_id": playbook.template_id,
             "description": playbook.description,
+            "inputs": inputs,
         },
         "message": f"Playbook '{name}' created successfully. Add steps via the playbook editor.",
     }
@@ -171,6 +183,12 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     )
     if not playbook:
         return {"success": False, "error": "Playbook not found"}
+    if params.get("inputs") is not None:  # checked before anything changes
+        from core.services.playbook_inputs import inputs_problem
+
+        problem = inputs_problem(params["inputs"])
+        if problem:
+            return {"success": False, "error": problem}
 
     changes = []
     if params.get("name"):
@@ -185,6 +203,9 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     if params.get("execution_config") is not None:
         playbook.execution_config = params["execution_config"]
         changes.append("execution_config updated")
+    if params.get("inputs") is not None:  # F182: what each run needs
+        playbook.inputs = params["inputs"]
+        changes.append(f"inputs -> {sorted(params['inputs'])}")
     schedule_note = None
     if params.get("schedule_config") is not None:
         from services.playbook_scheduler import SERVER_ZONE, cron_trigger, is_live_cron, with_explicit_zone
@@ -591,6 +612,16 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     playbook = query.first()
     if not playbook:
         return {"success": False, "error": "Playbook not found"}
+
+    # F182 (night 6): a run the call would start without an input it needs is
+    # not started. The caller is told which, and asks the owner in its chat
+    # (the run itself would stop and ask through Questions).
+    from core.services.playbook_inputs import contract_of, inputs_needed_error, missing_inputs, with_defaults
+
+    contract = contract_of(playbook)
+    needed = missing_inputs(contract, with_defaults(contract, input_data))
+    if needed:
+        return {"success": False, "error": inputs_needed_error(playbook.name, needed, contract)}
 
     # Concurrency guard -- return error to agent if workspace is at capacity
     from services.concurrency_guard import check_concurrency

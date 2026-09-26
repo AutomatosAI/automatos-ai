@@ -1397,6 +1397,31 @@ async def _execute_recipe_inner(
                 f"Switched off: {names}. Switch the agent on, or give its steps another agent. Nothing ran.")
             return
 
+        # F182 (night 6): what the run needs is checked once, before step 1. Run
+        # 207 started with no inputs, and its first step wrote to another café's
+        # contact from memory. A declared default fills in ('' never does); a
+        # required input still missing stops the run and asks the owner for it
+        # by name (F140's stop), and their answer's rerun is given it.
+        from core.services.playbook_inputs import input_contract, inputs_question, missing_inputs, with_defaults
+
+        contract = input_contract(recipe.inputs, steps)
+        input_data = with_defaults(contract, input_data)
+        needed = missing_inputs(contract, input_data)
+        if needed:
+            from services.playbook_owner_ask import NEEDS_YOU, stop_for_owner
+
+            first = steps[0]
+            first_agent = agent_map.get(first.get('agent_id'))
+            question = inputs_question(recipe.name, needed, contract)
+            asked = await stop_for_owner(
+                db, execution=execution, recipe=recipe, step_order=first.get('order', 1),
+                agent_id=first.get('agent_id'), agent_name=getattr(first_agent, "name", None),
+                ask={"question": question, "options": None}, step_results=[], step_calls=[], inputs=needed,
+            )
+            if not asked:
+                await _fail_execution(db, recipe_execution_id, f"{NEEDS_YOU} {question}")
+            return
+
         # --- Initialize scratchpad ---
         from core.services.playbook_scratchpad import PlaybookScratchpad
         scratchpad = PlaybookScratchpad(recipe_execution_id)

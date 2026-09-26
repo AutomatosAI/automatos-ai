@@ -2,6 +2,16 @@
 
 from .action_registry import ActionDefinition, ActionRegistry
 
+# F182 (night 6): what each run needs, declared the way a function signature is.
+_INPUTS_PARAM = {
+    "type": "object",
+    "description": (
+        'What each run needs, by name: {"cafe_name": {"required": true, "description": "The café\'s '
+        'name"}}. Steps read a value as {{cafe_name}}. A run started without a required one does '
+        "not start: it asks the owner for it."
+    ),
+}
+
 
 def register_playbooks_actions(registry: ActionRegistry) -> None:
     """Register all playbook-related platform actions."""
@@ -94,6 +104,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "items": {"type": "string"},
                     "description": "Optional tags for categorization.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["name", "description"],
         },
@@ -115,9 +126,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_playbook",
         description=(
-            "Update a playbook's metadata — name, description, tags, execution config, "
-            "or schedule. Use when the user asks to rename, update, or reconfigure a "
-            "playbook. To modify steps, use platform_update_playbook_step instead."
+            "Update a playbook's metadata — name, description, tags, the inputs each run "
+            "needs, execution config, or schedule. Use when the user asks to rename, update, "
+            "or reconfigure a playbook. To modify steps, use platform_update_playbook_step instead."
         ),
         category="playbooks",
         parameters={
@@ -148,6 +159,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "type": "object",
                     "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["playbook_id"],
         },

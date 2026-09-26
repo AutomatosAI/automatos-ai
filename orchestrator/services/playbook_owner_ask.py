@@ -261,11 +261,12 @@ def _run_card(db: Session, recipe: Any, execution: Any) -> Any:
 
 async def stop_for_owner(db: Session, *, execution: Any, recipe: Any, step_order: Any, agent_id: Any,
                          agent_name: Optional[str], ask: Dict[str, Any], step_results: List[dict],
-                         step_calls: List[dict]) -> bool:
+                         step_calls: List[dict], inputs: Optional[List[str]] = None) -> bool:
     """End the run needing the owner and put the question in their Questions,
     on the run's card. False when this run may not ask (a run a website visitor
     started never reaches the owner's Questions) or when nothing of the stop was
-    saved; the caller then fails the run as before."""
+    saved; the caller then fails the run as before. ``inputs`` names the inputs
+    the run stopped for (F182), which the answer's rerun is given."""
     from core.security.surface import widget_turn
     from modules.tools.discovery.handlers_asks import stage_question
     from services.cli_host_service import MAX_ASK_QUESTION_KEPT
@@ -296,7 +297,8 @@ async def stop_for_owner(db: Session, *, execution: Any, recipe: Any, step_order
             question=question_for_owner(question, changes, sessions), options=ask.get("options"),
             asked_by_agent_id=int(agent_id) if agent_id else None, agent_name=agent_name, park=card,
             details={ASK_MARKER: {"execution_id": execution.execution_id, "recipe_id": recipe.id,
-                                  "step": step_order, "question": question}},
+                                  "step": step_order, "question": question,
+                                  **({"inputs": list(inputs)} if inputs else {})}},
         )
         card.blocked_reason = f"{NEEDS_YOU} {question} (ask #{staged['ask_id']})"
         execution.execution_metadata = {
@@ -422,6 +424,11 @@ def rerun_after_answer(db: Session, grant: Any) -> bool:
     earlier = (original.execution_metadata or {}).get(ANSWERS_KEY) or []
     rerun = create_rerun_execution(db, recipe, original, triggered_by=TRIGGERED_BY_HUMAN)
     rerun.execution_metadata = {**(rerun.execution_metadata or {}), ANSWERS_KEY: [*earlier, answered]}
+    if marker.get("inputs"):  # F182: the run stopped for inputs, and the answer gives them
+        from core.services.playbook_inputs import contract_of, inputs_from_answer
+
+        given = inputs_from_answer(grant.answer_text or "", list(marker["inputs"]), contract_of(recipe))
+        rerun.input_data = {**(rerun.input_data or {}), **given}
 
     stopped = dict((original.execution_metadata or {}).get(STOPPED_KEY) or {})
     original.execution_metadata = {**(original.execution_metadata or {}),
