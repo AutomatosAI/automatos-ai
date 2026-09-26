@@ -159,15 +159,16 @@ def undeclared_params(action_def: Any, params: Dict[str, Any]) -> List[str]:
     """F182 (night 6): the keys in ``params`` that the action would drop.
 
     The keys it takes are the schema's, the undeclared ones its handler reads
-    (``accepts``), and the names ``_fill_required_from_aliases`` takes a required
-    key from. Server keys (a leading ``_``) and empty values are not counted,
-    since dropping them loses nothing.
+    (``accepts``), and any known other name of a declared one (``_PARAM_ALIASES``,
+    which ``_fill_required_from_aliases`` and ``map_optional_aliases`` fill from).
+    Server keys (a leading ``_``) and empty values are not counted, since
+    dropping them loses nothing.
     """
     if not isinstance(params, dict):
         return []
     schema = action_def.parameters or {}
     taken = set(schema.get("properties") or {}) | set(getattr(action_def, "accepts", ()) or ())
-    for name in schema.get("required") or []:
+    for name in schema.get("properties") or {}:
         taken.update(_PARAM_ALIASES.get(name, ()))
     return [key for key, value in params.items()
             if key not in taken and not str(key).startswith("_") and value not in (None, "", [], {})]
@@ -188,9 +189,6 @@ def _where_it_goes(
         return f"put these values under '{target}'.", {target: value}
     if target:
         return target, None
-    canonical = next((name for name in props if key in _PARAM_ALIASES.get(name, ())), None)
-    if canonical:
-        return f"call it '{canonical}'.", {canonical: value}
     stray = next((k for k in value if k in misplaced and misplaced[k] not in props), None) \
         if isinstance(value, dict) else None
     if stray:
@@ -231,6 +229,30 @@ def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], 
                       for name in props)
     lines.append(f"'{action_name}' takes: {takes or 'no parameters'}.")
     return "\n".join(lines)
+
+
+def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
+                         via: str = VIA_DISPATCHER) -> Dict[str, Any]:
+    """F182: an optional param sent under a known other name (create_agent's
+    "desc") is kept under its declared name, not refused and not dropped; each
+    mapping is logged. The required ones are ``_fill_required_from_aliases``'s.
+    A key the action itself declares is never taken for another. Returns new
+    params; the caller's are not changed."""
+    if not isinstance(params, dict):
+        return params
+    schema = action_def.parameters or {}
+    props, required = schema.get("properties") or {}, set(schema.get("required") or [])
+    mapped = dict(params)
+    for name in props:
+        if name in required or mapped.get(name) not in (None, ""):
+            continue
+        for alias in _PARAM_ALIASES.get(name, ()):
+            if alias in props or mapped.get(alias) in (None, "", [], {}):
+                continue
+            mapped[name] = mapped.pop(alias)
+            logger.info(f"[F182] {via} mapped param '{alias}' to '{name}' for {action_name} (trace {trace})")
+            break
+    return mapped
 
 
 def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
@@ -956,6 +978,7 @@ class UnifiedToolExecutor:
                 # synonym.
                 required = action_def.parameters.get("required", [])
                 action_params = _fill_required_from_aliases(action_params, required)
+                action_params = map_optional_aliases(action_name, action_def, action_params, trace)
                 missing = [p for p in required if p not in action_params]
                 # F182 (night 6): a key the action does not take is refused, not
                 # dropped. Run 207 started with no inputs because they came nested
@@ -997,6 +1020,7 @@ class UnifiedToolExecutor:
                 action_def = get_action_registry().get(tool_name)
                 if action_def is not None and isinstance(parameters, dict):
                     parameters = _fill_required_from_aliases(parameters, action_def.parameters.get("required", []))
+                    parameters = map_optional_aliases(tool_name, action_def, parameters, trace, VIA_DIRECT_CALL)
                     refused = undeclared_params_refusal(tool_name, action_def, parameters, trace, VIA_DIRECT_CALL)
                     if refused:
                         result = {"success": False, "error": refused, "tool": tool_name}

@@ -55,7 +55,7 @@ def test_the_reason_night_6_sent_is_refused_not_dropped(direct, caplog):
 
 
 def test_the_corrected_call_is_shown_the_way_it_was_made(direct):
-    result = direct.call("platform_get_playbook", {"recipe_id": 102})
+    result = direct.call("platform_get_playbook", {"playbook_idd": 102})
 
     assert 'Call it like this: platform_get_playbook({"playbook_id": 102})' in result["error"]
 

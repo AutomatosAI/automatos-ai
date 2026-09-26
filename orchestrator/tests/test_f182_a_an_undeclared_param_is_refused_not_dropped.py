@@ -95,19 +95,37 @@ def test_a_missing_key_and_a_stray_one_are_named_in_one_answer(dispatch):
 
 
 @pytest.mark.parametrize("action, params, says", [
-    ("platform_get_playbook", {"recipe_id": 102}, "recipe_id: call it 'playbook_id'."),
     ("platform_get_playbook", {"playbook_idd": 102}, "playbook_idd: did you mean 'playbook_id'?"),
     ("platform_create_playbook", {"name": "Onboarding", "description": "New cafés", "steps": STEPS},
      "steps: a playbook is created with no steps"),
     ("platform_update_playbook", {"playbook_id": 102, "workspace_id": WS}, "workspace_id: not a parameter"),
     ("platform_execute_playbook", {"params": {"playbook_id": 102, "input_data": {"cafe_name": "Gull & Anchor"}}},
      "params: its fields ['playbook_id', 'input_data'] go straight into params, not inside 'params'."),
-], ids=["alias", "typo", "create-steps", "stray", "double-nested"])
+], ids=["typo", "create-steps", "stray", "double-nested"])
 def test_the_refusal_says_where_the_key_goes(dispatch, action, params, says):
     result = dispatch.call(action, params)
 
     assert result["success"] is False and dispatch.ran == []
     assert says in result["error"]
+
+
+@pytest.mark.parametrize("action, sent, kept", [
+    ("platform_create_agent", {"name": "DevOps Bot", "desc": "Watches the deploys"},
+     {"name": "DevOps Bot", "description": "Watches the deploys"}),
+    ("platform_get_playbook", {"recipe_id": 102}, {"playbook_id": 102}),
+], ids=["desc", "recipe_id"])
+def test_an_optional_param_under_a_known_other_name_is_kept(dispatch, caplog, action, sent, kept):
+    """F027's synonym acceptance (tool errors 16 % → 1.9 %) covers optional params
+    too: the value is kept under its declared name, counted, never refused."""
+    with caplog.at_level(logging.INFO, logger="modules.tools.execution.unified_executor"):
+        result = dispatch.call(action, sent)
+
+    assert result == {"success": True}
+    ((_, params),) = dispatch.ran
+    assert params == kept
+    alias = next(k for k in sent if k not in kept)
+    assert any(r.getMessage().startswith(f"[F182] platform_execute mapped param '{alias}' to ")
+               for r in caplog.records)
 
 
 def test_a_model_cannot_write_a_tickets_planning_data(dispatch):
