@@ -682,6 +682,7 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     body = await request.json()
+    status_before = task.status  # F190 review: a repeat of in_progress launches nothing
 
     # F060: this route accepted any key, returned 200 and echoed the task back,
     # while storing only the eleven fields below. `review_feedback` — the field
@@ -731,10 +732,16 @@ async def update_task(
     if "status" in body:
         new_status = body["status"]
         old_status = task.status
+        if new_status == "in_progress" and old_status != "in_progress":
+            # F190: a new run starts clean, as PATCH /status does; the last run's
+            # outcome goes on record (keep_previous_run) and off the card.
+            keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))
+            task.started_at = datetime.now(timezone.utc)
+            task.completed_at = None
+            task.error_message = None
+            task.result = None
         task.status = new_status
         end_session_claim(task, old_status, new_status)
-        if new_status == "in_progress" and not task.started_at:
-            task.started_at = datetime.now(timezone.utc)
         if new_status in ("done", "review", "closed"):
             task.completed_at = datetime.now(timezone.utc)
         if new_status == "blocked":
@@ -814,6 +821,7 @@ async def update_task(
     trigger_execution = (
         "status" in body
         and body["status"] == "in_progress"
+        and status_before != "in_progress"
         and task.assigned_agent_id
         and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     )
@@ -1388,11 +1396,15 @@ async def update_task_status(
         raise HTTPException(status_code=409, detail=owned)
 
     old_status = task.status
-    if new_status == "in_progress":
+    # F190 review: only a move INTO in_progress starts a run. Repeating it on a
+    # running ticket (a double drag) wiped the live run's result and launched the
+    # agent a second time; it now changes nothing. A stuck ticket has Run Now.
+    starting = new_status == "in_progress" and old_status != "in_progress"
+    if starting:
         keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))  # its result is cleared below
     task.status = new_status
     end_session_claim(task, old_status, new_status)
-    if new_status == "in_progress":
+    if starting:
         task.started_at = datetime.now(timezone.utc)
         task.completed_at = None
         task.error_message = None
@@ -1427,7 +1439,7 @@ async def update_task_status(
     # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
     # mirror to in_progress must not re-run work the mission engine owns.
     if (
-        new_status == "in_progress"
+        starting
         and task.assigned_agent_id
         and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     ):
