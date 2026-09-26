@@ -265,6 +265,10 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
     sends it to ``review``) and name them in the review note. Night 3 marked
     both tickets failed while their answers sat in that folder. Returns
     ``{ticket id: [files]}``. Fail-soft per ticket.
+
+    "Nothing was registered" means by THIS run (``runtime_ref.deliverables``,
+    rebuilt by every claim), not ever: a mission step's card spans its runs
+    (F094), so an earlier run's files do not mean this one reported.
     """
     from config import config
     from services.cli_host_service import DEFAULT_FOLDER_SESSIONS, _register_session_deliverables
@@ -277,12 +281,7 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
                AND bt.lease_until IS NOT NULL
                AND bt.lease_until < :now
                AND bt.attempts >= :max_attempts
-               AND NOT EXISTS (
-                     SELECT 1 FROM deliverables d
-                      WHERE d.source_type = 'task'
-                        AND d.source_id = CAST(bt.id AS text)
-                        AND d.deleted_at IS NULL
-                   )
+               AND (bt.runtime_ref -> 'deliverables') IS NULL
             """
         ),
         {"now": now, "max_attempts": max_attempts},
@@ -306,6 +305,9 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
                 "Finished, worker never reported — its session left " + ", ".join(names)
                 + " (now on the ticket). Sent to review instead of failed."
             )
+            # This run's files, as a result that reported would record them (a
+            # later mission step reads them from here, F161).
+            task.runtime_ref = {**(task.runtime_ref or {}), "deliverables": registered}
             db.flush()
             adopted[task_id] = names
         except Exception:  # noqa: BLE001 — a ticket we cannot adopt still fails as before
@@ -354,7 +356,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     # A ticket whose worker never reported but which LEFT FILES did the work —
     # night 1 wrote "no worker completed the task" over six delivered files
     # (F013). Check the deliverables the run registered before naming it, and
-    # send those to ``review`` for a human verdict instead of ``failed``.
+    # send those to ``review`` for a human verdict instead of ``failed``. THIS
+    # run's (runtime_ref.deliverables): a mission step's card spans runs (F094).
     delivered = db.execute(
         text(
             """
@@ -372,12 +375,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
                AND bt.lease_until IS NOT NULL
                AND bt.lease_until < :now
                AND bt.attempts >= :max_attempts
-               AND EXISTS (
-                     SELECT 1 FROM deliverables d
-                      WHERE d.source_type = 'task'
-                        AND d.source_id = CAST(bt.id AS text)
-                        AND d.deleted_at IS NULL
-                   )
+               -- this run registered at least one file: a list holding an object
+               AND COALESCE(bt.runtime_ref -> 'deliverables', CAST('[]' AS jsonb)) @> CAST('[{}]' AS jsonb)
          RETURNING bt.id
             """
         ),

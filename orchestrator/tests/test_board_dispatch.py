@@ -382,3 +382,59 @@ def test_an_expired_ticket_whose_session_folder_is_empty_still_fails(seeded, new
     out = board_dispatcher.requeue_expired_leases(s, max_attempts=2)
     s.close()
     assert out["failed"] == [task_id] and out["delivered"] == []
+
+
+# ── F094 (night 5): one mission step's card spans its runs ───────────────────
+
+def _registered_before(new_session, ws_id, task_id, path):
+    """An EARLIER run of this card registered ``path``."""
+    s = new_session()
+    s.execute(
+        text("INSERT INTO deliverables (workspace_id, source_type, source_id, artifact_type, title, file_path) "
+             "VALUES (CAST(:w AS uuid), 'task', :id, 'document', :t, :p)"),
+        {"w": ws_id, "id": str(task_id), "t": path.rsplit("/", 1)[-1], "p": path},
+    )
+    s.commit()
+    s.close()
+
+
+def test_a_re_run_that_never_reported_has_this_runs_files_adopted(seeded, new_session, tmp_path, monkeypatch):
+    """The session lane now runs a step's re-run on the same card, so the files an
+    earlier run registered no longer mean this run reported. Adoption reads what
+    THIS run registered, and records what it adopts where a later step reads it."""
+    from config import config
+
+    ws_id, agent_id = seeded
+    [task_id] = _seed_tasks(new_session, ws_id, agent_id, 1, status="in_progress", attempts=2)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    folder = tmp_path / ws_id / "sessions" / str(task_id)
+    folder.mkdir(parents=True)
+    (folder / "offer.md").write_text("# The offer, run 1\n")
+    (folder / "offer-revised.md").write_text("# The offer, revised in run 2\n")
+    _registered_before(new_session, ws_id, task_id, f"sessions/{task_id}/offer.md")
+    s = _expire(new_session, task_id)
+
+    out = board_dispatcher.requeue_expired_leases(s, max_attempts=2)
+    paths = sorted(p for (p,) in s.execute(
+        text("SELECT file_path FROM deliverables WHERE source_type = 'task' AND source_id = :id "
+             "AND deleted_at IS NULL"), {"id": str(task_id)}))
+    ref = s.execute(text("SELECT runtime_ref FROM board_tasks WHERE id = :id"), {"id": task_id}).scalar()
+    s.execute(text("DELETE FROM deliverables WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
+    s.commit()
+    s.close()
+    assert out["delivered"] == [task_id]
+    assert paths == [f"sessions/{task_id}/offer-revised.md", f"sessions/{task_id}/offer.md"]   # run 2's file too
+    assert sorted(d["file_path"] for d in ref["deliverables"]) == paths
+
+
+def test_a_re_run_that_left_nothing_fails_rather_than_passing_on_an_earlier_runs_files(seeded, new_session):
+    ws_id, agent_id = seeded
+    [task_id] = _seed_tasks(new_session, ws_id, agent_id, 1, status="in_progress", attempts=2)
+    _registered_before(new_session, ws_id, task_id, f"projects/cafes/offer-{task_id}.md")
+    s = _expire(new_session, task_id)
+
+    out = board_dispatcher.requeue_expired_leases(s, max_attempts=2)
+    s.execute(text("DELETE FROM deliverables WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
+    s.commit()
+    s.close()
+    assert out["failed"] == [task_id] and out["delivered"] == []
