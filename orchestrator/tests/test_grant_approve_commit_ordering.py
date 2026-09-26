@@ -34,7 +34,8 @@ def _grant_approval_call_order() -> list[str]:
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
         and node.name == "grant_approval"
     )
-    interesting = {"grant_grant", "_requeue_subject", "commit"}
+    # F193: the yes is the compare-and-set _cas_grant (it was grant_grant).
+    interesting = {"_cas_grant", "_requeue_subject", "commit"}
     order: list[str] = []
     for call in ast.walk(fn):
         if not isinstance(call, ast.Call):
@@ -51,15 +52,15 @@ def _grant_approval_call_order() -> list[str]:
 
 def test_approval_is_committed_before_the_resume():
     order = _grant_approval_call_order()
-    assert "grant_grant" in order and "_requeue_subject" in order, order
+    assert "_cas_grant" in order and "_requeue_subject" in order, order
 
-    grant_i = order.index("grant_grant")
+    grant_i = order.index("_cas_grant")
     resume_i = order.index("_requeue_subject")
     assert grant_i < resume_i, f"approve must precede resume: {order}"
 
     between = order[grant_i + 1 : resume_i]
     assert "commit" in between, (
-        "grant_approval must db.commit() between grant_grant and "
+        "grant_approval must db.commit() between _cas_grant and "
         "_requeue_subject — with autoflush=False the gate's SQL cannot see "
         f"an uncommitted GRANTED row and re-asks (grant 77). Order: {order}"
     )
