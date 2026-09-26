@@ -311,7 +311,7 @@ class ToolLoopExecutor:
                 )
 
             # Append the assistant tool-call message + matching tool results.
-            messages.append(_build_assistant_tool_message(current.tool_calls or []))
+            messages.append(_build_assistant_tool_message(current.tool_calls or [], getattr(current, "content", None)))
             messages.extend(tool_results)
 
             # Per-round hook: caller may force a final synthesis (chat's
@@ -792,11 +792,14 @@ def _tool_msg(call_id: str, name: str, content: str) -> Message:
     }
 
 
-def _build_assistant_tool_message(tool_calls: List[ToolCall]) -> Message:
-    """Build the assistant message that carries the tool_calls (OpenAI shape)."""
+def _build_assistant_tool_message(tool_calls: List[ToolCall], content: Optional[str] = None) -> Message:
+    """Build the assistant message that carries the tool_calls (OpenAI shape),
+    with what the model said before calling them. F186 (night 6): that text was
+    dropped, so the next round never saw what it had already told the owner and
+    greeted them again ("Got it, Gerard! …" twice in one reply)."""
     return {
         "role": "assistant",
-        "content": None,
+        "content": content if isinstance(content, str) and content.strip() else None,
         "tool_calls": [
             {
                 "id": _tc_id(tc),

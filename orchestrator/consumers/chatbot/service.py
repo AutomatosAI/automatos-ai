@@ -62,6 +62,7 @@ from services.page_context import (
 )
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 
 logger = logging.getLogger(__name__)
 
@@ -1671,7 +1672,7 @@ class StreamingChatService:
         conversation_id: Optional[str] = None,
         assign_lane: bool = False,
         is_super_admin: bool = False,
-        streamed_text: Optional[List[str]] = None,
+        streamed_rounds: Optional[List[Any]] = None,
         reasoning_log: Optional[List[str]] = None,
         prefetched: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
     ) -> AsyncGenerator[Any, None]:
@@ -2033,8 +2034,16 @@ class StreamingChatService:
                     reasoning_log.append(reasoning)
                 if not getattr(resp, "streamed", False):
                     await sse_queue.put(self.streaming_handler.format_aisdk_reasoning(reasoning))
-            if getattr(resp, "streamed", False) and getattr(resp, "content", None) and streamed_text is not None:
-                streamed_text.append(resp.content)
+            if streamed_rounds is not None:
+                # F186: the loop only calls the model again after a reply with no
+                # tool call when it nudged that reply (F108), so it was never the answer.
+                if streamed_rounds and not called_tools(streamed_rounds[-1]) and streamed_rounds[-1] is not resp:
+                    await sse_queue.put(self.streaming_handler.format_aisdk_narration(
+                        streamed_rounds[-1].content, retracted=True))
+                if getattr(resp, "streamed", False) and getattr(resp, "content", None):
+                    streamed_rounds.append(resp)
+                    if called_tools(resp):  # it spoke before its tool calls: narration
+                        await sse_queue.put(self.streaming_handler.format_aisdk_narration(resp.content))
             return resp
 
         async def _llm_callback(messages, tools):
@@ -2871,7 +2880,9 @@ class StreamingChatService:
                 logger.info(f"Available tools: {tool_names}")
 
             # PRD-238 S2: the first call streams its text and reasoning live.
-            streamed_text: List[str] = []
+            # F186: each streamed round is kept whole: which ones called tools
+            # decides what was narration and what is the answer.
+            streamed_rounds: List[Any] = []
             reasoning_log: List[str] = []
             response = None
             async for item in self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools):
@@ -2884,7 +2895,9 @@ class StreamingChatService:
                 if not getattr(response, "streamed", False):
                     yield self.streaming_handler.format_aisdk_reasoning(response.reasoning)
             if getattr(response, "streamed", False) and response.content:
-                streamed_text.append(response.content)
+                streamed_rounds.append(response)
+                if called_tools(response):  # F186: it spoke before its tool calls
+                    yield self.streaming_handler.format_aisdk_narration(response.content)
             if is_empty_completion(response):
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
@@ -2904,7 +2917,6 @@ class StreamingChatService:
             )
 
             # Track response
-            assistant_parts = []
             full_response = ""
             tool_data = {}
 
@@ -2926,7 +2938,7 @@ class StreamingChatService:
                     conversation_id=chat_id,
                     assign_lane=_assign_lane,
                     is_super_admin=is_super_admin,
-                    streamed_text=streamed_text,
+                    streamed_rounds=streamed_rounds,
                     reasoning_log=reasoning_log,
                     prefetched=_prefetched,
                 ):
@@ -2939,6 +2951,7 @@ class StreamingChatService:
                 if final_response and final_response.content:
                     final_text = final_response.content
                     final_streamed = bool(getattr(final_response, "streamed", False))
+                    final_round = final_response
                 else:
                     logger.warning("Tool loop completed without final response - forcing synthesis")
                     llm_messages.append({
@@ -2949,9 +2962,11 @@ class StreamingChatService:
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
                     final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
                     final_streamed = False
+                    final_round = forced
             else:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
+                final_round = response
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
@@ -2967,22 +2982,21 @@ class StreamingChatService:
                 except Exception:
                     logger.debug("[no-tool-call] first-reply notice skipped", exc_info=True)
 
-            # PRD-238 S2: the saved message is exactly what the screen showed —
-            # every round's streamed text in order, plus a final answer that the
-            # provider could not stream. Only that unstreamed tail is emitted here.
-            shown_so_far = "\n\n".join(t for t in streamed_text if t)
-            if final_streamed:
-                full_response = shown_so_far
-                unstreamed_tail = ""
-            else:
-                full_response = f"{shown_so_far}\n\n{final_text}".strip() if shown_so_far else final_text
-                unstreamed_tail = final_text
+            # PRD-238 S2 / F186: every round streamed live; the reply is the
+            # answer, and what the model said before its tool calls is narration,
+            # saved as its own part (narration.split_reply). Only an answer the
+            # provider could not stream is emitted here.
+            narration, full_response = split_reply(streamed_rounds, final_round, final_text)
+            unstreamed_tail = "" if final_streamed else final_text
 
             # Upload inline base64 images to S3
             _ws_id_img = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
             full_response = await _upload_inline_images(
                 full_response, workspace_id=str(_ws_id_img) if _ws_id_img else None,
             )
+            narration_text = await _upload_inline_images(
+                "\n\n".join(narration), workspace_id=str(_ws_id_img) if _ws_id_img else None,
+            ) if narration else ""
 
             # Stream whatever the screen has not seen yet (nothing, when every round streamed)
             if unstreamed_tail:
@@ -3004,11 +3018,10 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_finish()
 
             # Save assistant message — PRD-238 S1: the reasoning rides as its
-            # own part (never the answer text, never fed back to the model).
+            # own part (never the answer text, never fed back to the model), and
+            # F186: so does the narration. Memory takes the answer (below).
             joined_reasoning = "\n\n".join(r for r in reasoning_log if r)
-            if joined_reasoning:
-                assistant_parts.append({'type': 'reasoning', 'reasoning': joined_reasoning})
-            assistant_parts.append({'type': 'text', 'text': full_response})
+            assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)
             self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,

@@ -46,6 +46,12 @@ class StreamingHandler:
         """PRD-238 S1: a reasoning delta — the thinking channel, never the answer."""
         return self.format_aisdk_data("reasoning", {"delta": delta})
 
+    def format_aisdk_narration(self, text: str, retracted: bool = False) -> str:
+        """F186: the text just streamed was not the answer. The round ended in
+        tool calls, so it is narration and belongs with the progress lines; or,
+        ``retracted``, the loop nudged it (F108) and the retry replaces it."""
+        return self.format_aisdk_data("narration", {"text": text, **({"retracted": True} if retracted else {})})
+
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped
         because it hit a cap (instead of silently bailing). Carries limit/value
