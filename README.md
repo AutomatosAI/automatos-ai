@@ -172,6 +172,7 @@ make up                 # first run builds the images and the database schema
 ```
 
 Then open http://localhost:3000 (API reference at http://localhost:8000/docs).
+To update later: stop the backend, pull, and rebuild ([Updating](docs/getting-started/self-hosting.md#10-updating)).
 No login. Add one model key and run the seeded *Two-minute brief* Playbook:
 
 - `OPENROUTER_API_KEY` (400+ models), or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`;
