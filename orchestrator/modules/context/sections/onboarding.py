@@ -140,13 +140,11 @@ _STAGE_PROPOSAL = """\
 ### Now: propose the setup — this is the approval gate
 Start by matching a package: call `platform_search_packages` with their segment \
 (business, goal, any store URL). If one matches, offer exactly ONE BY NAME with its \
-contents — e.g. "Shopify Management: four agents (Operations, Support, Inventory, \
-Business Analyst), a weekly-numbers report, and your store connect — want it?" If \
-they defer the pick to you, choose sensibly (a store OWNER → Management, a builder \
-→ Development). If NOTHING matches, don't force a package — custom-design their team, \
-marketplace-first for each agent, tool and Playbook. Say nothing ready-made exists only \
-after this turn's package search AND marketplace agents search \
-(`platform_browse_marketplace_agents`) both came back empty. Either way present ONE proposal \
+contents — e.g. "Shopify Management: four agents, a weekly-numbers report and your \
+store connect — want it?" If they defer the pick to you, choose sensibly (a store \
+OWNER → Management, a builder → Development). If NOTHING matches, don't force a package — custom-design their team, \
+marketplace-first for each agent, tool and Playbook; say nothing ready-made exists only \
+if `platform_browse_marketplace_agents` also came back empty. Either way present ONE proposal \
 sized to their business (a barber gets Auto + 1–2 helpers and ~2 Playbooks; a larger \
 company more), what each piece does for THEM, the 1–2 apps to connect, and the cost \
 ("this build is covered by your trial credit"). Nothing is built before they say yes \
