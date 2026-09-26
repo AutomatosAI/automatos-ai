@@ -37,6 +37,15 @@ _STOPWORDS = frozenset({
 # row for a person, in priority order.
 _LABEL_COLUMNS = ("name", "display_name", "title", "label")
 LOOKUP_TABLES_KEPT = 5
+OWNER_WORDS_RULE = (
+    "Where the two differ on what to count, filter or include, the person's words win. "
+    "Use the restatement only to resolve references such as \"those\" or \"that plan\"."
+)
+
+
+def _plain(text: str) -> str:
+    """A question compared without case, spacing or trailing punctuation."""
+    return " ".join(str(text or "").lower().split()).rstrip("?.! ")
 
 
 def label_column(table: Dict[str, Any]) -> Optional[str]:
@@ -73,6 +82,7 @@ class NaturalLanguageToSQLService:
         error_context: Optional[str] = None,
         previous_attempts: Optional[List[Dict[str, str]]] = None,
         system_prompt: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Tuple[str, str, Dict[str, Any]]:
         """
         Generate SQL from natural language using LLM.
@@ -97,7 +107,8 @@ class NaturalLanguageToSQLService:
             dialect=dialect,
             examples=examples,
             error_context=error_context,
-            previous_attempts=previous_attempts
+            previous_attempts=previous_attempts,
+            owner_question=owner_question,
         )
 
         try:
@@ -142,11 +153,13 @@ class NaturalLanguageToSQLService:
         dialect: str,
         examples: Optional[List[Dict[str, str]]],
         error_context: Optional[str] = None,
-        previous_attempts: Optional[List[Dict[str, str]]] = None
+        previous_attempts: Optional[List[Dict[str, str]]] = None,
+        owner_question: Optional[str] = None,
     ) -> str:
         """Build a comprehensive prompt for the LLM."""
 
-        relevant_tables = self._get_relevant_tables(question, schema_metadata)
+        owner = owner_question if owner_question and _plain(owner_question) != _plain(question) else None
+        relevant_tables = self._get_relevant_tables(f"{question} {owner}" if owner else question, schema_metadata)
 
         prompt_parts = []
 
@@ -251,8 +264,14 @@ Database Dialect: {dialect}
                 prompt_parts.append("")
             prompt_parts.append("Generate a CORRECTED SQL query that avoids these errors.\n")
 
-        # Add the actual question
-        prompt_parts.append(f"\nQUESTION: {question}")
+        # Add the actual question. F077 (A): the person's own words win over a
+        # restatement that added or dropped a qualifier.
+        if owner:
+            prompt_parts.append(f'\nQUESTION (the person\'s own words; answer this):\n"""\n{owner}\n"""')
+            prompt_parts.append(f"RESTATED BY THE ASSISTANT: {question}")
+            prompt_parts.append(OWNER_WORDS_RULE)
+        else:
+            prompt_parts.append(f"\nQUESTION: {question}")
         prompt_parts.append("\nGenerate the SQL query and explanation in this format:")
         prompt_parts.append("SQL:")
         prompt_parts.append("[your SQL query here]")

@@ -379,9 +379,13 @@ class DatabaseKnowledgeService:
         max_retries: int = 2,
         auto_train: bool = True,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a natural language query against a database source.
+
+        ``owner_question`` (F077): the person's own words for this turn, beside the
+        caller's restatement in ``natural_language_query``; their qualifiers win.
 
         PRD-61: Enhanced with error self-correction loop, few-shot examples
         from training store, and confidence scoring.
@@ -502,6 +506,7 @@ class DatabaseKnowledgeService:
                 error_context=last_error,
                 previous_attempts=attempted_sqls if attempted_sqls else None,
                 system_prompt=nl2sql_system_prompt,
+                owner_question=owner_question,
             )
 
             generated_sql = sql
@@ -733,6 +738,7 @@ class DatabaseKnowledgeService:
         natural_language_query: str,
         user_id: str,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Perform advanced analytics/visualization on database data.
@@ -751,7 +757,7 @@ class DatabaseKnowledgeService:
 
         sql_result = await self.query_database(
             source_id, fetch_query_prompt, user_id,
-            workspace_id=workspace_id,
+            workspace_id=workspace_id, owner_question=owner_question,
         )
         
         if not sql_result['success']:
@@ -800,6 +806,7 @@ class DatabaseKnowledgeService:
         user_id: str,
         agent_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Intelligently route between SQL Query and Data Analysis.
@@ -810,12 +817,12 @@ class DatabaseKnowledgeService:
 
         if is_analysis:
             return await self.analyze_database(
-                source_id, text, user_id, workspace_id=workspace_id
+                source_id, text, user_id, workspace_id=workspace_id, owner_question=owner_question,
             )
         else:
             return await self.query_database(
                 source_id, text, user_id, agent_id,
-                workspace_id=workspace_id,
+                workspace_id=workspace_id, owner_question=owner_question,
             )
 
     async def resolve_source_id(

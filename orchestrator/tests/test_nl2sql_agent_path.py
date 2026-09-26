@@ -106,7 +106,7 @@ def test_smart_database_tool_threads_scope_in_process(monkeypatch):
             calls["resolve"] = {"workspace_id": workspace_id, "database_name": database_name}
             return "7"
 
-        async def smart_query(self, source_id, text, user_id, agent_id=None, workspace_id=None):
+        async def smart_query(self, source_id, text, user_id, agent_id=None, workspace_id=None, owner_question=None):
             calls["smart_query"] = {
                 "source_id": source_id, "text": text, "user_id": user_id,
                 "agent_id": agent_id, "workspace_id": workspace_id,
