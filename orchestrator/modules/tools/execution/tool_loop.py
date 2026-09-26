@@ -699,7 +699,8 @@ def looks_like_narrated_action(text: str) -> bool:
     return cues >= 2 or (cues >= 1 and claims >= 1)
 
 
-_I_HAVE = r"\bi(?:'ve|’ve| have)(?: just| now| already)? "
+# F201: "I have also updated your subscription" (#1146's draft) is a claim too.
+_I_HAVE = r"\bi(?:'ve|’ve| have)(?: (?:just|now|already|also|gone ahead and))* "
 # F187 (nights 5-6), not claims: "I've started reading the document" (it read a
 # page; nothing started) and "I've noted that you're happy to increase the
 # budget" (it heard the owner; nothing was stored).
