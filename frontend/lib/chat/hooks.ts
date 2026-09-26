@@ -7,6 +7,7 @@ import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
 import { errorFromDataPayload, parseErrorFrame } from '@/lib/chat/errors'
+import { withoutNarration } from '@/lib/chat/narration'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -419,6 +420,27 @@ export function useChat({
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === assistantMessageId ? { ...m, reasoning: (m.reasoning ?? '') + delta } : m
+                    )
+                  )
+                }
+                // F186: the text just streamed was narration (the round called tools) or,
+                // retracted, a claim F108 nudged. It leaves the answer; narration joins the trail.
+                else if (data.type === 'narration' && typeof data.data?.text === 'string') {
+                  const said = data.data.text as string
+                  const retracted = data.data.retracted === true
+                  accumulatedContent = withoutNarration(accumulatedContent, said)
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                          ...m,
+                          content: accumulatedContent,
+                          parts: [{ type: 'text', text: accumulatedContent }],
+                          ...(retracted
+                            ? {}
+                            : { progress: [...(m.progress ?? []).slice(-(PROGRESS_LINES_KEPT - 1)), said] }),
+                        }
+                        : m
                     )
                   )
                 }

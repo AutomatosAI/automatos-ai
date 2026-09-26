@@ -735,6 +735,7 @@ def _install_handle_message_stubs(
         ("core", []),
         ("core.routing", ["core"]),
         ("core.database", ["core"]),
+        ("core.security", ["core"]),
         ("modules", []),
         ("modules.agents", ["modules"]),
         ("modules.agents.factory", ["modules", "modules.agents"]),
@@ -762,6 +763,13 @@ def _install_handle_message_stubs(
     agent_mod.AgentFactory = factory_cls  # type: ignore[attr-defined]
     sys.modules["modules.agents.factory.agent_factory"] = agent_mod
     installed.append("modules.agents.factory.agent_factory")
+
+    # F149: handle_message checks the routed agent is the channel workspace's;
+    # these tests pin the heartbeat shape, so the stubbed agent always is.
+    scope_mod = types.ModuleType("core.security.workspace_scope")
+    scope_mod.agent_in_workspace = lambda db, agent_id, workspace_id: True  # type: ignore[attr-defined]
+    sys.modules["core.security.workspace_scope"] = scope_mod
+    installed.append("core.security.workspace_scope")
 
     return installed
 
@@ -804,8 +812,8 @@ class TestEndToEndHeartbeatShape:
         saved = {
             name: sys.modules.get(name)
             for name in (
-                "core", "core.routing", "core.database",
-                "core.routing.engine", "core.database.database",
+                "core", "core.routing", "core.database", "core.security",
+                "core.routing.engine", "core.database.database", "core.security.workspace_scope",
                 "modules", "modules.agents", "modules.agents.factory",
                 "modules.agents.factory.agent_factory",
             )
@@ -883,8 +891,8 @@ class TestEndToEndHeartbeatShape:
         saved = {
             name: sys.modules.get(name)
             for name in (
-                "core", "core.routing", "core.database",
-                "core.routing.engine", "core.database.database",
+                "core", "core.routing", "core.database", "core.security",
+                "core.routing.engine", "core.database.database", "core.security.workspace_scope",
                 "modules", "modules.agents", "modules.agents.factory",
                 "modules.agents.factory.agent_factory",
             )
@@ -948,8 +956,8 @@ class TestEndToEndHeartbeatShape:
         saved = {
             name: sys.modules.get(name)
             for name in (
-                "core", "core.routing", "core.database",
-                "core.routing.engine", "core.database.database",
+                "core", "core.routing", "core.database", "core.security",
+                "core.routing.engine", "core.database.database", "core.security.workspace_scope",
                 "modules", "modules.agents", "modules.agents.factory",
                 "modules.agents.factory.agent_factory",
             )

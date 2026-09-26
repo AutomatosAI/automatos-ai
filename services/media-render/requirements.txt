@@ -1,0 +1,14 @@
+# media-render runtime (PRD-251 D3). Pinned exactly: every build of the image
+# renders the same way.
+
+# HTTP service (the worker's server library)
+aiohttp==3.14.3
+
+# Kokoro TTS, the default voice (D11). kokoro-onnx drives espeak-ng through
+# phonemizer: both are GPL-3.0 and stay inside this image (the GPL boundary).
+kokoro-onnx==0.6.1
+espeakng-loader==0.2.4
+phonemizer==3.4.0
+onnxruntime==1.30.0
+numpy==2.5.3
+soundfile==0.14.0

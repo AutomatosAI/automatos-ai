@@ -233,8 +233,9 @@ class _FakeHarnessExecutor:
         self._tasks = tasks
         self._agents = agents
         self.calls = []
+        self.db = None  # the task ledger is the harness_ledger fixture (F156)
 
-    async def execute(self, action, params):
+    async def execute(self, action, params, caller_context=None):
         self.calls.append((action, params))
         if action == "platform_list_tasks":
             return {"data": self._tasks}
@@ -243,7 +244,7 @@ class _FakeHarnessExecutor:
         return {"success": True}
 
 
-async def test_kill_switch_halts(monkeypatch, tmp_path, real_registry):
+async def test_kill_switch_halts(monkeypatch, tmp_path, real_registry, harness_ledger):
     """Flipping either kill-switch flag off MID-FLOW takes effect on the very
     next call — the autonomy dial re-imposes confirmation, the HARNESS flag
     refuses auto-apply. Neither is cached."""

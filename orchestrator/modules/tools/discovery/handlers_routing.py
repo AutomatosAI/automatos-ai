@@ -33,6 +33,13 @@ async def create_routing_rule(
             "error": "A routing rule needs a target_agent_id or target_workflow_id",
         }
 
+    # F149: a rule routes only to this workspace's agents and playbooks.
+    from core.security.workspace_scope import routing_target_error
+
+    refused = routing_target_error(db, workspace_id, target_agent_id, target_workflow_id)
+    if refused:
+        return {"success": False, "error": refused}
+
     source_pattern = params.get("source_pattern")
     source_channel = params.get("source_channel")
     if not source_pattern and not source_channel:

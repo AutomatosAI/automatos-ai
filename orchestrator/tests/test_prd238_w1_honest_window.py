@@ -109,7 +109,7 @@ def test_finalize_cancelled_reports_to_the_watch(monkeypatch):
     monkeypatch.setattr("api.board_tasks.notify_board_event", lambda *a, **k: None)
     task = SimpleNamespace(id=92, status="in_progress", runtime_ref={"exit_reason": "cancelled", "denials": 1})
     db = MagicMock()
-    db.query.return_value.get.return_value = task
+    db.get.return_value = task  # the writer's locked read (F175 review)
 
     status = asyncio.run(finalize_board_task_run(
         db, task_id=92, workspace_id=str(uuid.uuid4()), agent_id=15,

@@ -1,7 +1,7 @@
 """Mission handlers for PlatformActionExecutor (PRD-82A)."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -15,8 +15,9 @@ _CONTEXT_MESSAGE_LIMIT = 5
 
 
 def _actor(params: Dict[str, Any]) -> str:
-    """PRD-163 Q56: the human behind this action — the chatting user's clerk id
-    (``_created_by``, injected by the executor) when available, else the agent."""
+    """PRD-163 Q56: the human behind this action — the chatting user's clerk id,
+    or on the local edition their email (``_created_by``, injected by the
+    executor, F166) when available, else the agent."""
     return str(params.get("_created_by") or params.get("_agent_id") or "agent")
 
 
@@ -64,8 +65,14 @@ def _plan_task_summary(plan_tasks: list) -> list:
             "agent_role": t.get("agent_role", ""),
             "sequence": t.get("sequence_number", 0),
         }
+        # F162 (c): the card edits a task by its temp_id; side-by-side tasks
+        # share a sequence number, and an edit by step number is refused then.
+        if t.get("temp_id") is not None:
+            entry["temp_id"] = str(t["temp_id"])
         if t.get("match_agent"):
             entry["match_agent"] = t["match_agent"]
+        if t.get("match_agent_id") is not None:  # F142 (c): which of several same-named agents
+            entry["match_agent_id"] = t["match_agent_id"]
         if t.get("match_reason"):
             entry["match_reason"] = t["match_reason"]
         if t.get("match_is_override"):
@@ -89,6 +96,23 @@ def _owner_approves_every_mission(db: Session, workspace_id: UUID) -> bool:
 AUTO_APPROVE_HELD_NOTE = (
     " auto_approve was not applied: this workspace asks its owner to approve every mission."
 )
+WIDGET_AUTO_APPROVE_HELD_NOTE = (
+    " auto_approve was not applied: a call from the public widget is no approval, so the "
+    "workspace's mission policy decides."
+)
+
+
+def _auto_approve_held(db: Session, workspace_id: UUID, config: Dict[str, Any]) -> str:
+    """Why the call's auto_approve does not count (the reply's note), or ""."""
+    if not config.get("auto_approve"):
+        return ""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return WIDGET_AUTO_APPROVE_HELD_NOTE
+    if _owner_approves_every_mission(db, workspace_id):
+        return AUTO_APPROVE_HELD_NOTE
+    return ""
 
 
 def _create_reply_message(run: Any, task_count: int) -> str:
@@ -118,6 +142,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     goal = params.get("goal")
     if not goal:
         return {"success": False, "error": "goal is required"}
+    from services.coordinator_service import StaffingError
 
     created_by = _actor(params)
 
@@ -140,6 +165,8 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     config = strip_caller_narration_origin(params.get("config"))
     if _origin:
         config["origin_chat_id"] = str(_origin)
+    # F155: the coordinator server-sets where a mission starts from, and drops a
+    # widget turn's cost ceiling (services.coordinator_service._creator_config).
 
     # Recent conversation context for the planner. The UI suggestion-card already
     # attaches context_messages on its API call; the executor path did not. Narrow
@@ -148,8 +175,9 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     # F036 (night 1): a mission's approval gate is the OWNER's policy. An agent's
     # own tool call cannot skip it: auto_approve counts only where the policy
     # already lets missions start without asking (auto_below_budget, full_auto).
-    auto_approve_held = bool(config.get("auto_approve")) and _owner_approves_every_mission(db, workspace_id)
-    if auto_approve_held:
+    # F155: a public widget visitor's call is never an approval.
+    held_note = _auto_approve_held(db, workspace_id, config)
+    if held_note:
         config = {k: v for k, v in config.items() if k != "auto_approve"}
 
     if "context_messages" not in config:
@@ -169,6 +197,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             goal=goal,
             created_by=created_by,
             config=config,
+            staffing=params.get("staffing"),
         )
 
         # PRD-204 S9 (Q1): Auto-launched missions get a run_and_report watch
@@ -210,16 +239,40 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "goal": run.goal[:200] if run.goal else "",
             "task_count": len(tasks),
             "tasks": task_summary,
-            "message": _create_reply_message(run, len(tasks)) + (AUTO_APPROVE_HELD_NOTE if auto_approve_held else ""),
+            "message": _create_reply_message(run, len(tasks)) + held_note,
         }
 
+    except StaffingError as e:
+        # F142 (a): a name no agent has, or several share, is the owner's to settle.
+        return {"success": False, "error": str(e)}
     except Exception as e:
         logger.error("[Missions] create_mission failed: %s", e, exc_info=True)
         return {"success": False, "error": f"Failed to create mission: {str(e)[:300]}"}
 
 
+_DONE_TASK_STATES = ("completed", "verified")
+
+
+def _mission_visitor_view(run: Any, task_count: int, tasks_done: Optional[int] = None) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a mission (missions:read): what it
+    is for and how far it has got. Never its config (the owner's staffing,
+    budget, origin), plan, task texts and outputs, errors, or who started it."""
+    view = {
+        "id": run.id,
+        "goal": (run.goal or "")[:150],
+        "state": run.state,
+        "task_count": task_count,
+        "created_at": str(run.created_at) if run.created_at else None,
+        "completed_at": str(run.completed_at) if run.completed_at else None,
+    }
+    if tasks_done is not None:
+        view["tasks_done"] = tasks_done
+    return view
+
+
 async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List missions in the workspace."""
+    from core.security.surface import widget_turn
     from core.models.orchestration import OrchestrationRun
 
     query = db.query(OrchestrationRun).filter(
@@ -232,6 +285,10 @@ async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     limit = min(int(params.get("limit", 10)), 50)
     runs = query.order_by(OrchestrationRun.created_at.desc()).limit(limit).all()
+
+    if widget_turn():
+        missions = [_mission_visitor_view(r, len((r.plan or {}).get("tasks", []))) for r in runs]
+        return {"success": True, "missions": missions, "total": len(missions)}
 
     result = []
     for r in runs:
@@ -275,6 +332,12 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     tasks = db.query(OrchestrationTask).filter(
         OrchestrationTask.run_id == run.id,
     ).order_by(OrchestrationTask.sequence_number).all()
+
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        done = sum(1 for t in tasks if t.state in _DONE_TASK_STATES)
+        return {"success": True, "mission": _mission_visitor_view(run, len(tasks), done)}
 
     task_details = []
     for t in tasks:
@@ -347,6 +410,22 @@ def _resolve_run(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     return run, None
 
 
+WIDGET_CANNOT_CHANGE = (
+    "The public widget can't change a mission: the workspace owner does that from the dashboard."
+)
+
+
+def _widget_cannot_change() -> Optional[Dict[str, Any]]:
+    """F155: approving, resuming, rejecting, pausing, cancelling, replanning or
+    editing a mission is the owner's decision, never a public widget visitor's.
+    Refused before the run is looked up."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return {"success": False, "error": WIDGET_CANNOT_CHANGE}
+    return None
+
+
 def _ok(run: Any, verb: str) -> Dict[str, Any]:
     return {
         "success": True,
@@ -358,6 +437,9 @@ def _ok(run: Any, verb: str) -> Dict[str, Any]:
 
 async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Approve a mission plan and start execution (awaiting_approval → running)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -377,7 +459,12 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().approve_plan(db, run.id, actor_id)
-        return _ok(updated, "approved → running")
+        result = _ok(updated, "approved → running")
+        # F170: the reply says what it waits for, when another mission's step holds it.
+        from services.mission_wait import wait_note_of
+
+        waiting = wait_note_of(db, updated.id)
+        return {**result, "message": f"{result['message']} {waiting}", "waiting": waiting} if waiting else result
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive
@@ -386,7 +473,10 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 
 async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Reject a mission plan (awaiting_approval → failed)."""
+    """Reject a mission plan (awaiting_approval → cancelled, F143: it never ran)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -396,7 +486,11 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().reject_plan(db, run.id, actor_id, reason=reason)
-        return _ok(updated, "rejected")
+        return {
+            **_ok(updated, "rejected by the owner"),
+            "message": (f"Mission {updated.id} rejected by the owner: {reason}. "
+                        "It never ran, so it is closed as cancelled."),
+        }
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive
@@ -406,6 +500,9 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Pause a running mission (running → paused)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -424,15 +521,27 @@ async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
 async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Resume a paused mission (paused → running)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
     from services.coordinator_service import CoordinatorService
 
+    from modules.coordination.dispatcher import MissionDispatcher
+
     actor_id = _actor(params)
+    ceiling_before = MissionDispatcher._budget_ceiling_usd(run)
     try:
         updated = CoordinatorService().resume_mission(db, run.id, actor_id)
-        return _ok(updated, "resumed → running")
+        reply = _ok(updated, "resumed → running")
+        # F153: say what the budget was extended to, when resuming raised it.
+        ceiling_after = MissionDispatcher._budget_ceiling_usd(updated)
+        if ceiling_after > ceiling_before:
+            reply["message"] += (f" Its budget was raised from ${ceiling_before:,.2f} to ${ceiling_after:,.2f} "
+                                 f"(${MissionDispatcher._cost_used_usd(updated, db):,.2f} spent so far).")
+        return reply
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive
@@ -442,6 +551,9 @@ async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Cancel a mission (any non-terminal → cancelled)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -460,6 +572,9 @@ async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Replan a failed mission (failed → replanning → running)."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
@@ -468,7 +583,7 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     actor_id = _actor(params)
     try:
         updated = await CoordinatorService().replan_mission(
-            db, run.id, actor_id, notes=params.get("notes"),
+            db, run.id, actor_id, notes=params.get("notes"), staffing=params.get("staffing"),
         )
         return _ok(updated, "replanned → running")
     except ValueError as e:
@@ -481,6 +596,9 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
     mission (e.g. reassign a task's agent) so they persist into execution."""
+    refused = _widget_cannot_change()
+    if refused:
+        return refused
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err

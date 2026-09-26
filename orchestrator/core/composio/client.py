@@ -11,13 +11,16 @@ Features:
 - Webhook trigger subscription
 """
 
+import copy
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from config import config
+from core.composio import lookup_cache
 from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,11 @@ logger = logging.getLogger(__name__)
 # Lazy imports for Composio SDK (may not be installed in all environments)
 _composio = None
 _composio_toolset = None
+
+# F105: Composio lookups run on several threads at once (core.composio.off_loop),
+# so the client and its SDK handles are each built by one of them.
+_client_lock = threading.Lock()
+_sdk_init_lock = threading.Lock()
 
 
 def _get_composio():
@@ -117,38 +125,49 @@ class ComposioClient:
     def composio(self):
         """Lazy-load Composio client."""
         if self._composio is None and self.api_key:
-            Composio = _get_composio()
-            # Pin toolkit versions to "latest" so manual tools.execute() calls
-            # (e.g. bug-report Jira widget) don't error on the SDK's version check.
-            # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
-            # billing, and service monitoring. This is part of their service model.
-            self._composio = Composio(
-                api_key=self.api_key,
-                # "latest" is rejected for manual tools.execute() calls — see
-                # docs/SHOPIFY/COMPOSIO-SHOPIFY-SETUP.md gotcha #1. Pin shopify
-                # to the version we've tested PRD-009 sync against; other
-                # toolkits stay on "latest" via the default key.
-                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
-            )
+            with _sdk_init_lock:
+                if self._composio is None:
+                    Composio = _get_composio()
+                    # Pin toolkit versions to "latest" so manual tools.execute() calls
+                    # (e.g. bug-report Jira widget) don't error on the SDK's version check.
+                    # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
+                    # billing, and service monitoring. This is part of their service model.
+                    self._composio = Composio(
+                        api_key=self.api_key,
+                        # "latest" is rejected for manual tools.execute() calls — see
+                        # docs/SHOPIFY/COMPOSIO-SHOPIFY-SETUP.md gotcha #1. Pin shopify
+                        # to the version we've tested PRD-009 sync against; other
+                        # toolkits stay on "latest" via the default key.
+                        toolkit_versions={"default": "latest", "shopify": "20260414_00"},
+                    )
         return self._composio
 
     @property
     def toolset(self):
         """Lazy-load Composio with OpenAI Provider."""
         if self._toolset is None and self.api_key:
-            # Use new API: Composio with OpenAIProvider
-            Composio = _get_composio()
-            OpenAIProvider = _get_composio_openai_provider()
-            # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
-            # billing, and service monitoring. This is part of their service model.
-            # Initialize Composio client with OpenAI provider
-            self._toolset = Composio(
-                api_key=self.api_key,
-                provider=OpenAIProvider(),
-                # Mirror the pin on `composio` above so the OpenAI-provider
-                # variant doesn't drift back to "latest" for shopify.
-                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
-            )
+            with _sdk_init_lock:
+                if self._toolset is None:
+                    # Use new API: Composio with OpenAIProvider
+                    Composio = _get_composio()
+                    OpenAIProvider = _get_composio_openai_provider()
+                    # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
+                    # billing, and service monitoring. This is part of their service model.
+                    # Initialize Composio client with OpenAI provider
+                    self._toolset = Composio(
+                        api_key=self.api_key,
+                        provider=OpenAIProvider(),
+                        # Mirror the pin on `composio` above so the OpenAI-provider
+                        # variant doesn't drift back to "latest" for shopify.
+                        toolkit_versions={"default": "latest", "shopify": "20260414_00"},
+                        # F105: this handle serves only a turn's lookups (searches,
+                        # schemas, for_turn action lists), which a turn waits on for
+                        # COMPOSIO_LOOKUP_TIMEOUT_SECONDS at most: its calls give up
+                        # as soon, un-retried, so a hung call frees its thread. The
+                        # SDK's own default is 60 s a try, three tries.
+                        timeout=config.COMPOSIO_LOOKUP_TIMEOUT_SECONDS,
+                        max_retries=0,
+                    )
         return self._toolset
     
     def get_entity(self, entity_id: str):
@@ -813,28 +832,33 @@ class ComposioClient:
 
         return items
     
-    def get_app_actions(self, app_name: str) -> List[Dict[str, Any]]:
+    def get_app_actions(self, app_name: str, *, for_turn: bool = False) -> List[Dict[str, Any]]:
         """
         Get all actions available for an app.
-        
+
         Args:
             app_name: App name (e.g., "github")
-            
+            for_turn: F105 — a turn's lookup (the hint enrichment) asks through the
+                lookup handle, whose calls give up after
+                COMPOSIO_LOOKUP_TIMEOUT_SECONDS un-retried; the routes and the
+                metadata sync keep the SDK's default timeout and retries.
+
         Returns:
             List of actions with metadata
         """
-        if not self.composio:
+        sdk = self.toolset if for_turn else self.composio
+        if not sdk:
             return []
-        
+
         try:
             # For listing available actions, use a placeholder user_id
             # The new API requires user_id, but for discovery we can use a temporary one
             # Actions are the same regardless of user - user matters only for execution
             placeholder_user_id = "discovery_placeholder"
-            
+
             # New API: composio.tools.get(user_id, toolkits=[app_name])
             # Set a high limit to get all actions (default is only 20!)
-            tools = self.composio.tools.get(
+            tools = sdk.tools.get(
                 user_id=placeholder_user_id,
                 toolkits=[app_name],
                 limit=5000  # Get all actions (many apps exceed 500)
@@ -1096,13 +1120,15 @@ class ComposioClient:
                 self._populate_schema_cache(app, entity_id)
 
         # Look up requested actions — search all cached apps since action names
-        # may have multi-word app prefixes (e.g. COMPOSIO_SEARCH_WEB → app COMPOSIO_SEARCH)
+        # may have multi-word app prefixes (e.g. COMPOSIO_SEARCH_WEB → app COMPOSIO_SEARCH).
+        # F105: over a snapshot, since another lookup thread may add an app meanwhile
+        # (an app's own cache is replaced whole, never changed in place).
         results = []
         seen = set()
         for name in action_names:
             if name in seen:
                 continue
-            for app_key, app_cache in self._schema_cache.items():
+            for app_key, app_cache in list(self._schema_cache.items()):
                 if name in app_cache:
                     results.append({
                         "action_name": name,
@@ -1127,7 +1153,7 @@ class ComposioClient:
                     limit=500,
                 )
             for name in missing:
-                for app_key, app_cache in self._schema_cache.items():
+                for app_key, app_cache in list(self._schema_cache.items()):
                     if name in app_cache:
                         results.append({
                             "action_name": name,
@@ -1275,6 +1301,21 @@ class ComposioClient:
             logger.warning("Composio toolset not initialized — cannot search actions")
             return []
 
+        # F105: the same search as the same entity within the TTL is answered from
+        # memory (core.composio.lookup_cache), as a copy: callers hand the schemas
+        # on to a turn's tools.
+        kept_key = (
+            entity_id, search_query, tuple(n.lower() for n in app_names), limit, tuple(explicit_actions or ()),
+        )
+        kept = lookup_cache.STEP_SEARCHES.get(kept_key)
+        if kept is not None:
+            logger.info(
+                f"[ComposioClient] search_actions_for_step query={search_query!r} "
+                f"apps={app_names} explicit={bool(explicit_actions)} → {len(kept)} actions (kept): "
+                f"{[r['action_name'] for r in kept]}"
+            )
+            return copy.deepcopy(kept)
+
         results: List[Dict[str, Any]] = []
         seen: set = set()
 
@@ -1328,6 +1369,8 @@ class ComposioClient:
 
         except Exception as e:
             logger.error(f"Composio semantic search failed (query={search_query!r}): {e}")
+        else:
+            lookup_cache.STEP_SEARCHES.put(kept_key, copy.deepcopy(results))
 
         logger.info(
             f"[ComposioClient] search_actions_for_step query={search_query!r} "
@@ -1466,10 +1509,13 @@ _client_instance: Optional[ComposioClient] = None
 
 
 def get_composio_client() -> ComposioClient:
-    """Get or create the Composio client singleton."""
+    """Get or create the Composio client singleton (one, even when several
+    lookup threads ask at once: F105)."""
     global _client_instance
     if _client_instance is None:
-        _client_instance = ComposioClient()
+        with _client_lock:
+            if _client_instance is None:
+                _client_instance = ComposioClient()
     return _client_instance
 
 

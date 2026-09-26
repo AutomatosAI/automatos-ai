@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 ORPHANED_BOARD_SQL = """
-    SELECT bt.id, bt.source_type, bt.source_id, bt.started_at
+    SELECT bt.id, bt.source_type, bt.source_id, bt.started_at, bt.workspace_id, bt.assigned_agent_id
     FROM board_tasks bt
     WHERE bt.status = 'in_progress'
       AND bt.started_at < :cutoff
@@ -90,6 +90,7 @@ class TaskReconciler:
         db = SessionLocal()
         try:
             now = datetime.now(timezone.utc)
+            self._note_waiting_missions(db, now, app_config.MISSION_WAIT_NOTE_AFTER_SECONDS)
 
             # 1. Stalled running executions
             stalled_running = db.execute(
@@ -160,22 +161,23 @@ class TaskReconciler:
             for row in stuck_pending:
                 await self._handle_stalled(row, db, reason="pending", timeout=app_config.TASK_PENDING_TIMEOUT_SECONDS)
 
+            # F175 (night 6): an orphan used to close 'done', so #1094 read as delivered
+            # with no result. It is a failed run: the one completion writer closes it
+            # 'failed' with the reason, tells the owner (task_failed) and writes its
+            # report, as for any failed run. A task no longer in progress is left alone.
+            from api.board_tasks import finalize_board_task_run
+
             for row in orphaned_board:
                 error_msg = (
                     f"Stalled: in_progress for >{app_config.TASK_STALL_TIMEOUT_SECONDS}s "
                     f"with no active execution (source={row.source_type})"
                 )
-                db.execute(
-                    text("""
-                        UPDATE board_tasks
-                        SET status = 'done',
-                            error_message = :error,
-                            completed_at = :now
-                        WHERE id = :id AND status = 'in_progress'
-                    """),
-                    {"error": error_msg, "now": now, "id": row.id},
+                closed = await finalize_board_task_run(
+                    db, task_id=row.id, workspace_id=str(row.workspace_id), agent_id=row.assigned_agent_id,
+                    exec_result={"status": "error", "error": error_msg},
                 )
-                logger.warning("[TaskReconciler] Closed orphaned board task %d — %s", row.id, error_msg)
+                logger.warning("[TaskReconciler] Board task %d stalled, closed %s — %s",
+                               row.id, closed or "by nobody (no longer in progress)", error_msg)
 
             db.commit()
 
@@ -184,6 +186,23 @@ class TaskReconciler:
             db.rollback()
         finally:
             db.close()
+
+    @staticmethod
+    def _note_waiting_missions(db, now: datetime, wait_after_s: int) -> None:
+        """F170 (B52/B62): a running mission whose steps sit queued behind another
+        mission's Claude Code step says so, once per wait. This job keeps running
+        while the coordinator tick is held by that step. Its own commit; a failure
+        here never touches the reconciliation that follows."""
+        try:
+            from services.mission_wait import narrate_waits, note_waiting_missions
+
+            noted = note_waiting_missions(db, now, wait_after_s)
+            if noted:
+                db.commit()
+                narrate_waits(db, noted)
+        except Exception:  # noqa: BLE001
+            logger.warning("[TaskReconciler] could not note the missions waiting on a session", exc_info=True)
+            db.rollback()
 
     # ------------------------------------------------------------------
     # Handle a single stalled execution

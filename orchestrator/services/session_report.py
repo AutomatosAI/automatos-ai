@@ -24,6 +24,42 @@ def refused_calls_lines(denials: List[Any]) -> List[str]:
     return lines
 
 
+# F167: a hold's outcome, in the report's words. An approval the host reported
+# that the backend has no record of (cli_host_service.approval_on_record) is
+# never shown as the operator's.
+APPROVAL_NOT_ON_RECORD = "approval not on record"
+HOLD_OUTCOMES = {
+    "approved": "the operator approved it",
+    "denied": "the operator denied it",
+    "no answer": "no answer in time, so it did not run",
+    APPROVAL_NOT_ON_RECORD: "the host reported an approval that is not on record",
+}
+
+
+def tool_call_verdict(entry: Dict[str, Any]) -> str:
+    """F167: what the host decided for one call — "" when the host did not say
+    (older hosts). A call that ran with nobody asked never reads as approved."""
+    decision, reason = entry.get("decision"), entry.get("reason")
+    because = f" ({reason})" if reason else ""
+    if decision == "allow":
+        return f"ran, nobody was asked{because}"
+    if decision == "ask":
+        return f"held for the operator: {HOLD_OUTCOMES.get(entry.get('answer'), 'no answer recorded')}"
+    if decision == "deny":
+        return f"refused by the gate{because}"
+    return ""
+
+
+def tool_decisions_line(tally: Dict[str, Any]) -> str:
+    """F167: every call of the session, counted by what the host decided."""
+    held, unrecorded = int(tally.get("ask") or 0), int(tally.get("unrecorded") or 0)
+    not_on_record = f", {unrecorded} approval{'s' if unrecorded != 1 else ''} not on record" if unrecorded else ""
+    held_part = f"{held} held for the operator ({int(tally.get('approved') or 0)} approved{not_on_record})" if held \
+        else "none held for the operator"
+    return (f"- Tool calls: {int(tally.get('allow') or 0)} ran with nobody asked · {held_part} · "
+            f"{int(tally.get('deny') or 0)} refused by the gate")
+
+
 def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
     """PRD-234 S2: the "Claude Code session" part of a task report — what ran,
     where, what it produced, what was refused and how to take it over. Empty for
@@ -41,6 +77,8 @@ def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
         lines.append(f"- Working directory: {session['cwd']}")
     if session.get("exit_reason"):
         lines.append(f"- Ended: {session['exit_reason']}")
+    if isinstance(session.get("tool_decisions"), dict) and session["tool_decisions"]:
+        lines.append(tool_decisions_line(session["tool_decisions"]))
     deliverables = exec_result.get("deliverables") or []
     if deliverables:
         lines.append("")
@@ -62,7 +100,9 @@ def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
         lines.append(f"### Tool calls (last {len(recent)})")
         for r in recent:
             if isinstance(r, dict):
-                lines.append(f"- {r.get('at', '')} {r.get('tool', '?')}" + (f" — `{r['subject']}`" if r.get("subject") else ""))
+                verdict = tool_call_verdict(r)
+                lines.append(f"- {r.get('at', '')} {r.get('tool', '?')}" + (f" — `{r['subject']}`" if r.get("subject") else "")
+                             + (f" · {verdict}" if verdict else ""))
     if session.get("transcript_path"):
         lines.append("")
         lines.append(f"- Transcript: `{session['transcript_path']}`")

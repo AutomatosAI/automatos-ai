@@ -138,6 +138,13 @@ async def create_api_key(
                 "Public keys require a non-empty allowed_domains list",
             )
 
+    # F149: a key is locked only to one of this workspace's agents.
+    if body.default_agent_id is not None:
+        from core.security.workspace_scope import agent_in_workspace
+
+        if not agent_in_workspace(db, body.default_agent_id, ctx.workspace_id):
+            raise HTTPException(400, "default_agent_id is not an agent of this workspace")
+
     result = ApiKeyService.create_api_key(
         db=db,
         workspace_id=ctx.workspace_id,

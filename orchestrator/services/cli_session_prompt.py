@@ -46,6 +46,15 @@ from services.session_tools import tool_names as _session_tool_names
 
 SESSION_TOOLS_AVAILABLE: Sequence[str] = _session_tool_names()
 TOOLS_HEADER = "## Tools in this session"
+# F167: a session wrote that a command "needed your approval, and it went through"
+# when nobody had been asked. To the session, a command that runs looks the same
+# whether the host allowed it outright or the operator approved a hold.
+APPROVALS_LINE = (
+    "- Approvals: never write that anything needed, got or went through the operator's approval "
+    "unless a question card was answered: your own `ask_human` question, with the answer in this "
+    "ticket. A command that runs looks the same whether or not anyone was asked, so say that it "
+    "ran, never that it was approved."
+)
 GAP_LINE_PREFIX = "Not available in a session: "
 INSTEAD_LINE = "In a session, call {swaps}."
 # The CLI's OWN tools do these jobs; the bridge has no equivalent and needs none.
@@ -219,7 +228,8 @@ def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) 
     if extras:
         bash += " This agent's own allowlist adds " + ", ".join(f"`{e}`" for e in extras) + "."
     bash += (
-        " Any other command is HELD until the operator allows or denies it (in the Questions tab, "
+        # F167: "may": a host run with ``--unlisted-bash allow`` runs them without asking.
+        " Any other command may be HELD until the operator allows or denies it (in the Questions tab, "
         "on the ticket, or by Telegram); no answer in time means denied. Pushing, publishing and escalating never run."
     )
     lines = [
@@ -227,6 +237,7 @@ def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) 
         "- Files: read, search and edit inside the folder you were started in, the ticket's own "
         "session folder, and the Deliverables folder your ticket names; anything else is refused.",
         bash,
+        APPROVALS_LINE,
         "- Web: the CLI's own web fetch and web search tools.",
     ]
     if available:

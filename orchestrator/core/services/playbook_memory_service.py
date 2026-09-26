@@ -424,13 +424,21 @@ class PlaybookMemoryService:
         if not playbook:
             raise ValueError(f"Playbook not found: {playbook_id}")
 
-        # Resolve workspace_id: prefer context, then playbook
-        workspace_id = str((context or {}).get("workspace_id") or playbook.workspace_id or "")
+        # F159: the memories are the calling run's workspace's, and the caller
+        # names it. Guessing from the playbook row could recall another
+        # workspace's runs: a shared playbook has no workspace, or not the
+        # caller's. Without one, nothing is recalled.
+        workspace_id = str((context or {}).get("workspace_id") or "")
         if not workspace_id:
-            logger.warning(
-                "No workspace_id for playbook %d (marketplace playbook?), memory retrieval may be incomplete",
-                playbook_id,
-            )
+            logger.warning("Playbook %d recall asked without the run's workspace; nothing recalled", playbook_id)
+            return {
+                "playbook_id": playbook_id,
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "playbook_memories": [],
+                "agent_memories": {},
+                "total_memories": 0,
+                "summary": self._build_memory_summary([], {}),
+            }
         template_id = playbook.template_id or str(playbook.id)
         context = context or {}
         ns = MemoryNamespace(workspace_id=workspace_id)

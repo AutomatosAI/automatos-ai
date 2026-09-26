@@ -165,9 +165,12 @@ class OpenRouterAnalyticsService:
                 )
                 resp.raise_for_status()
                 data = resp.json()
+            # F208: OpenRouter nests the figures under "data" (as it does the key's,
+            # below); read at the top level they were always 0.0 and 0.0.
+            credits = data.get("data", data) if isinstance(data, dict) else {}
             return {
-                "total_credits": data.get("total_credits", 0),
-                "total_usage": data.get("total_usage", 0),
+                "total_credits": credits.get("total_credits", 0),
+                "total_usage": credits.get("total_usage", 0),
             }
         except httpx.HTTPStatusError as exc:
             logger.warning(

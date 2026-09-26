@@ -379,9 +379,13 @@ class DatabaseKnowledgeService:
         max_retries: int = 2,
         auto_train: bool = True,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a natural language query against a database source.
+
+        ``owner_question`` (F077): the person's own words for this turn, beside the
+        caller's restatement in ``natural_language_query``; their qualifiers win.
 
         PRD-61: Enhanced with error self-correction loop, few-shot examples
         from training store, and confidence scoring.
@@ -477,8 +481,10 @@ class DatabaseKnowledgeService:
 
         # PRD-160 S2: ground generation in real low-cardinality column values
         # (status ∈ {active, churned}, …) so the LLM emits correct literals.
+        # F105: sampling queries the owner's database (up to 40 columns, 5 s
+        # each), so it runs on a thread, not on the loop.
         try:
-            self._augment_schema_with_samples(source, credentials, schema_metadata)
+            await asyncio.to_thread(self._augment_schema_with_samples, source, credentials, schema_metadata)
         except Exception as e:
             logger.debug(f"value sampling skipped: {e}")
 
@@ -488,9 +494,11 @@ class DatabaseKnowledgeService:
         retries = max_retries if auto_correct else 0
 
         for attempt in range(retries + 1):
-            # Step 4: Generate SQL
+            # Step 4: Generate SQL. F105: its LLM call is sync (generate_response_sync),
+            # so it runs on a thread, with this request's context, not on the loop.
             nl2sql = NaturalLanguageToSQLService(llm_provider=self.llm_provider)
-            sql, explanation, metadata = nl2sql.generate_sql(
+            sql, explanation, metadata = await asyncio.to_thread(
+                nl2sql.generate_sql,
                 question=natural_language_query,
                 schema_metadata=schema_metadata,
                 # PRD-160 S4: inject the per-connection semantic layer (business
@@ -502,6 +510,7 @@ class DatabaseKnowledgeService:
                 error_context=last_error,
                 previous_attempts=attempted_sqls if attempted_sqls else None,
                 system_prompt=nl2sql_system_prompt,
+                owner_question=owner_question,
             )
 
             generated_sql = sql
@@ -551,9 +560,13 @@ class DatabaseKnowledgeService:
 
             # Step 6: Execute under PRD-160 S2 guards — per-statement timeout
             # bounds runaway queries; EXPLAIN dry-run catches bad SQL cheaply
-            # and (on failure) feeds the self-correction loop below.
+            # and (on failure) feeds the self-correction loop below. F105: on a
+            # thread, like run_validated_readonly_sql: the owner's query may run
+            # for its whole timeout (30 s by default), never on the loop.
             try:
-                columns, rows = self._run_sql_with_guards(source, credentials, validated_sql)
+                columns, rows = await asyncio.to_thread(
+                    lambda: self._run_sql_with_guards(source, credentials, validated_sql)
+                )
 
                 execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
@@ -733,6 +746,7 @@ class DatabaseKnowledgeService:
         natural_language_query: str,
         user_id: str,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Perform advanced analytics/visualization on database data.
@@ -751,7 +765,7 @@ class DatabaseKnowledgeService:
 
         sql_result = await self.query_database(
             source_id, fetch_query_prompt, user_id,
-            workspace_id=workspace_id,
+            workspace_id=workspace_id, owner_question=owner_question,
         )
         
         if not sql_result['success']:
@@ -800,6 +814,7 @@ class DatabaseKnowledgeService:
         user_id: str,
         agent_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        owner_question: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Intelligently route between SQL Query and Data Analysis.
@@ -810,12 +825,12 @@ class DatabaseKnowledgeService:
 
         if is_analysis:
             return await self.analyze_database(
-                source_id, text, user_id, workspace_id=workspace_id
+                source_id, text, user_id, workspace_id=workspace_id, owner_question=owner_question,
             )
         else:
             return await self.query_database(
                 source_id, text, user_id, agent_id,
-                workspace_id=workspace_id,
+                workspace_id=workspace_id, owner_question=owner_question,
             )
 
     async def resolve_source_id(
@@ -958,8 +973,9 @@ class DatabaseKnowledgeService:
                     "data": [], "columns": [], "row_count": 0}
 
         try:
-            columns, rows = self._run_sql_with_guards(
-                source, credentials, validated_sql, params=parameters
+            # F105: the owner's query runs on a thread, never on the loop.
+            columns, rows = await asyncio.to_thread(
+                self._run_sql_with_guards, source, credentials, validated_sql, params=parameters
             )
         except Exception as e:  # noqa: BLE001
             logger.error(f"Template {template_id} execution failed: {e}")

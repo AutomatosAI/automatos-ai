@@ -9,6 +9,8 @@ interface MissionBudgetBarProps {
   tokensUsed: number
   tokenBudgetEstimate: number
   missionState?: string
+  /** Why the mission paused (F153: a budget pause names the spend and the budget). */
+  stopDetail?: string | null
   onResume?: () => void
   isResuming?: boolean
   className?: string
@@ -50,6 +52,7 @@ export function MissionBudgetBar({
   tokensUsed,
   tokenBudgetEstimate,
   missionState,
+  stopDetail,
   onResume,
   isResuming,
   className,
@@ -88,14 +91,16 @@ export function MissionBudgetBar({
         />
       </div>
 
-      {/* Warning banner + resume button */}
-      {(status === 'warning' || status === 'critical' || status === 'exceeded') && (
+      {/* Warning banner + resume button. F153: a paused mission says why. The
+          budget is spend in dollars (a Claude Code session's tokens cost
+          nothing), so a budget pause can come at any token percentage. */}
+      {(isPaused || status === 'warning' || status === 'critical' || status === 'exceeded') && (
         <div className="flex items-center justify-between gap-2">
-          <div className={cn('flex items-center gap-1.5 text-[11px]', styles.text)}>
+          <div className={cn('flex items-center gap-1.5 text-[11px]', isPaused ? 'text-warning' : styles.text)}>
             <AlertTriangle className="w-3 h-3 shrink-0" />
             <span>
               {isPaused
-                ? 'Mission paused — budget exceeded'
+                ? stopDetail || 'Mission paused'
                 : status === 'exceeded'
                   ? 'Budget exceeded — mission may be paused'
                   : status === 'critical'

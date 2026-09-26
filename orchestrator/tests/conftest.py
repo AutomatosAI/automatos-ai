@@ -73,13 +73,30 @@ if _orchestrator_root not in sys.path:
 @pytest.fixture(autouse=True)
 def _reset_composio_deny_list_cache():
     """PRD-251 S0.6: the Composio deny list is cached per process
-    (core/composio/deny_list.py), so no test may inherit another test's list.
-    Resets only a module that is already imported: importing it here would
-    disturb the tests that stub packages in sys.modules."""
+    (core/composio/deny_list.py), and so is the Socials post gate's list of
+    posting actions (S3.5, core/composio/post_gate.py), so no test may inherit
+    another test's list. Resets only a module that is already imported:
+    importing it here would disturb the tests that stub packages in sys.modules."""
     def _reset():
-        reset = getattr(sys.modules.get("core.composio.deny_list"), "reset_cache", None)
-        if callable(reset):
-            reset()
+        for name in ("core.composio.deny_list", "core.composio.post_gate"):
+            reset = getattr(sys.modules.get(name), "reset_cache", None)
+            if callable(reset):
+                reset()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_composio_lookup_cache():
+    """F105: Composio lookups are answered from memory for minutes
+    (core/composio/lookup_cache.py), so no test may inherit another test's
+    answers. Like the deny list above, only a module already imported."""
+    def _reset():
+        forget_all = getattr(sys.modules.get("core.composio.lookup_cache"), "forget_all", None)
+        if callable(forget_all):
+            forget_all()
 
     _reset()
     yield
@@ -126,11 +143,15 @@ def _repair_stubbed_package_bindings():
     yield
 
 
-@pytest.fixture(autouse=True)
-def _drain_best_effort_writes():
-    """F105: best-effort writes a test handed to their threads finish before the
-    next test starts, so a late write never lands in the next test's fakes."""
-    yield
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_teardown(item, nextitem):
+    """F105: best-effort writes a test handed to their threads finish BEFORE its
+    fixtures tear down. A usage row booked on the event loop (``UsageTracker.track``
+    is ``off_loop``) lands after the call returns; drained only after the fixtures
+    (the autouse fixture this replaces ran last), it could land between a real-DB
+    sweep's ``DELETE FROM llm_usage`` and its ``DELETE FROM workspaces`` and fail
+    that teardown on the FK (test_prd234_s1a_cli_hosts_realdb, refresh 4). A late
+    write also never lands in the next test's fakes."""
     best_effort = sys.modules.get("core.best_effort")
     if best_effort is not None and hasattr(best_effort, "drain"):
         best_effort.drain(timeout=5)
@@ -435,3 +456,30 @@ def new_session(engine):
     # Files with no sweep of their own must still not pin row locks for the
     # rest of the run -- a leak here would hang a LATER module's sweep.
     _release_sessions(created)
+
+
+@pytest.fixture
+def harness_ledger(monkeypatch):
+    """F156: an in-memory HARNESS task ledger, for suites that run HARNESS on fake
+    executors and databases. The real one (harness_task_ledger) is tested against
+    the database in test_f156_the_harness_ledger_is_in_the_database.py."""
+    from services.harness_service import HarnessService
+
+    class _Ledger:
+        def __init__(self):
+            self.applied, self.held, self.entries = set(), set(), []
+
+        def read(self, db, workspace_id):
+            return {"applied_task_ids": sorted(self.applied),
+                    "needs_approve_task_ids": sorted(self.held - self.applied)}
+
+        def write(self, db, workspace_id, newly_applied, newly_held):
+            for entry in newly_applied:
+                self.applied.add(str(entry["task_id"]))
+                self.entries.append(entry)
+            self.held |= {str(task_id) for task_id in newly_held}
+
+    ledger = _Ledger()
+    monkeypatch.setattr(HarnessService, "_read_applied_tasks", staticmethod(ledger.read))
+    monkeypatch.setattr(HarnessService, "_write_applied_tasks", staticmethod(ledger.write))
+    return ledger

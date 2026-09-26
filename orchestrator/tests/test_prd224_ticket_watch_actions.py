@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import services.watch_actions as wa
@@ -42,6 +43,9 @@ class _FakeQuery:
     def filter(self, *a, **k):
         return self
 
+    def with_for_update(self, *a, **k):  # F209: the redispatch's locked re-read
+        return self
+
     def first(self):
         return self._result
 
@@ -58,7 +62,8 @@ class _FakeDB:
 
 
 def _task(**over):
-    base = dict(id=4242, assigned_agent_id=7, status="failed", source_type="user")
+    base = dict(id=4242, assigned_agent_id=7, status="failed", source_type="user", source_id=None,
+                lease_until=None)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -208,15 +213,59 @@ def test_rvw2_in_progress_task_is_not_redispatched(monkeypatch):
     — that would reset the live run to 'assigned' and double-execute. It escalates
     instead, honoring _redispatch_task's 'caller guarantees not in_progress', and
     the guard fires BEFORE the budget rail so a benign race spends no budget."""
-    watch, task = _watch(), _task(status="in_progress")
+    live_claim = datetime.now(timezone.utc) + timedelta(minutes=10)  # the claim's lease (F176)
+    watch, task = _watch(), _task(status="in_progress", lease_until=live_claim)
     bag, db = _wire(monkeypatch, budget_rail=_BudgetRail(2), task_result=task)
 
     outcome = asyncio.run(wa.run_board_task_action(db, watch, "rerun", diagnosis="below bar"))
 
     assert outcome.escalated is True
-    assert bag["redispatched"] == [], "an in_progress task must never be re-dispatched"
+    assert bag["redispatched"] == [], "a running task must never be re-dispatched"
     assert watch.actions_taken == 0, "guard precedes the budget rail — no action budget spent"
-    assert len(bag["escalated"]) == 1 and "in_progress" in bag["escalated"][0]
+    assert len(bag["escalated"]) == 1 and "already running" in bag["escalated"][0]
+
+
+def test_a_task_only_its_status_word_calls_running_is_re_run(monkeypatch):
+    """F176 (#1094): 'in_progress' with no claim and no execution is not a run.
+    The watch re-runs it, as Run Now does, instead of escalating it as busy."""
+    watch, task = _watch(), _task(status="in_progress")
+    bag, db = _wire(monkeypatch, budget_rail=_BudgetRail(2), task_result=task)
+
+    outcome = asyncio.run(wa.run_board_task_action(db, watch, "rerun", diagnosis="below bar"))
+
+    assert outcome.escalated is False and bag["redispatched"] == [4242]
+
+
+def test_a_missions_step_in_progress_is_left_to_the_mission(monkeypatch):
+    """F176: a mission's step holds no board lease; the mission engine runs it."""
+    watch, task = _watch(), _task(status="in_progress", source_type="orchestration_task", source_id="run-7:task-3")
+    bag, db = _wire(monkeypatch, budget_rail=_BudgetRail(2), task_result=task)
+
+    outcome = asyncio.run(wa.run_board_task_action(db, watch, "rerun", diagnosis="below bar"))
+
+    assert outcome.escalated is True and bag["redispatched"] == []
+
+
+class _PlaybookRuns(_FakeDB):
+    """The one query _running_now makes for a playbook step: is its run still going?"""
+
+    def __init__(self, result, going):
+        super().__init__(result=result)
+        self.going = going
+
+    def execute(self, *a, **k):
+        return SimpleNamespace(first=lambda: (1,) if self.going else None)
+
+
+def test_a_playbook_step_is_running_while_its_playbook_run_is(monkeypatch):
+    task = _task(status="in_progress", source_type="recipe", source_id="recipe:exec-42:2")
+    bag, _ = _wire(monkeypatch, budget_rail=_BudgetRail(2), task_result=task)
+
+    going = asyncio.run(wa.run_board_task_action(_PlaybookRuns(task, True), _watch(), "rerun"))
+    finished = asyncio.run(wa.run_board_task_action(_PlaybookRuns(task, False), _watch(), "rerun"))
+
+    assert going.escalated is True and finished.escalated is False
+    assert bag["redispatched"] == [4242]
 
 
 # ---------------------------------------------------------------------------

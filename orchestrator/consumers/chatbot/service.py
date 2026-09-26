@@ -31,7 +31,9 @@ from difflib import SequenceMatcher
 from modules.tools.execution.tool_loop import (
     RoundState,
     ToolLoopExecutor,
+    ToolLoopResult,
     ToolPostResult,
+    claimed_action_not_done,
 )
 from modules.tools.execution.telemetry import resolve_action_name
 
@@ -62,6 +64,10 @@ from services.page_context import (
 )
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
+from core.llm.output_budget import cut_note_for
+from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +287,20 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     return None
 
 
+# F185 (night 6): after two delete asks the model said nothing, and the owner was
+# told "encountered an issue … Please try again": the asks were never mentioned.
+NOTHING_SAID = "I apologize, but I encountered an issue generating a response. Please try again."
+
+
+def nothing_said_fallback(tool_data: Any) -> str:
+    """The reply when the model says nothing after its tools ran: a call waiting
+    for the owner's approval is named, never passed off as an error to retry."""
+    ask = tool_data.get("tool_approval") if isinstance(tool_data, dict) else None
+    if isinstance(ask, dict) and ask.get("message"):
+        return f"Nothing was done yet. {ask['message']} It waits for your approval on the card above."
+    return NOTHING_SAID
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -415,14 +435,17 @@ class ChatService:
         title: str,
         visibility: str = "private",
         workspace_id: Optional[uuid.UUID] = None,
+        widget_key_id: Optional[uuid.UUID] = None,
     ) -> Chat:
-        """Create a new chat session scoped to a workspace."""
+        """Create a new chat session scoped to a workspace. A widget passes
+        the key that starts it (F155)."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
             workspace_id=workspace_id,
             title=title,
             visibility=visibility,
+            widget_key_id=widget_key_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -714,7 +737,9 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
 
-    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False,
+                 widget_scopes: Optional[List[str]] = None, widget_team: Optional[str] = None,
+                 widget_agent_lock: Optional[int] = None):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -722,6 +747,13 @@ class StreamingChatService:
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
+        # F155: the widget key's scopes decide what its turns may call, and its
+        # team lock scopes every document they read.
+        self.widget_scopes = tuple(widget_scopes or ())
+        self.widget_team = widget_team
+        # ...and the agent the key is locked to, if any: only that agent's own
+        # plugins reach a widget turn's prompt.
+        self.widget_agent_lock = widget_agent_lock
 
         # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
         # per request (one request == one turn), so these accumulate the turn's
@@ -1374,7 +1406,7 @@ class StreamingChatService:
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
 
-    def _inject_composio_tools(
+    async def _inject_composio_tools(
         self,
         llm_messages: List[Dict[str, Any]],
         use_tools: Optional[List[Dict[str, Any]]],
@@ -1386,8 +1418,11 @@ class StreamingChatService:
     ) -> Tuple[Optional[List[Dict[str, Any]]], Any]:
         """
         Inject Composio per-action tools (primary) or hint fallback.
-        Returns (updated use_tools, composio_result).
+        Returns (updated use_tools, composio_result). F105: both lookups run
+        off the loop (core.composio.off_loop).
         """
+        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+
         _composio_result = None
         _tool_hints = (
             complexity_assessment.tool_hints
@@ -1398,15 +1433,18 @@ class StreamingChatService:
             if latest_text and agent_id and self.workspace_id and not skip_composio:
                 from modules.tools.services.composio_tool_service import ComposioToolService
 
-                _composio_svc = ComposioToolService(self.db)
+                workspace_id = self.workspace_id
                 _search_prompt = (
                     " ".join(_tool_hints) if _tool_hints else latest_text
                 )
-                _composio_result = _composio_svc.get_tools_for_step(
-                    agent_id=agent_id,
-                    workspace_id=self.workspace_id,
-                    task_prompt=_search_prompt,
-                    tool_hints=_tool_hints,
+                _composio_result = await composio_lookup(
+                    lambda db: ComposioToolService(db).get_tools_for_step(
+                        agent_id=agent_id,
+                        workspace_id=workspace_id,
+                        task_prompt=_search_prompt,
+                        tool_hints=_tool_hints,
+                    ),
+                    step=f"chat turn (agent {agent_id}): tool search",
                 )
                 if _composio_result and _composio_result.tools:
                     if use_tools:
@@ -1428,11 +1466,13 @@ class StreamingChatService:
                 else:
                     from modules.tools.services.composio_hint_service import ComposioHintService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
-                        agent_id=agent_id,
-                        prompt=latest_text,
-                        workspace_id=self.workspace_id,
+                    hint_result = await composio_lookup(
+                        lambda db: ComposioHintService(db).build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=workspace_id,
+                        ),
+                        step=f"chat turn (agent {agent_id}): action hints",
                     )
                     if hint_result.hint_lines:
                         llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -1440,10 +1480,26 @@ class StreamingChatService:
                             f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} "
                             f"apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}"
                         )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the turn goes on without Composio tools
         except Exception as exc:
             logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
         return use_tools, _composio_result
+
+    def _bind_turn_person(self, user_id: Optional[int]) -> None:
+        """Remember who this turn is for.
+
+        PRD-206 S7: the driving human is the viewer for the Q7 private-scope
+        recall guard (``user_id`` is the INTERNAL integer id — the value the
+        PRD-196 subject tag carries at store time). PRD-233 S6: the same id
+        seeds the greeting (_prepare_llm_messages → resolve_known_user_name).
+        F154: a widget turn is an anonymous visitor's, so it is for nobody —
+        the widget's user_id only owns the chat row.
+        """
+        person = None if self.widget_mode else user_id
+        self._viewer_subject_id = f"user:{person}" if person else None
+        self._driving_user_id = person
 
     # ─────────────────────────────────────────────────────────────────────
     # Post-response: memory, metrics, eval
@@ -1477,8 +1533,10 @@ class StreamingChatService:
         # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
         subject_id = f"user:{user_id}" if user_id else None
 
-        # Store memory via SmartChatIntegration
-        if latest_text and full_response and smart_chat:
+        # Store memory via SmartChatIntegration. F154: a widget turn is an
+        # anonymous visitor's, so it stores no memory; its transcript stays in
+        # the chat tables.
+        if latest_text and full_response and smart_chat and not self.widget_mode:
             try:
                 _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
                 _mm = smart_chat.orchestrator.memory_manager
@@ -1625,6 +1683,39 @@ class StreamingChatService:
         if found.message:
             llm_messages.append(found.message)
 
+    async def _first_reply_goes_through_the_loop(
+        self, response: Any, use_tools: Optional[List[Dict[str, Any]]],
+        prefetched: List[Tuple[str, Dict[str, Any]]], latest_text: str,
+    ) -> bool:
+        """F187 (night 6): a first reply that ran no tool but says an action was
+        done (tier 1) or names an id that does not exist (tier 2) goes through
+        the tool loop, which nudges the claim once (F108) and re-prompts the id
+        once. The check never breaks a turn."""
+        if not use_tools or getattr(response, "tool_calls", None) or not getattr(response, "content", None):
+            return False
+        try:
+            return bool(
+                claimed_action_not_done(response.content, {name for name, _args in prefetched})
+                or await asyncio.to_thread(invented_ids, response.content, latest_text, self.workspace_id)
+            )
+        except Exception:
+            logger.debug("[F187] first-reply check skipped", exc_info=True)
+            return False
+
+    @staticmethod
+    def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
+        """What the answer gains after it streamed, in order: F187's correction
+        (a claim its retry kept, an id that does not exist), then F196's note
+        for an answer cut at its budget."""
+        additions: List[str] = []
+        correction = f187_verdict.correction if f187_verdict else None
+        if correction:
+            additions.append(f"\n\n{correction}")
+        cut = cut_note_for(final_round)
+        if cut:
+            additions.append(cut)
+        return additions
+
     async def _stream_tool_loop(
         self,
         response,
@@ -1637,7 +1728,7 @@ class StreamingChatService:
         conversation_id: Optional[str] = None,
         assign_lane: bool = False,
         is_super_admin: bool = False,
-        streamed_text: Optional[List[str]] = None,
+        streamed_rounds: Optional[List[Any]] = None,
         reasoning_log: Optional[List[str]] = None,
         prefetched: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
     ) -> AsyncGenerator[Any, None]:
@@ -1696,11 +1787,14 @@ class StreamingChatService:
         # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
         # created mid-chat is attributed to THEM (created_by) — not the agent — and
         # plan-ready / awaiting-approval notifications land for the right person.
+        # F154: a widget turn is an anonymous visitor's, so its tool calls are made
+        # for nobody; the widget's user_id only owns the chat row (a foreign key).
+        _driving_user = None if self.widget_mode else user_id
         _driving_clerk: Optional[str] = None
-        if user_id:
+        if _driving_user:
             try:
                 from core.models import User
-                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _row = self.db.query(User.clerk_user_id).filter(User.id == _driving_user).first()
                 _driving_clerk = _row[0] if _row else None
             except Exception:
                 _driving_clerk = None
@@ -1726,12 +1820,6 @@ class StreamingChatService:
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
             "workspace_write_file", "workspace_exec", "workspace_git",
         }
-        _WORKFLOW_PREFIXES = (
-            "platform_list_recipes",
-            "platform_create_recipe",
-            "platform_execute_recipe",
-        )
-
         # SSE bridge: executor on_event puts AI SDK chunks here, this generator drains.
         sse_queue: "asyncio.Queue[Any]" = asyncio.Queue()
         DONE = object()
@@ -1808,7 +1896,7 @@ class StreamingChatService:
                     conversation_id=conversation_id,
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
-                    driving_user_id=user_id,
+                    driving_user_id=_driving_user,
                     prior_action=_prior_action,
                     model_id=_turn_budget.get("model_id"),
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),
@@ -1872,8 +1960,8 @@ class StreamingChatService:
                 tool_data.update(frontend_data)
                 await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
-            # Recipe / workflow tool-update emission.
-            if name.startswith(_WORKFLOW_PREFIXES) or "workflow" in name.lower():
+            # Workflow tool-update emission.
+            if "workflow" in name.lower():
                 _raw = result.get("raw_result") or {}
                 _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or call_id)
                 _wf_status = "completed" if result.get("success") else "failed"
@@ -2002,8 +2090,16 @@ class StreamingChatService:
                     reasoning_log.append(reasoning)
                 if not getattr(resp, "streamed", False):
                     await sse_queue.put(self.streaming_handler.format_aisdk_reasoning(reasoning))
-            if getattr(resp, "streamed", False) and getattr(resp, "content", None) and streamed_text is not None:
-                streamed_text.append(resp.content)
+            if streamed_rounds is not None:
+                # F186: the loop only calls the model again after a reply with no
+                # tool call when it nudged that reply (F108), so it was never the answer.
+                if streamed_rounds and not called_tools(streamed_rounds[-1]) and streamed_rounds[-1] is not resp:
+                    await sse_queue.put(self.streaming_handler.format_aisdk_narration(
+                        streamed_rounds[-1].content, retracted=True))
+                if getattr(resp, "streamed", False) and getattr(resp, "content", None):
+                    streamed_rounds.append(resp)
+                    if called_tools(resp):  # it spoke before its tool calls: narration
+                        await sse_queue.put(self.streaming_handler.format_aisdk_narration(resp.content))
             return resp
 
         async def _llm_callback(messages, tools):
@@ -2047,17 +2143,67 @@ class StreamingChatService:
         for _ran_name, _ran_args in prefetched or []:
             executor.tracker.record_execution(_ran_name, _ran_args)
 
+        async def _run_loop(initial):
+            return await executor.run(
+                initial_response=initial,
+                messages=llm_messages,
+                tools=use_tools,
+                workspace_id=self.workspace_id,
+                on_event=_on_event,
+                on_tool_result=_on_tool_result,
+                on_round_end=_on_round_end,
+            )
+
+        # F187 tier 2: an answer that names an id that does not exist is
+        # re-prompted once; a retry that makes calls runs them here.
+        owner_text = self._extract_user_text(llm_messages)
+        f187 = {"reprompted": False}
+
+        async def _ground_ids(result):
+            if called_tools(result.response) or result.forced_final or result.max_iterations_reached:
+                return result
+            answer = getattr(result.response, "content", "") or ""
+            missing = await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
+            if not missing:
+                return result
+            f187["reprompted"] = True
+            logger.warning(f"[F187] the answer names {missing}, which do not exist — re-prompting once")
+            llm_messages.append({"role": "assistant", "content": answer})
+            llm_messages.append({"role": "system", "content": id_nudge(missing)})
+            retry = await _llm_callback(llm_messages, use_tools)
+            if called_tools(retry):
+                return await _run_loop(retry)
+            return ToolLoopResult(response=retry, iterations=result.iterations)
+
+        # F205: after a failed call, the reply says what the owner can do in their
+        # words; one that names the platform's tools or parameters is re-prompted
+        # once, with no tools.
+        vocabulary: Dict[str, Any] = {}
+
+        async def _owner_words(result):
+            if called_tools(result.response) or result.forced_final or not executor.tracker.failed:
+                return result
+            if "names" not in vocabulary:
+                vocabulary["names"] = internal_vocabulary(use_tools)
+            answer = getattr(result.response, "content", "") or ""
+            names = internal_names(answer, vocabulary["names"], owner_text)
+            if not names:
+                return result
+            logger.warning(f"[F205] the reply after a failed call names {names} — re-prompting once")
+            llm_messages.append({"role": "assistant", "content": answer})
+            llm_messages.append({"role": "system", "content": owner_words_nudge(names)})
+            retry = await _llm_callback(llm_messages, None)
+            said = getattr(retry, "content", "") or ""
+            if called_tools(retry) or not said.strip():
+                return result
+            still = internal_names(said, vocabulary["names"], owner_text)
+            if still:
+                logger.warning(f"[F205] the retry still names {still}")
+            return ToolLoopResult(response=retry, iterations=result.iterations)
+
         async def _runner():
             try:
-                return await executor.run(
-                    initial_response=response,
-                    messages=llm_messages,
-                    tools=use_tools,
-                    workspace_id=self.workspace_id,
-                    on_event=_on_event,
-                    on_tool_result=_on_tool_result,
-                    on_round_end=_on_round_end,
-                )
+                return await _owner_words(await _ground_ids(await _run_loop(response)))
             finally:
                 await sse_queue.put(DONE)
 
@@ -2085,10 +2231,15 @@ class StreamingChatService:
         try:
             result = await runner_task
         except Exception as loop_err:
+            # F169 (B10/B26): the reply says what failed in plain words
+            # (turn_errors); the raw provider text stays in this log line.
+            from consumers.chatbot.turn_errors import describe_turn_error
+
             logger.error(f"Tool loop failed: {loop_err}", exc_info=True)
-            yield {"_final_response": SimpleNamespace(
-                content=f"Error: {loop_err}", tool_calls=None, usage=None,
-            )}
+            err = describe_turn_error(
+                loop_err, agent_name=self._agent_display_name(getattr(agent_runtime, "agent_id", None)),
+            )
+            yield {"_final_response": SimpleNamespace(content=err.message, tool_calls=None, usage=None)}
             return
 
         # PRD-232 US-011a: a tool-warranted turn (tools were offered) that ran NO
@@ -2152,7 +2303,23 @@ class StreamingChatService:
             yield {"_final_response": final}
             return
 
-        yield {"_final_response": result.response}
+        # F187: what the answer still claims or names, for its correction line
+        # (tiers 1-2) and the [F187] log (tier 3). ``tools`` is the model's own calls.
+        verdict = None
+        try:
+            answer = getattr(result.response, "content", "") or ""
+            verdict = Verdict(
+                tools=sum(executor.tracker.tool_counts.values()) - len(prefetched or []),
+                claim=claimed_action_not_done(answer, executor.tracker.succeeded),
+                passive=passive_claim(answer),
+                ids=(await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
+                     if f187["reprompted"] else []),
+                reprompted=f187["reprompted"],
+            )
+        except Exception:
+            logger.debug("[F187] claim check skipped", exc_info=True)
+
+        yield {"_final_response": result.response, "_f187": verdict}
 
     # PRD-192 S4: `_execute_composio_action` (the raw ComposioToolService
     # shortcut) is DELETED — per-action Composio calls dispatch through
@@ -2478,8 +2645,13 @@ class StreamingChatService:
         conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
+        from core.security.surface import WIDGET, turn_surface
 
-        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id):
+        # F155: every tool call of a widget turn carries the widget surface, so the
+        # gates treat it as a visitor's whatever caller context the call built.
+        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
+                turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
+                             self.widget_agent_lock):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2535,13 +2707,7 @@ class StreamingChatService:
         # PRD-185 S7: start the turn with clean retrieval provenance.
         self._reset_turn_retrieval()
 
-        # PRD-206 S7: the driving human as viewer for the Q7 private-scope
-        # recall guard (user_id here is the INTERNAL integer id — the same
-        # value the PRD-196 subject tag carries at store time).
-        self._viewer_subject_id = f"user:{user_id}" if user_id else None
-        # PRD-233 S6: the same integer id seeds the greeting (see
-        # _prepare_llm_messages → resolve_known_user_name).
-        self._driving_user_id = user_id
+        self._bind_turn_person(user_id)
 
         try:
             # Ensure workspace_id is available
@@ -2782,9 +2948,10 @@ class StreamingChatService:
                     )
                     await asyncio.sleep(0)
 
-            # Inject Composio per-action tools
-            if _complexity != Complexity.ATOM:
-                use_tools, _composio_result = self._inject_composio_tools(
+            # Inject Composio per-action tools (never on a widget turn: they act
+            # on the owner's connected apps, F155)
+            if _complexity != Complexity.ATOM and not self.widget_mode:
+                use_tools, _composio_result = await self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
                 )
@@ -2801,6 +2968,13 @@ class StreamingChatService:
                 )
                 use_tools = None
                 _composio_result = None
+
+            # F155: a widget turn is offered only what its key's scopes grant
+            # (the tool executor refuses anything else).
+            if self.widget_mode and use_tools:
+                from core.security.widget_scopes import widget_tool_surface
+
+                use_tools = widget_tool_surface(use_tools, self.widget_scopes) or None
 
             # F025: this turn's ranked actions go in LAST, after every stable
             # block. The dispatcher enum is byte-identical between turns so the
@@ -2829,7 +3003,9 @@ class StreamingChatService:
                 logger.info(f"Available tools: {tool_names}")
 
             # PRD-238 S2: the first call streams its text and reasoning live.
-            streamed_text: List[str] = []
+            # F186: each streamed round is kept whole: which ones called tools
+            # decides what was narration and what is the answer.
+            streamed_rounds: List[Any] = []
             reasoning_log: List[str] = []
             response = None
             async for item in self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools):
@@ -2842,7 +3018,9 @@ class StreamingChatService:
                 if not getattr(response, "streamed", False):
                     yield self.streaming_handler.format_aisdk_reasoning(response.reasoning)
             if getattr(response, "streamed", False) and response.content:
-                streamed_text.append(response.content)
+                streamed_rounds.append(response)
+                if called_tools(response):  # F186: it spoke before its tool calls
+                    yield self.streaming_handler.format_aisdk_narration(response.content)
             if is_empty_completion(response):
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
@@ -2862,13 +3040,21 @@ class StreamingChatService:
             )
 
             # Track response
-            assistant_parts = []
             full_response = ""
             tool_data = {}
 
+            # F187 (night 6): a first reply that ran no tool but says an action
+            # was done (tier 1) or names an id that does not exist (tier 2) goes
+            # through the loop, which nudges the claim once (F108) and re-prompts
+            # the id once. What it still gets wrong is corrected where it is saved.
+            f187_verdict: Optional[Verdict] = None
+            _first_reply_check = await self._first_reply_goes_through_the_loop(
+                response, use_tools, _prefetched, latest_text,
+            )
+
             # Handle tool calls via unified tool loop
-            if response.tool_calls:
-                logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
+            if response.tool_calls or _first_reply_check:
+                logger.info(f"Agent requested {len(response.tool_calls or [])} tool calls")
                 final_response = None
                 # PRD-224 US-005: mark the ASSIGN lane so the create-task tool
                 # auto-attaches supervision (the flag rides caller_context, never
@@ -2884,12 +3070,13 @@ class StreamingChatService:
                     conversation_id=chat_id,
                     assign_lane=_assign_lane,
                     is_super_admin=is_super_admin,
-                    streamed_text=streamed_text,
+                    streamed_rounds=streamed_rounds,
                     reasoning_log=reasoning_log,
                     prefetched=_prefetched,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
+                        f187_verdict = chunk.get('_f187')
                     else:
                         yield chunk
                     await asyncio.sleep(0)
@@ -2897,6 +3084,7 @@ class StreamingChatService:
                 if final_response and final_response.content:
                     final_text = final_response.content
                     final_streamed = bool(getattr(final_response, "streamed", False))
+                    final_round = final_response
                 else:
                     logger.warning("Tool loop completed without final response - forcing synthesis")
                     llm_messages.append({
@@ -2905,11 +3093,14 @@ class StreamingChatService:
                     })
                     self._before_model_call()
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                    final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
+                    final_text = forced.content or nothing_said_fallback(tool_data)
                     final_streamed = False
+                    final_round = forced
             else:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
+                final_round = response
+                f187_verdict = Verdict(tools=0, passive=passive_claim(final_text)) if use_tools else None
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
@@ -2925,22 +3116,21 @@ class StreamingChatService:
                 except Exception:
                     logger.debug("[no-tool-call] first-reply notice skipped", exc_info=True)
 
-            # PRD-238 S2: the saved message is exactly what the screen showed —
-            # every round's streamed text in order, plus a final answer that the
-            # provider could not stream. Only that unstreamed tail is emitted here.
-            shown_so_far = "\n\n".join(t for t in streamed_text if t)
-            if final_streamed:
-                full_response = shown_so_far
-                unstreamed_tail = ""
-            else:
-                full_response = f"{shown_so_far}\n\n{final_text}".strip() if shown_so_far else final_text
-                unstreamed_tail = final_text
+            # PRD-238 S2 / F186: every round streamed live; the reply is the
+            # answer, and what the model said before its tool calls is narration,
+            # saved as its own part (narration.split_reply). Only an answer the
+            # provider could not stream is emitted here.
+            narration, full_response = split_reply(streamed_rounds, final_round, final_text)
+            unstreamed_tail = "" if final_streamed else final_text
 
             # Upload inline base64 images to S3
             _ws_id_img = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
             full_response = await _upload_inline_images(
                 full_response, workspace_id=str(_ws_id_img) if _ws_id_img else None,
             )
+            narration_text = await _upload_inline_images(
+                "\n\n".join(narration), workspace_id=str(_ws_id_img) if _ws_id_img else None,
+            ) if narration else ""
 
             # Stream whatever the screen has not seen yet (nothing, when every round streamed)
             if unstreamed_tail:
@@ -2948,6 +3138,13 @@ class StreamingChatService:
                     unstreamed_tail, workspace_id=str(_ws_id_img) if _ws_id_img else None,
                 )
                 async for chunk in self.streaming_handler.stream_text_aisdk(tail):
+                    yield chunk
+
+            # F187's correction and F196's cut note go into the answer that is
+            # saved, remembered and read next turn, and onto the screen.
+            for _addition in self._answer_additions(f187_verdict, final_round):
+                full_response = f"{full_response}{_addition}"
+                async for chunk in self.streaming_handler.stream_text_aisdk(_addition):
                     yield chunk
 
             # Send usage data
@@ -2962,12 +3159,11 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_finish()
 
             # Save assistant message — PRD-238 S1: the reasoning rides as its
-            # own part (never the answer text, never fed back to the model).
+            # own part (never the answer text, never fed back to the model), and
+            # F186: so does the narration. Memory takes the answer (below).
             joined_reasoning = "\n\n".join(r for r in reasoning_log if r)
-            if joined_reasoning:
-                assistant_parts.append({'type': 'reasoning', 'reasoning': joined_reasoning})
-            assistant_parts.append({'type': 'text', 'text': full_response})
-            self.chat_service.save_message(
+            assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)
+            _saved = self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,
                 # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
@@ -2978,6 +3174,8 @@ class StreamingChatService:
                     getattr(orchestrated, "context_trace", None), page_context
                 ),
             )
+            if f187_verdict is not None:
+                f187_verdict.log(getattr(_saved, "id", None))
 
             # Post-response: memory, metrics, eval
             async for chunk in self._post_response(
@@ -3030,121 +3228,6 @@ class StreamingChatService:
             )
         except Exception:  # noqa: BLE001
             logger.debug("[Chat] could not persist the turn error note", exc_info=True)
-
-    async def stream_response(
-        self,
-        chat_id: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Any]] = None
-    ) -> AsyncGenerator[str, None]:
-        """Stream chat response using legacy SSE format."""
-        from core.llm import create_llm_manager
-
-        # PRD-185 S7: start the turn with clean retrieval provenance.
-        self._reset_turn_retrieval()
-
-        # Get tools from SINGLE SOURCE if not provided.
-        # PRD-138 US-009: extract latest user turn first so the dispatcher
-        # enum can be narrowed to relevant actions for this query.
-        if tools is None:
-            _query = self.prompt_analyzer.extract_latest_user_text(messages)
-            tools = await get_tools_for_agent_async(query=_query)
-
-        try:
-            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
-            messages = self._resolve_file_parts(messages)
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            if self.prompt_analyzer.is_fresh_start_request(latest_text):
-                messages = [m for m in messages if m.get("role") == "user"][-1:]
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-                messages, available_tools=tools,
-            )
-            # PRD-157 S5: keep the chat's pinned documents always in context.
-            self._inject_pinned_documents(llm_messages, chat_id)
-            assistant_parts = []
-
-            if hasattr(llm_manager, 'generate_response_stream'):
-                async for chunk in llm_manager.generate_response_stream(messages=llm_messages, tools=tools):
-                    yield self.streaming_handler.format_sse_chunk(chunk)
-                    if chunk.get('type') == 'text':
-                        assistant_parts.append({'type': 'text', 'text': chunk.get('text', '')})
-            else:
-                latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-                is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-                use_tools = None if is_simple else tools
-
-                self._before_model_call()
-                response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
-
-                if response.tool_calls:
-                    tool_data = {}
-                    tool_results = []
-
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
-                        tool_id = tool_call.get('id')
-
-                        result = await self.tool_router.execute_and_format(
-                            tool_name, tool_args,
-                            agent_id=1, workspace_id=self.workspace_id,
-                            original_intent=latest_text,
-                        )
-                        # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
-                        self._collect_tool_retrieval(tool_name, result)
-                        if result['success']:
-                            tool_data.update(result['frontend_data'])
-
-                        tool_results.append({
-                            "role": "tool",
-                            "tool_call_id": tool_id,
-                            "content": result['llm_context'],
-                        })
-
-                    if tool_data:
-                        yield self.streaming_handler.format_sse_tool_data(tool_data)
-
-                    llm_messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": response.tool_calls,
-                    })
-                    llm_messages.extend(tool_results)
-
-                    self._before_model_call()
-                    final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
-                    response_text = final_response.content or ""
-                else:
-                    response_text = response.content or ""
-
-                message_id = str(uuid.uuid4())
-                async for chunk in self.streaming_handler.stream_text_legacy(response_text, message_id):
-                    yield chunk
-
-                assistant_parts.append({'type': 'text', 'text': response_text})
-
-            if assistant_parts:
-                self.chat_service.save_message(
-                    chat_id=chat_id, role='assistant',
-                    parts=assistant_parts, workspace_id=self.workspace_id,
-                    # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
-                    retrieval_context=self._turn_retrieval_context(latest_text),
-                )
-
-            yield self.streaming_handler.format_sse_done()
-
-            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
-            _emit_chat_primitive(
-                self.workspace_id, success=True, detail="chat turn completed",
-            )
-
-        except Exception as e:
-            logger.error(f"Error streaming response: {e}", exc_info=True)
-            yield self.streaming_handler.format_sse_error(str(e))
-            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
-            _emit_chat_primitive(
-                self.workspace_id, success=False, detail=str(e),
-            )
 
     async def _execute_pretriggered_tools(
         self,

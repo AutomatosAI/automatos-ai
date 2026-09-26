@@ -76,6 +76,14 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
         and not getattr(a, "super_admin_only", False)
         and action_is_available(a)
     ]
+    # F155: a widget turn discovers only what its key's scopes grant.
+    from core.security.surface import widget_scopes, widget_turn
+
+    if widget_turn():
+        from core.security.widget_scopes import allowed_tools
+
+        granted = allowed_tools(widget_scopes())
+        eligible = [a for a in eligible if a.name in granted]
     by_name = {a.name: a for a in eligible}
 
     matched: List[Any] = []

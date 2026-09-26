@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -156,12 +156,19 @@ def file_cli_ticket(
     grant. ``resume_session_id`` + ``resume_host_id`` ask the host that ran the
     previous session of the same conversation to continue it (``claude --resume``).
     ``orchestration_run_id`` / ``orchestration_task_id`` tie a mission task's
-    ticket to its run.
+    ticket to its run; the step's own card is that ticket (F094, ``claim_step_card``).
     """
     existing = open_ticket_for_source(db, workspace_id, source_type, source_id)
     if existing is not None:
         logger.info("[CliTicketLane] %s/%s already has open ticket #%s — reusing", source_type, source_id, existing.id)
         return existing
+    if orchestration_task_id is not None:
+        card = claim_step_card(
+            db, workspace_id=workspace_id, agent_id=agent_id, prompt=prompt, source_id=source_id,
+            orchestration_run_id=orchestration_run_id, orchestration_task_id=orchestration_task_id,
+        )
+        if card is not None:
+            return card
     task = BoardTask(
         workspace_id=workspace_id,
         title=title[:255],
@@ -185,10 +192,7 @@ def file_cli_ticket(
             "resume_session_id": str(resume_session_id),
             "resume_host_id": str(resume_host_id) if resume_host_id else None,
         }
-    if not host_online(db, workspace_id):
-        task.blocked_reason = NO_HOST_REASON
-    else:
-        task.blocked_reason = no_cli_host_reason_for(db, workspace_id, agent_cli_provider(db, agent_id))
+    task.blocked_reason = _waiting_line(db, workspace_id, agent_id)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -207,6 +211,13 @@ def file_cli_ticket(
     return task
 
 
+def _waiting_line(db: Session, workspace_id: Any, agent_id: int) -> Optional[str]:
+    """What a ticket waits on while no host that runs its agent's CLI is online."""
+    if not host_online(db, workspace_id):
+        return NO_HOST_REASON
+    return no_cli_host_reason_for(db, workspace_id, agent_cli_provider(db, agent_id))
+
+
 def queued_line(task: BoardTask) -> str:
     """The one line a lane replies with."""
     line = QUEUED_LINE.format(task_id=task.id)
@@ -219,12 +230,12 @@ def queued_line(task: BoardTask) -> str:
     return line
 
 
-def _notify(db: Session, workspace_id: Any, task: BoardTask) -> None:
+def _notify(db: Session, workspace_id: Any, task: BoardTask, event: str = "task_created") -> None:
     """Board SSE + dispatcher wake, both fail-soft (the same two calls the HTTP
     create path makes)."""
     try:
         from services.board_events import notify_board_event
-        notify_board_event(db, workspace_id=str(workspace_id), task_id=task.id, status=task.status, event="task_created")
+        notify_board_event(db, workspace_id=str(workspace_id), task_id=task.id, status=task.status, event=event)
     except Exception:  # noqa: BLE001
         logger.debug("[CliTicketLane] board notify skipped", exc_info=True)
     try:
@@ -250,6 +261,179 @@ MISSION_SOURCE_TYPE = "mission"
 TERMINAL_STATUSES: Sequence[str] = ("done", "review", "failed", "cancelled", "closed")
 RUNNING_STATUSES: Sequence[str] = ("assigned", "in_progress", "blocked")
 DEFAULT_LANE_POLL_SECONDS = 5
+
+# F094: what a mission step's card keeps of its earlier runs.
+PREVIOUS_RUNS_KEPT = 10
+PREVIOUS_RUN_NOTE_CHARS = 500
+
+
+def is_lane_owned(card: Any) -> bool:
+    """F094: this mission step's card is run by the session lane, which alone
+    writes its status (its ``source_id`` is the lane's)."""
+    return str(getattr(card, "source_id", None) or "").startswith(f"{MISSION_SOURCE_TYPE}:")
+
+
+def release_step_card(card: Any) -> None:
+    """F094: the step went to an agent the lane does not run; the mission's
+    state is the card's status again."""
+    card.source_id = None
+
+
+# F094: the mission's verdict on a step whose session it no longer waits for, as
+# a note on the step's card. The card's status stays the session's.
+MISSION_NOTE_BY = "the mission"
+STILL_WORKING = "The session is still working, and its result will land here."
+NOT_STARTED = "No session has started it yet; if one does, its result will land here."
+STOPPED_WAITING_NOTE = "The mission stopped waiting for this step{after}. {state}"
+CANCELLED_NOTE = "The mission was cancelled while this step ran. {state}"
+
+
+def _state_line(card_status: str) -> str:
+    return NOT_STARTED if card_status == "assigned" else STILL_WORKING
+
+
+def stopped_waiting_note(waited_s: Any) -> Callable[[str], str]:
+    """The verdict when the lane gave up waiting after ``waited_s`` seconds."""
+    try:
+        minutes = max(1, round(int(waited_s) / 60))
+        after = f" after {minutes} minute{'' if minutes == 1 else 's'}"
+    except (TypeError, ValueError):
+        after = ""
+    return lambda status: STOPPED_WAITING_NOTE.format(after=after, state=_state_line(status))
+
+
+def cancelled_note(card_status: str) -> str:
+    """The verdict when the owner cancelled the mission while the step ran."""
+    return CANCELLED_NOTE.format(state=_state_line(card_status))
+
+
+def note_open_step_cards(
+    db: Session,
+    *,
+    note_for: Callable[[str], str],
+    run_id: Any = None,
+    orchestration_task_id: Any = None,
+) -> List[int]:
+    """F094: write the mission's verdict on the open cards the lane runs for a
+    run or one step (``note_for(card status)`` gives the words). The card's
+    status is not touched: it ends on its session's own outcome. Returns the
+    cards noted; nothing without a run or a step to look in."""
+    from services.cli_host_service import append_session_note, publish_note_line
+    from services.orchestration_board_bridge import STEP_CARD_SOURCE_TYPE
+
+    if run_id is None and orchestration_task_id is None:
+        return []
+    noted: List[int] = []
+    # Each read and write runs in its own SAVEPOINT: a statement that fails there
+    # rolls back to it, never the caller's transaction, which still holds the
+    # cancel or the step's failure it is about to commit.
+    try:
+        with db.begin_nested():
+            query = db.query(BoardTask).filter(
+                BoardTask.source_type == STEP_CARD_SOURCE_TYPE, BoardTask.status.in_(list(RUNNING_STATUSES)),
+            )
+            if run_id is not None:
+                query = query.filter(BoardTask.orchestration_run_id == run_id)
+            if orchestration_task_id is not None:
+                query = query.filter(BoardTask.orchestration_task_id == orchestration_task_id)
+            cards = [card for card in query.all() if is_lane_owned(card)]
+    except Exception:  # noqa: BLE001 -- a note never stops the mission recording the step or the cancel
+        logger.warning("[CliTicketLane] could not find the cards to note (run %s, step %s)",
+                       run_id, orchestration_task_id, exc_info=True)
+        return noted
+    for card in cards:
+        try:
+            with db.begin_nested():
+                entry = append_session_note(db, task_id=card.id, workspace_id=card.workspace_id,
+                                            note=note_for(card.status), by=MISSION_NOTE_BY)
+        except Exception:  # noqa: BLE001 -- as above
+            logger.warning("[CliTicketLane] could not note the mission's verdict on card #%s", card.id,
+                           exc_info=True)
+            continue
+        publish_note_line(card.workspace_id, card.id, entry["note"])
+        noted.append(card.id)
+    return noted
+
+
+def _previous_runs(card: BoardTask) -> list:
+    """The card's earlier runs, newest last, with the one that just ended."""
+    planning = card.planning_data if isinstance(card.planning_data, dict) else {}
+    ref = card.runtime_ref if isinstance(card.runtime_ref, dict) else {}
+    ended = {
+        "status": card.status,
+        "finished_at": card.completed_at.isoformat() if card.completed_at else None,
+        "note": (card.result or card.error_message or "")[:PREVIOUS_RUN_NOTE_CHARS],
+        "deliverable_ids": [d["id"] for d in ref.get("deliverables") or []
+                            if isinstance(d, dict) and d.get("id") is not None],
+    }
+    earlier = planning.get("previous_runs")
+    return [*(earlier if isinstance(earlier, list) else []), ended][-PREVIOUS_RUNS_KEPT:]
+
+
+def claim_step_card(
+    db: Session,
+    *,
+    workspace_id: Any,
+    agent_id: int,
+    prompt: str,
+    source_id: str,
+    orchestration_run_id: Any,
+    orchestration_task_id: Any,
+) -> Optional[BoardTask]:
+    """F094 (night 5): a mission step run by a Claude Code agent runs on the
+    step's own card, the one dispatch filed, not on a ticket beside it. Step
+    2fa5467f had four cards: #964 said done while #980, the ticket its session
+    worked, sat in review, and each re-run filed another (#982, #985).
+
+    The lane marks the card with its ``source_id``; from then on it alone writes
+    the card's status (``sync_board_status`` skips it). While the card's session
+    is still open (``REUSABLE_STATUSES``) it is waited on as it is. A card whose
+    run ended is set up for the step's next run, and the ended run is kept in
+    ``planning_data['previous_runs']``. ``attempts`` carries on, so a late result
+    from an earlier session is refused as a stale attempt. ``None`` when the step
+    has no card: the caller files a ticket then.
+    """
+    from services.orchestration_board_bridge import STEP_CARD_SOURCE_TYPE
+
+    card = (
+        db.query(BoardTask)
+        .filter(
+            BoardTask.workspace_id == workspace_id,
+            BoardTask.source_type == STEP_CARD_SOURCE_TYPE,
+            BoardTask.orchestration_task_id == orchestration_task_id,
+        )
+        .order_by(BoardTask.id.asc())
+        .first()
+    )
+    if card is None:
+        return None
+    if card.source_id == source_id and card.status in REUSABLE_STATUSES:
+        logger.info("[CliTicketLane] %s: its card #%s is still open — waiting on it", source_id, card.id)
+        return card
+    if card.source_id == source_id:
+        planning = card.planning_data if isinstance(card.planning_data, dict) else {}
+        card.planning_data = {**planning, "previous_runs": _previous_runs(card)}
+    card.source_id = source_id
+    card.orchestration_run_id = orchestration_run_id
+    card.assigned_agent_id = agent_id
+    card.description = prompt
+    card.status = "assigned"
+    card.result = None
+    card.error_message = None
+    card.started_at = None
+    card.completed_at = None
+    card.blocked_at = None
+    card.lease_until = None
+    card.runtime_ref = None
+    card.blocked_reason = _waiting_line(db, workspace_id, agent_id)
+    db.commit()
+    db.refresh(card)
+    from services.board_consent import consent_for_lane_ticket
+    consent_for_lane_ticket(db, workspace_id=workspace_id, task=card, source_type=MISSION_SOURCE_TYPE)
+    _notify(db, workspace_id, card, event="status_changed")
+    db.commit()
+    logger.info("[CliTicketLane] %s runs on the step's card #%s (agent %s)", source_id, card.id, agent_id)
+    return card
 
 
 SESSION_MODE_TERMINAL = "terminal"
@@ -349,7 +533,7 @@ def open_session_ticket(
         created_by_id=actor or "operator",
         source_type=CHAT_SOURCE_TYPE,
         source_id=session_source_id(chat_id),
-        review_mode="manual",
+        review_mode="human",  # F180: the board's word ('manual' was PRD-234's)
         tags=["session"],
     )
     session_id = str(uuid4())
@@ -397,12 +581,17 @@ def exec_result_for(task: Any) -> dict:
     except (TypeError, ValueError):
         tokens = 0
     status = getattr(task, "status", None)
+    from services.cli_host_service import SESSION_CONNECTED_KEY, SESSION_TOOLS_OFFERED_KEY
+
     base = {
         "runtime": RUNTIME_CLI,
         "task_id": task.id,
         "board_status": status,
         "tokens_used": tokens,
         "execution": {"tokens_used": tokens, "tool_calls": [], "messages": []},
+        # F131: True / False when the claim offered Automatos tools, None when it did not say.
+        "session_connected": (bool(ref.get(SESSION_CONNECTED_KEY))
+                              if ref.get(SESSION_TOOLS_OFFERED_KEY) is True else None),
     }
     if status in ("done", "review"):
         result = getattr(task, "result", None) or ""
@@ -565,5 +754,6 @@ async def run_cli_ticket_and_wait(
                     "task_id": task_id,
                     "timed_out": True,
                     "still_running": _ticket_is_alive(current),
+                    "waited_s": int(waited),
                 }
         await asyncio.sleep(poll_s)

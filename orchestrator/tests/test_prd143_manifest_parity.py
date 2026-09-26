@@ -114,11 +114,29 @@ def test_manifest_matches_registry(registry):
     )
 
 
-def test_no_admin_only_actions_remain(registry):
-    """Rev 2 inversion: the admin_only TIER is empty (mechanism kept for future)."""
+ADMIN_ONLY = {
+    # F147: a channel's config and the workspace's settings.
+    "platform_configure_channel", "platform_update_workspace_settings",
+    # F148: members, as REST (members:invite, members:change_role).
+    "platform_invite_member", "platform_set_member_role",
+    # F151: the writes REST keeps behind workspace:manage, and three with no twin.
+    "platform_revoke_api_key",
+    "platform_connect_channel", "platform_start_channel", "platform_stop_channel",
+    "platform_uninstall_plugin", "platform_set_skill_script_execution",
+    "platform_set_power_mode", "platform_create_routing_rule", "platform_install_package",
+    # PRD-251 Wave 1: the brand kit, as REST (PUT /brand-kit is workspace:manage).
+    "platform_update_brand_kit",
+}
+
+
+def test_the_admin_only_tier_is_the_decided_set(registry):
+    """Rev 2 emptied the admin_only tier. Since F145 the gate checks the person
+    the call is made for, and F147, F148, F151 and PRD-251 Wave 1 each put decided
+    actions behind it; a new entry is a decision, never a drift."""
     admin_only = sorted(a.name for a in registry.get_all() if a.admin_only)
-    assert admin_only == [], (
-        f"actions still admin_only after the Rev 2 reclassification: {admin_only}"
+    assert admin_only == sorted(ADMIN_ONLY), (
+        f"the admin_only tier drifted: added {sorted(set(admin_only) - ADMIN_ONLY)}, "
+        f"dropped {sorted(ADMIN_ONLY - set(admin_only))}"
     )
 
 

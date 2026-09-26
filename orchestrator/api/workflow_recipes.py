@@ -34,19 +34,59 @@ from config import config
 
 
 def _sync_cron_schedule(recipe: WorkflowRecipe):
-    """Sync a playbook's cron schedule with the PlaybookSchedulerService."""
-    if not config.RECIPE_SCHEDULER_ENABLED:
-        return
+    """Sync a playbook's cron schedule with the scheduler, through the helper Auto's
+    tools use too (F132). A save never fails on it: the leader's reconcile tick
+    registers a saved schedule within a minute."""
     try:
-        from services.playbook_scheduler import get_playbook_scheduler
-        scheduler = get_playbook_scheduler()
-        sc = recipe.schedule_config or {}
-        if sc.get("type") == "cron" and sc.get("cron_expression"):
-            scheduler.schedule_playbook(recipe)
-        else:
-            scheduler.unschedule_playbook(recipe.id)
+        from services.playbook_scheduler import sync_playbook_schedule
+        sync_playbook_schedule(recipe)
     except Exception as e:
-        logger.warning(f"[_sync_cron_schedule] Failed for recipe {recipe.id}: {e}")
+        logger.error(f"[_sync_cron_schedule] Playbook {recipe.id} is not scheduled: {e}")
+
+
+def _creator_pk(db: Session, ctx) -> Optional[int]:
+    """F133: the ``users.id`` of the person making a playbook, or None."""
+    from core.auth.principal import resolve_user_pk
+
+    return resolve_user_pk(db, ctx)
+
+
+def _check_step_agents(db: Session, workspace_id, steps) -> None:
+    """400 when a step names an agent that is not in the workspace, or one that is
+    switched off (F135, B67/B87: a switched-off agent was saved onto a step, then ran it)."""
+    agent_ids = [step.get('agent_id') for step in (steps or []) if step.get('agent_id')]
+    if not agent_ids:
+        return
+    agents = db.query(Agent.id, Agent.name, Agent.status).filter(
+        Agent.id.in_(agent_ids),
+        Agent.workspace_id == workspace_id,
+    ).all()
+    found = {a.id for a in agents}
+    missing = [aid for aid in agent_ids if aid not in found]
+    if missing:
+        logger.warning(f"[recipe agents] Agent IDs not found in workspace {workspace_id}: {missing}")
+        raise HTTPException(status_code=400, detail=f"Agent IDs not found in workspace: {missing}")
+    switched_off = [a for a in agents if (a.status or "active") != "active"]
+    if switched_off:
+        names = ", ".join(f"#{a.id} {a.name} ({a.status})" for a in switched_off)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Switched off: {names}. Switch the agent on, or give its steps another agent.")
+
+
+def _explicit_schedule(recipe: WorkflowRecipe, db: Session, workspace_id) -> None:
+    """A cron saves with its zone named (the workspace's heartbeat timezone, else
+    UTC), and a cron or zone the scheduler cannot use is a 400, not a schedule
+    that never fires (F132)."""
+    from services.playbook_scheduler import SERVER_ZONE, cron_trigger, is_live_cron, with_explicit_zone
+
+    recipe.schedule_config = with_explicit_zone(recipe.schedule_config, db, workspace_id)
+    sc = recipe.schedule_config
+    if is_live_cron(sc):
+        try:
+            cron_trigger(sc["cron_expression"], sc.get("timezone") or SERVER_ZONE)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {exc}")
 
 
 def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
@@ -452,7 +492,9 @@ async def create_workflow_recipe(
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
-            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous")
+            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous"),
+            # F133: the person who made it; its later edits are checked against them.
+            created_by_user_id=_creator_pk(db, ctx),
         )
 
         # Validate steps structure
@@ -469,21 +511,9 @@ async def create_workflow_recipe(
         is_valid, error = recipe.validate_schedule_config()
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+        _explicit_schedule(recipe, db, ctx.workspace_id)
 
-        # Validate agent_id references exist in workspace
-        agent_ids = [step.get('agent_id') for step in recipe.steps if step.get('agent_id')]
-        if agent_ids:
-            existing_agents = db.query(Agent.id).filter(
-                Agent.id.in_(agent_ids),
-                Agent.workspace_id == ctx.workspace_id
-            ).all()
-            existing_ids = {a.id for a in existing_agents}
-            missing = [aid for aid in agent_ids if aid not in existing_ids]
-            if missing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Agent IDs not found in workspace: {missing}"
-                )
+        _check_step_agents(db, ctx.workspace_id, recipe.steps)
 
         db.add(recipe)
         db.commit()
@@ -572,21 +602,7 @@ async def update_workflow_recipe(
                 logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
                 raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
 
-            # Validate agent_id references exist in workspace
-            agent_ids = [step.get('agent_id') for step in (recipe.steps or []) if step.get('agent_id')]
-            if agent_ids:
-                existing_agents = db.query(Agent.id).filter(
-                    Agent.id.in_(agent_ids),
-                    Agent.workspace_id == ctx.workspace_id
-                ).all()
-                existing_ids = {a.id for a in existing_agents}
-                missing = [aid for aid in agent_ids if aid not in existing_ids]
-                if missing:
-                    logger.warning(f"[update_recipe] Agent IDs not found for {recipe_id}: {missing}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Agent IDs not found in workspace: {missing}"
-                    )
+            _check_step_agents(db, ctx.workspace_id, recipe.steps)
 
         # Validate execution_config if updated
         if 'execution_config' in recipe_data:
@@ -601,6 +617,7 @@ async def update_workflow_recipe(
             if not is_valid:
                 logger.warning(f"[update_recipe] schedule_config validation failed for {recipe_id}: {error}")
                 raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+            _explicit_schedule(recipe, db, ctx.workspace_id)
 
         recipe.updated_at = datetime.now()
         db.commit()
@@ -627,8 +644,10 @@ async def update_workflow_recipe(
 
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
+        from services.playbook_engine import next_run_note
+
         return {
-            "message": "Recipe updated successfully",
+            "message": "Recipe updated successfully." + next_run_note(db, recipe.id),
             "recipe": recipe.to_dict()
         }
 
@@ -851,14 +870,12 @@ async def execute_recipe(
 
         logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
 
-        input_data = body.get('input_data') or {}
+        # F182 (night 6): a declared default fills in a missing input, and ''
+        # never does. A required input still missing stops the run before step 1,
+        # which asks the owner for it (api.recipe_executor).
+        from core.services.playbook_inputs import contract_of, with_defaults
 
-        # Fill in defaults for missing required inputs
-        if recipe.inputs:
-            for param_name, param_def in recipe.inputs.items():
-                if isinstance(param_def, dict) and param_name not in input_data:
-                    default = param_def.get('default', '')
-                    input_data[param_name] = default
+        input_data = with_defaults(contract_of(recipe), body.get('input_data') or {})
 
         # Concurrency guard — reject with 429 if workspace is at capacity
         from services.concurrency_guard import check_concurrency
@@ -872,7 +889,7 @@ async def execute_recipe(
                 status_code=429,
                 detail={
                     "error": "concurrency_limit",
-                    "detail": concurrency.reason,
+                    "detail": concurrency.refusal,
                     "limits": concurrency.limits,
                 },
             )
@@ -995,7 +1012,7 @@ async def rerun_recipe_execution(
                 status_code=429,
                 detail={
                     "error": "concurrency_limit",
-                    "detail": concurrency.reason,
+                    "detail": concurrency.refusal,
                     "limits": concurrency.limits,
                 },
             )
@@ -1730,17 +1747,11 @@ async def install_recipe_from_marketplace(
 
         recipe_name = f"{marketplace_recipe.name} (Copy)" if name_exists else marketplace_recipe.name
 
-        # Generate unique template_id
+        # Generate unique template_id: unique across every workspace, not per workspace.
+        from services.package_installer import free_template_id
+
         base_template_id = marketplace_recipe.template_id.replace('marketplace-', '')
-        template_id = base_template_id
-        counter = 1
-        while db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.template_id == template_id,
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.owner_type == 'workspace'
-        ).first():
-            template_id = f"{base_template_id}-{counter}"
-            counter += 1
+        template_id = free_template_id(db, base_template_id, ctx.workspace_id)
 
         # Clone recipe to workspace
         cloned_recipe = WorkflowRecipe(
@@ -1983,7 +1994,7 @@ async def recipe_webhook(
             status_code=429,
             detail={
                 "error": "concurrency_limit",
-                "detail": concurrency.reason,
+                "detail": concurrency.refusal,
                 "limits": concurrency.limits,
             },
         )

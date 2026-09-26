@@ -5,7 +5,6 @@ Extracted from unified_executor.py.
 
 import base64
 import logging
-import mimetypes
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -161,11 +160,92 @@ async def _with_directory_hint(client: Any, path: str, result: dict) -> dict:
     return result
 
 
+# F179 (A): only a raster image is ever made public, recognised by its first bytes,
+# never by its name. Anything else (a customer CSV, a page, an SVG) is refused.
+PUBLIC_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+ONLY_IMAGES_ARE_PUBLIC = (
+    "Only images can be made public; share a document through its Deliverables link."
+)
+
+
+def public_image_type(data: bytes) -> Optional[str]:
+    """The raster image type these bytes are (png, jpeg, gif, webp), or None."""
+    for signature, mime in PUBLIC_IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def public_image_url(image_id: str) -> str:
+    """Where the public image store serves ``image_id``: anyone with the link opens it."""
+    from config import config
+
+    return f"{(config.BACKEND_URL or '').rstrip('/')}/api/generated-images/{image_id}"
+
+
+# F179 (B): a confirmation card names what it acts on. A public link's id is minted
+# only when the image is stored, so the card names the file and where it will be.
+PATH_ON_CARD_CHARS = 160
+
+
+def _public_url_card(params: Dict[str, Any]) -> str:
+    path = str(params.get("path") or "").strip()[:PATH_ON_CARD_CHARS]
+    return f" on {path!r}, published at {public_image_url('<new id>')} for anyone with the link"
+
+
+_CARD_SUBJECTS = {"workspace_get_public_url": _public_url_card}
+
+
+def clear_declared_gates(
+    db,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    *,
+    workspace_id: Optional[UUID],
+    agent_id: Optional[int] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
+):
+    """F179 (B): a workspace tool clears the gates its definition declares, the
+    platform actions' own (PlatformActionExecutor.clear): super admin, admin and
+    confirmation. None when it declares none, as the file tools do, so they run
+    as before without touching the database; otherwise the refusal or card to
+    return, or how the call cleared (for ``marked``)."""
+    from modules.tools.discovery import get_action_registry
+
+    action_def = get_action_registry().get(tool_name)
+    declared = action_def is not None and (
+        action_def.requires_confirmation or action_def.admin_only or action_def.super_admin_only
+    )
+    if not declared or not workspace_id:
+        return None
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    # The actor is the runtime's agent, never a parameter (exec_platform's rule).
+    params = {
+        k: v for k, v in (parameters if isinstance(parameters, dict) else {}).items()
+        if k not in ("_agent_id", "_agent_name")
+    }
+    if agent_id:
+        params["_agent_id"] = agent_id
+    card = _CARD_SUBJECTS.get(tool_name)
+    return PlatformActionExecutor(db=db, workspace_id=workspace_id).clear(
+        tool_name, params, caller_context, card_subject=card(params) if card else "",
+    )
+
+
 async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
-    """Download a workspace file and upload to public image store.
+    """Download a workspace IMAGE and upload it to the public image store.
 
     Returns a publicly accessible URL that external services (Instagram,
-    Twitter, etc.) can fetch without authentication.
+    Twitter, etc.) can fetch without authentication. Only a raster image
+    (png, jpeg, gif, webp, recognised by its bytes) is published (F179).
     """
     result = await client.download_file(path)
     if result.get("success") is False:
@@ -175,10 +255,9 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
     if not file_bytes:
         return {"success": False, "error": "File is empty", "tool": "workspace_get_public_url"}
 
-    content_type = result.get("content_type", "")
-    if not content_type or content_type == "application/octet-stream":
-        guessed, _ = mimetypes.guess_type(path)
-        content_type = guessed or "image/png"
+    content_type = public_image_type(file_bytes)
+    if content_type is None:
+        return {"success": False, "error": ONLY_IMAGES_ARE_PUBLIC, "tool": "workspace_get_public_url"}
 
     b64_data = base64.b64encode(file_bytes).decode("ascii")
 
@@ -186,9 +265,7 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
     store = get_image_store()
     image_id = await store.save_image(b64_data, mime_type=content_type, workspace_id=str(workspace_id))
 
-    from config import config
-    backend_url = (config.BACKEND_URL or "").rstrip("/")
-    public_url = f"{backend_url}/api/generated-images/{image_id}"
+    public_url = public_image_url(image_id)
 
     logger.info(
         "[tool-trace %s] workspace_get_public_url: %s -> %s (%d bytes)",
@@ -201,6 +278,62 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
         "size_bytes": len(file_bytes),
         "content_type": content_type,
     }
+
+
+async def execute_gated_workspace_action(
+    executor,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    workspace_id: Optional[UUID] = None,
+    trace_id: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """F179 (B): how every workspace tool is dispatched, by its own name or a file
+    tool's (exec_file_ops): it clears the gates its definition declares, then runs."""
+    async def run() -> Dict[str, Any]:
+        return await execute_workspace_action(
+            executor, tool_name, parameters,
+            workspace_id=workspace_id, trace_id=trace_id,
+            agent_id=agent_id, caller_context=caller_context,
+        )
+
+    cleared = clear_declared_gates(
+        getattr(executor, "db", None), tool_name, parameters,
+        workspace_id=workspace_id, agent_id=agent_id, caller_context=caller_context,
+    )
+    if cleared is None:
+        return await run()
+    from modules.tools.discovery.platform_executor import Cleared, marked
+
+    if not isinstance(cleared, Cleared):
+        return cleared
+    result = await run()
+    from modules.tools.execution.tool_grants import give_back_unused
+
+    give_back_unused(getattr(executor, "db", None), cleared.approved_via_grant_id, result)
+    return marked(result, cleared)
+
+
+def exec_failure(result: Dict[str, Any]) -> Optional[str]:
+    """F191 (night 6): why a command the worker ran failed, read from its exit
+    code, or None.
+
+    python3 scripts/profile.py exited 2 ("can't open file") and the call said
+    success. The worker answers /exec with HTTP 200 and the exit code in the
+    body, and nothing read it, so telemetry, F137's step summary and F131's
+    failed-last-call rule all saw a success. Any non-zero exit fails the call,
+    except 1 with nothing on stderr: that is a command's "no" (grep found
+    nothing, test was false, diff found a difference), and a step that ends on
+    one has not failed.
+    """
+    code = result.get("exit_code")
+    if not isinstance(code, int) or code == 0 or result.get("error"):
+        return None
+    stderr = str(result.get("stderr") or "").strip()
+    if code == 1 and not stderr:
+        return None
+    return f"the command exited {code}: {stderr.splitlines()[-1] if stderr else 'nothing on stderr'}"
 
 
 async def resolve_repo_dir(client) -> Optional[str]:
@@ -342,9 +475,8 @@ async def execute_workspace_action(
                         "success": False,
                         "error": (
                             f"url points to a .{ext} file — this tool renders HTML pages "
-                            f"to PNG. Pass the HTML template URL with query params, e.g. "
-                            f"file:///workspaces/{{id}}/repos/automatos-social/render/"
-                            f"index.html?template=...&size=..."
+                            f"to PNG. Pass the URL of an HTML page in the workspace, e.g. "
+                            f"file:///workspaces/{{id}}/deliverables/charts/revenue.html"
                         ),
                         "tool": tool_name,
                     }
@@ -375,6 +507,11 @@ async def execute_workspace_action(
 
         else:
             return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
+
+        # F191: a command that failed says so; its output stays for the model.
+        failed = exec_failure(result) if tool_name == "workspace_exec" else None
+        if failed:
+            result = {**result, "success": False, "error": failed}
 
         # Worker returned an error
         if result.get("success") is False or result.get("error"):

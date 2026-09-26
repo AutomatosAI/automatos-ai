@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 
 # Actor ref recorded when a single-use (destructive) grant is retired on use.
 GRANT_CONSUMED_BY = "system:consumed"
+# F179 (the TESTER's call): a write whose effect cannot be taken back is
+# single-use too — one yes, one public link. Other write grants keep the TTL.
+SINGLE_USE_ACTIONS = frozenset({"workspace_get_public_url"})
 
 # Strong refs to fire-and-forget notification tasks (the board_approval /
 # api/webhooks.py background-task idiom) so the loop cannot GC them mid-flight.
@@ -49,8 +52,8 @@ _NOTIFY_TASKS: Set["asyncio.Task"] = set()
 # reproduces the original call's identity/telemetry posture — nothing more.
 _CALLER_SNAPSHOT_KEYS = (
     "user_id",
+    "driving_user_id",  # F133: a resumed playbook edit is still made for its person
     "system_role",
-    "workspace_role",
     "conversation_id",
     "turn_id",
 )
@@ -344,9 +347,24 @@ def consume_tool_grant(
             return None
 
         stored_risk = grant.risk_tier or _risk_class_for(action, permission_level)
-        if stored_risk == RISK_DESTRUCTIVE:
-            # Single-use: the yes covered exactly one execution.
-            revoke_grant(grant, revoked_by=GRANT_CONSUMED_BY)
+        if stored_risk == RISK_DESTRUCTIVE or action in SINGLE_USE_ACTIONS:
+            # Single-use: the yes covered exactly one execution. Review HIGH: two
+            # calls both read it GRANTED and both ran. The row is now claimed:
+            # locked for this transaction, and a concurrent call skips it and
+            # gets the ask. A rolled-back transaction leaves the yes in place.
+            from core.models.approval_grants import ApprovalGrant, GrantStatus
+
+            claimed = (
+                db.query(ApprovalGrant)
+                .filter(ApprovalGrant.id == grant.id, ApprovalGrant.status == GrantStatus.GRANTED.value)
+                .with_for_update(skip_locked=True)
+                .first()
+            )
+            if claimed is None:
+                return None
+            revoke_grant(claimed, revoked_by=GRANT_CONSUMED_BY)
+            db.flush()
+            return claimed
         return grant
     except Exception:
         logger.warning(
@@ -354,6 +372,37 @@ def consume_tool_grant(
             action, exc_info=True,
         )
         return None
+
+
+def give_back_unused(db: Any, grant_id: Any, result: Any) -> bool:
+    """F179/F193: a single-use yes whose call did nothing — its result says
+    ``success: False`` (the file was gone, a refusal after the gates, a handler
+    that failed) — is given back, so the next call runs on it instead of asking
+    again for what was never done."""
+    if grant_id is None or not (isinstance(result, dict) and result.get("success") is False):
+        return False
+    return give_back_grant(db, grant_id)
+
+
+def give_back_grant(db: Any, grant_id: Any) -> bool:
+    """Undo this module's own consumption of a grant (``revoked_by`` is
+    ``system:consumed``); a human's revoke or deny is never undone. Never raises."""
+    if db is None or grant_id is None:
+        return False
+    try:
+        from core.models.approval_grants import ApprovalGrant, GrantStatus
+
+        grant = db.get(ApprovalGrant, grant_id)
+        if grant is None or grant.status != GrantStatus.REVOKED.value or grant.revoked_by != GRANT_CONSUMED_BY:
+            return False
+        grant.status = GrantStatus.GRANTED.value
+        grant.revoked_at = None
+        grant.revoked_by = None
+        db.flush()
+        return True
+    except Exception:
+        logger.warning("[tool_grants] could not give back grant %s", grant_id, exc_info=True)
+        return False
 
 
 # ---------------------------------------------------------------------------

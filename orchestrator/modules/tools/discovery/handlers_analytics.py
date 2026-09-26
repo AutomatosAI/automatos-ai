@@ -230,7 +230,13 @@ async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]
     """
     from sqlalchemy import text as sa_text
 
+    from core.security.surface import widget_turn
+
     snapshot: Dict[str, Any] = {"success": True}
+    # F155: a widget turn (tasks:read) gets where things stand: the counts and
+    # each open or finished ticket's id, title and status. Never who is busiest,
+    # the owner's scheduled routines, or anyone's errors.
+    visitor = widget_turn()
 
     summary = await board_summary(db, workspace_id, params)
     snapshot["counts"] = {
@@ -256,7 +262,7 @@ async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]
         """), {"ws": str(workspace_id), "limit": limit}).fetchall()
         snapshot["open_tasks"] = [{
             "id": r.id, "title": (r.title or "")[:120], "status": r.status,
-            "priority": r.priority, "agent": r.agent_name,
+            **({} if visitor else {"priority": r.priority, "agent": r.agent_name}),
         } for r in rows]
         snapshot["open_task_count"] = len(snapshot["open_tasks"])
     except Exception as e:  # noqa: BLE001 — a partial snapshot beats no answer
@@ -277,6 +283,9 @@ async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]
     except Exception as e:  # noqa: BLE001
         logger.warning("[board_snapshot] recent activity unavailable: %s", e)
         snapshot["recently_finished"] = []
+
+    if visitor:
+        return snapshot
 
     try:
         sched = db.execute(sa_text("""
@@ -333,6 +342,12 @@ async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any])
             for aid, count in sorted_agents
         ]
 
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        # F155: a widget turn (tasks:read) gets the counts, never who is busiest
+        # or what failed and why.
+        return {"success": True, "total_tasks": len(all_tasks), "by_status": by_status, "by_priority": by_priority}
     return {
         "success": True,
         "total_tasks": len(all_tasks),

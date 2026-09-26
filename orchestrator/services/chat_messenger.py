@@ -39,13 +39,11 @@ BACKGROUND_LABEL = "Auto · background"
 
 
 def _resolve_user_int_id(db: Session, clerk_user_id: Optional[str]) -> Optional[int]:
-    """Clerk string → integer users.id (the coordinator pattern; #513)."""
-    if not clerk_user_id:
-        return None
-    from core.models.core import User
+    """The recorded person → integer users.id (#513): a Clerk id, or a local
+    operator's email (F166); an agent id is nobody."""
+    from core.auth.actor import resolve_recorded_person
 
-    row = db.query(User.id).filter(User.clerk_user_id == str(clerk_user_id)).first()
-    return int(row[0]) if row else None
+    return resolve_recorded_person(db, clerk_user_id)
 
 
 def find_or_create_auto_chat(db: Session, workspace_id, user_int_id: int):

@@ -1,0 +1,218 @@
+{
+  "name": "Carousel",
+  "description": "A swipeable carousel on the brand's paper, one PNG per slide: a cover, two to six numbered points and a closing call to action. A point left empty drops its slide, and the slides are counted as they show.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. 5 SIGNS|YOUR AGENT|NEEDS A|HARNESS",
+      "max_chars": 80
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "subline": {
+      "type": "text",
+      "label": "Supporting line",
+      "description": "One or two sentences on the cover. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "point_1_title": {
+      "type": "text",
+      "label": "Point 1 heading",
+      "description": "The heading of slide 2.",
+      "max_chars": 70
+    },
+    "point_1_body": {
+      "type": "text",
+      "label": "Point 1 text",
+      "description": "A sentence or two on slide 2. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "point_2_title": {
+      "type": "text",
+      "label": "Point 2 heading",
+      "description": "The heading of slide 3.",
+      "max_chars": 70
+    },
+    "point_2_body": {
+      "type": "text",
+      "label": "Point 2 text",
+      "description": "A sentence or two on slide 3. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "point_3_title": {
+      "type": "text",
+      "label": "Point 3 heading",
+      "description": "The heading of slide 4. Leave empty and the slide is left out.",
+      "default": "",
+      "max_chars": 70
+    },
+    "point_3_body": {
+      "type": "text",
+      "label": "Point 3 text",
+      "description": "A sentence or two on slide 4. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "point_4_title": {
+      "type": "text",
+      "label": "Point 4 heading",
+      "description": "The heading of slide 5. Leave empty and the slide is left out.",
+      "default": "",
+      "max_chars": 70
+    },
+    "point_4_body": {
+      "type": "text",
+      "label": "Point 4 text",
+      "description": "A sentence or two on slide 5. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "point_5_title": {
+      "type": "text",
+      "label": "Point 5 heading",
+      "description": "The heading of slide 6. Leave empty and the slide is left out.",
+      "default": "",
+      "max_chars": 70
+    },
+    "point_5_body": {
+      "type": "text",
+      "label": "Point 5 text",
+      "description": "A sentence or two on slide 6. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "point_6_title": {
+      "type": "text",
+      "label": "Point 6 heading",
+      "description": "The heading of slide 7. Leave empty and the slide is left out.",
+      "default": "",
+      "max_chars": 70
+    },
+    "point_6_body": {
+      "type": "text",
+      "label": "Point 6 text",
+      "description": "A sentence or two on slide 7. Leave empty for none.",
+      "default": "",
+      "max_chars": 220
+    },
+    "closing_title": {
+      "type": "text",
+      "label": "Closing heading",
+      "description": "The last slide's statement, e.g. Build the harness first.",
+      "max_chars": 80
+    },
+    "closing_body": {
+      "type": "text",
+      "label": "Closing text",
+      "description": "A sentence or two on the last slide. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The button on the last slide, e.g. Follow for more. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    },
+    "swipe_hint": {
+      "type": "text",
+      "label": "Swipe hint",
+      "description": "The footer of every other slide, e.g. Swipe. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "stills": [
+    {
+      "at": 0.5
+    },
+    {
+      "at": 1.5
+    },
+    {
+      "at": 2.5
+    },
+    {
+      "at": 3.5,
+      "when": "point_3_title"
+    },
+    {
+      "at": 4.5,
+      "when": "point_4_title"
+    },
+    {
+      "at": 5.5,
+      "when": "point_5_title"
+    },
+    {
+      "at": 6.5,
+      "when": "point_6_title"
+    },
+    {
+      "at": 7.5
+    }
+  ],
+  "sample_data": {
+    "eyebrow": "AI ARCHITECTURE",
+    "headline": "4 SIGNS|YOUR AGENT|NEEDS A|HARNESS",
+    "headline_accent": "HARNESS",
+    "subline": "The model is rarely the problem. Here is what goes wrong around it, and what to do instead.",
+    "point_1_title": "It forgets what it just did",
+    "point_1_body": "Without memory it has no state between steps, so every turn starts from zero.",
+    "point_2_title": "It picks the wrong tool",
+    "point_2_body": "Forty tools in the prompt means forty chances to choose badly. Give it the few it needs.",
+    "point_3_title": "It never knows when to stop",
+    "point_3_body": "A loop without a goal check runs until the budget does. Define done before you start.",
+    "point_4_title": "Nobody can see why it failed",
+    "point_4_body": "Log every step, tool call and result. You cannot fix what you cannot read.",
+    "point_5_title": "",
+    "point_5_body": "",
+    "point_6_title": "",
+    "point_6_body": "",
+    "closing_title": "Build the harness first.",
+    "closing_body": "The model you have is good enough. The system around it decides the result.",
+    "cta": "Follow for more",
+    "swipe_hint": "Swipe",
+    "handle": "@automatos.app"
+  },
+  "preview": {
+    "probe": {
+      "x": 0.5,
+      "y": 0.003,
+      "token": "primary",
+      "what": "the brand stripe along the top edge"
+    }
+  }
+}

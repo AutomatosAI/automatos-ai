@@ -142,11 +142,14 @@ class SmartMemoryManager:
         agent_id: Optional[int],
         query: str,
         viewer_subject_id: Optional[str] = None,
+        lane: str = "chat",
     ) -> str:
         """Cache key for memory lookups. Includes the agent AND the viewer —
         the Q7 private-scope guard filters per viewer, so two users sharing a
-        cache entry would leak one user's private rows to the other."""
-        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{query[:50]}"
+        cache entry would leak one user's private rows to the other — and the
+        lane (F182): a widget's agent-only lookup, or autonomous work's lookup
+        without chat transcripts, is never served a chat turn's result."""
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}:{query[:50]}"
 
     async def retrieve_memories(
         self,
@@ -156,6 +159,7 @@ class SmartMemoryManager:
         limit: int = 8,
         widget_mode: bool = False,
         viewer_subject_id: Optional[str] = None,
+        chat_transcripts: bool = True,
     ) -> MemoryResult:
         """
         Retrieve relevant memories for a query.
@@ -165,6 +169,8 @@ class SmartMemoryManager:
             agent_id: Agent ID for scoping
             query: The user's query to match against
             limit: Maximum memories to retrieve
+            chat_transcripts: False for autonomous work (F182): raw chat
+                transcripts promoted into L3 are left out.
 
         Returns:
             MemoryResult with memories and extracted context
@@ -172,7 +178,8 @@ class SmartMemoryManager:
         start_time = time.time()
 
         # Check cache first
-        cache_key = self._get_cache_key(workspace_id, agent_id, query, viewer_subject_id)
+        lane = "widget" if widget_mode else ("chat" if chat_transcripts else "work")
+        cache_key = self._get_cache_key(workspace_id, agent_id, query, viewer_subject_id, lane)
         cached = self._cache.get(cache_key)
         if cached and (time.time() - cached[0]) < self._cache_ttl:
             logger.debug("[SmartMemory] Using cached memory result")
@@ -225,7 +232,11 @@ class SmartMemoryManager:
                 # (durable_store.filter_by_relevance_floor, PRD-159 S3); re-asserting
                 # it over the MERGED set closes the content-type gap the search
                 # layer lacks, at the one chokepoint that feeds the LLM formatter.
-                from modules.memory.injection_filter import filter_injectable_memories
+                from modules.memory.injection_filter import (
+                    CHAT_TRANSCRIPT_CONTENT_TYPES,
+                    EXCLUDED_INJECTION_CONTENT_TYPES,
+                    filter_injectable_memories,
+                )
                 try:
                     from config import config as _cfg
                     _floor = float(getattr(_cfg, "MEMORY_RELEVANCE_FLOOR", 0.3))
@@ -236,8 +247,10 @@ class SmartMemoryManager:
                 # PRD-206 S7: the viewer rides into the guard — Q7 private
                 # memories only inject for their owner (unknown viewer fails
                 # closed; legacy/workspace rows unchanged).
+                excluded = EXCLUDED_INJECTION_CONTENT_TYPES | (
+                    frozenset() if chat_transcripts else CHAT_TRANSCRIPT_CONTENT_TYPES)
                 memories = filter_injectable_memories(
-                    memories, floor=_floor, viewer_subject_id=viewer_subject_id,
+                    memories, floor=_floor, excluded_types=excluded, viewer_subject_id=viewer_subject_id,
                 )
                 if len(memories) != _before:
                     logger.info(

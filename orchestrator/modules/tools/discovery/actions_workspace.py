@@ -307,10 +307,11 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     ))
 
     # ── PRD-143 S11: administration surface — workspace + system settings ──
-    # Operator tier by design (Rev 2). The workspace-settings tool is
-    # fail-closed on a key whitelist (handlers_workspace.
-    # OPERATOR_WORKSPACE_SETTINGS_KEYS); system-setting updates are
-    # platform-wide, hence requires_confirmation=True.
+    # The workspace-settings tool is fail-closed on a key whitelist
+    # (handlers_workspace.OPERATOR_WORKSPACE_SETTINGS_KEYS) and, since F147,
+    # admin_only: a workspace owner/admin drives it. System settings are
+    # platform-wide (every tenant's), so since F147 they are super_admin_only,
+    # and still confirmed.
 
     registry.register(ActionDefinition(
         name="platform_update_workspace_settings",
@@ -341,6 +342,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F147
         tags=["settings", "workspace", "byok", "notifications", "configuration"],
         examples=[
             "use my own OpenAI key for this workspace",
@@ -406,6 +408,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=True,
+        super_admin_only=True,  # F147: platform-wide, every tenant's
         tags=["settings", "system", "configuration", "platform"],
         examples=[
             "change the default LLM model setting",

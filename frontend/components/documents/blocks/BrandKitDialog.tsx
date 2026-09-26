@@ -9,6 +9,9 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FieldHelp } from '@/components/ui/help-tooltip'
 import { templateBlocksApi } from './api'
+import { BrandKitFonts, useUploadedFontFaces } from './BrandKitFonts'
+import { BrandKitSocial, toneWordsProblem } from './BrandKitSocial'
+import { useBrandImage } from './useBrandImage'
 import type { BrandKit, BrandSuggestions } from './types'
 
 interface BrandKitDialogProps {
@@ -22,6 +25,21 @@ const SOURCE_LABEL: Record<string, string> = {
   business_profile: 'your business profile',
   workspace: 'your workspace name',
   user: 'your account',
+}
+const NO_FONTS: BrandKit['font_files'] = []
+
+// The PRD-251 D5 fields, filled when the kit comes from a backend that predates them
+// (the frontend can deploy before the API).
+function withD5Fields(kit: BrandKit): BrandKit {
+  return {
+    ...kit,
+    heading_font: kit.heading_font ?? '',
+    font_files: kit.font_files ?? [],
+    logo_mark_url: kit.logo_mark_url ?? '',
+    logo_mark_path: kit.logo_mark_path ?? '',
+    social_handles: kit.social_handles ?? {},
+    voice: { tone: kit.voice?.tone ?? [], banned_phrases: kit.voice?.banned_phrases ?? [] },
+  }
 }
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -42,8 +60,33 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
   )
 }
 
+// A 422 from PUT /brand-kit names each refused field and why ("voice.tone: give 3 to 5
+// tone words"): the kit's own check ({message, errors}) or the request's (a list).
+function saveErrorMessage(e: any): string {
+  try {
+    const detail = JSON.parse(e?.message ?? '')
+    const errors: Array<{ loc?: unknown[]; msg?: string }> = Array.isArray(detail)
+      ? detail
+      : Array.isArray(detail?.errors)
+        ? detail.errors
+        : []
+    if (errors.length) {
+      return errors
+        .map((err) => {
+          const field = (err.loc ?? []).filter((part) => part !== 'body').join('.')
+          return `${field}: ${(err.msg ?? '').replace(/^Value error, /, '')}`
+        })
+        .join('; ')
+    }
+  } catch {
+    // Not a validation detail: the message as it came.
+  }
+  return e?.message || 'Failed to save brand kit'
+}
+
 // A live swatch of what the renderers will do with the palette (heading, rule, table head).
-function KitPreview({ kit, logoUrl }: { kit: BrandKit; logoUrl: string | null }) {
+function KitPreview({ kit, logoUrl, markUrl }: { kit: BrandKit; logoUrl: string | null; markUrl: string | null }) {
+  const mark = markUrl || kit.logo_mark_url || null
   return (
     <div className="rounded-md border bg-white p-3 text-[#1a1a2e]" style={{ fontFamily: kit.font_family || undefined, color: kit.text_color || undefined }}>
       {logoUrl ? (
@@ -53,7 +96,14 @@ function KitPreview({ kit, logoUrl }: { kit: BrandKit; logoUrl: string | null })
         // eslint-disable-next-line @next/next/no-img-element
         <img src={kit.logo_url} alt="Logo" className="mb-2 h-8 w-auto object-contain" />
       ) : null}
-      <div className="text-base font-bold" style={{ color: kit.primary_color, borderBottom: `2px solid ${kit.accent_color}` }}>
+      <div
+        className="flex items-center gap-2 text-base font-bold"
+        style={{ color: kit.primary_color, borderBottom: `2px solid ${kit.accent_color}`, fontFamily: kit.heading_font || undefined }}
+      >
+        {mark && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={mark} alt="Logo mark" className="h-5 w-5 object-contain" />
+        )}
         {kit.name || 'Your brand'}
       </div>
       <div className="mt-1 text-[11px]">{kit.tagline || 'Tagline'} · {kit.company.website || 'website'}</div>
@@ -65,55 +115,48 @@ function KitPreview({ kit, logoUrl }: { kit: BrandKit; logoUrl: string | null })
   )
 }
 
-// Edit the workspace brand kit (PRD-167 S4 → PRD-242 S3): logo upload, prefill from
-// what the platform already knows, every colour the renderers use, and a live swatch.
+// Edit the workspace brand kit (PRD-167 S4 → PRD-242 S3 → PRD-251 D5): logo and logo
+// mark uploads, prefill from what the platform already knows, every colour the
+// renderers use, the body and heading fonts with uploaded font files, the social
+// handles and the brand voice, and a live swatch. Opened from Template Studio and
+// from the Socials tab.
 export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogProps) {
   const [kit, setKit] = useState<BrandKit | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<BrandSuggestions>({})
-  const fileInput = useRef<HTMLInputElement | null>(null)
+  // Each load remounts the fields that keep their own typed text (the voice lists).
+  const [loads, setLoads] = useState(0)
+  const logoInput = useRef<HTMLInputElement | null>(null)
+  const markInput = useRef<HTMLInputElement | null>(null)
 
-  const refreshLogo = async (hasLogo: boolean) => {
-    if (!hasLogo) {
-      setLogoUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return null
-      })
-      return
-    }
-    try {
-      const url = await templateBlocksApi.fetchLogoObjectUrl()
-      setLogoUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return url
-      })
-    } catch {
-      setLogoUrl(null)
-    }
-  }
+  const patch = (p: Partial<BrandKit>) => setKit((k) => (k ? { ...k, ...p } : k))
+  const patchCompany = (p: Partial<BrandKit['company']>) =>
+    setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
+
+  const logo = useBrandImage('logo', patch)
+  const mark = useBrandImage('mark', patch)
+  useUploadedFontFaces(kit?.font_files ?? NO_FONTS)
 
   useEffect(() => {
     if (!open) return
     setLoadError(null)
     templateBlocksApi
       .getBrandKit()
-      .then((k) => {
+      .then((loaded) => {
+        const k = withD5Fields(loaded)
         setKit(k)
-        refreshLogo(!!k.logo_path)
+        setLoads((n) => n + 1)
+        logo.refresh(!!k.logo_path)
+        mark.refresh(!!k.logo_mark_path)
       })
       .catch((e: any) => setLoadError(e?.message || 'Failed to load brand kit'))
     templateBlocksApi
       .getBrandSuggestions()
       .then((r) => setSuggestions(r.suggestions || {}))
       .catch(() => setSuggestions({}))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
-
-  const patch = (p: Partial<BrandKit>) => setKit((k) => (k ? { ...k, ...p } : k))
-  const patchCompany = (p: Partial<BrandKit['company']>) =>
-    setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
 
   const applySuggestions = () => {
     if (!kit) return
@@ -134,47 +177,26 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
     toast.success(`Filled empty fields from ${sources.join(' and ')}`)
   }
 
-  const uploadLogo = async (file: File | undefined) => {
-    if (!file) return
-    setUploading(true)
-    try {
-      const saved = await templateBlocksApi.uploadLogo(file)
-      setKit((k) => (k ? { ...k, logo_path: saved.logo_path, logo_url: saved.logo_url } : k))
-      await refreshLogo(true)
-      toast.success('Logo uploaded — it will appear in every document with a logo block')
-    } catch (e: any) {
-      toast.error(e?.message || 'Logo upload failed')
-    } finally {
-      setUploading(false)
-      if (fileInput.current) fileInput.current.value = ''
-    }
+  const pickFile = (upload: (file: File | undefined) => Promise<void>) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    upload(file)
   }
 
-  const removeLogo = async () => {
-    setUploading(true)
-    try {
-      const saved = await templateBlocksApi.deleteLogo()
-      setKit((k) => (k ? { ...k, logo_path: saved.logo_path } : k))
-      await refreshLogo(false)
-      toast.success('Logo removed')
-    } catch (e: any) {
-      toast.error(e?.message || 'Could not remove the logo')
-    } finally {
-      setUploading(false)
-    }
-  }
+  const voiceProblem = kit ? toneWordsProblem(kit.voice.tone) : null
 
   const save = async () => {
-    if (!kit) return
+    if (!kit || voiceProblem) return
     setSaving(true)
     try {
-      // logo_path is server-managed; the update route ignores it (validate_brand_kit strips it).
+      // The stored files (logo_path, logo_mark_path, font_files) are server-managed;
+      // the update route ignores them (validate_brand_kit strips them).
       const saved = await templateBlocksApi.updateBrandKit(kit)
       toast.success('Brand kit saved')
       onSaved?.(saved)
       onOpenChange(false)
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save brand kit')
+      toast.error(saveErrorMessage(e))
     } finally {
       setSaving(false)
     }
@@ -190,7 +212,7 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
             Brand Kit <FieldHelp id="deliverables.brand_kit.title" />
           </DialogTitle>
           <DialogDescription>
-            Applied to every document rendered from a template — logo, colours, font, and the {'{{brand.*}}'} / {'{{company.*}}'} chips.
+            Applied to every document and social post rendered from a template — logo, colours, fonts, and the {'{{brand.*}}'} / {'{{company.*}}'} chips.
           </DialogDescription>
         </DialogHeader>
 
@@ -223,19 +245,13 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
                   Logo <FieldHelp id="deliverables.brand_kit.logo" />
                 </Label>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    className="hidden"
-                    onChange={(e) => uploadLogo(e.target.files?.[0])}
-                  />
-                  <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={uploading} onClick={() => fileInput.current?.click()}>
-                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+                  <input ref={logoInput} type="file" accept="image/png,image/jpeg" className="hidden" onChange={pickFile(logo.upload)} />
+                  <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={logo.busy} onClick={() => logoInput.current?.click()}>
+                    {logo.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
                     {kit.logo_path ? 'Replace logo' : 'Upload logo (PNG/JPEG)'}
                   </Button>
                   {kit.logo_path && (
-                    <Button type="button" size="sm" variant="ghost" className="gap-1.5 text-destructive" disabled={uploading} onClick={removeLogo}>
+                    <Button type="button" size="sm" variant="ghost" className="gap-1.5 text-destructive" disabled={logo.busy} onClick={logo.remove}>
                       <Trash2 className="h-3.5 w-3.5" /> Remove
                     </Button>
                   )}
@@ -248,16 +264,72 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
                 )}
               </div>
 
+              <div className="rounded-md border p-3">
+                <Label className="flex items-center text-xs">
+                  Logo mark (square) <FieldHelp id="deliverables.brand_kit.logo_mark" />
+                </Label>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    ref={markInput}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    aria-label="Logo mark file"
+                    onChange={pickFile(mark.upload)}
+                  />
+                  <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={mark.busy} onClick={() => markInput.current?.click()}>
+                    {mark.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+                    {kit.logo_mark_path ? 'Replace logo mark' : 'Upload logo mark (square PNG/JPEG)'}
+                  </Button>
+                  {kit.logo_mark_path && (
+                    <Button type="button" size="sm" variant="ghost" className="gap-1.5 text-destructive" disabled={mark.busy} onClick={mark.remove}>
+                      <Trash2 className="h-3.5 w-3.5" /> Remove
+                    </Button>
+                  )}
+                </div>
+                {!kit.logo_mark_path && (
+                  <div className="mt-2">
+                    <Label htmlFor="brand-logo-mark-url" className="text-xs text-muted-foreground">…or a public image URL</Label>
+                    <Input
+                      id="brand-logo-mark-url"
+                      value={kit.logo_mark_url}
+                      onChange={(e) => patch({ logo_mark_url: e.target.value })}
+                      placeholder="https://…/mark.png"
+                    />
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <ColorField label="Primary (headings)" value={kit.primary_color} onChange={(v) => patch({ primary_color: v })} />
                 <ColorField label="Accent (rules)" value={kit.accent_color} onChange={(v) => patch({ accent_color: v })} />
                 <ColorField label="Secondary (borders)" value={kit.secondary_color} onChange={(v) => patch({ secondary_color: v })} />
                 <ColorField label="Body text" value={kit.text_color} onChange={(v) => patch({ text_color: v })} />
               </div>
-              <div>
-                <Label className="text-xs">Font family</Label>
-                <Input value={kit.font_family} onChange={(e) => patch({ font_family: e.target.value })} placeholder="Inter, system-ui, sans-serif" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="brand-body-font" className="text-xs">Body font</Label>
+                  <Input
+                    id="brand-body-font"
+                    value={kit.font_family}
+                    onChange={(e) => patch({ font_family: e.target.value })}
+                    placeholder="Inter, system-ui, sans-serif"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center">
+                    <Label htmlFor="brand-heading-font" className="text-xs">Heading font</Label>
+                    <FieldHelp id="deliverables.brand_kit.heading_font" />
+                  </div>
+                  <Input
+                    id="brand-heading-font"
+                    value={kit.heading_font}
+                    onChange={(e) => patch({ heading_font: e.target.value })}
+                    placeholder="Same as the body font"
+                  />
+                </div>
               </div>
+              <BrandKitFonts fonts={kit.font_files} onChange={(font_files) => patch({ font_files })} />
               <div className="rounded-md border p-3">
                 <p className="mb-2 flex items-center text-xs font-medium text-muted-foreground">
                   Company contact — fills {'{{company.*}}'} <FieldHelp id="deliverables.brand_kit.company" />
@@ -270,11 +342,18 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
                   <Input placeholder="Phone" value={kit.company.phone} onChange={(e) => patchCompany({ phone: e.target.value })} />
                 </div>
               </div>
+              <BrandKitSocial
+                key={loads}
+                handles={kit.social_handles}
+                voice={kit.voice}
+                onHandlesChange={(social_handles) => patch({ social_handles })}
+                onVoiceChange={(voice) => patch({ voice })}
+              />
             </div>
             <div className="md:col-span-2">
               <Label className="text-xs text-muted-foreground">How it renders</Label>
               <div className="mt-1">
-                <KitPreview kit={kit} logoUrl={logoUrl} />
+                <KitPreview kit={kit} logoUrl={logo.objectUrl} markUrl={mark.objectUrl} />
               </div>
             </div>
           </div>
@@ -282,7 +361,7 @@ export function BrandKitDialog({ open, onOpenChange, onSaved }: BrandKitDialogPr
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving || !kit}>{saving ? 'Saving…' : 'Save'}</Button>
+          <Button onClick={save} disabled={saving || !kit || !!voiceProblem}>{saving ? 'Saving…' : 'Save'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -242,7 +242,6 @@ def test_executor_injects_and_overwrites_origin():
         "platform_create_watch",
         "platform_create_mission",
         "platform_execute_playbook",
-        "platform_execute_recipe",
         "platform_schedule_task",
     ):
         assert action in block.group("actions")
@@ -276,8 +275,15 @@ def test_executor_strips_spoofed_origin_without_context(monkeypatch):
     import modules.tools.discovery as discovery_pkg
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
+    from modules.tools.discovery.action_registry import ActionDefinition
+
     registry = MagicMock()
-    registry.get.return_value = None  # no action_def -> permission gates no-op
+    # A read-level definition: the permission gates pass, so only the origin
+    # injection is under test (an action with no definition is refused).
+    registry.get.return_value = ActionDefinition(
+        name="platform_create_watch", description="probe", category="t", permission_level="read",
+        parameters={"type": "object", "properties": {}, "required": []},
+    )
     monkeypatch.setattr(discovery_pkg, "get_action_registry", lambda: registry)
 
     seen = []

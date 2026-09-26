@@ -38,6 +38,23 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                         "publish (bool: auto-publish result if applicable)."
                     ),
                 },
+                "staffing": {
+                    "type": "array",
+                    "description": (
+                        "Only when the owner says which agent does what: one entry per named "
+                        "agent, with its work in the owner's words. Each named agent gets that "
+                        "work and is pinned to it; anything else is routed by capability. A name "
+                        "several agents share is refused with their ids: ask the owner which one."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": {"type": "string", "description": "The agent's name, slug or id"},
+                            "does": {"type": "string", "description": "Its work, in the owner's words"},
+                        },
+                        "required": ["agent", "does"],
+                    },
+                },
             },
             "required": ["goal"],
         },
@@ -128,11 +145,11 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
+                # F142 (e): no `modifications` here. The approval never applied
+                # them (api/missions.py PRD-163 S4 note), so an agent that sent
+                # agent_overrides believed it had pinned staff when it had not.
+                # Plan edits go through platform_update_mission_plan.
                 **_MISSION_ID_PARAM,
-                "modifications": {
-                    "type": "object",
-                    "description": "Optional approval-time plan edits (task_overrides, agent_overrides, notes).",
-                },
             },
             "required": ["mission_id"],
         },
@@ -144,13 +161,16 @@ def register_mission_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_reject_mission",
-        description="Reject an awaiting-approval mission plan (it transitions to failed). Use when the user declines the proposed plan.",
+        description=("Reject an awaiting-approval mission plan: it never runs and is closed as cancelled, "
+                     "with the reason. Use when the user declines the proposed plan."),
         category="missions",
         parameters={
             "type": "object",
             "properties": {
                 **_MISSION_ID_PARAM,
-                "reason": {"type": "string", "description": "Why the plan was rejected (returned to Auto's context)."},
+                "reason": {"type": "string", "description": (
+                    "Why the owner turned the plan down, in the owner's own words: quote what they "
+                    "asked to change, do not summarise it. The next plan for this conversation reads it.")},
             },
             "required": ["mission_id"],
         },
@@ -202,6 +222,23 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "properties": {
                 **_MISSION_ID_PARAM,
                 "notes": {"type": "string", "description": "Optional guidance for the replanner."},
+                "staffing": {
+                    "type": "array",
+                    "description": (
+                        "To re-staff the mission (omit to keep its staffing; [] clears it): one entry per named "
+                        "agent, with its work in the owner's words. Each named agent gets that "
+                        "work and is pinned to it; anything else is routed by capability. A name "
+                        "several agents share is refused with their ids: ask the owner which one."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": {"type": "string", "description": "The agent's name, slug or id"},
+                            "does": {"type": "string", "description": "Its work, in the owner's words"},
+                        },
+                        "required": ["agent", "does"],
+                    },
+                },
             },
             "required": ["mission_id"],
         },
@@ -227,7 +264,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                     "type": "array",
                     "description": (
                         "Per-task edits. Identify each task by task_id, temp_id, or "
-                        "sequence_number; set any of agent_role, title, description."
+                        "sequence_number; set any of agent_id, agent_role, title, description. "
+                        "To have a specific agent run the task, give its agent_id (or its "
+                        "name when only one active agent has it)."
                     ),
                     "items": {
                         "type": "object",
@@ -235,6 +274,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                             "task_id": {"type": "string"},
                             "temp_id": {"type": "string"},
                             "sequence_number": {"type": "integer"},
+                            "agent_id": {"type": "integer"},
                             "agent_role": {"type": "string"},
                             "title": {"type": "string"},
                             "description": {"type": "string"},

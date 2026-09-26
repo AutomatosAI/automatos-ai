@@ -1,0 +1,647 @@
+{
+  "name": "Data story",
+  "description": "A 40 s vertical data story: footage and stills behind data cards that the template draws from the post's own data (price bars and plan levels become chart shapes, and every figure on screen is computed from them). The hook, the reveal on the kick, the data, the odds, the log, a replay, and the end card. Six media slots; an empty slot falls back to the template's motion graphics. Ported from the Markets posh cut (PRD-251A). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s, as in the reference; the post's copy carries its credit.",
+  "format": "social_video",
+  "category": "social",
+  "sizes": [
+    "1080x1920"
+  ],
+  "variables_schema": {
+    "hook_line_1": {
+      "type": "text",
+      "label": "Hook: line 1",
+      "max_chars": 22,
+      "description": "Over the hook footage."
+    },
+    "hook_line_2": {
+      "type": "text",
+      "label": "Hook: line 2",
+      "max_chars": 22
+    },
+    "hook_accent": {
+      "type": "text",
+      "label": "Hook: the turn, in the brand colour",
+      "max_chars": 26
+    },
+    "product_name": {
+      "type": "text",
+      "label": "Reveal: the product under the brand name",
+      "max_chars": 24,
+      "description": "Set in spaced caps under the wordmark."
+    },
+    "tide_line": {
+      "type": "text",
+      "label": "Tide: the line",
+      "max_chars": 20
+    },
+    "tide_accent": {
+      "type": "text",
+      "label": "Tide: the accent line",
+      "max_chars": 20
+    },
+    "tide_pill_1": {
+      "type": "text",
+      "label": "Tide: pill 1",
+      "max_chars": 18
+    },
+    "tide_pill_2": {
+      "type": "text",
+      "label": "Tide: pill 2",
+      "max_chars": 20
+    },
+    "computed_line": {
+      "type": "text",
+      "label": "Data: the headline",
+      "max_chars": 14
+    },
+    "computed_accent": {
+      "type": "text",
+      "label": "Data: the headline's accent",
+      "max_chars": 12
+    },
+    "chart_symbol": {
+      "type": "text",
+      "label": "Data: what the chart shows",
+      "max_chars": 8,
+      "description": "e.g. 'BTC'."
+    },
+    "chart_timeframe": {
+      "type": "text",
+      "label": "Data: one bar's period",
+      "max_chars": 6,
+      "description": "e.g. '1H'."
+    },
+    "chart_bars": {
+      "type": "text",
+      "label": "Data: the bars",
+      "max_chars": 2000,
+      "description": "The price bars every chart and figure is computed from: 'open,high,low,close' per bar, bars separated by ';', oldest first; 60 bars (at least 40). Needs its source.",
+      "claim": true
+    },
+    "last_close_label": {
+      "type": "text",
+      "label": "Data: the last close's label",
+      "max_chars": 16,
+      "default": "Last close"
+    },
+    "data_as_of": {
+      "type": "text",
+      "label": "Data: when the data was taken",
+      "max_chars": 24,
+      "description": "e.g. '23 Sep 01:00 UTC'.",
+      "claim": true
+    },
+    "stat_high_label": {
+      "type": "text",
+      "label": "Data: the high's label",
+      "max_chars": 14,
+      "description": "e.g. '60h high'."
+    },
+    "stat_low_label": {
+      "type": "text",
+      "label": "Data: the low's label",
+      "max_chars": 14
+    },
+    "stat_change_label": {
+      "type": "text",
+      "label": "Data: the change's label",
+      "max_chars": 14
+    },
+    "stat_tag": {
+      "type": "text",
+      "label": "Data: the tag on each figure",
+      "max_chars": 12,
+      "default": "COMPUTED"
+    },
+    "computed_stamp": {
+      "type": "text",
+      "label": "Data: the stamp",
+      "max_chars": 20
+    },
+    "plan_title": {
+      "type": "text",
+      "label": "Plan: the title",
+      "max_chars": 44
+    },
+    "plan_subtitle": {
+      "type": "text",
+      "label": "Plan: the subtitle",
+      "max_chars": 40
+    },
+    "plan_entry_low": {
+      "type": "number",
+      "label": "Plan: the entry zone's low",
+      "min": 0,
+      "max": 1000000000000.0,
+      "claim": true
+    },
+    "plan_entry_high": {
+      "type": "number",
+      "label": "Plan: the entry zone's high",
+      "min": 0,
+      "max": 1000000000000.0,
+      "claim": true
+    },
+    "plan_stop": {
+      "type": "number",
+      "label": "Plan: the stop",
+      "min": 0,
+      "max": 1000000000000.0,
+      "claim": true
+    },
+    "plan_target": {
+      "type": "number",
+      "label": "Plan: the target",
+      "min": 0,
+      "max": 1000000000000.0,
+      "description": "Its R multiple is computed from the entry and the stop.",
+      "claim": true
+    },
+    "plan_target_label": {
+      "type": "text",
+      "label": "Plan: the target's label",
+      "max_chars": 6,
+      "default": "T1"
+    },
+    "plan_entry_label": {
+      "type": "text",
+      "label": "Plan: the entry's label",
+      "max_chars": 8,
+      "default": "ENTRY"
+    },
+    "plan_stop_label": {
+      "type": "text",
+      "label": "Plan: the stop's label",
+      "max_chars": 6,
+      "default": "STOP"
+    },
+    "odds_title": {
+      "type": "text",
+      "label": "Odds: the title",
+      "max_chars": 32,
+      "description": "e.g. 'REPLAYED ODDS · n = 242'.",
+      "claim": true
+    },
+    "odds_note": {
+      "type": "text",
+      "label": "Odds: the note",
+      "max_chars": 40
+    },
+    "odds_1_label": {
+      "type": "text",
+      "label": "Odds: outcome 1",
+      "max_chars": 12,
+      "default": "T1 FIRST"
+    },
+    "odds_1_percent": {
+      "type": "number",
+      "label": "Odds: outcome 1's share, in percent",
+      "min": 0,
+      "max": 100,
+      "claim": true
+    },
+    "odds_2_label": {
+      "type": "text",
+      "label": "Odds: outcome 2",
+      "max_chars": 12,
+      "default": "STOP FIRST"
+    },
+    "odds_2_percent": {
+      "type": "number",
+      "label": "Odds: outcome 2's share, in percent",
+      "min": 0,
+      "max": 100,
+      "claim": true
+    },
+    "odds_3_label": {
+      "type": "text",
+      "label": "Odds: outcome 3",
+      "max_chars": 12,
+      "default": "HORIZON"
+    },
+    "odds_3_percent": {
+      "type": "number",
+      "label": "Odds: outcome 3's share, in percent",
+      "min": 0,
+      "max": 100,
+      "claim": true
+    },
+    "odds_footer": {
+      "type": "text",
+      "label": "Odds: the footer",
+      "max_chars": 24
+    },
+    "ledger_title": {
+      "type": "text",
+      "label": "Log: the title",
+      "max_chars": 22
+    },
+    "ledger_subtitle": {
+      "type": "text",
+      "label": "Log: the subtitle",
+      "max_chars": 40,
+      "claim": true
+    },
+    "ledger_head_1": {
+      "type": "text",
+      "label": "Log: column 1",
+      "max_chars": 10,
+      "default": "Chart"
+    },
+    "ledger_head_2": {
+      "type": "text",
+      "label": "Log: column 2",
+      "max_chars": 10,
+      "default": "Setup"
+    },
+    "ledger_head_3": {
+      "type": "text",
+      "label": "Log: column 3",
+      "max_chars": 10,
+      "default": "Outcome"
+    },
+    "ledger_head_4": {
+      "type": "text",
+      "label": "Log: column 4",
+      "max_chars": 10,
+      "default": "R net"
+    },
+    "ledger_1": {
+      "type": "text",
+      "label": "Log: row 1",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_2": {
+      "type": "text",
+      "label": "Log: row 2",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_3": {
+      "type": "text",
+      "label": "Log: row 3",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_4": {
+      "type": "text",
+      "label": "Log: row 4",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_5": {
+      "type": "text",
+      "label": "Log: row 5",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_6": {
+      "type": "text",
+      "label": "Log: row 6",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_7": {
+      "type": "text",
+      "label": "Log: row 7",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_8": {
+      "type": "text",
+      "label": "Log: row 8",
+      "max_chars": 64,
+      "description": "'chart | setup | outcome | R', e.g. 'SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R'; the row's colour follows R's sign.",
+      "claim": true
+    },
+    "ledger_footer": {
+      "type": "text",
+      "label": "Log: the footer",
+      "max_chars": 52
+    },
+    "ledger_stamp": {
+      "type": "text",
+      "label": "Log: the stamp",
+      "max_chars": 18
+    },
+    "replay_title": {
+      "type": "text",
+      "label": "Replay: the title",
+      "max_chars": 16
+    },
+    "replay_subtitle": {
+      "type": "text",
+      "label": "Replay: the subtitle",
+      "max_chars": 56
+    },
+    "replay_future_1": {
+      "type": "text",
+      "label": "Replay: the future's first line",
+      "max_chars": 14
+    },
+    "replay_future_2": {
+      "type": "text",
+      "label": "Replay: the future's second line",
+      "max_chars": 14
+    },
+    "replay_your_call": {
+      "type": "text",
+      "label": "Replay: the call label",
+      "max_chars": 16,
+      "default": "Your call"
+    },
+    "replay_long": {
+      "type": "text",
+      "label": "Replay: button 1 (chosen)",
+      "max_chars": 8,
+      "default": "LONG"
+    },
+    "replay_short": {
+      "type": "text",
+      "label": "Replay: button 2",
+      "max_chars": 8,
+      "default": "SHORT"
+    },
+    "replay_flat": {
+      "type": "text",
+      "label": "Replay: button 3",
+      "max_chars": 7,
+      "default": "FLAT"
+    },
+    "replay_confidence": {
+      "type": "text",
+      "label": "Replay: the confidence",
+      "max_chars": 4,
+      "default": "70%"
+    },
+    "replay_commit": {
+      "type": "text",
+      "label": "Replay: the commit button",
+      "max_chars": 8,
+      "default": "COMMIT"
+    },
+    "replay_rule": {
+      "type": "text",
+      "label": "Replay: the rule's label",
+      "max_chars": 20
+    },
+    "replay_hidden": {
+      "type": "text",
+      "label": "Replay: before the call",
+      "max_chars": 32
+    },
+    "replay_shown": {
+      "type": "text",
+      "label": "Replay: after the call",
+      "max_chars": 32
+    },
+    "calm_line": {
+      "type": "text",
+      "label": "Calm: the line",
+      "max_chars": 10
+    },
+    "calm_accent": {
+      "type": "text",
+      "label": "Calm: the accent line",
+      "max_chars": 18
+    },
+    "end_line": {
+      "type": "text",
+      "label": "End card: line 1",
+      "max_chars": 20
+    },
+    "end_accent": {
+      "type": "text",
+      "label": "End card: line 2, in the brand colour",
+      "max_chars": 20
+    },
+    "end_url": {
+      "type": "text",
+      "label": "End card: the address",
+      "max_chars": 28
+    },
+    "end_note": {
+      "type": "text",
+      "label": "End card: the line under the address",
+      "max_chars": 48,
+      "default": ""
+    },
+    "end_disclaimer": {
+      "type": "text",
+      "label": "End card: the disclaimer",
+      "max_chars": 32,
+      "default": ""
+    },
+    "cap_numbers": {
+      "type": "text",
+      "label": "Caption and voice: the numbers",
+      "max_chars": 60
+    },
+    "cap_odds": {
+      "type": "text",
+      "label": "Caption and voice: the odds",
+      "max_chars": 64
+    },
+    "cap_log": {
+      "type": "text",
+      "label": "Caption and voice: the log",
+      "max_chars": 76
+    },
+    "cap_train": {
+      "type": "text",
+      "label": "Caption and voice: the replay",
+      "max_chars": 60
+    },
+    "cap_decides": {
+      "type": "text",
+      "label": "Caption and voice: who decides",
+      "max_chars": 60
+    }
+  },
+  "slots": {
+    "hook": {
+      "kind": "video",
+      "path": "assets/slots/hook.mp4",
+      "label": "Hook footage",
+      "description": "9:16, 5 s, no readable text or logos: a calm sea from a moving boat. Plays 0-7.45 s under the hook and the reveal, and holds its last frame."
+    },
+    "tide": {
+      "kind": "video",
+      "path": "assets/slots/tide.mp4",
+      "label": "Tide footage",
+      "description": "9:16, 4 s, no readable text or logos: a harbour or a coastline, the tide turning. Plays 7.45-11.5 s."
+    },
+    "still_1": {
+      "kind": "image",
+      "path": "assets/slots/still_1.png",
+      "label": "Still behind the chart",
+      "description": "9:16 still, no readable text: a quiet study or a desk. Behind the first chart, 11.5-15.5 s."
+    },
+    "still_2": {
+      "kind": "image",
+      "path": "assets/slots/still_2.png",
+      "label": "Still behind the odds",
+      "description": "9:16 still, no readable text: hands at a helm or a wheel. Behind the odds, 15.5-19.5 s."
+    },
+    "still_3": {
+      "kind": "image",
+      "path": "assets/slots/still_3.png",
+      "label": "Still behind the log",
+      "description": "9:16 still, no readable text: an open logbook. Behind the log, 19.5-25 s."
+    },
+    "end": {
+      "kind": "video",
+      "path": "assets/slots/end.mp4",
+      "label": "End footage",
+      "description": "9:16, 5 s, no readable text or logos: a slow aerial pull-back, e.g. a sailboat at sunset. Plays 31.3-40 s and holds its last frame."
+    }
+  },
+  "audio_plan": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [
+        {
+          "id": "l01",
+          "at": 0.3,
+          "text": "{{ hook_line_1 }} {{ hook_line_2 }} {{ hook_accent }}"
+        },
+        {
+          "id": "l02",
+          "at": 4.4,
+          "text": "{{ brand.name }} {{ product_name }}."
+        },
+        {
+          "id": "l03",
+          "at": 7.64,
+          "text": "{{ tide_line }} {{ tide_accent }}"
+        },
+        {
+          "id": "l04",
+          "at": 11.73,
+          "text": "{{ cap_numbers }}"
+        },
+        {
+          "id": "l05",
+          "at": 15.63,
+          "text": "{{ cap_odds }}"
+        },
+        {
+          "id": "l06",
+          "at": 19.63,
+          "text": "{{ cap_log }}"
+        },
+        {
+          "id": "l07",
+          "at": 25.23,
+          "text": "{{ cap_train }}"
+        },
+        {
+          "id": "l08",
+          "at": 28.24,
+          "text": "{{ cap_decides }}"
+        },
+        {
+          "id": "l09",
+          "at": 31.76,
+          "text": "{{ calm_line }} {{ calm_accent }}"
+        },
+        {
+          "id": "l10",
+          "at": 35.8,
+          "text": "{{ brand.name }}. {{ end_line }} {{ end_accent }}"
+        }
+      ]
+    },
+    "music": {
+      "track": "deep-house-003",
+      "start": 32.0,
+      "fade_in": 0.08,
+      "fade_out": 1.2
+    }
+  },
+  "sample_data": {
+    "hook_line_1": "The sea doesn't care",
+    "hook_line_2": "how sure you are.",
+    "hook_accent": "Neither does the market.",
+    "product_name": "Market Intelligence",
+    "tide_line": "It reads the tide",
+    "tide_accent": "before you sail.",
+    "tide_pill_1": "LIVE PUBLIC DATA",
+    "tide_pill_2": "DETERMINISTIC CORE",
+    "computed_line": "The market,",
+    "computed_accent": "computed.",
+    "chart_symbol": "BTC",
+    "chart_timeframe": "1H",
+    "chart_bars": "80569,80928,80414,80788;80788,81374,80604,81145;81145,81508,81015,81345;81345,81572,81166,81349;81349,81533,81107,81254;81254,81466,81057,81226;81226,81580,81064,81377;81377,81878,81221,81682;81682,82217,81508,82000;82000,82360,81860,82184;82184,82423,82003,82196;82196,82349,82018,82141;82141,82420,81957,82190;82190,82600,82071,82450;82450,83101,82268,82873;82873,83462,82735,83290;83290,83745,83114,83526;83526,83727,83372,83534;83534,83740,83264,83428;83428,83638,83227,83394;83394,83740,83244,83553;83553,84084,83375,83862;83862,84320,83729,84154;84154,84488,83971,84259;84259,84403,84033,84148;84148,84378,83774,83958;83958,84117,83771,83899;83899,84322,83719,84098;84098,84682,83953,84501;84501,85127,84330,84913;84913,85340,84753,85139;85139,85338,84972,85131;85131,85346,84847,85020;85020,85199,84871,85015;85015,85462,84834,85237;85237,85777,85111,85620;85620,86185,85436,85955;85955,86192,85838,86046;86046,86274,85678,85861;85861,86029,85428,85563;85563,85784,85221,85397;85397,85697,85245,85508;85508,86043,85341,85835;85835,86371,85669,86164;86164,86480,86012,86289;86289,86509,85997,86173;86173,86343,85844,85980;85980,86208,85766,85948;85948,86354,85830,86207;86207,86895,86023,86665;86665,87230,86540,87074;87074,87396,86893,87204;87204,87382,86874,87016;87016,87232,86518,86691;86691,86888,86334,86492;86492,86770,86331,86569;86569,87058,86398,86845;86845,87261,86699,87079;87079,87303,86872,87051;87051,87212,86370,86370",
+    "data_as_of": "23 Sep 01:00 UTC",
+    "stat_high_label": "60h high",
+    "stat_low_label": "60h low",
+    "stat_change_label": "60h change",
+    "computed_stamp": "None invented.",
+    "plan_title": "BTC · 1H · LEVEL REJECTION · LONG",
+    "plan_subtitle": "The plan on screen · 23 Sep 2026",
+    "plan_entry_low": 86360,
+    "plan_entry_high": 86645,
+    "plan_stop": 86095,
+    "plan_target": 87396,
+    "odds_title": "REPLAYED ODDS · n = 242",
+    "odds_note": "What the replay promised at capture",
+    "odds_1_percent": 35,
+    "odds_2_percent": 53,
+    "odds_3_percent": 12,
+    "odds_footer": "Shown either way",
+    "ledger_title": "The captain's log.",
+    "ledger_subtitle": "7,414 logged · graded in public",
+    "ledger_1": "SOL · 5M | TREND PULLBACK | STOP FIRST | −1.42R",
+    "ledger_2": "BTC · 1H | LEVEL REJECTION | INVALIDATED | —",
+    "ledger_3": "ETH · 1H | TREND PULLBACK | T1 FIRST | +0.17R",
+    "ledger_4": "SOL · 1H | TREND PULLBACK | T1 FIRST | +0.58R",
+    "ledger_5": "SOL · 15M | TREND PULLBACK | T1 FIRST | +1.61R",
+    "ledger_6": "ETH · 1H | LEVEL REJECTION | T1 FIRST | +2.06R",
+    "ledger_7": "ETH · 15M | TREND PULLBACK | STOP FIRST | −1.49R",
+    "ledger_8": "BTC · 1H | BREAKOUT RETEST | NEVER ENTERED | —",
+    "ledger_footer": "Latest 8 resolved · R net after fees and funding",
+    "ledger_stamp": "Frozen at entry.",
+    "replay_title": "Sea trials.",
+    "replay_subtitle": "BTC · 1H · recorded history, one closed bar at a time",
+    "replay_future_1": "The future",
+    "replay_future_2": "isn't sent.",
+    "replay_rule": "The rule says",
+    "replay_hidden": "Hidden until you commit",
+    "replay_shown": "Shown after your call",
+    "calm_line": "Calm,",
+    "calm_accent": "in every market.",
+    "end_line": "The market,",
+    "end_accent": "computed.",
+    "end_url": "markets.automatos.app",
+    "end_note": "MARKET INTELLIGENCE · RESEARCH, NOT SIGNALS",
+    "end_disclaimer": "NOT FINANCIAL ADVICE",
+    "cap_numbers": "Every number, computed. None invented.",
+    "cap_odds": "Every plan shows its odds. Even when they're against you.",
+    "cap_log": "Every plan goes in the captain's log. Frozen at entry, graded in public.",
+    "cap_train": "Train on real history, one bar at a time.",
+    "cap_decides": "Agents propose. The replay engine decides."
+  },
+  "preview": {
+    "at": [
+      1.6,
+      5.6,
+      9.4,
+      13.8,
+      17.8,
+      22.4,
+      29.8,
+      33.5,
+      38.6
+    ]
+  }
+}

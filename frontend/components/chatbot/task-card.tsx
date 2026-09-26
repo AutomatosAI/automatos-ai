@@ -42,7 +42,8 @@ function cardFromTask(task: Record<string, any>, previous: TaskCardData): TaskCa
     title: task.title ?? previous.title,
     status: task.status ?? previous.status,
     assigned_agent: task.assigned_agent_name ?? task.assigned_agent ?? previous.assigned_agent,
-    last_tool: last ? (typeof last === 'object' ? last.name : String(last)) : previous.last_tool,
+    // F168: the backend's entries carry `tool`; `name` is the older shape.
+    last_tool: last ? (typeof last === 'object' ? (last.tool ?? last.name) : String(last)) : previous.last_tool,
     files_touched: Array.isArray(ref.files_touched) ? ref.files_touched.length : previous.files_touched,
     exit_reason: ref.exit_reason ?? previous.exit_reason,
     started_at: task.started_at ?? previous.started_at,

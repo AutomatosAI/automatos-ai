@@ -1,5 +1,5 @@
 {
-  "route_count": 828,
+  "route_count": 839,
   "routes": [
     {
       "method": "GET",
@@ -1038,6 +1038,18 @@
       "path": "/api/documents/brand-kit"
     },
     {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/fonts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/brand-kit/fonts/{font_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/fonts/{font_id}"
+    },
+    {
       "method": "DELETE",
       "path": "/api/documents/brand-kit/logo"
     },
@@ -1048,6 +1060,18 @@
     {
       "method": "POST",
       "path": "/api/documents/brand-kit/logo"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/brand-kit/logo-mark"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/logo-mark"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/logo-mark"
     },
     {
       "method": "GET",
@@ -1871,14 +1895,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/playbooks"
-    },
-    {
-      "method": "POST",
-      "path": "/api/playbooks/mine"
-    },
-    {
-      "method": "GET",
       "path": "/api/policy/abtest/get"
     },
     {
@@ -2047,6 +2063,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/footage"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/posts"
     },
     {
@@ -2066,12 +2086,20 @@
       "path": "/api/socials/posts/{post_id}/approve"
     },
     {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}/media/{file_name}"
+    },
+    {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/publish-now"
     },
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/render"
     },
     {
       "method": "POST",
@@ -2088,6 +2116,26 @@
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/unschedule"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/sources/reports/{report_id}/chart"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voices/{toolkit}"
     },
     {
       "method": "GET",
@@ -2812,10 +2860,6 @@
     {
       "method": "GET",
       "path": "/api/widgets/config"
-    },
-    {
-      "method": "POST",
-      "path": "/api/widgets/data/execute"
     },
     {
       "method": "POST",

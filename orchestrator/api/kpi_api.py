@@ -21,6 +21,7 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.core import LLMUsage, BoardTask, RecipeExecution, WorkflowTemplate
 from core.models.orchestration import OrchestrationRun
+from core.models.orchestration_enums import StateType
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +365,9 @@ async def get_approval_gates(
 # ── Decisions Needed (Wave 5) ────────────────────────────────
 
 
+DECISIONS_NOT_LOADED = "The decisions waiting for you could not be loaded. Try again shortly."
+
+
 @router.get("/decisions-needed")
 async def get_decisions_needed(
     limit: int = Query(10, ge=1, le=50),
@@ -373,8 +377,11 @@ async def get_decisions_needed(
     """Aggregate things that need Gerard's call but aren't already on the kanban.
 
     Specifically: reports flagged ``requires_approval=True`` and not yet
-    acknowledged, plus orchestration runs in a BLOCKED state with
-    escalation_level >= APPROVAL (or any blocked run when level is unset).
+    acknowledged, plus orchestration runs in a BLOCKED state, oldest first.
+    F207: nothing writes an escalation level, and agent_reports has no such
+    column on a DB built from the models (c1 lost it too), so reading it made
+    this whole list come back empty. Items still carry ``escalation_level: null``.
+    And a blocked mission is ``state_type='blocked'`` (the enum's value, not 'BLOCKED').
 
     Tasks themselves (priority urgent/high) are intentionally excluded —
     the kanban already surfaces those. Approval gates have their own widget.
@@ -386,13 +393,13 @@ async def get_decisions_needed(
         report_rows = db.execute(
             text(
                 """
-                SELECT id::text, title, summary, status, escalation_level,
+                SELECT id::text, title, summary, status,
                        agent_name, created_at, requires_approval
                   FROM agent_reports
                  WHERE workspace_id = :ws
                    AND requires_approval = TRUE
                    AND acknowledged_at IS NULL
-              ORDER BY COALESCE(escalation_level, 0) DESC, created_at ASC
+              ORDER BY created_at ASC
                  LIMIT :limit
                 """
             ),
@@ -406,7 +413,7 @@ async def get_decisions_needed(
                 "title": r.title,
                 "summary": r.summary,
                 "status": r.status,
-                "escalation_level": r.escalation_level,
+                "escalation_level": None,
                 "agent_name": r.agent_name,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
@@ -418,7 +425,8 @@ async def get_decisions_needed(
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationRun.state_type == "BLOCKED",
+                # F207: state_type is stored lowercase; "BLOCKED" matched no mission, ever.
+                OrchestrationRun.state_type == StateType.BLOCKED.value,
             )
             .order_by(OrchestrationRun.updated_at.desc())
             .limit(limit)
@@ -432,7 +440,7 @@ async def get_decisions_needed(
                 "title": (r.goal[:120] if r.goal else "(no goal)"),
                 "summary": r.stop_detail or r.stop_reason or "blocked",
                 "status": r.state,
-                "escalation_level": getattr(r, "escalation_level", None),
+                "escalation_level": None,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
@@ -440,12 +448,7 @@ async def get_decisions_needed(
         ]
 
         merged = reports + missions
-        merged.sort(
-            key=lambda item: (
-                -(item.get("escalation_level") or 0),
-                item.get("created_at") or "",
-            )
-        )
+        merged.sort(key=lambda item: item.get("created_at") or "")
         # Trim before counting — sub-queries each LIMIT independently, so
         # raw counts could double up. The widget's "total" must match the
         # number of rows it actually shows.
@@ -462,9 +465,11 @@ async def get_decisions_needed(
 
     except Exception as e:
         logger.error("KPI decisions-needed failed: %s", e, exc_info=True)
+        # F207: a failure is never a silent "nothing needs you".
         return {
             "total": 0,
             "reports_count": 0,
             "missions_count": 0,
             "items": [],
+            "error": DECISIONS_NOT_LOADED,
         }

@@ -8,12 +8,14 @@ Covers the hardened, deny-by-default contract:
   - In-subtree allow / cross-subtree deny (deny escalates to Auto).
   - Self-edit allow; cross-workspace target deny.
   - Skill always-deny for non-system actors (escalates to Auto).
-  - Task / playbook scoping via owning agent's subtree.
+  - Task scoping via the assigned agent's subtree.
   - Unknown target_type → deny.
 
 Uses an in-memory SQLite DB with the minimal columns the helper queries
 (``agents.id/name/is_system_agent/reports_to_id/workspace_id/status``,
-``board_tasks.id/assigned_agent_id``, ``workflow_recipes.id/created_by_agent_id``).
+``board_tasks.id/assigned_agent_id``). Playbooks are scoped by who the call is
+made for, on the real schema: tests/test_f133_a_playbook_is_changed_for_its_creator.py
+(F133: the ``workflow_recipes.created_by_agent_id`` this file invented never existed).
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from sqlalchemy.orm import sessionmaker
 from core.security.hierarchy_permissions import (
     can_actor_modify,
     TARGET_AGENT,
-    TARGET_PLAYBOOK,
     TARGET_SKILL,
     TARGET_TASK,
     TARGET_TOOL_ASSIGNMENT,
@@ -59,14 +60,6 @@ def db():
             CREATE TABLE board_tasks (
                 id INTEGER PRIMARY KEY,
                 assigned_agent_id INTEGER
-            )
-            """
-        ))
-        conn.execute(text(
-            """
-            CREATE TABLE workflow_recipes (
-                id INTEGER PRIMARY KEY,
-                created_by_agent_id INTEGER
             )
             """
         ))
@@ -258,30 +251,6 @@ class TestTaskScoping:
         db.execute(text("INSERT INTO board_tasks (id, assigned_agent_id) VALUES (12, NULL)"))
         db.commit()
         d = _check(db, actor_agent_id=2, target_type=TARGET_TASK, target_id=12)
-        assert not d.allowed
-        assert d.escalation_target == "auto"
-
-
-class TestPlaybookScoping:
-    def test_playbook_owned_in_subtree_allowed(self, db):
-        _seed_org(db)
-        db.execute(text("INSERT INTO workflow_recipes (id, created_by_agent_id) VALUES (20, 4)"))
-        db.commit()
-        d = _check(db, actor_agent_id=2, target_type=TARGET_PLAYBOOK, target_id=20)
-        assert d.allowed
-
-    def test_playbook_owned_outside_subtree_denied(self, db):
-        _seed_org(db)
-        db.execute(text("INSERT INTO workflow_recipes (id, created_by_agent_id) VALUES (21, 7)"))
-        db.commit()
-        d = _check(db, actor_agent_id=2, target_type=TARGET_PLAYBOOK, target_id=21)
-        assert not d.allowed
-
-    def test_playbook_with_no_owner_escalates(self, db):
-        _seed_org(db)
-        db.execute(text("INSERT INTO workflow_recipes (id, created_by_agent_id) VALUES (22, NULL)"))
-        db.commit()
-        d = _check(db, actor_agent_id=2, target_type=TARGET_PLAYBOOK, target_id=22)
         assert not d.allowed
         assert d.escalation_target == "auto"
 

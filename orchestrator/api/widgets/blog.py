@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from api.widgets.auth import _extract_origin
+from core.security.log_safe import log_safe
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from core.services.blog_service import BlogService
@@ -74,7 +75,7 @@ async def resolve_blog_workspace(
         if origin and not ApiKeyService.check_domain(api_key_record, origin):
             logger.warning(
                 "blog widget: origin %s not in allowed_domains for key %s",
-                origin,
+                log_safe(origin, 120),
                 api_key_record.key_prefix,
             )
             raise HTTPException(

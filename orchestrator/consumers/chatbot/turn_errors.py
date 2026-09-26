@@ -10,6 +10,7 @@ Edition-neutral: nothing here reads config or the database.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,9 +20,19 @@ CODE_NO_API_KEY = "no_api_key"
 CODE_RUNTIME_MISMATCH = "runtime_mismatch"
 CODE_TRIAL_EXHAUSTED = "trial_exhausted"
 CODE_ACTIVATION_FAILED = "activation_failed"
+CODE_PROVIDER_FAILED = "provider_failed"
 CODE_TURN_FAILED = "turn_failed"
 
 RAW_MESSAGE_CHARS = 200
+
+# F169 (night 5, B10/B26): an AI provider's HTTP error reached the reply as the
+# SDK's text, "Error: Error code: 502 - {'error': {'message': 'Server tool
+# \"openrouter:web_search\" failed: upstream returned an invalid response', …".
+# It is said in plain words now; the raw text stays in the log.
+PROVIDER_SDK_MODULES = ("openai", "anthropic", "httpx")
+_STATUS_IN_TEXT = re.compile(r"^Error code: (\d{3})\b")
+_SERVER_TOOL = re.compile(r'Server tool \\?"[\w.-]+:(?P<tool>[\w.-]+)\\?" failed')
+ASK_AGAIN = "Nothing needs changing on your side; ask again in a minute."
 
 
 @dataclass(frozen=True)
@@ -41,6 +52,43 @@ def _class_name(exc: BaseException) -> str:
 def _short(text: str) -> str:
     text = " ".join(str(text or "").split())
     return text if len(text) <= RAW_MESSAGE_CHARS else text[:RAW_MESSAGE_CHARS].rstrip() + "…"
+
+
+def _provider_status(exc: BaseException) -> Optional[int]:
+    """The HTTP status an AI provider answered with, when ``exc`` is its SDK's
+    error (``openai.APIStatusError`` and kin); None for anything else."""
+    if type(exc).__module__.split(".")[0] not in PROVIDER_SDK_MODULES:
+        return None
+    status = getattr(exc, "status_code", None)
+    if not isinstance(status, int):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int):
+        return status
+    match = _STATUS_IN_TEXT.match(str(exc) or "")
+    return int(match.group(1)) if match else None
+
+
+def _provider_error(status: int, text: str, who: str) -> TurnError:
+    """What an AI provider's HTTP error means for the owner, in one sentence."""
+    head = f"{who} could not finish this reply:"
+    server_tool = _SERVER_TOOL.search(text)
+    if server_tool:
+        tool = server_tool.group("tool").replace("_", " ")
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider's {tool} failed on its side. {ASK_AGAIN}")
+    if status == 402:
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider refused it because the account is out of "
+                                               "credits. Top up the provider account, then ask again.")
+    if status in (401, 403):
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider rejected its API key. Check the provider's "
+                                               "key in Settings, then ask again.")
+    if status == 429:
+        return TurnError(CODE_RATE_LIMITED, f"{who} is rate-limited by the AI provider right now. Ask again in a minute.")
+    if status in (408, 504):
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider took too long to answer. {ASK_AGAIN}")
+    if status >= 500:
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider had a problem on its side. {ASK_AGAIN}")
+    return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider refused the request. Ask again; if it keeps "
+                                           "happening, the details are in the server log.")
 
 
 def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None) -> TurnError:
@@ -69,4 +117,7 @@ def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None)
             CODE_ACTIVATION_FAILED,
             f"{who} could not be started — check its model and provider key in the agent's Model tab.",
         )
+    status = _provider_status(exc)
+    if status is not None:
+        return _provider_error(status, text, who)
     return TurnError(CODE_TURN_FAILED, f"{who} could not finish this reply: {_short(text)}")

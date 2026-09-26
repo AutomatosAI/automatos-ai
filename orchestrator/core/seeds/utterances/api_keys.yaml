@@ -26,43 +26,6 @@
 version: 1
 category: api_keys
 actions:
-  platform_create_api_key:
-  - text: create a server API key for our CI
-    source: example
-  - text: make a public widget key for acme.com
-    source: example
-  - text: generate an SDK key with chat permission
-    source: example
-  - text: spin up a new server key for our backend
-    source: authored
-  - text: generate a public key for widget.example.com
-    source: authored
-  - text: i need an api key with agents:execute scope
-    source: authored
-  - text: make me a server sdk key for the pipeline
-    source: authored
-  - text: create a widget key restricted to shop.acme.io
-    source: authored
-  - text: issue a new key with blog and documents:read
-    source: authored
-  - text: set up a public browser key for our site
-    source: authored
-  - text: give me a fresh server key for integrations
-    source: authored
-  - text: create an sdk key that can only do chat
-    source: authored
-  - text: make a new public key for embedding the widget
-    source: authored
-  - text: provision a server key with agents:execute
-    source: authored
-  - text: new api key please, server type
-    source: authored
-  - text: generate a key for our staging backend
-    source: authored
-  - text: mint a public widget key for demo.acme.com
-    source: authored
-  - text: create an api key scoped to documents:read
-    source: authored
   platform_list_api_keys:
   - text: list our API keys
     source: example

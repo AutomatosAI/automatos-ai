@@ -54,6 +54,7 @@ def register_codegraph_actions(registry: ActionRegistry) -> None:
             "find where retry logic lives in the orchestrator repo",
             "search the codebase for the tool router",
         ],
+        accepts=("symbol",),
     ))
 
     registry.register(ActionDefinition(
@@ -80,6 +81,7 @@ def register_codegraph_actions(registry: ActionRegistry) -> None:
             "where is the function execute_task defined?",
             "find the class WorkflowOrchestrator",
         ],
+        accepts=("query",),
     ))
 
     registry.register(ActionDefinition(
@@ -186,6 +188,7 @@ def register_codegraph_actions(registry: ActionRegistry) -> None:
             "index the automatos-ai repo",
             "add this github repo to the code graph",
         ],
+        accepts=("project_name", "source_url"),
     ))
 
     registry.register(ActionDefinition(

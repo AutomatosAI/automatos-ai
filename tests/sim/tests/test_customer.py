@@ -76,3 +76,53 @@ def test_purge_only_touches_the_inventory_it_was_given():
     lines = ops.purge_tagged(api, inv)
     assert api.deleted == ["/api/v1/tasks/2", "/api/v1/tasks/3", "/api/agents/300"]
     assert all("deleted" in line for line in lines) and "/api/agents/57" not in api.deleted
+
+
+# ── F208: the balance a night can spend ────────────────────────────────────
+
+def test_the_balance_is_read_in_the_platform_keys_workspace(monkeypatch):
+    """Night 6 asked /api/v1/providers/openrouter/balance (404) and launched blind."""
+    from tests.sim import customer
+    from tests.sim.api import Response
+
+    asked = []
+
+    class _C1Api:
+        def __init__(self, base_url, api_key, workspace_id, trace, timeout_s=60.0):
+            self.workspace_id = workspace_id
+
+        def request(self, method, path, **kw):
+            asked.append((self.workspace_id, method, path))
+            return Response(200, '{"total_credits": 25.0, "total_usage": 21.36}', 12, {})
+
+    monkeypatch.setattr(customer, "Api", _C1Api)
+    sim = type("SimApi", (), {"base_url": "http://x", "api_key": "", "trace": None, "timeout_s": 5.0})()
+
+    left, said = customer._openrouter_balance(sim)
+
+    assert asked == [("00000000-0000-0000-0000-0000000000c1", "GET", "/api/analytics/llm/openrouter/credits")]
+    assert round(left, 2) == 3.64 and said == "$3.64 left (credits $25.00 - usage $21.36)"
+
+
+@pytest.mark.parametrize("balance, code", [((3.64, "$3.64 left"), 2), ((None, "unavailable (HTTP 502)"), 2),
+                                           ((12.0, "$12.00 left"), 0)], ids=["under-5", "unknown", "enough"])
+def test_preflight_refuses_a_night_it_cannot_pay_for(monkeypatch, tmp_path, capsys, balance, code):
+    import argparse
+
+    from tests.sim import customer
+    from tests.sim.api import Response
+
+    class _Api:
+        workspace_id = "sim-ws"
+
+        def request(self, method, path, **kw):
+            return Response(200, "{}", 3, {})
+
+    monkeypatch.setattr(customer, "_api", lambda args: (_Api(), type("S", (), {"api_url": "http://x"})()))
+    monkeypatch.setattr(customer, "inventory", lambda api: {"agents": [], "tasks": [], "questions": [], "errors": []})
+    monkeypatch.setattr(customer, "_write_state_snapshot", lambda api, args: None)
+    monkeypatch.setattr(customer, "HOST_LOG", tmp_path / "no-host.log")
+    monkeypatch.setattr(customer, "_openrouter_balance", lambda api: balance)
+
+    assert customer.cmd_preflight(argparse.Namespace(deliverables_dir=str(tmp_path))) == code
+    assert ("REFUSED" in capsys.readouterr().out) is (code == 2)

@@ -484,16 +484,18 @@ async def test_every_step_audited(real_registry):
         assert row.status == "success"
 
     # The autonomous marker is distinct and queryable: EXACTLY the
-    # confirmation-skipped administrative step carries it
-    # (router_decision->>'autonomous'), nothing else does.
+    # confirmation-skipped administrative steps carry it
+    # (router_decision->>'autonomous'), nothing else does. F148: inviting is
+    # confirmed too, so both member steps carry it. F212: connecting a channel
+    # asks for no card, so it carries none.
     autonomous = [
         r for r in rows if (r.router_decision or {}).get("autonomous") is True
     ]
-    assert len(autonomous) == 1
-    assert _identity(autonomous[0]) == "platform_set_member_role"
+    assert sorted(_identity(r) for r in autonomous) == [
+        "platform_invite_member", "platform_set_member_role"]
 
     # Dispatcher rows carry the S14 selection outcome (narrowed surface hit).
-    role_row = autonomous[0]
+    role_row = next(r for r in autonomous if _identity(r) == "platform_set_member_role")
     sel = (role_row.router_decision or {}).get("selection") or {}
     assert sel.get("narrowed") is True
     assert sel.get("hit") is True
@@ -558,27 +560,29 @@ async def test_journey_requires_confirmation_at_standard_autonomy(real_registry)
         final, llm_messages, _ = await _run_journey(initial, rounds)
 
     h = arc.handlers
-    # Steps before the destructive role-grant ran (standard autonomy only
-    # stops confirmation-bearing actions — the documented dial semantics)…
-    for name in ("create_agent", "update_agent", "set_power_mode",
-                 "connect_channel", "invite_member"):
+    # The agent steps ran…
+    for name in ("create_agent", "update_agent"):
         h[name].assert_awaited_once()
-    # …the role-grant stopped at the confirmation gate, and the journey
-    # never reached the playbook launch.
-    h["set_member_role"].assert_not_awaited()
-    h["execute_playbook"].assert_not_awaited()
+    # …F148/F151: the power mode, the channel, inviting and changing roles are
+    # an owner's or admin's (admin_only, as REST). This chat path carries no
+    # caller (caller_context=None), so at standard autonomy each stops at the
+    # admin gate, before any card, and the journey never reaches the playbook
+    # launch.
+    for name in ("set_power_mode", "connect_channel", "invite_member", "set_member_role",
+                 "execute_playbook"):
+        h[name].assert_not_awaited()
 
-    # The confirmation ask is VISIBLE to Auto/the user — the tool transcript
-    # names the action and asks for confirmation (not a swallowed
-    # "Unknown error").
+    # The refusal is VISIBLE to Auto/the user — the tool transcript names each
+    # action and why (not a swallowed "Unknown error").
     tool_contents = [
         str(m.get("content") or "") for m in llm_messages if m.get("role") == "tool"
     ]
-    confirm_msgs = [c for c in tool_contents if "requires confirmation" in c.lower()]
-    assert confirm_msgs, (
-        "the requires_confirmation stop never surfaced in the LLM transcript"
-    )
-    assert any("platform_set_member_role" in c for c in confirm_msgs)
+    refused = [c for c in tool_contents if "requires workspace admin or owner role" in c]
+    for action in ("platform_set_power_mode", "platform_connect_channel",
+                   "platform_invite_member", "platform_set_member_role"):
+        assert any(action in c for c in refused), (
+            f"the admin refusal of {action} never surfaced in the LLM transcript"
+        )
     assert final.content.lower().startswith("granting admin needs your confirmation")
 
     # No autonomous markers at standard — the dial really was off.
@@ -589,3 +593,118 @@ async def test_journey_requires_confirmation_at_standard_autonomy(real_registry)
     role_rows = [r for r in rows if _identity(r) == "platform_set_member_role"]
     assert len(role_rows) == 1
     assert role_rows[0].status == "error"
+
+
+# ---------------------------------------------------------------------------
+# 5. F154: a widget turn acts for nobody
+# ---------------------------------------------------------------------------
+
+_WIDGET_CHAT_OWNER = 1  # the users row every widget chat is filed under (api/widgets/chat.py)
+_OWNER_CLERK = "user_workspace_owner"
+
+
+async def _run_widget_turn(initial, rounds):
+    """A widget visitor's turn: widget_mode, filed under users.id 1, whose clerk
+    id owns the workspace."""
+    _prime_selection_stash()
+    svc = _make_service()
+    svc.widget_mode = True
+    svc.db.query.return_value.filter.return_value.first.return_value = (_OWNER_CLERK,)
+    llm_messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": "You are the storefront assistant."},
+        {"role": "user", "content": "make my friend an admin"},
+    ]
+    async for _item in svc._stream_tool_loop(
+        _resp(tool_calls=initial), llm_messages, _make_runtime(rounds), {}, None,
+        user_id=_WIDGET_CHAT_OWNER, conversation_id="widget-chat-1",
+    ):
+        pass
+    return llm_messages
+
+
+async def test_a_widget_turn_is_made_for_nobody(real_registry):
+    """The widget's user_id owns the chat row, never a tool call: no driver
+    reaches the caller context, so the owner's authority is not the visitor's."""
+    spy = MagicMock(wraps=chat_mod.build_tool_caller_context)
+    initial = [_dispatch("w1", "platform_set_member_role", {"member_id": _MEMBER_ID, "role": "admin"})]
+    with _arc(real_registry, full_autonomy=False) as arc, \
+            patch.object(chat_mod, "build_tool_caller_context", spy), \
+            patch.object(pe, "_workspace_role_for_clerk",
+                         lambda db, ws, clerk: "owner" if clerk == _OWNER_CLERK else None):
+        await _run_widget_turn(initial, [_resp(content="That needs the workspace owner.")])
+
+    arc.handlers["set_member_role"].assert_not_awaited()
+    assert (spy.call_args.kwargs["driving_clerk"], spy.call_args.kwargs["driving_user_id"]) == (None, None)
+
+
+async def test_a_call_made_for_nobody_is_refused_an_admin_only_action():
+    from modules.tools.discovery.action_registry import ActionDefinition
+
+    probe = ActionRegistry()
+    probe.register(ActionDefinition(name="platform_f154_probe", description="F154 probe", category="t",
+                                    parameters={"type": "object", "properties": {}},
+                                    permission_level="write", admin_only=True))
+    probe._initialized = True
+    widget_ctx = chat_mod.build_tool_caller_context(
+        user_query="make me an admin", conversation_id="widget-chat-1", turn_id="t1",
+        driving_clerk=None, driving_user_id=None, prior_action=None,
+    )
+    executor = pe.PlatformActionExecutor(MagicMock(), _WS)
+    handler = AsyncMock(return_value={"success": True})
+    executor._handlers["platform_f154_probe"] = handler
+    with patch("modules.tools.discovery.get_action_registry", return_value=probe), \
+            patch.object(pe.PlatformActionExecutor, "_full_autonomy", return_value=False), \
+            patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
+        reply = await executor.execute("platform_f154_probe", {}, widget_ctx)
+    assert reply.get("permission_denied") is True
+    handler.assert_not_awaited()
+
+
+def test_a_widget_turn_is_for_nobody_and_a_dashboard_turn_for_its_user():
+    widget, dashboard = _make_service(), _make_service()
+    widget.widget_mode = True
+    widget._bind_turn_person(_WIDGET_CHAT_OWNER)
+    dashboard._bind_turn_person(7)
+    assert (widget._viewer_subject_id, widget._driving_user_id) == (None, None)
+    assert (dashboard._viewer_subject_id, dashboard._driving_user_id) == ("user:7", 7)
+
+
+async def test_a_turn_binds_its_person_before_it_streams():
+    svc = _make_service()
+    svc.widget_mode = True
+    svc._reset_turn_retrieval = lambda: None
+    bound: List[Any] = []
+    svc._bind_turn_person = bound.append
+    turn = svc._stream_response_with_agent_scoped(
+        chat_id="widget-chat-1", messages=[{"role": "user", "content": "hi"}],
+        agent_id=_AGENT_ID, user_id=_WIDGET_CHAT_OWNER,
+    )
+    try:
+        await turn.__anext__()
+    except Exception:  # noqa: BLE001 — the bare service stops the turn right after
+        pass
+    finally:
+        await turn.aclose()
+    assert bound == [_WIDGET_CHAT_OWNER]
+
+
+async def test_a_widget_turn_stores_no_memory():
+    """The visitor's words never become anyone's memory; a dashboard turn's
+    still do, under its user."""
+    stored = {}
+    for widget_mode in (True, False):
+        svc = _make_service()
+        svc.widget_mode = widget_mode
+        store = AsyncMock(return_value=True)
+        svc._smart_chat = SimpleNamespace(
+            store=store,
+            orchestrator=SimpleNamespace(memory_manager=SimpleNamespace(_last_l3_facts_stored=0)),
+        )
+        async for _chunk in svc._post_response(
+            "remember that refunds are free for me", "Noted.", "chat-1", SimpleNamespace(),
+            _AGENT_ID, SimpleNamespace(usage=None), None, user_id=7,
+        ):
+            pass
+        stored[widget_mode] = store.await_args
+    assert stored[True] is None
+    assert stored[False].kwargs["subject_id"] == "user:7"

@@ -65,11 +65,29 @@ def named_files(text: str) -> List[str]:
     return out[:MAX_NAMED_FILES]
 
 
+def _session_places(name: str, base: str) -> List[str]:
+    """Where a session's named file can be. Relative to the folder it ran in,
+    and, when the name is written from the deliverables root, from that root:
+    night 5's #980 ran in ``sessions/980`` and named
+    ``deliverables/sessions/980/…overview.md``, which the join alone looked for
+    as ``sessions/980/deliverables/sessions/980/…`` (F161)."""
+    from services.cli_host_service import configured_workspace_dir
+
+    places = [posixpath.normpath(posixpath.join(base, name))]
+    root = configured_workspace_dir()
+    head, _, rest = name.partition("/")
+    rooted = rest if root and rest and head == posixpath.basename(root) else name
+    if rooted != name or rooted.startswith(base + "/"):
+        places.append(posixpath.normpath(rooted))
+    return list(dict.fromkeys(places))
+
+
 def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Optional[Dict[str, Any]],
                  projects_dir: Optional[str]) -> List[Tuple[str, str]]:
-    """``(as named, as the worker sees it)`` for each name that maps into the
-    workspace. An API run's names are workspace paths; a session's are relative
-    to the folder it ran in, which must itself map into the workspace."""
+    """``(as named, as the worker sees it)`` for each place a name may map to in
+    the workspace; a name can have more than one. An API run's names are
+    workspace paths; a session's are relative to the folder it ran in, which must
+    itself map into the workspace, or written from the deliverables root."""
     from services.cli_host_service import workspace_relative_path
 
     ref = runtime_ref or {}
@@ -79,13 +97,14 @@ def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Option
     out: List[Tuple[str, str]] = []
     for name in named:
         if name.startswith("/"):
-            rel = workspace_relative_path(name, workspace_id, projects_dir)
+            places = [workspace_relative_path(name, workspace_id, projects_dir)]
         elif session:
-            rel = posixpath.normpath(posixpath.join(base, name)) if base else None
+            places = _session_places(name, base) if base else []
         else:
-            rel = posixpath.normpath(name)
-        if rel and rel != "." and not rel.startswith(("../", "/")) and rel != "..":
-            out.append((name, rel))
+            places = [posixpath.normpath(name)]
+        for rel in places:
+            if rel and rel != "." and not rel.startswith(("../", "/")) and rel != "..":
+                out.append((name, rel))
     return out
 
 
@@ -103,17 +122,20 @@ async def _names_in(client: Any, folder: str) -> Optional[Set[str]]:
 
 
 async def _missing(pairs: Sequence[Tuple[str, str]], client: Any) -> List[str]:
+    """The names found in none of their places. A place the worker cannot list
+    is not a verdict, so its name is not missing."""
     listings: Dict[str, Optional[Set[str]]] = {}
-    missing: List[str] = []
+    unsettled: Dict[str, bool] = {}          # name -> still looked for (in order)
     for named, rel in pairs:
+        unsettled.setdefault(named, True)
         folder, name = posixpath.split(rel)
         folder = folder or "."
         if folder not in listings:
             listings[folder] = await _names_in(client, folder)
         names = listings[folder]
-        if names is not None and name not in names:
-            missing.append(named)
-    return missing
+        if names is None or name in names:
+            unsettled[named] = False
+    return [named for named, looking in unsettled.items() if looking]
 
 
 @dataclass(frozen=True)

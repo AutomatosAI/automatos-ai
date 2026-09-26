@@ -57,6 +57,26 @@ def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     return agent, None
 
 
+def _connection(db: Session, workspace_id: UUID, app_name: str, said: str) -> Dict[str, Any]:
+    """F188 (night 6): whether the assigned app is connected, and a message that
+    says so. At 02:03:19 GMAIL was assigned with no app connected, the result
+    said nothing of it, and Auto told the owner Gmail was ready."""
+    from core.composio.entity_manager import EntityManager
+
+    try:
+        connected = app_name in {a.upper().strip() for a in EntityManager(db).get_connected_apps(workspace_id)}
+    except Exception:  # noqa: BLE001 -- unknown is not connected: never "ready"
+        logger.warning("[F188] could not read the connected apps for %s", workspace_id, exc_info=True)
+        connected = False
+    if connected:
+        return {"connected": True, "message": f"{said}."}
+    shown = app_name.replace("_", " ").title()
+    return {"connected": False, "message": (
+        f"{said}, but {app_name} is NOT connected for this workspace, so the agent cannot use it yet. Tell the "
+        f"owner it is assigned but not connected — never that it is ready. They connect it on "
+        f"Tools & Integrations → {shown} → Connect.")}
+
+
 async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a Composio tool/app to an agent."""
     from core.models.composio_cache import AgentAppAssignment
@@ -88,7 +108,7 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
                 "already_assigned": True,
                 "agent": {"id": agent.id, "name": agent.name},
                 "app_name": app_name,
-                "message": f"Tool '{app_name}' is already assigned to agent '{agent.name}'.",
+                **_connection(db, workspace_id, app_name, f"Tool '{app_name}' is already assigned to agent '{agent.name}'"),
             }
         # Re-activate
         existing.is_active = True
@@ -99,7 +119,7 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
             "reactivated": True,
             "agent": {"id": agent.id, "name": agent.name},
             "app_name": app_name,
-            "message": f"Tool '{app_name}' re-activated for agent '{agent.name}'.",
+            **_connection(db, workspace_id, app_name, f"Tool '{app_name}' re-activated for agent '{agent.name}'"),
         }
 
     # Create assignment
@@ -118,13 +138,72 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
         "success": True,
         "agent": {"id": agent.id, "name": agent.name},
         "app_name": app_name,
-        "message": f"Tool '{app_name}' assigned to agent '{agent.name}'.",
+        **_connection(db, workspace_id, app_name, f"Tool '{app_name}' assigned to agent '{agent.name}'"),
     }
+
+
+INSTALLED_SKILLS_NAMED = 12
+
+
+def _installed_skills(db: Session, workspace_id: UUID) -> list:
+    """The active skills this workspace may assign: its own and the marketplace
+    skills enabled for it, by name."""
+    from sqlalchemy import and_, or_
+
+    from core.models.core import Skill
+    from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+    enabled = db.query(WorkspaceEnabledSkill.skill_id).filter(WorkspaceEnabledSkill.workspace_id == workspace_id)
+    return (
+        db.query(Skill)
+        .filter(
+            Skill.is_active.is_(True),
+            or_(Skill.workspace_id == workspace_id,
+                and_(Skill.workspace_id.is_(None), Skill.id.in_(enabled.subquery()))),
+        )
+        .order_by(Skill.name)
+        .all()
+    )
+
+
+def _pick_installed_skill(installed: list, skill_id: Any, skill_name: Any) -> Tuple[Any, Optional[Dict[str, Any]]]:
+    """(skill, refusal): by id, by whole name, or by the one installed name containing it."""
+    if skill_id:
+        try:
+            wanted_id = int(skill_id)
+        except (TypeError, ValueError):
+            return None, {"success": False, "error": f"skill_id must be a number, got {skill_id!r}"}
+        return next((s for s in installed if s.id == wanted_id), None), None
+    wanted = str(skill_name).strip().lower()
+    exact = next((s for s in installed if (s.name or "").strip().lower() == wanted), None)
+    if exact is not None:
+        return exact, None
+    partial = [s for s in installed if wanted and wanted in (s.name or "").lower()]
+    if len(partial) > 1:
+        named = ", ".join(f"'{s.name}'" for s in partial[:INSTALLED_SKILLS_NAMED])
+        return None, {"success": False, "error": f"{len(partial)} installed skills match '{skill_name}': {named}. Use one exactly."}
+    return (partial[0] if partial else None), None
+
+
+async def _skill_not_installed(db: Session, workspace_id: UUID, requested: str, installed: list) -> Dict[str, Any]:
+    from modules.tools.discovery.handlers_marketplace import browse_marketplace_skills
+    from modules.tools.discovery.not_found_candidates import find_candidates
+
+    here = ", ".join(f"'{s.name}'" for s in installed[:INSTALLED_SKILLS_NAMED]) or "none yet"
+    candidates = await find_candidates(browse_marketplace_skills, db, workspace_id, requested, list_key="skills")
+    market = ", ".join(f"'{c.get('slug') or c.get('name')}'" for c in candidates)
+    error = (
+        f"No skill '{requested}' is installed in this workspace. Installed here: {here}."
+        + (f" In the marketplace: {market} (install one with platform_install_skill, then assign it)." if market else "")
+        + " Search with platform_browse_marketplace_skills — never guess a skill's name."
+    )
+    return {"success": False, "error": error, "requested": requested,
+            "installed": [s.name for s in installed], "candidates": candidates}
 
 
 async def assign_skill_to_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a skill to an agent via the agent_skills M2M table."""
-    from core.models.core import Skill, agent_skills
+    from core.models.core import agent_skills
 
     agent, err = resolve_agent(db, workspace_id, params)
     if err:
@@ -136,16 +215,17 @@ async def assign_skill_to_agent(db: Session, workspace_id: UUID, params: Dict[st
     if not skill_id and not skill_name:
         return {"success": False, "error": "Provide skill_id or skill_name"}
 
-    # Resolve skill
-    query = db.query(Skill)
-    if skill_id:
-        query = query.filter(Skill.id == skill_id)
-    else:
-        query = query.filter(Skill.name.ilike(f"%{skill_name}%"))
-
-    skill = query.first()
+    # F184 (night 6): asked for 'data-analysis', Auto got a bare "Skill not found"
+    # and offered to install a name it made up while 'spreadsheet-qa' was
+    # installed. A skill is assigned from this workspace's own: its skills and the
+    # marketplace skills enabled for it (the lookup read every workspace's). A miss
+    # names what is installed and what the marketplace has.
+    installed = _installed_skills(db, workspace_id)
+    skill, refusal = _pick_installed_skill(installed, skill_id, skill_name)
+    if refusal:
+        return refusal
     if not skill:
-        return {"success": False, "error": "Skill not found"}
+        return await _skill_not_installed(db, workspace_id, str(skill_name or skill_id), installed)
 
     # Idempotency: check if already assigned
     from sqlalchemy import select as sa_select
@@ -317,9 +397,11 @@ async def configure_agent_heartbeat(db: Session, workspace_id: UUID, params: Dic
         changes.append("checklist updated")
 
     if not changes:
+        from modules.tools.discovery.action_registry import nothing_changed
+
         return {
-            "success": True,
-            "message": "No changes specified",
+            "success": False,
+            "error": nothing_changed("platform_configure_agent_heartbeat", "agent_id", "agent_name"),
             "current_heartbeat": hb,
             "agent_id": agent.id,
         }

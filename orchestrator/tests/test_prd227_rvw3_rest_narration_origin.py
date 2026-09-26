@@ -63,7 +63,7 @@ def _capture_rest_config(monkeypatch, *, is_import=False) -> dict:
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             captured["config"] = config
             captured["created_by"] = created_by
             return types.SimpleNamespace(id=uuid.uuid4(), state=RunState.AWAITING_APPROVAL.value)
@@ -203,7 +203,7 @@ def _create_then_narrate(monkeypatch, *, clerk_id, launch_chat, state):
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             run = types.SimpleNamespace(
                 id=uuid.uuid4(),
                 workspace_id=workspace_id,
@@ -353,7 +353,7 @@ def test_rest_cross_user_launch_never_lands_in_another_users_chat(two_users, new
     captured: dict = {}
 
     class _FakeCoordinator:
-        async def create_mission(self, *, db, workspace_id, goal, created_by, config):
+        async def create_mission(self, *, db, workspace_id, goal, created_by, config, staffing=None):
             captured["run"] = types.SimpleNamespace(
                 id=uuid.uuid4(),
                 workspace_id=uuid.UUID(ws_id),

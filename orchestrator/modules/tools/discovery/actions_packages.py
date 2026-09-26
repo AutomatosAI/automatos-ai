@@ -54,6 +54,7 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "what starter team fits an online jewellery shop",
             "search packages for ecommerce",
         ],
+        accepts=("query",),
     ))
 
     registry.register(ActionDefinition(
@@ -80,6 +81,7 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "required": ["slug"],
         },
         permission_level="write",
+        admin_only=True,  # F151: installs agents, tools and playbooks at once
         promoted=True,
         tags=["marketplace", "packages", "install", "onboarding"],
         examples=[
@@ -96,7 +98,9 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "dependency closure (its LLM, skills, plugins) — workspace-owned and "
             "editable, idempotent. Its connected apps come back as guided connect "
             "steps, never auto-connected. Browse first with "
-            "platform_browse_marketplace_agents. Provide agent_id or agent_name."
+            "platform_browse_marketplace_agents. Provide agent_id or agent_name. "
+            "A package's team is installed with platform_install_package, never "
+            "one agent at a time."
         ),
         category="marketplace",
         parameters={

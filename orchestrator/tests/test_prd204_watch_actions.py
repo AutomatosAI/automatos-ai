@@ -281,6 +281,26 @@ def test_replan_full_auto_executes_and_counts_budget(
     s.close()
 
 
+def test_a_widget_born_missions_replan_waits_for_approval_under_full_auto(
+    workspace, new_session, stub_replan, capture_notifications
+):
+    """F155: the watch decides a widget-born mission's corrective action as the
+    widget's, as the mission's planning is: never autonomous."""
+    s = new_session()
+    run, _, _, _ = _seed_failed_mission(s, workspace)
+    run.config = {"origin_surface": "widget", "origin_scopes": ["chat"], "origin_team": None}
+    s.commit()
+    watch = _make_watch(s, workspace, run)
+    _set_policy(s, workspace, FULL_AUTO_SETTINGS)
+
+    outcome = _run_action(s, watch, "replan", diagnosis="planner missed a data step")
+    s.commit()
+
+    assert (outcome.executed, outcome.parked) == (False, True)
+    assert stub_replan == []
+    s.close()
+
+
 def test_replan_always_ask_parks_grant(
     workspace, new_session, stub_replan, capture_notifications
 ):

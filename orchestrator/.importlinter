@@ -37,7 +37,6 @@ modules =
     modules.documents
     modules.intake
     modules.knowledge
-    modules.learning
     modules.memory
     modules.nl2sql
     modules.policy
@@ -59,6 +58,7 @@ ignore_imports =
     modules.agents.services.agent_platform_tools -> modules.rag.config
     modules.context.planning -> modules.rag.budget
     modules.context.sections.graph_context -> modules.knowledge.graph_service
+    modules.context.sections.memory -> modules.memory.context_router
     modules.context.sections.memory -> modules.memory.injection_filter
     modules.context.sections.memory -> modules.memory.recall_ranking
     modules.context.sections.memory -> modules.memory.unified_memory_service

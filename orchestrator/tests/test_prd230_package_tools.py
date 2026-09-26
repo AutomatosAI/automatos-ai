@@ -28,9 +28,24 @@ class FakeWS:
                            "funnel": funnel or {}}
 
 
+class _Savepoint:
+    def __init__(self, db):
+        self._db = db
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        self._db.rolled_back_to_savepoint = True
+
+
 class FakeDB:
     def __init__(self):
         self.committed = False
+        self.rolled_back_to_savepoint = False
+
+    def begin_nested(self):
+        return _Savepoint(self)
 
     def commit(self):
         self.committed = True

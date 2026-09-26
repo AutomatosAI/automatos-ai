@@ -102,7 +102,6 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/widgets/auth"),
     ("POST", "/api/widgets/callback"),
     ("POST", "/api/widgets/chat"),
-    ("POST", "/api/widgets/data/execute"),
     ("POST", "/api/widgets/data/query"),
     ("POST", "/api/widgets/docs/search"),
     # PRD-234 S1a — the CLI host machine lane (api/cli_hosts.py). Every route

@@ -1,0 +1,49 @@
+{
+ "about": "The music library media-render bundles (PRD-251 S1.6). The image build fetches every track from its url and fails when a sha256 differs, then analyses each into cue windows (media_render/music_build.py). No audio file is committed to git. A track is CC0 1.0 or CC BY 4.0; a CC BY track's attribution is the credit line every post that uses it carries. Adding a track is the owner's call (PRD-251 open question 5).",
+ "tracks": [
+  {
+   "id": "where-the-night-begins",
+   "title": "Where the Night Begins",
+   "artist": "Sascha Ende",
+   "style": "melodic techno",
+   "licence": "CC-BY-4.0",
+   "attribution": "Music: \"Where the Night Begins\" by Sascha Ende (ende.app), licensed CC BY 4.0.",
+   "url": "https://ende.app/storage/mp3low/b171474b-0ac5-4daa-a012-28fea778fb86.mp3",
+   "sha256": "2feeff3d7bfffc24712bf0b9df1efc76a1777973fde3143b061579c4541d6c83",
+   "reference": "UI story promo (v1), from 190.1 s: the music drops out on \"clock off\" and the beat returns when the board starts"
+  },
+  {
+   "id": "da-da-da-da-da-de-de-de-de",
+   "title": "Da Da Da Da Da De De De De",
+   "artist": "Sascha Ende",
+   "style": "Afro house",
+   "licence": "CC-BY-4.0",
+   "attribution": "Music: \"Da Da Da Da Da De De De De\" by Sascha Ende (ende.app), licensed CC BY 4.0.",
+   "url": "https://ende.app/storage/mp3low/ec7b18f5-b8d6-4438-9c8e-081f531564e0.mp3",
+   "sha256": "5e71ada9dc33cd4fc21e69a38008b4b263d45de8aca2b2b5ed466816f66e9792",
+   "reference": "Cinematic product promo (v2), from 50.05 s: the breakdown at 53.4 s, the drop at 62.2 s"
+  },
+  {
+   "id": "spring-of-2026",
+   "title": "Spring of 2026",
+   "artist": "Sascha Ende",
+   "style": "tropical house",
+   "licence": "CC-BY-4.0",
+   "attribution": "Music: \"Spring of 2026\" by Sascha Ende (ende.app), licensed CC BY 4.0.",
+   "url": "https://ende.app/storage/mp3low/d130cacc-e8a6-457f-ac48-e21aa9bd67c5.mp3",
+   "sha256": "ab1805743e5c3a728013ad45e06a80fe6cd22384ea9f2602e4d9209cf585016d",
+   "reference": "App promo (the Academy promo), from 47.9 s: the drop at 52.9 s"
+  },
+  {
+   "id": "deep-house-003",
+   "title": "Deep House 003",
+   "artist": "Sascha Ende",
+   "style": "deep house",
+   "licence": "CC-BY-4.0",
+   "attribution": "Music: \"Deep House 003\" by Sascha Ende (ende.app), licensed CC BY 4.0.",
+   "url": "https://ende.app/storage/mp3low/e1168d5d-f775-4a55-856a-dbbf62d115a5.mp3",
+   "sha256": "ddb3174cb4f2337a04c918902e4a766a427e947c6b04ae8d406317db07b32109",
+   "reference": "Data story (the Markets cut), from 32.0 s: the bass-out breaks at 34.0-35.8 s and 67.6-69.5 s"
+  }
+ ]
+}

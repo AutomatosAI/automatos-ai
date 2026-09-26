@@ -212,7 +212,13 @@ async def _approve(
 
     # Idempotency: the shared applied-tasks ledger is the source of truth, so a
     # second /approve (or a later tick) never re-applies the same change.
-    ledger = svc._read_applied_tasks(workspace_id)
+    ledger = svc._read_applied_tasks(db, workspace_id)
+    if ledger is None:
+        # F156: without the ledger, a change may already have been applied.
+        return {
+            "success": False,
+            "message": f"The HARNESS ledger could not be read, so {rx_id} was not applied. Try again shortly.",
+        }
     applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
     if task_id in applied_ids:
         return {
@@ -249,7 +255,12 @@ async def _approve(
         }
 
     current_before = svc._snapshot_current_value(rx)
-    apply_result = await svc._auto_apply_prescription(executor, rx)
+    # F151: the change is made for the approving admin, so an admin_only action
+    # (power mode, routing rule) applies as them; the executor re-reads their
+    # membership rather than trusting this check.
+    apply_result = await svc._auto_apply_prescription(
+        executor, rx, caller_context={"driving_user_id": str(user_id)}
+    )
     if not apply_result.get("success"):
         return {
             "success": False,
@@ -277,8 +288,7 @@ async def _approve(
         "approved_by": user_id,
         "policy_verdict": decision.reason,
     }
-    applied_ids.add(task_id)
-    svc._write_applied_tasks(workspace_id, ledger, applied_ids, [entry])
+    svc._write_applied_tasks(db, workspace_id, [entry], [])
 
     logger.info(
         "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s via policy plane",

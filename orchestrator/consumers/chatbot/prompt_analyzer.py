@@ -6,7 +6,6 @@ Handles:
 - Converting chat messages to LLM format
 - Extracting search terms from conversational queries
 - Detecting tool intent from user messages
-- Identifying simple vs complex prompts
 """
 
 import json
@@ -17,12 +16,6 @@ from typing import List, Dict, Any, Optional
 from core.attachment_refs import render_unresolved_file_part
 
 logger = logging.getLogger(__name__)
-
-# Simple message patterns that don't need tools
-SIMPLE_PATTERNS = [
-    'hi', 'hello', 'hey', 'thanks', 'thank you', 'bye', 'ok', 'yes', 'no',
-    'what model', 'who are you', 'what are you'
-]
 
 # Explicit tool call syntax (e.g., "Use tool foo with params {...}")
 EXPLICIT_TOOL_CALL_RE = re.compile(
@@ -37,38 +30,6 @@ class PromptAnalyzer:
     Used by StreamingChatService to determine how to process messages.
     """
     
-    def __init__(self):
-        self.simple_patterns = SIMPLE_PATTERNS
-    
-    def is_simple_message(self, text: str) -> bool:
-        """Check if message is a simple greeting/acknowledgment."""
-        text_lower = (text or "").lower().strip()
-        if len(text_lower) >= 50:
-            return False
-
-        # Normalize punctuation -> spaces so we can do safe token/phrase checks.
-        cleaned = re.sub(r"[^a-z0-9\\s]", " ", text_lower)
-        cleaned = re.sub(r"\\s+", " ", cleaned).strip()
-        if not cleaned:
-            return True
-
-        # IMPORTANT:
-        # - Single-word patterns must match as WHOLE WORDS (avoid "hi" matching "this")
-        # - Multi-word patterns can match as phrases
-        words = set(cleaned.split())
-        for p in self.simple_patterns:
-            p = (p or "").strip().lower()
-            if not p:
-                continue
-            if " " in p:
-                if p in cleaned:
-                    return True
-            else:
-                if p in words:
-                    return True
-
-        return False
-
     def is_fresh_start_request(self, text: str) -> bool:
         """Detect user requests to ignore prior chat context/memory."""
         if not text:

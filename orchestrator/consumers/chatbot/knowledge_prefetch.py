@@ -35,6 +35,13 @@ PREFETCH_HEADER = (
     "(search_knowledge ran automatically). Answer from them where they apply and name the file; call "
     "search_knowledge again if they do not cover the question."
 )
+# F077/F078 (refresh-3 retest): with a database connected, a summary document's
+# figure answered the number questions (415 for 400, 18 for 19); the database was
+# never asked. The passages stay; for a number they say where the number lives.
+PREFETCH_DATABASE_NOTE = (
+    "This workspace also has a connected database: for current counts, totals or rankings, call "
+    "smart_query_database rather than answering from these passages; a document's figure may be out of date."
+)
 
 # An instruction, even one phrased as a question ("Can you create an agent?").
 _INSTRUCTION = re.compile(
@@ -97,6 +104,18 @@ class Prefetch:
         return f"{self.passages} passage{'s' if self.passages != 1 else ''} from {names} — searched automatically"
 
 
+def _has_database(db: Any, workspace_id: Any) -> bool:
+    """Whether the workspace has an active database source (the documents
+    section's own reading). Cannot tell: the passages go as they did."""
+    from modules.context.sections.documents_inventory import connected_databases
+
+    try:
+        return bool(connected_databases(db, workspace_id))
+    except Exception:  # noqa: BLE001 — a note must never be why a turn fails
+        logger.warning("[F085] retrieval first: could not read the database sources", exc_info=True)
+        return False
+
+
 async def prefetch(
     db: Any,
     workspace_id: Any,
@@ -106,12 +125,14 @@ async def prefetch(
     enabled: bool,
     limit: int,
     min_score: float,
+    question_only: bool = True,
+    header: Optional[str] = None,
 ) -> Optional[Prefetch]:
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
     or the search failed. ``search`` runs search_knowledge with the given args
     and returns the tool router's result (``raw_result`` / ``frontend_data``)."""
-    if not enabled or not is_question(message):
+    if not enabled or (question_only and not is_question(message)):
         return None
     try:
         if documents_in(db, workspace_id) < 1:
@@ -140,6 +161,8 @@ async def prefetch(
         from modules.tools.formatting.result_formatter import ToolResultFormatter
 
         body = ToolResultFormatter.format_for_llm({"success": True, "results": kept}, PREFETCH_TOOL)
-        message_for_model = {"role": "system", "content": f"{PREFETCH_HEADER}\n\n{body}"}
+        if header is None:
+            header = f"{PREFETCH_HEADER} {PREFETCH_DATABASE_NOTE}" if _has_database(db, workspace_id) else PREFETCH_HEADER
+        message_for_model = {"role": "system", "content": f"{header}\n\n{body}"}
     return Prefetch(args=args, message=message_for_model, passages=len(kept), files=files, found=len(found),
                     elapsed_ms=elapsed, frontend_data=result.get("frontend_data"))

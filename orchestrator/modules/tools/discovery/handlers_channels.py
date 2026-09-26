@@ -94,14 +94,19 @@ async def connect_channel(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 
 async def configure_channel(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Update a channel connection's config and/or default agent (mirrors PUT /api/channels/{id})."""
+    """Update a channel connection's config and/or default agent (mirrors PUT /api/channels/{id}).
+
+    F147: the call's config is MERGED into the stored one. A key it does not name
+    is kept: the PRD-225 ``trigger_mode`` trust gate and credentials such as a
+    ``bot_token``. A ``trigger_mode`` it does name must be a valid mode.
+    """
     channel_id = params.get("channel_id")
     if not channel_id:
         return {"success": False, "error": "Missing required parameter: channel_id"}
 
     try:
         row = db.execute(
-            text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+            text("SELECT id, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
             {"id": str(channel_id), "ws_id": str(workspace_id)},
         ).fetchone()
         if not row:
@@ -112,9 +117,25 @@ async def configure_channel(db: Session, workspace_id: UUID, params: Dict[str, A
         updates = []
         bind: Dict[str, Any] = {"id": str(channel_id)}
         if "config" in params and params["config"] is not None:
+            if not isinstance(params["config"], dict):
+                return {"success": False, "error": "config must be an object"}
+            from services.ingress_gate import TRIGGER_MODES, normalize_trigger_mode, with_trigger_mode
+
+            stored = row.config if isinstance(row.config, dict) else {}
+            merged = {**stored, **params["config"]}
+            if "trigger_mode" in params["config"]:
+                mode = normalize_trigger_mode(params["config"]["trigger_mode"])
+                if mode is None:
+                    return {"success": False, "error": f"trigger_mode must be one of {list(TRIGGER_MODES)}"}
+                merged = with_trigger_mode(merged, mode)
             updates.append("config = :config")
-            bind["config"] = _json.dumps(params["config"])
+            bind["config"] = _json.dumps(merged)
         if "default_agent_id" in params:
+            from core.security.workspace_scope import agent_in_workspace
+
+            if params["default_agent_id"] is not None and not agent_in_workspace(
+                    db, params["default_agent_id"], workspace_id):
+                return {"success": False, "error": "default_agent_id is not an agent of this workspace"}  # F149
             updates.append("default_agent_id = :agent_id")
             bind["agent_id"] = params["default_agent_id"]
 

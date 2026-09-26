@@ -11,14 +11,82 @@ Follows the same pattern as HeartbeatService:
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
+from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.cron import CronTrigger
 
+from config import config
+
 logger = logging.getLogger(__name__)
+
+JOB_PREFIX = "playbook_cron_"
+# What a schedule saved without a zone has always fired in: the servers run UTC.
+SERVER_ZONE = "UTC"
+SYNC_SCHEDULED, SYNC_REMOVED, SYNC_DEFERRED, SYNC_OFF = "scheduled", "removed", "deferred", "off"
+
+
+def cron_trigger(expression: str, zone: str) -> CronTrigger:
+    """The trigger for a cron schedule in ``zone``. A cron or zone the scheduler
+    cannot use raises ValueError naming it (F132: both used to be swallowed)."""
+    try:
+        return CronTrigger.from_crontab(expression, timezone=zone)
+    except KeyError as exc:  # pytz and zoneinfo raise KeyError subclasses for an unknown zone
+        raise ValueError(f"unknown timezone '{zone}'") from exc
+    except ValueError as exc:
+        raise ValueError(f"invalid cron '{expression}': {exc}") from exc
+
+
+def is_live_cron(schedule_config: Optional[Dict[str, Any]]) -> bool:
+    sc = schedule_config or {}
+    return sc.get("type") == "cron" and bool(sc.get("cron_expression")) and sc.get("enabled") is not False
+
+
+def default_schedule_zone(db, workspace_id) -> str:
+    """The zone a schedule saved without one fires in (F132): the workspace's
+    orchestrator heartbeat timezone when set, else UTC."""
+    from core.models.workspaces import Workspace
+
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    settings = (getattr(workspace, "settings", None) or {}) if workspace is not None else {}
+    heartbeat = (settings.get("orchestrator") or {}).get("heartbeat") or {}
+    return heartbeat.get("timezone") or SERVER_ZONE
+
+
+def with_explicit_zone(schedule_config: Optional[Dict[str, Any]], db, workspace_id) -> Dict[str, Any]:
+    """A copy of ``schedule_config`` whose cron names its zone, so what fires is
+    what the owner saw (B35: a zone-less cron fired in the server's UTC)."""
+    sc = dict(schedule_config or {})
+    if sc.get("type") == "cron" and not sc.get("timezone"):
+        sc["timezone"] = default_schedule_zone(db, workspace_id)
+    return sc
+
+
+def sync_playbook_schedule(playbook) -> str:
+    """Make this worker's scheduler match the playbook's schedule (F132), for the
+    UI route and Auto's tools alike.
+
+    SYNC_SCHEDULED / SYNC_REMOVED where this worker hosts the scheduler;
+    SYNC_DEFERRED where it does not (production runs several workers): the
+    leader's reconcile tick registers the saved schedule within
+    RECONCILE_INTERVAL_SECONDS; SYNC_OFF when scheduled runs are switched off.
+    A cron or zone the scheduler cannot use raises ValueError.
+    """
+    if not config.RECIPE_SCHEDULER_ENABLED:
+        return SYNC_OFF
+    service = get_playbook_scheduler()
+    sc = playbook.schedule_config or {}
+    if not is_live_cron(sc):
+        service.unschedule_playbook(playbook.id)
+        return SYNC_REMOVED
+    if not service.hosts_jobs:
+        cron_trigger(sc["cron_expression"], sc.get("timezone") or SERVER_ZONE)
+        return SYNC_DEFERRED
+    service.schedule_playbook(playbook)
+    return SYNC_SCHEDULED
 
 
 class PlaybookSchedulerService:
@@ -33,6 +101,12 @@ class PlaybookSchedulerService:
         # (the check passes again); a process restart re-notifies at most
         # once per still-open breaker, which is acceptable for an alert.
         self._benched_notified: set[int] = set()
+        self._notify_tasks: set = set()
+
+    @property
+    def hosts_jobs(self) -> bool:
+        """True in the worker that holds the scheduler lock (the leader)."""
+        return self._scheduler is not None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -63,6 +137,7 @@ class PlaybookSchedulerService:
             self._scheduler.start()
             self._owns_scheduler = True
 
+        self._scheduler.add_listener(self._on_job_missed, EVENT_JOB_MISSED)
         await self._load_cron_playbooks()
         logger.info("[PlaybookScheduler] Service started")
 
@@ -91,18 +166,27 @@ class PlaybookSchedulerService:
                 WorkflowPlaybook.steps.isnot(None),
             ).all()
 
-            count = 0
+            count, zoned = 0, []
             for playbook in playbooks:
                 sc = playbook.schedule_config or {}
-                if sc.get("type") != "cron":
+                if not is_live_cron(sc):
                     continue
-                expr = sc.get("cron_expression")
-                if not expr:
+                try:
+                    self.schedule_playbook(playbook)
+                except ValueError as exc:
+                    logger.error("[PlaybookScheduler] Playbook %d is not scheduled: %s", playbook.id, exc)
                     continue
-                self.schedule_playbook(playbook)
                 count += 1
+                if (sc.get("timezone") or SERVER_ZONE) != SERVER_ZONE:
+                    zoned.append(playbook.id)
 
             logger.info("[PlaybookScheduler] Loaded %d cron playbooks", count)
+            if zoned:
+                # F132: these fired in the server's UTC until now, whatever zone they were saved with.
+                logger.warning(
+                    "[PlaybookScheduler] %d schedules now fire in their saved zone, not the server's UTC: ids %s",
+                    len(zoned), zoned,
+                )
         except Exception as e:
             logger.error("[PlaybookScheduler] Failed to load cron playbooks: %s", e, exc_info=True)
         finally:
@@ -113,33 +197,75 @@ class PlaybookSchedulerService:
     # ------------------------------------------------------------------
 
     def schedule_playbook(self, playbook):
-        """Add or replace APScheduler job for a cron playbook."""
+        """Add or replace the cron job for a playbook, in its saved zone (F132:
+        the trigger was built without one, so it fired in the server's UTC). A
+        cron or zone the scheduler cannot use raises ValueError."""
         sc = playbook.schedule_config or {}
         expr = sc.get("cron_expression")
         if not expr:
             logger.warning("[PlaybookScheduler] No cron_expression for playbook %d, skipping", playbook.id)
             return
 
-        job_id = f"playbook_cron_{playbook.id}"
-
-        try:
-            trigger = CronTrigger.from_crontab(expr)
-        except ValueError as e:
-            logger.error("[PlaybookScheduler] Invalid cron expression '%s' for playbook %d: %s", expr, playbook.id, e)
-            return
-
+        zone = sc.get("timezone") or SERVER_ZONE
+        trigger = cron_trigger(expr, zone)
+        job_id = f"{JOB_PREFIX}{playbook.id}"
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
+        self._add_job(playbook, trigger)
+        logger.info("[PlaybookScheduler] Scheduled playbook %d (%s) with cron '%s' in %s",
+                    playbook.id, getattr(playbook, 'name', ''), expr, zone)
 
+    def _add_job(self, playbook, trigger) -> None:
         self._scheduler.add_job(
             self._fire_playbook,
             trigger,
-            id=job_id,
+            id=f"{JOB_PREFIX}{playbook.id}",
             args=[playbook.id, str(playbook.workspace_id)],
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            # F132: APScheduler's default grace is 1 s; a fire reached later is dropped
+            # (and now reported by _on_job_missed).
+            misfire_grace_time=config.PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS,
         )
-        logger.info("[PlaybookScheduler] Scheduled playbook %d (%s) with cron '%s'", playbook.id, getattr(playbook, 'name', ''), expr)
+
+    def reconcile_with_db(self, db) -> Dict[str, int]:
+        """The leader's tick (F132). A schedule saved on a worker that hosts no
+        scheduler, or whose sync failed, is registered here; a changed one is
+        replaced; one no longer live is removed. Idempotent."""
+        if not self.hosts_jobs:
+            return {}
+        from core.models import WorkflowTemplate as WorkflowPlaybook
+
+        wanted = {
+            f"{JOB_PREFIX}{playbook.id}": playbook
+            for playbook in db.query(WorkflowPlaybook).filter(
+                WorkflowPlaybook.schedule_config.isnot(None),
+                WorkflowPlaybook.workspace_id.isnot(None),
+                WorkflowPlaybook.steps.isnot(None),
+            ).all()
+            if is_live_cron(playbook.schedule_config)
+        }
+        jobs = {job.id: job for job in self._scheduler.get_jobs() if str(job.id).startswith(JOB_PREFIX)}
+        counts = {"added": 0, "changed": 0, "removed": 0}
+        for job_id, playbook in wanted.items():
+            sc = playbook.schedule_config
+            try:
+                trigger = cron_trigger(sc["cron_expression"], sc.get("timezone") or SERVER_ZONE)
+            except ValueError as exc:
+                logger.error("[PlaybookScheduler] Playbook %d is not scheduled: %s", playbook.id, exc)
+                continue
+            job = jobs.get(job_id)
+            if job is not None and repr(job.trigger) == repr(trigger):
+                continue
+            self._add_job(playbook, trigger)
+            counts["added" if job is None else "changed"] += 1
+        for job_id in jobs.keys() - wanted.keys():
+            self._scheduler.remove_job(job_id)
+            counts["removed"] += 1
+        if any(counts.values()):
+            logger.info("[PlaybookScheduler] reconcile: %s", counts)
+        return counts
 
     def unschedule_playbook(self, playbook_id: int):
         """Remove a scheduled cron job by playbook id."""
@@ -258,6 +384,8 @@ class PlaybookSchedulerService:
                 # Roll back the pending execution record — cron will retry next tick
                 db.delete(execution)
                 db.commit()
+                await self._notify_schedule_skipped(
+                    db, playbook, f"the workspace was at its run limit ({concurrency.reason})")
                 return
 
             logger.info("[PlaybookScheduler] Firing playbook %d (%s), execution=%s", playbook.id, playbook.name, execution_id)
@@ -313,6 +441,61 @@ class PlaybookSchedulerService:
                 getattr(playbook, "id", "?"),
                 exc_info=True,
             )
+
+    # ------------------------------------------------------------------
+    # F132: a scheduled run that did not start says so
+    # ------------------------------------------------------------------
+
+    def _on_job_missed(self, event) -> None:
+        """EVENT_JOB_MISSED: APScheduler drops a fire it reaches after the grace,
+        without a word (B34, B60). Log it and ring the owner."""
+        job_id = str(getattr(event, "job_id", ""))
+        if not job_id.startswith(JOB_PREFIX):
+            return
+        playbook_id = int(job_id[len(JOB_PREFIX):])
+        due = getattr(event, "scheduled_run_time", None)
+        when = f"at {due:%H:%M %Z} " if due is not None else ""
+        reason = (f"it was due {when}and the scheduler reached it more than "
+                  f"{config.PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS} s late (busy or restarting)")
+        logger.warning("[PlaybookScheduler] scheduled run skipped: playbook %d, %s", playbook_id, reason)
+        try:
+            task = asyncio.get_running_loop().create_task(self._notify_skipped_by_id(playbook_id, reason))
+        except RuntimeError:
+            logger.warning("[PlaybookScheduler] no event loop to report the skip of playbook %d", playbook_id)
+            return
+        self._notify_tasks.add(task)
+        task.add_done_callback(self._notify_tasks.discard)
+
+    async def _notify_skipped_by_id(self, playbook_id: int, reason: str) -> None:
+        from core.database.database import SessionLocal
+        from core.models import WorkflowTemplate as WorkflowPlaybook
+
+        db = SessionLocal()
+        try:
+            playbook = db.query(WorkflowPlaybook).filter(WorkflowPlaybook.id == playbook_id).first()
+            if playbook is not None:
+                await self._notify_schedule_skipped(db, playbook, reason)
+        finally:
+            db.close()
+
+    async def _notify_schedule_skipped(self, db, playbook, reason: str) -> None:
+        """Dispatch ``playbook_schedule_skipped`` to the workspace. Never raises
+        into the fire path; commits its own row like ``_notify_playbook_benched``."""
+        try:
+            from core.services.notification_dispatcher import NotificationDispatcher
+
+            await NotificationDispatcher(db, str(playbook.workspace_id)).dispatch(
+                event_type="playbook_schedule_skipped",
+                title=f"Scheduled run skipped: {playbook.name}",
+                message=f"The scheduled run did not start: {reason}.",
+                link_type="playbook",
+                link_id=str(playbook.id),
+                status="warning",
+            )
+            db.commit()
+        except Exception:
+            logger.error("[PlaybookScheduler] playbook_schedule_skipped dispatch failed for %s",
+                         getattr(playbook, "id", "?"), exc_info=True)
 
     # ------------------------------------------------------------------
     # Status

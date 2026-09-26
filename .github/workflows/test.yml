@@ -112,6 +112,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # PRD-140 hierarchy audit (F147): every mutating platform action is
+      # hierarchy-gated or allow-listed with its reason. A new unlisted
+      # mutator fails the job here.
+      - name: Hierarchy gate audit
+        run: python scripts/check_hierarchy_gate.py
+
       - name: Initialise test database schema
         run: python scripts/init_test_db.py
 
@@ -147,6 +153,40 @@ jobs:
       # up toward the 80% doctrine as coverage improves.
       - name: Coverage ratchet (measured baseline)
         run: python scripts/check_coverage_baseline.py
+
+  # AGENTS.md → the engineering rules, held on the lines a change touches (a ratchet:
+  # existing code meets them the next time someone edits it). ruff runs through
+  # diff-quality (changed lines only; ruff.toml holds the rules), then the code-shape
+  # check (function length, nesting, file size). Pinned tools, no app dependencies.
+  # The base is the pull request's base branch, or main on a branch push.
+  code-standards:
+    name: Code standards on changed lines (ruff, function length, nesting) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history, for the diff against the base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the linters (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff==0.16.9" "diff-cover==10.6.0"
+
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
+
+      - name: ruff on changed lines (diff-quality)
+        run: diff-quality --violations=ruff.check --compare-branch="origin/${GITHUB_BASE_REF:-main}" --fail-under=100
+
+      - name: Function length, nesting and file size on changed Python
+        run: python scripts/ci/check_changed_code_shape.py --base "origin/${GITHUB_BASE_REF:-main}"
 
   # PRD-160 S5 — NL2SQL regression eval. NON-REQUIRED (same posture as the test
   # net). Self-contained: it seeds an in-memory SQLite DB, so it needs no
@@ -593,6 +633,331 @@ jobs:
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
           docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
 
+  # PRD-251 Wave 1, S1.1a/b (US-101, US-102): the media-render image (D3). It
+  # builds the service exactly as Railway will (no build args, the default last
+  # stage), runs the service's own suite INSIDE the image (the real check, mix
+  # and Kokoro among it), proves the boot assertion and /health, then renders the
+  # 3-second fixture bundle through the API with the internal token, timed, and
+  # asserts the MP4 with ffprobe and its loudness with ebur128. The runner only
+  # builds, runs and asserts. A required job for the PRD-251 Wave 1 gate
+  # (scripts/ralph/acceptance-prd251w1.sh).
+  media-render:
+    name: media-render — image builds and renders the fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE: media-render:ci
+      TEST_IMAGE: media-render:test
+    steps:
+      - uses: actions/checkout@v4
+      # US-104 (S1.1c): the local edition runs the renderer as the optional
+      # compose profile `media`, and the backend's SOCIALS_RENDER_URL points at it.
+      # Throwaway values for the three `:?`-required secrets; nothing starts.
+      - name: Compose — the media profile runs media-render; the default stack does not
+        env:
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+          API_KEY: ci
+        run: |
+          docker compose version
+          docker compose --profile media config > "$RUNNER_TEMP/compose-media.yml"
+          media=$(docker compose --profile media config --services)
+          plain=$(docker compose config --services)
+          echo "services with --profile media:"; echo "$media" | sed 's/^/  /'
+          echo "$media" | grep -qx media-render || { echo "::error::docker compose --profile media config has no media-render service"; exit 1; }
+          if echo "$plain" | grep -qx media-render; then echo "::error::media-render starts without the media profile"; exit 1; fi
+          grep -qE 'SOCIALS_RENDER_URL: *"?http://media-render:8090' "$RUNNER_TEMP/compose-media.yml" \
+            || { echo "::error::the backend's SOCIALS_RENDER_URL does not point at media-render"; exit 1; }
+          sed -n '/^  media-render:/,/^  [a-z]/p' "$RUNNER_TEMP/compose-media.yml" | head -60
+          echo "docker compose --profile media config includes media-render; the default profile does not: PASS"
+      - name: Build the image (default target, as Railway builds it)
+        run: |
+          start=$(date +%s)
+          docker build -t "$IMAGE" services/media-render/
+          echo "image build: $(( $(date +%s) - start )) s"
+          docker image ls "$IMAGE"
+      - name: The versions baked into the image
+        run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
+      # US-112 (S1.6): the music library. The build fetched every track named in
+      # services/media-render/music/manifest.json, checked its sha256 and analysed
+      # it; the manifest it wrote must carry every committed track as committed,
+      # with cue windows, and Deep House 003 must list the break the Markets
+      # reference cut on (34.0-35.8 s). Then the same build from a manifest whose
+      # first sha256 is wrong must FAIL: no audio is committed, so the hash is
+      # what pins the bytes (the layers before the music step come from cache).
+      - name: The music library — every track hash-checked and analysed; a bad hash fails the image build
+        run: |
+          out="$RUNNER_TEMP/music"
+          mkdir -p "$out"
+          docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/music/manifest.json > "$out/manifest.json"
+          python3 services/media-render/ci/assert_music.py --source services/media-render/music/manifest.json \
+            --built "$out/manifest.json" --break deep-house-003:34.0-35.8
+          bad="$RUNNER_TEMP/media-render-bad-hash"
+          rm -rf "$bad"
+          cp -r services/media-render "$bad"
+          python3 -c 'import hashlib, json, sys; p = sys.argv[1]; d = json.load(open(p)); d["tracks"][0]["sha256"] = hashlib.sha256(b"not the track").hexdigest(); json.dump(d, open(p, "w"), indent=1); print("changed the sha256 of", d["tracks"][0]["id"])' "$bad/music/manifest.json"
+          set +e
+          start=$(date +%s)
+          docker build --progress=plain -t media-render:bad-hash "$bad" > "$out/bad-hash-build.log" 2>&1
+          code=$?
+          set -e
+          echo "the build with a wrong sha256 exited $code after $(( $(date +%s) - start )) s"
+          grep -n "sha256 mismatch" "$out/bad-hash-build.log" | head -n 3 || true
+          if [ "$code" -eq 0 ]; then echo "::error::the image built with a wrong sha256 in music/manifest.json"; exit 1; fi
+          if ! grep -q "sha256 mismatch" "$out/bad-hash-build.log"; then
+            tail -n 60 "$out/bad-hash-build.log"
+            echo "::error::the build failed, but not on the music hash"
+            exit 1
+          fi
+          echo "a music manifest with a wrong sha256 fails the image build: PASS"
+      - name: The service's own suite, inside the image
+        run: |
+          docker build --target test -t "$TEST_IMAGE" services/media-render/
+          docker run --rm --shm-size=1g -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
+      - name: Boot assertion — a 160-character espeak data path stops the container
+        run: |
+          long="/opt/$(printf 'e%.0s' $(seq 1 160))"
+          set +e
+          timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false -e MEDIA_RENDER_ESPEAK_DATA_PATH="$long" "$IMAGE" > boot.log 2>&1
+          code=$?
+          set -e
+          cat boot.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
+            echo "::error::the container did not refuse a ${#long}-character espeak data path (exit $code)"
+            exit 1
+          fi
+          grep -q 'espeak-ng data path is 165 characters' boot.log
+          echo "the default command refused to boot with a ${#long}-character path (exit $code): PASS"
+      - name: The container boots and /health answers without a token
+        run: |
+          docker run -d --name media-render-health -e LOG_RELAY_ENABLED=false -p 127.0.0.1:8090:8090 "$IMAGE"
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health; then ok=1; echo; break; fi
+            sleep 2
+          done
+          docker logs media-render-health
+          docker rm -f media-render-health > /dev/null
+          if [ -z "$ok" ]; then echo "::error::/health never answered"; exit 1; fi
+      - name: The API renders the fixture bundle (POST /render, poll, fetch the MP4), timed
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle > "$out/bundle.json"
+          docker run -d --name media-render-api --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8090:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-api; echo "::error::the API never answered /health"; exit 1; fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8090/render)
+          echo "POST /render without the token answered $code"
+          if [ "$code" != 401 ]; then echo "::error::the render API is open without its token"; exit 1; fi
+          start=$(date +%s)
+          code=$(curl -sS -o "$out/accepted.json" -w '%{http_code}' --max-time 600 \
+            -H "X-Internal-Token: $TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @"$out/bundle.json" http://127.0.0.1:8090/render)
+          echo "POST /render answered $code after $(( $(date +%s) - start )) s (staged, spoken, mixed, checked)"
+          cat "$out/accepted.json"; echo
+          if [ "$code" != 202 ]; then docker logs media-render-api; echo "::error::POST /render answered $code"; exit 1; fi
+          id=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["id"])' "$out/accepted.json")
+          status=""
+          for i in $(seq 1 300); do
+            curl -sS -H "X-Internal-Token: $TOKEN" "http://127.0.0.1:8090/render/$id" > "$out/job.json"
+            status=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$out/job.json")
+            case "$status" in done|failed|rejected) break ;; esac
+            sleep 2
+          done
+          echo "render $id: $status, $(( $(date +%s) - start )) s from POST to finished"
+          if [ "$status" != done ]; then cat "$out/job.json"; docker logs media-render-api; exit 1; fi
+          curl -sS -f -H "X-Internal-Token: $TOKEN" -o "$out/fixture.mp4" \
+            "http://127.0.0.1:8090/render/$id/output/render.mp4"
+          ls -l "$out/fixture.mp4"
+          docker logs media-render-api 2>&1 | tail -n 40
+          docker rm -f media-render-api > /dev/null
+      - name: Assert the MP4 (ffprobe), the Kokoro line and the loudness (ebur128)
+        run: |
+          out="$RUNNER_TEMP/out"
+          docker run --rm -v "$out:/out" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/fixture.mp4 > "$out/probe.json"
+          docker run --rm -v "$out:/out" --entrypoint ffmpeg "$IMAGE" -hide_banner -nostats \
+            -i /out/fixture.mp4 -map 0:a:0 -af ebur128=peak=true -f null - 2> "$out/ebur128.log"
+          sed -n '/Summary:/,$p' "$out/ebur128.log"
+          python3 services/media-render/ci/assert_output.py "$out/probe.json" \
+            --video-codec h264 --width 1080 --height 1920 --fps 30 \
+            --audio-codec aac --duration 3.0 --tolerance 0.1 \
+            --job "$out/job.json" --min-line-seconds 0.5 \
+            --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
+      - name: The render job's report (check, mix, timings)
+        if: always()
+        run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
+      - name: Keep the rendered fixture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-fixture
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+          retention-days: 7
+      # US-111 (S1.5): the fixture script, four Kokoro lines each in its own
+      # script window (services/media-render/fixtures/script). Its first line is
+      # the fixture's own (2.09 s) in a 1.9 s window, so the render must speed it
+      # up into the window (media_render/fit.py). The MP4 is probed, its audio is
+      # decoded by the image's ffmpeg, and every script window must carry speech
+      # well above the quiet between the lines (ci/assert_script_windows.py).
+      - name: The fixture script renders with Kokoro speech in every script window (a line longer than its window is fitted)
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/script"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle script > "$out/bundle.json"
+          docker run -d --name media-render-script --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8092:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8092/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-script; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/render_bundle.py --url http://127.0.0.1:8092 --token "$TOKEN" \
+            --bundle "$out/bundle.json" --out "$out" --output render.mp4 --save-as script.mp4
+          code=$?
+          set -e
+          docker logs media-render-script 2>&1 | tail -n 40
+          docker rm -f media-render-script > /dev/null
+          if [ "$code" != 0 ]; then echo "::error::the fixture script did not render"; exit 1; fi
+          docker run --rm -v "$out:/out:ro" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/script.mp4 > "$out/probe.json"
+          python3 services/media-render/ci/assert_output.py "$out/probe.json" \
+            --video-codec h264 --width 1080 --height 1920 --fps 30 \
+            --audio-codec aac --duration 9.0 --tolerance 0.1 \
+            --job "$out/job.json" --min-line-seconds 0.5
+          docker run --rm -v "$out:/out:ro" --entrypoint ffmpeg "$IMAGE" -v error \
+            -i /out/script.mp4 -map 0:a:0 -ac 1 -ar 16000 -f s16le - > "$out/script.pcm"
+          python3 services/media-render/ci/assert_script_windows.py --job "$out/job.json" \
+            --pcm "$out/script.pcm" --rate 16000 --duration 9.0 --expect-fitted l01 --max-tempo 1.25
+      - name: Keep the rendered fixture script
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-fixture-script
+          path: ${{ runner.temp }}/script
+          if-no-files-found: ignore
+          retention-days: 7
+      # US-112 (S1.6): a video with library music. The fixture script's
+      # composition with three Kokoro lines over Deep House 003 from 32.0 s (its
+      # bass-out break lands at 2.0-3.9 s): the bed ducked under the voice, the
+      # mix normalised in two passes. The rendered MP4's integrated loudness must
+      # be -14 ± 1 LUFS (ebur128), and the job report must name the track with the
+      # CC BY credit line the post's copy carries.
+      - name: A video with library music renders at -14 ± 1 LUFS, and its report carries the CC BY credit line
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/music-render"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle music > "$out/bundle.json"
+          docker run -d --name media-render-music --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8093:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8093/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-music; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/render_bundle.py --url http://127.0.0.1:8093 --token "$TOKEN" \
+            --bundle "$out/bundle.json" --out "$out" --output render.mp4 --save-as music.mp4
+          code=$?
+          set -e
+          docker logs media-render-music 2>&1 | tail -n 40
+          docker rm -f media-render-music > /dev/null
+          if [ "$code" != 0 ]; then echo "::error::the music fixture did not render"; exit 1; fi
+          docker run --rm -v "$out:/out:ro" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/music.mp4 > "$out/probe.json"
+          docker run --rm -v "$out:/out:ro" --entrypoint ffmpeg "$IMAGE" -hide_banner -nostats \
+            -i /out/music.mp4 -map 0:a:0 -af ebur128=peak=true -f null - 2> "$out/ebur128.log"
+          sed -n '/Summary:/,$p' "$out/ebur128.log"
+          python3 services/media-render/ci/assert_output.py "$out/probe.json" \
+            --video-codec h264 --width 1080 --height 1920 --fps 30 \
+            --audio-codec aac --duration 9.0 --tolerance 0.1 \
+            --job "$out/job.json" --min-line-seconds 0.5 \
+            --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
+          python3 services/media-render/ci/assert_music.py --job "$out/job.json" --track deep-house-003 \
+            --credit 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.'
+      - name: Keep the rendered video with music
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-fixture-music
+          path: ${{ runner.temp }}/music-render
+          if-no-files-found: ignore
+          retention-days: 7
+      # US-106 (S1.2b): the four reference videos, seeded as templates. Each one's
+      # bundle is built by the orchestrator's own seed loader and bundle builder
+      # (standard library only, the runner's python3) from its sample data (the
+      # reference's copy), a Studio Dark brand kit and a drawn logo, with every
+      # footage slot empty. media-render checks the FULL composition (`hyperframes
+      # check`: a 202 means 0 errors) and renders a preview: snapshot frames at the
+      # template's key moments, small, and a short reel. The pixel probe renders
+      # a probed moment again with the brand kit's primary colour swapped and reads
+      # the pixel back (scripts/ci/social_template_previews.py).
+      # US-107 (S1.2c): the seven image templates (the automatos-social families, a
+      # fact card and a carousel) render for real at every size they declare: the
+      # full check, then one full-size PNG per still (a carousel's slides), each
+      # read back and measured; the probe swaps the primary under the brand stripe.
+      # US-108 (S1.3): the Title card renders again with a brand kit carrying an
+      # uploaded woff2 (scripts/ci/ci_block_font.py, every glyph a solid block)
+      # named in heading_font, and an uploaded logo mark: the headline's accent
+      # words must fill their box as solid blocks do, and in the kit's own
+      # heading font they must not.
+      # US-113 (S1.7): the Infographic, whose sample chart is a fixture report's
+      # binding, renders again bound to more fixture reports by the orchestrator's
+      # own parser and binder (core/report_tables.py, core/chart_binding.py): a
+      # line, a number grid, and a stress table (labels cut, the widest figures)
+      # as a bar, a line and a grid, at every size, each with 0 check errors (the
+      # axis labels fit), every figure on the chart the report's own cell.
+      - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/templates"
+          mkdir -p "$out"
+          docker run -d --name media-render-templates --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8091:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8091/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-templates; echo "::error::the API never answered /health"; exit 1; fi
+          python3 --version
+          start=$(date +%s)
+          set +e
+          PYTHONPATH=orchestrator python3 scripts/ci/social_template_previews.py \
+            --url http://127.0.0.1:8091 --token "$TOKEN" --out "$out"
+          code=$?
+          set -e
+          echo "the seeded templates: $(( $(date +%s) - start )) s"
+          docker logs media-render-templates 2>&1 | tail -n 80
+          docker rm -f media-render-templates > /dev/null
+          if [ "$code" != 0 ]; then echo "::error::a seeded template failed its check, its preview or render, or the pixel probe"; fi
+          exit $code
+      - name: Keep the seeded templates' previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-template-previews
+          path: ${{ runner.temp }}/templates
+          if-no-files-found: ignore
+          retention-days: 7
+
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration
   # forest, create_all-at-boot, and inline ALTERs inside migrations). No lane
@@ -692,6 +1057,16 @@ jobs:
       # HARD gate — fails on a NEW frontend call to a non-existent backend path.
       - name: Frontend route-contract (consumes route-manifest.json)
         run: node scripts/check-route-contract.js
+
+      # HARD gate on changed lines only (AGENTS.md → Code shape): function length
+      # (components 150), depth, new-file size, and the apiClient-only rule that the
+      # full ESLint run above only reports. Needs the base branch and enough history
+      # for the merge-base.
+      - name: Code shape and apiClient on changed lines (ESLint)
+        run: |
+          git fetch --no-tags --unshallow origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}" \
+            || git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
+          node scripts/check-changed-lines-eslint.js "origin/${GITHUB_BASE_REF:-main}"
 
   # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
   # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)

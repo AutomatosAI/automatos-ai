@@ -23,9 +23,10 @@ import json
 import logging
 import time
 import uuid as uuid_mod
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -34,7 +35,11 @@ from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
-from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.models.core import PLAYBOOK_DOCUMENT_STEP, RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.security.surface import origin_surface, widget_scopes, widget_turn
+from core.security.widget_scopes import widget_tool_surface
+from core.services.playbook_scratchpad import answer_for_next_step
+from core.services.playbook_step_refs import resolve_step_references, step_values
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,9 @@ INTERNAL_ERROR_TEXT = (
     "The run stopped on an internal error, so nothing after it ran. "
     "The details are in the server log."
 )
+# F155: a Claude Code session's tools are not the widget key's, so a run a
+# widget turn started never files a session ticket.
+WIDGET_SESSION_REFUSAL = "A playbook started from the website chat does not run on a Claude Code session."
 
 
 def owner_error_text(exc: BaseException) -> str:
@@ -381,19 +389,41 @@ def _step_deadline(step_timeout_sec: float, session_step: bool, cfg) -> float:
     return max(float(step_timeout_sec), float(getattr(cfg, "CLI_LANE_STEP_TIMEOUT_SECONDS", 1800)))
 
 
-def _stamp_progress(db, execution) -> None:
-    """Record that the run is alive (execution_metadata.last_progress_at, naive UTC
-    like started_at); the reconciler's stall rule reads it. Rebuild the JSONB,
-    never mutate; a failure to stamp must never end the step."""
+def _progress_stamped(metadata) -> Dict[str, Any]:
+    """``metadata`` with the run's last progress time (naive UTC, like started_at):
+    a new dict. The reconciler's stall rule reads it."""
     from datetime import datetime as _dt
 
+    return {**dict(metadata or {}), "last_progress_at": _dt.utcnow().replace(microsecond=0).isoformat()}
+
+
+def _stamp_progress(db, execution) -> None:
+    """Record that the run is alive (execution_metadata.last_progress_at). Rebuild
+    the JSONB, never mutate; a failure to stamp must never end the step."""
     try:
-        meta = dict(getattr(execution, "execution_metadata", None) or {})
-        meta["last_progress_at"] = _dt.utcnow().replace(microsecond=0).isoformat()
-        execution.execution_metadata = meta
+        execution.execution_metadata = _progress_stamped(getattr(execution, "execution_metadata", None))
         db.commit()
     except Exception:  # noqa: BLE001
         logger.debug("[recipe_direct] progress stamp failed", exc_info=True)
+
+
+async def _stamping_progress(work: Awaitable[Any], stamp: Callable[[], None], every_seconds: float) -> Any:
+    """Await ``work``, calling ``stamp`` every ``every_seconds`` while it runs.
+
+    A fixed generate_document step waits on media-render for minutes (PRD-251
+    US-120): without a fresh stamp the reconciler fails the run as stalled after
+    TASK_STALL_TIMEOUT_SECONDS and starts it again, render and all.
+    """
+    async def beat() -> None:
+        while True:
+            await asyncio.sleep(every_seconds)
+            stamp()
+
+    beating = asyncio.ensure_future(beat())
+    try:
+        return await work
+    finally:
+        beating.cancel()
 
 
 def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str:
@@ -452,8 +482,17 @@ async def _execute_step(
     # works; the step waits for it to end (the caller's step timeout bounds the
     # wait — the session carries on and its result lands on the board). Before
     # the tool/LLM imports: a session step touches none of them.
+    # The earlier steps' answers, for either kind of agent (F130: a session step
+    # got none of them and the next api step got 500 characters).
+    previous_output = ""
+    if scratchpad and step_order > 1:
+        previous_output = scratchpad.format_context_for_step(step_order) or ""
+
     from services.cli_ticket_lane import RECIPE_SOURCE_TYPE, is_cli_agent, run_cli_ticket_and_wait
     if is_cli_agent(db, agent.id):
+        if widget_turn():
+            return {"status": "error", "error": WIDGET_SESSION_REFUSAL,
+                    "execution": {"tokens_used": 0, "tool_calls": [], "messages": []}}
         import uuid as _uuid
 
         return await run_cli_ticket_and_wait(
@@ -461,7 +500,8 @@ async def _execute_step(
             workspace_id=workspace_id,
             agent_id=agent.id,
             title=_cli_step_title(recipe_name, step_order, clean_prompt),
-            prompt=clean_prompt,
+            # A session reads only its ticket: the earlier answers go in it.
+            prompt=f"{clean_prompt}\n\n{previous_output}" if previous_output else clean_prompt,
             source_type=RECIPE_SOURCE_TYPE,
             source_id=f"{RECIPE_SOURCE_TYPE}:{recipe_execution_id or _uuid.uuid4().hex}:{step_order}",
             tags=["playbook"],
@@ -477,6 +517,8 @@ async def _execute_step(
     from core.composio.tool_executor import resolve_file_uploads
     from core.composio.client import get_composio_client
     from core.composio.deny_list import composio_action_denial_async
+    from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+    from core.composio.post_gate import post_action_refusal
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -487,6 +529,7 @@ async def _execute_step(
         handle_scratchpad_write,
         handle_scratchpad_read,
     )
+    from services.playbook_owner_ask import ASK_ACTION, NOT_RUN_AFTER_ASK, ask_call_params, take_ask
 
     # 0. Activate agent via factory — gives us the agent's LLM manager
     factory = AgentFactory(db_session=db)
@@ -500,12 +543,6 @@ async def _execute_step(
 
     # 1. System prompt + tools via ContextService (PRD-80)
     #    Build recipe_step dict for RecipeContextSection
-    previous_output = ""
-    if scratchpad and step_order > 1:
-        prev_ctx = scratchpad.format_context_for_step(step_order)
-        if prev_ctx:
-            previous_output = prev_ctx
-
     recipe_step_dict = {
         "name": recipe_name,
         "step_number": step_order,
@@ -529,16 +566,28 @@ async def _execute_step(
 
     # 2. Composio tools — SDK semantic search for per-action function-calling tools.
     #    Falls back to hint-based composio_execute if SDK search returns empty.
-    tool_service = ComposioToolService(db)
+    #    F155: none on a widget turn — the owner's connected apps are not the
+    #    widget key's (the widget chat is never offered them either).
+    #    F105: both lookups run off the loop, with a session of their own
+    #    (core.composio.off_loop), so they read nothing through `agent`.
     composio_result = None
-    try:
-        composio_result = tool_service.get_tools_for_step(
-            agent_id=agent.id,
-            workspace_id=workspace_id,
-            task_prompt=prompt_for_hints or clean_prompt,
-        )
-    except Exception as exc:
-        logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
+    composio_timed_out = False
+    lookup_agent_id = agent.id
+    lookup_prompt = prompt_for_hints or clean_prompt
+    if not widget_turn():
+        try:
+            composio_result = await composio_lookup(
+                lambda session: ComposioToolService(session).get_tools_for_step(
+                    agent_id=lookup_agent_id,
+                    workspace_id=workspace_id,
+                    task_prompt=lookup_prompt,
+                ),
+                step=f"playbook step (agent {lookup_agent_id}): tool search",
+            )
+        except ComposioLookupTimeout:
+            composio_timed_out = True  # warned where it gave up; the hints would wait on the same SDK
+        except Exception as exc:
+            logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
 
     # If SDK search returned tools, inject a simpler scope message.
     # Otherwise fall back to hint-based composio_execute mega-tool.
@@ -548,17 +597,19 @@ async def _execute_step(
             f"[recipe_step] SDK search: strategy={composio_result.strategy} "
             f"actions={len(composio_result.action_set)} search_ms={composio_result.search_ms}"
         )
-    else:
+    elif not widget_turn() and not composio_timed_out:
         # Fallback: existing hint service with composio_execute mega-tool
         if composio_result:
             composio_result.strategy = "hint_fallback"
         try:
-            hint_service = ComposioHintService(db)
-            hint_result = hint_service.build_hints(
-                agent_id=agent.id,
-                prompt=prompt_for_hints or clean_prompt,
-                workspace_id=workspace_id,
-                recipe_mode=True,
+            hint_result = await composio_lookup(
+                lambda session: ComposioHintService(session).build_hints(
+                    agent_id=lookup_agent_id,
+                    prompt=lookup_prompt,
+                    workspace_id=workspace_id,
+                    recipe_mode=True,
+                ),
+                step=f"playbook step (agent {lookup_agent_id}): action hints",
             )
             if hint_result.hint_lines:
                 messages.append({"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -566,6 +617,8 @@ async def _execute_step(
                     f"[recipe_step] Hints fallback: strategy={hint_result.strategy_used} "
                     f"actions={len(hint_result.matched_actions)}"
                 )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the step goes on without Composio tools
         except Exception as exc:
             logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
 
@@ -599,6 +652,10 @@ async def _execute_step(
     else:
         # Fallback: composio_execute + hints (existing behavior)
         tools = list(base_tools)
+    if widget_turn():
+        # F155: what the widget key's scopes allow (the executor refuses
+        # anything else on the resolved action).
+        tools = widget_tool_surface(tools, widget_scopes())
     if scratchpad:
         scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
         if step_order > 1:
@@ -617,6 +674,7 @@ async def _execute_step(
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
     response = None
+    owner_ask: Optional[Dict[str, Any]] = None  # F140: the step's question to the owner
 
     for iteration in range(max_iterations):
         if recipe_execution_id:
@@ -714,6 +772,24 @@ async def _execute_step(
                 )
                 tool_args = {}
 
+            # F140: a step asks the owner through its run, never through a subject
+            # it would have to name (night 4: B15/B23 were refused, and five of six
+            # calls came with params={}). The run stops after this turn.
+            ask_params = ask_call_params(tool_name, tool_args) if recipe_execution_id else None
+            if ask_params is not None:
+                ask, result_text = take_ask(ask_params)
+                owner_ask = owner_ask or ask
+                all_tool_calls.append({"action": ASK_ACTION, "params": ask_params, "result": result_text,
+                                       "success": ask is not None})
+                messages.append({"role": "tool", "tool_call_id": tool_id, "content": result_text})
+                continue
+            if owner_ask is not None:  # nothing acts after the step asked
+                all_tool_calls.append({"action": tool_args.get("action", tool_name),
+                                       "params": tool_args.get("params", tool_args),
+                                       "result": NOT_RUN_AFTER_ASK, "success": False})
+                messages.append({"role": "tool", "tool_call_id": tool_id, "content": NOT_RUN_AFTER_ASK})
+                continue
+
             # Handle scratchpad tools inline (no tool_router needed)
             if tool_name == SCRATCHPAD_TOOL_NAME and scratchpad:
                 result_text = handle_scratchpad_write(
@@ -726,6 +802,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_TOOL_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -743,6 +820,7 @@ async def _execute_step(
                     "action": SCRATCHPAD_READ_NAME,
                     "params": tool_args,
                     "result": result_text,
+                    "success": True,
                 })
                 messages.append({
                     "role": "tool",
@@ -774,12 +852,22 @@ async def _execute_step(
                 # PRD-251 S0.6 (D16): a denied action never runs — not from the
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
                 _denial = await composio_action_denial_async(tool_name)
+                call_ok = False  # F137: whether the call worked, never guessed from its text
+                # PRD-251 S3.5 (D14b): with Socials on, the step's agent drafts a
+                # post and a person approves it; it never publishes one directly —
+                # not from the dedup cache, the LinkedIn workaround or the spine.
+                # After the deny list, which always wins.
+                _post_refusal = None if _denial else await post_action_refusal(tool_name, workspace_id)
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
                     logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
+                elif _post_refusal:
+                    result_text = f"Error executing {tool_name}: {_post_refusal}"
+                    exec_ms = 0
+                    logger.warning(f"[recipe_step] Socials post gate refused {tool_name}")
                 elif _dedup_key in _composio_call_cache:
-                    result_text = _composio_call_cache[_dedup_key]
+                    result_text, call_ok = _composio_call_cache[_dedup_key]
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
                 else:
@@ -814,11 +902,12 @@ async def _execute_step(
                                 else:
                                     result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
                                     logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
-                                _composio_call_cache[_dedup_key] = result_text
+                                call_ok = bool(success)
+                                _composio_call_cache[_dedup_key] = (result_text, call_ok)
                                 all_tool_calls.append({
                                     "action": tool_name, "params": tool_args,
                                     "result": result_text[:8000], "duration_ms": exec_ms,
-                                    "composio_direct": True,
+                                    "composio_direct": True, "success": call_ok,
                                 })
                                 messages.append({
                                     "role": "tool", "tool_call_id": tool_id,
@@ -851,6 +940,7 @@ async def _execute_step(
 
                         raw = spine_result.get("raw_result") or {}
                         success = bool(spine_result.get("success"))
+                        call_ok = success
                         data = raw.get("data") if isinstance(raw, dict) else None
                         error = (
                             (raw.get("error") if isinstance(raw, dict) else None)
@@ -873,7 +963,7 @@ async def _execute_step(
                                 tf.unlink(missing_ok=True)
                             except Exception:
                                 pass
-                    _composio_call_cache[_dedup_key] = result_text
+                    _composio_call_cache[_dedup_key] = (result_text, call_ok)
 
                 all_tool_calls.append({
                     "action": tool_name,
@@ -881,6 +971,7 @@ async def _execute_step(
                     "result": result_text[:8000],
                     "duration_ms": exec_ms,
                     "composio_direct": True,
+                    "success": call_ok,
                 })
                 messages.append({
                     "role": "tool",
@@ -901,6 +992,7 @@ async def _execute_step(
                 "action": tool_args.get("action", tool_name),
                 "params": tool_args.get("params", tool_args),
                 "result": result.get("llm_context", ""),
+                "success": result.get("success") is not False,
             })
 
             messages.append({
@@ -910,6 +1002,8 @@ async def _execute_step(
             })
 
         logger.info(f"[recipe_step] Tool iteration {iteration + 1}: {len(response.tool_calls)} calls")
+        if owner_ask is not None:
+            break  # F140: the owner is asked; this step goes no further
 
     # 8. Return with full message history for S3 logging
     content = (response.content or "") if response else ""
@@ -932,6 +1026,7 @@ async def _execute_step(
     return {
         "status": "success",
         "result": content,
+        "owner_ask": owner_ask,
         "execution": {
             "tokens_used": tokens,
             "tool_calls": all_tool_calls,
@@ -1017,10 +1112,12 @@ def _build_compact_step_result(
     tool_summaries = []
     for tc in tool_calls:
         action = tc.get("action", "unknown")
-        # Infer success/failure from result content
-        result_str = str(tc.get("result", ""))
-        status = "error" if "error" in result_str.lower()[:100] else "success"
-        tool_summaries.append(f"{action} ({status})")
+        # F137: the call's own success flag. B22's "Tool composio_execute failed: …"
+        # holds no "error", so the text guess showed four failed drafts as (success).
+        worked = tc.get("success")
+        if worked is None:  # a record from before the flag: the old guess
+            worked = "error" not in str(tc.get("result", "")).lower()[:100]
+        tool_summaries.append(f"{action} ({'success' if worked else 'error'})")
 
     output = step_result.get("output", "")
     output_preview = output[:200] + "..." if output and len(output) > 200 else (output or "")
@@ -1231,12 +1328,13 @@ async def _execute_recipe_inner(
         db = SessionLocal()
 
     scratchpad = None
+    origin = ExitStack()
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
 
         # F113: whatever the trigger stored (a string from a tool call, a retried
         # row), the steps read key-value pairs.
-        from core.services.playbook_inputs import playbook_inputs
+        from core.services.playbook_inputs import playbook_inputs, with_input_defaults
 
         input_data, _input_problem = playbook_inputs(input_data)
         if _input_problem:
@@ -1248,6 +1346,9 @@ async def _execute_recipe_inner(
         if not recipe:
             await _fail_execution(db, recipe_execution_id, "Recipe not found")
             return
+        # A scheduled run, a tool's run and a retry carry only what they were
+        # given: the playbook's declared defaults fill the rest, as the run route's do.
+        input_data = with_input_defaults(input_data, getattr(recipe, "inputs", None))
 
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == recipe_execution_id
@@ -1255,6 +1356,9 @@ async def _execute_recipe_inner(
         if not execution:
             logger.error(f"[recipe_direct] Execution record not found: {recipe_execution_id}")
             return
+        # F155: a run a widget turn started (its origin is on the row, server-set)
+        # runs under that turn's key scopes and team lock, retries and reruns too.
+        origin.enter_context(origin_surface(execution.execution_metadata))
 
         # Disabled / deleted workspace gate — covers scheduled runs that
         # bypass the request-context middleware. The HTTP entry point also
@@ -1320,6 +1424,39 @@ async def _execute_recipe_inner(
         if missing_agents:
             await _fail_execution(db, recipe_execution_id, f"Agents not found: {missing_agents}")
             return
+        # F135 (B67, B87): agent #303 was switched off at 14:08:11 and ran a step at 14:08:16.
+        switched_off = [a for a in agents if (a.status or "active") != "active"]
+        if switched_off:
+            names = ", ".join(f"#{a.id} {a.name} ({a.status})" for a in switched_off)
+            await _fail_execution(
+                db, recipe_execution_id,
+                f"Switched off: {names}. Switch the agent on, or give its steps another agent. Nothing ran.")
+            return
+
+        # F182 (night 6): what the run needs is checked once, before step 1. Run
+        # 207 started with no inputs, and its first step wrote to another café's
+        # contact from memory. A declared default fills in ('' never does); a
+        # required input still missing stops the run and asks the owner for it
+        # by name (F140's stop), and their answer's rerun is given it.
+        from core.services.playbook_inputs import input_contract, inputs_question, missing_inputs, with_defaults
+
+        contract = input_contract(recipe.inputs, steps)
+        input_data = with_defaults(contract, input_data)
+        needed = missing_inputs(contract, input_data)
+        if needed:
+            from services.playbook_owner_ask import NEEDS_YOU, stop_for_owner
+
+            first = steps[0]
+            first_agent = agent_map.get(first.get('agent_id'))
+            question = inputs_question(recipe.name, needed, contract)
+            asked = await stop_for_owner(
+                db, execution=execution, recipe=recipe, step_order=first.get('order', 1),
+                agent_id=first.get('agent_id'), agent_name=getattr(first_agent, "name", None),
+                ask={"question": question, "options": None}, step_results=[], step_calls=[], inputs=needed,
+            )
+            if not asked:
+                await _fail_execution(db, recipe_execution_id, f"{NEEDS_YOU} {question}")
+            return
 
         # --- Initialize scratchpad ---
         from core.services.playbook_scratchpad import PlaybookScratchpad
@@ -1328,21 +1465,27 @@ async def _execute_recipe_inner(
         scratchpad.write_meta(recipe_id, total_steps)
 
         # --- Pre-execution: load Mem0 memories ---
+        # F155: none for a run a widget turn started — they are the owner's runs.
         recipe_memories = None
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            recipe_memories = await memory_svc.retrieve_relevant_memories(
-                recipe_id=recipe.id,
-                context={"workspace_id": str(workspace_id), "input_data": input_data}
-            )
-            if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
-                logger.info(
-                    "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
-                    recipe_memories["total_memories"], recipe.id,
+        if not widget_turn():
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                # F159: the parameter is playbook_id. The call passed recipe_id=,
+                # raised TypeError on every run, and was logged as "skipped", so
+                # no run ever recalled its playbook's past runs.
+                recipe_memories = await memory_svc.retrieve_relevant_memories(
+                    playbook_id=recipe.id,
+                    context={"workspace_id": str(workspace_id), "input_data": input_data}
                 )
-        except Exception as exc:
-            logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
+                if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
+                    logger.info(
+                        "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
+                        recipe_memories["total_memories"], recipe.id,
+                    )
+            except Exception as exc:
+                logger.warning("[recipe_direct] Playbook memory recall failed for recipe %s: %s",
+                               recipe.id, exc, exc_info=True)
 
         # F125: execution_config holds seconds. No unit is guessed from the size;
         # only the floors apply (core/services/playbook_timeouts.py).
@@ -1361,9 +1504,17 @@ async def _execute_recipe_inner(
             f"total={total_timeout_sec:.0f}s (configured: step={raw_step:.0f}s, total={raw_total:.0f}s)"
         )
 
+        # F140: a rerun after the owner answered carries the answers in every step's prompt.
+        from services.playbook_owner_ask import NEEDS_YOU, owner_answers_block, owner_question, stop_for_owner
+
+        owner_answers = owner_answers_block(execution.execution_metadata)
+
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
         step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
+        answers: Dict[str, str] = {}      # output_key -> that step's whole answer (F130 placeholders)
+        # PRD-251 US-117: what each finished step offers a fixed step's {{ step_N.key }}.
+        finished_steps: Dict[int, Dict[str, Any]] = {}
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
@@ -1437,8 +1588,10 @@ async def _execute_recipe_inner(
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+            step_type = step.get("type", "agent")
 
-            if not prompt_template:
+            # A fixed generate_document step has no agent and no prompt (PRD-251 US-117).
+            if not prompt_template and step_type != PLAYBOOK_DOCUMENT_STEP:
                 msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
                 logger.warning(f"[recipe_direct] {msg}")
                 step_result = {
@@ -1464,8 +1617,10 @@ async def _execute_recipe_inner(
             )
             logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
-            # Update execution progress
+            # Update execution progress. The stamp tells the reconciler the run is
+            # alive: a run of several steps outlives TASK_STALL_TIMEOUT_SECONDS.
             execution.current_step = idx + 1
+            execution.execution_metadata = _progress_stamped(execution.execution_metadata)
             db.commit()
 
             # PRD-239 S3b: a session agent's step is a Claude Code session on the
@@ -1498,7 +1653,7 @@ async def _execute_recipe_inner(
             }
 
             # Build clean step prompt: input substitutions + trigger context
-            clean_step_prompt = substitute_playbook_input(prompt_template, input_data)
+            clean_step_prompt = fill_step_placeholders(prompt_template, input_data, answers)
 
             # Inject trigger/input context
             trigger_content = input_data.get("content", "") if input_data else ""
@@ -1518,35 +1673,36 @@ async def _execute_recipe_inner(
                 if context_block_parts:
                     clean_step_prompt = "\n\n".join(context_block_parts) + f"\n\n## Your Task\n{clean_step_prompt}"
 
-            # Check for generate_document step type (PRD-63)
-            step_type = step.get("type", "agent")
-            if step_type == "generate_document":
+            # A fixed generate_document step (PRD-63): a PDF/DOCX/XLSX, or a social
+            # image/video rendered by media-render (PRD-251 US-117).
+            if step_type == PLAYBOOK_DOCUMENT_STEP:
                 try:
                     from modules.documents.generation_service import (
                         DocumentGenerationService,
                         deliverables_app_url,
                     )
                     gen = _document_step_config(step)
-
-                    # Resolve {{step_N.field}} variables in data from scratchpad
-                    gen_data = gen["data"]
-                    if scratchpad and isinstance(gen_data, dict):
-                        gen_data = _resolve_doc_step_variables(gen_data, scratchpad)
+                    # {{ step_N.key }} in the title and data: what earlier steps produced.
+                    gen_title, gen_data = _resolved_document_step(gen, finished_steps)
 
                     gen_service = DocumentGenerationService(db, workspace_id)
-                    gen_result = await gen_service.generate(
-                        title=gen["title"],
-                        format=gen["format"],
-                        data=gen_data,
-                        workspace_id=workspace_id,
-                        template_name=gen["template_name"],
-                        template_id=gen["template_id"],
+                    gen_result = await _stamping_progress(
+                        gen_service.generate(
+                            title=gen_title,
+                            format=gen["format"],
+                            data=gen_data,
+                            workspace_id=workspace_id,
+                            template_name=gen["template_name"],
+                            template_id=gen["template_id"],
+                        ),
+                        _mark_progress,
+                        app_config.PLAYBOOK_PROGRESS_STAMP_SECONDS,
                     )
                     # PRD-242 S4: a playbook-rendered document is a Deliverable —
                     # it used to live only inside the step's output JSON.
                     registration = gen_service.register_as_deliverable(
                         gen_result,
-                        title=gen["title"],
+                        title=gen_title,
                         source_type="playbook",
                         source_id=str(getattr(execution, "execution_id", "") or ""),
                         agent_name=getattr(recipe, "name", None),
@@ -1575,6 +1731,7 @@ async def _execute_recipe_inner(
                             agent_output=step_result["output"],
                             agent_exports={},
                         )
+                    finished_steps[step_order] = step_values(step_result["output"])
 
                     logger.info(f"[recipe_direct] Step {step_order} (generate_document) completed: {gen_result.filename}")
                     compact = _build_compact_step_result(step_result)
@@ -1753,11 +1910,15 @@ async def _execute_recipe_inner(
                     return
                 continue
 
+            if owner_answers:  # after the F055 check: an answer is the owner's text, not a template
+                clean_step_prompt = f"{clean_step_prompt}\n\n{owner_answers}"
+
             # Execute with retries
             attempt = 0
             success = False
             last_error = None
             exec_messages = []
+            owner_ask = None
 
             while attempt <= max_retries and not success:
                 if attempt > 0:
@@ -1800,7 +1961,6 @@ async def _execute_recipe_inner(
                         return
 
                     if result.get("status") == "success":
-                        step_result["status"] = "completed"
                         raw_output = result.get("result", "")
                         if isinstance(raw_output, (dict, list)):
                             step_result["output"] = json.dumps(raw_output)
@@ -1814,9 +1974,29 @@ async def _execute_recipe_inner(
                         step_result["tool_calls"] = _normalize_tool_calls(tool_calls_raw)
                         exec_messages = result.get("execution", {}).get("messages", [])
 
+                        # F140: a step that asks the owner stops the run and asks them,
+                        # never retried. Before F131's rule: B4's step 1 failed to read
+                        # the file AND asked for its path; the owner can answer that.
+                        owner_ask = owner_question(step_result["output"], result, prompt_template)
+                        if owner_ask is not None:
+                            break
+
+                        # F131: a step can run to its end and still have failed.
+                        failed = step_failure(step_result["tool_calls"], result)
+                        if failed:
+                            last_error = failed
+                            logger.warning(f"[recipe_direct] Step {step_order} failed: {failed}")
+                            attempt += 1
+                            continue
+
+                        step_result["status"] = "completed"
                         success = True
 
-                        # Write to scratchpad (auto-extract)
+                        # Write to scratchpad (auto-extract). The step's own saved keys
+                        # first: write_step_results replaces them with every export so far.
+                        finished_steps[step_order] = step_values(
+                            step_result["output"], scratchpad.step_exports(step_order) if scratchpad else {}
+                        )
                         agent_exports = scratchpad.get_exports() if scratchpad else {}
                         scratchpad.write_step_results(
                             step_order=step_order,
@@ -1825,6 +2005,7 @@ async def _execute_recipe_inner(
                             agent_exports=agent_exports,
                         )
 
+                        answers[output_key] = step_result["output"]
                         logger.info(f"[recipe_direct] Step {step_order} completed → output_key={output_key} ({step_result['tokens_used']} tokens)")
                     else:
                         last_error = result.get("error", "Agent returned non-success status")
@@ -1842,6 +2023,20 @@ async def _execute_recipe_inner(
             # Finalize step result
             step_result["duration_ms"] = int((time.time() - step_start) * 1000)
             step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+            if owner_ask is not None:
+                step_result["status"] = "failed"
+                step_result["error"] = f"{NEEDS_YOU} {owner_ask['question']}"
+                step_results.append(_build_compact_step_result(step_result))
+                _persist_step_results(db, execution, step_results)
+                asked = await stop_for_owner(
+                    db, execution=execution, recipe=recipe, step_order=step_order, agent_id=agent_id,
+                    agent_name=agent_name, ask=owner_ask, step_results=step_results,
+                    step_calls=step_result["tool_calls"],
+                )
+                if not asked:
+                    await _fail_execution(db, recipe_execution_id, step_result["error"], step_results=step_results)
+                return
 
             if not success:
                 step_result["status"] = "failed"
@@ -2011,9 +2206,13 @@ async def _execute_recipe_inner(
         _update_agent_performance_metrics(db, step_results, success=True)
 
         # --- Post-execution: learning + memory storage ---
+        # F155: a run a widget turn started teaches the playbook nothing and
+        # leaves nothing in memory (a widget turn stores none, F154); later runs
+        # would recall it.
         post_exec_config = recipe.execution_config or {}
         learning_result = None
-        if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
+        remembered = not widget_turn()
+        if remembered and (post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False)):
             try:
                 from core.services.playbook_learning_service import PlaybookLearningService
                 learning_svc = PlaybookLearningService(db=db)
@@ -2023,16 +2222,17 @@ async def _execute_recipe_inner(
                 logger.warning(f"[recipe_direct] Auto-learning failed (non-blocking): {e}")
 
         # Store execution memories in Mem0 + L2 short-term
-        try:
-            from core.services.playbook_memory_service import PlaybookMemoryService
-            memory_svc = PlaybookMemoryService(db=db)
-            await memory_svc.store_execution_memory(
-                recipe_execution_id,
-                learnings=learning_result,
-            )
-            logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
-        except Exception as e:
-            logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
+        if remembered:
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                await memory_svc.store_execution_memory(
+                    recipe_execution_id,
+                    learnings=learning_result,
+                )
+                logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
+            except Exception as e:
+                logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
@@ -2043,6 +2243,7 @@ async def _execute_recipe_inner(
                 f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"
             )
     finally:
+        origin.close()
         # Cleanup scratchpad TTL
         if scratchpad:
             try:
@@ -2055,7 +2256,7 @@ async def _execute_recipe_inner(
 
 
 # ---------------------------------------------------------------------------
-# Prompt resolution (kept for backward compat — used by _resolve_prompt callers)
+# Prompt resolution: the run's input and the earlier steps' answers
 # ---------------------------------------------------------------------------
 
 # `{input}` and `{input.<field>}` — the placeholders a playbook step may use to
@@ -2098,90 +2299,32 @@ def unresolved_input_placeholders(text: str) -> List[str]:
     return sorted(set(_INPUT_PLACEHOLDER_RE.findall(text or "")))
 
 
-def _resolve_prompt(
+# `{{name}}` — a named blank (F130). Inner spaces allowed: `{{ name }}`.
+_NAMED_BLANK_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def fill_step_placeholders(
     template: str,
-    input_data: dict,
-    step_outputs: Dict[str, Dict[str, Any]],
+    input_data: Optional[Dict[str, Any]],
+    answers: Optional[Dict[str, str]] = None,
 ) -> str:
+    """Fill a step's placeholders: F055's ``{input}`` and ``{input.<field>}``,
+    then (F130) ``{{name}}`` from the run's input of that name, else from the
+    answer an earlier step stored under that ``output_key``, and ``{output_key}``
+    from that answer.
+
+    Night 4: ``{{date}}``, ``{{month}} {{year}}`` and ``{{roast_log_filename}}``
+    reached the agents literally although the run supplied exactly those keys
+    (B8, B27, B57), and step 2's ``{{price_per_kilo}}`` stayed blank after step 1
+    stored "£22.00" under that key (B68). A blank that names neither is left as
+    written: a prompt may be asking for a template.
     """
-    Resolve a step's prompt template with variable substitution.
-
-    IMPORTANT: The task instruction stays at the TOP of the prompt.
-    Context from previous steps is appended BELOW with a separator.
-
-    Supports:
-    - {input.field_name} — from user input_data
-    - {previous_output} — text from the most recently completed step (backward compat)
-    - {step_N_output} — text from step N by order (backward compat)
-    - {output_key} — text from a step by its output_key (NEW)
-    """
-    resolved = template
-
-    # Substitute {input} and {input.xxx} placeholders (F055)
-    resolved = substitute_playbook_input(resolved, input_data)
-
-    # Determine "previous_output" for backward compat: last step's text
-    previous_output: Optional[str] = None
-    if step_outputs:
-        last_entry = max(step_outputs.values(), key=lambda v: v.get("step_order", 0))
-        previous_output = last_entry.get("text", "")
-
-    if previous_output:
-        resolved = resolved.replace("{previous_output}", previous_output)
-
-    for key, entry in step_outputs.items():
-        order = entry.get("step_order", 0)
-        text = entry.get("text", "")
-        if text:
-            resolved = resolved.replace(f"{{step_{order}_output}}", text)
-
-    for key, entry in step_outputs.items():
-        text = entry.get("text", "")
-        if text:
-            resolved = resolved.replace(f"{{{key}}}", text)
-
-    has_explicit_ref = (
-        "{previous_output}" in template
-        or any(f"{{step_{e.get('step_order', 0)}_output}}" in template for e in step_outputs.values())
-        or any(f"{{{k}}}" in template for k in step_outputs)
-    )
-
-    if step_outputs and not has_explicit_ref:
-        context_parts = []
-        context_parts.append("=" * 60)
-        context_parts.append("DATA FROM PREVIOUS STEPS")
-        context_parts.append("When the task above mentions 'results', 'output', 'data',")
-        context_parts.append("or 'findings', it refers to the content below.")
-        context_parts.append("USE THIS CONTENT to complete the task — do not invent data.")
-        context_parts.append("=" * 60)
-
-        sorted_entries = sorted(step_outputs.items(), key=lambda kv: kv[1].get("step_order", 0))
-        for out_key, entry in sorted_entries:
-            sr_order = entry.get("step_order", "?")
-            sr_agent = entry.get("agent_name", "Agent")
-            sr_output = entry.get("text", "")
-            sr_tool_calls = entry.get("tool_calls", [])
-
-            context_parts.append(f"\n--- Step {sr_order} ({out_key}): {sr_agent} ---")
-
-            if sr_tool_calls:
-                for tc in sr_tool_calls:
-                    action = tc.get("action", "unknown")
-                    tc_result = tc.get("result", "")
-                    if tc_result:
-                        result_str = json.dumps(tc_result, indent=2) if isinstance(tc_result, (dict, list)) else str(tc_result)
-                        if len(result_str) > 20000:
-                            result_str = result_str[:20000] + "\n... (truncated)"
-                        context_parts.append(f"[Tool: {action}]\n{result_str}")
-
-            if sr_output:
-                output_preview = sr_output[:12000]
-                if len(sr_output) > 12000:
-                    output_preview += "\n... (truncated)"
-                context_parts.append(f"[Agent Output]\n{output_preview}")
-
-        resolved = f"{resolved}\n\n" + "\n".join(context_parts)
-
+    resolved = substitute_playbook_input(template, input_data)
+    answers = {key: answer_for_next_step(text) for key, text in (answers or {}).items() if text}
+    values = {**answers, **{key: str(value) for key, value in (input_data or {}).items()}}
+    resolved = _NAMED_BLANK_RE.sub(lambda m: values.get(m.group(1), m.group(0)), resolved)
+    for key, text in answers.items():
+        resolved = resolved.replace(f"{{{key}}}", text)
     return resolved
 
 
@@ -2196,6 +2339,8 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     (a UUID string — the id ``platform_list_templates`` hands out) is parsed
     here so an invalid one fails the step with a clear message instead of a
     stack trace deep in the renderer; it takes precedence over ``template_name``.
+    ``data`` is an object, or (PRD-251 US-117) one ``{{ step_N.key }}`` string
+    naming an object an earlier step produced.
     """
     cfg = step.get("config", step) if isinstance(step, dict) else {}
     raw_id = cfg.get("template_id")
@@ -2209,33 +2354,46 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": cfg.get("title", "Document"),
         "format": cfg.get("format", "pdf"),
-        "data": data if isinstance(data, dict) else {},
+        "data": data if isinstance(data, (dict, str)) else {},
         "template_name": cfg.get("template_name"),
         "template_id": template_id,
     }
 
 
-def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
-    """
-    Resolve {{ step_N.field }} placeholders in document step data from scratchpad.
-    Works recursively on dicts, lists, and strings.
-    """
-    import re
+def _resolved_document_step(gen: Dict[str, Any], finished_steps: Dict[int, Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    """The step's title and data with every ``{{ step_N.key }}`` resolved (PRD-251 US-117). Pure.
 
-    if isinstance(data, str):
-        # Replace {{ step_N.field }} or {{ step_N.output }}
-        def _replace(match):
-            step_num = int(match.group(1))
-            field = match.group(2)
-            ctx = scratchpad.format_context_for_step(step_num + 1)  # get results UP TO step_num
-            return ctx if ctx else match.group(0)
+    What each reference reads is ``core/services/playbook_step_refs.py``: an
+    earlier step's output, its scratchpad_write keys, or the keys of its JSON
+    answer. A reference no earlier step answers fails the step, naming it, and
+    nothing is rendered. The data must come out an object.
+    """
+    title = resolve_step_references(gen["title"], finished_steps)
+    data = resolve_step_references(gen["data"], finished_steps)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"generate_document step: data must be an object, or a reference to one, not {type(data).__name__}"
+        )
+    return str(title), data
 
-        return re.sub(r"\{\{\s*step_(\d+)\.(\w+)\s*\}\}", _replace, data)
-    elif isinstance(data, dict):
-        return {k: _resolve_doc_step_variables(v, scratchpad) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [_resolve_doc_step_variables(item, scratchpad) for item in data]
-    return data
+
+def step_failure(tool_calls: List[Dict[str, Any]], result: Dict[str, Any]) -> Optional[str]:
+    """Why a step that ran to its end failed, from deterministic signals, or None.
+
+    F131 (night 4): the run's status came from the loop finishing, never from what
+    the steps did. B33, B25: a step's tool call failed in words while the turn
+    ended normally, so the step's 'stop' never fired and the run said complete.
+    B47: a session step never reached Automatos ("No Automatos tools this
+    session") and the run said "Playbook complete". Whether the step's answer
+    MEANS it failed is the PRD-204 watch's job (Gerard's wiring), not this.
+    """
+    if result.get("session_connected") is False:
+        return "the session never reached Automatos, so it ran without any of its tools"
+    if tool_calls and tool_calls[-1].get("success") is False:
+        last = tool_calls[-1]
+        said = " ".join(str(last.get("result") or "").split())[:200]
+        return f"its last tool call, {last.get('action') or 'a tool'}, failed" + (f": {said}" if said else "")
+    return None
 
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
@@ -2251,6 +2409,7 @@ def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
                     "params": call.get("params") or call.get("function", {}).get("arguments", {}),
                     "result": call.get("result") or call.get("content", {}),
                     "duration_ms": call.get("duration_ms", 0),
+                    "success": call.get("success"),
                 })
         return normalized
     return []
@@ -2348,6 +2507,16 @@ async def _fail_execution(
             RecipeExecution.execution_id == execution_id
         ).first()
         if execution:
+            # F197: a credit failure is said in plain words (the raw text is in the
+            # log), and a scheduled run that hit it is marked to go again once
+            # credit is back.
+            from core.llm.credit import is_out_of_credit, mark_for_rerun, plain_failure
+
+            if is_out_of_credit(error_message):
+                logger.warning(f"[F197] {execution_id} stopped on credit: {error_message}")
+                error_message = plain_failure(error_message, scheduled=mark_for_rerun(execution))
+            else:
+                error_message = plain_failure(error_message)
             execution.status = 'failed'
             execution.error_message = error_message
             execution.completed_at = datetime.now(timezone.utc)

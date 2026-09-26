@@ -92,6 +92,18 @@ class PlaybookContextSection(BaseSection):
                 "Use ONLY the external app actions that are directly relevant to your specific task."
             )
 
+        # F140: how a step that cannot go on without the owner says so. Night 4:
+        # two runs drafted orders with quantities nobody gave them.
+        from services.playbook_owner_ask import NEEDS_YOU_LINE
+
+        parts.append(
+            "\nIf you cannot finish this step without the owner (a file you cannot find, a figure "
+            "only they know, a decision that is theirs), do not guess. Ask them with "
+            f"platform_ask_human (only the question), or end your answer with one line: "
+            f"`{NEEDS_YOU_LINE} <your question>`. The run stops there and asks the owner; their "
+            "answer runs the playbook again from step 1."
+        )
+
         # Instructions body
         if instructions:
             parts.append(f"\n{instructions}")

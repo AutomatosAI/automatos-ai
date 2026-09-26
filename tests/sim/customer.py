@@ -31,7 +31,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .api import Api, ApiError, Trace
-from .config import DEFAULT_WORKSPACE_ID, LOGS_DIR, SIM_HOME, ConfigError, load_settings
+from .config import (DEFAULT_WORKSPACE_ID, LOGS_DIR, MIN_BALANCE_USD, PLATFORM_KEY_WORKSPACE_ID, SIM_HOME, ConfigError,
+                     load_settings)
 from .customer_ops import (cost_table, inventory, local_time, purge_tagged, question_line, render_inventory,
                            render_prompt)
 from .judge import judge_output
@@ -162,8 +163,13 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     # settings and blueprint defaults and nobody had a before-picture.
     snapshot = _write_state_snapshot(api, args)
     print("state snapshot: " + (str(snapshot) if snapshot else "not written (no night dir set)"))
-    balance = _openrouter_balance(api)
-    print(f"openrouter balance: {balance}")
+    left, said = _openrouter_balance(api)
+    print(f"openrouter balance: {said}")
+    if left is None or left < MIN_BALANCE_USD:
+        # F208: night 6 launched with the balance unknown and died of it at iteration 10.
+        print(f"REFUSED: a night has cost $3-11; launch with at least ${MIN_BALANCE_USD:,.2f} of OpenRouter credit "
+              "known (top up at https://openrouter.ai/settings/credits, or set SIM_MIN_BALANCE_USD).")
+        ok = False
     return 0 if ok else 2
 
 
@@ -194,23 +200,31 @@ def _write_state_snapshot(api: Any, args: argparse.Namespace) -> Optional[Path]:
     return target
 
 
-def _openrouter_balance(api: Any) -> str:
-    """The credit the night will spend, or why it could not be read.
+CREDITS_PATH = "/api/analytics/llm/openrouter/credits"
 
-    Night 1 ran with the balance unknown; a night that cannot pay is better
-    stopped at preflight than discovered at 3am.
+
+def _openrouter_balance(api: Any) -> tuple[Optional[float], str]:
+    """What the night can spend (credits minus usage), and the line that says
+    so; None when it could not be read.
+
+    Night 1 ran with the balance unknown. F208: night 6 asked
+    /api/v1/providers/openrouter/balance, which does not exist (404), launched
+    anyway and died of it at iteration 10. The credits route answers for the
+    platform key's workspace (c1), not a sim workspace.
     """
+    c1 = Api(api.base_url, api.api_key or None, PLATFORM_KEY_WORKSPACE_ID, api.trace, timeout_s=api.timeout_s)
     try:
-        resp = api.request("GET", "/api/v1/providers/openrouter/balance")
-        if resp.status == 200:
-            data = json.loads(resp.body)
-            for key in ("balance", "credits", "remaining", "usage_remaining"):
-                if data.get(key) is not None:
-                    return f"{data[key]}"
-            return json.dumps(data)[:120]
-        return f"unavailable (HTTP {resp.status}) — check it in the OpenRouter dashboard before launching"
-    except Exception as exc:  # noqa: BLE001
-        return f"unavailable ({type(exc).__name__}) — check it in the OpenRouter dashboard before launching"
+        resp = c1.request("GET", CREDITS_PATH)
+    except Exception as exc:  # noqa: BLE001 — unreadable is its own answer
+        return None, f"unavailable ({type(exc).__name__})"
+    if resp.status != 200:
+        return None, f"unavailable (HTTP {resp.status} from {CREDITS_PATH} in c1)"
+    try:
+        data = json.loads(resp.body)
+        credits, usage = float(data["total_credits"]), float(data["total_usage"])
+    except (ValueError, KeyError, TypeError):
+        return None, f"unreadable ({resp.body[:120]})"
+    return credits - usage, f"${credits - usage:,.2f} left (credits ${credits:,.2f} - usage ${usage:,.2f})"
 
 
 def cmd_render_prompt(args: argparse.Namespace) -> int:

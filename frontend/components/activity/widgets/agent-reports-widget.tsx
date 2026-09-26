@@ -23,25 +23,42 @@ import {
 import { useAgentReports } from '@/hooks/use-activity-api'
 import type { AgentReport } from '@/hooks/use-activity-api'
 import { useAgents } from '@/hooks/use-agent-api'
+import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 
-const PINNED_AGENTS_KEY = 'automatos:pinned-agents'
 const MAX_PINNED = 12
 
-function loadPinnedAgents(): number[] {
+/** F157: pins are kept per workspace. An agent id belongs to one workspace, so
+ *  a single browser-wide list carried pins that name no agent here. */
+export function pinnedAgentsKey(workspaceId: string): string {
+  return `automatos:pinned-agents:${workspaceId}`
+}
+
+function loadPinnedAgents(workspaceId: string): number[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = localStorage.getItem(PINNED_AGENTS_KEY)
-    return raw ? JSON.parse(raw) : []
+    const raw = localStorage.getItem(pinnedAgentsKey(workspaceId))
+    const ids: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(ids) ? ids.filter((id): id is number => Number.isInteger(id)) : []
   } catch {
     return []
   }
 }
 
-function savePinnedAgents(ids: number[]) {
+function savePinnedAgents(workspaceId: string, ids: number[]) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(PINNED_AGENTS_KEY, JSON.stringify(ids))
+  try {
+    localStorage.setItem(pinnedAgentsKey(workspaceId), JSON.stringify(ids))
+  } catch {
+    // Storage full or blocked: the pins last for this visit only.
+  }
+}
+
+/** F157: the pins that are still this workspace's agents, in pin order. */
+export function livePins(pinnedIds: number[], agentIds: number[]): number[] {
+  const here = new Set(agentIds)
+  return pinnedIds.filter((id) => here.has(id))
 }
 
 interface SimpleAgent {
@@ -183,28 +200,38 @@ interface AgentReportsWidgetProps {
 }
 
 export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
+  const workspaceId = useWorkspaceOptional()?.workspace?.id?.toString() ?? ''
   const [pinnedIds, setPinnedIds] = useState<number[]>([])
-  const [initialized, setInitialized] = useState(false)
 
-  // Load pinned IDs from localStorage
+  // Load this workspace's pins from localStorage
   useEffect(() => {
-    setPinnedIds(loadPinnedAgents())
-    setInitialized(true)
-  }, [])
+    setPinnedIds(workspaceId ? loadPinnedAgents(workspaceId) : [])
+  }, [workspaceId])
 
   const { data: rawAgents, isLoading: agentsLoading } = useAgents()
   // Map to SimpleAgent shape — useAgents returns full AgentResponse objects
   const allAgents: SimpleAgent[] | undefined = rawAgents
     ? (rawAgents as any[]).map((a: any) => ({ id: a.id, name: a.name, premium_icon: a.premium_icon ?? null }))
     : undefined
+
   const hasPinned = pinnedIds.length > 0
   // Pinning is a FILTER, not a precondition. With nothing pinned the endpoint
-  // returns the agents that reported most recently, so the panel shows the
-  // workspace's reports instead of silently showing three agents' worth.
+  // returns the agents that reported most recently, and the panel shows them.
   const { data: reportsData, isLoading: reportsLoading } = useAgentReports(pinnedIds)
   const reports = reportsData?.reports ?? []
+  // A pinned agent that never reported still comes back, as status no_data.
+  const hasReports = reports.some((report) => report.status !== 'no_data')
 
-  const showReportsLoading = reportsLoading
+  // F157: every pinned agent of this workspace comes back with an entry; a pin
+  // with none names no agent here any more (deleted, or recreated with a new id)
+  // and is dropped. It used to stay, and the panel showed nothing at all.
+  useEffect(() => {
+    if (!workspaceId || pinnedIds.length === 0 || !reportsData) return
+    const live = livePins(pinnedIds, reportsData.reports.map((report) => report.agent_id))
+    if (live.length === pinnedIds.length) return
+    setPinnedIds(live)
+    savePinnedAgents(workspaceId, live)
+  }, [workspaceId, pinnedIds, reportsData])
 
   const togglePin = useCallback((id: number) => {
     setPinnedIds((prev) => {
@@ -213,10 +240,10 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
         : prev.length < MAX_PINNED
           ? [...prev, id]
           : prev
-      savePinnedAgents(next)
+      if (workspaceId) savePinnedAgents(workspaceId, next)
       return next
     })
-  }, [])
+  }, [workspaceId])
 
   return (
     <div className={cn('h-full flex flex-col', className)}>
@@ -250,17 +277,27 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
       </div>
 
       <div className="flex-1 overflow-x-auto px-4 py-3">
-        {agentsLoading ? (
+        {agentsLoading || reportsLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
-        ) : !hasPinned ? (
-          /* No agents pinned — show inline pin selector */
+        ) : hasPinned && !hasReports ? (
+          /* F157: pinned agents that have never reported — say so, not a row of empty cards */
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <Bot className="w-8 h-8 mb-3 opacity-30" />
-            <p className="text-sm font-medium mb-1">No agents pinned</p>
+            <p className="text-sm font-medium mb-1">Your pinned agents have no reports</p>
+            <p className="text-xs text-center max-w-[260px]">
+              Change the pins with the settings button, or unpin them all to see the
+              workspace&apos;s most recent reports.
+            </p>
+          </div>
+        ) : !hasReports ? (
+          /* Nothing pinned and nobody has reported yet — offer the pins */
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+            <Bot className="w-8 h-8 mb-3 opacity-30" />
+            <p className="text-sm font-medium mb-1">No agent reports yet</p>
             <p className="text-xs mb-4 text-center max-w-[250px]">
-              Pin agents to track their latest routine reports here
+              Agents&apos; routine reports appear here. Pin agents to follow them.
             </p>
             {allAgents && allAgents.length > 0 ? (
               <div className="w-full max-w-[280px] border border-border/50 rounded-lg p-2 bg-secondary/20">
@@ -275,10 +312,6 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
                 Create agents first to see reports
               </p>
             )}
-          </div>
-        ) : showReportsLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">

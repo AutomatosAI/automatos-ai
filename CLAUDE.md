@@ -1,6 +1,8 @@
 # CLAUDE.md — Automatos AI Platform
 
-> Project-specific guidance for Claude. Complements the user's global `~/.claude/CLAUDE.md`.
+@AGENTS.md
+
+> The rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md), imported above. This file adds the maintainer's Claude workflow: memory, the graph, PRD framing and scope. It complements the user's global `~/.claude/CLAUDE.md`.
 
 ## 1. Where this project is
 
@@ -40,15 +42,7 @@ If the PRD is ambiguous, **ask before assuming**.
 
 ## 4. Clean-coding rules (Automatos-specific)
 
-These are non-negotiable on this codebase:
-
-- **No backward-compat shims.** When a path is replaced, the old one is deleted in the same PR. No "_legacy" suffix that lives forever. (See memory: `feedback-no-backward-compat.md`.)
-- **No file hacks for DB data.** Personas, configs, agent definitions belong in the database, not loaded from files at runtime. (See memory: `feedback-no-file-hacks-for-db-data.md`.)
-- **No `os.getenv()` outside `config.py`.** All env reads go through the canonical config module. Enforced across 86 files.
-- **No hardcoded values.** Constants and config only.
-- **No new tables when an existing one fits.** This is the #1 rule for PRDs that feel "new" — the table probably exists.
-- **No new tools when an existing tool can be extended.** The 3-file platform-tool registration pattern is the canonical extension point. (See memory: `prd71-tools.md`.)
-- **No duplicate hooks.** If `useDeliverables` exists, don't add `useDeliverablesV2`. Refactor the existing one.
+They are the **Hard rules** and **Code shape** sections of [AGENTS.md](AGENTS.md), imported at the top of this file. They are non-negotiable, and CI checks them on changed lines.
 
 ---
 
@@ -118,17 +112,7 @@ After significant changes (new files, renames, architecture shifts), suggest run
 
 ## 10. Canonical terms — do not drift
 
-| Use | Do not use |
-|---|---|
-| **Playbook** | ~~Recipe~~ (legacy) |
-| **Mission** | ~~Workflow~~, ~~Job~~ |
-| **Task** | (canonical: `BoardTask`; mission sub-tasks are `OrchestrationTask`) |
-| **Deliverable** | ~~Output~~, ~~Workspace file~~, ~~Artifact~~ (in user-facing copy) |
-| **Knowledge Graph** | ~~Business Graph~~ |
-| **Command Center** | ~~Activity~~ (renamed) |
-| **Auto** | "the assistant" — Auto is a proper noun, a character |
-
-Drift costs the user. Use the right word.
+The table is in [AGENTS.md](AGENTS.md#canonical-terms). Drift costs the user: use the right word.
 
 ---
 

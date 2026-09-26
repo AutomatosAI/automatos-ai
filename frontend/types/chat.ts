@@ -216,6 +216,8 @@ export type MessagePart =
   | { type: 'text'; text: string }
   /** PRD-238 S1: the model's deliberation, stored beside the answer, shown collapsed. */
   | { type: 'reasoning'; reasoning: string }
+  /** F186: what the model said before its tool calls, stored beside the answer, shown in the activity trail. */
+  | { type: 'narration'; narration: string }
   /** PRD-239 S2: a ticket card persisted with the reply (a session agent's turn). */
   | { type: 'task_card'; card: TaskCardData }
   | { type: 'file'; filename: string; mediaType: string; url: string }

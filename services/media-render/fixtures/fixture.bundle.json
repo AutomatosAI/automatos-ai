@@ -1,0 +1,14 @@
+{
+  "workspace_id": "media-render-fixture",
+  "reference": "the committed fixture (CI)",
+  "composition": {},
+  "variables": {"headline": "Rendered on brand"},
+  "brand": {"tokens": {"bg": "#14171c", "text": "#f3efe6", "accent": "#e96235"}},
+  "audio": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [{"id": "l01", "at": 0.3, "text": "Rendered on brand, in three seconds."}]
+    }
+  }
+}

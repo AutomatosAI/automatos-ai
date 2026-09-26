@@ -5,6 +5,7 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_agents_actions(registry: ActionRegistry) -> None:
     """Register all agent-related platform actions."""
+    from core.llm.defaults import DEFAULT_LLM_MODEL
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -142,9 +143,9 @@ def register_agents_actions(registry: ActionRegistry) -> None:
                 "model_id": {
                     "type": "string",
                     "description": (
-                        "LLM model ID to use. Examples: 'gpt-4o', 'gpt-4o-mini', "
-                        "'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'. "
-                        "Defaults to 'gpt-4o' if not specified."
+                        "LLM model ID, as platform_list_workspace_models lists it "
+                        f"(e.g. '{DEFAULT_LLM_MODEL}'). Omit it for the default model, "
+                        f"{DEFAULT_LLM_MODEL}."
                     ),
                 },
                 "system_prompt": {
@@ -191,6 +192,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "make a new researcher agent",
             "create a support agent using claude sonnet with a helpful persona",
         ],
+        accepts=("model", "provider"),
     ))
 
     registry.register(ActionDefinition(
@@ -229,7 +231,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
                 "model_id": {
                     "type": "string",
                     "description": (
-                        "New LLM model ID (e.g. 'gpt-4o', 'claude-sonnet-4-20250514')."
+                        "New LLM model ID, as platform_list_workspace_models lists it "
+                        f"(e.g. '{DEFAULT_LLM_MODEL}'). An id the catalog does not have is refused."
                     ),
                 },
                 "system_prompt": {
@@ -272,6 +275,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "change the support agent's model to claude sonnet",
             "update agent 3's system prompt to be more formal",
         ],
+        accepts=("provider",),
     ))
 
     # ── Destructive ──────────────────────────────────────────────────

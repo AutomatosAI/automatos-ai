@@ -1,0 +1,19 @@
+{
+  "workspace_id": "media-render-fixture",
+  "reference": "the committed fixture with music (CI)",
+  "composition": {},
+  "variables": {"headline": "Music under the voice"},
+  "brand": {"tokens": {"bg": "#14171c", "text": "#f3efe6", "accent": "#e96235"}},
+  "audio": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [
+        {"id": "l01", "at": 0.3, "text": "Music from the library, under the voice."},
+        {"id": "l02", "at": 4.2, "text": "The beat comes back on the drop."},
+        {"id": "l03", "at": 6.9, "text": "Ready to post."}
+      ]
+    },
+    "music": {"track": "deep-house-003", "start": 32.0}
+  }
+}

@@ -5,6 +5,7 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_marketplace_actions(registry: ActionRegistry) -> None:
     """Register marketplace discovery, workspace inventory, and install actions."""
+    from core.llm.defaults import DEFAULT_LLM_MODEL
 
     # ── Marketplace Discovery (read) ────────────────────────────────
 
@@ -268,7 +269,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
         name="platform_install_model",
         description=(
             "Install an LLM model from OpenRouter catalog. "
-            "Use the model_id format like 'anthropic/claude-sonnet-4-20250514'. "
+            f"Use OpenRouter's vendor/model id, like '{DEFAULT_LLM_MODEL}'. "
             "Idempotent — re-installing reactivates inactive installs. "
             "Auto-creates registry entry from OpenRouter cache if needed."
         ),
@@ -278,7 +279,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "model_id": {
                     "type": "string",
-                    "description": "OpenRouter model ID (e.g., 'anthropic/claude-sonnet-4-20250514').",
+                    "description": f"OpenRouter model ID (e.g. '{DEFAULT_LLM_MODEL}').",
                 },
             },
             "required": ["model_id"],
@@ -286,10 +287,11 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
         permission_level="write",
         tags=["marketplace", "models", "llm", "install", "enable"],
         examples=[
-            "install anthropic/claude-sonnet-4-20250514",
+            f"install {DEFAULT_LLM_MODEL}",
             "add model google/gemini-2.5-pro",
             "enable openai/gpt-4o",
         ],
+        accepts=("provider",),
     ))
 
     # PRD-143 S11: the disable side of platform_install_plugin (administration
@@ -318,6 +320,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
         },
         permission_level="destructive",
         requires_confirmation=True,
+        admin_only=True,  # F151: REST: workspace:manage
         tags=["marketplace", "plugins", "disable", "uninstall"],
         examples=[
             "disable the shopify plugin",

@@ -22,8 +22,16 @@ The actor gate runs first and fails closed on anything suspicious:
   These rows are platform-seeded (Auto, Auto CTO, onboarding agents).
 
 Everyone else is scoped to their org subtree: an actor may modify any agent in
-(or equal to) their ``reports_to_id`` subtree, plus tasks/playbooks owned by an
-agent in that subtree, and only within their own workspace.
+(or equal to) their ``reports_to_id`` subtree, plus tasks owned by an agent in
+that subtree, and only within their own workspace.
+
+Playbooks belong to the person who made them, not to an agent (F133): an actor
+may change one only while the call is made FOR its creator
+(``workflow_recipes.created_by_user_id``) or for a workspace owner/admin
+(:mod:`core.security.driving_user`), read from the server-built caller context.
+The owner lookup used to query a ``created_by_agent_id`` column that never
+existed; the error was swallowed, so every such edit was refused as
+``unresolved_owner``.
 
 Authority *limits* (out-of-subtree, unresolved owner, workspace-global skills,
 broken hierarchy) deny with ``escalation_target="auto"`` so the caller can route
@@ -39,9 +47,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Set
+from typing import Any, Mapping, Optional, Set, Tuple
 
 from sqlalchemy import text
+
+from core.security.driving_user import driver_is_workspace_admin, driving_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +88,26 @@ SYSTEM_BYPASS_ALLOWLIST: frozenset = frozenset({
 # a cycle the visited-set missed (defence in depth).
 MAX_SUBTREE_DEPTH: int = 16
 
+# F133: what a refused playbook edit tells the agent, so it can get it done.
+_PLAYBOOK_REFUSALS = {
+    "no_driving_user": (
+        "This change is not being made for anyone, and only the playbook's creator or a "
+        "workspace owner or admin can change it. Ask for it in chat, or ask Auto to make it."
+    ),
+    "no_creator_recorded": (
+        "This playbook has no recorded creator, so only a workspace owner or admin can change "
+        "it. Ask one of them, or ask Auto."
+    ),
+    "not_the_creators_agent": (
+        "Only the person who made this playbook, or a workspace owner or admin, can change it. "
+        "Ask them, or ask Auto."
+    ),
+    "owner_lookup_failed": (
+        "The playbook's creator could not be checked, so the change was refused. Try again, "
+        "or ask Auto."
+    ),
+}
+
 
 # ----------------------------------------------------------------- types
 
@@ -104,6 +134,7 @@ class PermissionDecision:
     target_id: Optional[str] = None
     change_type: Optional[str] = None
     source: Optional[str] = None
+    message: Optional[str] = None  # F133: the refusal in words the agent can act on
 
 
 # ----------------------------------------------------------------- main API
@@ -118,12 +149,14 @@ def can_actor_modify(
     target_id: Optional[object] = None,
     change_type: str = "update",
     source: Optional[str] = None,
+    caller_context: Optional[Mapping[str, Any]] = None,
 ) -> PermissionDecision:
     """Decide whether ``actor`` may apply ``change_type`` to ``target``.
 
     ``workspace_id`` scopes every check — cross-tenant mutations are denied
-    here. Never raises for permission state — always returns a
-    ``PermissionDecision``.
+    here. ``caller_context`` is the server-built context of the call (who it is
+    made for); only playbooks read it. Never raises for permission state —
+    always returns a ``PermissionDecision``.
     """
     ws = _ws(workspace_id)
 
@@ -149,7 +182,10 @@ def can_actor_modify(
                      source=source, escalate=False)
 
     # --- Narrowed system bypass: flag AND allowlisted name ---------------
-    if bool(actor.is_system_agent) and (actor.name or "") in SYSTEM_BYPASS_ALLOWLIST:
+    # F155: never on a public widget turn — there Auto answers a visitor.
+    from core.security.surface import widget_turn
+
+    if bool(actor.is_system_agent) and (actor.name or "") in SYSTEM_BYPASS_ALLOWLIST and not widget_turn():
         return _allow(
             "system_actor_bypass", target_type, target_id, change_type,
             actor_id=actor_agent_id, actor_name=actor.name, source=source,
@@ -174,9 +210,8 @@ def can_actor_modify(
                                 target_type, target_id, change_type, source)
 
     if target_type == TARGET_PLAYBOOK:
-        owner = _owner_id(db, "SELECT created_by_agent_id FROM workflow_recipes WHERE id = :id", target_id)
-        return _scope_via_owner(db, actor, actor_agent_id, ws, owner,
-                                target_type, target_id, change_type, source)
+        return _scope_playbook(db, actor, actor_agent_id, ws, target_id, change_type, source,
+                               caller_context)
 
     return _deny(
         f"unknown_target_type:{target_type}", target_type, target_id, change_type,
@@ -234,6 +269,50 @@ def _scope_via_owner(db, actor, actor_id, ws, owner_id, target_type, target_id, 
 
     return _by_subtree(db, actor, actor_id, owner_int, target_type, target_id, change_type, source,
                        allow_reason="owner_in_subtree", deny_reason="owner_out_of_subtree")
+
+
+def _scope_playbook(db, actor, actor_id, ws, target_id, change_type, source,
+                    caller_context) -> PermissionDecision:
+    """F133 (B9): a playbook edit is made for its creator, or for a workspace
+    owner/admin. Everything else is refused, fail-closed, with the real cause."""
+    who = dict(actor_id=actor_id, actor_name=actor.name, source=source)
+
+    def refuse(reason, *, escalate=True, cause=None):
+        return _deny(f"{reason}:{cause}" if cause else reason, TARGET_PLAYBOOK, target_id, change_type,
+                     escalate=escalate, message=_PLAYBOOK_REFUSALS.get(reason), **who)
+
+    if target_id is None:
+        return refuse("missing_target")
+    try:
+        found, creator = _playbook_creator(db, target_id, ws)
+    except Exception as exc:  # noqa: BLE001 — refused with its cause, never swallowed
+        logger.warning("[hierarchy] creator lookup for playbook %s failed: %r", target_id, exc)
+        return refuse("owner_lookup_failed", cause=type(exc).__name__)
+    if not found:
+        return refuse("target_not_found", escalate=False)
+    driver = driving_user_id(caller_context)
+    if driver is None:
+        return refuse("no_driving_user")
+    if creator is not None and creator == driver:
+        return _allow("acts_for_creator", TARGET_PLAYBOOK, target_id, change_type, **who)
+    if driver_is_workspace_admin(db, ws, caller_context):
+        return _allow("acts_for_workspace_admin", TARGET_PLAYBOOK, target_id, change_type, **who)
+    return refuse("no_creator_recorded" if creator is None else "not_the_creators_agent")
+
+
+def _playbook_creator(db, target_id, ws) -> Tuple[bool, Optional[int]]:
+    """(the playbook exists in this workspace, its creator's users.id). A
+    non-numeric id is no playbook. Raises when the lookup itself fails."""
+    playbook_id = _as_int(target_id)
+    if playbook_id is None:
+        return False, None
+    with db.begin_nested():
+        row = db.execute(
+            text("SELECT created_by_user_id FROM workflow_recipes "
+                 "WHERE id = :id AND workspace_id = CAST(:ws AS uuid)"),
+            {"id": playbook_id, "ws": ws},
+        ).first()
+    return (row is not None), (int(row[0]) if row is not None and row[0] is not None else None)
 
 
 def _by_subtree(db, actor, actor_id, candidate_id, target_type, target_id, change_type, source,
@@ -349,7 +428,8 @@ def _allow(reason, target_type, target_id, change_type, *,
 
 
 def _deny(reason, target_type, target_id, change_type, *,
-          actor_id=None, actor_name=None, source=None, escalate=False) -> PermissionDecision:
+          actor_id=None, actor_name=None, source=None, escalate=False,
+          message=None) -> PermissionDecision:
     return PermissionDecision(
         allowed=False,
         reason=reason,
@@ -360,4 +440,5 @@ def _deny(reason, target_type, target_id, change_type, *,
         target_id=_sid(target_id),
         change_type=change_type,
         source=source,
+        message=message,
     )

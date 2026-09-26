@@ -160,11 +160,26 @@ def test_admin_only_denied_for_non_admin_caller(patched_gate):
     assert v.error.code == "admin_required"
 
 
-def test_admin_only_allowed_for_admin_caller(patched_gate):
+def test_admin_only_allowed_for_a_call_made_for_a_workspace_admin(patched_gate, monkeypatch):
+    # F145: the gate asks the executor's question, who the call is made for
+    # (core.security.driving_user); user 7 holds an owner row here (stubbed).
+    import core.security.driving_user as driving_user
+
+    monkeypatch.setattr(driving_user, "driver_is_workspace_admin",
+                        lambda db, ws, ctx: (ctx or {}).get("driving_user_id") == "7")
     actions = {"platform_admin_thing": _ActionDef(admin_only=True, permission_level="read")}
     g = patched_gate(actions=actions)
-    v = g.check(_call("platform_admin_thing", caller={"system_role": "admin"}))
+    v = g.check(_call("platform_admin_thing", caller={"driving_user_id": "7"}))
     assert v.decision is Decision.ALLOW
+
+
+def test_the_api_key_admin_role_alone_is_not_a_workspace_admin(patched_gate):
+    # F145: system_role 'admin' (the API-key principal) names no person of this
+    # workspace; neither does a bare workspace_role no server path writes.
+    actions = {"platform_admin_thing": _ActionDef(admin_only=True, permission_level="read")}
+    g = patched_gate(actions=actions)
+    for caller in ({"system_role": "admin"}, {"workspace_role": "owner"}):
+        assert g.check(_call("platform_admin_thing", caller=caller)).decision is Decision.DENY
 
 
 def test_admin_only_super_admin_caller_also_allowed(patched_gate):

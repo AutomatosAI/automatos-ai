@@ -274,13 +274,13 @@ class AgentFactory:
 
             # Lookup context window from LLM models registry
             context_window = 8192
-            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
+            ceiling = None
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
                 if llm_model:
                     context_window = llm_model.context_window
-                    max_tokens = llm_model.max_output_tokens
+                    ceiling = llm_model.max_output_tokens
             except Exception as e:
                 self.logger.warning(f"Could not get context window from registry: {e}")
 
@@ -289,7 +289,9 @@ class AgentFactory:
                 "provider": provider,
                 "model": model,
                 "temperature": 0.7,
-                "max_tokens": max_tokens,
+                # F196: Settings' Max Output Tokens for the tier, never the model's ceiling.
+                "max_tokens": self._output_budget(get_system_setting("orchestrator_llm", "max_tokens"), ceiling),
+                "output_ceiling": ceiling,
                 "context_window": context_window,
             }
         except Exception as e:
@@ -318,13 +320,13 @@ class AgentFactory:
                 model = DEFAULT_LLM_MODEL
 
             context_window = 8192
-            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
+            ceiling = None
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
                 if llm_model:
                     context_window = llm_model.context_window
-                    max_tokens = llm_model.max_output_tokens
+                    ceiling = llm_model.max_output_tokens
             except Exception as e:
                 self.logger.warning(f"Could not get context window for system_llm: {e}")
 
@@ -333,7 +335,9 @@ class AgentFactory:
                 "provider": provider,
                 "model": model,
                 "temperature": 0.7,
-                "max_tokens": max_tokens,
+                # F196: Settings' Max Output Tokens for the tier, never the model's ceiling.
+                "max_tokens": self._output_budget(get_system_setting("system_llm", "max_tokens"), ceiling),
+                "output_ceiling": ceiling,
                 "context_window": context_window,
             }
         except Exception as e:
@@ -347,11 +351,9 @@ class AgentFactory:
                 "context_window": 8192,
             }
 
-    def _model_max_output_tokens(self, model_id: Optional[str]) -> int:
-        """The selected model's own output ceiling from the LLM registry, or the
-        canonical default if the model isn't found. Lets an agent that hasn't set
-        an explicit Max Output Tokens default to what its model actually supports
-        — never a hardcoded literal."""
+    def _model_ceiling(self, model_id: Optional[str]) -> Optional[int]:
+        """The selected model's own output maximum from the LLM registry, or None
+        when the model isn't found. It caps a budget; it is never the budget."""
         if model_id and self.db_session is not None:
             try:
                 from core.models import LLMModel
@@ -360,7 +362,22 @@ class AgentFactory:
                     return m.max_output_tokens
             except Exception as e:
                 self.logger.warning(f"max_output_tokens lookup failed for {model_id}: {e}")
-        return DEFAULT_MAX_OUTPUT_TOKENS
+        return None
+
+    @staticmethod
+    def _output_budget(explicit: Any, ceiling: Optional[int]) -> int:
+        """F196: an agent's output budget. Its own Max Output Tokens (or the
+        tier's in Settings), else an agent run's budget, capped by the model's
+        ceiling. Night 6: an agent that set nothing reserved 65,535 per call."""
+        from core.llm import output_budget
+
+        try:
+            value = int(explicit) if explicit not in (None, "") else 0
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            value = output_budget.budget_for(output_budget.AGENT_RUN) or DEFAULT_MAX_OUTPUT_TOKENS
+        return min(value, ceiling) if ceiling else value
 
     def _openrouter_model_id(self, vendor_provider: str, model_id: str) -> str:
         """Vendor model id -> its OpenRouter form (no-op when already prefixed).
@@ -805,6 +822,17 @@ class AgentFactory:
         """
         from services.trial_ledger import TrialExhaustedError
 
+        # F149 (log-only until the logs show no caller hits it): an agent run
+        # for a workspace is that workspace's own or a platform system agent.
+        if workspace_id is not None:
+            from core.security.workspace_scope import agent_in_workspace
+
+            if not agent_in_workspace(self.db_session, agent_id, workspace_id):
+                self.logger.warning(
+                    "[F149] agent %s activated for workspace %s it does not belong to",
+                    agent_id, workspace_id, stack_info=True,
+                )
+
         try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
@@ -853,6 +881,7 @@ class AgentFactory:
                     "model": tier_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
                     "max_tokens": tier_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
+                    "output_ceiling": tier_config.get("output_ceiling"),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (force_llm_tier=system_llm)")
             elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
@@ -862,15 +891,21 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
+                    "max_tokens": self._output_budget(
+                        agent_llm_config.get("max_tokens") or orchestrator_llm_config.get("max_tokens"),
+                        orchestrator_llm_config.get("output_ceiling"),
+                    ),
+                    "output_ceiling": orchestrator_llm_config.get("output_ceiling"),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
             elif agent_has_model:
+                ceiling = self._model_ceiling(agent_model_config.get("model_id"))
                 llm_config_dict = {
                     "provider": agent_model_config["provider"],
                     "model": agent_model_config["model_id"],
                     "temperature": agent_model_config.get("temperature", 0.7),
-                    "max_tokens": agent_model_config.get("max_tokens") or self._model_max_output_tokens(agent_model_config.get("model_id")),
+                    "max_tokens": self._output_budget(agent_model_config.get("max_tokens"), ceiling),
+                    "output_ceiling": ceiling,
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
             else:
@@ -879,7 +914,11 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
+                    "max_tokens": self._output_budget(
+                        agent_llm_config.get("max_tokens") or orchestrator_llm_config.get("max_tokens"),
+                        orchestrator_llm_config.get("output_ceiling"),
+                    ),
+                    "output_ceiling": orchestrator_llm_config.get("output_ceiling"),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
 
@@ -968,6 +1007,7 @@ class AgentFactory:
                 model=model_id_str,
                 temperature=llm_config_dict.get("temperature", 0.7),
                 max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
+                output_ceiling=llm_config_dict.get("output_ceiling"),
                 api_key=resolved.api_key if resolved else None,
                 top_p=llm_config_dict.get("top_p"),
                 frequency_penalty=llm_config_dict.get("frequency_penalty"),
@@ -1115,6 +1155,9 @@ class AgentFactory:
         composio_action_names: Optional[set] = None,
         context_mode: Optional[str] = None,  # ContextMode enum value — overrides default TASK_EXECUTION
         attachment_ids: Optional[List[str]] = None,  # PRD-127: ephemeral attachments
+        # F182: a person's message (a channel), which recalls as a chat turn does;
+        # autonomous work never reads another conversation as its facts.
+        conversation: bool = False,
         # Legacy params — accepted but ignored (callers may still pass them)
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
@@ -1178,7 +1221,7 @@ class AgentFactory:
             return await self._execute_with_prompt_scoped(
                 agent_runtime, agent_id, agent_name, prompt, system_prompt, context, use_memory,
                 max_retries, max_tool_iterations, composio_action_names, context_mode,
-                attachment_ids, start_time,
+                attachment_ids, start_time, conversation,
             )
 
     async def _execute_with_prompt_scoped(
@@ -1196,6 +1239,7 @@ class AgentFactory:
         context_mode: Optional[str],
         attachment_ids: Optional[List[str]],
         start_time: float,
+        conversation: bool = False,
     ) -> Dict[str, Any]:
         """The body of ``execute_with_prompt`` (unchanged), run inside its usage scope."""
         try:
@@ -1229,6 +1273,7 @@ class AgentFactory:
                         # Narrow the dispatcher enum to task-relevant actions —
                         # without a query this lane shipped all 137 every run.
                         query=prompt,
+                        conversation=conversation,
                     )
                     # PRD-201 S4: carry the assembler's cache-stable prefix on the
                     # system message so the Anthropic client can place its
@@ -1274,9 +1319,22 @@ class AgentFactory:
                     query=prompt,
                 )
 
+            # F155: a task run under the widget mark (a widget-born mission's) is
+            # offered only what the widget key's scopes allow and none of the
+            # owner's connected apps, as the widget chat is.
+            from core.security.surface import widget_scopes, widget_turn
+
+            on_widget = widget_turn()
+            if on_widget:
+                from core.security.widget_scopes import widget_tool_surface
+
+                tool_schemas = widget_tool_surface(tool_schemas, widget_scopes())
+
             # Composio hint injection (enriches composio_execute with action enum + hints)
             workspace_id = agent_runtime.workspace_id
-            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            composio_apps = [] if on_widget else [
+                t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"
+            ]
             if composio_apps:
                 if composio_action_names:
                     # Recipe path: pre-resolved action names
@@ -1285,7 +1343,7 @@ class AgentFactory:
                     )
                 else:
                     # Default path: hint service
-                    self._inject_composio_hints(
+                    await self._inject_composio_hints(
                         tool_schemas, messages, agent_runtime, original_user_prompt, workspace_id,
                     )
 
@@ -1425,6 +1483,12 @@ class AgentFactory:
                         # PRD-201 S5: the Anthropic memory tool is client-executed —
                         # run it against the durable store with the /memories
                         # traversal guard, never through the platform tool registry.
+                        # F155: so the executor's widget gate never sees it; under
+                        # the widget mark it is refused (the store is the owner's).
+                        if name == "memory" and widget_turn():
+                            from core.security.widget_scopes import WIDGET_REFUSAL
+
+                            return {"success": False, "llm_context": json.dumps({"error": WIDGET_REFUSAL})}
                         if name == "memory":
                             from modules.memory.memory_tool import (
                                 DurableMemoryStoreBackend,
@@ -1489,6 +1553,8 @@ class AgentFactory:
                         tools=tool_schemas,
                         workspace_id=workspace_id,
                     )
+                    # F199: which actions worked, so a result can be checked against them.
+                    succeeded_actions = sorted(loop_executor.tracker.succeeded)
                     response = loop_result.response
                     tool_iteration = loop_result.iterations
                     execution_time = time.time() - start_time
@@ -1566,6 +1632,13 @@ class AgentFactory:
                             continuation, agent_id, len(response.content) if response and response.content else 0,
                         )
 
+                    # F196: an answer still cut after its continuations says so.
+                    from core.llm.output_budget import cut_note_for
+
+                    _cut = cut_note_for(response)
+                    if _cut:
+                        response.content = f"{response.content}{_cut}"
+
                     if response and response.content:
                         tokens_used = response.usage.get("total_tokens", 0) if response.usage else 0
                         agent_runtime.update_metrics(execution_time, tokens_used, True)
@@ -1610,6 +1683,7 @@ class AgentFactory:
                                 "provider": response.provider,
                                 "attempt": attempt + 1,
                                 "tool_iterations": tool_iteration,
+                                "actions": succeeded_actions,
                             },
                             "metrics": {
                                 "total_executions": agent_runtime.execution_count,
@@ -1629,9 +1703,14 @@ class AgentFactory:
             # All retries failed
             agent_runtime.update_metrics(time.time() - start_time, 0, False)
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
+            # F197: the owner reads it in plain words; the raw text is in the log above.
+            from core.llm.credit import is_out_of_credit, plain_failure
+
+            failure = plain_failure(last_error)
             return {
                 "status": "error",
-                "error": f"Task execution failed after {max_retries} attempts: {last_error}",
+                "error": failure if is_out_of_credit(last_error)
+                else f"Task execution failed after {max_retries} attempts: {failure}",
                 "agent": {
                     "id": agent_runtime.agent_id,
                     "name": agent_runtime.metadata.name,
@@ -1642,7 +1721,9 @@ class AgentFactory:
         except Exception as e:
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
             self.logger.error(f"Task execution error: {e}")
-            return {"status": "error", "error": str(e)}
+            from core.llm.credit import plain_failure
+
+            return {"status": "error", "error": plain_failure(e)}
 
     # ==================================================================
     # Composio Hint Injection
@@ -1691,7 +1772,7 @@ class AgentFactory:
             f"Composio (semantic): constrained to {len(sorted_actions)} actions: {sorted_actions}"
         )
 
-    def _inject_composio_hints(
+    async def _inject_composio_hints(
         self,
         tool_schemas: List[Dict],
         messages: List[Dict],
@@ -1707,15 +1788,22 @@ class AgentFactory:
 
         Fallback: ComposioHintService injects action names as system prompt
         hints and constrains composio_execute's action enum.
+
+        F105: both lookups run off the loop (core.composio.off_loop).
         """
+        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+
+        agent_id = agent_runtime.agent_id
         try:
             from modules.tools.services.composio_tool_service import ComposioToolService
 
-            composio_svc = ComposioToolService(self.db_session)
-            composio_result = composio_svc.get_tools_for_step(
-                agent_id=agent_runtime.agent_id,
-                workspace_id=workspace_id,
-                task_prompt=original_user_prompt,
+            composio_result = await composio_lookup(
+                lambda db: ComposioToolService(db).get_tools_for_step(
+                    agent_id=agent_id,
+                    workspace_id=workspace_id,
+                    task_prompt=original_user_prompt,
+                ),
+                step=f"agent run (agent {agent_id}): tool search",
             )
 
             if composio_result and composio_result.tools:
@@ -1740,6 +1828,8 @@ class AgentFactory:
                 )
                 return
 
+        except ComposioLookupTimeout:
+            return  # warned where it gave up; the hints would wait on the same SDK
         except Exception as e:
             self.logger.warning(f"ComposioToolService failed, falling back to hints: {e}")
 
@@ -1747,11 +1837,13 @@ class AgentFactory:
         try:
             from modules.tools.services.composio_hint_service import ComposioHintService
 
-            hint_service = ComposioHintService(self.db_session)
-            hint_result = hint_service.build_hints(
-                agent_id=agent_runtime.agent_id,
-                prompt=original_user_prompt,
-                workspace_id=workspace_id,
+            hint_result = await composio_lookup(
+                lambda db: ComposioHintService(db).build_hints(
+                    agent_id=agent_id,
+                    prompt=original_user_prompt,
+                    workspace_id=workspace_id,
+                ),
+                step=f"agent run (agent {agent_id}): action hints",
             )
 
             if hint_result.hint_lines:
@@ -1773,6 +1865,8 @@ class AgentFactory:
                 f"constrained_actions={len(hint_result.matched_actions)}, "
                 f"apps={hint_result.allowed_apps}"
             )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the run goes on without Composio tools
         except Exception as e:
             self.logger.warning(f"Failed to inject Composio hints: {e}")
 

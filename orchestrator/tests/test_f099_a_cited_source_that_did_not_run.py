@@ -109,5 +109,5 @@ def test_a_first_reply_with_no_tool_call_is_checked_too():
 
     source = inspect.getsource(service.StreamingChatService._stream_response_with_agent_scoped)
     branch = source[source.index('final_text = response.content or ""'):]
-    assert branch.index("unexecuted_claims_notice(") < branch.index("shown_so_far")
+    assert branch.index("unexecuted_claims_notice(") < branch.index("split_reply(")   # before the reply is made
     assert "unexecuted_claims_notice(" in inspect.getsource(service.StreamingChatService._stream_tool_loop)

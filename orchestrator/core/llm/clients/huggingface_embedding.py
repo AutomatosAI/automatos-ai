@@ -8,7 +8,7 @@ Local HuggingFace models via sentence-transformers (FREE!).
 import logging
 from typing import List
 
-from .base import BaseEmbeddingProvider, EmbeddingConfig
+from .base import BaseEmbeddingProvider, EmbeddingConfig, run_blocking
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -52,9 +52,7 @@ class HuggingFaceLocalEmbeddingProvider(BaseEmbeddingProvider):
         
         try:
             # Run in executor since sentence-transformers is sync
-            import asyncio
-            loop = asyncio.get_event_loop()
-            embedding = await loop.run_in_executor(None, self.client.encode, text)
+            embedding = await run_blocking(self.client.encode, text)
             return embedding.tolist()
         except Exception as e:
             logger.error(f"HuggingFace embedding error: {e}")

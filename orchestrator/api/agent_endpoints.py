@@ -615,7 +615,12 @@ async def update_agent_model_config(
                     detail=f"Model rejected: {_reason}",
                 )
 
-        # Update model config
+        # Update model config. F141: a model the catalog just vouched for drops a
+        # provider-refusal stamp (the form echoes back what it loaded).
+        if model_id:
+            from core.llm.model_refusals import without_refusal
+
+            model_config = without_refusal(model_config)
         agent.model_config = model_config
         
         # Mark for modification tracking
@@ -764,7 +769,9 @@ async def switch_agent_model(
             "provider": new_model.provider,
             "model_id": new_model_id,
             "temperature": request.get("temperature", new_model.default_temperature),
-            "max_tokens": request.get("max_tokens", new_model.max_output_tokens),
+            # F196: the agent's own Max Output Tokens carries over; unset stays unset
+            # (an agent run's budget). The model's ceiling is not a setting.
+            "max_tokens": request.get("max_tokens") or current_config.get("max_tokens"),
             "top_p": current_config.get("top_p", 1.0),
             "frequency_penalty": current_config.get("frequency_penalty", 0.0),
             "presence_penalty": current_config.get("presence_penalty", 0.0),

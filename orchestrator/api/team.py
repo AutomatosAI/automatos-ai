@@ -254,10 +254,13 @@ async def update_member_role(
     
     # Can't change owner's role
     if member.role == WorkspaceRole.OWNER.value:
-        raise HTTPException(400, "Cannot change owner's role. Transfer ownership instead.")
-    
+        raise HTTPException(400, "The owner's role cannot be changed.")
+    # F152: a workspace has one owner, so nobody else is made owner.
+    if str(request.role).strip().lower() == WorkspaceRole.OWNER.value:
+        raise HTTPException(400, "A workspace has one owner: make them an admin, editor or viewer.")
+
     # Validate role
-    valid_roles = [r.value for r in WorkspaceRole]
+    valid_roles = [r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER]
     if request.role not in valid_roles:
         raise HTTPException(400, f"Invalid role: {request.role}")
     
@@ -461,6 +464,10 @@ async def accept_invitation(
         raise HTTPException(404, "Invitation not found")
     if invitation.expires_at < datetime.utcnow():
         raise HTTPException(410, "Invitation has expired")
+    # F152: an invitation never makes a second owner, including one stored before
+    # invitations refused the role — its role is checked again here.
+    if invitation.role not in {r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER}:
+        raise HTTPException(400, "This invitation can no longer be accepted: ask the workspace for a new one.")
 
     workspace = db.query(Workspace).get(invitation.workspace_id)
     if not workspace:

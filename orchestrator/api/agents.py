@@ -425,12 +425,23 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _refuse_past_the_agent_limit(db: Session, workspace_id: Any, adding: int = 1) -> None:
+    """F200: an agent past the plan's limit is refused before anything is created."""
+    from services.agent_quota import AGENT_LIMIT_STATUS, agent_limit_refusal
+
+    refusal = agent_limit_refusal(db, workspace_id, adding)
+    if refusal:
+        raise HTTPException(status_code=refusal.get("http_status", AGENT_LIMIT_STATUS), detail=refusal["message"])
+
+
 @router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
         created_agents = []
-        
+        # F200: the plan's agent limit, for the whole batch, before any is created.
+        _refuse_past_the_agent_limit(db, ctx.workspace_id, adding=len(agents))
+
         for agent_data in agents:
         
             _reject_invalid_runtime(agent_data.configuration)  # PRD-234 S1a
@@ -496,6 +507,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_data.name).first()
         if existing:
             raise HTTPException(status_code=400, detail="Agent with this name already exists")
+        _refuse_past_the_agent_limit(db, ctx.workspace_id)  # F200 (night 6: #330 made past the limit)
         
         tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
         _reject_invalid_runtime(agent_data.configuration)  # PRD-234 S1a
@@ -1064,6 +1076,10 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
             # keeping it here as `required` made every agent deletion 500 on a
             # nonexistent table (PRD-209 live-test finding, 2026-08-29).
             ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
+            # F135 (B66): routing rows name the agent with no ON DELETE; left in place,
+            # db.delete(agent) raised IntegrityError and the delete answered 500.
+            ("tool_routing_edges", "DELETE FROM tool_routing_edges WHERE agent_id = :agent_id", False),
+            ("tool_routing_affinities", "DELETE FROM tool_routing_affinities WHERE agent_id = :agent_id", False),
         ]
         
         for table_name, sql_stmt, required in deletions:

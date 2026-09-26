@@ -65,8 +65,9 @@ async def _route_low_signal(routing_env, enum):
 @pytest.mark.asyncio
 async def test_active_onboarding_pins_reach_the_final_surface(routing_env):
     """Half 1: mid-onboarding, all six spine actions are in the dispatcher enum
-    that survives route() — the model can actually call them on 'Yes please.'"""
-    narrowing = _apply_onboarding_prior(_NARROWED, _FakeSession(_WS("teach")), WS_ID, False, False)
+    that survives route() — the owner's model can actually call them on 'Yes
+    please.' (Installing a package is an owner's or admin's, F151.)"""
+    narrowing = _apply_onboarding_prior(_NARROWED, _FakeSession(_WS("teach")), WS_ID, True, False)
     enum = narrowing[0]
     assert set(ONBOARDING_PRIOR_ACTIONS) <= set(enum), "prior did not fold the spine into the enum"
 

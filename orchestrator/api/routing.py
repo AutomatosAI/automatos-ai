@@ -173,6 +173,12 @@ async def create_rule(
                 status_code=400,
                 detail="Either target_agent_id or target_workflow_id is required",
             )
+        # F149: a rule routes only to this workspace's agents and playbooks.
+        from core.security.workspace_scope import routing_target_error
+
+        refused = routing_target_error(db, ctx.workspace_id, body.target_agent_id, body.target_workflow_id)
+        if refused:
+            raise HTTPException(status_code=400, detail=refused)
 
         rule = RoutingRule(
             workspace_id=ctx.workspace_id,
@@ -386,6 +392,12 @@ async def setup_trigger(
     After setup, ensure the callback URL is registered in your Composio
     dashboard (https://app.composio.dev → Project Settings → Webhooks).
     """
+    # F149: a subscription routes only to this workspace's agents and playbooks.
+    from core.security.workspace_scope import routing_target_error
+
+    refused = routing_target_error(db, ctx.workspace_id, body.agent_id, body.workflow_id)
+    if refused:
+        raise HTTPException(status_code=400, detail=refused.replace("target_", ""))
     try:
         from core.composio.client import get_composio_client
         from core.composio.entity_manager import EntityManager

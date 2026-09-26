@@ -19,10 +19,20 @@ import core.llm.model_policy as policy
 from modules.tools.discovery.handlers_agents import create_agent
 
 
+def _db():
+    """A session where no active agent already has the new agent's name (F134's
+    namesake check reads that first)."""
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+    db.query.return_value.filter.return_value.count.return_value = 0  # F200's plan limit: no agents yet
+    return db
+
+
 def test_unknown_model_creates_the_agent_on_the_default_and_says_so(monkeypatch, caplog):
     monkeypatch.setattr(marketplace, "_get_or_create_from_cache", lambda db, model_id, provider=None: None)
     with caplog.at_level(logging.WARNING, logger="modules.tools.discovery.handlers_agents"):
-        res = asyncio.run(create_agent(MagicMock(), uuid4(), {"name": "Booking Assistant", "model_id": "anthropic/claude-sonnet-4-20250514"}))
+        res = asyncio.run(create_agent(_db(), uuid4(), {"name": "Booking Assistant", "model_id": "anthropic/claude-sonnet-4-20250514"}))
     assert res["success"] is True
     assert "created successfully" in res["message"]
     assert "not in the catalog" in res["model_note"] and "workspace default (" in res["model_note"]
@@ -42,6 +52,6 @@ def test_known_model_still_passes_the_policy_gate(monkeypatch):
         return False, "not allowed on this plan"
 
     monkeypatch.setattr(policy, "check_model_for_agent", gate)
-    res = asyncio.run(create_agent(MagicMock(), uuid4(), {"name": "X", "model_id": "google/gemini-2.5-pro"}))
+    res = asyncio.run(create_agent(_db(), uuid4(), {"name": "X", "model_id": "google/gemini-2.5-pro"}))
     assert res["success"] is False and "Model rejected" in res["error"]
     assert seen["model_id"] == "google/gemini-2.5-pro"

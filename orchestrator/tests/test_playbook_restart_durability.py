@@ -27,6 +27,7 @@ with ``AttributeError`` / wrong count / missing ``record_error`` call until
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -126,7 +127,7 @@ def test_reaps_stale_running_recipe_execution_as_failed(monkeypatch):
     row = _rxe(101, "running", OLD_NAIVE)
     db = _FakeSession({RecipeExecution: [row]})
 
-    n = reaper.reap_orphaned_runs(db, now=NOW)
+    n = asyncio.run(reaper.reap_orphaned_runs(db, now=NOW))
 
     assert n >= 1
     assert row.status == "failed"
@@ -157,7 +158,7 @@ def test_reaps_stale_pending_recipe_execution_as_failed(monkeypatch):
     row = _rxe(102, "pending", OLD_NAIVE)
     db = _FakeSession({RecipeExecution: [row]})
 
-    assert reaper.reap_orphaned_runs(db, now=NOW) >= 1
+    assert asyncio.run(reaper.reap_orphaned_runs(db, now=NOW)) >= 1
     assert row.status == "failed"
     assert row.completed_at is not None
 
@@ -175,7 +176,7 @@ def test_fresh_running_recipe_execution_is_not_reaped(monkeypatch):
     row = _rxe(103, "running", FRESH_NAIVE)
     db = _FakeSession({RecipeExecution: [row]})
 
-    n = reaper.reap_orphaned_runs(db, now=NOW)
+    n = asyncio.run(reaper.reap_orphaned_runs(db, now=NOW))
 
     # No playbook reap for a fresh row.
     playbook_calls = [
@@ -204,7 +205,7 @@ def test_terminal_recipe_executions_are_untouched(monkeypatch):
     pre_status = [r.status for r in rows]
     db = _FakeSession({RecipeExecution: rows})
 
-    n = reaper.reap_orphaned_runs(db, now=NOW)
+    n = asyncio.run(reaper.reap_orphaned_runs(db, now=NOW))
 
     assert n == 0
     assert [r.status for r in rows] == pre_status
@@ -218,14 +219,26 @@ def test_terminal_recipe_executions_are_untouched(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _board_closed_as_failed(monkeypatch):
+    """The board surface closes an orphan through finalize_board_task_run (F175's
+    rule); faked here, as these tests have no real DB."""
+    import api.board_tasks as board_tasks
+
+    async def _finalize(db, *, task_id, **_):
+        return "failed"
+
+    monkeypatch.setattr(board_tasks, "finalize_board_task_run", _finalize)
+
+
 def test_aggregate_count_includes_playbook_surface(monkeypatch):
     """``reap_orphaned_runs`` returns the SUM across all four surfaces — the
     playbook reap is additive on top of board / wizard / workflow."""
     monkeypatch.setattr(reaper, "record_error", MagicMock())
+    _board_closed_as_failed(monkeypatch)
     db = _FakeSession({
         BoardTask: [SimpleNamespace(
             id=1, status="in_progress", started_at=OLD, updated_at=OLD,
-            completed_at=None, error_message=None, workspace_id=None,
+            completed_at=None, error_message=None, workspace_id=None, assigned_agent_id=None,
         )],
         WorkflowExecution: [SimpleNamespace(
             id=2, status="running", started_at=OLD_NAIVE,
@@ -238,7 +251,7 @@ def test_aggregate_count_includes_playbook_surface(monkeypatch):
     })
 
     # board (1) + workflow (1) + recipe (2) = 4 minimum (wizard skipped — no rows)
-    assert reaper.reap_orphaned_runs(db, now=NOW) >= 4
+    assert asyncio.run(reaper.reap_orphaned_runs(db, now=NOW)) >= 4
     assert db.commits >= 1
 
 
@@ -251,11 +264,12 @@ def test_playbook_surface_failure_does_not_abort_others(monkeypatch):
     """If the playbook reap blows up, board / wizard / workflow still run.
     Mirrors the W1-S6 contract for surface isolation."""
     monkeypatch.setattr(reaper, "record_error", MagicMock())
+    _board_closed_as_failed(monkeypatch)
     db = _FakeSession(
         rows_by_model={
             BoardTask: [SimpleNamespace(
                 id=1, status="in_progress", started_at=OLD, updated_at=OLD,
-                completed_at=None, error_message=None, workspace_id=None,
+                completed_at=None, error_message=None, workspace_id=None, assigned_agent_id=None,
             )],
             WorkflowExecution: [SimpleNamespace(
                 id=2, status="running", started_at=OLD_NAIVE,
@@ -266,7 +280,7 @@ def test_playbook_surface_failure_does_not_abort_others(monkeypatch):
     )
 
     # board (1) + workflow (1) still reaped → 2
-    assert reaper.reap_orphaned_runs(db, now=NOW) == 2
+    assert asyncio.run(reaper.reap_orphaned_runs(db, now=NOW)) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +296,7 @@ def test_disabled_flag_short_circuits_playbook_surface(monkeypatch):
     monkeypatch.setattr(reaper, "record_error", rec)
     db = _FakeSession({RecipeExecution: [_rxe(401, "running", OLD_NAIVE)]})
 
-    assert reaper.reap_orphaned_runs(db, now=NOW) == 0
+    assert asyncio.run(reaper.reap_orphaned_runs(db, now=NOW)) == 0
     assert db.query_calls == 0
     rec.assert_not_called()
 

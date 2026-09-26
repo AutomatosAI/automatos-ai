@@ -54,6 +54,24 @@ describe('TaskCard', () => {
     expect(screen.getByText(/3 files touched/)).toBeInTheDocument()
   })
 
+  it('names the last tool the session reported, in the shape the backend writes (F168)', async () => {
+    const refresh = (recent_tools: unknown[]) =>
+      api.request.mockResolvedValue({ id: 92, title: card.title, status: 'in_progress', started_at: card.started_at,
+        runtime_ref: { recent_tools } })
+    refresh([{ at: '2026-09-26T00:10:00Z', tool: 'Read' }, { at: '2026-09-26T00:10:05Z', tool: 'Edit', subject: 'index.html' }])
+    render(<TaskCard card={card} />)
+    act(() => {
+      window.dispatchEvent(new CustomEvent('automatos:board-changed', { detail: { task_id: 92 } }))
+    })
+    await waitFor(() => expect(screen.getByText(/last tool: Edit/)).toBeInTheDocument())
+
+    refresh([{ name: 'Grep' }])  // an older row
+    act(() => {
+      window.dispatchEvent(new CustomEvent('automatos:board-changed', { detail: { task_id: 92 } }))
+    })
+    await waitFor(() => expect(screen.getByText(/last tool: Grep/)).toBeInTheDocument())
+  })
+
   it('opens the ticket on the board', () => {
     render(<TaskCard card={card} />)
     screen.getByRole('button', { name: /Open on the board/ }).click()

@@ -191,6 +191,7 @@ async def test_reconciler_commits_after_reads_before_verify(monkeypatch):
     )
     run = SimpleNamespace(
         id="run-1",
+        workspace_id="ws-1",
         config=None,  # → skip_verification False → real verify path
         tokens_used=0,
         token_budget_estimate=None,

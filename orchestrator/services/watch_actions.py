@@ -163,8 +163,13 @@ async def run_mission_action(
         )
 
     # --- approval gate ---
+    # F155: a widget-born mission's action is decided as the widget's (never
+    # autonomous), as its planning is (core.security.surface.origin_surface).
+    from core.security.surface import origin_surface
+
     estimated = estimate_mission_action_cost_usd(run)
-    decision = evaluate_approval(db, watch.workspace_id, estimated)
+    with origin_surface(run.config):
+        decision = evaluate_approval(db, watch.workspace_id, estimated)
     auto = decision.auto_approve
     if action == ACTION_SPAWN_AGENT and decision.policy != FULL_AUTO:
         # Section 8 Q5: spawn is ALWAYS grant-gated in v1 -- only full_auto
@@ -235,6 +240,12 @@ async def run_board_task_action(
         return WatchActionOutcome(
             action=action, escalated=True, error="target task missing"
         )
+    from api.board_tasks import mission_runs_it
+
+    owned = mission_runs_it(db, task)
+    if owned:  # the board never runs a mission's step, a watch's re-run included
+        await escalate_watch_now(db, watch, reason=owned)
+        return WatchActionOutcome(action=action, escalated=True, detail="a mission runs this ticket")
     if task.assigned_agent_id is None:
         await escalate_watch_now(
             db, watch, reason=f"task {watch.target_id} has no assigned agent to re-run"
@@ -246,18 +257,22 @@ async def run_board_task_action(
     # P224-RVW-2: never re-dispatch a task that is already running. The decider
     # reached this rerun off a TERMINAL read, but a concurrent Run-Now / dispatcher
     # claim (or the US-001 re-queue) may have restarted the ticket since — and
-    # _redispatch_task's contract requires the caller guarantee it is not
-    # in_progress (the Run-Now route enforces the same guard at api/board_tasks.py:871).
+    # _redispatch_task's contract requires the caller guarantee no run holds it.
     # A re-dispatch would reset the live run to 'assigned' and double-execute. Escalate
     # (like the sibling preconditions) rather than clobbering the in-flight run;
     # placed BEFORE the budget rail so a benign race costs no action budget.
-    if task.status == "in_progress":
+    # F176: decided as Run Now decides it (a live claim, a playbook run still going,
+    # or a mission's step in progress), never by the status word: #1094 said
+    # 'in_progress' with nothing running it.
+    from api.board_tasks import _running_now
+
+    if _running_now(db, task):
         await escalate_watch_now(
             db, watch,
-            reason=f"task {watch.target_id} already in_progress — not re-dispatching",
+            reason=f"task {watch.target_id} is already running — not re-dispatching",
         )
         return WatchActionOutcome(
-            action=action, escalated=True, detail="task already in_progress"
+            action=action, escalated=True, detail="task already running"
         )
 
     # --- budget hard rail (record at initiation; see module docstring) ---
@@ -284,7 +299,12 @@ async def run_board_task_action(
     try:
         from api.board_tasks import _redispatch_task
 
-        _redispatch_task(db, task)
+        if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
+            await escalate_watch_now(
+                db, watch,
+                reason=f"task {watch.target_id} is starting or finishing a run — not re-dispatching",
+            )
+            return WatchActionOutcome(action=action, escalated=True, detail="task already running")
     except Exception as exc:  # noqa: BLE001 -- outcome-shaped, we escalate
         logger.error(
             "[WatchActions] board re-run failed for task %s",

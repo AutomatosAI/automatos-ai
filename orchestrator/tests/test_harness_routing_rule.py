@@ -13,6 +13,8 @@ import sys
 import types
 from uuid import UUID
 
+import pytest
+
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
@@ -80,14 +82,20 @@ class _FakeExecutor:
     def __init__(self):
         self.calls = []
 
-    async def execute(self, name, params):
+    async def execute(self, name, params, caller_context=None):
         self.calls.append((name, params))
         return {"success": True}
 
 
 # --- the handler -----------------------------------------------------------
 
-def test_create_routing_rule_writes_row_workspace_scoped():
+@pytest.fixture
+def _targets_are_ours(monkeypatch):
+    """F149's tenancy check has its own tests; the fake DB here can't answer it."""
+    monkeypatch.setattr("core.security.workspace_scope.routing_target_error", lambda *args: None)
+
+
+def test_create_routing_rule_writes_row_workspace_scoped(_targets_are_ours):
     db = _FakeDB()
     res = _run(create_routing_rule(db, _WS, {
         "source_channel": "telegram", "target_agent_id": 7, "priority": 5,
@@ -117,7 +125,7 @@ def test_create_routing_rule_requires_a_matcher():
     assert db.added == []
 
 
-def test_create_routing_rule_coerces_bad_priority():
+def test_create_routing_rule_coerces_bad_priority(_targets_are_ours):
     db = _FakeDB()
     res = _run(create_routing_rule(db, _WS, {
         "source_pattern": "invoice", "target_agent_id": 1, "priority": "not-a-number",

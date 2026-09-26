@@ -712,6 +712,13 @@ class Config:
     # the model is on the operator's own plan; this stops a looping session from
     # hammering the board. 0 = no cap.
     SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
+    # F161 (night 5): the most of one file an earlier mission step saved that a
+    # session reads in one read_step_file call; a longer file comes back cut,
+    # with a note saying so. Held under the bridge's own result cap.
+    SESSION_STEP_FILE_MAX_CHARS: int = int(os.getenv("SESSION_STEP_FILE_MAX_CHARS", "30000"))
+    # F170 (night 5): how long a running mission's steps sit queued behind
+    # another mission's Claude Code step before the mission says so.
+    MISSION_WAIT_NOTE_AFTER_SECONDS: int = int(os.getenv("MISSION_WAIT_NOTE_AFTER_SECONDS", "300"))
     # PRD-234 S2 (local edition): the owner's projects folder on the HOST machine, as
     # the CLI host sees it. Only used to map a session's file paths onto the
     # worker's "projects/" view (the folder is bind-mounted read-only into the
@@ -794,6 +801,10 @@ class Config:
     TASK_MAX_RETRIES: int = int(os.getenv("TASK_MAX_RETRIES", "2"))
     TASK_MAX_RETRY_BACKOFF_MS: int = int(os.getenv("TASK_MAX_RETRY_BACKOFF_MS", "300000"))  # 5 min cap
     TASK_RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("TASK_RECONCILE_INTERVAL_SECONDS", "60"))
+    # PRD-251 US-120: how often a playbook step that waits on a render (a fixed
+    # generate_document step) stamps the run's progress. Keep it well under
+    # TASK_STALL_TIMEOUT_SECONDS, or the reconciler fails the run as stalled.
+    PLAYBOOK_PROGRESS_STAMP_SECONDS: int = int(os.getenv("PLAYBOOK_PROGRESS_STAMP_SECONDS", "60"))
 
     # Playbook (Recipe) execution timeouts — defaults used when a recipe's
     # execution_config is empty; the MIN_* values floor whatever the recipe configures
@@ -808,6 +819,9 @@ class Config:
     # A manual run that succeeds breaks the streak and auto-resets the breaker.
     # Set to 0 to disable the breaker entirely.
     PLAYBOOK_BREAKER_THRESHOLD: int = int(os.getenv("PLAYBOOK_BREAKER_THRESHOLD", "3"))
+    # F132: how late a scheduled playbook may still start. APScheduler's default (1 s)
+    # dropped a fire the loop reached a moment late, silently.
+    PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS: int = int(os.getenv("PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS", "300"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
@@ -1090,8 +1104,13 @@ class Config:
     # were billed in full ($9.06 of a $9.60 line). Extraction gets its own,
     # lower ceiling, and a prompt that fits inside it.
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
-    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
-    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
+    # F206 (night 6): 20 of 25 calls ended at the cap. 25 nodes and 40 edges run
+    # to about 68 lines, and the cap held about 36, so what was cut was mostly
+    # edges. The contract now fits the cap: a full answer (node about 43
+    # tokens, edge 61, hyperedge 80, cl100k) is about 1,670, about 83% of 2,000.
+    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "14"))
+    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "16"))
+    GRAPH_EXTRACTION_MAX_HYPEREDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_HYPEREDGES", "1"))
     # F051: a call that yields no parseable line is retried ONCE with the
     # ceiling lifted, rather than discarded after being paid for.
     GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS", "6000"))
@@ -1227,7 +1246,11 @@ class Config:
     # Shadow-only until the flip.
     TOOL_SURFACE_HYBRID_CAP: int = int(os.getenv("TOOL_SURFACE_HYBRID_CAP", "6"))
     PLATFORM_ACTIONS_MAX_TOKENS: int = int(os.getenv("PLATFORM_ACTIONS_MAX_TOKENS", "4000"))
-    PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
+    # F130: the playbook section carries the earlier steps' answers, so 2000 cut them
+    # (the budget truncates from the end: the latest answer went first).
+    PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "12000"))
+    # F130: each earlier step's answer reaches a later step whole up to this many characters.
+    PLAYBOOK_STEP_ANSWER_MAX_CHARS: int = int(os.getenv("PLAYBOOK_STEP_ANSWER_MAX_CHARS", "12000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
     COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
     # TOOL_ROUTING_GRAPH (default OFF) gates the learned tool-routing GRAPH reads
@@ -1500,6 +1523,37 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F140: a playbook step's whole answer at most this long, ending by asking for
+    # what it needs, stops the run and asks the owner. Night 4's 12 asks were at
+    # most 402 characters; a longer answer is the step's work, even if it ends
+    # on a question.
+    PLAYBOOK_OWNER_ASK_MAX_CHARS: int = int(os.getenv("PLAYBOOK_OWNER_ASK_MAX_CHARS", "600"))
+    # F183: an answer that says what it lacks, asks for it and puts its work off
+    # until it has it ("Once I have …, I will …") is an ask up to this long,
+    # wherever its questions sit. Night 6's #1097 was 662 characters.
+    OWNER_ASK_DEFERRED_MAX_CHARS: int = int(os.getenv("OWNER_ASK_DEFERRED_MAX_CHARS", "1200"))
+    # F105: document-vector searches run on this many threads of their own, never
+    # on the loop; the local search is a full scan (F107) that holds a pool
+    # connection for its whole length, so this also caps how many run at once.
+    DOCUMENT_SEARCH_THREADS: int = int(os.getenv("DOCUMENT_SEARCH_THREADS", "4"))
+    # F105: the Composio lookups before a model call (tool search, action hints)
+    # run on this many threads of their own, never on the loop; each holds a pool
+    # connection for its whole length, so this also caps how many run at once.
+    COMPOSIO_LOOKUP_THREADS: int = int(os.getenv("COMPOSIO_LOOKUP_THREADS", "4"))
+    # ...and an app's action list or a step search, once fetched, is answered
+    # from memory for this long (core.composio.lookup_cache).
+    COMPOSIO_LOOKUP_CACHE_TTL_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_CACHE_TTL_SECONDS", "600"))
+    # ...and a turn waits at most this long for one; then it goes on without
+    # Composio tools. The SDK's lookup calls give up after as long, un-retried,
+    # so a hung call frees its thread too.
+    COMPOSIO_LOOKUP_TIMEOUT_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_TIMEOUT_SECONDS", "20"))
+    # F105: when the event loop stands still this long, the loop watchdog logs
+    # one WARNING with the loop thread's stack (core/loop_watchdog.py). 0 = off.
+    LOOP_STALL_LOG_SECONDS: float = float(os.getenv("LOOP_STALL_LOG_SECONDS", "2"))
+    # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
+    # unless it fetched fewer than this share of the models listed before: a
+    # partial answer would otherwise retire the rest of the catalog.
+    OPENROUTER_DELIST_MIN_FETCH_RATIO: float = float(os.getenv("OPENROUTER_DELIST_MIN_FETCH_RATIO", "0.9"))
     # F085-A: how many passages the automatic search brings, and the relevance
     # (the retrieval funnel's final score) a passage needs to reach the prompt.
     KNOWLEDGE_PREFETCH_PASSAGES: int = int(os.getenv("KNOWLEDGE_PREFETCH_PASSAGES", "5"))
@@ -1857,6 +1911,68 @@ class Config:
     SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
     # D3: the media-render service (Wave 1). Empty = no renderer configured.
     SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
+    # S1.1c: the client (core/media_render_client.py). The token is sent as
+    # X-Internal-Token and must match the service's own SOCIALS_RENDER_TOKEN
+    # (empty = none sent). The read timeout covers the longest single call:
+    # POST /render answers once the job is staged, spoken, mixed and checked.
+    SOCIALS_RENDER_TOKEN: str = os.getenv("SOCIALS_RENDER_TOKEN", "").strip()
+    SOCIALS_RENDER_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_TIMEOUT_SECONDS", "900"))
+    SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS", "10"))
+    # A render in flight is polled this often, and waited for this long (its
+    # queue time and the render) before the post goes to failed. Keep the wait
+    # under BOOT_REAPER_STALE_MINUTES, so a restart only ever reaps renders no
+    # live process still owns.
+    SOCIALS_RENDER_POLL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_POLL_SECONDS", "5"))
+    SOCIALS_RENDER_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_WAIT_SECONDS", "1500"))
+    # How long a presigned link to a render's input in our storage (a voice line
+    # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
+    # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
+    SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS", "3600"))
+    # S1.5 (D11): a voice toolkit's line (Fish Audio, ElevenLabs through the
+    # workspace's Composio connection) is copied into our storage the moment it
+    # returns: at most this many bytes, fetched within this many seconds.
+    SOCIALS_VOICE_LINE_MAX_BYTES: int = int(os.getenv("SOCIALS_VOICE_LINE_MAX_BYTES", "16777216"))
+    SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS", "60"))
+    # The voices a voice toolkit lists in the Socials voice picker, at most.
+    SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
+    # S1.8 (D12): footage and stills from the workspace's own Composio generation
+    # toolkit (modules/socials/recipes/footage.py). The toolkits a render tries,
+    # in this order, for a slot its post asks footage for; each toolkit's model
+    # per kind (the owner sets these after the small-spend quality test, PRD-251
+    # open question 7); the clip length asked for; the words every prompt ends
+    # with (every word on screen is template text, never generated); how often a
+    # job is polled and for how long (inside the render's own
+    # SOCIALS_RENDER_MAX_WAIT_SECONDS, leaving the render its time); the largest
+    # file kept.
+    SOCIALS_FOOTAGE_TOOLKITS: str = os.getenv("SOCIALS_FOOTAGE_TOOLKITS", "fal_ai,kieai,higgsfield_mcp")
+    SOCIALS_FOOTAGE_FAL_VIDEO_MODEL: str = os.getenv(
+        "SOCIALS_FOOTAGE_FAL_VIDEO_MODEL", "fal-ai/kling-video/v2.1/standard/text-to-video"
+    ).strip()
+    SOCIALS_FOOTAGE_FAL_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_FAL_IMAGE_MODEL", "fal-ai/flux-pro/v1.1-ultra").strip()
+    SOCIALS_FOOTAGE_KIEAI_VIDEO_MODEL: str = os.getenv("SOCIALS_FOOTAGE_KIEAI_VIDEO_MODEL", "veo3_fast").strip()
+    SOCIALS_FOOTAGE_KIEAI_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_KIEAI_IMAGE_MODEL", "flux-kontext-pro").strip()
+    SOCIALS_FOOTAGE_HIGGSFIELD_VIDEO_MODEL: str = os.getenv("SOCIALS_FOOTAGE_HIGGSFIELD_VIDEO_MODEL", "kling3_0").strip()
+    SOCIALS_FOOTAGE_HIGGSFIELD_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_HIGGSFIELD_IMAGE_MODEL", "gpt_image_2").strip()
+    SOCIALS_FOOTAGE_CLIP_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_CLIP_SECONDS", "5"))
+    SOCIALS_FOOTAGE_PROMPT_GUARD: str = os.getenv("SOCIALS_FOOTAGE_PROMPT_GUARD", "no readable text, no logos").strip()
+    SOCIALS_FOOTAGE_POLL_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_POLL_SECONDS", "10"))
+    SOCIALS_FOOTAGE_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_MAX_WAIT_SECONDS", "900"))
+    SOCIALS_FOOTAGE_MAX_BYTES: int = int(os.getenv("SOCIALS_FOOTAGE_MAX_BYTES", "134217728"))
+    # D13: money. A toolkit that prices a call (fal: its estimate action) is
+    # priced before any submit; one that prices nothing (Kie.ai, Higgsfield) is
+    # budgeted at these ceilings per shot, so the caps still hold (the reference
+    # client's rule: a 5 s 720p Cinema Studio shot was $2.31, an unpriced image
+    # budgeted at $0.30). Every submit fits the post's cap and the workspace's
+    # monthly media cap: the workspace setting socials.media_monthly_cap_usd, whose
+    # default this is. A credit-billed toolkit books its balance difference at its
+    # credit's price: Kie.ai $0.005 a credit; Higgsfield $0.0625, its smallest
+    # top-up pack (the dearest credit, so a cap binds early).
+    SOCIALS_FOOTAGE_CEILING_VIDEO_USD: float = float(os.getenv("SOCIALS_FOOTAGE_CEILING_VIDEO_USD", "2.50"))
+    SOCIALS_FOOTAGE_CEILING_IMAGE_USD: float = float(os.getenv("SOCIALS_FOOTAGE_CEILING_IMAGE_USD", "0.30"))
+    SOCIALS_MEDIA_POST_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_POST_CAP_USD", "10"))
+    SOCIALS_MEDIA_MONTHLY_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_MONTHLY_CAP_USD", "30"))
+    SOCIALS_KIEAI_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_KIEAI_USD_PER_CREDIT", "0.005"))
+    SOCIALS_HIGGSFIELD_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_HIGGSFIELD_USD_PER_CREDIT", "0.0625"))
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".
@@ -1865,6 +1981,10 @@ class Config:
     # (core/composio/deny_list.py). A warm cache answers every Composio call from
     # memory, so no call waits on system_settings; an edit applies within this.
     COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS: int = int(os.getenv("COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS", "30"))
+    # S3.5 (D14b): how long the Socials post gate's list of posting actions (the
+    # socials.post_actions system setting) is cached per process
+    # (core/composio/post_gate.py). An edit applies within this, with no restart.
+    SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS: int = int(os.getenv("SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS", "30"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
@@ -2086,6 +2206,12 @@ orchestrator_config = config
 # ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
 # so tiers can be tuned live while testing. ``0`` means "unlimited" for
 # max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+#
+# PRD-251 S1.1c (owner, 2026-09-23): every plan gets Socials, and plans differ
+# only in hosting: ``render_minutes_month`` is the monthly render quota
+# (core/media_render_quota.py). ``0`` or no key means no quota, as for
+# max_agents: enterprise has none until the owner sets one, and the local
+# edition never has one.
 # ---------------------------------------------------------------------------
 _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
     "basic": {
@@ -2099,6 +2225,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 1,
         "marketplace_depth": 1,
         "budget_usd": 25,
+        "render_minutes_month": 10,
         "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
     },
     "pro": {
@@ -2112,6 +2239,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 5,
         "marketplace_depth": 2,
         "budget_usd": 100,
+        "render_minutes_month": 60,
         "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
     },
     "business": {
@@ -2125,6 +2253,7 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "watcher_limit": 0,
         "marketplace_depth": 3,
         "budget_usd": 0,
+        "render_minutes_month": 240,
         "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
     },
     "enterprise": {

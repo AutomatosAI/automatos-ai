@@ -12,7 +12,6 @@ Available Modules (Complete):
 - tools/       - Tool registry and execution ✅
 - nl2sql/     - Natural language to SQL ✅
 - codegraph/   - Code analysis and search ✅
-- learning/    - Playbook mining (PlaybookMiner) ✅
 
 Usage:
     from modules.search import ContextOptimizer
@@ -20,7 +19,6 @@ Usage:
     from modules.memory.unified_memory_service import get_unified_memory_service
     from modules.agents import AgentService, AgentFactory
     from modules.tools import ToolRegistry, get_tools_for_agent
-    from modules.learning import PlaybookMiner
 """
 
 # Lazy imports - use these to access modules
@@ -32,5 +30,4 @@ __all__ = [
     "tools",
     "nl2sql",
     "codegraph",
-    "learning",
 ]

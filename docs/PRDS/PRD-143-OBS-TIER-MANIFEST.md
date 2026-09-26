@@ -12,7 +12,7 @@ reachable by Auto at `autonomy=full` under gates-and-logs (PRD-140 hierarchy
 checks, destructive backstop, Wave 4 audit + rollback, the human kill-switch),
 not exclusion.
 
-## super_admin_only actions (7)
+## super_admin_only actions (8)
 
 | Action | Source | Why super-admin |
 |---|---|---|
@@ -23,6 +23,7 @@ not exclusion.
 | `platform_list_services` | `orchestrator/modules/tools/discovery/actions_monitoring.py` | Obs read: the Railway service inventory is deployment topology. |
 | `platform_get_system_health` | `orchestrator/modules/tools/discovery/actions_workspace.py` | Obs read: host-level health (CPU/memory/disk, DB, Redis, RAG) is platform internals. |
 | `platform_set_autonomy_level` | `orchestrator/modules/tools/discovery/actions_autonomy.py` | Oversight control: the kill-switch dial stays HUMAN — Auto must never raise its own autonomy. |
+| `platform_update_system_setting` | `orchestrator/modules/tools/discovery/actions_workspace.py` | Oversight control: system settings are platform-wide (every tenant's), so only the platform operator changes them (F147, 25 Sep). |
 
 `platform_get_autonomy_level` (read-only) stays **operator** — Auto may read
 its own dial, never set it.

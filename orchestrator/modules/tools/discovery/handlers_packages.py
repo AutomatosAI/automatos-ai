@@ -45,14 +45,8 @@ def _load_workspace(db: Any, workspace_id: UUID) -> Any:
     return db.query(Workspace).filter(Workspace.id == workspace_id).first()
 
 
-def _workspace_agent_count(db: Any, workspace_id: UUID) -> int:
-    from core.models.core import Agent
-
-    return (
-        db.query(Agent)
-        .filter(Agent.workspace_id == workspace_id, Agent.owner_type == "workspace")
-        .count()
-    )
+# F200: the one count every create path's limit uses (services.agent_quota).
+from services.agent_quota import AgentLimitReached, workspace_agent_count as _workspace_agent_count  # noqa: E402
 
 
 def _package_agent_refs(package: Any) -> set:
@@ -89,6 +83,9 @@ def _match_summary(match: Any) -> Dict[str, Any]:
         "reasons": match.reasons,
         "contents": _member_counts(pkg),  # {"agent": 4, "playbook": 1, ...}
         "required_connects": manifest.get("required_connects", []),
+        # The guided setup (PRD-251 US-120): what to ask, and the steps to walk through.
+        "questions": manifest.get("questions", []),
+        "guide_steps": manifest.get("guide_steps", []),
         "showcase": bool(getattr(pkg, "showcase", False)),
     }
 
@@ -113,6 +110,14 @@ def _record_offer_if_onboarding(db: Any, workspace_id: UUID, slug: str) -> None:
         logger.debug("package_offered funnel record skipped: %s", exc)
 
 
+# F184 (night 6): after one package search with its own label, Auto said nothing
+# ready-made existed and never saw the Shopify Business Analyst agent.
+NO_PACKAGE_NEXT = (
+    "No package matches. Before you tell the owner nothing ready-made exists, search the "
+    "marketplace agents too (platform_browse_marketplace_agents) with their own words."
+)
+
+
 async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_search_packages — rank marketplace packages against business signals."""
     from services.marketplace_packages import list_packages, match_by_signals
@@ -126,11 +131,15 @@ async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -
     matches = match_by_signals(signals, list_packages(db))
     if matches:
         _record_offer_if_onboarding(db, workspace_id, matches[0].package.slug)
-    return {
+    result = {
         "success": True,
+        "searched": "packages",  # F184: what a "nothing ready-made" rests on, checkable
         "matches": [_match_summary(m) for m in matches],
         "count": len(matches),
     }
+    if not matches:
+        result["next"] = NO_PACKAGE_NEXT
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -163,11 +172,9 @@ def _over_quota_response(db: Any, workspace: Any, package: Any, package_agents: 
 def _check_quota(db: Any, workspace: Any, workspace_id: UUID, package: Any) -> Dict[str, Any]:
     """D9: does installing this package exceed the tier's agent cap? Read-only —
     NEVER installs. Returns {ok: True} or the honest over-quota response."""
-    from services.plan_tiers import get_tier
+    from services.agent_quota import plan_agent_limit
 
-    plan = (getattr(workspace, "plan", None) or "basic") if workspace else "basic"
-    tier = get_tier(plan) or {}
-    max_agents = int(tier.get("max_agents", 0) or 0)
+    _, max_agents = plan_agent_limit(workspace)
     package_agents = len(_package_agent_refs(package))
     if max_agents <= 0:  # 0 = unlimited
         return {"ok": True}
@@ -224,10 +231,22 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
     if onboarding_active:
         onboarding_state.record_package_event(db, workspace, "package_accepted", slug, commit=True)
 
+    # F200 review HIGH: the plan can fill up between the check above and a member's
+    # clone (another create at the same moment). The refusal says nothing was
+    # created, so the members cloned before it are rolled back with the savepoint.
+    installing = db.begin_nested()
     try:
         manifest = await install_package(db, workspace_id, slug, user_id=None)
+    except AgentLimitReached as full:
+        installing.rollback()
+        return full.refusal
     except PackageInstallError as exc:
+        installing.commit()  # as before: a failed member leaves what installed
         return {"success": False, "error": str(exc)}
+    except Exception:
+        installing.rollback()  # never a savepoint left open for the caller to find
+        raise
+    installing.commit()
 
     if onboarding_active:
         onboarding_state.record_package_event(db, workspace, "package_installed", slug, commit=False)
@@ -247,6 +266,32 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
 # --------------------------------------------------------------------------- #
 
 
+def _package_named(db: Any, ref: str) -> Any:
+    """The package whose slug or name is ``ref`` (any case), or None."""
+    from services.marketplace_packages import get_by_slug, list_packages
+
+    wanted = str(ref).strip().lower()
+    by_slug = get_by_slug(db, wanted)
+    if by_slug is not None and str(getattr(by_slug, "slug", "")).lower() == wanted:
+        return by_slug
+    return next((p for p in list_packages(db) if str(getattr(p, "name", "")).strip().lower() == wanted), None)
+
+
+def _install_the_package_instead(package: Any, ref: str) -> Dict[str, Any]:
+    """F200 (night 6): asked for 'Shopify Management' as one agent, the refusal
+    offered its three agents, and Auto installed them one by one: no skills, no
+    tools, no store-URL question, no connect card, no plan check. A package name
+    is answered with the package's own install."""
+    count = len(_package_agent_refs(package))
+    return {
+        "success": False,
+        "use_package": package.slug,
+        "error": (f"'{ref}' is a package, not an agent. Install it with platform_install_package "
+                  f"(slug '{package.slug}'): that sets up its {count} agents with their skills, tools and "
+                  "connections together, and checks the plan first. Don't install its agents one at a time."),
+    }
+
+
 async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_install_marketplace_agent — install one marketplace agent with its
     full closure (US-005). Provide agent_id or agent_name."""
@@ -260,7 +305,12 @@ async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Di
     ref = str(agent_id) if agent_id is not None else str(agent_name)
     try:
         manifest = await install_marketplace_agent(db, workspace_id, ref, user_id=None)
+    except AgentLimitReached as full:  # refused before anything was cloned
+        return full.refusal
     except PackageInstallError as exc:
+        package = _package_named(db, ref) if "not found" in str(exc).lower() else None
+        if package is not None:
+            return _install_the_package_instead(package, ref)
         if "not found" in str(exc).lower():
             from modules.tools.discovery.handlers_marketplace import browse_marketplace_agents
             from modules.tools.discovery.not_found_candidates import find_candidates, not_found_error

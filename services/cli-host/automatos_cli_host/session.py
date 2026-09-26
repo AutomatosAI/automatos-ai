@@ -44,7 +44,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__
 from . import usage_limit
@@ -64,6 +64,10 @@ STOP_GRACE_SECONDS = 2.0
 KILL_GRACE_SECONDS = 5.0
 PTY_ROWS, PTY_COLS = 50, 200
 _OUTPUT_TAIL_BYTES = 16 * 1024
+# F167: a PreToolUse event carries the host's decision and, for a hold, the
+# operator's answer. The backend keeps them on the ticket's ``recent_tools``.
+DECISION_REASON_CHARS = 300
+ANSWER_APPROVED, ANSWER_DENIED, ANSWER_NONE = "approved", "denied", "no answer"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -114,7 +118,7 @@ SESSION_RULES = (
     "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
     "reply with a concise summary of what changed, what you verified, and anything left open.\n"
     "Tools in this session: file tools work only inside the working folder and the ticket "
-    "folder; Bash runs an allowlist of read, build and test verbs, and anything else is held "
+    "folder; Bash runs an allowlist of read, build and test verbs, and anything else may be held "
     "for the operator. The Automatos tools you have are listed earlier in this prompt, under "
     "\"Tools in this session\" — that list is the truth, and it is the only place to read it. "
     "A platform tool your skills name that is NOT on that list does not exist here: do not call "
@@ -336,7 +340,8 @@ class Session:
         if payload is None:
             return {}
         event = payload.get("hook_event_name") or ""
-        self._emit(event, payload)
+        if event != "PreToolUse":  # F167: a tool call is reported with its decision (_pre_tool_use)
+            self._emit(event, payload)
         reply = self._reply_for(event, payload)
         return self.adapter.render_response(event, reply) or {}
 
@@ -394,19 +399,28 @@ class Session:
             decision = Decision("deny", "session policy not initialised")
         else:
             decision = decide(intent, self._policy)
+        verdict, answer, request_id = decision, None, None
         if decision.behavior == "ask":
-            decision = self._ask_operator(tool, intent.subject, decision.reason)
-        if decision.allow:
+            verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
+        # F167: what the host decided, and why, is on the ticket — a call that ran
+        # with nobody asked never reads as one the operator approved.
+        # ``event_id``: a batch re-posted after a lost response counts once on the ticket.
+        self.events.put({**compact_event("PreToolUse", payload, subject=intent.subject), "event_id": uuid.uuid4().hex,
+                         "decision": decision.behavior, "reason": decision.reason[:DECISION_REASON_CHARS],
+                         **({"answer": answer, "request_id": request_id} if answer else {})})
+        if verdict.allow:
             return Reply.allow()
-        self.denials.append({"tool": tool, "reason": decision.reason, "stage": "PreToolUse",
+        self.denials.append({"tool": tool, "reason": verdict.reason, "stage": "PreToolUse",
                              "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
-        return Reply.deny(decision.reason)
+        return Reply.deny(verdict.reason)
 
-    def _ask_operator(self, tool: str, subject: Optional[str], reason: str) -> Decision:
+    def _ask_operator(self, tool: str, subject: Optional[str], reason: str) -> Tuple[Decision, str, str]:
         """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
         ticket's Canvas. The question travels with the next event flush; the answer
         comes back on that same channel (``resolve_ask``). No answer within
-        ``ask_timeout`` seconds → deny, honestly worded."""
+        ``ask_timeout`` seconds → deny, honestly worded. Returns the verdict, the
+        answer (``ANSWER_APPROVED`` / ``ANSWER_DENIED`` / ``ANSWER_NONE``) and the
+        question's request id (the backend matches a reported approval to it)."""
         request_id = uuid.uuid4().hex
         done = threading.Event()
         with self._ask_lock:
@@ -422,10 +436,11 @@ class Session:
             self._pending_asks.pop(request_id, None)
             approved = self._ask_answers.pop(request_id, None)
         if answered and approved:
-            return Decision("allow")
+            return Decision("allow"), ANSWER_APPROVED, request_id
         if answered:
-            return Decision("deny", f"{reason} — denied by the operator")
-        return Decision("deny", f"{reason} — no answer from the operator within {int(timeout)} s")
+            return Decision("deny", f"{reason} — denied by the operator"), ANSWER_DENIED, request_id
+        return (Decision("deny", f"{reason} — no answer from the operator within {int(timeout)} s"), ANSWER_NONE,
+                request_id)
 
     def resolve_ask(self, request_id: str, approved: bool) -> bool:
         """The backend delivered the operator's answer for a pending question."""

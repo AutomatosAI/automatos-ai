@@ -482,16 +482,12 @@ async def test_identity_section_greets_by_name_from_the_user_name_kwarg(monkeypa
 
 
 def test_chat_service_seeds_the_greeting_state_from_the_users_row():
-    """Source guard: the seam lives in ONE module — the driving human's integer
-    id is remembered next to the viewer subject, the orchestrator state is
-    seeded from users.name, and the ATOM prompt reads that same state."""
+    """Source guard: the seam lives in ONE module — the orchestrator state is
+    seeded from users.name, and the ATOM prompt reads that same state. Who a
+    turn is for (_bind_turn_person) has behavioural tests in
+    test_prd143_concierge_journey.py (F154)."""
     src = (_ORCH / "consumers" / "chatbot" / "service.py").read_text(encoding="utf-8")
 
-    assert re.search(
-        r'self\._viewer_subject_id = f"user:\{user_id\}" if user_id else None\s*\n'
-        r"(?:.*\n){0,3}\s*self\._driving_user_id = user_id",
-        src,
-    ), "stream_response_with_agent must remember the driving users.id"
     assert re.search(
         r"smart_chat\.orchestrator\.state\.user_name = \(\s*\n\s*smart_chat\.orchestrator\.state\.user_name\s*\n"
         r"\s*or resolve_known_user_name\(self\.db, getattr\(self, \"_driving_user_id\", None\)\)",

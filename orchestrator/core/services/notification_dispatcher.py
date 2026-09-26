@@ -66,6 +66,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # PRD-204 S4: scheduler skipped a cron fire on an open breaker with
         # only a log line -- now user-visible, once per breaker-open period.
         "playbook_benched",
+        # F132: a scheduled run that did not start (missed its grace, or the
+        # workspace was at its run limit) -- it used to leave no trace at all.
+        "playbook_schedule_skipped",
         # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
         # actions S7/S8, escalations).
         "watch_verdict",
@@ -130,6 +133,18 @@ class NotificationDispatcher:
         ``slack``, ``webhook``, ``channel:<uuid>``). Silent and failed
         destinations are not included.
         """
+        # F197: running out of model credit reaches the bell once per outage,
+        # in plain words (night 6: 17 raw 402 notices in 14 minutes).
+        from core.llm.credit import (
+            CREDIT_EVENTS, OUT_OF_CREDIT, OUTAGE_NOTICE, OUTAGE_TITLE, first_notice_of_outage, is_out_of_credit,
+        )
+
+        if event_type in CREDIT_EVENTS and is_out_of_credit(message):
+            if not first_notice_of_outage(self.workspace_id):
+                logger.info("[F197] %s held back: the bell already says credit ran out", event_type)
+                return {"dispatched_to": [], "held_back": OUT_OF_CREDIT}
+            title, message = OUTAGE_TITLE, OUTAGE_NOTICE
+
         # Wave 2 — auto_reporting overrides.
         # If settings load fails, _load_auto_reporting returns {}; treat that
         # as disabled rather than enabled, otherwise a transient load error
@@ -354,14 +369,19 @@ class NotificationDispatcher:
         agent_name: Optional[str],
         status: str,
     ) -> None:
-        """Insert an in-app notification row. Does NOT commit."""
+        """Insert an in-app notification row. Does NOT commit.
+
+        F209: its time is when it is written (clock_timestamp()). The column's
+        default, now(), is the transaction's START: a run's task_complete,
+        written minutes into a long transaction, sorted before things that
+        happened earlier and read "N min ago" from when the run began."""
         self.db.execute(
             text(
                 "INSERT INTO notifications "
                 "(workspace_id, user_id, event_type, title, message, "
-                " link_type, link_id, agent_id, agent_name, status) "
+                " link_type, link_id, agent_id, agent_name, status, created_at) "
                 "VALUES (:ws_id, :user_id, :event_type, :title, :message, "
-                " :link_type, :link_id, :agent_id, :agent_name, :status)"
+                " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp())"
             ),
             {
                 "ws_id": self.workspace_id,

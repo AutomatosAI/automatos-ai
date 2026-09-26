@@ -192,3 +192,29 @@ def test_a_handed_over_write_keeps_the_callers_context_and_never_raises(caplog):
         assert best_effort.drain(5)
     assert seen == ["c1"]
     assert "best-effort write failed: RuntimeError('db down')" in caplog.text
+
+
+def test_drain_waits_for_a_failed_writes_log_line(monkeypatch, caplog):
+    """A write's future tells its waiters it is done before its callback runs,
+    and the callback logs the failure. drain() waited on the futures, so the
+    test above read an empty log in a shared run (1 in 3 with the threads
+    already started). A slow callback makes that order certain."""
+    finished = best_effort._finished
+
+    def slow_finished(future):
+        time.sleep(0.2)
+        finished(future)
+
+    monkeypatch.setattr(best_effort, "_finished", slow_finished)
+
+    @best_effort.off_loop
+    def broken():
+        raise RuntimeError("db down")
+
+    async def main():
+        broken()
+
+    with caplog.at_level(logging.WARNING, logger="core.best_effort"):
+        asyncio.run(main())
+        assert best_effort.drain(5)
+        assert "best-effort write failed: RuntimeError('db down')" in caplog.text

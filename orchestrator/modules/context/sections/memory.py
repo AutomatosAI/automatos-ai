@@ -72,19 +72,42 @@ class MemorySection(BaseSection):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _autonomous(ctx: SectionContext) -> bool:
+        """F182 (night 6): autonomous work (a playbook step, or an agent run for
+        a board ticket, a mission task, a trigger or a schedule) recalls the
+        owner's curated workspace memories, its agent's own and its playbook's
+        own learnings, never another conversation or the daily logs. Run 207's
+        step 1 (the Analyst) and ticket #1119 wrote to Maya at Lamplight Café:
+        agent 324's chat about her, recalled workspace-wide (the Context
+        Router's L2), read as their own work's facts. A channel message is a
+        conversation (``conversation``), and recalls as a chat turn does."""
+        from modules.context.modes import ContextMode
+
+        return (ctx.context_mode in (ContextMode.RECIPE.value, ContextMode.TASK_EXECUTION.value)
+                and not ctx.kwargs.get("conversation"))
+
     async def _build(self, ctx: SectionContext) -> str:
-        # --- Try Context Router first (PRD-79) for chatbot mode ---
+        # --- Context Router first (PRD-79), for a chat turn only ---
+        # It also recalls the workspace's other conversations (L2) and its
+        # daily logs: never on a widget turn (F155: an anonymous visitor's, which
+        # recalls only its agent's own memories) or for autonomous work (F182).
         chat_id = ctx.kwargs.get("chat_id")
-        context_bundle = await self._try_context_router(ctx, chat_id)
+        autonomous = self._autonomous(ctx)
+        chat_turn = not (ctx.widget_mode or autonomous)
+        context_bundle = await self._try_context_router(ctx, chat_id) if chat_turn else None
 
         if context_bundle is not None:
             content = self._format_context_bundle(context_bundle, ctx)
         else:
-            # --- Fallback: SmartMemoryManager ---
+            # --- SmartMemoryManager ---
             content = await self._build_from_smart_memory(ctx, chat_id)
+            if autonomous:  # what it can look up, as the router's bundle gave it
+                content = "\n\n".join(part for part in (content, await self._knowledge_awareness(ctx)) if part)
 
-        # Recipe memories (Mem0 learnings from previous runs) — step 1 only
-        recipe_memories = ctx.kwargs.get("recipe_memories")
+        # Recipe memories (Mem0 learnings from previous runs) — step 1 only;
+        # never on a widget turn (they are the owner's runs).
+        recipe_memories = None if ctx.widget_mode else ctx.kwargs.get("recipe_memories")
         if recipe_memories:
             summary = recipe_memories.get("summary", "")
             if summary and summary != "No relevant memories found":
@@ -99,6 +122,17 @@ class MemorySection(BaseSection):
             content = self.truncate(content, self.max_tokens)
 
         return content
+
+    async def _knowledge_awareness(self, ctx: SectionContext) -> str:
+        """What the workspace can look up (its documents, databases, tools):
+        the router's own block, built without its recall."""
+        try:
+            from modules.memory.context_router import ContextRouter
+
+            return await ContextRouter().build_knowledge_awareness(ctx.workspace_id) or ""
+        except Exception:
+            logger.warning("MemorySection: knowledge awareness failed — continuing without it", exc_info=True)
+            return ""
 
     async def _try_context_router(
         self, ctx: SectionContext, chat_id: Optional[str]
@@ -231,8 +265,9 @@ class MemorySection(BaseSection):
         # --- Retrieve memories ---
         memory_text = await self._retrieve_memories(manager, ctx)
 
-        # --- Retrieve daily logs ---
-        daily_logs = await self._retrieve_daily_logs(manager, ctx)
+        # --- Retrieve daily logs (the workspace's: a chat turn's only) ---
+        chat_turn = not (ctx.widget_mode or self._autonomous(ctx))
+        daily_logs = await self._retrieve_daily_logs(manager, ctx) if chat_turn else ""
 
         # --- Session hydration (Redis) — only in fallback path ---
         session_text = await self._hydrate_session(ctx, chat_id)
@@ -270,14 +305,14 @@ class MemorySection(BaseSection):
                 return ""
 
             agent_id = getattr(ctx.agent, "id", None) if ctx.agent else None
-            widget_mode = ctx.widget_mode
 
             result = await manager.retrieve_memories(  # type: ignore[attr-defined]
                 workspace_id=ctx.workspace_id,
                 agent_id=agent_id,
                 query=query,
                 limit=8,
-                widget_mode=widget_mode,
+                widget_mode=ctx.widget_mode,
+                chat_transcripts=not self._autonomous(ctx),
                 # PRD-206 S7: Q7 private-scope guard + composite ranking
                 # happen inside retrieve_memories; the viewer rides kwargs.
                 viewer_subject_id=ctx.kwargs.get("viewer_subject_id"),

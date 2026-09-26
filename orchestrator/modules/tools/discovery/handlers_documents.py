@@ -17,7 +17,9 @@ SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS = 1200
 
 
 async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-167 S6: list the workspace's document templates for an agent."""
+    """PRD-167 S6: list the workspace's document templates for an agent (a social
+    composition is never block-editable, PRD-251 S1.2)."""
+    from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
@@ -33,7 +35,7 @@ async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]
                 "description": t.description,
                 "format": t.format,
                 "category": t.category,
-                "has_blocks": bool(t.blocks),
+                "has_blocks": bool(t.blocks) and not is_social_format(t.format),
             }
             for t in templates
         ],
@@ -42,9 +44,15 @@ async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 
 async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-167 S6: describe the data a template needs (variable chips + data.* fields)."""
+    """PRD-167 S6: describe the data a template needs (variable chips + data.* fields).
+
+    PRD-251 S1.2: a social template's data fields are its ``variables_schema``,
+    which the answer carries whole (types, defaults, claims) with its sizes.
+    """
+    from core.social_templates import is_social_format
     from modules.documents.blocks import collect_variable_paths, validate_blocks
     from modules.documents.template_service import DocumentTemplateService
+    from modules.documents.template_summary import social_variable_names
     from modules.documents.variables import CATALOG_BY_PATH
 
     template_id_raw = params.get("template_id")
@@ -62,7 +70,10 @@ async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str,
 
     variables: List[Dict[str, Any]] = []
     data_fields: List[str] = []
-    if template.blocks:
+    social = is_social_format(template.format)
+    if social:
+        data_fields = [f"data.{name}" for name in social_variable_names(template.blocks)]
+    elif template.blocks:
         for path in sorted(collect_variable_paths(validate_blocks(template.blocks))):
             if path.startswith("data."):
                 data_fields.append(path)
@@ -70,32 +81,131 @@ async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str,
                 entry = CATALOG_BY_PATH[path]
                 variables.append({"path": path, "label": entry["label"], "category": entry["category"]})
 
-    return {
+    schema = {
         "success": True,
         "id": str(template.id),
         "name": template.name,
         "format": template.format,
         "description": template.description,
-        "uses_blocks": bool(template.blocks),
+        "uses_blocks": bool(template.blocks) and not social,
         "variables": variables,           # auto-resolved chips (user/company/brand/date)
         "data_fields": data_fields,       # data.* fields you must supply at generation
         "data_schema": template.data_schema or {},  # legacy templates
         "sample_data": template.sample_data or {},
     }
+    if social:
+        blocks = template.blocks if isinstance(template.blocks, dict) else {}
+        schema["variables_schema"] = blocks.get("variables_schema") or {}
+        schema["sizes"] = blocks.get("sizes") or []
+    return schema
+
+
+# ---------------------------------------------------------------------------
+# PRD-251 US-115: the brand kit. Thin wrappers over modules/documents/brand_kit.py,
+# the functions GET and PUT /api/documents/brand-kit call.
+# ---------------------------------------------------------------------------
+
+
+def _workspace(db: Session, workspace_id: UUID):
+    from core.models.workspaces import Workspace
+
+    return db.query(Workspace).filter(Workspace.id == workspace_id).first()
+
+
+async def get_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The kit as GET /api/documents/brand-kit returns it, with the suggestions the
+    Brand Kit form prefills from (an agent is not a user, so none come from one)."""
+    from modules.documents import brand_kit
+
+    workspace = _workspace(db, workspace_id)
+    if workspace is None:
+        return {"success": False, "error": "Workspace not found"}
+    return {
+        "success": True,
+        "brand_kit": brand_kit.get_brand_kit(workspace.settings),
+        "suggestions": brand_kit.brand_kit_suggestions(db, workspace),
+    }
+
+
+async def update_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Change some kit fields through the PUT's validation and writer.
+
+    Fails closed: a field the kit's patch does not take (a stored file, a misspelt
+    name) is refused rather than dropped, and an invalid value saves nothing.
+    """
+    from pydantic import ValidationError
+
+    from modules.documents import brand_kit
+
+    fields = {k: v for k, v in params.items() if not k.startswith("_")}  # "_" keys: server-injected
+    refused = sorted(set(fields) - set(brand_kit.PATCH_FIELDS))
+    if refused:
+        return {
+            "success": False,
+            "error": (
+                f"platform_update_brand_kit cannot set {', '.join(refused)}; nothing saved. "
+                f"It sets {', '.join(brand_kit.PATCH_FIELDS)}. The logo, logo mark and font "
+                "files are uploaded by a person in the brand kit settings."
+            ),
+        }
+    patch = {k: v for k, v in fields.items() if v is not None}
+    if not patch:
+        return {"success": False, "error": "Nothing to change: send at least one brand kit field."}
+    workspace = _workspace(db, workspace_id)
+    if workspace is None:
+        return {"success": False, "error": "Workspace not found"}
+    try:
+        kit = brand_kit.update_brand_kit(db, workspace, patch)
+    except ValidationError as exc:
+        errors = brand_kit.brand_kit_errors(exc)
+        reasons = "; ".join(f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in errors)
+        return {"success": False, "error": f"Invalid brand kit, nothing saved. {reasons}", "errors": errors}
+    return {"success": True, "brand_kit": kit, "changed": sorted(patch)}
+
+
+def _whole_number(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _like_text(text: str) -> str:
+    """``text`` as literal characters inside a LIKE pattern: `_` and `%` in a
+    filename are not wildcards (roast_log_…, 100%-arabica.md)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """F138 (night 4): ``search`` was ignored and only the newest page came back,
+    so Auto said a document "might have been deleted" after reading the newest
+    20 (B6, B71). ``search`` now filters by name or description, ``offset``
+    pages, and ``total`` says how many match."""
+    from sqlalchemy import or_, text
+
     from core.models import Document
 
-    limit = min(params.get("limit", 50), 200)
+    limit = min(max(_whole_number(params.get("limit"), 50), 1), 200)
+    offset = max(_whole_number(params.get("offset"), 0), 0)
+    query = db.query(Document).filter(Document.workspace_id == workspace_id)
+    # F155: a widget turn lists only its key's team's documents and those
+    # shared with every team (the PRD-124 rule of TEAM_FILTER_CLAUSE).
+    from core.security.surface import widget_team
 
-    docs = (
-        db.query(Document)
-        .filter(Document.workspace_id == workspace_id)
-        .order_by(Document.upload_date.desc())
-        .limit(limit)
-        .all()
-    )
+    lock = widget_team()
+    if lock:
+        query = query.filter(text("(documents.team_access = '{}' OR :team = ANY(documents.team_access))")
+                             .bindparams(team=lock))
+    search = str(params.get("search") or "").strip()
+    if search:
+        pattern = f"%{_like_text(search)}%"
+        query = query.filter(or_(
+            Document.filename.ilike(pattern, escape="\\"),
+            Document.original_filename.ilike(pattern, escape="\\"),
+            Document.description.ilike(pattern, escape="\\"),
+        ))
+    total = query.count()
+    docs = query.order_by(Document.upload_date.desc(), Document.id.desc()).offset(offset).limit(limit).all()
 
     return {
         "success": True,
@@ -112,6 +222,8 @@ async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]
             for d in docs
         ],
         "count": len(docs),
+        "total": total,
+        "offset": offset,
     }
 
 
@@ -361,7 +473,7 @@ async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any
             content_hash=content_hash,
             status="uploaded",
             description=params.get("description"),
-            team_access=[],
+            team_access=_widget_team_access(),
             created_by="auto",
         )
         db.add(document)
@@ -411,17 +523,29 @@ _GREP_MAX_SCAN_CHUNKS = 5000     # bound the literal scan
 _GREP_SNIPPET_TOKENS = 120       # per-match snippet token budget
 
 
+def _widget_team_access() -> list:
+    """F155: a widget key's upload belongs to its team, if it has one."""
+    from core.security.surface import widget_team
+
+    lock = widget_team()
+    return [lock] if lock else []
+
+
 def _resolve_agent_team(db: Session, agent_id: Any) -> Optional[str]:
-    """Look up an agent's team for retrieval scoping. None when unknown."""
+    """The team that scopes this call's retrieval: a widget key's team lock on
+    a widget turn, else the agent's team (core.team_access.retrieval_team).
+    None when neither is known."""
+    from core.team_access import retrieval_team
+
     if not agent_id:
-        return None
+        return retrieval_team(None)
     try:
         from core.models import Agent
 
         row = db.query(Agent).filter(Agent.id == int(agent_id)).first()
-        return getattr(row, "team", None) if row else None
+        return retrieval_team(getattr(row, "team", None) if row else None)
     except Exception:
-        return None
+        return retrieval_team(None)
 
 
 async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -456,6 +580,16 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not doc:
         return {"success": False, "error": "Document not found"}
 
+    # F181 (night 6): a spreadsheet is counted with code on its copy in the
+    # workspace (made here from the stored upload if missing), never from pages.
+    from services.spreadsheet_workspace import COUNT_WITH_CODE, workspace_copies
+
+    copies = await workspace_copies(workspace_id, doc)
+    counted: Dict[str, Any] = {}
+    if copies:
+        counted = {"workspace_path": copies[0]["workspace_path"], "row_count": copies[0]["row_count"],
+                   "count_with_code": COUNT_WITH_CODE, **({"sheets": copies} if len(copies) > 1 else {})}
+
     rows = db.execute(
         sa_text(
             "SELECT chunk_index, content FROM document_chunks "
@@ -464,6 +598,10 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
         {"doc_id": document_id},
     ).fetchall()
     if not rows:
+        if counted:  # its copy is readable even before the knowledge base has it
+            return {"success": True, "document_id": document_id, "source_id": document_id,
+                    "filename": doc.original_filename or doc.filename, "file_type": doc.file_type,
+                    **counted, "content": "", "total_pages": 0, "has_more": False}
         return {"success": False, "error": "Document has no readable content yet"}
 
     # Pack chunks into deterministic, token-budgeted pages (never split a chunk).
@@ -510,6 +648,7 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
         "has_more": page < total_pages - 1,
         "next_page": page + 1 if page < total_pages - 1 else None,
         "chunk_range": {"start": current["start"], "end": current["end"]},
+        **counted,
         "content": current["content"],
         "staleness": {
             "uploaded_at": doc.upload_date.isoformat() if doc.upload_date else None,

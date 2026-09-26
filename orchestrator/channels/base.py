@@ -148,7 +148,11 @@ class BaseChannelAdapter(ABC):
                 router = UniversalRouter(db=db)
                 decision = await router.route(envelope)
 
-                if not decision or not decision.agent_id:
+                # F149: only an agent of this channel's workspace answers it.
+                from core.security.workspace_scope import agent_in_workspace
+
+                if not decision or not decision.agent_id or not agent_in_workspace(
+                        db, decision.agent_id, envelope.workspace_id):
                     logger.warning(
                         "[Channel:%s] No route found for message, sending fallback",
                         self.connection_id,
@@ -192,6 +196,7 @@ class BaseChannelAdapter(ABC):
                             "connection_id": self.connection_id,
                         },
                         attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
+                        conversation=True,  # F182: a person's message recalls as a chat turn does
                     )
                     response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
 

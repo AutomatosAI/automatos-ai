@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, validator
 from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
@@ -63,7 +63,7 @@ from core.models.orchestration_enums import (
 from modules.coordination.planner import PlanValidationError
 
 from services.chat_messenger import strip_caller_narration_origin
-from services.coordinator_service import get_coordinator_service
+from services.coordinator_service import StaffingError, get_coordinator_service
 from services.orchestration_state import (
     ConflictError,
     InvalidTransitionError,
@@ -79,6 +79,24 @@ router = APIRouter(prefix="/api/missions", tags=["missions"])
 # ---------------------------------------------------------------------------
 
 
+class StaffingEntry(BaseModel):
+    """F142: one agent the owner named, and its work in the owner's words."""
+
+    agent: str = Field(..., min_length=1, max_length=200, description="The agent's name, slug or id")
+    does: str = Field(..., min_length=1, max_length=2000, description="Its work, in the owner's words")
+
+    @field_validator("agent", mode="before")
+    @classmethod
+    def _an_id_is_a_name_too(cls, value: Any) -> Any:
+        """An agent's id may come as a JSON number, as the field says."""
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+
+def _staffing(entries: Optional[List[StaffingEntry]]) -> Optional[List[Dict[str, str]]]:
+    """The staffing as the coordinator resolves it; [] (clear it) stays []."""
+    return None if entries is None else [entry.model_dump() for entry in entries]
+
+
 class MissionCreateRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=10000, description="Natural-language goal")
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
@@ -91,9 +109,27 @@ class MissionCreateRequest(BaseModel):
         False,
         description="PRD-163 S2: plan only — produce the plan and await approval, never auto-execute",
     )
+    staffing: Optional[List[StaffingEntry]] = Field(
+        None,
+        max_length=20,
+        description=(
+            "F142: when the owner names who does what — [{agent: name, slug or id, "
+            "does: the work in the owner's words}]. Each named agent is pinned to its work."
+        ),
+    )
+
+
+PLAN_EDITS_GO_TO_THE_PLAN = (
+    "Approve takes no plan edits: send them to PATCH /api/missions/{mission_id}/plan first, then approve."
+)
 
 
 class MissionApproveRequest(BaseModel):
+    # F165 (night 5): the Approve button's `modifications` were dropped without a
+    # word, since this body ignored unknown keys. Edits go to the plan route first
+    # (PRD-163 S4/Q57); a body carrying anything else is refused and says why.
+    model_config = ConfigDict(extra="forbid")
+
     max_concurrent_override: Optional[int] = Field(
         None, ge=1, le=10, description="Override max_concurrent for this mission"
     )
@@ -104,6 +140,13 @@ class MissionApproveRequest(BaseModel):
         None, description="Skip task verification (for benchmarks/testing)",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _edits_go_to_the_plan(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "modifications" in data:
+            raise ValueError(PLAN_EDITS_GO_TO_THE_PLAN)
+        return data
+
 
 # PRD-163 S4/Q57: approval-time plan editing. The old `modifications`-on-approve
 # stub never applied — edits now PATCH the plan (task rows) before approval.
@@ -111,6 +154,8 @@ class MissionTaskEdit(BaseModel):
     task_id: Optional[str] = Field(None, description="Task row UUID")
     temp_id: Optional[str] = Field(None, description="Planner temp id")
     sequence_number: Optional[int] = Field(None, ge=1, description="1-based task sequence")
+    # F142 (c): pin a specific agent (several may share a name).
+    agent_id: Optional[int] = Field(None, ge=1, description="The agent that runs this task")
     agent_role: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
     description: Optional[str] = Field(None, max_length=5000)
@@ -166,6 +211,9 @@ class EventResponse(BaseModel):
     old_state: Optional[str] = None
     new_state: Optional[str] = None
     task_id: Optional[str] = None
+    # F153: why the run stopped, on the transition that stopped it (a budget
+    # pause names the spend and the budget).
+    stop_detail: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -190,6 +238,8 @@ class MissionResponse(BaseModel):
     parallel_groups: List[str] = []
     has_synthesis_tasks: bool = False
     created_by: str
+    stop_reason: Optional[str] = None
+    stop_detail: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -407,6 +457,7 @@ def _event_to_response(event: OrchestrationEvent) -> dict:
         "old_state": event.old_state,
         "new_state": event.new_state,
         "task_id": str(event.task_id) if event.task_id else None,
+        "stop_detail": (event.payload or {}).get("stop_detail"),
         "created_at": event.created_at,
     }
 
@@ -475,10 +526,14 @@ async def create_mission(
             goal=body.goal,
             created_by=ctx.user.id or "unknown",
             config=mission_config or None,
+            staffing=_staffing(body.staffing),
         )
         db.commit()
         return _run_to_response(run)
 
+    except StaffingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
     except PlanValidationError as exc:
         db.rollback()
         raise HTTPException(
@@ -1442,6 +1497,14 @@ class MissionReplanRequest(BaseModel):
         max_length=5000,
         description="Optional user guidance for the replanner",
     )
+    staffing: Optional[List[StaffingEntry]] = Field(
+        None,
+        max_length=20,
+        description=(
+            "F142: when the owner names who does what — [{agent: name, slug or id, "
+            "does: the work in the owner's words}]. Each named agent is pinned to its work."
+        ),
+    )
 
 
 @router.post("/{mission_id}/replan", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -1478,12 +1541,16 @@ async def replan_mission(
             run_id=run.id,
             actor_id=ctx.user.id or "unknown",
             notes=body.notes,
+            staffing=_staffing(body.staffing),
         )
         db.commit()
         return _run_to_response(run)
 
     except HTTPException:
         raise
+    except StaffingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
     except PlanValidationError as exc:
         db.rollback()
         raise HTTPException(
@@ -1661,6 +1728,8 @@ async def save_as_routine(
         description = body.description or f"Routine created from mission: {run.goal[:200]}"
 
         # Create WorkflowTemplate record
+        from core.auth.principal import resolve_user_pk
+
         recipe = WorkflowTemplate(
             template_id=template_id_slug,
             name=body.name,
@@ -1668,6 +1737,8 @@ async def save_as_routine(
             workspace_id=ctx.workspace_id,
             owner_type="workspace",
             owner_id=str(ctx.workspace_id),
+            # F133: the person who saved it; its later edits are checked against them.
+            created_by_user_id=resolve_user_pk(db, ctx),
             tags=body.tags or [],
             template_definition=template_def,
             steps=[

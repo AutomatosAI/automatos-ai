@@ -27,6 +27,21 @@ from core.auth.dependencies import RequestContext
 from core.models.core import User
 
 
+def resolve_recorded_person(db: Session, recorded: Optional[str]) -> Optional[int]:
+    """The integer ``users.id`` for a person a row recorded as a string — a
+    mission's ``created_by``, a watch's creator. The same order as below: the Clerk
+    id first, then the email (a local operator has no Clerk id; the local REST API
+    and chat record the email, F166). Never a bare number: a digit string there is
+    an agent id wherever no person drove the action, so it resolves to nobody."""
+    value = str(recorded or "").strip()
+    if not value:
+        return None
+    row = db.query(User.id).filter(User.clerk_user_id == value).first()
+    if row is None and "@" in value:
+        row = db.query(User.id).filter(User.email == value).first()
+    return int(row[0]) if row else None
+
+
 def resolve_internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
     """The integer ``users.id`` for ``ctx``'s principal, or None if unresolvable."""
     if not ctx.user:

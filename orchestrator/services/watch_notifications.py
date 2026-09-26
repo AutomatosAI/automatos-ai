@@ -49,23 +49,16 @@ async def dispatch_watch_notification(
     completed; False (logged) on any failure -- never raises.
     """
     try:
-        from core.models.core import User
+        from core.auth.actor import resolve_recorded_person
         from core.services.notification_dispatcher import NotificationDispatcher
 
         workspace_id = getattr(watch, "workspace_id", None)
         if workspace_id is None:
             return False
 
-        user_id: Optional[int] = None
+        # A Clerk id, or F166 a local operator's email; an agent id is nobody.
         created_by = getattr(watch, "created_by", None)
-        if created_by:
-            user_row = (
-                db.query(User.id)
-                .filter(User.clerk_user_id == created_by)
-                .first()
-            )
-            if user_row:
-                user_id = user_row[0]
+        user_id: Optional[int] = resolve_recorded_person(db, created_by)
 
         dispatcher = NotificationDispatcher(db, str(workspace_id))
         await dispatcher.dispatch(

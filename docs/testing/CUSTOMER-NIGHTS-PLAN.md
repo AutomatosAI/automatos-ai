@@ -65,6 +65,7 @@ Each theme is a brief file under `scripts/ralph/customer-night/nights/<theme>.md
 | 11 | **Hybrid runtimes** | the night-1 evening with a mixed team: Claude sessions, Codex sessions, API agents on OpenAI, DeepSeek, Kimi via OpenRouter — identical briefs to each; **plus one mission staffed across runtimes (Claude, Fable, Codex, Grok) sharing one field memory** | quality (judge), cost, time per runtime on the same brief; the "some agents perform better" table | the models present in the registry; budget |
 | 12 | **Load** | 30–60 tickets released at once; many sessions | dispatcher fairness, session concurrency the Mac tolerates, SSE, Redis errors, p95 claim latency | evening with nothing else running |
 | 13 | **Collective** | a week compressed into a night on the premium models — the scorecard night | usability / cost / quality / usefulness as one customer; the demo numbers | everything above green enough |
+| 14 | **Socials (PRD-251)** — added 25 Sep (Gerard), placeholder | *written once HIGGS's build is done (W1 video engine → W2 Socials tab → W3 publishing)* | *written with the brief* | the PRD-251 waves built and in the local build; `socials.enabled` switched on for the test workspace; HIGGS's summary of what a customer can do; the brief and the testing personas are written THEN, not before |
 
 Then the cycle repeats from 2 with whatever is still red. Nights 8→9 and 11 are the comparison pairs: same brief, one variable changed, the ledger and the judge do the comparing.
 

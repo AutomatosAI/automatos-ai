@@ -9,7 +9,7 @@ but it should never have been given a template variable to puzzle over.
 from __future__ import annotations
 
 from api.recipe_executor import (
-    _resolve_prompt,
+    fill_step_placeholders,
     substitute_playbook_input,
     unresolved_input_placeholders,
 )
@@ -50,5 +50,5 @@ def test_braces_that_are_not_input_variables_are_the_authors_text():
     assert unresolved_input_placeholders(text) == []
 
 
-def test_the_prompt_resolver_understands_bare_input_too():
-    assert "{input}" not in _resolve_prompt(TICKET_387, {"doc": "the doc"}, {})
+def test_the_step_resolver_understands_bare_input_too():
+    assert "{input}" not in fill_step_placeholders(TICKET_387, {"doc": "the doc"})

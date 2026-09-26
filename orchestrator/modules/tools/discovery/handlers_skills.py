@@ -15,6 +15,7 @@ handlers refuse to read or mutate skills outside that boundary.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -102,6 +103,38 @@ def _apply_frontmatter(skill, content: str, params: Dict[str, Any]) -> None:
     }
     if "forked_from_skill_id" in existing_metadata:
         skill.skill_metadata["forked_from_skill_id"] = existing_metadata["forked_from_skill_id"]
+
+
+# F204 (night 6): skill #358 was meant to draw on the owner's voice guide; its body
+# said "Refer to the 'harbourline-brand-voice.md' document" and carried none of its
+# rules. A pointer is sometimes right (a price list that changes), so it is advice
+# on the result, never a refusal.
+_DOCUMENT_EXT = r"\.(?:md|pdf|docx?|txt|csv|xlsx?|pptx?)"
+_QUOTED_DOCUMENT = re.compile(r"""['"\u201c\u2018]([^'"\u201d\u2019\n]{1,120}?""" + _DOCUMENT_EXT + r""")['"\u201d\u2019]""", re.I)
+# One bounded run, no nested repeats: 'Notes' then fifty hyphens made the first
+# version backtrack exponentially and hold the event loop (review CRITICAL).
+_BARE_DOCUMENT = re.compile(r"\b\w[\w.\-]{0,118}" + _DOCUMENT_EXT + r"\b", re.I)
+_OWN_FILE = "skill.md"
+# Advice needs no more than this much of a body to find its pointers.
+_ADVICE_SCAN_CHARS = 50_000
+
+
+def points_at_documents_advice(content: str) -> Optional[str]:
+    """The advice for a skill body that points at documents instead of carrying
+    their rules, or None. A quoted name may hold spaces; a bare one may not."""
+    text = (content or "")[:_ADVICE_SCAN_CHARS]
+    quoted = [(m.span(1), m.group(1)) for m in _QUOTED_DOCUMENT.finditer(text)]
+    bare = [(m.span(), m.group(0)) for m in _BARE_DOCUMENT.finditer(text)
+            if not any(start <= m.start() and m.end() <= end for (start, end), _ in quoted)]
+    names = []
+    for _, name in sorted(quoted + bare):
+        if name.lower() != _OWN_FILE and name not in names:
+            names.append(name)
+    if not names:
+        return None
+    quoted = ", ".join(f"'{name}'" for name in names)
+    return (f"This skill points at {quoted} instead of carrying its rules. If those rules don't change "
+            "often, put them in the skill, so agents don't depend on a search each time.")
 
 
 def _invalidate_skill_cache(skill_name: str, db: Session) -> None:
@@ -250,13 +283,18 @@ async def create_workspace_skill(db: Session, workspace_id: UUID, params: Dict[s
         skill.name, skill.id, workspace_id,
     )
 
-    return {
+    result = {
         "success": True,
         "skill_id": skill.id,
         "name": skill.name,
         "warnings": scan_result["findings"],
         "message": f"Skill '{skill.name}' created and enabled for this workspace.",
     }
+    pointer = points_at_documents_advice(content)
+    if pointer:
+        result["advice"] = pointer
+        result["message"] = f"{result['message']} {pointer}"
+    return result
 
 
 async def update_skill(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

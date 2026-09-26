@@ -14,6 +14,12 @@ Shape:
   with a Bearer key is keyed on a SHA-256 digest of the presented key (a
   1:1 per-key bucket without writing key material into Redis); a request
   with no key falls back to ``client_ip``. The FIRST request is gated.
+- A session token (a signed JWT, minted only from a server key) keeps its own
+  window at the public limit and also counts against its key's bucket at the
+  server limit, so a key's sessions share one budget (F155).
+- A key's stored per-minute limit (``sdk_api_keys.rate_limit_requests``) is
+  counted per key and a request over it is logged, once a window; it is not
+  enforced (F155, log-only).
 - The window lives in a Redis sorted set — the same sliding-window idiom as
   ``core/security/rate_limiter.py`` — via the platform Redis client
   (``core/redis/client.py`` + ``config.REDIS_URL``). No new dependency.
@@ -45,7 +51,7 @@ import json
 import logging
 import time
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -123,11 +129,15 @@ class RateLimitStore:
         key_id: str,
         limit: int,
         window: Optional[int] = None,
+        *,
+        quiet: bool = False,
     ) -> tuple[bool, int, int, int]:
         """Evaluate whether *key_id* may proceed under *limit* req/window.
 
         Returns ``(allowed, limit, remaining, reset_seconds)``. Redis
-        unreachable ⇒ **fail OPEN** (allowed, loud counter + ERROR log).
+        unreachable ⇒ **fail OPEN** (allowed, loud counter + ERROR log). A
+        ``quiet`` check (a count that gates nothing) skips the fail-open
+        accounting.
         """
         window = window or config.WIDGET_RATE_LIMIT_WINDOW_SECONDS
 
@@ -136,7 +146,8 @@ class RateLimitStore:
         except Exception:
             redis = None
         if redis is None:
-            _count_redis_failure(key_id)
+            if not quiet:
+                _count_redis_failure(key_id)
             return (True, limit, max(0, limit - 1), window)
 
         key = f"{_KEY_PREFIX}:{key_id}"
@@ -151,7 +162,8 @@ class RateLimitStore:
             pipe.expire(key, window + 10)
             results = pipe.execute()
         except Exception:
-            _count_redis_failure(key_id)
+            if not quiet:
+                _count_redis_failure(key_id)
             return (True, limit, max(0, limit - 1), window)
 
         count = int(results[1])
@@ -165,6 +177,93 @@ class RateLimitStore:
         if count >= limit:
             return (False, limit, 0, reset_seconds)
         return (True, limit, max(0, limit - count - 1), reset_seconds)
+
+
+# ---------------------------------------------------------------------------
+# Per-key identity and the stored per-key limit (F155)
+# ---------------------------------------------------------------------------
+
+# sdk_api_keys.rate_limit_requests is documented as requests per minute.
+_KEY_LIMIT_WINDOW_SECONDS = 60
+_census_store = RateLimitStore()
+_census_logged: dict[str, float] = {}
+_stored_limits: dict[str, tuple[Optional[int], float]] = {}
+
+
+def _session_key_id(token: str) -> Optional[str]:
+    """The api_key_id a widget session token was minted for, or None for
+    anything else: a raw key, or an invalid, expired or unsigned token."""
+    if token.count(".") != 2:
+        return None
+    from api.widgets.auth import _try_jwt
+
+    payload = _try_jwt(token) or {}
+    try:
+        return str(UUID(str(payload.get("api_key_id"))))
+    except (TypeError, ValueError):
+        return None
+
+
+def stored_key_limit(db, api_key_id) -> Optional[int]:
+    """A key's stored per-minute limit, cached for a window; None when unset
+    or unreadable."""
+    key = str(api_key_id)
+    now = time.time()
+    cached = _stored_limits.get(key)
+    if cached and cached[1] > now:
+        return cached[0]
+    from sqlalchemy import text
+
+    try:
+        limit = db.execute(text("SELECT rate_limit_requests FROM sdk_api_keys WHERE id = CAST(:id AS uuid)"),
+                           {"id": key}).scalar()
+    except Exception:
+        logger.debug("widget key limit unreadable for %s", key, exc_info=True)
+        return None
+    _stored_limits[key] = (limit, now + _KEY_LIMIT_WINDOW_SECONDS)
+    return limit
+
+
+async def note_key_limit(api_key_id, stored_limit: Optional[int]) -> None:
+    """Count a request against its key's stored limit, and log (once a window)
+    when the key is over it. Log-only: it never refuses and never raises."""
+    if not stored_limit:
+        return
+    key = str(api_key_id)
+    try:
+        allowed = (await asyncio.to_thread(
+            _census_store.check, f"census:{key}", int(stored_limit), _KEY_LIMIT_WINDOW_SECONDS, quiet=True,
+        ))[0]
+    except Exception:
+        logger.debug("widget key limit count failed for %s", key, exc_info=True)
+        return
+    now = time.time()
+    if allowed or now - _census_logged.get(key, 0.0) < _KEY_LIMIT_WINDOW_SECONDS:
+        return
+    _census_logged[key] = now
+    logger.warning(
+        "widget key %s is over its limit of %d requests a minute — not enforced (log-only)",
+        key, int(stored_limit),
+    )
+
+
+def _bucket(api_key: str, client_ip: str) -> tuple[str, int, Optional[str]]:
+    """``(identifier, limit, session_key_id)`` for a request."""
+    if not api_key:
+        return f"ip:{client_ip}", config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW, None
+    # The canonical key-identity derivation (core/services/api_key_service.
+    # _hash_key — the same digest sdk_api_keys stores as key_hash): no key
+    # material lands in Redis.
+    digest = _hash_key(api_key)[:32]
+    session_key_id = _session_key_id(api_key)
+    if session_key_id:
+        return f"session:{digest}", config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW, session_key_id
+    limit = (
+        config.WIDGET_RATE_LIMIT_SERVER_PER_WINDOW
+        if api_key.startswith("ak_srv_")
+        else config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW
+    )
+    return f"key:{digest}", limit, None
 
 
 # ---------------------------------------------------------------------------
@@ -210,24 +309,22 @@ class WidgetRateLimitMiddleware:
         client = scope.get("client")
         client_ip = client[0] if client else "unknown"
 
-        if api_key:
-            # The canonical key-identity derivation (core/services/
-            # api_key_service._hash_key — the same digest sdk_api_keys
-            # stores as key_hash): the bucket IS the key row's identity,
-            # and no key material lands in Redis.
-            identifier = f"key:{_hash_key(api_key)[:32]}"
-            limit = (
-                config.WIDGET_RATE_LIMIT_SERVER_PER_WINDOW
-                if api_key.startswith("ak_srv_")
-                else config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW
-            )
-        else:
-            identifier = f"ip:{client_ip}"
-            limit = config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW
-
+        identifier, limit, session_key_id = _bucket(api_key, client_ip)
         allowed, rl_limit, remaining, reset_seconds = await asyncio.to_thread(
             self._store.check, identifier, limit
         )
+
+        # F155: a session also counts against its key, so a key's sessions
+        # share one budget (sessions are minted only from server keys).
+        if allowed and session_key_id:
+            key_allowed, key_limit, key_remaining, key_reset = await asyncio.to_thread(
+                self._store.check, f"key:{session_key_id}", config.WIDGET_RATE_LIMIT_SERVER_PER_WINDOW
+            )
+            if not key_allowed:
+                allowed = False
+                rl_limit, remaining, reset_seconds = key_limit, 0, key_reset
+            else:
+                remaining = min(remaining, key_remaining)
 
         # Per-IP ceiling on the money-spending endpoints — applies even when
         # a key was presented (PRD-194 S5): a scraped ak_pub_ key replayed

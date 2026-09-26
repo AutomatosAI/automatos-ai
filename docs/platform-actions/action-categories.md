@@ -153,7 +153,6 @@ graph TB
 
     subgraph "API Keys"
         AK1["platform_list_api_keys<br/>(handlers_api_keys:list_api_keys)"]
-        AK2["platform_create_api_key<br/>(handlers_api_keys:create_api_key)"]
         AK3["platform_revoke_api_key<br/>(handlers_api_keys:revoke_api_key)"]
     end
 
@@ -337,8 +336,9 @@ Actions for managing workspace members and invitations.
 ### 13. API Keys
 Actions for managing API keys within the workspace.
 - `platform_list_api_keys`: Lists API keys configured for the workspace.
-- `platform_create_api_key`: Creates a new API key.
-- `platform_revoke_api_key`: Revokes an existing API key.
+- There is no create tool: an owner or admin creates a key in Settings → Widget SDK → API keys,
+  which shows the full key once, so it never enters the LLM context.
+- `platform_revoke_api_key`: Revokes an existing API key (an owner's or admin's, confirmed).
 
 **Sources:** [orchestrator/modules/tools/discovery/actions_api_keys.py:1-70]().
 

@@ -34,6 +34,11 @@ class ComposioSection(BaseSection):
 
     async def render(self, ctx: SectionContext) -> str:
         """Render connected Composio apps block."""
+        from core.security.surface import widget_turn
+
+        if widget_turn():
+            # F155: the owner's connected apps are never offered on a widget turn.
+            return ""
         try:
             return self._build(ctx)
         except Exception:

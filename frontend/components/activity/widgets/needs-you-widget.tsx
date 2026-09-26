@@ -56,6 +56,9 @@ function Section({ title, count, href, children }: { title: string; count: numbe
 
 const rowClass = 'block w-full rounded-lg border border-border/50 bg-muted/30 p-2 text-left transition-colors hover:bg-muted/60'
 
+// F207: a list that could not be loaded is never "Nothing on your plate".
+const DECISIONS_NOT_LOADED = 'The decisions waiting for you could not be loaded. Try again shortly.'
+
 interface NeedsYouWidgetProps {
   period: string
   className?: string
@@ -76,6 +79,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
   const pendingCount = gates.data?.pending_count ?? 0
   const decisionItems = decisions.data?.items ?? []
   const decisionsTotal = decisions.data?.total ?? 0
+  const decisionsError = decisions.data?.error ?? (decisions.isError ? DECISIONS_NOT_LOADED : null)
   const reviewTasks = reviews.data?.tasks ?? []
   const reviewTotal = reviews.data?.total ?? reviewTasks.length
   const total = asks.length + pendingCount + decisionsTotal + reviewTotal
@@ -97,7 +101,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
-        ) : total === 0 ? (
+        ) : total === 0 && !decisionsError ? (
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <CheckCircle2 className="w-8 h-8 mb-2 opacity-30" />
             <p className="text-xs">Nothing on your plate. Grab a tea.</p>
@@ -149,6 +153,12 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
                 </Link>
               ))}
             </Section>
+
+            {decisionsError && (
+              <p role="status" className="text-xs text-warning">
+                {decisionsError}
+              </p>
+            )}
 
             <Section title="Decisions" count={decisionsTotal} href={AUTO_NOW_LINKS.governance}>
               {decisionItems.slice(0, ROWS + 1).map((item) => {

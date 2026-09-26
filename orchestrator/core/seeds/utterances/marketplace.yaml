@@ -146,7 +146,7 @@ actions:
   - text: what installable skills exist for email drafting?
     source: authored
   platform_install_model:
-  - text: install anthropic/claude-sonnet-4-20250514
+  - text: install google/gemini-2.5-flash
     source: example
   - text: add model google/gemini-2.5-pro
     source: example

@@ -95,6 +95,10 @@ export function MissionActivityFeed({ events, className }: MissionActivityFeedPr
                     </span>
                   )}
                 </p>
+                {/* F153: why the run stopped (a budget pause names the spend) */}
+                {event.stop_detail && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{event.stop_detail}</p>
+                )}
                 {event.actor_type !== 'system' && event.actor_id && (
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     by {event.actor_type}: {event.actor_id}

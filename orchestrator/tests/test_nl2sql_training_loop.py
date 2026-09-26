@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 
@@ -18,6 +18,16 @@ def _store(**kw):
     from modules.nl2sql.training.example_store import SQLExampleStore
 
     return SQLExampleStore(**kw)
+
+
+def _embedder(**generate):
+    """F172: a fake with the REAL EmbeddingManager's methods only — a bare MagicMock
+    answered ``embed_text``, which the real class never had."""
+    from core.llm.embedding_manager import EmbeddingManager
+
+    em = create_autospec(EmbeddingManager, instance=True)
+    em.generate_embedding = AsyncMock(**generate)
+    return em
 
 
 # --- embedding is persisted, not discarded -----------------------------------
@@ -30,8 +40,7 @@ def test_add_example_persists_embedding_vector():
             captured.update(kwargs)
             self.id = 1
 
-    em = MagicMock()
-    em.embed_text.return_value = [0.1, 0.2, 0.3]
+    em = _embedder(return_value=[0.1, 0.2, 0.3])
     db = MagicMock()
     store = _store(embedding_manager=em, db_session=db)
 
@@ -59,8 +68,7 @@ def test_add_example_survives_embedding_failure():
             self.kwargs = kwargs
             self.id = 2
 
-    em = MagicMock()
-    em.embed_text.side_effect = RuntimeError("embedder down")
+    em = _embedder(side_effect=RuntimeError("embedder down"))
     db = MagicMock()
     store = _store(embedding_manager=em, db_session=db)
 
@@ -100,8 +108,7 @@ def test_embedding_similarity_ranks_closest_pair_first():
 
 def test_get_similar_examples_prefers_embeddings_over_keyword():
     db = MagicMock()
-    em = MagicMock()
-    em.embed_text.return_value = [1.0, 0.0]
+    em = _embedder(return_value=[1.0, 0.0])
     store = _store(db_session=db, embedding_manager=em)
 
     rows = [

@@ -275,10 +275,16 @@ class TestTick:
             hbmod, "get_heartbeat_service",
             lambda: SimpleNamespace(reconcile_agent_heartbeats=lambda _db: {"added": 0, "removed": 2, "changed": 0}),
         )
+        import services.playbook_scheduler as pbmod
+        monkeypatch.setattr(
+            pbmod, "get_playbook_scheduler",
+            lambda: SimpleNamespace(reconcile_with_db=lambda _db: {"added": 1, "changed": 0, "removed": 0}),
+        )
         out = sr.run_reconcile_once(_FakeScheduler())
         assert out == {
             "tasks": {"added": 1, "removed": 0, "skipped": False},
             "heartbeats": {"added": 0, "removed": 2, "changed": 0},
+            "playbooks": {"added": 1, "changed": 0, "removed": 0},
         }
         assert db.closed is True
 

@@ -33,6 +33,7 @@ import { TaskInspector } from './task-inspector'
 import { MissionResultsPanel } from './mission-results-panel'
 import { MissionFieldPanel } from './mission-field-panel'
 import { MissionDeliverablesPanel } from './mission-deliverables-panel'
+import { approveBody, BUDGET_MIN_TOKENS } from './approve-body'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
@@ -68,7 +69,7 @@ function missionDisplayTitle(goal: string, config?: Record<string, unknown>): st
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const router = useRouter()
   const { data: mission, isLoading } = useMission(missionId)
-  const { selectedTaskId, setSelectedTaskId, planModifications, clearPlanModifications } = useMissionStore()
+  const { selectedTaskId, setSelectedTaskId } = useMissionStore()
 
   const pauseMutation = usePauseMission()
   const resumeMutation = useResumeMission()
@@ -86,6 +87,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const [showReplan, setShowReplan] = useState(false)
   const [replanNotes, setReplanNotes] = useState('')
   const [maxConcurrentOverride, setMaxConcurrentOverride] = useState<string | null>(null)
+  // F165: the approve route takes a token budget; plan edits go to the plan route first.
+  const [tokenBudgetOverride, setTokenBudgetOverride] = useState('')
   const [showSaveRoutine, setShowSaveRoutine] = useState(false)
   const [routineName, setRoutineName] = useState('')
   const [routineDescription, setRoutineDescription] = useState('')
@@ -394,6 +397,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
             tokensUsed={mission.tokens_used}
             tokenBudgetEstimate={mission.token_budget_estimate}
             missionState={mission.state}
+            stopDetail={mission.stop_detail}
             onResume={() => resumeMutation.mutate(missionId, {
               onSuccess: () => toast.success('Mission resumed'),
               onError: (err) => toast.error(err.message),
@@ -446,6 +450,21 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   </SelectContent>
                 </Select>
               </div>
+              {/* Token budget override (F165) */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">Budget:</span>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={BUDGET_MIN_TOKENS}
+                  step={BUDGET_MIN_TOKENS}
+                  placeholder={mission.token_budget_estimate != null ? String(mission.token_budget_estimate) : 'tokens'}
+                  value={tokenBudgetOverride}
+                  onChange={(e) => setTokenBudgetOverride(e.target.value)}
+                  className="h-7 w-28 text-xs"
+                  aria-label="Token budget for this mission"
+                />
+              </div>
               <Button
                 variant="outline"
                 size="sm"
@@ -460,31 +479,18 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 className="bg-success hover:bg-success/80 text-white"
                 disabled={approveMutation.isLoading}
                 onClick={() => {
-                  const hasModifications =
-                    Object.keys(planModifications.task_overrides).length > 0 ||
-                    Object.keys(planModifications.agent_overrides).length > 0 ||
-                    planModifications.notes.length > 0
-
-                  const overrideVal = maxConcurrentOverride != null
-                    ? parseInt(maxConcurrentOverride, 10)
-                    : undefined
-                  const hasOverride = overrideVal != null && overrideVal !== mission.max_concurrent
-
+                  const { body, error } = approveBody(maxConcurrentOverride, tokenBudgetOverride, mission.max_concurrent)
+                  if (error) {
+                    toast.error(error)
+                    return
+                  }
                   approveMutation.mutate(
-                    {
-                      id: missionId,
-                      body: hasModifications || hasOverride
-                        ? {
-                            ...(hasModifications ? { modifications: planModifications } : {}),
-                            ...(hasOverride ? { max_concurrent_override: overrideVal } : {}),
-                          }
-                        : undefined,
-                    },
+                    { id: missionId, body },
                     {
                       onSuccess: () => {
                         toast.success('Plan approved — mission is running')
-                        clearPlanModifications()
                         setMaxConcurrentOverride(null)
+                        setTokenBudgetOverride('')
                       },
                       onError: (err) => toast.error(err.message),
                     },
@@ -517,7 +523,6 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                     {
                       onSuccess: () => {
                         toast.success('Plan rejected — provide more details')
-                        clearPlanModifications()
                         setRejectFeedback('')
                         setShowRejectInput(false)
                       },

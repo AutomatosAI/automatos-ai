@@ -222,6 +222,9 @@ async def session_tools_mcp(
         return _json({"jsonrpc": "2.0", "id": None,
                       "error": {"code": session_tools_rpc.PARSE_ERROR, "message": "invalid JSON"}})
 
+    if _opens_the_session(payload):
+        _stamp_connected(db, task)
+
     async def _call(tool, scoped_params, context):
         # The wire scoped these (services/session_tools_rpc.py); we only run them.
         return await session_tools.call_tool(db, tool, scoped_params, context)
@@ -235,6 +238,37 @@ async def session_tools_mcp(
     if reply is None:
         return Response(status_code=202)
     return _json(reply)
+
+
+def _opens_the_session(payload: Any) -> bool:
+    messages = payload if isinstance(payload, list) else [payload]
+    return any(isinstance(m, dict) and m.get("method") == "initialize" for m in messages)
+
+
+def _stamp_connected(db: Session, task: Any) -> None:
+    """F131: the session's MCP client reached Automatos. Stamped on the ticket
+    with a targeted UPDATE, as ``_count_call`` does, never by assigning
+    ``runtime_ref`` (which would flush a stale copy over the host's writes)."""
+    try:
+        db.execute(
+            sa_text(
+                "UPDATE board_tasks SET runtime_ref = jsonb_set(COALESCE(runtime_ref, CAST('{}' AS jsonb)), "
+                "CAST(:path AS text[]), to_jsonb(CAST(now() AS text)), true) WHERE id = :task_id"
+            ),
+            {"path": "{" + svc.SESSION_CONNECTED_KEY + "}", "task_id": int(task.id)},
+        )
+        db.commit()
+        try:
+            db.expire(task, ["runtime_ref"])
+        except Exception:  # noqa: BLE001 — a test double, or a detached row
+            pass
+    except Exception:  # noqa: BLE001 — a stamp must never be why a session cannot start
+        logger.warning("[session-tools] could not stamp the connection on ticket #%s", getattr(task, "id", "?"),
+                       exc_info=True)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _json(body: Any) -> Response:

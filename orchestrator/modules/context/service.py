@@ -32,6 +32,7 @@ from modules.context.budget import (
     TokenBudgetManager,
 )
 from core.context_guard import count_tokens, get_context_window
+from core.security.surface import widget_turn
 from modules.context.modes import (
     MODE_CONFIGS,
     ContextMode,
@@ -149,7 +150,10 @@ class ContextService:
             recipe_step=recipe_step,
             complexity_assessment=complexity_assessment,
             tool_hints=tool_hints,
-            widget_mode=widget_mode,
+            # F155: any context built during a widget turn or for work one started
+            # (a mission's task, a playbook's step: core.security.surface) is a
+            # widget context, whether or not its caller says so.
+            widget_mode=widget_mode or widget_turn(),
             # PRD-229: carry the mode so tool loading + the action catalog can
             # apply mode-scoped admission (ask_orchestrator is execution-only).
             context_mode=mode.value if isinstance(mode, ContextMode) else str(mode),
@@ -338,7 +342,11 @@ class ContextService:
         try:
             config = MODE_CONFIGS[ContextMode.PLANNING]
 
-            kwargs: dict[str, Any] = {"team": team}
+            # F155: planning a widget-born mission reads what the widget key
+            # may: its team lock wins, and no workspace history is recalled.
+            from core.team_access import retrieval_team
+
+            kwargs: dict[str, Any] = {"team": retrieval_team(team)}
             if include_roster:
                 roster = agents if agents is not None else self._fetch_roster(workspace_id)
                 if roster is not None:
@@ -351,6 +359,7 @@ class ContextService:
                 db_session=self._db_session,
                 messages=None,
                 task_description=goal,
+                widget_mode=widget_turn(),
                 kwargs=kwargs,
             )
 

@@ -99,6 +99,12 @@ Composio, if you add a key).
 | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
 | `gotenberg` | 3001 (`GOTENBERG_PORT`) | DOCX/XLSX → PDF conversion. The backend reaches it at `http://gotenberg:3000`; without the profile, document conversions that need it fail, everything else is unaffected. |
 
+`docker compose --profile media up -d media-render` adds the Socials renderer:
+
+| Service | Host port | What it does |
+|---|---|---|
+| `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
+
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
 `automatos_minio_data`, `automatos_backend_logs`, and `backend_data`, which
 holds the auto-generated credential-encryption key (`CREDENTIAL_KEY_FILE` in
@@ -337,6 +343,62 @@ metadata endpoint. `WEB_ACCESS_DENY` adds hosts to that (suffix match:
 both actions answer `{available:false, reason}`. In the hosted edition an
 operator must set `WEB_ACCESS=on` explicitly. All of these are read at process
 start — change them in `.env` and `docker compose up -d backend`.
+
+## 7b. Media rendering (the `media` profile)
+
+Socials (PRD-251) renders its videos and images in a separate service,
+`media-render`. It assembles a finished MP4 or PNG from a template, your brand
+kit, the Kokoro voice and the music; it calls no paid provider. It is an
+optional compose profile because its image is the heaviest in the stack
+(Chromium, ffmpeg, Hyperframes and the 310 MB Kokoro model), and the first build
+takes several minutes.
+
+```bash
+docker compose --profile media up -d media-render
+```
+
+Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` / `docker compose up -d`.
+
+- **Wiring.** The backend already points at it: `SOCIALS_RENDER_URL=http://media-render:8090`
+  in `envs/api.defaults`. An optional shared secret, `SOCIALS_RENDER_TOKEN` in `.env`,
+  reaches both containers.
+- **Without the profile**, rendering a post answers *"Rendering needs the media
+  profile"* and the post stays as it was. Everything else in Socials works.
+- **Where files go.** Rendered files are stored in MinIO under
+  `social-media/<workspace>/<post>/` and appear in **Deliverables → Outputs**.
+  Media inputs reach the renderer only as presigned links on your MinIO bucket
+  (`MEDIA_RENDER_MEDIA_URL_PREFIXES`, default `http://minio:9000/automatos-ai/`).
+- **Resources.** Compose caps it at 4 CPUs and 8 GB. It renders two videos at
+  once at most, one per workspace, and queues the rest.
+- **Render minutes.** The local edition has no monthly render quota. The hosted
+  plans do: Basic 10, Pro 60 and Business 240 minutes a month.
+
+### media-render on Railway (SaaS)
+
+The hosted edition runs the renderer as its own Railway service (owner sizing,
+2026-09-23). The entry is `media-render` in `infrastructure/railway-manifest.json`.
+
+1. **Create the service** in the Automatos AI project: *New → GitHub repo →
+   AutomatosAI/automatos-ai*, with **root directory `services/media-render`**. It
+   builds the Dockerfile with no build args (the last stage, `production`).
+2. **Size it: 4 vCPU / 8 GB, one replica.** Its render lanes are in-process, so a
+   second replica would double the concurrency.
+3. **No public domain.** It is reached over Railway's private network only;
+   `/health` on port 8090 is its health check.
+4. **Set its variables:**
+   - `SOCIALS_RENDER_TOKEN`: a long random secret (boot refuses production without one);
+   - `ENVIRONMENT=production`, `SERVICE_NAME=media-render`;
+   - `MEDIA_RENDER_MEDIA_URL_PREFIXES`: the documents bucket's HTTPS origin, e.g.
+     `https://<S3_DOCUMENTS_BUCKET>.s3.<AWS_REGION>.amazonaws.com/`;
+   - optional: `LOG_LEVEL`, `LOG_RELAY_ENABLED`, and
+     `MEDIA_RENDER_MAX_CONCURRENT_RENDERS=2` / `MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE=1`
+     (their defaults).
+5. **Point the API at it** (the `automatos-ai-api` service):
+   - `SOCIALS_RENDER_URL=http://media-render.railway.internal:8090`;
+   - `SOCIALS_RENDER_TOKEN`: the same secret.
+6. **Check it.** A render from the Socials tab moves the post to *Rendering*, then
+   *Needs approval*, and the file shows in Deliverables. The tab shows
+   *Render minutes: used / quota this month*.
 
 ## 8. What a fresh instance contains
 

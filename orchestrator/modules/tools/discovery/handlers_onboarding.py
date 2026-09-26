@@ -91,6 +91,32 @@ def _usable_segment(segment: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _is_zone(name: Any) -> bool:
+    from zoneinfo import ZoneInfo
+
+    try:
+        ZoneInfo(str(name))
+        return isinstance(name, str) and bool(name.strip())
+    except Exception:  # noqa: BLE001 — any unknown or malformed name is not a zone
+        return False
+
+
+def _set_business_zone(workspace: Any, zone: str) -> Dict[str, Any]:
+    """F132: the business's zone becomes the workspace's (the heartbeat timezone
+    playbook schedules default to), unless the owner already set one."""
+    settings = dict(getattr(workspace, "settings", None) or {})
+    orchestrator = dict(settings.get("orchestrator") or {})
+    heartbeat = dict(orchestrator.get("heartbeat") or {})
+    kept = heartbeat.get("timezone")
+    if kept and kept != zone:
+        return {"kept": kept, "note": f"The workspace timezone was already {kept}; left as it is."}
+    heartbeat["timezone"] = zone
+    orchestrator["heartbeat"] = heartbeat
+    settings["orchestrator"] = orchestrator
+    workspace.settings = settings
+    return {"set": zone}
+
+
 def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     """Coerce the LLM-supplied argument shapes seen in prod into the schema's.
 
@@ -199,12 +225,25 @@ async def update_onboarding(
     advance_to = params.get("advance_to")
     segment = params.get("segment")
     plan = params.get("plan")
+    zone = params.get("timezone")
+    # F188: on local, powerup (the key and the checklist cards) has no UI. The
+    # stage after boom is completed, as advance_past_boom moves it there.
+    from config import config
 
-    if not advance_to and not segment and not plan and not params.get("_bare_answer"):
+    local_finish = advance_to == "powerup" and config.IS_LOCAL_EDITION
+    if local_finish:
+        advance_to = "completed"
+
+    if not advance_to and not segment and not plan and not zone and not params.get("_bare_answer"):
         return {
             "success": False,
-            "error": "Provide advance_to, segment, or plan — at least one is required.",
+            "error": "Provide advance_to, segment, plan, or timezone — at least one is required.",
         }
+    # F132 (night 6): where the business is decides when its schedules fire.
+    if zone is not None and not _is_zone(zone):
+        return {"success": False, "error": (
+            f"'{zone}' isn't a timezone. Pass the IANA name for where the business is, "
+            "e.g. 'Europe/London' for Bristol.")}
 
     workspace = (
         db.query(Workspace).filter(Workspace.id == workspace_id).first()
@@ -227,10 +266,10 @@ async def update_onboarding(
             segment = {key: text}
             logger.warning("[update_onboarding] bare-text answer recorded as '%s' (%s)", key,
                            "key named by the model" if bare[0] else "first unanswered question")
-    if not advance_to and not segment and not plan:
+    if not advance_to and not segment and not plan and not zone:
         return {
             "success": False,
-            "error": "Provide advance_to, segment, or plan — at least one is required.",
+            "error": "Provide advance_to, segment, plan, or timezone — at least one is required.",
         }
 
     # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
@@ -247,7 +286,7 @@ async def update_onboarding(
             advance_to,
         )
         advance_to = None
-        if not segment and not plan:
+        if not segment and not plan and not zone:
             # Honest no-op (local test 2026-09-02): Auto re-asserted 'building'
             # twice while SAYING "I'm proceeding with the installation" and
             # installing nothing — a bare success read as progress. Say what
@@ -332,6 +371,8 @@ async def update_onboarding(
             assign_plan(db, workspace, plan, commit=False)
             record_plan_event(db, workspace, "plan_accepted", plan, commit=False)
 
+        zone_outcome = _set_business_zone(workspace, zone) if zone else None
+
         # The single commit — all deferred writes land as one transaction.
         if db is not None:
             db.commit()
@@ -354,4 +395,10 @@ async def update_onboarding(
             db.rollback()
         return {"success": False, "error": str(exc)}
 
-    return {"success": True, "data": public_snapshot(workspace)}
+    result: Dict[str, Any] = {"success": True, "data": public_snapshot(workspace)}
+    if zone_outcome:
+        result["timezone"] = zone_outcome
+    if local_finish:
+        result["message"] = ("This local install has no powerup step (a key and the checklist are SaaS), "
+                             "so onboarding is completed.")
+    return result

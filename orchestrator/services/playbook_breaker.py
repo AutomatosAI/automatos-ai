@@ -66,12 +66,14 @@ def _recent_terminal_statuses(db: Session, recipe_id: int, limit: int) -> List[s
     ``(recipe_id, status)``; ordered by ``started_at`` desc so "newest first".
     """
     from core.models.core import RecipeExecution
+    from services.playbook_owner_ask import ended_with_an_outcome
 
     rows = (
         db.query(RecipeExecution.status)
         .filter(
             RecipeExecution.recipe_id == recipe_id,
             RecipeExecution.status.in_(_TERMINAL_STATUSES),
+            ended_with_an_outcome(RecipeExecution),  # F140: a stop to ask the owner is no failure
         )
         .order_by(RecipeExecution.started_at.desc())
         .limit(limit)

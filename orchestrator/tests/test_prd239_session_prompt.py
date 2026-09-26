@@ -120,7 +120,7 @@ def test_the_tools_block_names_what_a_session_has_and_what_it_has_not():
     block = text[text.index(TOOLS_HEADER):text.index(SKILLS_HEADER)]
     assert "- Files:" in block and "- Bash:" in block and "- Web:" in block
     assert "`git status`" in block and "`sort`" in block and "`pytest`" in block   # the host's allowlist, rendered
-    assert "HELD until the operator" in block and "Questions tab" in block
+    assert "may be HELD until the operator" in block and "Questions tab" in block  # F167: not every host holds
     # Only the families the session does NOT have, and only in the unavailable
     # line — asserting over the whole block let `composio_execute` and
     # `search_knowledge` match the AVAILABLE line, so a regression that listed

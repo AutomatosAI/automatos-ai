@@ -33,12 +33,21 @@ from sqlalchemy.orm import Session
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
+from services.pasted_data import pasted_data_rule
+from services.ticket_owner_ask import ticket_answers_block
+from services.ticket_redo import redo_block
 
 logger = logging.getLogger(__name__)
 
 # Claimants LISTEN on this channel to skip the poll wait; assign/create NOTIFY it.
 NOTIFY_CHANNEL = "board_task_available"
 MAX_ADOPTED_FILES = 20
+
+# F209: a ticket's current run, in ``runtime_ref``. Every start stamps a fresh one
+# (this claim, a PATCH into in_progress, the status tool) and a redispatch clears
+# it, so a run that no longer holds the ticket can never finalize it. The claim
+# SQL below spells the same key.
+RUN_ID_KEY = "run_id"
 
 # Priority ordering for claim selection — highest urgency, then oldest first.
 # Inlined as data (no hardcoded behaviour elsewhere); mirrors the board's
@@ -73,6 +82,21 @@ def recipe_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
     if runtime == RUNTIME_CLI:
         return ""
     return f"AND {alias}.source_type <> 'recipe'"
+
+
+# The mission engine runs its own steps (PRD-171 F025): the dispatch loop never
+# claims a mission's mirror tickets, whoever set one 'assigned' (a PATCH, a tool,
+# a grant's re-queue). A CLI agent's step is run by its host for the mission, and
+# its card may be the step's mirror itself (F094); the mission's own ticket never.
+MISSION_MIRROR_TYPES = ("orchestration", "orchestration_task")
+CLI_CLAIMABLE_MIRRORS = ("orchestration_task",)
+
+
+def mission_mirror_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
+    barred = [kind for kind in MISSION_MIRROR_TYPES
+              if not (runtime == RUNTIME_CLI and kind in CLI_CLAIMABLE_MIRRORS)]
+    kinds = ", ".join(f"'{kind}'" for kind in barred)
+    return f"AND {alias}.source_type NOT IN ({kinds})"
 
 
 def provider_predicate_sql(providers: Optional[Sequence[str]], alias: str = "board_tasks") -> str:
@@ -148,8 +172,8 @@ def claim_tasks(
     # Recipe-mirror tickets of API agents are driven by the recipe executor, never
     # the board — but a session agent's playbook step IS a ticket its host must
     # claim (PRD-239 S3): the exclusion applies to the API runtime only.
-    recipe_sql = recipe_exclusion_sql(runtime, alias="board_tasks")
-    recipe_sql_t = recipe_exclusion_sql(runtime, alias="t")
+    recipe_sql = recipe_exclusion_sql(runtime, alias="board_tasks") + " " + mission_mirror_exclusion_sql(runtime, "board_tasks")
+    recipe_sql_t = recipe_exclusion_sql(runtime, alias="t") + " " + mission_mirror_exclusion_sql(runtime, "t")
     ws_sql = "AND workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_sql_t = "AND t.workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_params = {"ws": str(workspace_id)} if workspace_id is not None else {}
@@ -227,7 +251,10 @@ def claim_tasks(
                    attempts    = t.attempts + 1,
                    lease_until = :lease_until,
                    started_at  = COALESCE(t.started_at, :now),
-                   updated_at  = :now
+                   updated_at  = :now,
+                   -- F209: each claim is its own run; finalize writes only for it.
+                   runtime_ref = COALESCE(t.runtime_ref, '{{}}'::jsonb)
+                                 || jsonb_build_object('run_id', gen_random_uuid()::text)
              WHERE t.id IN ({locked})
          RETURNING t.id
             """
@@ -265,6 +292,10 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
     sends it to ``review``) and name them in the review note. Night 3 marked
     both tickets failed while their answers sat in that folder. Returns
     ``{ticket id: [files]}``. Fail-soft per ticket.
+
+    "Nothing was registered" means by THIS run (``runtime_ref.deliverables``,
+    rebuilt by every claim), not ever: a mission step's card spans its runs
+    (F094), so an earlier run's files do not mean this one reported.
     """
     from config import config
     from services.cli_host_service import DEFAULT_FOLDER_SESSIONS, _register_session_deliverables
@@ -277,12 +308,7 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
                AND bt.lease_until IS NOT NULL
                AND bt.lease_until < :now
                AND bt.attempts >= :max_attempts
-               AND NOT EXISTS (
-                     SELECT 1 FROM deliverables d
-                      WHERE d.source_type = 'task'
-                        AND d.source_id = CAST(bt.id AS text)
-                        AND d.deleted_at IS NULL
-                   )
+               AND (bt.runtime_ref -> 'deliverables') IS NULL
             """
         ),
         {"now": now, "max_attempts": max_attempts},
@@ -306,6 +332,9 @@ def adopt_session_files(db: Session, *, now: datetime, max_attempts: int) -> Dic
                 "Finished, worker never reported — its session left " + ", ".join(names)
                 + " (now on the ticket). Sent to review instead of failed."
             )
+            # This run's files, as a result that reported would record them (a
+            # later mission step reads them from here, F161).
+            task.runtime_ref = {**(task.runtime_ref or {}), "deliverables": registered}
             db.flush()
             adopted[task_id] = names
         except Exception:  # noqa: BLE001 — a ticket we cannot adopt still fails as before
@@ -354,7 +383,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     # A ticket whose worker never reported but which LEFT FILES did the work —
     # night 1 wrote "no worker completed the task" over six delivered files
     # (F013). Check the deliverables the run registered before naming it, and
-    # send those to ``review`` for a human verdict instead of ``failed``.
+    # send those to ``review`` for a human verdict instead of ``failed``. THIS
+    # run's (runtime_ref.deliverables): a mission step's card spans runs (F094).
     delivered = db.execute(
         text(
             """
@@ -372,12 +402,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
                AND bt.lease_until IS NOT NULL
                AND bt.lease_until < :now
                AND bt.attempts >= :max_attempts
-               AND EXISTS (
-                     SELECT 1 FROM deliverables d
-                      WHERE d.source_type = 'task'
-                        AND d.source_id = CAST(bt.id AS text)
-                        AND d.deleted_at IS NULL
-                   )
+               -- this run registered at least one file: a list holding an object
+               AND COALESCE(bt.runtime_ref -> 'deliverables', CAST('[]' AS jsonb)) @> CAST('[{}]' AS jsonb)
          RETURNING bt.id
             """
         ),
@@ -448,7 +474,7 @@ def _notify_swept(db: Session, task_ids: List[int], status: str, event: str) -> 
         logger.debug("[dispatch] sweep notify failed for %s", task_ids, exc_info=True)
 
 
-def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:
+def renew_lease(db: Session, task_id: int, *, lease_seconds: int, run_id: Optional[str] = None) -> bool:
     """PRD-171 F024: extend a still-running task's lease (a live heartbeat).
 
     The lease (``BOARD_DISPATCH_LEASE_SECONDS``, default 600s) is the crash
@@ -475,10 +501,12 @@ def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:
                    updated_at  = :now
              WHERE id = :task_id
                AND status = 'in_progress'
+               -- F209: a run renews only the claim it holds, never a newer run's
+               AND (CAST(:run_id AS text) IS NULL OR runtime_ref->>'run_id' = :run_id)
          RETURNING id
             """
         ),
-        {"new_lease": new_lease, "now": now, "task_id": task_id},
+        {"new_lease": new_lease, "now": now, "task_id": task_id, "run_id": run_id},
     ).fetchall()
     db.commit()
     renewed = bool(rows)
@@ -617,14 +645,19 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
         out = []
         for t in claimed:
             prompt = t.raw_prompt or t.description or t.title
-            if t.review_feedback:
-                # Q44: a rejected task redoes the work with reviewer feedback in
-                # context. Consume it so the correction applies to this run only.
-                prompt = (
-                    f"{prompt}\n\n## Reviewer feedback on your previous attempt\n"
-                    f"{t.review_feedback}\n\n"
-                    "Address this feedback in your redo."
-                )
+            # F199: data pasted into the brief is counted and totalled with code.
+            pasted = pasted_data_rule(t.description or prompt)
+            if pasted:
+                prompt = f"{prompt}\n\n{pasted}"
+            # F183: a ticket the owner's answer re-queued runs with the answer.
+            answers = ticket_answers_block(getattr(t, "planning_data", None))
+            if answers:
+                prompt = f"{prompt}\n\n{answers}"
+            # Q44 + F198: a sent-back task corrects its last draft with every
+            # correction on the ticket; the waiting feedback is consumed here.
+            redo = redo_block(t)
+            if redo:
+                prompt = f"{prompt}\n\n{redo}"
                 t.review_feedback = None
             out.append(
                 {
@@ -634,6 +667,7 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
                     "prompt": prompt,
                     "review_mode": t.review_mode or "auto",
                     "attachment_ids": t.attachment_ids or [],
+                    "run_id": (getattr(t, "runtime_ref", None) or {}).get(RUN_ID_KEY),
                 }
             )
         db.commit()  # persist consumed review_feedback
@@ -657,6 +691,7 @@ def _launch_one(task: dict) -> None:
         prompt=task["prompt"],
         review_mode=task["review_mode"],
         attachment_ids=task["attachment_ids"],
+        run_id=task.get("run_id"),
     )
 
 

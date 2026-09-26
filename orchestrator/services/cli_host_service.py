@@ -38,10 +38,11 @@ from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
-from services.board_dispatcher import claim_tasks, renew_lease
+from services.board_dispatcher import RUN_ID_KEY, claim_tasks, renew_lease
 from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
+from services.session_report import APPROVAL_NOT_ON_RECORD
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,11 @@ _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # ends, which is the whole point of scoping it to one ticket.
 SESSION_TOKEN_BYTES = 32
 SESSION_TOKEN_HASH_KEY = "session_token_sha256"
+# F131 (night 4, B47): the claim offered the session its Automatos tools, and the
+# session's MCP client reached them (stamped at its `initialize`). A ticket that
+# was offered them and never connected ran without any of its platform tools.
+SESSION_TOOLS_OFFERED_KEY = "session_tools_offered"
+SESSION_CONNECTED_KEY = "mcp_connected_at"
 SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # What of an ask we keep ON the ticket (the grant row is the record; this is the
 # fold-in for the next session's prompt, and it rides a JSONB column).
@@ -110,7 +116,8 @@ def clear_session_token(ref: Dict[str, Any]) -> None:
 def revoke_session_token(db: Session, task: Any) -> bool:
     """Kill this ticket's session credential on the row, now. True iff one was there.
 
-    Called from the two early returns in ``apply_result``; cancel does the same
+    Called from ``apply_result``'s early return for a ticket that left
+    ``in_progress`` (a stale attempt's token is already replaced, F211); cancel does the same
     thing inline (``clear_session_token``). The sweeper's requeue does NOT — it
     nulls the lease and leaves the hash, which is safe only because the lookup
     below requires a LIVE LEASE as well as ``in_progress``. ``in_progress`` alone is not enough to keep a token safe: a ticket
@@ -889,20 +896,35 @@ def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[st
 
 
 def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
+    from services.ticket_owner_ask import ticket_answers_block
+    from services.ticket_redo import redo_block
+
     prompt = task.raw_prompt or task.description or task.title or ""
     answers = _answers_fold_in(task)
     if answers:
         prompt = f"{prompt}\n\n{answers}"
+    # F183: the owner's answers from Questions (a parked ticket re-queued by one).
+    owners = ticket_answers_block(getattr(task, "planning_data", None))
+    if owners:
+        prompt = f"{prompt}\n\n{owners}"
     if field_memory:
         prompt = f"{prompt}\n\n{field_memory}"
-    if task.review_feedback:
-        # Same redo fold-in as the dispatcher (Q44); consumed for this attempt only.
-        prompt = (
-            f"{prompt}\n\n## Reviewer feedback on your previous attempt\n"
-            f"{task.review_feedback}\n\nAddress this feedback in your redo."
-        )
+    # Same redo fold-in as the dispatcher (Q44 + F198); consumed for this attempt.
+    redo = redo_block(task)
+    if redo:
+        prompt = f"{prompt}\n\n{redo}"
         task.review_feedback = None
     return prompt
+
+
+def _claim_attempt(task: BoardTask, prior: Dict[str, Any]) -> int:
+    """F209: the number of this claim, which the host echoes with its result. It
+    never repeats on a ticket. Run Now resets ``attempts`` to 0 (and a usage-limit
+    pause refunds one), so a re-claim was numbered like the session it replaced,
+    and that session's late result passed apply_result's stale-attempt check and
+    finished the ticket under the new run. ``attempts`` stays the retry budget."""
+    before = prior.get("attempt")
+    return max(int(task.attempts or 0), before + 1 if isinstance(before, int) else 0)
 
 
 def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]:
@@ -961,7 +983,8 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "model": cfg.get(CONFIG_MODEL_KEY),
             "host_id": str(host.id),
             "session_id": session_id,
-            "attempt": int(task.attempts or 0),
+            "attempt": _claim_attempt(task, prior),
+            RUN_ID_KEY: prior.get(RUN_ID_KEY),  # F209: the claim's run, stamped by claim_tasks
             "claimed_at": _iso(_now()),
             # PRD-239 S6c: an agent without a folder runs where the workspace says
             # (the projects folder by default), else the host's sessions/<ticket>.
@@ -980,9 +1003,16 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         # read the new empty ref: no answer ever reached the resumed session and
         # the ceiling reset to zero every claim.
         ref[SESSION_ASKS_KEY] = session_asks(prior)
+        # F094: the notes on the ticket (the operator's, the session's, the
+        # mission's verdict) are its record too; a claim that resumes the same
+        # run keeps them. A mission step's next run starts with none.
+        prior_notes = prior.get(SESSION_NOTES_KEY)
+        if isinstance(prior_notes, list) and prior_notes:
+            ref[SESSION_NOTES_KEY] = prior_notes
         # PRD-245 S1.1: the session's own credential for the Automatos tools.
         # Handed over ONCE, in this payload; only its hash stays on the ticket.
         session_token = mint_session_token(ref)
+        ref[SESSION_TOOLS_OFFERED_KEY] = True
         task.runtime_ref = ref
         prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
         # Mark the answers just folded in, so a LATER resume of the same ticket
@@ -1146,12 +1176,20 @@ def _absorb_hook_event(ref: Dict[str, Any], task: BoardTask, ev: Dict[str, Any])
     if name:
         ref["last_event"] = name
     if name == "PreToolUse" and ev.get("tool_name"):
-        ref["live_tool"] = ev["tool_name"]
+        decided = tool_decision(ev, ref.get("permission_decisions"))
         # PRD-234 S2: the ticket's live log — tool + what it was about, bounded.
-        entry: Dict[str, Any] = {"at": _iso(_now()), "tool": str(ev["tool_name"])[:60]}
+        # F167: and what the host decided, and why.
+        entry: Dict[str, Any] = {"tool": str(ev["tool_name"])[:60], **decided,
+                                 **({"event_id": _event_id(ev)} if _event_id(ev) else {})}
         if ev.get("subject"):
             entry["subject"] = str(ev["subject"])[:200]
-        ref["recent_tools"] = (list(ref.get("recent_tools") or []) + [entry])[-RECENT_TOOLS_KEPT:]
+        if not _already_kept(ref, entry):
+            if tool_call_ran(decided):
+                ref["live_tool"] = ev["tool_name"]
+            ref["recent_tools"] = (list(ref.get("recent_tools") or [])
+                                   + [{"at": _iso(_now()), **entry}])[-RECENT_TOOLS_KEPT:]
+            if decided:
+                ref["tool_decisions"] = tally_tool_decision(ref.get("tool_decisions"), decided)
     elif name in ("PostToolUse", "Stop", "SessionEnd"):
         ref.pop("live_tool", None)
     if ev.get("session_id"):
@@ -1220,6 +1258,7 @@ SESSION_HOLD_MARKER = "cli_permission"       # ``ApprovalGrant.details[<marker>]
 # picks the work back up.
 SESSION_ASK_MARKER = "cli_ask"               # ``ApprovalGrant.details[<marker>] = {task_id}``
 SESSION_ASKS_KEY = "session_asks"            # ``runtime_ref[<key>] = [{grant_id, question, answer?, …}]``
+SESSION_NOTES_KEY = "session_notes"          # ``runtime_ref[<key>] = [{note, at, by}]``, appended only
 PARKED_FOR_ANSWER_REASON = "Waiting on your answer to the agent's question (ask #{grant_id})"
 SESSION_HOLD_OPTION_ALLOW = "allow"
 SESSION_HOLD_OPTION_DENY = "deny"
@@ -1768,6 +1807,84 @@ def _tokens_used(usage: Dict[str, Any]) -> int:
 
 RECENT_TOOLS_KEPT = 30
 
+# F167: what the host decided for a tool call (host ≥ this change). A ticket said
+# a command "needed your approval, and it went through" when nobody was asked:
+# the board knew which tools ran, never what the host decided or why.
+TOOL_DECISIONS = ("allow", "ask", "deny")
+TOOL_ANSWERS = ("approved", "denied", "no answer")   # a hold's outcome, as the host reports it
+TOOL_DECISION_TALLY = (*TOOL_DECISIONS, "approved", "unrecorded")
+TOOL_DECISION_REASON_CHARS = 300
+EVENT_ID_CHARS = 64
+
+
+def _event_id(ev: Dict[str, Any]) -> Optional[str]:
+    """The host's id for one reported tool call, or None (an older host, or junk)."""
+    value = ev.get("event_id")
+    return value if isinstance(value, str) and 0 < len(value) <= EVENT_ID_CHARS else None
+
+
+def _already_kept(ref: Dict[str, Any], entry: Dict[str, Any]) -> bool:
+    """The ticket already keeps this exact entry: the host re-posts a batch whose
+    response it lost, and the same call must count once. A re-post is the SAME
+    event, so everything but the time must match — id, tool, command, decision,
+    reason and answer. An id reused for anything else is recorded: no call hides
+    behind an earlier one's id. An entry with no id counts, as before."""
+    return bool(entry.get("event_id")) and any(
+        isinstance(t, dict) and {k: v for k, v in t.items() if k != "at"} == entry
+        for t in ref.get("recent_tools") or [])
+
+
+def tool_decision(ev: Dict[str, Any], decisions: Any = None) -> Dict[str, Any]:
+    """``{decision, reason?, answer?}`` from a PreToolUse event — the known words
+    only — or ``{}`` from a host that does not report its decisions.
+
+    The host learns an approval only from this backend (``record_permission_decision``,
+    then the events answer), so a real one is always on record here: for that
+    request, that tool and that command. An approval that is not is shown as such,
+    never as the operator's."""
+    decision = ev.get("decision")
+    if decision not in TOOL_DECISIONS:
+        return {}
+    out: Dict[str, Any] = {"decision": decision}
+    reason = ev.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        out["reason"] = reason.strip()[:TOOL_DECISION_REASON_CHARS]
+    answer = ev.get("answer")
+    if decision == "ask" and answer in TOOL_ANSWERS:
+        out["answer"] = answer if answer != "approved" or approval_on_record(decisions, ev) \
+            else APPROVAL_NOT_ON_RECORD
+    return out
+
+
+def approval_on_record(decisions: Any, ev: Dict[str, Any]) -> bool:
+    """The operator approved THIS question: the request the event names, for the
+    same tool and command (a request id replayed for another command is not)."""
+    request_id = ev.get("request_id")
+    record = decisions.get(str(request_id)) if isinstance(decisions, dict) and request_id else None
+    if not isinstance(record, dict) or record.get("approved") is not True:
+        return False
+    subject = str(ev["subject"])[:PERMISSION_SUBJECT_CHARS] if ev.get("subject") else None
+    return record.get("tool") == str(ev.get("tool_name") or "?")[:60] and record.get("subject") == subject
+
+
+def tool_call_ran(decided: Dict[str, Any]) -> bool:
+    """An allow, or a hold the host says was approved. With no decision reported
+    (an older host), the call is taken as run, as it always was."""
+    return (not decided or decided["decision"] == "allow"
+            or decided.get("answer") in ("approved", APPROVAL_NOT_ON_RECORD))
+
+
+def tally_tool_decision(tally: Any, decided: Dict[str, Any]) -> Dict[str, int]:
+    """The ticket's count of every decision — ``recent_tools`` keeps only the last
+    few calls. ``approved`` counts the holds the operator approved; ``unrecorded``
+    the approvals a host reported that are not on record."""
+    counts = {k: v for k, v in (tally.items() if isinstance(tally, dict) else ())
+              if k in TOOL_DECISION_TALLY and isinstance(v, int) and not isinstance(v, bool)}
+    answer = decided.get("answer")
+    keys = [decided["decision"], *(["approved"] if answer == "approved" else []),
+            *(["unrecorded"] if answer == APPROVAL_NOT_ON_RECORD else [])]
+    return {**counts, **{k: counts.get(k, 0) + 1 for k in keys}}
+
 # register() refuses 'report' — ReportService owns that type; a session's .md is a document.
 _DELIVERABLE_TYPE_OVERRIDES = {"report": "document"}
 
@@ -1859,6 +1976,7 @@ def _canvas_envelope(workspace_id: Any, event_type: str, data: Dict[str, Any]) -
 
 
 PENDING_PERMISSIONS_KEPT = 20
+PERMISSION_SUBJECT_CHARS = 300
 
 
 def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1876,7 +1994,7 @@ def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional
     entry = {
         "request_id": str(request_id),
         "tool": str(ev.get("tool_name") or "?")[:60],
-        "subject": (str(ev["subject"])[:300] if ev.get("subject") else None),
+        "subject": (str(ev["subject"])[:PERMISSION_SUBJECT_CHARS] if ev.get("subject") else None),
         "reason": str(ev.get("reason") or "")[:300],
         "at": _iso(_now()),
     }
@@ -1889,13 +2007,17 @@ def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional
 
 
 def record_permission_decision(ref: Dict[str, Any], request_id: str, approved: bool, actor: str) -> bool:
-    """The operator's answer. False when the question is unknown (already answered or expired)."""
+    """The operator's answer. False when the question is unknown (already answered or expired).
+    F167: it keeps what was asked (tool, command), so an approval the host reports
+    can be matched to the question it answered."""
     pending = ref.get("pending_permissions") or []
-    if not any(p.get("request_id") == str(request_id) for p in pending):
+    asked = next((p for p in pending if p.get("request_id") == str(request_id)), None)
+    if asked is None:
         return False
     ref["pending_permissions"] = [p for p in pending if p.get("request_id") != str(request_id)]
     decisions = dict(ref.get("permission_decisions") or {})
-    decisions[str(request_id)] = {"approved": bool(approved), "by": actor, "at": _iso(_now()), "delivered": False}
+    decisions[str(request_id)] = {"approved": bool(approved), "by": actor, "at": _iso(_now()), "delivered": False,
+                                  "tool": asked.get("tool"), "subject": asked.get("subject")}
     ref["permission_decisions"] = decisions
     return True
 
@@ -2139,15 +2261,16 @@ async def apply_result(
     task = _owned_task(db, host, task_id)
     ref = dict(task.runtime_ref or {})
     attempt = payload.get("attempt")
-    # Whatever else is true, this host's run of this ticket is over, so its
-    # credential dies here — BEFORE either early return. A result that arrives
-    # for a stale attempt, or for a ticket someone already moved, used to leave
-    # the hash on the row with the plaintext still in the transcript and in
-    # ``mcp.json``; the next flip back to ``in_progress`` revived it.
+    # F211: a stale attempt's credential is already dead. Every claim builds a
+    # fresh ref and mints its own token, so the hash on the row is the NEWER
+    # claim's; revoking it here cut the live session off its platform tools.
     if attempt is not None and ref.get("attempt") is not None and int(attempt) != int(ref["attempt"]):
-        if revoke_session_token(db, task):
-            db.commit()
         return {"applied": False, "reason": "stale attempt", "status": task.status}
+    # Whatever else is true, this host's run of this ticket is over, so its
+    # credential dies here — BEFORE the early return. A result that arrives for
+    # a ticket someone already moved used to leave the hash on the row with the
+    # plaintext still in the transcript and in ``mcp.json``; the next flip back
+    # to ``in_progress`` revived it.
     if task.status != "in_progress":
         if revoke_session_token(db, task):
             db.commit()
@@ -2225,6 +2348,7 @@ async def apply_result(
         "exit_reason": ref.get("exit_reason"),
         "transcript_path": ref.get("transcript_path"),
         "recent_tools": list(ref.get("recent_tools") or []),
+        "tool_decisions": dict(ref.get("tool_decisions") or {}),
         "permission_denials": list(ref.get("permission_denials") or []),
     }
     # A concurrent ``answer_session_ask`` (the operator answered while the turn
@@ -2233,6 +2357,9 @@ async def apply_result(
     # or the park below reads a stale ledger and blocks the ticket on a question
     # already answered — a ticket that then never resumes.
     ref = _merge_fresh_session_asks(db, task, ref)
+    # F094: likewise a note appended meanwhile (the mission's verdict on a step
+    # whose session outran the wait, a progress note) is kept.
+    ref = _merge_fresh_session_notes(db, task, ref)
     task.runtime_ref = ref
     db.commit()
     book_session_usage(
@@ -2266,6 +2393,10 @@ async def apply_result(
         agent_id=task.assigned_agent_id,
         exec_result=exec_result,
         review_mode=task.review_mode or "auto",
+        # F209: finalize only while the ticket is still on the run this result was
+        # written under; a redispatch and re-claim since the commit above make it
+        # another run's (finalize re-reads the row under its lock).
+        run_id=ref.get(RUN_ID_KEY),
         # PRD-245 S0.3 (D6): review only when a held command went unanswered or
         # was denied (an unclassifiable refusal counts as one — fail closed) —
         # or when the turn produced nothing at all (night 1, finding 14): no
@@ -2366,34 +2497,63 @@ def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any])
     return {**ref, SESSION_ASKS_KEY: merged} if changed else ref
 
 
+def _merge_fresh_session_notes(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
+    """``ref`` with the notes appended to this row since ``ref`` was read. Notes
+    are only ever appended, so a longer list on the row is this one plus the
+    new ones. Read-only re-select; ``ref`` unchanged on any error."""
+    from sqlalchemy import text as sql_text
+
+    try:
+        row = db.execute(
+            sql_text("SELECT runtime_ref FROM board_tasks WHERE id = :id"), {"id": int(task.id)}
+        ).first()
+    except Exception:  # noqa: BLE001 — a merge must never fail the result
+        return ref
+    fresh = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+    theirs = fresh.get(SESSION_NOTES_KEY)
+    mine = ref.get(SESSION_NOTES_KEY)
+    if isinstance(theirs, list) and len(theirs) > (len(mine) if isinstance(mine, list) else 0):
+        return {**ref, SESSION_NOTES_KEY: theirs}
+    return ref
+
+
+def append_session_note(db: Session, *, task_id: Any, workspace_id: Any, note: str, by: str) -> Dict[str, Any]:
+    """Append one note to a ticket's ``session_notes`` in the caller's
+    transaction; returns the entry. ONE key, in one statement (``jsonb_set``
+    append) — never a whole-document write, which would clobber the host's
+    concurrent event flush."""
+    from sqlalchemy import text as sql_text
+
+    entry = {"note": str(note)[:MAX_ASK_QUESTION_KEPT], "at": _iso(_now()), "by": by}
+    db.execute(
+        sql_text(
+            """
+            UPDATE board_tasks
+               SET runtime_ref = jsonb_set(
+                       COALESCE(runtime_ref, CAST('{}' AS jsonb)),
+                       CAST(:path AS text[]),
+                       COALESCE(runtime_ref -> :key, CAST('[]' AS jsonb)) || CAST(:entry AS jsonb),
+                       true)
+             WHERE id = :task_id AND workspace_id = :ws
+            """
+        ),
+        {"path": "{%s}" % SESSION_NOTES_KEY, "key": SESSION_NOTES_KEY,
+         "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
+    )
+    return entry
+
+
 def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
                         agent_name: Optional[str], note: str) -> Dict[str, Any]:
     """Append a progress note to a running ticket, for the operator to read.
 
-    ONE key, in one statement (``jsonb_set`` append) — never a whole-document
-    write, which would clobber the host's concurrent event flush. The note also
-    goes to the ticket's Code Canvas so the operator sees it live. Returns an
+    ONE key, in one statement (``append_session_note``). The note also goes to
+    the ticket's Code Canvas so the operator sees it live. Returns an
     executor-shaped result the session reads as ordinary tool output.
     """
-    from sqlalchemy import text as sql_text
-
-    entry = {"note": str(note)[:MAX_ASK_QUESTION_KEPT], "at": _iso(_now()), "by": agent_name or "the session"}
     try:
-        db.execute(
-            sql_text(
-                """
-                UPDATE board_tasks
-                   SET runtime_ref = jsonb_set(
-                           COALESCE(runtime_ref, CAST('{}' AS jsonb)),
-                           CAST(:path AS text[]),
-                           COALESCE(runtime_ref -> :key, CAST('[]' AS jsonb)) || CAST(:entry AS jsonb),
-                           true)
-                 WHERE id = :task_id AND workspace_id = :ws
-                """
-            ),
-            {"path": "{session_notes}", "key": "session_notes",
-             "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
-        )
+        entry = append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=note,
+                                    by=agent_name or "the session")
         db.commit()
     except Exception as exc:  # noqa: BLE001 — the session reads the reason
         logger.warning("[cli-host] progress note not recorded for ticket #%s", task_id, exc_info=True)
@@ -2402,15 +2562,21 @@ def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
         except Exception:  # noqa: BLE001
             pass
         return {"success": False, "error": f"the note could not be saved ({type(exc).__name__})"}
+    publish_note_line(workspace_id, task_id, entry["note"])
+    return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
+
+
+def publish_note_line(workspace_id: Any, task_id: Any, note: str) -> None:
+    """A ticket's new note, live in its Code Canvas. Best-effort: the note is
+    already on the ticket."""
     try:
         publish_canvas_events(workspace_id, [
             _canvas_envelope(workspace_id, "canvas.session.status", {
-                "source": "cli", "task_id": int(task_id), "status": "running", "note": entry["note"],
+                "source": "cli", "task_id": int(task_id), "status": "running", "note": note,
             }),
         ])
     except Exception:  # noqa: BLE001 — the note is saved; the live line is best-effort
-        logger.debug("[cli-host] progress note canvas line not published for ticket #%s", task_id, exc_info=True)
-    return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
+        logger.debug("[cli-host] note canvas line not published for ticket #%s", task_id, exc_info=True)
 
 
 def requeue_exhausted(task: BoardTask) -> bool:

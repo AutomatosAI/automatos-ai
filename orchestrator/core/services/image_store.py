@@ -41,16 +41,21 @@ from core.storage import ensure_bucket, get_s3_client
 
 logger = logging.getLogger(__name__)
 
+# F179 (C): the store keeps only what its callers save, the raster images and SVG
+# (a Composio output can be one), and refuses anything else. A raster image is
+# served inline; anything else, SVG included, as an attachment.
 MIME_TO_EXT = {
     "image/jpeg": "jpg",
-    "image/jpg": "jpg",
     "image/png": "png",
     "image/gif": "gif",
     "image/webp": "webp",
     "image/svg+xml": "svg",
 }
+RASTER_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_TYPE_ALIASES = {"image/jpg": "image/jpeg"}
 
 IMAGE_KEY_PREFIX = "generated-images"
+IMAGE_ROUTE = "/api/generated-images"
 POINTER_KEY_PREFIX = "generated-image-pointers"
 DEFAULT_WORKSPACE_SEGMENT = "default"
 DEFAULT_CONTENT_TYPE = "image/png"
@@ -65,6 +70,25 @@ _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 _INVALID_RANGE_CODE = "InvalidRange"
 # One range, RFC 9110 form: bytes=a-b, bytes=a- or bytes=-n.
 _SINGLE_BYTE_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+class UnstorableImageType(ValueError):
+    """save_image was given a type the public store does not keep (F179)."""
+
+
+def stored_type(mime_type: str) -> str:
+    """The type ``mime_type`` is stored as; UnstorableImageType outside MIME_TO_EXT."""
+    requested = str(mime_type or "").strip().lower()
+    canonical = _TYPE_ALIASES.get(requested, requested)
+    if canonical not in MIME_TO_EXT:
+        raise UnstorableImageType(f"{mime_type!r} is not an image type the public store keeps")
+    return canonical
+
+
+def served_inline(content_type: Optional[str]) -> bool:
+    """A raster image is shown inline; anything else, an older object too, downloads."""
+    base = str(content_type or "").split(";", 1)[0].strip().lower()
+    return _TYPE_ALIASES.get(base, base) in RASTER_IMAGE_TYPES
 
 
 class ImageRangeNotSatisfiable(Exception):
@@ -102,6 +126,23 @@ def parse_byte_range(header: Optional[str]) -> Optional[str]:
     if start and end and int(start) > int(end):
         return None
     return f"bytes={start}-{end}"
+
+
+def image_extension(mime_type: str) -> str:
+    """The file extension an image of ``mime_type`` is saved with."""
+    return MIME_TO_EXT.get(mime_type, "png")
+
+
+def image_key(image_id: str, mime_type: str, workspace_id: Optional[str] = None) -> str:
+    """generated-images/{ws}/{id}.{ext}: where :meth:`S3ImageStore.save_image`
+    puts an image (an image Deliverable's file_path names it too, PRD-251 US-117)."""
+    ws = workspace_id or DEFAULT_WORKSPACE_SEGMENT
+    return f"{IMAGE_KEY_PREFIX}/{ws}/{image_id}.{image_extension(mime_type)}"
+
+
+def generated_image_path(image_id: str) -> str:
+    """The app route that serves a saved image by id (api/generated_images.py)."""
+    return f"{IMAGE_ROUTE}/{image_id}"
 
 
 def _is_image_id(image_id: str) -> bool:
@@ -155,10 +196,9 @@ class S3ImageStore:
         mime_type: str = "image/png",
         workspace_id: Optional[str] = None,
     ) -> str:
-        ext = MIME_TO_EXT.get(mime_type, "png")
+        mime_type = stored_type(mime_type)
         image_id = str(uuid4())
-        ws = workspace_id or DEFAULT_WORKSPACE_SEGMENT
-        key = f"{IMAGE_KEY_PREFIX}/{ws}/{image_id}.{ext}"
+        key = image_key(image_id, mime_type, workspace_id)
         image_bytes = base64.b64decode(base64_data)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: ensure_bucket(self.bucket))

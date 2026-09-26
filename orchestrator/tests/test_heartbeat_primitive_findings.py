@@ -176,6 +176,15 @@ def test_unhardened_primitive_emits_nothing(monkeypatch):
     svc._scheduler = sched
 
     asyncio.run(svc._durable_memory_probe_tick())
+    # emit_primitive_finding is a best-effort writer (F105): on the tick's event
+    # loop it hands the INSERT to the best-effort threads and returns at once.
+    # Wait for it. Once an earlier test in the process has started those
+    # threads, the write had often not landed when asyncio.run returned (shared
+    # runs read ``set()``); only the first write of a process waits for its
+    # thread to start.
+    from core import best_effort
+
+    assert best_effort.drain(), "the probe tick's write did not finish"
 
     primitives_seen: set[str] = set()
     for _, params in session.inserts:

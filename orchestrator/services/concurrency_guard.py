@@ -30,10 +30,16 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ConcurrencyResult:
     allowed: bool
-    reason: str = ""
+    reason: str = ""  # the limit that was hit, in words ("3 of 3 runs are going in this workspace")
     current_running: int = 0
     current_pending: int = 0
     limits: Dict[str, int] = field(default_factory=dict)
+
+    @property
+    def refusal(self) -> str:
+        """What the owner is told when a run is refused (F135, B59: a bare 429
+        carrying "Running executions (3) >= limit (3)")."""
+        return f"{self.reason}, so this run was not started. Start it again when one finishes."
 
 
 def _get_limits(workspace_plan_limits: dict) -> Dict[str, int]:
@@ -90,20 +96,22 @@ async def check_concurrency(workspace_id: UUID, db: Session) -> ConcurrencyResul
 
     current_total = current_running + current_pending
 
-    # Check limits
-    if current_total >= limits["max_concurrent_total"]:
+    # Check limits. The running cap first: with the default caps (3 and 3) the
+    # total check matched first and a fourth run was told about "places" (F135).
+    if current_running >= limits["max_concurrent_running"]:
         return ConcurrencyResult(
             allowed=False,
-            reason=f"Total concurrent executions ({current_total}) >= limit ({limits['max_concurrent_total']})",
+            reason=f"{current_running} of {limits['max_concurrent_running']} runs are going in this workspace",
             current_running=current_running,
             current_pending=current_pending,
             limits=limits,
         )
 
-    if current_running >= limits["max_concurrent_running"]:
+    if current_total >= limits["max_concurrent_total"]:
         return ConcurrencyResult(
             allowed=False,
-            reason=f"Running executions ({current_running}) >= limit ({limits['max_concurrent_running']})",
+            reason=(f"{current_running} running and {current_pending} waiting fill this workspace's "
+                    f"{limits['max_concurrent_total']} places"),
             current_running=current_running,
             current_pending=current_pending,
             limits=limits,
@@ -112,7 +120,8 @@ async def check_concurrency(workspace_id: UUID, db: Session) -> ConcurrencyResul
     if current_pending >= limits["max_concurrent_pending"]:
         return ConcurrencyResult(
             allowed=False,
-            reason=f"Pending executions ({current_pending}) >= limit ({limits['max_concurrent_pending']})",
+            reason=(f"{current_pending} runs are already waiting to start in this workspace "
+                    f"(the limit is {limits['max_concurrent_pending']})"),
             current_running=current_running,
             current_pending=current_pending,
             limits=limits,

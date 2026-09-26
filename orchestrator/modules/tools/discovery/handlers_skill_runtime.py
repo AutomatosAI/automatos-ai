@@ -24,12 +24,17 @@ and these refuse to touch skills outside that boundary.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# F181 (night 6): a script a skill's instructions name — a relative path to a
+# .py, .sh or .js file (scripts/profile.py, tests/run_tests.py).
+_NAMED_SCRIPT = re.compile(r"(?<![\w./-])((?:[\w-]+/)+[\w.-]+\.(?:py|sh|js))\b")
 
 
 # ---------------------------------------------------------------------------
@@ -92,17 +97,46 @@ async def load_skill(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     if not body or not str(body).strip():
         return {"success": False, "error": f"Skill '{skill.name}' has no loadable instructions."}
 
+    content = str(body).strip()
+    missing = missing_scripts(db, skill, content)
+    if missing:
+        logger.info("[F181] skill '%s' names scripts it did not bring: %s", skill.name, missing)
+        content = f"{content}\n\n{missing_scripts_note(missing)}"
+
     logger.info("[load_skill] activated '%s' (id=%s) for ws=%s", skill.name, skill.id, workspace_id)
     return {
         "success": True,
         "skill": skill.name,
         "skill_id": skill.id,
-        "content": str(body).strip(),
+        "content": content,
         "message": (
             f"Loaded skill '{skill.name}'. Its full instructions are now in "
             "context for this turn — follow them for the current task."
         ),
     }
+
+
+def missing_scripts(db: Session, skill: Any, body: str) -> List[str]:
+    """F181 (night 6): the scripts ``body`` names that did not come with the
+    skill. spreadsheet-qa was imported (from OneWave-AI/claude-skills) without
+    its scripts, told agent 325 to run python3 scripts/profile.py, and the
+    workspace had no such file."""
+    named = sorted(set(_NAMED_SCRIPT.findall(body or "")))
+    if not named:
+        return []
+    from core.models.core import SkillFile
+
+    rows = db.query(SkillFile.file_path).filter(SkillFile.skill_id == skill.id).all()
+    shipped = {re.sub(r"^\./", "", str(path)) for (path,) in rows}
+    return [path for path in named if path not in shipped]
+
+
+def missing_scripts_note(missing: List[str]) -> str:
+    """What the loaded skill says about the scripts it does not have."""
+    one = len(missing) == 1
+    return (f"Not installed here: {', '.join(missing)} {'is' if one else 'are'} named above but did not come "
+            f"with this skill, so do not run {'it' if one else 'them'}. Do those steps with your own code "
+            "(python3 and its csv module), and say in your answer that the skill's scripts were missing.")
 
 
 # ---------------------------------------------------------------------------
@@ -223,14 +257,19 @@ async def run_skill_script(db: Session, workspace_id: UUID, params: Dict[str, An
         # Transport/worker error (unreachable, etc.) — no script output produced.
         return {"success": False, "skill": skill.name, "script": script_rel, "error": result.get("error")}
 
+    # F191: a script that failed is not a success (its output still comes back).
+    from modules.tools.execution.exec_workspace import exec_failure
+
+    failed = exec_failure(result)
     cap = config.SKILL_SCRIPT_OUTPUT_MAX_CHARS
     return {
-        "success": True,
+        "success": failed is None,
         "skill": skill.name,
         "script": script_rel,
         "exit_code": result.get("exit_code", result.get("returncode")),
         "stdout": _cap(result.get("stdout") or result.get("output"), cap),
         "stderr": _cap(result.get("stderr"), cap),
+        **({"error": failed} if failed else {}),
     }
 
 

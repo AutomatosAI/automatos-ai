@@ -2,6 +2,8 @@
 
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
+import { sessionNotes, type SessionNote } from './session-notes'
+import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
@@ -62,9 +64,41 @@ function formatElapsed(startedAt: string): string {
 
 // ── PRD-234: the session behind a `runtime: cli` ticket ─────────────────────
 
+// F094: what the session said, what the operator wrote, and the mission's verdict
+// when it stopped waiting for this step or was cancelled while it ran.
+function SessionNotes({ notes }: { notes: SessionNote[] }) {
+  return (
+    <ul className="text-xs space-y-1" data-testid="session-notes">
+      {notes.map((n, i) => (
+        <li key={i}>
+          {n.by && (
+            <span className="text-muted-foreground">
+              {n.by}{n.at ? ` · ${new Date(n.at).toLocaleTimeString()}` : ''}:{' '}
+            </span>
+          )}
+          {n.note}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** The notes alone, for a ticket no session has claimed yet or one that finished. */
+function NotesSection({ task }: { task: BoardTask }) {
+  const notes = sessionNotes(task.runtime_ref)
+  if (notes.length === 0) return null
+  return (
+    <div>
+      <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Notes</SectionLabel>
+      <div className="glass-card rounded-lg p-4 text-sm"><SessionNotes notes={notes} /></div>
+    </div>
+  )
+}
+
 function SessionBlock({ task }: { task: BoardTask }) {
   const ref = task.runtime_ref
-  if (!ref || ref.runtime !== 'cli') return null
+  const notes = sessionNotes(ref)
+  if (!ref || ref.runtime !== 'cli') return <NotesSection task={task} />
   const files: string[] = Array.isArray(ref.files_touched) ? ref.files_touched : []
   const usage = ref.usage || {}
   // PRD-239 S7 v2: the session opens in the Runtime Canvas — the host starts or
@@ -92,6 +126,13 @@ function SessionBlock({ task }: { task: BoardTask }) {
               <span>{ref.denials}</span>
             </>
           )}
+          {/* F167: every call, by what the host decided — nobody asked, held for the operator, refused */}
+          {toolDecisionsSummary(ref) && (
+            <>
+              <span className="text-muted-foreground">Tool calls</span>
+              <span data-testid="session-tool-decisions">{toolDecisionsSummary(ref)}</span>
+            </>
+          )}
         </div>
         {reviewReason(ref) && (
           <div className="rounded-md border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-2 text-xs space-y-1">
@@ -105,6 +146,12 @@ function SessionBlock({ task }: { task: BoardTask }) {
             )}
           </div>
         )}
+        {notes.length > 0 && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Notes</p>
+            <SessionNotes notes={notes} />
+          </div>
+        )}
         {files.length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Files touched</p>
@@ -113,13 +160,14 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
-        {Array.isArray(ref.recent_tools) && ref.recent_tools.length > 0 && (
+        {sessionToolCalls(ref).length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Recent tool calls</p>
             <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
-              {(ref.recent_tools as Array<{ at?: string; tool?: string; subject?: string }>).slice(-10).map((r, i) => (
-                <li key={i} className="truncate" title={r.subject || r.tool}>
+              {sessionToolCalls(ref).slice(-10).map((r, i) => (
+                <li key={i} className="truncate" title={toolCallTitle(r)}>
                   <span className="text-muted-foreground">{r.at ? new Date(r.at).toLocaleTimeString() : ''}</span> {r.tool}{r.subject ? ` · ${r.subject}` : ''}
+                  {toolCallVerdict(r) && <span className="text-muted-foreground"> — {toolCallVerdict(r)}</span>}
                 </li>
               ))}
             </ul>
@@ -274,6 +322,7 @@ function AssignedContent({ task }: { task: BoardTask }) {
         </div>
       )}
       <MetadataGrid task={task} />
+      <NotesSection task={task} />
 
       {task.description && (
         <div>
@@ -509,6 +558,9 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
           </div>
         </div>
       )}
+
+      {/* F094: the notes, the mission's verdict among them, stay on a finished ticket */}
+      <NotesSection task={task} />
 
       {/* Original description (only if no result to show) */}
       {task.description && !task.result && (

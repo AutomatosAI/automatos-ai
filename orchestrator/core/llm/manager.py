@@ -25,6 +25,8 @@ from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 
+from core.llm import output_budget
+
 logger = logging.getLogger(__name__)
 
 # Canonical mapping from service name to LLM tier (PRD-136).
@@ -420,6 +422,7 @@ class LLMManager:
             "trial": trial,
         }
         
+        built_from_settings = config is None
         if config is None:
             config = self._load_config_from_settings(service_name, provider, model)
         elif not config.api_key:
@@ -443,13 +446,25 @@ class LLMManager:
                     temperature=config.temperature,
                     max_tokens=config.max_tokens,
                     api_key=api_key,
-                    base_url=config.base_url
+                    base_url=config.base_url,
+                    output_ceiling=config.output_ceiling,
                 )
                 logger.info(f"Credential found for {config.provider.value}")
         
         self.config = config
         self.provider = None  # Lazy initialization
-        
+
+        # F196: this manager's output budgets, read once here: a settings read is
+        # a sync database read, so never per call. A service manager (built from
+        # settings) has its purpose's budget; an agent's (given a config) keeps
+        # its configured one.
+        self._own_purpose = request_type or service_name
+        self._from_settings = built_from_settings
+        self._service_budget = (
+            output_budget.budget_for(self._own_purpose, config.output_ceiling) if built_from_settings else None
+        )
+        self._long_budget = output_budget.budget_for(output_budget.LONG_DELIVERABLE, config.output_ceiling)
+
         # Don't create provider immediately - lazy loading
         logger.debug(f"LLMManager initialized for service '{service_name}' with provider '{config.provider.value}', model '{config.model}'")
     
@@ -651,16 +666,22 @@ class LLMManager:
         """
         self._ensure_provider_initialized()
         start = time.monotonic()
+        budget = self._call_budget()
         try:
-            stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
-            if stream is not None:
-                response = await stream(messages, tools, on_delta=on_delta)
-            else:
-                response = await self.provider.generate_response(messages, tools)
+            with output_budget.call_budget(budget):
+                stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
+                if stream is not None:
+                    response = await stream(messages, tools, on_delta=on_delta)
+                else:
+                    response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
+            self._note_success(budget)
+            self._note_cut(response, budget)
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
+            self._remember_refusal(exc)
+            self._note_refusal(exc, budget)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -674,12 +695,17 @@ class LLMManager:
         """Generate response using the configured provider (synchronous), with usage tracking."""
         self._ensure_provider_initialized()
         start = time.monotonic()
+        budget = self._call_budget()
         try:
-            response = self.provider.generate_response_sync(messages)
+            with output_budget.call_budget(budget):
+                response = self.provider.generate_response_sync(messages)
             self._track_usage(response, start)
+            self._note_cut(response, budget)
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
+            self._remember_refusal(exc)
+            self._note_refusal(exc, budget)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -688,6 +714,82 @@ class LLMManager:
                 ) from exc
 
             raise
+
+    def _call_budget(self) -> Optional[int]:
+        """F196: the max_tokens this call reserves (see core.llm.output_budget);
+        None leaves the config's own value."""
+        from .usage_context import current_usage_scope
+
+        configured = getattr(getattr(self, "config", None), "max_tokens", None)
+        if not configured:
+            return None
+        return output_budget.for_call(
+            current_usage_scope().get("request_type"), configured,
+            own_purpose=getattr(self, "_own_purpose", None),
+            service_budget=getattr(self, "_service_budget", None),
+            long_budget=getattr(self, "_long_budget", None),
+        )
+
+    def _credit_workspace(self) -> Any:
+        from .usage_context import current_usage_scope
+
+        ctx = getattr(self, "_tracking_ctx", None) or {}
+        return ctx.get("workspace_id") or current_usage_scope().get("workspace_id")
+
+    def _reserved(self, budget: Optional[int]) -> Optional[int]:
+        return budget or getattr(getattr(self, "config", None), "max_tokens", None)
+
+    def _note_success(self, budget: Optional[int] = None) -> None:
+        """F197: a call that worked, reserving ``budget``, can end a workspace's
+        credit outage when it reserved as much as the refused calls did."""
+        try:
+            from .credit import note_model_success
+
+            note_model_success(self._credit_workspace(), reserved=self._reserved(budget))
+        except Exception:  # noqa: BLE001 — never breaks the call it follows
+            logger.debug("[F197] success note skipped", exc_info=True)
+
+    def _note_refusal(self, exc: Exception, budget: Optional[int]) -> None:
+        """F197: a call refused for credit records how much it reserved."""
+        try:
+            from .credit import is_out_of_credit, note_refused
+
+            if is_out_of_credit(exc):
+                note_refused(self._credit_workspace(), self._reserved(budget))
+        except Exception:  # noqa: BLE001 — never breaks the failure it follows
+            logger.debug("[F197] refusal note skipped", exc_info=True)
+
+    def _note_cut(self, response: Any, budget: Optional[int]) -> None:
+        from .usage_context import current_usage_scope
+
+        if not budget:
+            return
+        purpose = output_budget.call_purpose(
+            current_usage_scope().get("request_type"),
+            own_purpose=getattr(self, "_own_purpose", None),
+            from_settings=getattr(self, "_from_settings", False),
+        )
+        output_budget.note_cut(response, purpose=purpose, budget=budget,
+                                      model=getattr(getattr(self, "config", None), "model", "unknown"))
+
+    def _remember_refusal(self, exc: Exception) -> None:
+        """F141: the provider refused this model for good (the typed error says so):
+        record it for the route and for the agent that asked, whatever lane the
+        call came from (core.llm.model_refusals)."""
+        if getattr(exc, "definitive", False) is not True:
+            return
+        try:
+            from .model_refusals import record_model_refusal
+            from .usage_context import current_usage_scope
+
+            record_model_refusal(
+                agent_id=self._tracking_ctx.get("agent_id") or current_usage_scope().get("agent_id"),
+                provider=exc.provider,
+                model=exc.model,
+                said=exc.said,
+            )
+        except Exception:  # noqa: BLE001 — never mask the refusal itself
+            logger.warning("[model-refusal] not recorded", exc_info=True)
 
     def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
         """Track LLM usage via UsageTracker and cost audit logger.

@@ -1,6 +1,8 @@
 """A two-step playbook ("Monday dispatch") through the real step loop and the
 real board bridge, faking only the edges: the session, the step's agent call,
-the clock, the log upload and the notifications. Shared by F123 and F125."""
+the clock, the log upload and the notifications. Shared by F123, F125 and F130;
+``patch_edges`` is the same faking for a test that brings its own steps
+(PRD-251 US-117)."""
 from __future__ import annotations
 
 import asyncio
@@ -76,6 +78,9 @@ class _Pad:
     def get_exports(self):
         return {}
 
+    def step_exports(self, step_order):
+        return {}
+
     def _hgetall(self):
         return {}
 
@@ -103,37 +108,64 @@ def done(output, tokens=TOKENS):
     return {"status": "success", "result": output, "execution": {"tokens_used": tokens, "tool_calls": []}}
 
 
-def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config):
-    """Run a two-step playbook through the real loop; return (execution, card)."""
+MONDAY_DISPATCH = [
+    {"step_id": "s1", "order": 1, "agent_id": 7, "prompt_template": "Redo the club list.",
+     "error_handling": "skip", "max_retries": 0},
+    {"step_id": "s2", "order": 2, "agent_id": 7, "prompt_template": "Send Callum the Monday sheet.",
+     "error_handling": "stop", "max_retries": 0},
+]
+
+
+def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None,
+                 agent_status="active", execution_metadata=None, on_step=None, after_run=None, inputs=None):
+    """Run a playbook (default: the two-step Monday dispatch) through the real
+    loop; return (execution, card). ``calls`` collects what each step was sent;
+    ``on_step`` is called inside each step, ``after_run`` in the run's task once
+    the run returns. ``inputs`` is the playbook's declared inputs (F182)."""
     clock = [1_000_000.0]
     results = iter(outcomes)
 
     async def _step(**kwargs):
         clock[0] += step_seconds
+        if calls is not None:
+            calls.append(kwargs)
+        if on_step is not None:
+            on_step(kwargs)
         return next(results)
 
-    steps = [
-        {"step_id": "s1", "order": 1, "agent_id": 7, "prompt_template": "Redo the club list.",
-         "error_handling": "skip", "max_retries": 0},
-        {"step_id": "s2", "order": 2, "agent_id": 7, "prompt_template": "Send Callum the Monday sheet.",
-         "error_handling": "stop", "max_retries": 0},
-    ]
+    steps = steps if steps is not None else MONDAY_DISPATCH
     execution = SimpleNamespace(
         execution_id="exec-120", recipe_id=79, workspace_id=WS, status="pending", current_step=0,
         step_results=None, error_message=None, completed_at=None, started_at=None, output_data=None,
-        execution_metadata={},
+        execution_metadata=dict(execution_metadata or {}),
     )
     card = SimpleNamespace(id=760, status="in_progress", result=None, error_message=None,
                            review_feedback=None, completed_at=None)
     session = _Session({
-        WorkflowTemplate: [SimpleNamespace(id=79, name="Monday dispatch", steps=steps, execution_config=exec_config)],
+        WorkflowTemplate: [SimpleNamespace(id=79, name="Monday dispatch", steps=steps, execution_config=exec_config,
+                                           inputs=inputs)],
         RecipeExecution: [execution],
         Workspace: [SimpleNamespace(deleted_at=None, paused_at=None, paused_reason=None)],
-        Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={})],
+        Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={}, status=agent_status)],
         BoardTask: [card],
     })
+    patch_edges(monkeypatch, session=session, step=_step, clock=clock)
+
+    async def _run():
+        await rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None)
+        if after_run is not None:
+            after_run()
+
+    asyncio.run(_run())
+    return execution, card
+
+
+def patch_edges(monkeypatch, *, session, step, pad=_Pad, clock=None):
+    """Fake one run's edges: its session (rows by model), the agent step call
+    ``step(**kwargs)``, the scratchpad class ``pad``, memory, the clock (a
+    one-item list, when given), the log upload, notifications, the board bridge."""
     pad_mod = types.ModuleType("core.services.playbook_scratchpad")
-    pad_mod.PlaybookScratchpad = _Pad
+    pad_mod.PlaybookScratchpad = pad
     mem_mod = types.ModuleType("core.services.playbook_memory_service")
     mem_mod.PlaybookMemoryService = _Memory
     monkeypatch.setitem(sys.modules, pad_mod.__name__, pad_mod)
@@ -141,8 +173,9 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config):
     # The loop reads this system_setting eagerly, and the test DB seeds none.
     monkeypatch.setattr(type(app_config), "RECIPE_DEFAULT_MAX_ITERATIONS", 3)
     monkeypatch.setattr(rex, "SessionLocal", lambda: session)
-    monkeypatch.setattr(rex, "time", SimpleNamespace(time=lambda: clock[0]))
-    monkeypatch.setattr(rex, "_execute_step", _step)
+    if clock is not None:
+        monkeypatch.setattr(rex, "time", SimpleNamespace(time=lambda: clock[0]))
+    monkeypatch.setattr(rex, "_execute_step", step)
     monkeypatch.setattr(rex, "_is_session_step", lambda db, agent: False)
     monkeypatch.setattr(rex, "_upload_step_log_to_s3", lambda ws, ex, order, log: LOG.format(order))
     monkeypatch.setattr(rex, "_dispatch_playbook_event", _nothing)
@@ -152,5 +185,3 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config):
     monkeypatch.setattr(board_task_bridge, "create_recipe_board_task", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "update_recipe_board_task_progress", lambda *a, **k: None)
     monkeypatch.setattr(playbook_engine_heartbeat, "_emit_playbooks_primitive", lambda *a, **k: None)
-    asyncio.run(rex._execute_recipe_inner("exec-120", 79, WS, {}, None))
-    return execution, card

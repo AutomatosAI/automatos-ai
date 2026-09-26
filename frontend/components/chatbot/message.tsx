@@ -14,6 +14,7 @@ import { ActivityTrail, LimitReachedNote } from './activity-trail'
 import { WithdrawOfferCard } from './withdraw-offer-card'
 import { ReasoningBlock } from './reasoning-block'
 import { TaskCard } from './task-card'
+import { narrationLines } from '@/lib/chat/narration'
 
 export interface MessageProps {
   chatId: string
@@ -207,7 +208,8 @@ export function Message({
   const renderToolCalls = () => {
     if (message.role !== 'assistant') return null
     const toolCalls = message.toolCalls || []
-    const progress = message.progress || []
+    // F186: live, narration arrives in `progress`; reloaded, from the stored narration part.
+    const progress = message.progress?.length ? message.progress : narrationLines(message.parts)
     const limit = message.limitReached
     const offer = message.withdrawOffer
     if (toolCalls.length === 0 && progress.length === 0 && !limit && !offer) return null

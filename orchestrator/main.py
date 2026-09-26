@@ -53,7 +53,6 @@ from api.memory_stats import admin_router as memory_stats_admin_router  # PRD-77
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
-from api.api_playbooks import router as playbooks_router
 from api.patterns import router as patterns_router
 from api.context import router as context_router
 from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
@@ -265,6 +264,37 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("Auto persona doctrine backfill: %s", e)
 
+        # PRD-251 US-119: the built-in skills (core/seeds/skills/manifest.json).
+        # CREATE-only: a skill the owner synced (scripts/sync-skills.py) lands on
+        # the next deploy; an existing row is refreshed by content hash when it is
+        # loaded (SkillLoader), never here. Runs before the marketplace seeds,
+        # which resolve their agents' skills by name.
+        try:
+            from core.seeds.seed_builtin_skills import seed_builtin_skills
+            with get_db_session() as db:
+                skills_seeded = seed_builtin_skills(db)
+            logger.info(
+                "Built-in skills: created %s; not synced yet %s; name held by another source %s; invalid %s",
+                skills_seeded["created"], skills_seeded["not_synced"],
+                skills_seeded["left_alone"], skills_seeded["invalid"],
+            )
+        except Exception as e:
+            logger.warning("Built-in skills seed: %s", e)
+
+        # PRD-251 US-120: the Socials package's two marketplace agents and four
+        # Playbooks (core/seeds/seed_socials_package.py). Creates what is missing
+        # and leaves existing rows alone, except the agents' skill links: every
+        # boot links the built-in skills that exist now, so a skill the owner
+        # syncs after the first boot attaches on the next one. After the built-in
+        # skills above; the package row itself is seed_packages below.
+        try:
+            from core.seeds.seed_socials_package import seed_socials_marketplace
+            with get_db_session() as db:
+                socials_seeded = seed_socials_marketplace(db)
+            logger.info("Socials package seed: %s", socials_seeded)
+        except Exception as e:
+            logger.warning("Socials package seed: %s", e)
+
         # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
         # manual script, so prod carried ZERO packages — the Packages tab was
         # empty and onboarding's proposal silently fell back to custom-design
@@ -292,7 +322,7 @@ async def _boot_phase_1_core():
         try:
             from core.boot.reaper import reap_orphaned_runs
             with get_db_session() as db:
-                reap_orphaned_runs(db)
+                await reap_orphaned_runs(db)
         except Exception as reap_err:
             logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
             from core.utils.exception_telemetry import record_error
@@ -643,6 +673,12 @@ async def lifespan(app: FastAPI):
         app.state.bootstrap_report = report
         app.state.ready = True
 
+        # F105: from here on, a stall of the loop logs the stack that caused it
+        # (LOOP_STALL_LOG_SECONDS; 0 starts nothing). Never raises.
+        from core.loop_watchdog import start_loop_watchdog
+
+        app.state.loop_watchdog = start_loop_watchdog()
+
         failed = report.failed_stages
         if failed:
             logger.warning(
@@ -664,6 +700,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
+
+    _watchdog = getattr(app.state, "loop_watchdog", None)
+    if _watchdog is not None:
+        _watchdog.stop()
 
     # Stop unified scheduler (shuts down all heartbeat + recipe + coordinator jobs at once)
     if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
@@ -929,9 +969,15 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload", "/api/knowledge/graph/import")
 # PRD-242 S3: the brand logo is capped at 2 MB by the route; the transport cap
 # stays just above it so an oversized multipart body is refused before the
-# parser spools it (a 50 MB bucket for a 2 MB file is 25x wasted churn).
+# parser spools it (a 50 MB bucket for a 2 MB file is 25x wasted churn). The
+# logo mark's route shares the logo's prefix and cap; PRD-251 D5's font files
+# get theirs.
+from modules.documents.brand_fonts import BRAND_FONTS_ROUTE, MAX_FONT_BYTES
 from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
-PATH_BODY_LIMITS = {BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024}
+PATH_BODY_LIMITS = {
+    BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024,
+    BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
+}
 
 
 def _body_limit_for(path: str) -> int:
@@ -1065,7 +1111,6 @@ app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(context_policy_router)
 app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(github_webhooks_router)  # GitHub PR automation
-app.include_router(playbooks_router)
 app.include_router(patterns_router)
 app.include_router(context_router)
 app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management

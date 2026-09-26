@@ -68,7 +68,14 @@ def get_autonomy_level(db: Session, workspace_id: UUID | str) -> str:
 
 
 def is_full_autonomy(db: Session, workspace_id: UUID | str) -> bool:
-    """True when the workspace is running at full autonomy."""
+    """True when the workspace is running at full autonomy.
+
+    Never on a public widget turn (F155): the dial is the owner's grant to
+    Auto, not to the site's visitors."""
+    from core.security.surface import widget_turn
+
+    if widget_turn():
+        return False
     return get_autonomy_level(db, workspace_id) == FULL
 
 

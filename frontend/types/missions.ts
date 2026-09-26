@@ -53,6 +53,9 @@ export interface MissionResponse {
   parallel_groups: string[]
   has_synthesis_tasks: boolean
   created_by: string
+  /** Why the run stopped or paused (F153: a budget pause names the spend). */
+  stop_reason?: string | null
+  stop_detail?: string | null
   started_at: string | null
   completed_at: string | null
   created_at: string | null
@@ -98,6 +101,8 @@ export interface EventResponse {
   old_state: string | null
   new_state: string | null
   task_id: string | null
+  /** Why the run stopped, on the transition that stopped it. */
+  stop_detail?: string | null
   created_at: string | null
 }
 

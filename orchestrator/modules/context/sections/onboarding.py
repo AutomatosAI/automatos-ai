@@ -93,7 +93,8 @@ widgets and agents." And early: "you're on Basic while we set up — we'll pick 
 plan together shortly."
 - Stages are EXACTLY `not_started`, `questions`, `teach`, `proposal`, `building`, \
 `boom`, `powerup`, `completed`, `skipped` — pass one to `platform_update_onboarding`; \
-never invent one.
+never invent one. The ids are internal: never say one to the owner; say what is \
+built and what is left, in plain words.
 """
 
 _FIRST_MESSAGE_PREFIX = (
@@ -108,7 +109,9 @@ Ask these one at a time, in your own words, waiting for each answer:
 2. What's the first thing you'd want handled for you?
 3. How comfortable are you with AI — brand new, or very technical?
 Save each answer with `platform_update_onboarding` (segment.business / .goal / \
-.comfort). When you have all three, advance_to `teach`.
+.comfort). When you learn where the business is, pass its `timezone` too (Bristol → \
+'Europe/London'): its schedules then fire in its own time. When you have all three, \
+advance_to `teach`.
 """
 
 _STAGE_TEACH = """\
@@ -123,6 +126,9 @@ to correct you — corrections matter. Then, BEFORE you compose any proposal, ca
 staff their team from the marketplace, NEVER by inventing agents or guessing tool/\
 plugin names. In the SAME turn, advance_to `proposal` and present what the search \
 returned (a matched package by name, or a custom team only if it returned nothing).
+Never say nothing ready-made exists unless, in this turn, a package search \
+(`platform_search_packages`) AND a marketplace agents search \
+(`platform_browse_marketplace_agents`) both came back empty for what they need.
 """
 
 _NO_SCAN_NOTE = (
@@ -134,11 +140,11 @@ _STAGE_PROPOSAL = """\
 ### Now: propose the setup — this is the approval gate
 Start by matching a package: call `platform_search_packages` with their segment \
 (business, goal, any store URL). If one matches, offer exactly ONE BY NAME with its \
-contents — e.g. "Shopify Management: four agents (Operations, Support, Inventory, \
-Business Analyst), a weekly-numbers report, and your store connect — want it?" If \
-they defer the pick to you, choose sensibly (a store OWNER → Management, a builder \
-→ Development). If NOTHING matches, don't force a package — custom-design their team, \
-marketplace-first for each agent, tool and Playbook. Either way present ONE proposal \
+contents — e.g. "Shopify Management: four agents, a weekly-numbers report and your \
+store connect — want it?" If they defer the pick to you, choose sensibly (a store \
+OWNER → Management, a builder → Development). If NOTHING matches, don't force a package — custom-design their team, \
+marketplace-first for each agent, tool and Playbook; say nothing ready-made exists only \
+if `platform_browse_marketplace_agents` also came back empty. Either way present ONE proposal \
 sized to their business (a barber gets Auto + 1–2 helpers and ~2 Playbooks; a larger \
 company more), what each piece does for THEM, the 1–2 apps to connect, and the cost \
 ("this build is covered by your trial credit"). Nothing is built before they say yes \
@@ -168,8 +174,9 @@ _STAGE_BOOM = """\
 ### Now: the payoff moment
 Invite the user to ask you something about THEIR business, and answer it grounded \
 in what you just learned — this is the value moment, still on their trial credit. \
-Offer to put the team to work now — run their first Playbook or report; the setup \
-checklist card carries the remaining steps. Once they've seen it, advance_to `powerup`.
+Offer to put the team to work now — run their first Playbook or report. If they ask \
+whether setup is done: "Your team is built — the last step is seeing it answer or do one \
+real thing for you." They see no checklist yet. Once they've seen it, advance_to `powerup`.
 """
 
 _STAGE_POWERUP = """\
@@ -181,7 +188,7 @@ models.** Offer the masked in-chat key entry. List other providers \
 (OpenAI, Anthropic, …) collapsed beneath, for users who already have one.
 A saved key is validated live and unlocks the full model catalogue. Declining is \
 fine — the remaining trial credit keeps working.
-Then present the run-and-learn checklist (connect a second app · invite a teammate \
+Then present the run-and-learn checklist (connect {an_app} · invite a teammate \
 · run your first mission · take the 10-minute course).
 To finish, write the onboarding summary — what you built, why, and what happens \
 next — with `platform_submit_report` (report_type `onboarding`, plus a title and \
@@ -222,6 +229,11 @@ class OnboardingSection(BaseSection):
     max_tokens: Optional[int] = 800
 
     async def render(self, ctx: SectionContext) -> str:
+        from core.security.surface import widget_turn
+
+        if widget_turn():
+            # F155: onboarding is the owner's; a widget visitor is never onboarded.
+            return ""
         try:
             return await self._build(ctx)
         except Exception:
@@ -294,8 +306,20 @@ class OnboardingSection(BaseSection):
         if stage == "boom":
             return _STAGE_BOOM
         if stage == "powerup":
-            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding))
+            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding), an_app=self._next_app(ctx))
         return ""  # defensive — terminal stages never reach here
+
+    @staticmethod
+    def _next_app(ctx: SectionContext) -> str:
+        """F188: the checklist item as the setup checklist words it — "an app"
+        while none is connected (night 6 asked for "a second app" with 0)."""
+        try:
+            from core.composio.entity_manager import EntityManager
+
+            connected = EntityManager(ctx.db_session).get_connected_apps(ctx.workspace_id)
+        except Exception:  # noqa: BLE001 -- unreadable: the first app is the ask
+            connected = []
+        return "a second app" if connected else "an app"
 
     def _plan_recommendation(self, onboarding: dict[str, Any]) -> str:
         """The plan-recommendation line for the proposal stage (US-025).

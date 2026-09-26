@@ -140,10 +140,14 @@ class PolicyGate:
             return Verdict.allow("full-autonomy: agent runs as admin")
 
         if ctx is not None:
-            role = ctx.get("system_role")
-            ws_role = ctx.get("workspace_role")
-            if _roles.is_admin(role) or ws_role in ("owner", "admin"):
-                return Verdict.allow("caller has admin/owner role")
+            # F145: an admin is the person the call is made for (an active
+            # owner/admin of this workspace, read fresh, or the server-side
+            # super_admin role), the executor's predicate too. The chat's context
+            # never carries a workspace_role, so reading one made owners non-admin.
+            from core.security.driving_user import driver_is_workspace_admin
+
+            if driver_is_workspace_admin(self.db, call.workspace_id, ctx):
+                return Verdict.allow("the call is made for a workspace owner/admin")
             # Explicit non-admin caller — deny (F014: no workspace-has-an-admin flip).
             return Verdict.deny(
                 PolicyError(
@@ -287,15 +291,16 @@ class PolicyGate:
         try:
             from core.workspaces.models import WorkspaceMember
 
-            member = (
-                self.db.query(WorkspaceMember)
-                .filter(
-                    WorkspaceMember.workspace_id == workspace_id,
-                    WorkspaceMember.role.in_(("owner", "admin")),
-                    WorkspaceMember.is_active.is_(True),
+            with self.db.begin_nested():  # a failed probe never poisons the caller's transaction
+                member = (
+                    self.db.query(WorkspaceMember)
+                    .filter(
+                        WorkspaceMember.workspace_id == workspace_id,
+                        WorkspaceMember.role.in_(("owner", "admin")),
+                        WorkspaceMember.is_active.is_(True),
+                    )
+                    .first()
                 )
-                .first()
-            )
             return member is not None
         except Exception:
             logger.warning(

@@ -24,6 +24,20 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+# F077 (A, refresh 4): the person's own words for this turn go to NL2SQL beside Auto's
+# restatement. Auto turned "How many subscribers ... not counting cancelled ones?" into
+# "How many ACTIVE subscribers ...", and the SQL counted active only (383, not 400).
+OWNER_WORDS_CHARS = 2000
+
+
+def owner_words(caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
+    """What the person typed this turn (``user_query``, set by the chat server-side;
+    never a tool argument), bounded, or None for a lane nobody typed into."""
+    if not isinstance(caller_context, dict):
+        return None
+    return str(caller_context.get("user_query") or "").strip()[:OWNER_WORDS_CHARS] or None
+
+
 def _error(message: str, *, disabled: bool = False) -> Dict[str, Any]:
     """Structured, leak-free failure response matching the success shape."""
     resp: Dict[str, Any] = {
@@ -95,6 +109,7 @@ async def run_nl2sql(
         )
 
     agent = str(agent_id) if agent_id is not None else None
+    owner_question = owner_words(caller_context)
     try:
         if method == "smart_query":
             result = await service.smart_query(
@@ -103,6 +118,7 @@ async def run_nl2sql(
                 user_id=user_id,
                 agent_id=agent,
                 workspace_id=ws_id,
+                owner_question=owner_question,
             )
         else:
             result = await service.query_database(
@@ -111,6 +127,7 @@ async def run_nl2sql(
                 user_id=user_id,
                 agent_id=agent,
                 workspace_id=ws_id,
+                owner_question=owner_question,
             )
     except Exception as e:  # noqa: BLE001 — surface a safe message, never leak internals
         logger.error(

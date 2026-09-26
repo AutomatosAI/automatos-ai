@@ -131,7 +131,7 @@ def test_smart_query_database_with_one_source_and_no_name_queries_it(monkeypatch
         async def active_sources(self, workspace_id, db_session=None):
             return [(36, "harbourline_shop")]
 
-        async def smart_query(self, source_id, text, user_id, agent_id=None, workspace_id=None):
+        async def smart_query(self, source_id, text, user_id, agent_id=None, workspace_id=None, owner_question=None):
             self.queried = source_id
             return {"success": True, "data": [], "columns": [], "row_count": 0}
 

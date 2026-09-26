@@ -196,13 +196,30 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     seconds = (versions / "f125_playbook_timeouts_seconds.py").read_text()
     assert 'down_revision = "llm_usage_agent_name"' in seconds
     # 2026-09-23: prd251_socials chains onto kb_multimodal_tables too (PRD-251's one
-    # Socials migration), and f049_prd251_merge_heads joins it with F125; the guard
-    # follows it.
+    # Socials migration), and f049_prd251_merge_heads joins it with F125.
     socials = (versions / "prd251_socials.py").read_text()
     assert 'down_revision = "kb_multimodal_tables"' in socials
     joined = (versions / "f049_prd251_merge_heads.py").read_text()
     assert '"f125_playbook_timeouts_seconds"' in joined and '"prd251_socials"' in joined
-    assert 'EXPECTED_HEAD = "f049_prd251_merge_heads"' in guard
+    # 2026-09-25: f155_chats_widget_key_id chains onto that (F155 — the widget key
+    # that started a conversation).
+    widget_key = (versions / "f155_chats_widget_key_id.py").read_text()
+    assert 'down_revision = "f049_prd251_merge_heads"' in widget_key
+    # 2026-09-25: f156_harness_task_ledger chains onto that (F156 — the HARNESS
+    # ledger in the database).
+    ledger = (versions / "f156_harness_task_ledger.py").read_text()
+    assert 'down_revision = "f155_chats_widget_key_id"' in ledger
+    # 2026-09-25: llm_usage_execution_index chains onto that (F153 — the index the
+    # mission budget reads).
+    index = (versions / "llm_usage_execution_index.py").read_text()
+    assert 'down_revision = "f156_harness_task_ledger"' in index
+    # 2026-09-25: prd251_wave1 chains onto the merge too (PRD-251 Wave 1's one migration).
+    wave1 = (versions / "prd251_wave1.py").read_text()
+    assert 'down_revision = "f049_prd251_merge_heads"' in wave1
+    # 2026-09-26: prd251w1_merge_heads joins the two into one head; the guard follows it.
+    joined_w1 = (versions / "prd251w1_merge_heads.py").read_text()
+    assert '"llm_usage_execution_index"' in joined_w1 and '"prd251_wave1"' in joined_w1
+    assert 'EXPECTED_HEAD = "prd251w1_merge_heads"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

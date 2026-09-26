@@ -208,10 +208,10 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
         name="workspace_html_to_png",
         description=(
             "Render an HTML page to a PNG image inside the workspace using "
-            "headless Chromium. Use to turn templated HTML (e.g. social card "
-            "templates from a cloned repo) into shareable PNGs. The output file "
-            "is automatically registered as a deliverable and shows up in the "
-            "Deliverables Gallery, Workspace Explorer, and Mission Outputs."
+            "headless Chromium. Use to turn an HTML page in the workspace (a "
+            "chart, a diagram, a page you wrote) into a shareable PNG. The output "
+            "file is automatically registered as a deliverable and shows up in "
+            "the Deliverables Gallery, Workspace Explorer, and Mission Outputs."
         ),
         category="workspace_render",
         parameters={
@@ -222,7 +222,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                     "description": (
                         "Absolute URL to render. Must be either: "
                         "(a) a 'file://' URL pointing INSIDE this workspace "
-                        "(e.g. 'file:///workspaces/<id>/repos/automatos-social/render/index.html?template=definition&size=ig_post&...'), "
+                        "(e.g. 'file:///workspaces/<id>/deliverables/charts/revenue.html'), "
                         "or (b) an 'http(s)://' URL. Other schemes are rejected."
                     ),
                 },
@@ -243,9 +243,8 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "output_path": {
                     "type": "string",
                     "description": (
-                        "Workspace-relative path for the PNG. Must end in '.png'. "
-                        "Convention: 'deliverables/social/{YYYY-MM-DD}/{template}_{size}.png' "
-                        "(e.g. 'deliverables/social/2026-04-29/definition_ig_post.png'). "
+                        "Workspace-relative path for the PNG. Must end in '.png' "
+                        "(e.g. 'deliverables/charts/2026-04-29/revenue.png'). "
                         "Parent directories are created automatically."
                     ),
                 },
@@ -331,12 +330,15 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="workspace_get_public_url",
+        # F179: publishing is a write. It waits for an owner's or admin's approval
+        # unless one of them asked for it in their own chat turn.
         description=(
-            "Get a publicly accessible URL for a workspace file (image or document). "
-            "Use when you need to share a workspace file with an external service "
-            "that requires a public URL — e.g. posting an image to Instagram, "
-            "Twitter, or LinkedIn. The file is uploaded to a CDN-backed store and "
-            "the returned URL is accessible without authentication."
+            "Publish a workspace image at a public URL: anyone who has the link can open it, "
+            "without signing in. "
+            "Only a PNG, JPEG, GIF or WebP image is published; share a document "
+            "through its Deliverables link. Use when an external service needs a "
+            "public image URL, e.g. posting to Instagram, Twitter or LinkedIn. "
+            "It waits for an owner's or admin's approval unless one of them asked for it in chat."
         ),
         category="workspace_files",
         parameters={
@@ -345,14 +347,15 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "path": {
                     "type": "string",
                     "description": (
-                        "Relative path to the file inside the workspace "
+                        "Relative path to the image inside the workspace "
                         "(e.g. 'content/social/instagram/post.png')."
                     ),
                 },
             },
             "required": ["path"],
         },
-        permission_level="read",
+        permission_level="write",
+        requires_confirmation=True,
         promoted=True,
         tags=["workspace", "files", "share", "public", "url", "social", "instagram"],
         examples=[

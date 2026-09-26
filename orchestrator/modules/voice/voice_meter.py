@@ -34,6 +34,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import config
+from core.utils.timestamps import month_window_utc
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +55,6 @@ class MeterReading:
     @property
     def committed_minutes(self) -> int:
         return self.ended_minutes + self.reserved_minutes
-
-
-def month_window_utc(now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
-    """Pure: the [start, next-start) UTC window of the calendar month."""
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if start.month == 12:
-        nxt = start.replace(year=start.year + 1, month=1)
-    else:
-        nxt = start.replace(month=start.month + 1)
-    return start, nxt
 
 
 def cap_allows_mint(reading: MeterReading, cap_minutes: int) -> Tuple[bool, str]:

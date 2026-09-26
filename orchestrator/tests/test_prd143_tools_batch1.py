@@ -307,8 +307,11 @@ def test_connect_channel_canonical_helper_exists():
         assert expected in params
 
 
-def test_configure_channel_workspace_scoped():
-    db = _TextDB(row=SimpleNamespace(id="ch-1"))
+def test_configure_channel_workspace_scoped(monkeypatch):
+    # F147: the handler reads the stored config to merge the call's into it.
+    # F149: agent 7 is taken as this workspace's (its tenancy check has its own tests).
+    monkeypatch.setattr("core.security.workspace_scope.agent_in_workspace", lambda db, agent_id, ws: True)
+    db = _TextDB(row=SimpleNamespace(id="ch-1", config={"trigger_mode": "strict"}))
     out = _run(configure_channel(db, _WS, {
         "channel_id": "ch-1",
         "config": {"bot_token": "new"},
@@ -488,13 +491,18 @@ def test_upload_document_duplicate_short_circuits(monkeypatch, tmp_path):
 def test_batch1_tools_registered_and_operator_tier():
     from modules.tools.discovery.action_registry import ActionRegistry
 
+    # F147 (25 Sep): a channel's config holds its trust gate and its
+    # credentials, so configuring one is an owner's or admin's (F212: no card).
+    # F151: so are connecting, starting and stopping one (REST: workspace:manage).
+    admin_gated = {"platform_configure_channel", "platform_connect_channel",
+                   "platform_start_channel", "platform_stop_channel"}
     registry = ActionRegistry()
     actions = {a.name: a for a in registry.get_all()}
     for name, level in BATCH1_TOOLS.items():
         assert name in actions, f"{name} missing from registry"
         action = actions[name]
         assert action.super_admin_only is False, f"{name} must be operator tier (Rev 2 inversion)"
-        assert action.admin_only is False, f"{name} must not be admin-gated"
+        assert action.admin_only is (name in admin_gated), f"{name}: admin_only must be {name in admin_gated}"
         assert action.workspace_scoped is True, f"{name} must be workspace-scoped"
         assert action.permission_level == level, (
             f"{name}: expected permission_level={level!r}, got {action.permission_level!r}"

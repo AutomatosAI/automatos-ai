@@ -163,6 +163,13 @@ async def _build_planning_context(
 # validator no longer rejects a 1-task plan.
 MIN_TASKS = 1
 MAX_TASKS = 20
+# F142: the planner prompts state the range the validator enforces. They said
+# "between 3 and 20", so a two-step goal was padded to three tasks and more.
+_TASK_RANGE_RULE = (
+    f"- The plan MUST contain between {MIN_TASKS} and {MAX_TASKS} tasks inclusive. Use as few "
+    "as the goal needs: one task is a whole plan for a simple goal, and a task is never added "
+    "only to reach a count.\n"
+)
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
 
@@ -304,6 +311,9 @@ class PlannedTask:
     # dispatch contract. Verification scores against it when present; absent ⇒
     # the inference path is unchanged (rides the existing input_context JSONB).
     definition_of_done: Optional[str] = None
+    # F142 (b): the id of the agent the owner named for this task's work (the
+    # mission's staffing); the coordinator pins that agent to the task.
+    staffed_by: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -362,10 +372,12 @@ class MissionPlanner:
         user_notes: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         db: Any = None,
+        staffing: Optional[List[Dict[str, Any]]] = None,
     ) -> DecompositionResult:
         """
         Replan a failed mission — generate replacement tasks for the failed
-        subtree while preserving completed/verified tasks.
+        subtree while preserving completed/verified tasks. F142 (b): a
+        replacement for a named agent's work stays with that agent (``staffing``).
 
         Args:
             goal: Original mission goal.
@@ -409,6 +421,7 @@ class MissionPlanner:
                 user_notes=user_notes,
                 validation_errors=last_errors if attempt > 1 else None,
                 planning_context=planning_context,
+                staffing=staffing,
             )
 
             messages = [
@@ -450,8 +463,10 @@ class MissionPlanner:
                 )
                 continue
 
-            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
-            validation_errors = _validate_plan(tasks, deps, agents)
+            if not staffing:
+                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+            validation_errors = _validate_plan(tasks, deps, agents) + _staffing_errors(
+                tasks, staffing, every_named=False)
             if validation_errors:
                 last_errors = validation_errors
                 logger.warning(
@@ -496,6 +511,7 @@ class MissionPlanner:
         agents: Sequence[Agent],
         config: Optional[Dict[str, Any]] = None,
         db: Any = None,
+        owner_feedback: Optional[str] = None,
     ) -> DecompositionResult:
         """
         Decompose *goal* into a task DAG validated against available *agents*.
@@ -507,6 +523,8 @@ class MissionPlanner:
             config: Optional overrides (unused in v1, reserved for 82B).
             db: Optional DB session — enables the PRD-164 planning context
                 pack (RAG + mission memory + KG) in the decomposition prompt.
+            owner_feedback: F171 — the plans this conversation just turned
+                down, with the owner's reasons (services.turned_down_plans).
 
         Returns:
             DecompositionResult with tasks, dependencies, and token estimate.
@@ -556,6 +574,15 @@ class MissionPlanner:
                 )
         if template is None:
             template = match_template(goal)
+        # F142 (b): a template knows nothing of the owner's named staffing.
+        staffing = list((config or {}).get("staffing") or [])
+        if staffing and template is not None:
+            logger.info("MissionPlanner: the owner named who does what; template %s skipped", template.id)
+            template = None
+        # F171: nor of why the owner turned the last plan down.
+        if owner_feedback and template is not None:
+            logger.info("MissionPlanner: the owner turned a plan down; template %s skipped", template.id)
+            template = None
         if template is not None:
             logger.info(
                 "MissionPlanner: template=%s matched for goal='%s'",
@@ -643,6 +670,8 @@ class MissionPlanner:
                 chat_context=chat_context,
                 power_mode=power_mode,
                 planning_context=planning_context,
+                staffing=staffing,
+                owner_feedback=owner_feedback,
             )
 
             messages = [
@@ -685,11 +714,16 @@ class MissionPlanner:
                 )
                 continue
 
-            # Auto-insert synthesis tasks for parallel convergence (82C US-008)
-            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+            # Auto-insert synthesis tasks for parallel convergence (82C US-008),
+            # unless the owner named who does what (F142 b: no step they didn't ask for).
+            if not staffing:
+                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
 
-            # Structural validation
-            validation_errors = _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
+            # Structural validation, and the owner's staffing kept (F142 b)
+            validation_errors = (
+                _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
+                + _staffing_errors(tasks, staffing)
+            )
             if validation_errors:
                 last_errors = validation_errors
                 logger.warning(
@@ -750,12 +784,51 @@ that merges and integrates the outputs of the parallel tasks.
 - Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
 researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
 platform routes each capability to the best-fit agent.
-- The plan MUST contain between 3 and 20 tasks inclusive.
+""" + _TASK_RANGE_RULE + """\
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
 _VALID_TASK_TYPES = frozenset(t.value for t in TaskType)
 _VALID_COMPLEXITIES = frozenset({"simple", "moderate", "complex", "synthesis"})
+
+
+def _staffing_block(staffing: Optional[List[Dict[str, Any]]], replan: bool = False) -> str:
+    """F142 (b): the owner's named staffing, for the planner. Each named agent
+    gets the work named, pinned by ``staffed_by``; nothing else is added for
+    it. Empty when the owner named nobody (capability routing, as before)."""
+    if not staffing:
+        return ""
+    lines = [f'- {entry["agent_name"]} (id {entry["agent_id"]}): "{entry["does"]}"' for entry in staffing]
+    keep = ("A replacement task for a named agent's work keeps its staffed_by. " if replan else
+            "Give each named agent its own task for exactly the work named. ")
+    return (
+        "## Who does what: the owner's choice\n"
+        "The owner named these agents for this work. " + keep +
+        'Set that task\'s "staffed_by" to the agent\'s id (its agent_role stays a capability word). '
+        "Do not hand that work to another agent, and do not add a review or synthesis step the "
+        "owner did not ask for. Anything else the goal needs is routed by capability as usual.\n"
+        + "\n".join(lines) + "\n"
+    )
+
+
+def _staffing_errors(tasks: List[PlannedTask], staffing: Optional[List[Dict[str, Any]]],
+                     every_named: bool = True) -> List[str]:
+    """F142 (b): a plan that drops or invents the owner's staffing is sent back.
+    Every staffed_by must be an agent the owner named, and (for a new plan)
+    every agent the owner named must have a task."""
+    named = {entry["agent_id"]: entry for entry in staffing or []}
+    errors = [
+        f"Task '{task.title}' has staffed_by {task.staffed_by}, which is not an agent the owner named"
+        for task in tasks if task.staffed_by is not None and task.staffed_by not in named
+    ]
+    if every_named:
+        staffed = {task.staffed_by for task in tasks}
+        errors += [
+            f'The owner named {entry["agent_name"]} (id {agent_id}) to "{entry["does"]}"; '
+            f"give that work a task with staffed_by {agent_id}"
+            for agent_id, entry in named.items() if agent_id not in staffed
+        ]
+    return errors
 
 
 def _build_decomposition_prompt(
@@ -767,11 +840,18 @@ def _build_decomposition_prompt(
     chat_context: Optional[List[Dict[str, str]]] = None,
     power_mode: str = "standard",
     planning_context: Optional[str] = None,
+    staffing: Optional[List[Dict[str, Any]]] = None,
+    owner_feedback: Optional[str] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
         f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
     ]
+    if staffing:
+        parts.append(_staffing_block(staffing))
+    # F171: the plans this conversation just turned down, and why.
+    if owner_feedback:
+        parts.append(owner_feedback)
 
     # PRD-164 S1: the platform planning pack (RAG + mission memory + KG),
     # assembled by ContextService.build_planning_context — the one assembler.
@@ -941,7 +1021,7 @@ that merges the parallel outputs.
 - Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
 researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
 platform routes each capability to the best-fit agent.
-- The plan MUST contain between 3 and 20 tasks inclusive.
+""" + _TASK_RANGE_RULE + """\
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
@@ -956,6 +1036,7 @@ def _build_replan_prompt(
     user_notes: Optional[str] = None,
     validation_errors: Optional[List[str]] = None,
     planning_context: Optional[str] = None,
+    staffing: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Build the user prompt for replanning a failed mission."""
     completed_summary = ""
@@ -975,6 +1056,8 @@ def _build_replan_prompt(
         f"## Completed Tasks (DO NOT REDO)\n{completed_summary}\n",
         f"## Failed Task\n- **Title**: {failed_task_title}\n- **Failure Reason**: {failed_task_reason}\n",
     ]
+    if staffing:
+        parts.append(_staffing_block(staffing, replan=True))
 
     # PRD-164 S1: the platform planning pack — same assembler as decompose().
     if planning_context:
@@ -1052,8 +1135,10 @@ def _render_agent_roster(agents: Sequence[Agent]) -> str:
             tags_text = f" | Tags: {', '.join(str(t) for t in agent.tags)}"
 
         desc = (agent.description or "")[:120]
+        # F142 (c): the id (and slug) tell same-named agents apart.
+        slug = getattr(agent, "slug", None)
         lines.append(
-            f"- {agent.name}: {desc}"
+            f"- {agent.name} (id {agent.id}{f', slug {slug}' if slug else ''}): {desc}"
             f"{skills_text}{tags_text}"
             f"{f' | Model: {model_id}' if model_id else ''}"
         )
@@ -1196,6 +1281,12 @@ def _parse_plan(
         raw_dod = rt.get("definition_of_done")
         definition_of_done = str(raw_dod).strip() if raw_dod and str(raw_dod).strip() else None
 
+        # F142 (b): the named agent's id, when the owner staffed this work.
+        try:
+            staffed_by = int(rt["staffed_by"]) if rt.get("staffed_by") is not None else None
+        except (TypeError, ValueError):
+            staffed_by = None
+
         tasks.append(
             PlannedTask(
                 temp_id=temp_id,
@@ -1211,6 +1302,7 @@ def _parse_plan(
                 parallel_group=parallel_group,
                 attachment_ids=[str(a) for a in task_attachment_ids],
                 definition_of_done=definition_of_done,
+                staffed_by=staffed_by,
             )
         )
 

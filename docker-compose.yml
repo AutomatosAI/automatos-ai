@@ -27,6 +27,8 @@
 #     and Deliverables → Explorer, the chat's Code mode and your Claude Code
 #     sessions all read and write the one place.
 #   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
+#   - Media: Add --profile media (media-render, the Socials video/image renderer;
+#     PRD-251 D3). Without it, rendering a post says it needs the media profile.
 # =============================================================================
 
 services:
@@ -263,6 +265,9 @@ services:
       # sent as X-Internal-Token; must match the worker's value (empty = none,
       # the worker port is never published outside the compose network).
       WORKER_INTERNAL_TOKEN: ${WORKER_INTERNAL_TOKEN:-}
+      # The same, for media-render (the media profile). SOCIALS_RENDER_URL is in
+      # envs/api.defaults.
+      SOCIALS_RENDER_TOKEN: ${SOCIALS_RENDER_TOKEN:-}
       
       # Clerk Authentication — SaaS-only. `:-` (not `:?`) so their ABSENCE never
       # blocks `docker compose up` in local mode; when set (saas) they resolve
@@ -419,6 +424,51 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      - automatos
+
+  # ===========================================================================
+  # media-render — the Socials renderer (PRD-251 D3). Add with: --profile media
+  # ===========================================================================
+  # Turns a template, the brand kit, the Kokoro voice and the music into a
+  # finished MP4 or PNG. It assembles; it never generates. The backend reaches
+  # it at SOCIALS_RENDER_URL (envs/api.defaults); its port stays inside the
+  # compose network. The image carries Chromium, ffmpeg, Hyperframes and Kokoro,
+  # so it is the heaviest image in the stack (docs/getting-started/self-hosting.md).
+  # ===========================================================================
+  media-render:
+    build:
+      context: ./services/media-render
+      dockerfile: Dockerfile
+    container_name: automatos_media_render
+    restart: unless-stopped
+    profiles: ["media"]
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Off locally, like the backend's (the service relays logs to Loki by default).
+      LOG_RELAY_ENABLED: "false"
+      SERVICE_NAME: media-render
+      # The backend sends the same value as X-Internal-Token (empty = none).
+      SOCIALS_RENDER_TOKEN: ${SOCIALS_RENDER_TOKEN:-}
+      # Media inputs arrive as presigned GETs on the local MinIO bucket only.
+      MEDIA_RENDER_MEDIA_URL_PREFIXES: ${MEDIA_RENDER_MEDIA_URL_PREFIXES:-http://minio:9000/${S3_DOCUMENTS_BUCKET:-automatos-ai}/}
+      # Two renders at once overall, one per workspace (owner, 2026-09-23).
+      MEDIA_RENDER_MAX_CONCURRENT_RENDERS: ${MEDIA_RENDER_MAX_CONCURRENT_RENDERS:-2}
+      MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE: ${MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE:-1}
+    # Chrome renders the frames; the CI job runs the image with 1 GB of /dev/shm too.
+    shm_size: "1gb"
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     networks:
       - automatos
 

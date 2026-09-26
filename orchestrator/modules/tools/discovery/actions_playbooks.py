@@ -2,6 +2,16 @@
 
 from .action_registry import ActionDefinition, ActionRegistry
 
+# F182 (night 6): what each run needs, declared the way a function signature is.
+_INPUTS_PARAM = {
+    "type": "object",
+    "description": (
+        'What each run needs, by name: {"cafe_name": {"required": true, "description": "The café\'s '
+        'name"}}. Steps read a value as {{cafe_name}}. A run started without a required one does '
+        "not start: it asks the owner for it."
+    ),
+}
+
 
 def register_playbooks_actions(registry: ActionRegistry) -> None:
     """Register all playbook-related platform actions."""
@@ -94,6 +104,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "items": {"type": "string"},
                     "description": "Optional tags for categorization.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["name", "description"],
         },
@@ -104,14 +115,20 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "create a playbook for daily standup summaries",
             "make an automation for code review",
         ],
+        misplaced={
+            "steps": (
+                "a playbook is created with no steps: create it, then add each step "
+                "with platform_add_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
         name="platform_update_playbook",
         description=(
-            "Update a playbook's metadata — name, description, tags, execution config, "
-            "or schedule. Use when the user asks to rename, update, or reconfigure a "
-            "playbook. To modify steps, use platform_update_playbook_step instead."
+            "Update a playbook's metadata — name, description, tags, the inputs each run "
+            "needs, execution config, or schedule. Use when the user asks to rename, update, "
+            "or reconfigure a playbook. To modify steps, use platform_update_playbook_step instead."
         ),
         category="playbooks",
         parameters={
@@ -142,6 +159,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "type": "object",
                     "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["playbook_id"],
         },
@@ -153,6 +171,13 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "update the bug triage playbook description",
             "set playbook 3 to run on a cron schedule",
         ],
+        misplaced={
+            "steps": (
+                "steps change one at a time, with platform_update_playbook_step "
+                "(step_index plus what changes), platform_add_playbook_step or "
+                "platform_delete_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
@@ -206,7 +231,10 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         name="platform_update_playbook_step",
         description=(
             "Modify an existing playbook step by its 0-based index. Can change "
-            "prompt, agent, order, or error handling."
+            "prompt, agent, order, or error handling. To change part of a step's "
+            "prompt, pass find and replace: that one passage changes and the rest "
+            "stays as written. prompt_template replaces the WHOLE prompt, and the "
+            "reply lists every line it dropped."
         ),
         category="playbooks",
         parameters={
@@ -222,7 +250,15 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "prompt_template": {
                     "type": "string",
-                    "description": "New prompt template for this step.",
+                    "description": "New prompt template for this step: replaces the whole prompt.",
+                },
+                "find": {
+                    "type": "string",
+                    "description": "Exact text in the step's prompt to change; it must appear exactly once.",
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "What `find` becomes (an empty string removes it).",
                 },
                 "agent_id": {
                     "type": "integer",
@@ -291,7 +327,11 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "Schedule a playbook to run automatically on a cron schedule. "
             "Sets the playbook's schedule_config so it fires at the specified "
             "times. Use platform_execute_playbook for immediate one-off runs. "
-            "Provide playbook_id or playbook_name."
+            "For one run at a set time, give a dated cron: '20 18 23 9 *' is "
+            "18:20 on 23 September, once. The cron is read in the schedule's "
+            "timezone: pass the owner's own (UK time is 'Europe/London'), and ask "
+            "them first when you do not know where they are — never assume UTC. "
+            "The reply names the zone used. Provide playbook_id or playbook_name."
         ),
         category="playbooks",
         parameters={
@@ -307,11 +347,15 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "cron_expression": {
                     "type": "string",
-                    "description": "5-field cron expression (e.g. '0 9 * * 1' = every Monday at 09:00 UTC).",
+                    "description": "5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every Monday at 09:00).",
                 },
                 "timezone": {
                     "type": "string",
-                    "description": "Timezone for the schedule (e.g. 'UTC', 'Europe/Dublin'). Defaults to 'UTC'.",
+                    "description": (
+                        "The owner's IANA timezone, which the cron is read in (UK time is "
+                        "'Europe/London'). Ask the owner when you do not know it; never assume "
+                        "UTC. Left out, the workspace's zone (its heartbeat setting) is used, else UTC."
+                    ),
                 },
                 "enabled": {
                     "type": "boolean",
@@ -372,6 +416,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "execute playbook 5",
             "trigger the bug triage automation",
         ],
+        accepts=("inputs", "input"),
+        # F182: night 6 nested the café's details under "params".
+        misplaced={key: "input_data" for key in ("params", "parameters", "variables", "data")},
     ))
 
     registry.register(ActionDefinition(

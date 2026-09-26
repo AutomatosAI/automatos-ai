@@ -37,8 +37,9 @@ _TRACKED = "f105_tracked"                # on a session: its transaction began u
 _PLAIN_READ = re.compile(r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*(?:SELECT|SHOW)\b", re.IGNORECASE | re.DOTALL)
 _LOCKS_OR_WRITES = re.compile(
     # F119: pg_notify is delivered at COMMIT — a transaction holding one is not
-    # read-only; releasing it (a rollback) drops the notice.
-    r"\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)\b|pg_advisory|set_config|\bINTO\b|nextval|setval|pg_notify",
+    # read-only; releasing it (a rollback) drops the notice. F200: the try-lock
+    # holds the agent count; releasing it would reopen the double create.
+    r"\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)\b|pg_(?:try_)?advisory|set_config|\bINTO\b|nextval|setval|pg_notify",
     re.IGNORECASE,
 )
 

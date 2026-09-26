@@ -2,7 +2,9 @@
 Document Generation Service (PRD-63).
 
 Generates PDF (WeasyPrint), DOCX (python-docx-template), and XLSX (XlsxWriter)
-documents from templates + data.
+documents from templates + data, and (PRD-251 S1.2) social_image / social_video
+files: a social template is rendered by the media-render service
+(:meth:`DocumentGenerationService.generate_social`), never by WeasyPrint.
 
 Files are generated locally then uploaded to S3 for persistent storage.
 On Railway (ephemeral containers) the local file vanishes after the request,
@@ -14,7 +16,9 @@ import logging
 import mimetypes
 import os
 import re
+import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -56,12 +60,26 @@ def _safe_url_fetcher(url, *args, **kwargs):
     return default_url_fetcher(url, *args, **kwargs)
 
 from config import config
+from core.media_render_bundle import build_bundle
+from core.media_render_client import MediaRenderClient
+from core.media_render_quota import book_render_seconds, enforce_render_quota
+from core.music_credit import credit_for_render
+from core.social_templates import (
+    SOCIAL_IMAGE,
+    SOCIAL_VIDEO,
+    InvalidVariableValues,
+    is_social_format,
+    resolve_variables,
+    still_moments,
+    validate_social_blocks,
+)
 from core.storage import ensure_bucket, get_public_s3_client, get_s3_client, is_storage_configured
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
 from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
+from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.brand_logo import brand_kit_for_render
 from modules.documents.blocks import (
     blocks_from_legacy,
@@ -87,6 +105,24 @@ DELIVERABLES_APP_PATH = "/deliverables?tab=outputs"
 def deliverables_app_url() -> str:
     """Absolute link to the Deliverables feed for messages that leave the app."""
     return f"{(config.FRONTEND_URL or '').rstrip('/')}{DELIVERABLES_APP_PATH}"
+
+
+# PRD-251 S1.2: a social template renders to one file through media-render.
+SOCIAL_LANE = "social"
+SOCIAL_FILE_TYPES = {SOCIAL_IMAGE: "png", SOCIAL_VIDEO: "mp4"}
+# The render's reference and its media-lane booking: which template rendered it.
+SOCIAL_EXECUTION_PREFIX = "document_template:"
+
+
+def _rendered_seconds(record: dict) -> float:
+    """The seconds a finished render delivered, what the quota counts (0 for a still)."""
+    durations = [
+        output.get("duration")
+        for output in (record.get("outputs") or [])
+        if isinstance(output, dict)
+    ]
+    return float(sum(d for d in durations if isinstance(d, (int, float)) and not isinstance(d, bool)))
+
 
 # PRD-167 S2/S4: the hardcoded `_FALLBACK_PDF_TEMPLATE` (with the `#ff6b35` Automatos
 # orange) is gone. When a template has no blocks and no template_content, the no-template
@@ -150,15 +186,18 @@ class DocumentGenerationService:
 
         logger.info(f"[DocGen] Data keys from LLM: {list(data.keys())}")
 
-        # Generate the format-specific file
-        if format == "pdf":
+        # Generate the format-specific file. PRD-251 S1.2: a social format renders
+        # its template through media-render; WeasyPrint plays no part in it.
+        if is_social_format(format):
+            result = await self.generate_social(template, data, ws, title, format=format)
+        elif format == "pdf":
             result = await self.generate_pdf(template, data, ws, title, user_id=user_id)
         elif format == "docx":
             result = await self.generate_docx(template, data, ws, title, user_id=user_id)
         elif format == "xlsx":
             result = await self.generate_xlsx(data, ws, title=title, template=template)
         else:
-            raise ValueError(f"Unsupported format: {format}. Use pdf, docx, or xlsx.")
+            raise ValueError(f"Unsupported format: {format}. Use pdf, docx, xlsx, social_image or social_video.")
 
         # P2-09 S3 — the finalisation gate. The render-honesty primitives
         # (RenderedHtml/RenderedDocx.unresolved, ResolvedVariables.unknown) used
@@ -177,6 +216,9 @@ class DocumentGenerationService:
 
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
+        credit = (result.music or {}).get("credit")
+        if credit:  # PRD-251 S1.6: a CC BY track's credit goes wherever the video does
+            result.content = f"{result.content.rstrip()}\n\n{credit}\n"
         # PRD-242 S4: attribution rides the result so callers (tool result,
         # Deliverable extra, playbook step output) can say WHICH template filled it.
         if template is not None:
@@ -240,8 +282,12 @@ class DocumentGenerationService:
         if not ws:
             return None
         try:
-            from services.deliverable_service import DeliverableService
+            from services.deliverable_service import DeliverableService, _infer_artifact_type
 
+            # PRD-251 S1.2: a rendered social file is a video or an image
+            # Deliverable (streamed, with a player), never a document.
+            is_social = result.template_lane == SOCIAL_LANE
+            artifact_type = _infer_artifact_type(result.filename) if is_social else "document"
             extra = {
                 "render": {
                     "unresolved_count": len(result.unresolved),
@@ -253,6 +299,10 @@ class DocumentGenerationService:
                 extra["template_id"] = str(template_id)
             if getattr(result, "template_name", None):
                 extra["template_name"] = result.template_name
+            # PRD-251 S1.6: the music a social video mixed; a post that attaches
+            # this Deliverable carries its credit line (modules/socials/credits.py).
+            if getattr(result, "music", None):
+                extra["music"] = dict(result.music)
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,
@@ -260,7 +310,7 @@ class DocumentGenerationService:
                 source_id=source_id,
                 agent_id=agent_id,
                 agent_name=agent_name,
-                artifact_type="document",
+                artifact_type=artifact_type,
                 storage_type="generated",
                 file_type=result.format,
                 file_size_bytes=result.size,
@@ -516,6 +566,97 @@ class DocumentGenerationService:
 
         workbook.close()
         return self._build_result(output_path, "xlsx", title, workspace_id)
+
+    # ------------------------------------------------------------------
+    # Social image / video (PRD-251 S1.2): rendered by media-render
+    # ------------------------------------------------------------------
+
+    def _render_client(self) -> MediaRenderClient:
+        """The media-render client; tests hand in one on a mock transport."""
+        return MediaRenderClient()
+
+    async def generate_social(
+        self,
+        template: Optional[DocumentTemplate],
+        data: dict,
+        workspace_id: UUID,
+        title: str,
+        *,
+        format: str,
+    ) -> GeneratedDocument:
+        """Render a social template through media-render: a PNG (social_image) or an MP4 (social_video).
+
+        The template's composition, its variables from ``data`` (one left out
+        takes its default) and the workspace brand kit make one render bundle
+        (``core/media_render_bundle.py``): brand tokens as CSS variables, the
+        uploaded logo, logo mark and font files inlined as data: URIs
+        (``brand_kit_for_media_render``). A variable with neither a value
+        nor a default blocks the file before anything renders, like an
+        unresolved chip. The month's render minutes are checked before
+        media-render is called (``RenderQuotaExceeded``), and the rendered
+        seconds are booked on the media lane after, like a Socials post's render.
+        An image renders as one still (US-107); a template that renders several
+        (a carousel's slides) is refused: a document is one file, and a Socials
+        post's render keeps every slide. The library track a video mixed rides
+        the result (``music``, S1.6): its Deliverable records it, so a post that
+        attaches the video carries a CC BY track's credit line; a report that
+        asks for credit and gives no line, or does not name the track the bundle
+        asked for, fails the render (``MusicCreditMissing``).
+        """
+        if template is None or getattr(template, "format", None) != format:
+            raise ValueError(f"{format} renders a {format} template: pass its template_id or template_name")
+        blocks = validate_social_blocks(template.blocks, format)
+        resolved = resolve_variables(blocks["variables_schema"], data)
+        if resolved.missing:
+            raise UnresolvedDeliverableError(unresolved=[f"data.{name}" for name in resolved.missing])
+        if resolved.invalid:
+            raise InvalidVariableValues([{"field": "data", "message": problem} for problem in resolved.invalid])
+        # One document is one file: a template that renders several images (a
+        # carousel's slides) renders as a Socials post, which keeps every one.
+        stills = still_moments(blocks, resolved.values) if format == SOCIAL_IMAGE else []
+        if len(stills) > 1:
+            raise ValueError(
+                f"{template.name} renders {len(stills)} images, one per slide, and a document is one file: "
+                "draft it as a Socials post, whose render keeps every slide"
+            )
+
+        workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if workspace is None:
+            raise ValueError(f"workspace {workspace_id} not found")
+        enforce_render_quota(self.db, workspace)
+        reference = f"{SOCIAL_EXECUTION_PREFIX}{template.id}"
+        bundle = build_bundle(
+            workspace_id=workspace_id,
+            reference=reference,
+            blocks=blocks,
+            values=resolved.values,
+            brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
+            fallback_name=getattr(workspace, "name", None) or "",
+            fmt=format,
+        )
+        file_type = SOCIAL_FILE_TYPES[format]
+        output_path = Path(self._output_path(workspace_id, title, file_type))
+        started = time.monotonic()
+        try:
+            finished = await self._render_client().render_to_file(
+                bundle,
+                output_path,
+                max_wait_seconds=config.SOCIALS_RENDER_MAX_WAIT_SECONDS,
+                poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS,
+            )
+            music = credit_for_render(bundle, finished.get("report"))
+        except BaseException:
+            output_path.unlink(missing_ok=True)  # never leave a half-fetched (or uncredited) file behind
+            raise
+        book_render_seconds(
+            workspace_id=workspace_id,
+            execution_id=reference,
+            seconds=_rendered_seconds(finished),
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
+        result = self._build_result(str(output_path), file_type, title, workspace_id, template_lane=SOCIAL_LANE)
+        result.music = music.extra() if music is not None else None
+        return result
 
     # ------------------------------------------------------------------
     # Helpers

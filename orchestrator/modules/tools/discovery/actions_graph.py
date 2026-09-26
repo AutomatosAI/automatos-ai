@@ -11,8 +11,11 @@ def register_graph_actions(registry: ActionRegistry) -> None:
         description=(
             "Query the business knowledge graph to find connections between concepts, "
             "trace dependencies, and discover relationships across documents. The graph "
-            "contains entities, processes, metrics, and rules extracted from all workspace "
-            "documents. Returns a traversal-based answer with source nodes and edges. "
+            "contains the entities, processes, named metrics and rules the workspace's "
+            "documents describe, and how they connect. It holds no live figures: counts, "
+            "money, totals, averages and rankings come from the workspace's databases, so "
+            "use smart_query_database for those. Returns a traversal-based answer with "
+            "source nodes and edges. "
             "Use 'bfs' mode (default) for broad context or 'dfs' to trace a specific chain."
         ),
         category="graph",
@@ -24,7 +27,7 @@ def register_graph_actions(registry: ActionRegistry) -> None:
                     "description": (
                         "Natural-language question to answer from the knowledge graph. "
                         "Examples: 'how does pricing connect to retention?', "
-                        "'what processes depend on the API?', 'what metrics track growth?'"
+                        "'what processes depend on the API?', 'which rules govern refunds?'"
                     ),
                 },
                 "mode": {
@@ -140,6 +143,7 @@ def register_graph_actions(registry: ActionRegistry) -> None:
             "find the path between onboarding and retention",
             "shortest path from product to revenue",
         ],
+        accepts=("from", "to"),
     ))
 
     registry.register(ActionDefinition(

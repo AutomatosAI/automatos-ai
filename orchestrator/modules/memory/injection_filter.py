@@ -22,6 +22,11 @@ EXCLUDED_INJECTION_CONTENT_TYPES = frozenset({
     "recipe_summary",
 })
 
+# F182 (night 6): raw chat transcripts (L2's record of a conversation, and the
+# retired per-turn ``exchange`` rows), which L2 promotion copies into L3
+# verbatim. Autonomous work never reads another conversation as its facts.
+CHAT_TRANSCRIPT_CONTENT_TYPES = frozenset({"transcript", "exchange"})
+
 
 def _content_type_of(mem: Dict[str, Any]) -> Optional[str]:
     """Best-effort content-type signal across the shapes a memory row takes.
@@ -31,6 +36,8 @@ def _content_type_of(mem: Dict[str, Any]) -> Optional[str]:
     L2-shaped rows carry a top-level ``content_type`` (or ``category``). Checking
     every path means the filter bites wherever the tag lands instead of silently
     no-op-ing on a shape mismatch — the exact failure class this wave exists for.
+    A row promoted from L2 keeps its type as ``metadata.category``
+    (``store_long_term``), the path F182 found unread.
     """
     if not isinstance(mem, dict):
         return None
@@ -41,6 +48,7 @@ def _content_type_of(mem: Dict[str, Any]) -> Optional[str]:
         or meta.get("content_type")
         or meta.get("type")
         or mem.get("category")
+        or meta.get("category")
     )
 
 

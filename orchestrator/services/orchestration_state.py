@@ -244,7 +244,8 @@ def transition_run(
     run.state_type = new_state_type.value
 
     # Update timestamps based on new state
-    if new_state == RunState.RUNNING and run.started_at is None:
+    first_start = new_state == RunState.RUNNING and run.started_at is None
+    if first_start:
         run.started_at = now
 
     if new_state in TERMINAL_RUN_STATES:
@@ -254,6 +255,14 @@ def transition_run(
             run.stop_reason = stop_reason
         if stop_detail:
             run.stop_detail = stop_detail
+    elif new_state == RunState.PAUSED:
+        # F153: a pause says why, as a stop does (the board card shows it).
+        run.stop_reason = stop_reason
+        run.stop_detail = stop_detail
+    elif new_state == RunState.RUNNING:
+        # A running run has no stop reason: resuming clears the pause's.
+        run.stop_reason = None
+        run.stop_detail = None
 
     # Build event payload
     payload = {}
@@ -327,6 +336,11 @@ def transition_run(
                 exc_info=True,
             )
 
+    # F188 (night 6): a mission's first start is onboarding's payoff; a workspace
+    # at boom moves on. Its own savepoint: nothing here can touch the transition.
+    if first_start:
+        _note_first_mission(db, run)
+
     # PRD-123 Pattern #1: Produce frozen transition record
     transition = RunTransition(
         run_id=run.id,
@@ -346,6 +360,20 @@ def transition_run(
     )
 
     return transition
+
+
+def _note_first_mission(db: Session, run: OrchestrationRun) -> None:
+    """``services.onboarding_state.advance_past_boom`` for a mission's first start."""
+    try:
+        from core.models.workspaces import Workspace
+        from services.onboarding_state import advance_past_boom
+
+        with db.begin_nested():
+            workspace = db.query(Workspace).filter(Workspace.id == run.workspace_id).first()
+            if workspace is not None:
+                advance_past_boom(db, workspace, "a mission started", commit=False)
+    except Exception:  # noqa: BLE001 -- the run starts either way
+        logger.warning("[F188] onboarding not moved past boom for run %s", run.id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

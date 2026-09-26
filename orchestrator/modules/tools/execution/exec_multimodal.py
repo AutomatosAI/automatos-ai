@@ -32,6 +32,12 @@ async def execute_multimodal_tool(
         # Tenant scope is authoritative from the dispatcher — never trust an
         # LLM-supplied workspace_id in the tool parameters.
         params = {**parameters, "workspace_id": workspace_id}
+        # F155: on a widget turn the key's team lock scopes the search, whatever
+        # team the call names.
+        from core.security.surface import widget_team
+
+        if widget_team():
+            params["team"] = widget_team()
 
         if tool_name == 'search_multimodal':
             return await tools.search_multimodal(**params)

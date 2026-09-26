@@ -535,6 +535,21 @@ _STREAM_DONE = object()
 _STREAM_ERROR = object()
 
 
+def _named_call_agent(db: Session, workspace_id: Any, raw_agent_id: Any) -> Optional[int]:
+    """The agent a call names, when it is one of the call's workspace's own or a
+    platform system agent (F149); otherwise None, and the default answers."""
+    from core.security.workspace_scope import agent_in_workspace
+
+    try:
+        agent_id = int(raw_agent_id) if raw_agent_id else None
+    except (TypeError, ValueError):
+        return None
+    if agent_id is not None and not agent_in_workspace(db, agent_id, workspace_id):
+        logger.warning("[voice] agent %s is not in workspace %s — the default answers", agent_id, workspace_id)
+        return None
+    return agent_id
+
+
 async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
     """Frames for one turn, generated on a DEDICATED thread + event loop.
 
@@ -675,12 +690,7 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
         # workspace default answers (minimal wire — the same default chat uses).
         from api.chat import get_default_agent_id
 
-        agent_id = None
-        if req.agent_id:
-            try:
-                agent_id = int(req.agent_id)
-            except (TypeError, ValueError):
-                agent_id = None
+        agent_id = _named_call_agent(db, binding.workspace_id, req.agent_id)
         if agent_id is None:
             agent_id = get_default_agent_id(db, binding.workspace_id)
 

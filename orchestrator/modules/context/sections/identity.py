@@ -12,6 +12,14 @@ from typing import Any, Dict, Optional
 
 from modules.context.sections.base import BaseSection, SectionContext
 
+# F155: what a widget turn is told about where it is. True for every key: no
+# scope lets a widget change the owner's agents, playbooks, settings or apps.
+WIDGET_CHAT_NOTE = (
+    "\n## Where you are\n"
+    "This is a public website chat: use only the tools you are given here. The owner's "
+    "agents, playbooks, settings and connected apps can't be changed from this chat."
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -153,6 +161,12 @@ class IdentitySection(BaseSection):
                 logger.debug("Could not load orchestrator settings for %s", ctx.workspace_id)
                 orch_settings = {}
 
+        # F155: a widget turn is not told Auto's owner-facing platform skill (what
+        # the owner can have built, installed and connected) or to learn into
+        # memory (a widget turn stores none, F154); it is told where it is.
+        from core.security.surface import widget_turn
+
+        visitor = widget_turn()
         parts = [
             AutomatosPersonality.get_base_system_prompt(
                 user_name=user_name,
@@ -160,11 +174,11 @@ class IdentitySection(BaseSection):
                 msg_count=msg_count,
                 orchestrator_settings=orch_settings or None,
             ),
-            AutomatosPersonality.get_platform_skill(),
+            *([] if visitor else [AutomatosPersonality.get_platform_skill()]),
             AutomatosPersonality.get_tool_guidance_prompt(has_tools=True),
             AutomatosPersonality.get_action_response_style(),
             AutomatosPersonality.get_anti_patterns(),
-            AutomatosPersonality.get_self_learning_instruction(),
+            *([] if visitor else [AutomatosPersonality.get_self_learning_instruction()]),
         ]
 
         # PRD-137 Fix #3: append agent's own description + persona text.
@@ -186,6 +200,9 @@ class IdentitySection(BaseSection):
             "(send/post/create/update) steps. "
             "Only send/post after you have the final content to send."
         )
+        if visitor:
+            # Last, so it is the most recent thing the identity says.
+            parts.append(WIDGET_CHAT_NOTE)
 
         # No max_tokens truncation — the full chatbot personality is essential
         return "\n".join(parts)

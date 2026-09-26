@@ -34,6 +34,13 @@ class PluginsSection(BaseSection):
 
     async def render(self, ctx: SectionContext) -> str:
         """Render plugin tier-1 + tier-2 blocks."""
+        from core.security.surface import widget_agent_lock, widget_turn
+
+        lock = widget_agent_lock()
+        if widget_turn() and (lock is None or lock != getattr(ctx.agent, "id", None)):
+            # F155: on a widget turn, only the agent the key is locked to brings
+            # its own plugins; none when any agent (Auto included) may answer it.
+            return ""
         try:
             return self._build(ctx)
         except Exception:

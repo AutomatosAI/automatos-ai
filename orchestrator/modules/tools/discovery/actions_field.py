@@ -39,6 +39,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "find prior analysis on competitor pricing from the team",
             "see what's already known about the EU AI Act",
         ],
+        accepts=("field_id",),
     ))
 
     registry.register(ActionDefinition(
@@ -77,6 +78,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "post this conclusion to the shared field",
             "let the other agents know what I discovered",
         ],
+        accepts=("field_id",),
     ))
 
     registry.register(ActionDefinition(
@@ -99,4 +101,5 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "how stable are the agents' findings",
             "are we done gathering research",
         ],
+        accepts=("field_id",),
     ))

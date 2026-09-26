@@ -240,7 +240,7 @@ _PLATFORM_KEYWORDS = {
         "list my agents", "what agents do i have", "show my agents",
         "how many agents do i have", "show me my agents",
     ],
-    "platform_list_recipes": [
+    "platform_list_playbooks": [
         "list my recipes", "what recipes do i have", "show my recipes",
         "list my workflows", "show my workflows", "how many recipes",
         "how many workflows",
@@ -299,13 +299,13 @@ _PLATFORM_KEYWORDS = {
         "schedule this playbook", "schedule a playbook",
         "run playbook on a schedule", "set up recurring playbook",
     ],
-    "platform_execute_recipe": [
+    "platform_execute_playbook": [
         "run the recipe", "execute recipe", "trigger recipe",
         "run automation", "start recipe",
         "run the playbook", "execute playbook", "trigger playbook",
         "start playbook", "run playbook",
     ],
-    "platform_get_recipe_execution": [
+    "platform_get_playbook_execution": [
         "recipe status", "execution status", "recipe result",
         "did the recipe run", "check recipe",
         "playbook status", "playbook result", "did the playbook run",
@@ -330,7 +330,7 @@ _PLATFORM_KEYWORDS = {
         "create a recipe", "make a recipe", "new recipe",
         "build a workflow", "set up an automation",
     ],
-    "platform_delete_recipe": [
+    "platform_delete_playbook": [
         "delete recipe", "remove recipe", "delete automation",
         "delete playbook", "remove playbook",
     ],
@@ -624,6 +624,14 @@ _PLATFORM_KEYWORDS = {
         "generate cover image", "create cover art", "blog cover image",
         "make a cover for", "design cover image", "add cover to post",
         "generate cover for blog",
+    ],
+    # PRD-251 US-116 (S4.1): Socials drafts. Agents draft; a person approves in the Socials tab.
+    "platform_create_social_post": [
+        "draft a social post", "create a social post", "new social post",
+        "social media post about", "draft a linkedin post",
+    ],
+    "platform_list_social_posts": [
+        "list social posts", "show social posts", "social posts awaiting approval",
     ],
     # PRD-82A: Missions
     "platform_create_mission": [

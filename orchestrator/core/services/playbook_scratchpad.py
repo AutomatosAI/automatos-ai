@@ -11,7 +11,7 @@ Key layout (Redis HASH):
         _meta:playbook_id         -> playbook PK
         _meta:total_steps         -> step count
         step_{N}:tool_results     -> JSON array of auto-extracted tool summaries
-        step_{N}:output_summary   -> first 500 chars of agent response
+        step_{N}:output           -> the agent's whole answer (F130; cut only when read)
         step_{N}:exports          -> JSON of agent's explicit scratchpad_write calls
 """
 
@@ -30,12 +30,22 @@ _URL_RE = re.compile(r'https?://[^\s\'"<>]+')
 _KV_RE = re.compile(r'^([A-Z][A-Za-z_ ]{1,30}):\s+(.+)$', re.MULTILINE)
 
 
+def answer_for_next_step(answer: str) -> str:
+    """An earlier step's answer as a later step reads it: whole, or cut at
+    PLAYBOOK_STEP_ANSWER_MAX_CHARS with a line that says so."""
+    cap = config.PLAYBOOK_STEP_ANSWER_MAX_CHARS
+    if len(answer) <= cap:
+        return answer
+    return f"{answer[:cap]}\n[Cut at {cap:,} of {len(answer):,} characters.]"
+
+
 class PlaybookScratchpad:
     """
     Ephemeral scratchpad for a single playbook execution.
 
-    Provides structured context to downstream steps instead of dumping
-    full agent output text (80-90% token savings).
+    Provides structured context to downstream steps: tool results as
+    summaries, and each step's answer whole up to PLAYBOOK_STEP_ANSWER_MAX_CHARS
+    (F130: a 500-character stub made the next step invent what it could not see).
     """
 
     def __init__(self, execution_id: str, redis_client=None):
@@ -130,12 +140,9 @@ class PlaybookScratchpad:
         if extracted:
             self._hset(f"{prefix}:tool_results", json.dumps(extracted))
 
-        # 2. Agent output summary (first 500 chars)
+        # 2. The agent's whole answer: it is cut, if at all, when a later step reads it
         if agent_output:
-            summary = agent_output[:500]
-            if len(agent_output) > 500:
-                summary += "..."
-            self._hset(f"{prefix}:output_summary", summary)
+            self._hset(f"{prefix}:output", agent_output)
 
         # 3. Exports from scratchpad_write tool calls
         if agent_exports:
@@ -158,6 +165,19 @@ class PlaybookScratchpad:
                 pass
         existing[key] = value
         self._hset(field, json.dumps(existing))
+
+    def step_exports(self, step_order: int) -> Dict[str, str]:
+        """The keys step ``step_order`` saved with scratchpad_write (PRD-251 US-117).
+
+        Read it before :meth:`write_step_results`, which replaces the step's
+        field with every export so far.
+        """
+        raw = self._hget(f"step_{step_order}:exports")
+        try:
+            exports = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return exports if isinstance(exports, dict) else {}
 
     def get_exports(self) -> Dict[str, str]:
         """Return all exports across all steps (flat dict)."""
@@ -232,10 +252,10 @@ class PlaybookScratchpad:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            # Output summary
-            summary = all_data.get(f"{prefix}:output_summary")
-            if summary:
-                step_parts.append(f"- Agent: \"{summary}\"")
+            # The step's answer, whole up to the cap
+            answer = all_data.get(f"{prefix}:output")
+            if answer:
+                step_parts.append(f"- Answer:\n{answer_for_next_step(answer)}")
 
             # Exports
             raw_exports = all_data.get(f"{prefix}:exports")

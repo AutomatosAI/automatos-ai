@@ -81,6 +81,7 @@ class EventType(str, Enum):
     RUN_AUTO_APPROVED = "run_auto_approved"  # PRD-163 S3: policy auto-approval (distinct audit)
     RUN_REJECTED = "run_rejected"
     RUN_STARTED = "run_started"
+    RUN_WAITING = "run_waiting"  # F170: its steps wait behind another mission's Claude Code step
     RUN_PAUSED = "run_paused"
     RUN_RESUMED = "run_resumed"
     RUN_REPLANNING = "run_replanning"

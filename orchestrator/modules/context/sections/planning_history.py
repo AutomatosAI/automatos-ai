@@ -46,6 +46,9 @@ class PlanningHistorySection(BaseSection):
             return ""
 
     async def _build(self, ctx: SectionContext) -> str:
+        if ctx.widget_mode:
+            # F155: the owner's past missions are not a widget turn's to recall.
+            return ""
         goal = (ctx.task_description or "").strip()
         if not ctx.workspace_id:
             return ""

@@ -172,8 +172,6 @@ async def grant_approval(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Approve a pending grant (a human says yes) and re-queue any blocked subject."""
-    from core.services.approval_grants import grant_grant
-
     grant = _load_grant(db, ctx, grant_id)
     # PRD-225: a question is answered, never approved — /answer is its only
     # completion path (a yes/no can't stand in for a free-text decision).
@@ -182,7 +180,12 @@ async def grant_approval(
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
-    grant_grant(grant, granted_by=_actor_ref(ctx))
+    # F193: two approvals at once (a double click, two admins) both read PENDING
+    # and both resumed the call. The flip is a compare-and-set: only the approval
+    # that turns PENDING into GRANTED resumes anything.
+    if not _cas_grant(db, grant, actor=_actor_ref(ctx), now=datetime.now(timezone.utc)):
+        raise HTTPException(status_code=422, detail=(
+            f"This approval was already decided (status: {grant.status}); nothing ran again."))
     # COMMIT THE YES BEFORE RESUMING (2026-08-06 incident, grant 77).
     # SessionLocal runs autoflush=False, and the resume re-enters the
     # confirmation gate, whose consume_tool_grant() runs real SQL — an
@@ -197,6 +200,30 @@ async def grant_approval(
     db.commit()
     _audit(db, ctx, "approval_grant:granted", grant)
     return {"grant": grant.to_dict()}
+
+
+def _cas_grant(db: Session, grant: ApprovalGrant, *, actor: str, now: datetime) -> bool:
+    """Flip ``grant`` PENDING -> GRANTED only while it is still PENDING (F193): the
+    approval that wins resumes the call; one that lost matches 0 rows, and the
+    caller answers "already decided". The in-memory row is synced either way."""
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(ApprovalGrant.id == grant.id, ApprovalGrant.status == GrantStatus.PENDING.value)
+        .update(
+            {ApprovalGrant.status: GrantStatus.GRANTED.value,
+             ApprovalGrant.granted_at: now,
+             ApprovalGrant.granted_by: actor},
+            synchronize_session=False,
+        )
+    )
+    if not flipped:
+        db.rollback()
+        db.refresh(grant)
+        return False
+    grant.status = GrantStatus.GRANTED.value
+    grant.granted_at = now
+    grant.granted_by = actor
+    return True
 
 
 def _cas_resolve_grant(
@@ -278,6 +305,13 @@ async def deny_approval(
         # the parked subject blocked — answering "use your judgment" is the
         # one-click unblock path.
         _fail_subject(db, grant)
+    else:
+        # F140: a run that stopped to ask has nobody left to re-ask: the owner's
+        # no closes it (cancelled, its card done), never as a failure.
+        from services.playbook_owner_ask import ask_marker, dismiss_stopped_run
+
+        if ask_marker(grant) is not None:
+            dismiss_stopped_run(db, grant)
     db.commit()
     _audit(db, ctx, "question:dismissed" if is_question else "approval_grant:denied", grant)
     return {"grant": grant.to_dict()}
@@ -471,12 +505,16 @@ def _confirm_answer_into_chat(db: Session, grant: ApprovalGrant, *, resumed: boo
     try:
         from services.chat_messenger import deliver_background_message
 
+        from services.playbook_owner_ask import ask_marker
+
         subject_label = f"{grant.subject_type.replace('_', ' ')} {grant.subject_id}"
         text = (
             f"Answered — resuming {subject_label}."
             if resumed
             else f"Answer recorded for {subject_label} — nothing to auto-resume."
         )
+        if resumed and ask_marker(grant) is not None:  # F140: say what answering did
+            text = "Answered — the playbook runs again from step 1 with your answer."
         deliver_background_message(
             db,
             workspace_id=grant.workspace_id,
@@ -559,7 +597,12 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
     from services.cli_host_service import (
         answer_session_ask, answer_session_hold, session_ask_marker, session_hold_marker,
     )
+    from services.playbook_owner_ask import ask_marker, rerun_after_answer
 
+    # F140: a playbook run stopped to ask the owner. The answer runs the playbook
+    # again from step 1 on the same card; its card is never dispatched as a task.
+    if ask_marker(grant) is not None:
+        return rerun_after_answer(db, grant)
     if session_hold_marker(grant) is not None:
         return answer_session_hold(db, grant)
     # PRD-245 W2: a question the SESSION asked. The answer goes onto the ticket

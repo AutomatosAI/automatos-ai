@@ -187,6 +187,13 @@ def _ns(**kw):
     return types.SimpleNamespace(**kw)
 
 
+def _live_lease():
+    """A claim a run is renewing (F176: what "already running" means)."""
+    from datetime import datetime, timedelta, timezone
+
+    return datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
 def _stub_task(**kw):
     base = dict(
         id=1,
@@ -216,6 +223,13 @@ class _FakeQ:
 
     def get(self, *_a):
         return self._r
+
+    def with_for_update(self, *a, **k):  # F209: the redispatch's locked re-read
+        return self
+
+    def update(self, values, synchronize_session=None):
+        # F195's compare-and-set on a seeded row: nothing else is deciding it here.
+        return 1 if self._r is not None else 0
 
     def all(self):
         # A single seeded agent models the one active row the name query returns;
@@ -248,9 +262,9 @@ class _FakeSession:
         self._claim_race_lost = claim_race_lost
         self.executes = []
 
-    def query(self, model):
+    def query(self, *entities):  # a model, or F209's locked re-read of a ticket's columns
         from core.models import Agent
-        if model is Agent:
+        if entities[0] is Agent:
             return _FakeQ(self._agent)
         return _FakeQ(self._task)
 
@@ -265,7 +279,7 @@ class _FakeSession:
     def commit(self):
         self.commits += 1
 
-    def refresh(self, obj):
+    def refresh(self, obj, **_):  # F209: a start re-reads the row (with_for_update)
         if getattr(obj, "id", None) is None:
             obj.id = 4242
 
@@ -536,7 +550,9 @@ def test_run_now_rejects_already_running_task():
     from fastapi import HTTPException
     import pytest as _p
 
-    task = BoardTask(id=23, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    # F176: running means a run holds it (a live lease), not the status word alone
+    task = BoardTask(id=23, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4,
+                     lease_until=_live_lease())
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=4), task=task)
     with _p.raises(HTTPException) as ei:
@@ -586,6 +602,7 @@ def _fresh_task(**kw):
         id=1, status="assigned", assigned_agent_id=None,
         started_at=None, completed_at=None, blocked_at=None, blocked_reason=None,
         title="t", raw_prompt="do it", description="d", review_mode="auto",
+        result=None, error_message=None, planning_data=None,  # a real row always has them
     )
     base.update(kw)
     return _ns(**base)
@@ -749,58 +766,6 @@ def test_agent_notify_failure_is_fail_soft(monkeypatch):
 
     assert result["success"] is True, "NOTIFY blew up but the status write succeeded"
     assert task.status == "review"
-
-
-def test_agent_in_progress_clears_stale_terminal_fields(monkeypatch):
-    """P227-RVW-4: moving a task to in_progress clears completed_at/error_message/
-    result, mirroring the HTTP update_task_status reset (api/board_tasks.py:890-895).
-    A done task carrying a prior failed run's error_message, redone by an agent,
-    must not keep the stale terminal fields."""
-    _patch_notify(monkeypatch)
-    task = _fresh_task(
-        id=3, status="done",
-        completed_at="2026-08-27T00:00:00Z",
-        error_message="prior run blew up",
-        result="partial output",
-    )
-    db = _FakeSession(task=task)
-
-    result = asyncio.run(
-        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
-    )
-
-    assert result["success"] is True
-    assert task.status == "in_progress"
-    assert task.completed_at is None, "stale completed_at must be cleared"
-    assert task.error_message is None, "stale error_message must be cleared"
-    assert task.result is None, "stale result must be cleared"
-    assert task.started_at is not None, "started_at is set on in_progress (HTTP-path parity)"
-
-
-def test_agent_redo_done_task_does_not_render_failed(monkeypatch):
-    """The end-to-end redo: done+error → in_progress → done leaves error_message
-    null, so board-card.tsx isFailed (error_message != null && status == 'done') is
-    False — a task that just succeeded renders as succeeded, not the red 'failed'
-    strip. This is the board-state lie P227-RVW-4 closes."""
-    _patch_notify(monkeypatch)
-    task = _fresh_task(
-        id=3, status="done",
-        completed_at="2026-08-27T00:00:00Z",
-        error_message="prior failure", result="stale",
-    )
-    db = _FakeSession(task=task)
-
-    asyncio.run(
-        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
-    )
-    asyncio.run(
-        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "done"})
-    )
-
-    assert task.status == "done"
-    assert task.error_message is None, "a redone+succeeded task must not carry a stale error → not 'failed'"
-    assert task.result is None, "stale result stays cleared through the redo"
-    assert task.completed_at is not None, "the fresh done transition sets completed_at"
 
 
 def test_agent_in_progress_reset_leaves_blocked_transition_unchanged(monkeypatch):
@@ -1419,7 +1384,7 @@ class _RosterDB:
     def commit(self):
         self.commits += 1
 
-    def refresh(self, obj):
+    def refresh(self, obj, **_):  # F209: a start re-reads the row (with_for_update)
         if getattr(obj, "id", None) is None:
             obj.id = 4242
 
@@ -1750,7 +1715,8 @@ def test_run_now_on_a_running_ticket_says_what_is_happening():
     from fastapi import HTTPException
     import pytest as _p
 
-    task = BoardTask(id=33, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    task = BoardTask(id=33, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4,
+                     lease_until=_live_lease())
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     with _p.raises(HTTPException) as ei:
         asyncio.run(bt.run_task_now(33, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))

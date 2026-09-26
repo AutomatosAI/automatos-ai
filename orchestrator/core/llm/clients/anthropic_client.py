@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     import anthropic
@@ -69,12 +69,19 @@ class AnthropicProvider(BaseLLMProvider):
     def _convert_messages_to_anthropic_format(self, messages: List[Dict[str, Any]]) -> tuple:
         """
         Convert OpenAI-style messages to Anthropic format.
-        
+
         Handles:
-        - System messages (becomes system parameter)
+        - System messages: the first becomes the system parameter; a later one
+          (a nudge, a forced synthesis) is a user turn
         - User messages (can contain text or tool results)
-        - Assistant messages (can contain text or tool use)
-        
+        - Assistant messages: text, and their tool_calls as tool_use blocks
+        - Tool results (role "tool"): tool_result blocks in the next user turn
+
+        F186 (night 6): an assistant message's tool_calls and the tool results
+        were dropped, a content of None went out as the text "None", and a later
+        system message replaced the system prompt. A tool loop on this client
+        never saw its own calls, their results, or what it said before them.
+
         Anthropic tool result format:
         {
             "role": "user",
@@ -84,14 +91,28 @@ class AnthropicProvider(BaseLLMProvider):
         }
         """
         system_message = ""
+        seen_system = False
         user_messages = []
-        
+
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content", "")
-            
+
             if role == "system":
-                system_message = content if isinstance(content, str) else str(content)
+                text = content if isinstance(content, str) else str(content)
+                if not seen_system:
+                    system_message, seen_system = text, True
+                else:
+                    user_messages.append({"role": "user", "content": text})
+            elif role == "tool":
+                block = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id"),
+                         "content": content if isinstance(content, str) else json.dumps(content)}
+                last = user_messages[-1] if user_messages else None
+                if (last and last["role"] == "user" and isinstance(last["content"], list)
+                        and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in last["content"])):
+                    user_messages[-1] = {"role": "user", "content": [*last["content"], block]}
+                else:
+                    user_messages.append({"role": "user", "content": [block]})
             elif role == "user":
                 # Handle tool results (Anthropic expects array of content blocks)
                 if isinstance(content, str):
@@ -114,18 +135,27 @@ class AnthropicProvider(BaseLLMProvider):
                     # Fallback: convert to string
                     user_messages.append({"role": "user", "content": str(content)})
             elif role == "assistant":
-                # Assistant messages can have text or tool use
-                if isinstance(content, str):
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    blocks = list(content) if isinstance(content, list) else (
+                        [{"type": "text", "text": content}] if isinstance(content, str) and content.strip() else [])
+                    for tc in tool_calls:
+                        function = tc.get("function") or {}
+                        arguments = function.get("arguments") or "{}"
+                        try:
+                            parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+                        except (json.JSONDecodeError, TypeError):
+                            parsed = {}
+                        blocks.append({"type": "tool_use", "id": tc.get("id"), "name": function.get("name"),
+                                       "input": parsed if isinstance(parsed, dict) else {}})
+                    user_messages.append({"role": "assistant", "content": blocks})
+                elif isinstance(content, (str, list)):
                     user_messages.append({"role": "assistant", "content": content})
-                elif isinstance(content, list):
-                    # Content blocks (might include tool use)
-                    user_messages.append({"role": "assistant", "content": content})
-                else:
+                elif content is not None:
                     user_messages.append({"role": "assistant", "content": str(content)})
-                # Note: Anthropic handles tool_use blocks in assistant messages automatically
-        
+
         return system_message, user_messages
-    
+
     def _convert_tools_to_anthropic_format(self, tools: List[Dict]) -> List[Dict]:
         """
         Convert OpenAI-style tools to Anthropic format.
@@ -187,12 +217,10 @@ class AnthropicProvider(BaseLLMProvider):
                 "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
             )
         
-        import asyncio
         from core.llm.prompt_cache import build_cached_system
         from core.llm.request_scope import is_headless_run
         from modules.memory.memory_tool import memory_tool_definition
 
-        loop = asyncio.get_running_loop()
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
             # PRD-201 S4: the assembler's cache-stable prefix, if the caller
@@ -204,7 +232,7 @@ class AnthropicProvider(BaseLLMProvider):
             def _call():
                 kwargs = {
                     "model": self.config.model,
-                    "max_tokens": self.config.max_tokens,
+                    "max_tokens": request_max_tokens(self.config),
                     "temperature": self.config.temperature,
                     # PRD-201 S4: emit cache_control on the stable prefix. This IS
                     # the Anthropic client, so the marker is inherently on the
@@ -236,7 +264,7 @@ class AnthropicProvider(BaseLLMProvider):
                     kwargs["tools"] = anthropic_tools
                 return self.client.messages.create(**kwargs)
 
-            response = await loop.run_in_executor(None, _call)
+            response = await run_blocking(_call)
             
             # PRD-17: Extract tool calls if present
             tool_calls = None
@@ -283,7 +311,7 @@ class AnthropicProvider(BaseLLMProvider):
             
             response = self.client.messages.create(
                 model=self.config.model,
-                max_tokens=self.config.max_tokens,
+                max_tokens=request_max_tokens(self.config),
                 temperature=self.config.temperature,
                 system=system_message,
                 messages=user_messages

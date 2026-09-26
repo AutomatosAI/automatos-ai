@@ -26,6 +26,11 @@ so unmanaged keys survive, under the keys the LIVE consumers already read:
 (the tier's declared limits) but have no enforcement consumer yet — this wave adds
 NO quota hardening. No billing anywhere: ``display_price_usd`` is a label only
 (PRD §12 Q5). ``enterprise`` is coming-soon and is rejected by :func:`assign_plan`.
+
+  * ``render_minutes_month`` — PRD-251 S1.1c: the monthly media render quota,
+    hosting, not a capability gate (``0`` or no key = no quota). It is written
+    on every assignment, so a move between tiers never leaves the previous
+    tier's quota behind.
 """
 from __future__ import annotations
 
@@ -91,6 +96,9 @@ def plan_limits_for_tier(
         "mission_concurrency": tier["mission_concurrency"],
         "watcher_limit": tier["watcher_limit"],
         "marketplace_depth": tier["marketplace_depth"],
+        # PRD-251 S1.1c: None (a tier without the key) is written too, so the
+        # previous tier's quota never survives the move.
+        "render_minutes_month": tier.get("render_minutes_month"),
     }
     budget_usd = tier.get("budget_usd") or 0
     if with_budget and budget_usd and budget_usd > 0:

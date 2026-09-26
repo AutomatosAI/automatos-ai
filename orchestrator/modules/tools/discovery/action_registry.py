@@ -15,7 +15,7 @@ Usage:
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,16 @@ class ActionDefinition:
     # that can only error is never offered (the rule _offerable_candidates
     # applies to a Composio tool without Composio); calling it still refuses.
     available: Optional[Callable[[], bool]] = None
+    # F182 (night 6): what platform_execute does with a key the schema does not
+    # declare. It refuses the key, because the handler would drop it and report
+    # success (a run started with no inputs, an update that changed nothing).
+    # ``accepts`` lists the undeclared keys the handler does read (an older or
+    # alternative name of a declared one), which pass. ``misplaced`` maps a key
+    # models send here by mistake to where it goes: one of this action's
+    # parameters (the refusal shows the call with the value moved there), or a
+    # sentence naming the action it belongs to.
+    accepts: Tuple[str, ...] = ()
+    misplaced: Dict[str, str] = field(default_factory=dict)
 
     def is_available(self) -> bool:
         if self.available is None:
@@ -500,3 +510,16 @@ def get_action_registry() -> ActionRegistry:
             _registry_instance = ActionRegistry()
 
     return _registry_instance
+
+
+def nothing_changed(action_name: str, *selects: str) -> str:
+    """F182 (night 6): the refusal of an update given nothing to change, naming
+    what the action can change (its parameters, less ``selects``, the ones that
+    pick what it updates). Two update_playbook calls changed nothing and said
+    success, "No changes specified", and Auto told the owner the playbook was
+    fixed."""
+    action = get_action_registry().get(action_name)
+    params = ((action.parameters or {}).get("properties") or {}) if action else {}
+    changeable = ", ".join(name for name in params if name not in selects)
+    return (f"Nothing was changed: the call gave {action_name} nothing to change. "
+            f"Pass at least one of: {changeable}.")

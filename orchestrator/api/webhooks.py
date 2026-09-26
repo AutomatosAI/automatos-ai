@@ -377,8 +377,12 @@ async def _apply_telegram_answer(
     # Confirm HONESTLY, mirroring the in-app _confirm_answer_into_chat (P225-RVW-17):
     # this second confirmation channel must never claim 'resuming' for an answer
     # that lost the compare-and-swap race (applied False) or resumed nothing.
+    from services.playbook_owner_ask import ask_marker
+
     if not outcome.applied:
         reply = f"Question #{grant.id} was already answered."
+    elif outcome.resumed and ask_marker(grant) is not None:  # F140: a stopped playbook run
+        reply = f"Answered #{grant.id} — the playbook runs again from step 1."
     elif outcome.resumed:
         reply = f"Answered #{grant.id} — the agent is resuming."
     else:
@@ -1255,9 +1259,14 @@ async def _execute_agent_sync(
     workspace_id: UUID,
 ) -> Dict[str, Any]:
     """Execute an agent synchronously and return the result."""
+    from core.security.workspace_scope import agent_in_workspace
     from modules.agents.factory.agent_factory import AgentFactory
     db = next(get_db())
     try:
+        # F149: a webhook runs only an agent of its own workspace.
+        if not agent_in_workspace(db, agent_id, workspace_id):
+            logger.warning("[webhook/ws] Agent %s is not in workspace %s — not run", agent_id, workspace_id)
+            return {"status": "error", "error": "Agent not found"}
         # PRD-234 S3: a Claude Code agent's webhook becomes a board ticket; the
         # caller gets the ticket id back (the factory refuses cli agents by design).
         from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
@@ -1296,7 +1305,8 @@ async def _dispatch_workflow_async(
     from datetime import datetime, timezone
 
     recipe = db.query(WorkflowRecipe).filter(
-        WorkflowRecipe.id == workflow_id
+        WorkflowRecipe.id == workflow_id,
+        WorkflowRecipe.workspace_id == envelope.workspace_id,  # F149
     ).first()
 
     if not recipe or not recipe.steps:

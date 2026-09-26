@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
+from core.security.log_safe import log_safe
 from core.database.database import get_db
 from integrations import PLUGIN_REGISTRY
 from modules.tools.widget_callback import (
@@ -40,12 +41,8 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "widget_chat"
 
 
-def _short(s: Optional[str], n: int = 80) -> str:
-    """Truncate strings for logging. Avoids dumping huge messages into logs."""
-    if s is None:
-        return "<none>"
-    s = str(s)
-    return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
+# Truncate for logging, with control characters made spaces (F155).
+_short = log_safe
 
 router = APIRouter(tags=["Widget Chat"])
 
@@ -86,6 +83,23 @@ class WidgetMessageOut(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _retrieval_team(db: Session, auth: WidgetAuthContext, agent_id: Optional[int]) -> Optional[str]:
+    """PRD-124: the team that scopes a widget chat's documents. F155: the key's
+    team lock wins, as /search and /docs already honour it; otherwise the
+    answering agent's team."""
+    from core.team_access import effective_team
+
+    agent_team: Optional[str] = None
+    try:
+        from core.models.core import Agent
+
+        agent_row = db.query(Agent.team).filter(Agent.id == agent_id).first()
+        agent_team = agent_row.team if agent_row else None
+    except Exception:
+        logger.debug("Could not resolve agent team for agent_id=%s", agent_id)
+    return effective_team(auth.team, agent_team)
+
+
 def _get_widget_user_id(db: Session) -> int:
     """Return a default user id for widget-initiated chats.
 
@@ -102,6 +116,21 @@ def _get_widget_user_id(db: Session) -> int:
             detail="No users found in the database",
         )
     return result[0]
+
+
+def _key_started(db: Session, conversation_id: str, auth: WidgetAuthContext) -> bool:
+    """F155: a key reads and resumes only the conversations it started. Any
+    other id — another key's, the dashboard's, not a chat — is not found."""
+    try:
+        chat_id = str(uuid.UUID(str(conversation_id)))
+    except ValueError:
+        return False
+    row = db.execute(
+        text("SELECT 1 FROM chats WHERE id = CAST(:id AS uuid) AND workspace_id = CAST(:ws AS uuid) "
+             "AND widget_key_id = CAST(:key AS uuid)"),
+        {"id": chat_id, "ws": str(auth.workspace_id), "key": str(auth.api_key_id)},
+    ).first()
+    return row is not None
 
 
 def _resolve_workspace_vertical(db: Session, workspace_id: str) -> str:
@@ -148,23 +177,24 @@ async def widget_chat(
     # ------------------------------------------------------------------
     # Tag this request for log correlation
     # ------------------------------------------------------------------
-    req_id = (
+    req_id = _short(
         request.headers.get("X-Request-ID")
         or request.headers.get("x-railway-request-id")
-        or uuid.uuid4().hex[:12]
+        or uuid.uuid4().hex[:12],
+        64,
     )
     started_at = time.perf_counter()
-    origin = request.headers.get("Origin") or "?"
+    origin = _short(request.headers.get("Origin") or "?", 120)
     log_extra = (
         f"[{_LOG_TAG} req={req_id} ws={auth.workspace_id} origin={origin}]"
     )
     logger.info(
         "%s REQUEST: agent_id=%s conv_id=%s trigger_reason=%s page_type=%s msg_len=%d msg_preview=%s",
         log_extra,
-        body.agent_id,
-        body.conversation_id,
-        body.trigger_reason,
-        (body.page_context or {}).get("pageType") if body.page_context else None,
+        _short(body.agent_id, 40),
+        _short(body.conversation_id, 64),
+        _short(body.trigger_reason, 40),
+        _short((body.page_context or {}).get("pageType") if body.page_context else None, 40),
         len(body.message or ""),
         _short(body.message),
     )
@@ -221,7 +251,7 @@ async def widget_chat(
             "%s PROACTIVE_REWRITE: vertical=%s trigger=%s original_msg_len=%d new_msg_len=%d telemetry=%s new_preview=%s",
             log_extra,
             vertical,
-            body.trigger_reason,
+            _short(body.trigger_reason, 40),
             original_msg_len,
             len(body.message),
             plugin_result.telemetry,
@@ -231,13 +261,12 @@ async def widget_chat(
         logger.warning(
             "%s UNKNOWN_TRIGGER_REASON: %s vertical=%s (page_context=%s) — proceeding as normal chat",
             log_extra,
-            body.trigger_reason,
+            _short(body.trigger_reason, 40),
             vertical,
             "present" if body.page_context else "missing",
         )
 
     chat_service = ChatService(db)
-    streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True)
 
     # ------------------------------------------------------------------
     # Resolve or create conversation
@@ -246,13 +275,11 @@ async def widget_chat(
 
     t_conv = time.perf_counter()
     if body.conversation_id:
-        ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
-        chat = chat_service.get_chat(body.conversation_id, workspace_id=ws_uuid)
-        if not chat:
+        if not _key_started(db, body.conversation_id, auth):
             logger.warning(
                 "%s CONV_NOT_FOUND: %s",
                 log_extra,
-                body.conversation_id,
+                _short(body.conversation_id, 64),
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -269,6 +296,7 @@ async def widget_chat(
             title=title,
             visibility="private",
             workspace_id=ws_uuid,
+            widget_key_id=auth.api_key_id,
         )
         chat_id = str(chat.id)
         logger.info(
@@ -344,10 +372,17 @@ async def widget_chat(
         logger.info(
             "%s AGENT_RESOLVED: input=%s -> id=%s (source=%s)",
             log_extra,
-            _raw_agent_ref,
+            _short(str(_raw_agent_ref), 40),
             effective_agent_id,
             "key_lock" if auth.default_agent_id else "body",
         )
+        if not auth.default_agent_id:
+            # F155 (a), log-only: which agents each key's visitors name, before
+            # a per-key agent allow-list is decided.
+            logger.info(
+                "%s AGENT_CENSUS: key=%s named=%s resolved=%s",
+                log_extra, auth.api_key_id, _short(str(body.agent_id), 40), effective_agent_id,
+            )
     else:
         # Fallback to workspace Auto agent (Phase 2 will replace the `or 1`)
         from api.chat import get_default_agent_id
@@ -358,14 +393,12 @@ async def widget_chat(
             effective_agent_id,
         )
 
-    # PRD-124: Resolve agent team for document scoping
-    agent_team: Optional[str] = None
-    try:
-        from core.models.core import Agent
-        agent_row = db.query(Agent.team).filter(Agent.id == effective_agent_id).first()
-        agent_team = agent_row.team if agent_row else None
-    except Exception:
-        logger.debug("Could not resolve agent team for agent_id=%s", effective_agent_id)
+    # PRD-124: the team that scopes this chat's documents.
+    agent_team = _retrieval_team(db, auth, effective_agent_id)
+    # F155: the key's scopes, team lock and agent lock mark every call of the turn.
+    streaming_service = StreamingChatService(
+        db, workspace_id=workspace_id, widget_mode=True, widget_scopes=auth.permissions, widget_team=auth.team,
+        widget_agent_lock=effective_agent_id if auth.default_agent_id else None)
 
     # ------------------------------------------------------------------
     # Stream
@@ -409,7 +442,7 @@ async def widget_chat(
             }
             logger.info(
                 "%s OPEN_CALLBACK_FORM emitted (product_context=%s)",
-                log_extra, product_context,
+                log_extra, _short(product_context, 120),
             )
             return f"event: open-callback-form\ndata: {json.dumps(payload)}\n\n"
 
@@ -566,10 +599,12 @@ async def widget_chat_history(
     auth: WidgetAuthContext = Depends(require_permission("chat")),
     db: Session = Depends(get_db),
 ):
-    """Return the message history for a conversation.
-
-    Only messages belonging to the authenticated workspace are returned.
-    """
+    """Return the message history for a conversation this key started."""
+    if not _key_started(db, conversation_id, auth):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or no messages",
+        )
     workspace_id = str(auth.workspace_id)
 
     rows = db.execute(

@@ -18,7 +18,7 @@ import pytest
 class _FakeCronTrigger:
     """Minimal CronTrigger stub that validates basic cron syntax."""
     @classmethod
-    def from_crontab(cls, expression: str):
+    def from_crontab(cls, expression: str, timezone=None):
         parts = expression.strip().split()
         if len(parts) != 5:
             raise ValueError(f"Wrong number of fields; got {len(parts)}, expected 5")
@@ -38,6 +38,7 @@ _APS_KEYS = (
     "apscheduler.schedulers.asyncio",
     "apscheduler.jobstores",
     "apscheduler.jobstores.memory",
+    "apscheduler.events",
     "apscheduler.triggers",
     "apscheduler.triggers.cron",
 )
@@ -52,6 +53,7 @@ def _install_apscheduler_stubs():
         "apscheduler.schedulers.asyncio": MagicMock(AsyncIOScheduler=MagicMock),
         "apscheduler.jobstores": _pkg,
         "apscheduler.jobstores.memory": MagicMock(MemoryJobStore=MagicMock),
+        "apscheduler.events": MagicMock(EVENT_JOB_MISSED=2 ** 15),
         "apscheduler.triggers": _pkg,
         "apscheduler.triggers.cron": MagicMock(CronTrigger=_FakeCronTrigger),
     }
@@ -71,6 +73,17 @@ def _restore_apscheduler_stubs():
 _install_apscheduler_stubs()
 from services.playbook_scheduler import PlaybookSchedulerService, get_playbook_scheduler
 import services.playbook_scheduler as sched_mod
+
+# The real modules _fire_playbook imports lazily are imported now, before any
+# patch.dict(sys.modules) window below. One imported for the first time inside a
+# window is dropped from sys.modules when the window closes, while the services
+# package attribute still points at it: a later test that patches it by dotted
+# path ("services.playbook_breaker.breaker_is_open") patches that orphan, and the
+# code under test imports a fresh, unpatched copy (test_prd204_silent_holes in a
+# shared run: the breaker read as closed and the real engine launched).
+import services.playbook_breaker  # noqa: E402,F401
+import services.playbook_engine  # noqa: E402,F401
+import services.trial_ledger  # noqa: E402,F401
 
 # Replace the (real-or-stub) CronTrigger with our fake so cron validation is
 # deterministic regardless of whether apscheduler is installed.
@@ -240,14 +253,16 @@ class TestScheduleUnschedule:
         mock_sched.add_job.assert_called_once()
 
     def test_schedule_playbook_invalid_cron(self, mock_playbook):
-        """Invalid cron expression logs error, no job added."""
+        """An invalid cron raises ValueError naming it and adds no job (F132: it
+        was logged and swallowed, and the caller said "scheduled")."""
         mock_playbook.schedule_config = {"type": "cron", "cron_expression": "not valid cron"}
 
         svc = PlaybookSchedulerService()
         mock_sched = MagicMock()
         svc._scheduler = mock_sched
 
-        svc.schedule_playbook(mock_playbook)
+        with pytest.raises(ValueError, match="invalid cron 'not valid cron'"):
+            svc.schedule_playbook(mock_playbook)
 
         mock_sched.add_job.assert_not_called()
 

@@ -13,12 +13,13 @@ Usage:
 import logging
 import httpx
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from config import config
 from core.models.openrouter_cache import OpenRouterModelCache, OpenRouterSyncJob
 
 logger = logging.getLogger(__name__)
@@ -57,11 +58,14 @@ class OpenRouterSyncService:
         errors: List[str] = []
         models_added = 0
         models_updated = 0
+        models_delisted = 0
+        delisting_held = False
 
         try:
             # Fetch from OpenRouter (public endpoint, no auth required)
             raw_models = self._fetch_models()
             logger.info(f"Fetched {len(raw_models)} models from OpenRouter")
+            listed_before = self._listed_count()
 
             for model_data in raw_models:
                 try:
@@ -76,6 +80,7 @@ class OpenRouterSyncService:
                     logger.error(error_msg)
                     errors.append(error_msg)
 
+            models_delisted, delisting_held = self._delist_missing(raw_models, listed_before)
             self.db.commit()
 
             self._sync_job.status = "completed"
@@ -103,11 +108,57 @@ class OpenRouterSyncService:
             "models_synced": models_added + models_updated,
             "models_added": models_added,
             "models_updated": models_updated,
+            "models_delisted": models_delisted,
+            "delisting_held": delisting_held,
             "errors_count": len(errors),
             "duration_ms": self._sync_job.duration_ms,
         }
         logger.info(f"OpenRouter sync completed: {result}")
         return result
+
+    # =========================================================================
+    # Delisting (F141)
+    # =========================================================================
+
+    def _listed_count(self) -> int:
+        return (
+            self.db.query(func.count(OpenRouterModelCache.id))
+            .filter(OpenRouterModelCache.status == "active")
+            .scalar()
+            or 0
+        )
+
+    def _delist_missing(self, raw_models: List[Dict[str, Any]], listed_before: int) -> Tuple[int, bool]:
+        """F141: the models OpenRouter no longer lists go ``inactive``, so PRD-239
+        S5's projection (it reads active rows only) deprecates their routes. This
+        sync only ever upserted, so a retired model stayed active in the cache and
+        the projection deprecated nothing. An empty fetch touches nothing; a fetch
+        smaller than OPENROUTER_DELIST_MIN_FETCH_RATIO of the models listed before
+        is a partial answer: it retires nothing and logs what it would have.
+
+        Returns (rows made inactive, whether the partial-answer guard held).
+        """
+        fetched = {m.get("id") for m in raw_models if m.get("id")}
+        if not fetched:
+            return 0, False
+        missing = self.db.query(OpenRouterModelCache).filter(
+            OpenRouterModelCache.status == "active",
+            ~OpenRouterModelCache.model_id.in_(fetched),
+        )
+        if listed_before and len(fetched) < config.OPENROUTER_DELIST_MIN_FETCH_RATIO * listed_before:
+            would = [row.model_id for row in missing.order_by(OpenRouterModelCache.model_id)]
+            logger.warning(
+                "[OpenRouterSync] fetched %d models where %d were listed: a partial answer retires "
+                "nothing (it would have made %d inactive: %s)",
+                len(fetched), listed_before, len(would), ", ".join(would),
+            )
+            return 0, True
+        delisted = missing.update(
+            {"status": "inactive", "updated_at": datetime.utcnow()}, synchronize_session=False,
+        )
+        if delisted:
+            logger.info("[OpenRouterSync] %d models no longer listed by OpenRouter made inactive", delisted)
+        return int(delisted or 0), False
 
     # =========================================================================
     # API fetching
@@ -212,6 +263,8 @@ class OpenRouterSyncService:
             created_timestamp=data.get("created"),
             # DB column is "metadata", ORM attribute is "raw_data"
             metadata=data,
+            # F141: listed again, active again (a delisting made it inactive).
+            status="active",
             last_synced_at=now,
             updated_at=now,
         )

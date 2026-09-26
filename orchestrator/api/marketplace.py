@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from services.agent_quota import AGENT_LIMIT_STATUS, AgentLimitReached
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, text
@@ -559,6 +560,10 @@ async def install_item(
 
     except HTTPException:
         raise
+    except AgentLimitReached as full:  # F200: the plan's limit, before anything is created
+        db.rollback()
+        raise HTTPException(status_code=full.refusal.get("http_status", AGENT_LIMIT_STATUS),
+                            detail=full.refusal["message"])
     except Exception as e:
         logger.error(f"Error installing marketplace item {item_id}: {str(e)}")
         db.rollback()

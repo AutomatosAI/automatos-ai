@@ -58,8 +58,8 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
             "segment answers, and/or set the plan the user accepted at the "
             "proposal. This is the ONLY way onboarding state moves — never assume a "
             "stage changed, call this after each step. Provide advance_to (the next "
-            "stage), segment (business/goal/comfort/team_size), or plan (the "
-            "accepted tier) — "
+            "stage), segment (business/goal/comfort/team_size), plan (the "
+            "accepted tier), or timezone (where the business is) — "
             "AT LEAST ONE is required; passing none returns a clear error. Stages "
             "move forward only: questions -> teach -> proposal -> building -> boom "
             "-> powerup -> completed; 'skipped' ends the flow from any stage. A "
@@ -113,6 +113,15 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
                         "comfort, and optional team_size. Pass an object, never a "
                         "string. Any subset may be supplied; keys are merged into "
                         "onboarding state. Omit to only advance."
+                    ),
+                },
+                "timezone": {
+                    "type": "string",
+                    "description": (
+                        "Where the business is, as an IANA timezone (Bristol is "
+                        "'Europe/London', New York 'America/New_York'). Pass it as soon as "
+                        "you learn where they are: their schedules then fire in their own "
+                        "time. It becomes the workspace timezone unless one is already set."
                     ),
                 },
                 "plan": {

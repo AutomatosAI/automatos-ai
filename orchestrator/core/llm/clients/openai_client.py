@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
 
 try:
     from openai import OpenAI
@@ -69,15 +69,13 @@ class OpenAIProvider(BaseLLMProvider):
                 "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
             )
         
-        import asyncio
-        loop = asyncio.get_running_loop()
         try:
             def _call():
                 kwargs = {
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens,
+                    "max_tokens": request_max_tokens(self.config),
                 }
                 if self.config.top_p is not None:
                     kwargs["top_p"] = self.config.top_p
@@ -120,7 +118,7 @@ class OpenAIProvider(BaseLLMProvider):
                 return self.client.chat.completions.create(**kwargs)
             
             try:
-                response = await loop.run_in_executor(None, _call)
+                response = await run_blocking(_call)
             except Exception as e:
                 msg = str(e)
                 if "context_length_exceeded" in msg or "maximum context length" in msg:
@@ -173,7 +171,7 @@ class OpenAIProvider(BaseLLMProvider):
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens,
+                "max_tokens": request_max_tokens(self.config),
             }
             if self.config.top_p is not None:
                 sync_kwargs["top_p"] = self.config.top_p

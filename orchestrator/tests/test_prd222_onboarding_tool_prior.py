@@ -75,9 +75,10 @@ def test_every_prior_action_is_registered(name):
 
 
 def test_active_onboarding_folds_spine_actions_into_enum():
+    # The owner doing onboarding (an admin principal) gets every spine action.
     allowed, reason, _ = _apply_onboarding_prior(
         _NARROWED, _FakeSession(_WS("questions")), WS_ID,
-        is_admin=False, is_super_admin=False,
+        is_admin=True, is_super_admin=False,
     )
     assert "platform_list_agents" in allowed  # ranked set survives, order-stable
     for name in ONBOARDING_PRIOR_ACTIONS:
@@ -85,14 +86,16 @@ def test_active_onboarding_folds_spine_actions_into_enum():
     assert reason == "onboarding_prior"
 
 
-def test_plain_user_gets_the_spine_actions():
-    # The gate filter must clear every spine action for a non-admin principal —
-    # onboarding is a plain-user flow.
+def test_plain_user_gets_the_spine_actions_they_may_run():
+    # The gate filter clears every spine action a non-admin may run. Installing
+    # a package is an owner's or admin's (F151), so a plain member is not
+    # offered it; the owner doing onboarding is.
     allowed, _, _ = _apply_onboarding_prior(
         _NARROWED, _FakeSession(_WS("building")), WS_ID,
         is_admin=False, is_super_admin=False,
     )
-    assert set(ONBOARDING_PRIOR_ACTIONS) <= set(allowed)
+    assert set(ONBOARDING_PRIOR_ACTIONS) - {"platform_install_package"} <= set(allowed)
+    assert "platform_install_package" not in allowed
 
 
 # --------------------------------------------------------------------------- #

@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Any, Dict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -118,6 +118,23 @@ def _is_dispatch_claimable(task) -> bool:
     )
 
 
+def _cannot_take_tasks(db: Session, agent: Any) -> Optional[str]:
+    """F141: an agent whose model is not available (its provider refused it for
+    good, or its route is deprecated) is never handed a task: the task would fail
+    at its first model call. The check failing never blocks an assignment."""
+    try:
+        from core.llm.model_refusals import unavailable_reason
+
+        reason = unavailable_reason(db, agent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[board] model check failed for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return None
+    if not reason:
+        return None
+    return (f"{reason}, so it cannot take this task. Pick another model in its Model tab, "
+            "or give the task to another agent.")
+
+
 def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: str):
     """Resolve an agent NAME to a single ACTIVE agent for a board write.
 
@@ -182,6 +199,18 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not title or not description:
         return {"success": False, "error": "title and description are required"}
 
+    # F180 (#1110): the review gate is kept as asked, never quietly made 'auto'.
+    # 'human' was dropped because this tool took only 'auto' and 'manual'.
+    from api.board_tasks import VALID_REVIEW_MODES, board_review_mode
+
+    review_mode = "auto"
+    if params.get("review_mode") is not None:
+        review_mode = board_review_mode(params["review_mode"])
+        if review_mode is None:
+            return {"success": False, "error": (
+                f"Invalid review_mode: {params['review_mode']!r}. Must be one of {sorted(VALID_REVIEW_MODES)}: "
+                "'human' waits in Review for a person, 'llm' for a model, 'auto' closes it Done.")}
+
     # Resolve assigned agent by name — ACTIVE only + ambiguity-aware (P224-RVW-4).
     # A same-named pair refuses rather than silently dispatching to a row-order
     # pick; an active-vs-inactive pair resolves to the active one. No match leaves
@@ -193,6 +222,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         if ambiguity_error:
             return {"success": False, "error": ambiguity_error}
         if agent:
+            refused = _cannot_take_tasks(db, agent)
+            if refused:
+                return {"success": False, "error": refused}
             assigned_agent_id = agent.id
 
     # Build planning_data if approval_action or other planning fields provided
@@ -215,15 +247,19 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         tags=params.get("tags", []),
         planning_data=planning_data,
         # PRD-234 S3: Auto can set the review gate and a due date when filing.
-        review_mode=params.get("review_mode") if params.get("review_mode") in ("auto", "manual") else "auto",
+        review_mode=review_mode,
         sla_deadline=_parse_deadline(params.get("sla_deadline")),
     )
     db.add(task)
     db.commit()
     db.refresh(task)
 
-    # Auto-approve: execute the approval action immediately, skip human review
-    auto_approve = params.get("auto_approve", False)
+    # Auto-approve: execute the approval action immediately, skip human review.
+    # F155: a public widget visitor's call is never an approval; the task waits.
+    from core.security.surface import widget_turn
+
+    auto_approve_held = bool(params.get("auto_approve")) and widget_turn()
+    auto_approve = params.get("auto_approve", False) and not auto_approve_held
     if auto_approve and planning_data and planning_data.get("approval_action"):
         approval_action = planning_data["approval_action"]
         action_type = approval_action.get("type")
@@ -278,7 +314,10 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         "task_id": task.id,
         "status": task.status,
         "title": task.title,
+        "review_mode": task.review_mode,  # F180: what was kept, so the reply says what is true
     }
+    if auto_approve_held:
+        result["auto_approve"] = "not applied: a call from the public widget is no approval"
 
     # PRD-224 US-005: an ASSIGN-lane assigned ticket is auto-supervised — attach a
     # run_and_report board_task watch here (in the create transaction path) so the
@@ -336,6 +375,24 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     return result
 
 
+def task_visitor_view(task: Any) -> Dict[str, Any]:
+    """F155: what a public widget turn sees of a board task (tasks:read): what
+    it is and where it stands. Never its description, prompt, result, errors,
+    tags, who works it or how (a session's tools and files)."""
+    def _at(name: str) -> Optional[str]:
+        value = getattr(task, name, None)
+        return str(value) if value else None
+
+    return {"id": task.id, "title": (task.title or "")[:150], "status": task.status,
+            "created_at": _at("created_at"), "started_at": _at("started_at"), "completed_at": _at("completed_at")}
+
+
+def _widget_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
+
+
 async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List board tasks with optional filters."""
     from core.models.core import BoardTask
@@ -372,6 +429,11 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
         ).first()
         if agent:
             query = query.filter(BoardTask.assigned_agent_id == agent.id)
+        elif _widget_turn():
+            # F155: a widget turn cannot tell a name no agent has from an agent
+            # with no tickets: who the agents are is agents:read's, not tasks:read's.
+            return {"success": True, "tasks": [], "total": 0, "total_matching": 0,
+                    "limit": min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)}
         else:
             return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
 
@@ -383,6 +445,9 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     except Exception:  # noqa: BLE001 — a count failure never fails the listing
         total_matching = None
     tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
+    if _widget_turn():
+        return {"success": True, "tasks": [task_visitor_view(t) for t in tasks], "total": len(tasks),
+                "total_matching": total_matching if total_matching is not None else len(tasks), "limit": limit}
 
     # Enrich with agent names
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
@@ -442,7 +507,8 @@ def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
     last_tool = None
     if isinstance(tools, (list, tuple)) and tools:
         last = tools[-1]
-        last_tool = last.get("name") if isinstance(last, dict) else str(last)
+        # F168: the host's entries carry ``tool``; ``name`` is the older shape.
+        last_tool = (last.get("tool") or last.get("name")) if isinstance(last, dict) else str(last)
     files = ref.get("files_touched") or []
     return {
         "id": task.id,
@@ -517,15 +583,17 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
 
     started = time.monotonic()
     waited = 0
+    visitor = _widget_turn()
     while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
-        await turn_progress.emit(turn_id, _progress_line(task_card(task, agent_name), waited))
+        await turn_progress.emit(turn_id, (f"#{task.id} is still running · {waited} s" if visitor
+                                           else _progress_line(task_card(task, agent_name), waited)))
         await asyncio.sleep(min(poll, limit - waited))
         waited = int(time.monotonic() - started)
         task = _load()
         if not task:
             return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
 
-    card = task_card(task, agent_name)
+    card = task_visitor_view(task) if visitor else task_card(task, agent_name)
     terminal = task.status in WAIT_TERMINAL_STATUSES
     return {
         "success": True,
@@ -558,6 +626,8 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
+    if _widget_turn():
+        return {"success": True, "task": task_visitor_view(task)}
 
     # Resolve agent name
     agent_name = None
@@ -612,6 +682,9 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         return {"success": False, "error": ambiguity_error}
     if not agent:
         return {"success": False, "error": f"Agent '{agent_name}' not found"}
+    refused = _cannot_take_tasks(db, agent)
+    if refused:
+        return {"success": False, "error": refused}
 
     task.assigned_agent_id = agent.id
     if task.status == "inbox":
@@ -694,7 +767,7 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     owns that, including the execution it triggers.
     """
     from core.models.core import BoardTask
-    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS
+    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS, board_review_mode
 
     task_id = params.get("task_id")
     if not task_id:
@@ -730,10 +803,11 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
     review_mode = params.get("review_mode")
     if review_mode is not None:
-        if review_mode not in VALID_REVIEW_MODES:
+        mode = board_review_mode(review_mode)  # F180: 'manual' is 'human' here too
+        if mode is None:
             return {"success": False, "error": f"Invalid review_mode: {review_mode}. Must be one of {sorted(VALID_REVIEW_MODES)}"}
-        task.review_mode = review_mode
-        changed["review_mode"] = review_mode
+        task.review_mode = mode
+        changed["review_mode"] = mode
 
     tags = params.get("tags")
     if tags is not None:
@@ -787,7 +861,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # PRD-227 US-001: agent-side vocabulary reaches parity with the HTTP path by
     # reusing its VALID_STATUSES set — so 'blocked'/'failed' are accepted and any
     # future status the HTTP path adds is accepted identically, never drifting.
-    from api.board_tasks import VALID_STATUSES
+    from api.board_tasks import NO_AGENT_NO_PROGRESS, STARTING_STATUSES, VALID_STATUSES, mission_runs_it
     if new_status not in VALID_STATUSES:
         return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {sorted(VALID_STATUSES)}"}
 
@@ -803,6 +877,14 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     ).first()
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
+    # #1094: set in progress with no agent, then assigned, a ticket sat 'in
+    # progress' with nothing running it.
+    if new_status == "in_progress" and not task.assigned_agent_id:
+        return {"success": False, "error": NO_AGENT_NO_PROGRESS}
+    # The mission runs its steps: never started here, where in_progress launches it.
+    owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
+    if owned:
+        return {"success": False, "error": owned}
 
     old_status = task.status
 
@@ -828,17 +910,30 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         review_mode = task.review_mode or "auto"
         now = datetime.now(timezone.utc)
 
+        # PRD-227 P227-RVW-4: a redo starts clean, as the board's PATCH does: the
+        # last run's completed_at, error_message and result are cleared, so a redo
+        # that succeeds never renders as failed. (It lived on the no-agent write,
+        # the only in_progress that reached it, which #1094 now refuses.) The last
+        # run is kept on record first, as Run Now keeps it (review MEDIUM): a draft
+        # in Review is never lost.
+        from api.board_tasks import keep_previous_run
+
+        keep_previous_run(task, why="moved to in progress", by="an agent")
+        run_id = uuid4().hex
         won = db.execute(
             text(
                 "UPDATE board_tasks "
                 "SET status = 'in_progress', "
                 "    started_at = COALESCE(started_at, :now), "
+                "    completed_at = NULL, error_message = NULL, result = NULL, "
                 "    blocked_at = NULL, blocked_reason = NULL, "
-                "    updated_at = :now "
+                "    updated_at = :now, "
+                # F209: the run this claim starts; finalize writes only for it
+                "    runtime_ref = COALESCE(runtime_ref, '{}'::jsonb) || jsonb_build_object('run_id', CAST(:run_id AS text)) "
                 "WHERE id = :id AND status <> 'in_progress' "
                 "RETURNING id"
             ),
-            {"id": int(task_id), "now": now},
+            {"id": int(task_id), "now": now, "run_id": run_id},
         ).fetchone()
         db.commit()
 
@@ -856,6 +951,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
                 workspace_id=str(workspace_id),
                 prompt=prompt,
                 review_mode=review_mode,
+                run_id=run_id,
             )
             launched = True
         # If we lost, the dispatcher already claimed + launched this row — no second
@@ -868,20 +964,8 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         }
 
     # Every other transition is a plain ORM write with no launch and no dispatcher
-    # race (in_progress WITHOUT an assigned agent cannot run, so it falls here too).
+    # race (in_progress without an agent was refused above).
     task.status = new_status
-    # PRD-227 P227-RVW-4: mirror the HTTP update_task_status in_progress reset
-    # (api/board_tasks.py:890-895) — clear the terminal fields so a redone task
-    # (done → in_progress → done) does not carry a stale completed_at/error_message/
-    # result. Without this, a task that previously failed then succeeds still renders
-    # as the red 'failed' strip (board-card.tsx isFailed = error_message != null &&
-    # status == 'done') — a board-state lie this PRD exists to kill. started_at is
-    # set unconditionally, matching the HTTP path (restart the clock on a redo).
-    if new_status == "in_progress":
-        task.started_at = datetime.now(timezone.utc)
-        task.completed_at = None
-        task.error_message = None
-        task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).

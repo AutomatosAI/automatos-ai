@@ -43,6 +43,15 @@ def effective_team(
     return normalize_team(raw)
 
 
+def retrieval_team(agent_team: Optional[str]) -> Optional[str]:
+    """The team that scopes a tool call's document reads: on a public widget
+    turn the key's team lock wins (F155, as /search and /docs), else the
+    answering agent's team."""
+    from core.security.surface import widget_team
+
+    return effective_team(widget_team(), agent_team)
+
+
 # SQL clause reusable across endpoints (bind :team parameter)
 TEAM_FILTER_CLAUSE = "AND (team_access = '{}' OR :team = ANY(team_access))"
 
