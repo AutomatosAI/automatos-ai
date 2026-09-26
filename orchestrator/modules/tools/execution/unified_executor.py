@@ -201,9 +201,15 @@ def _where_it_goes(
     return "not a parameter of this action.", None
 
 
-def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], sent: Dict[str, Any]) -> str:
+# F182: the two ways a model calls a platform action, as the refusal log names them.
+VIA_DISPATCHER = "platform_execute"
+VIA_DIRECT_CALL = "direct call"
+
+
+def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], sent: Dict[str, Any],
+                         via: str = VIA_DISPATCHER) -> str:
     """F182: the refusal names each key the action does not take, where it goes,
-    and the call with it moved there. Nothing ran."""
+    and the call with it moved there, in the form the caller used. Nothing ran."""
     schema = action_def.parameters or {}
     props = schema.get("properties") or {}
     required = set(schema.get("required") or [])
@@ -215,13 +221,26 @@ def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], 
         where, moved = _where_it_goes(key, sent[key], props, misplaced)
         lines.append(f"  {key}: {where}")
         fixed = {**fixed, **(moved or {})}
-    example = json.dumps({"action": action_name, "params": fixed}, default=str, ensure_ascii=False)
+    if via == VIA_DISPATCHER:
+        example = json.dumps({"action": action_name, "params": fixed}, default=str, ensure_ascii=False)
+    else:
+        example = f"{action_name}({json.dumps(fixed, default=str, ensure_ascii=False)})"
     if fixed != kept and len(example) <= EXAMPLE_CALL_CHARS:
         lines.append(f"Call it like this: {example}")
     takes = ", ".join(f"{name} ({(props[name] or {}).get('type', 'any')}{', required' if name in required else ''})"
                       for name in props)
     lines.append(f"'{action_name}' takes: {takes or 'no parameters'}.")
     return "\n".join(lines)
+
+
+def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
+                              via: str = VIA_DISPATCHER) -> Optional[str]:
+    """F182: the refusal for the keys in ``params`` the action does not take,
+    each logged to be counted, or None when there are none."""
+    unknown = undeclared_params(action_def, params)
+    for key in unknown:
+        logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")
+    return unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None
 
 
 def unknown_action_error(action_name: str, registry: Any) -> str:
@@ -942,16 +961,14 @@ class UnifiedToolExecutor:
                 # dropped. Run 207 started with no inputs because they came nested
                 # under "params", and two update_playbook calls changed nothing
                 # and reported success. Each refusal is logged, to be counted.
-                unknown = undeclared_params(action_def, action_params)
-                for key in unknown:
-                    logger.info(f"[F182] platform_execute refused param '{key}' for {action_name} (trace {trace})")
-                if missing or unknown:
+                refused = undeclared_params_refusal(action_name, action_def, action_params, trace)
+                if missing or refused:
                     errors = []
                     if missing:
                         # F027-C: the exact call, every required key with its type.
                         errors.append(missing_params_error(action_name, action_def.parameters, missing, action_params))
-                    if unknown:
-                        errors.append(unknown_params_error(action_name, action_def, unknown, action_params))
+                    if refused:
+                        errors.append(refused)
                     result = {"success": False, "error": "\n".join(errors), "tool": tool_name}
                     return result
 
@@ -972,6 +989,18 @@ class UnifiedToolExecutor:
             # PRD-64: Route platform_* actions to PlatformActionExecutor (direct calls)
             if tool_name.startswith("platform_"):
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
+                # F182: a direct call is held to platform_execute's rule. Night 6's
+                # update_task_status sent "reason", which it does not take, and the
+                # reason was dropped without a word.
+                from modules.tools.discovery import get_action_registry
+
+                action_def = get_action_registry().get(tool_name)
+                if action_def is not None and isinstance(parameters, dict):
+                    parameters = _fill_required_from_aliases(parameters, action_def.parameters.get("required", []))
+                    refused = undeclared_params_refusal(tool_name, action_def, parameters, trace, VIA_DIRECT_CALL)
+                    if refused:
+                        result = {"success": False, "error": refused, "tool": tool_name}
+                        return result
                 result = await self._execute_platform_action(
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
                     caller_context=caller_context, agent_id=agent_id,
