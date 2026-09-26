@@ -985,6 +985,12 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         # read the new empty ref: no answer ever reached the resumed session and
         # the ceiling reset to zero every claim.
         ref[SESSION_ASKS_KEY] = session_asks(prior)
+        # F094: the notes on the ticket (the operator's, the session's, the
+        # mission's verdict) are its record too; a claim that resumes the same
+        # run keeps them. A mission step's next run starts with none.
+        prior_notes = prior.get(SESSION_NOTES_KEY)
+        if isinstance(prior_notes, list) and prior_notes:
+            ref[SESSION_NOTES_KEY] = prior_notes
         # PRD-245 S1.1: the session's own credential for the Automatos tools.
         # Handed over ONCE, in this payload; only its hash stays on the ticket.
         session_token = mint_session_token(ref)
@@ -1226,6 +1232,7 @@ SESSION_HOLD_MARKER = "cli_permission"       # ``ApprovalGrant.details[<marker>]
 # picks the work back up.
 SESSION_ASK_MARKER = "cli_ask"               # ``ApprovalGrant.details[<marker>] = {task_id}``
 SESSION_ASKS_KEY = "session_asks"            # ``runtime_ref[<key>] = [{grant_id, question, answer?, …}]``
+SESSION_NOTES_KEY = "session_notes"          # ``runtime_ref[<key>] = [{note, at, by}]``, appended only
 PARKED_FOR_ANSWER_REASON = "Waiting on your answer to the agent's question (ask #{grant_id})"
 SESSION_HOLD_OPTION_ALLOW = "allow"
 SESSION_HOLD_OPTION_DENY = "deny"
@@ -2239,6 +2246,9 @@ async def apply_result(
     # or the park below reads a stale ledger and blocks the ticket on a question
     # already answered — a ticket that then never resumes.
     ref = _merge_fresh_session_asks(db, task, ref)
+    # F094: likewise a note appended meanwhile (the mission's verdict on a step
+    # whose session outran the wait, a progress note) is kept.
+    ref = _merge_fresh_session_notes(db, task, ref)
     task.runtime_ref = ref
     db.commit()
     book_session_usage(
@@ -2372,34 +2382,63 @@ def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any])
     return {**ref, SESSION_ASKS_KEY: merged} if changed else ref
 
 
+def _merge_fresh_session_notes(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
+    """``ref`` with the notes appended to this row since ``ref`` was read. Notes
+    are only ever appended, so a longer list on the row is this one plus the
+    new ones. Read-only re-select; ``ref`` unchanged on any error."""
+    from sqlalchemy import text as sql_text
+
+    try:
+        row = db.execute(
+            sql_text("SELECT runtime_ref FROM board_tasks WHERE id = :id"), {"id": int(task.id)}
+        ).first()
+    except Exception:  # noqa: BLE001 — a merge must never fail the result
+        return ref
+    fresh = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+    theirs = fresh.get(SESSION_NOTES_KEY)
+    mine = ref.get(SESSION_NOTES_KEY)
+    if isinstance(theirs, list) and len(theirs) > (len(mine) if isinstance(mine, list) else 0):
+        return {**ref, SESSION_NOTES_KEY: theirs}
+    return ref
+
+
+def append_session_note(db: Session, *, task_id: Any, workspace_id: Any, note: str, by: str) -> Dict[str, Any]:
+    """Append one note to a ticket's ``session_notes`` in the caller's
+    transaction; returns the entry. ONE key, in one statement (``jsonb_set``
+    append) — never a whole-document write, which would clobber the host's
+    concurrent event flush."""
+    from sqlalchemy import text as sql_text
+
+    entry = {"note": str(note)[:MAX_ASK_QUESTION_KEPT], "at": _iso(_now()), "by": by}
+    db.execute(
+        sql_text(
+            """
+            UPDATE board_tasks
+               SET runtime_ref = jsonb_set(
+                       COALESCE(runtime_ref, CAST('{}' AS jsonb)),
+                       CAST(:path AS text[]),
+                       COALESCE(runtime_ref -> :key, CAST('[]' AS jsonb)) || CAST(:entry AS jsonb),
+                       true)
+             WHERE id = :task_id AND workspace_id = :ws
+            """
+        ),
+        {"path": "{%s}" % SESSION_NOTES_KEY, "key": SESSION_NOTES_KEY,
+         "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
+    )
+    return entry
+
+
 def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
                         agent_name: Optional[str], note: str) -> Dict[str, Any]:
     """Append a progress note to a running ticket, for the operator to read.
 
-    ONE key, in one statement (``jsonb_set`` append) — never a whole-document
-    write, which would clobber the host's concurrent event flush. The note also
-    goes to the ticket's Code Canvas so the operator sees it live. Returns an
+    ONE key, in one statement (``append_session_note``). The note also goes to
+    the ticket's Code Canvas so the operator sees it live. Returns an
     executor-shaped result the session reads as ordinary tool output.
     """
-    from sqlalchemy import text as sql_text
-
-    entry = {"note": str(note)[:MAX_ASK_QUESTION_KEPT], "at": _iso(_now()), "by": agent_name or "the session"}
     try:
-        db.execute(
-            sql_text(
-                """
-                UPDATE board_tasks
-                   SET runtime_ref = jsonb_set(
-                           COALESCE(runtime_ref, CAST('{}' AS jsonb)),
-                           CAST(:path AS text[]),
-                           COALESCE(runtime_ref -> :key, CAST('[]' AS jsonb)) || CAST(:entry AS jsonb),
-                           true)
-                 WHERE id = :task_id AND workspace_id = :ws
-                """
-            ),
-            {"path": "{session_notes}", "key": "session_notes",
-             "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
-        )
+        entry = append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=note,
+                                    by=agent_name or "the session")
         db.commit()
     except Exception as exc:  # noqa: BLE001 — the session reads the reason
         logger.warning("[cli-host] progress note not recorded for ticket #%s", task_id, exc_info=True)
@@ -2408,15 +2447,21 @@ def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
         except Exception:  # noqa: BLE001
             pass
         return {"success": False, "error": f"the note could not be saved ({type(exc).__name__})"}
+    publish_note_line(workspace_id, task_id, entry["note"])
+    return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
+
+
+def publish_note_line(workspace_id: Any, task_id: Any, note: str) -> None:
+    """A ticket's new note, live in its Code Canvas. Best-effort: the note is
+    already on the ticket."""
     try:
         publish_canvas_events(workspace_id, [
             _canvas_envelope(workspace_id, "canvas.session.status", {
-                "source": "cli", "task_id": int(task_id), "status": "running", "note": entry["note"],
+                "source": "cli", "task_id": int(task_id), "status": "running", "note": note,
             }),
         ])
     except Exception:  # noqa: BLE001 — the note is saved; the live line is best-effort
-        logger.debug("[cli-host] progress note canvas line not published for ticket #%s", task_id, exc_info=True)
-    return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
+        logger.debug("[cli-host] note canvas line not published for ticket #%s", task_id, exc_info=True)
 
 
 def requeue_exhausted(task: BoardTask) -> bool:

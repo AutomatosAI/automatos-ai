@@ -3776,6 +3776,11 @@ class CoordinatorService:
             run_id=run.id,
             reason="Mission cancelled",
         )
+        # F094: a step whose Claude Code session is still working keeps its card
+        # (the session's); the card says the mission was cancelled.
+        from services.cli_ticket_lane import cancelled_note, note_open_step_cards
+
+        note_open_step_cards(db, run_id=run.id, note_for=cancelled_note)
 
         VerificationService.clear_cache(run.id)
         # PRD-227 US-002: narrate the cancel into the launching thread (run-level).

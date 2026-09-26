@@ -40,6 +40,7 @@ from core.models.orchestration_enums import (
     TaskType,
 )
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
+from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
 from services.orchestration_state import (
@@ -929,6 +930,9 @@ class MissionDispatcher:
                     "Task %s: session ticket still running past the wait — failed without a "
                     "retry so no second session is spawned: %s", task.id, error_msg[:200],
                 )
+                # F094: the step's card stays the session's; it says the mission stopped waiting.
+                note_open_step_cards(db, orchestration_task_id=task.id,
+                                     note_for=stopped_waiting_note(result.get("waited_s")))
             elif current_attempt < max_retries:
                 # Re-queue for retry
                 task.assigned_agent_id = None
