@@ -81,6 +81,32 @@ def _one_of(value: Any, allowed: Any) -> bool:
     return isinstance(value, str) and value in allowed
 
 
+AGENT_ID_REFUSAL = "assigned_agent_id must be an agent's id, or null"
+
+
+def _agent_id_of(raw: Any) -> Optional[int]:
+    """A sent assigned_agent_id as an agent's id (None for null); anything else is
+    a 422 (F195's candidates: 'abc' or a list was a 500). true is not agent 1."""
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, bool):
+            raise TypeError("a boolean is not an id")
+        return int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=AGENT_ID_REFUSAL)
+
+
+def _text_of(value: Any, field: str) -> str:
+    """A sent text field, trimmed ('' for null); a number or a list is a 422, not
+    the 500 its .strip() raised (F195's candidates)."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=f"{field} must be text")
+    return value.strip()
+
+
 def board_review_mode(value: Any) -> Optional[str]:
     """The board's review_mode for ``value`` ('manual' is 'human'), or None when it is not one."""
     mode = REVIEW_MODE_ALIASES.get(value, value) if isinstance(value, str) else None
@@ -372,13 +398,12 @@ async def create_task(
     """Create a new board task."""
     body = await request.json()
 
-    title = (body.get("title") or "").strip()
+    title = _text_of(body.get("title"), "title")
     if not title:
         raise HTTPException(status_code=422, detail="title is required")
 
-    assigned_agent_id = body.get("assigned_agent_id")
+    assigned_agent_id = _agent_id_of(body.get("assigned_agent_id"))
     if assigned_agent_id is not None:
-        assigned_agent_id = int(assigned_agent_id)
         agent = db.query(Agent).filter(
             Agent.id == assigned_agent_id,
             Agent.workspace_id == ctx.workspace_id,
@@ -678,13 +703,10 @@ async def update_task(
     # read as an id first (review LOW), never by the truth of what was sent.
     agent_after = task.assigned_agent_id
     if "assigned_agent_id" in body:
-        raw_agent = body["assigned_agent_id"]
-        try:
-            if isinstance(raw_agent, bool):  # true is not agent 1 (review LOW)
-                raise TypeError("a boolean is not an id")
-            agent_after = int(raw_agent) if raw_agent is not None else None
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="assigned_agent_id must be an agent's id, or null")
+        agent_after = _agent_id_of(body["assigned_agent_id"])
+    # F195's candidates: a status is checked before anything compares it (a list was a 500).
+    if "status" in body and not _one_of(body["status"], VALID_STATUSES):
+        raise HTTPException(status_code=422, detail=f"Invalid status: {body['status']}")
     if body.get("status") == "in_progress" and not agent_after:
         raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)
     owned = mission_runs_it(db, task) if body.get("status") in STARTING_STATUSES else None
@@ -698,7 +720,7 @@ async def update_task(
         task.review_feedback = str(feedback)[:MAX_REVIEW_FEEDBACK_CHARS] if feedback else None
 
     if "title" in body:
-        title = (body["title"] or "").strip()
+        title = _text_of(body["title"], "title")
         if not title:
             raise HTTPException(status_code=422, detail="title cannot be empty")
         task.title = title
@@ -708,8 +730,6 @@ async def update_task(
 
     if "status" in body:
         new_status = body["status"]
-        if new_status not in VALID_STATUSES:
-            raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
         old_status = task.status
         task.status = new_status
         end_session_claim(task, old_status, new_status)
@@ -882,6 +902,15 @@ def _decide(db: Session, task: BoardTask, *, seen: str, values: Dict[str, Any]) 
     return True
 
 
+def _refreshed(db: Session, task: BoardTask, task_id: int) -> None:
+    """Re-read a ticket after its decision commits; one deleted in that instant is
+    a 404, not a 500 (F195's candidates)."""
+    try:
+        db.refresh(task)
+    except InvalidRequestError:
+        raise HTTPException(status_code=404, detail=f"Ticket #{task_id} was deleted as it was decided.")
+
+
 def already_decided(task: BoardTask) -> HTTPException:
     return HTTPException(status_code=422, detail=(
         f"Ticket #{task.id} was already decided (status: {task.status}); nothing ran again."))
@@ -1032,7 +1061,7 @@ async def approve_task(
     except Exception:
         _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
         raise
-    db.refresh(task)
+    _refreshed(db, task, task_id)
 
     if not still_approved:
         logger.warning("[BoardTasks] Task %d: the approval's action ran, but the ticket was moved while it "
@@ -1135,7 +1164,7 @@ async def reject_task(
     if task.source_type != "recipe":
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
     db.commit()
-    db.refresh(task)
+    _refreshed(db, task, task_id)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
                 task.id, task.assigned_agent_id,
@@ -1349,7 +1378,7 @@ async def update_task_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     body = await request.json()
-    new_status = body.get("status", "").strip()
+    new_status = _text_of(body.get("status"), "status")
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     if new_status == "in_progress" and not task.assigned_agent_id:
