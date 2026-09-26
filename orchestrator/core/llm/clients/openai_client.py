@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     from openai import OpenAI
@@ -77,7 +77,7 @@ class OpenAIProvider(BaseLLMProvider):
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens,
+                    "max_tokens": request_max_tokens(self.config),
                 }
                 if self.config.top_p is not None:
                     kwargs["top_p"] = self.config.top_p
@@ -173,7 +173,7 @@ class OpenAIProvider(BaseLLMProvider):
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens,
+                "max_tokens": request_max_tokens(self.config),
             }
             if self.config.top_p is not None:
                 sync_kwargs["top_p"] = self.config.top_p

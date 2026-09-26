@@ -20,7 +20,7 @@ silent fallbacks (PRD-236 Q2: free must never silently become paid).
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 from core.llm import providers as registry
 from core.llm.reasoning import coalesce_reasoning, reasoning_from_fields, split_think_tags
 
@@ -361,7 +361,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "model": self.config.model,
             "messages": messages,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": request_max_tokens(self.config),
         }
         if self.config.top_p is not None:
             kwargs["top_p"] = self.config.top_p

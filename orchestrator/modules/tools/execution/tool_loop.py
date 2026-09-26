@@ -535,6 +535,19 @@ class ToolLoopExecutor:
         if not has_bad:
             return None
 
+        # F196: a report, document or blog post cut at the run's budget is
+        # written again once at a long deliverable's budget before it is asked
+        # to be shorter.
+        from core.llm.output_budget import LONG_DELIVERABLE, output_purpose
+
+        writes = writes_a_long_deliverable(tool_calls)
+        if writes:
+            logger.warning("[F196] %s cut at the run's budget — retrying once at a long deliverable's", writes)
+            with output_purpose(LONG_DELIVERABLE):
+                retry = await self._llm(messages, tools)
+            if getattr(retry, "finish_reason", None) != "length":
+                return retry
+
         logger.warning(
             "[tool-loop] LLM truncated (finish_reason=length) with malformed tool-call JSON — recovering"
         )
@@ -743,6 +756,27 @@ def claimed_action_not_done(text: str, done: Optional[set] = None) -> Optional[s
         for label, claim, backing in _ACTION_CLAIMS:
             if claim.search(sentence) and not any(b in a for a in succeeded for b in backing):
                 return label
+    return None
+
+
+# F196: the actions whose argument IS the deliverable (a long report, a document, a post).
+LONG_DELIVERABLE_ACTIONS = frozenset({"platform_submit_report", "platform_create_blog_post",
+                                      "platform_update_blog_post", "platform_upload_document"})
+_DISPATCHED_ACTION = re.compile(r'^\s*\{\s*"action"\s*:\s*"(platform_[a-z_]+)"')
+
+
+def writes_a_long_deliverable(tool_calls: List[ToolCall]) -> Optional[str]:
+    """The long-deliverable action among ``tool_calls``, direct or through
+    platform_execute. A cut call's arguments are not valid JSON, but the
+    dispatcher's action name comes first and survives the cut."""
+    for tc in tool_calls:
+        name = _tc_name(tc)
+        if name in LONG_DELIVERABLE_ACTIONS:
+            return name
+        args = tc.get("function", {}).get("arguments", "")
+        found = _DISPATCHED_ACTION.match(args) if isinstance(args, str) else None
+        if found and found.group(1) in LONG_DELIVERABLE_ACTIONS:
+            return found.group(1)
     return None
 
 

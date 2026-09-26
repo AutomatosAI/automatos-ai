@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     import boto3
@@ -178,7 +178,7 @@ class BedrockProvider(BaseLLMProvider):
         
         body = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": request_max_tokens(self.config),
             "temperature": self.config.temperature,
             "messages": user_messages
         }
@@ -211,7 +211,7 @@ class BedrockProvider(BaseLLMProvider):
         
         return {
             "prompt": prompt,
-            "max_gen_len": self.config.max_tokens,
+            "max_gen_len": request_max_tokens(self.config),
             "temperature": self.config.temperature,
             "top_p": 0.9
         }
@@ -233,7 +233,7 @@ class BedrockProvider(BaseLLMProvider):
         
         return {
             "prompt": prompt,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": request_max_tokens(self.config),
             "temperature": self.config.temperature,
             "top_p": 0.9,
             "top_k": 50

@@ -10,7 +10,7 @@ import logging
 import json
 from typing import Dict, Any, List, Optional
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     import requests
@@ -66,7 +66,7 @@ class HuggingFaceProvider(BaseLLMProvider):
                 "model": self.config.model,
                 "messages": messages,
                     "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens,
+                "max_tokens": request_max_tokens(self.config),
             }
             
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -124,7 +124,7 @@ class HuggingFaceProvider(BaseLLMProvider):
                 "model": self.config.model,
                 "messages": messages,
                     "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens,
+                "max_tokens": request_max_tokens(self.config),
             }
             
             response = requests.post(url, headers=headers, json=payload, timeout=120)

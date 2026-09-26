@@ -3,16 +3,17 @@ Agent output-token budget is resolved from the agent's own settings.
 =====================================================================
 
 The per-agent "Max Output Tokens" setting is the source of truth for an
-agent's output budget. When the agent has not set one, the budget falls back
-to the selected model's registry ceiling (``LLMModel.max_output_tokens``), and
-only then to the single named constant ``DEFAULT_MAX_OUTPUT_TOKENS``.
+agent's output budget. When the agent has not set one, the budget is an agent
+run's (8,000). F196 (night 6): it used to be the selected model's registry
+ceiling, and 65,535 reserved per call was refused at a low provider balance. The
+ceiling (``LLMModel.max_output_tokens``) now only caps a budget.
 
 Power mode plays NO role in the token budget — it governs only the LLM tier
 and tool-iteration count. There are no hardcoded token literals (the old
 silent ``2000`` defaults and the ``min(2000, ceiling)`` clamp are gone).
 
-These tests are DB-free: ``_model_max_output_tokens`` is exercised against a
-mock session, and the bound method is reached via ``__new__`` so no real
+These tests are DB-free: ``_model_ceiling`` is exercised against a mock
+session, and the bound method is reached via ``__new__`` so no real
 AgentFactory construction (and no DB) is required.
 """
 import logging
@@ -74,7 +75,7 @@ def test_get_model_config_preferred_model_honours_explicit():
     assert meta.get_model_config().max_tokens == 12000
 
 
-# --- _model_max_output_tokens: the model-ceiling fallback ---------------------
+# --- _model_ceiling caps; _output_budget decides (F196) --------------------------
 
 def _factory_with_session(session):
     """Build an AgentFactory shell without running __init__ (no DB needed)."""
@@ -84,7 +85,7 @@ def _factory_with_session(session):
     return factory
 
 
-def test_model_ceiling_used_when_model_in_registry():
+def test_model_ceiling_read_from_the_registry():
     """When the model exists in the registry, its own ceiling is returned."""
     model_row = MagicMock()
     model_row.max_output_tokens = 16384
@@ -92,34 +93,39 @@ def test_model_ceiling_used_when_model_in_registry():
     db.query.return_value.filter_by.return_value.first.return_value = model_row
 
     factory = _factory_with_session(db)
-    assert factory._model_max_output_tokens("gpt-4o") == 16384
+    assert factory._model_ceiling("gpt-4o") == 16384
 
 
-def test_constant_fallback_when_model_not_in_registry():
-    """An unknown model falls back to the single named default."""
+def test_no_ceiling_when_model_not_in_registry():
     db = MagicMock()
     db.query.return_value.filter_by.return_value.first.return_value = None
 
     factory = _factory_with_session(db)
-    assert factory._model_max_output_tokens("ghost/model") == DEFAULT_MAX_OUTPUT_TOKENS
+    assert factory._model_ceiling("ghost/model") is None
 
 
-def test_constant_fallback_when_no_db_session():
-    """With no DB session there is no registry to consult — use the constant."""
-    factory = _factory_with_session(None)
-    assert factory._model_max_output_tokens("gpt-4o") == DEFAULT_MAX_OUTPUT_TOKENS
+def test_no_ceiling_when_no_db_session():
+    assert _factory_with_session(None)._model_ceiling("gpt-4o") is None
 
 
-def test_constant_fallback_when_no_model_id():
-    """A missing model_id resolves to the constant, never a literal."""
-    factory = _factory_with_session(MagicMock())
-    assert factory._model_max_output_tokens(None) == DEFAULT_MAX_OUTPUT_TOKENS
+def test_no_ceiling_when_no_model_id():
+    assert _factory_with_session(MagicMock())._model_ceiling(None) is None
 
 
-def test_db_error_falls_back_to_constant():
-    """A registry lookup failure must not raise — the constant is returned."""
+def test_db_error_means_no_ceiling():
+    """A registry lookup failure must not raise."""
     db = MagicMock()
     db.query.side_effect = RuntimeError("db down")
 
-    factory = _factory_with_session(db)
-    assert factory._model_max_output_tokens("gpt-4o") == DEFAULT_MAX_OUTPUT_TOKENS
+    assert _factory_with_session(db)._model_ceiling("gpt-4o") is None
+
+
+def test_the_budget_is_the_agents_setting_else_an_agent_runs_capped_by_the_ceiling(monkeypatch):
+    from core.llm import output_budget
+
+    monkeypatch.setattr(output_budget, "_stored", lambda purpose: None)
+    assert AgentFactory._output_budget(None, 16384) == 8000       # never the ceiling
+    assert AgentFactory._output_budget(None, 4096) == 4096        # the ceiling caps it
+    assert AgentFactory._output_budget(12000, 16384) == 12000     # the agent's own setting wins
+    assert AgentFactory._output_budget(20000, 16384) == 16384
+    assert AgentFactory._output_budget(None, None) == 8000

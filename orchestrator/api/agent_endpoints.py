@@ -769,7 +769,9 @@ async def switch_agent_model(
             "provider": new_model.provider,
             "model_id": new_model_id,
             "temperature": request.get("temperature", new_model.default_temperature),
-            "max_tokens": request.get("max_tokens", new_model.max_output_tokens),
+            # F196: the agent's own Max Output Tokens carries over; unset stays unset
+            # (an agent run's budget). The model's ceiling is not a setting.
+            "max_tokens": request.get("max_tokens") or current_config.get("max_tokens"),
             "top_p": current_config.get("top_p", 1.0),
             "frequency_penalty": current_config.get("frequency_penalty", 0.0),
             "presence_penalty": current_config.get("presence_penalty", 0.0),

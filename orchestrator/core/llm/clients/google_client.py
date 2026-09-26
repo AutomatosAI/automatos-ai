@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens
 
 try:
     import google.generativeai as genai
@@ -60,7 +60,7 @@ class GoogleProvider(BaseLLMProvider):
             def _call():
                 generation_config = {
                     "temperature": self.config.temperature,
-                    "max_output_tokens": self.config.max_tokens,
+                    "max_output_tokens": request_max_tokens(self.config),
                 }
                 response = self.client.generate_content(
                     prompt,
@@ -106,7 +106,7 @@ class GoogleProvider(BaseLLMProvider):
             
             generation_config = {
                 "temperature": self.config.temperature,
-                "max_output_tokens": self.config.max_tokens,
+                "max_output_tokens": request_max_tokens(self.config),
             }
             
             response = self.client.generate_content(
