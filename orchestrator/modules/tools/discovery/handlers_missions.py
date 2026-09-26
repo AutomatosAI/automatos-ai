@@ -64,6 +64,10 @@ def _plan_task_summary(plan_tasks: list) -> list:
             "agent_role": t.get("agent_role", ""),
             "sequence": t.get("sequence_number", 0),
         }
+        # F162 (c): the card edits a task by its temp_id; side-by-side tasks
+        # share a sequence number, and an edit by step number is refused then.
+        if t.get("temp_id") is not None:
+            entry["temp_id"] = str(t["temp_id"])
         if t.get("match_agent"):
             entry["match_agent"] = t["match_agent"]
         if t.get("match_agent_id") is not None:  # F142 (c): which of several same-named agents
