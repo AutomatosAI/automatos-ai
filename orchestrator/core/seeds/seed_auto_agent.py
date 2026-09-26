@@ -17,7 +17,6 @@ Unlike the CTO agent (global, admin-only), Auto agents are:
 
 import hashlib
 import logging
-from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import inspect as sa_inspect
@@ -25,14 +24,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from core.models.core import Agent, Skill, agent_skills
+from core.seeds.seed_builtin_skills import ensure_builtin_skill
 
 logger = logging.getLogger(__name__)
 
-# The always-on platform-management skill lives alongside the seed files so it
-# ships in the Docker image. (The CTO soul file auto-cto-custom-soul.txt feeds the
-# GLOBAL, admin-only CTO agent via seed_cto_agent.py — NOT this per-workspace Auto
-# agent, whose persona is _default_persona() below: friendly base + doctrine.)
-_PLATFORM_SKILL_PATH = Path(__file__).resolve().parent / "platform-management-skill.md"
+# The always-on platform-management skill is a built-in skill: listed in
+# core/seeds/skills/manifest.json, its seed (platform-management-skill.md, beside
+# this file, so it ships in the Docker image) generated from the automatos-skills
+# repo by scripts/sync-skills.py. (The CTO soul file auto-cto-custom-soul.txt feeds
+# the GLOBAL, admin-only CTO agent via seed_cto_agent.py — NOT this per-workspace
+# Auto agent, whose persona is _default_persona() below: friendly base + doctrine.)
+PLATFORM_SKILL = "platform-management"
 
 _FRIENDLY_FALLBACK = """\
 **Who I Am:**
@@ -330,91 +332,6 @@ def _get_default_model_config() -> dict:
     return mc
 
 
-def _upsert_platform_management_skill(db: Session) -> Skill | None:
-    """Create the platform-management skill if it doesn't exist.
-
-    Create-only at boot time. Runtime freshness is handled by
-    skill_loader.py via content-hash-cache — no need to rewrite
-    prompt_template on every restart.
-    """
-    import hashlib
-
-    from sqlalchemy import text as _sql_text
-    from sqlalchemy.exc import IntegrityError
-
-    # PRD-191 S3: serialize concurrent seeders (hybrid/chat/workspaces run this
-    # on hot paths across workers). The xact-scoped advisory lock releases with
-    # the surrounding transaction; the IntegrityError fallback covers the race
-    # against the live UNIQUE(name) WHERE workspace_id IS NULL index.
-    try:
-        db.execute(_sql_text(
-            "SELECT pg_advisory_xact_lock(hashtext('seed:platform-management'))"
-        ))
-    except Exception:
-        logger.warning("Advisory lock unavailable — continuing unserialized", exc_info=True)
-
-    skill = db.query(Skill).filter(
-        Skill.name == "platform-management",
-        Skill.skill_source == "builtin-core",
-    ).first()
-
-    if skill:
-        logger.info("Platform-management skill exists (id=%s), skipping seed", skill.id)
-        return skill
-
-    if not _PLATFORM_SKILL_PATH.exists():
-        logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
-        return None
-
-    raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
-
-    # The seed file is GENERATED from automatos-skills/team/auto/SKILL.md
-    # (scripts/sync-auto-skill.py) — its frontmatter version is the truth.
-    import re as _re
-    _vm = _re.search(r'^version:\s*"?([\d.]+)"?', raw, _re.M)
-    skill_version = _vm.group(1) if _vm else "1.0.0"
-
-    # Split YAML frontmatter from markdown body
-    if raw.startswith("---"):
-        parts = raw.split("---", 2)
-        markdown_body = parts[2].strip() if len(parts) > 2 else raw
-    else:
-        markdown_body = raw
-
-    content_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
-
-    skill = Skill(
-        name="platform-management",
-        description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
-        skill_type="technical",
-        category="agent-role",
-        skill_version=skill_version,
-        skill_source="builtin-core",
-        prompt_template=markdown_body,
-        content_hash=content_hash,
-        tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
-        is_active=True,
-        workspace_id=None,  # global skill
-    )
-    db.add(skill)
-    try:
-        db.flush()
-    except IntegrityError:
-        # Another worker won the insert race despite the lock (or the lock
-        # was unavailable): the row exists — re-select and return it. Never
-        # swallow this into a silent no-seed (the Wave-0 lesson).
-        db.expunge(skill)
-        existing = db.query(Skill).filter(
-            Skill.name == "platform-management",
-            Skill.skill_source == "builtin-core",
-        ).first()
-        logger.info("Platform-management skill seeded by a concurrent worker (id=%s)",
-                    getattr(existing, "id", None))
-        return existing
-    logger.info("Platform-management skill created (id=%s)", skill.id)
-    return skill
-
-
 def _assign_skill_to_agent(db: Session, agent: Agent, skill: Skill) -> None:
     """Idempotent under concurrency: ON CONFLICT (agent_id, skill_id) DO
     NOTHING, backed by PRD-191 S1's unique constraint — the SELECT-then-INSERT
@@ -476,8 +393,9 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         # doctrine-carrying soul. Hash-guarded — customized souls are untouched.
         _backfill_auto_persona(agent)
 
-    # Ensure platform-management skill is assigned (refreshes content on every startup)
-    platform_skill = _upsert_platform_management_skill(db)
+    # Ensure the platform-management skill exists and is assigned. Create-only
+    # (core/seeds/seed_builtin_skills.py); the loader refreshes its content by hash.
+    platform_skill = ensure_builtin_skill(db, PLATFORM_SKILL)
     if platform_skill:
         _assign_skill_to_agent(db, agent, platform_skill)
 

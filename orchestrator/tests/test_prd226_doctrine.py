@@ -84,7 +84,7 @@ def test_doctrine_block_character_ceiling():
 # MANAGER_DOCTRINE_BLOCK. Point 7's ask-length silently drifted between them
 # once ("short" vs "≤ ~700"); this fails CI if any substantive value diverges.
 # (auto-cto-custom-soul.txt is out of scope here — it feeds the GLOBAL CTO
-# agent, not Auto; see seed_auto_agent.py's _PLATFORM_SKILL_PATH comment.)
+# agent, not Auto; see seed_auto_agent.py's PLATFORM_SKILL comment.)
 # ---------------------------------------------------------------------------
 
 def _skill_doctrine_section() -> str:
@@ -129,7 +129,7 @@ def test_substantive_doctrine_consistent_across_auto_facing_homes():
 # ---------------------------------------------------------------------------
 
 def test_fresh_workspace_seed_applies_new_soul(monkeypatch):
-    monkeypatch.setattr(seed_mod, "_upsert_platform_management_skill", lambda db: None)
+    monkeypatch.setattr(seed_mod, "ensure_builtin_skill", lambda db, name: None)
     monkeypatch.setattr(
         seed_mod, "_get_default_model_config",
         lambda: {"provider": "test", "model_id": "test", "max_tokens": 4000},

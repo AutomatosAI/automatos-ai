@@ -214,22 +214,24 @@ def test_skills_section_phantom_priority_sort_is_gone():
 # 3. S3 — seeder idempotency under the race
 # ---------------------------------------------------------------------------
 
-def test_platform_skill_upsert_reselects_when_race_lost(monkeypatch):
+def test_platform_skill_upsert_reselects_when_race_lost(monkeypatch, tmp_path):
     from sqlalchemy.exc import IntegrityError
 
-    import core.seeds.seed_auto_agent as seed_mod
+    import core.seeds.seed_builtin_skills as seed_mod
+    from core.builtin_skills import read_seed
 
+    # PRD-251 US-119: Auto's platform-management is created by the one
+    # built-in skill seeder (seed_auto_agent calls ensure_builtin_skill).
+    seed_file = tmp_path / "platform-management-skill.md"
+    seed_file.write_text("---\nname: platform-management\n---\nBODY", encoding="utf-8")
     existing = MagicMock(id=42)
     db = MagicMock()
     # first .first() → None (row not there yet); second → the winner's row
     db.query.return_value.filter.return_value.first.side_effect = [None, existing]
     db.flush.side_effect = IntegrityError("stmt", {}, Exception("duplicate key"))
-    monkeypatch.setattr(seed_mod, "_PLATFORM_SKILL_PATH", MagicMock(
-        exists=lambda: True,
-        read_text=lambda encoding: "---\nname: platform-management\n---\nBODY",
-    ))
+    monkeypatch.setattr(seed_mod, "read_seed", lambda _path: read_seed(seed_file))
 
-    result = seed_mod._upsert_platform_management_skill(db)
+    result = seed_mod.ensure_builtin_skill(db, "platform-management")
 
     assert result is existing, (
         "a lost insert race must re-select and return the existing row — "

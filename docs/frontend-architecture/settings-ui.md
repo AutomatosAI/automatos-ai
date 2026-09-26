@@ -16,7 +16,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
 - [orchestrator/core/seeds/seed_auto_agent.py](orchestrator/core/seeds/seed_auto_agent.py)
 - [orchestrator/tests/test_prd226_doctrine.py](orchestrator/tests/test_prd226_doctrine.py)
-- [scripts/sync-auto-skill.py](scripts/sync-auto-skill.py)
+- [scripts/sync-skills.py](scripts/sync-skills.py)
 
 </details>
 

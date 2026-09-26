@@ -21,7 +21,7 @@ This is the same pattern Gerard already applied to the tool registry (semantic p
 - `platform-management` is pinned in `SKILL_CORE_ALWAYS_ON` (`modules/context/sections/skills.py:33`) → full L2 body renders unconditionally. Every *other* skill already renders as a one-line L1 catalog entry with on-demand activation.
 - **The on-demand mechanism exists and is live:** `platform_load_skill` (`modules/tools/discovery/actions_skills.py:30`, handler `handlers_skill_runtime.py:65` — "S2: trigger-based L2 activation"). Non-core skills are listed L1; the model calls `load_skill <name>` to pull the body for that turn. Activation is already logged (`[skills] activation: core_always_on=… l1_offered=…`).
 - **The soul duplicates the skill.** Five soul sections restate skill charter content, verified 5/5 present: **My Role** (≈ charter identity), **My Authority** (≈ §B), **How I Think** (≈ §F), **My Operating Rhythm** (≈ §D), **My Routing Rules** (≈ §E/§H). Two always-on copies of the same rules that can drift — and since the soul is *tenant-editable* (Settings → Orchestrator → Soul & Personality, `custom_soul` via `PUT /api/workspaces/current/orchestrator`), a tenant edit can silently contradict platform routing today.
-- Skills repo (`automatos-skills`) is the authoring source for the skill; the seed is a generated copy (PR #640's `scripts/sync-auto-skill.py` + `_refresh_builtin_if_stale` propagation). The soul is tenant-owned; its seed file is only the default for new/uncustomized workspaces (PRD-226 backfill skips customized souls by design).
+- Skills repo (`automatos-skills`) is the authoring source for the skill; the seed is a generated copy (PR #640's sync script, now `scripts/sync-skills.py` since PRD-251 US-119, + `_refresh_builtin_if_stale` propagation). The soul is tenant-owned; its seed file is only the default for new/uncustomized workspaces (PRD-226 backfill skips customized souls by design).
 
 ## 3. Goals
 
@@ -52,14 +52,14 @@ Remove from the default soul the five sections that duplicate the skill charter 
 
 ### Component C — plumbing (all existing patterns)
 
-- `scripts/sync-auto-skill.py` → syncs **both** repo files to **two** seed files (`platform-management-skill.md`, `platform-operations-skill.md`), same banner + self-checks.
+- `scripts/sync-skills.py platform-management platform-operations` → syncs **both** repo files to **two** seed files (`platform-management-skill.md`, `platform-operations-skill.md`), same banner + self-checks (`platform-operations` is added to the built-in skills manifest, `core/seeds/skills/manifest.json`).
 - `seed_auto_agent.py` → upserts + assigns both skills (same advisory-lock + `ON CONFLICT` pattern).
-- `_BUILTIN_PATHS` gains the second entry so `_refresh_builtin_if_stale` propagates ops edits to existing workspaces too.
+- The manifest entry gives `_BUILTIN_PATHS` (built from it since PRD-251 US-119) the second entry, so `_refresh_builtin_if_stale` propagates ops edits to existing workspaces too.
 - `SKILL_CORE_ALWAYS_ON` unchanged (`platform-management` only) — that's the flag doing the work.
 
 ### Component D — the drift guard (folds in finding #3)
 
-CI check: run `sync-auto-skill.py --check` (no-write mode) asserting both seed files match the repo sources — the source-of-truth rule becomes structural instead of remembered. (Repo checkout for CI: vendor the check against the seed's recorded source hash if cross-repo fetch is unwanted — decide in implementation; the check must fail loud, not skip silent.)
+CI check: run `sync-skills.py --check` (no-write mode) asserting both seed files match the repo sources — the source-of-truth rule becomes structural instead of remembered. (Repo checkout for CI: vendor the check against the seed's recorded source hash if cross-repo fetch is unwanted — decide in implementation; the check must fail loud, not skip silent.)
 
 ## 6. Stories
 

@@ -54,6 +54,7 @@ if str(_ORCH) not in sys.path:
 if str(_MEDIA_RENDER) not in sys.path:
     sys.path.append(str(_MEDIA_RENDER))
 
+from core.builtin_skills import builtin_skill_paths  # noqa: E402
 from core.brand_palette import (  # noqa: E402
     PAPER_TOKENS,
     contrast,
@@ -402,6 +403,9 @@ def test_the_ci_driver_renders_every_image_at_every_size_and_probes_the_stripe()
 TEXT_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".json", ".md", ".yaml", ".yml", ".html", ".txt", ".sh", ".toml"}
 SKIPPED_DIRS = {"node_modules", ".next", "__pycache__", ".git", "dist", "build", "coverage", ".venv"}
 GENERATED_SEED = _ORCH / "core" / "seeds" / "platform-management-skill.md"
+# Every built-in skill's seed is generated from automatos-skills (US-119): its
+# wording is the owner's to change there, never in this repo.
+GENERATED_SEEDS = frozenset(builtin_skill_paths().values())
 
 
 def test_no_code_names_the_automatos_social_clone():
@@ -411,7 +415,7 @@ def test_no_code_names_the_automatos_social_clone():
             dirnames[:] = [d for d in dirnames if d not in SKIPPED_DIRS]
             for filename in filenames:
                 path = Path(dirpath) / filename
-                if path.suffix not in TEXT_SUFFIXES or path == GENERATED_SEED or path == Path(__file__).resolve():
+                if path.suffix not in TEXT_SUFFIXES or path in GENERATED_SEEDS or path == Path(__file__).resolve():
                     continue
                 try:
                     text = path.read_text(encoding="utf-8")
