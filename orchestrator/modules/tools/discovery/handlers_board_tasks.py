@@ -199,6 +199,18 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not title or not description:
         return {"success": False, "error": "title and description are required"}
 
+    # F180 (#1110): the review gate is kept as asked, never quietly made 'auto'.
+    # 'human' was dropped because this tool took only 'auto' and 'manual'.
+    from api.board_tasks import VALID_REVIEW_MODES, board_review_mode
+
+    review_mode = "auto"
+    if params.get("review_mode") is not None:
+        review_mode = board_review_mode(params["review_mode"])
+        if review_mode is None:
+            return {"success": False, "error": (
+                f"Invalid review_mode: {params['review_mode']!r}. Must be one of {sorted(VALID_REVIEW_MODES)}: "
+                "'human' waits in Review for a person, 'llm' for a model, 'auto' closes it Done.")}
+
     # Resolve assigned agent by name — ACTIVE only + ambiguity-aware (P224-RVW-4).
     # A same-named pair refuses rather than silently dispatching to a row-order
     # pick; an active-vs-inactive pair resolves to the active one. No match leaves
@@ -235,7 +247,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         tags=params.get("tags", []),
         planning_data=planning_data,
         # PRD-234 S3: Auto can set the review gate and a due date when filing.
-        review_mode=params.get("review_mode") if params.get("review_mode") in ("auto", "manual") else "auto",
+        review_mode=review_mode,
         sla_deadline=_parse_deadline(params.get("sla_deadline")),
     )
     db.add(task)
@@ -302,6 +314,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         "task_id": task.id,
         "status": task.status,
         "title": task.title,
+        "review_mode": task.review_mode,  # F180: what was kept, so the reply says what is true
     }
     if auto_approve_held:
         result["auto_approve"] = "not applied: a call from the public widget is no approval"
@@ -754,7 +767,7 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     owns that, including the execution it triggers.
     """
     from core.models.core import BoardTask
-    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS
+    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS, board_review_mode
 
     task_id = params.get("task_id")
     if not task_id:
@@ -790,10 +803,11 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
     review_mode = params.get("review_mode")
     if review_mode is not None:
-        if review_mode not in VALID_REVIEW_MODES:
+        mode = board_review_mode(review_mode)  # F180: 'manual' is 'human' here too
+        if mode is None:
             return {"success": False, "error": f"Invalid review_mode: {review_mode}. Must be one of {sorted(VALID_REVIEW_MODES)}"}
-        task.review_mode = review_mode
-        changed["review_mode"] = review_mode
+        task.review_mode = mode
+        changed["review_mode"] = mode
 
     tags = params.get("tags")
     if tags is not None:

@@ -59,8 +59,11 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                 },
                 "review_mode": {
                     "type": "string",
-                    "enum": ["auto", "manual"],
-                    "description": "PRD-234: 'manual' parks the finished ticket in Review for a human; 'auto' (default) closes it Done.",
+                    "enum": ["human", "llm", "auto"],
+                    "description": (
+                        "Who signs the work off: 'human' parks the finished ticket in Review until a "
+                        "person approves it; 'llm' has a model review it; 'auto' (default) closes it Done."
+                    ),
                 },
                 "sla_deadline": {
                     "type": "string",
@@ -309,7 +312,10 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                 "review_mode": {
                     "type": "string",
                     "enum": ["human", "llm", "auto"],
-                    "description": "Who signs the work off.",
+                    "description": (
+                        "Who signs the work off: 'human' parks the finished ticket in Review until a "
+                        "person approves it; 'llm' has a model review it; 'auto' closes it Done."
+                    ),
                 },
                 "tags": {
                     "type": "array", "items": {"type": "string"},

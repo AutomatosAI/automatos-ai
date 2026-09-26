@@ -65,6 +65,15 @@ PATCHABLE_TASK_FIELDS = frozenset({
 })
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
+# F180: PRD-234's platform_create_task said 'manual' for a person's review; the
+# board says 'human'. The tools take either and keep the board's word.
+REVIEW_MODE_ALIASES = {"manual": "human"}
+
+
+def board_review_mode(value: Any) -> Optional[str]:
+    """The board's review_mode for ``value`` ('manual' is 'human'), or None when it is not one."""
+    mode = REVIEW_MODE_ALIASES.get(value, value) if isinstance(value, str) else None
+    return mode if mode in VALID_REVIEW_MODES else None
 
 # PRD-171 F025: source_types the board must NOT self-execute on drag/PATCH.
 # 'recipe' runs through the recipe executor; 'orchestration'/'orchestration_task'

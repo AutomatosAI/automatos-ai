@@ -349,7 +349,7 @@ def open_session_ticket(
         created_by_id=actor or "operator",
         source_type=CHAT_SOURCE_TYPE,
         source_id=session_source_id(chat_id),
-        review_mode="manual",
+        review_mode="human",  # F180: the board's word ('manual' was PRD-234's)
         tags=["session"],
     )
     session_id = str(uuid4())
