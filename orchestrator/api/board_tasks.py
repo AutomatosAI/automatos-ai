@@ -74,6 +74,12 @@ VALID_REVIEW_MODES = {"human", "llm", "auto"}
 REVIEW_MODE_ALIASES = {"manual": "human"}
 
 
+def _one_of(value: Any, allowed: Any) -> bool:
+    """A body field names one of ``allowed``: a JSON list or object is not a name,
+    and a 422 rather than the 500 its lookup raised (F195)."""
+    return isinstance(value, str) and value in allowed
+
+
 def board_review_mode(value: Any) -> Optional[str]:
     """The board's review_mode for ``value`` ('manual' is 'human'), or None when it is not one."""
     mode = REVIEW_MODE_ALIASES.get(value, value) if isinstance(value, str) else None
@@ -380,11 +386,11 @@ async def create_task(
             raise HTTPException(status_code=404, detail="Assigned agent not found in workspace")
 
     priority = body.get("priority", "medium")
-    if priority not in VALID_PRIORITIES:
+    if not _one_of(priority, VALID_PRIORITIES):
         raise HTTPException(status_code=422, detail=f"Invalid priority: {priority}")
 
     review_mode = body.get("review_mode", "auto")
-    if review_mode not in VALID_REVIEW_MODES:
+    if not _one_of(review_mode, VALID_REVIEW_MODES):
         raise HTTPException(status_code=422, detail=f"Invalid review_mode: {review_mode}")
 
     planning_data = body.get("planning_data")
@@ -406,6 +412,9 @@ async def create_task(
     # a lane's ticket is filed by the platform; a request claiming one made a
     # ticket the dispatcher and the host treat as the platform's own.
     source_type = body.get("source_type") or "user"
+    if not isinstance(source_type, str):
+        raise HTTPException(status_code=422, detail=(
+            f"source_type is one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or left out."))
     if source_type not in USER_CREATABLE_SOURCE_TYPES:
         raise HTTPException(status_code=422, detail=(
             f"source_type '{source_type}' is filed by the platform, not by a request. "
@@ -726,12 +735,12 @@ async def update_task(
         apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     if "priority" in body:
-        if body["priority"] not in VALID_PRIORITIES:
+        if not _one_of(body["priority"], VALID_PRIORITIES):
             raise HTTPException(status_code=422, detail=f"Invalid priority: {body['priority']}")
         task.priority = body["priority"]
 
     if "review_mode" in body:
-        if body["review_mode"] not in VALID_REVIEW_MODES:
+        if not _one_of(body["review_mode"], VALID_REVIEW_MODES):
             raise HTTPException(status_code=422, detail=f"Invalid review_mode: {body['review_mode']}")
         task.review_mode = body["review_mode"]
 
