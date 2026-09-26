@@ -21,7 +21,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, text
@@ -273,6 +273,12 @@ def _the_row_at_step(tasks: List[Any], step: Any) -> Any:
         raise ValueError(f"Step {step} has {len(at_step)} tasks that run side by side; name the one to "
                          "change by its task_id or temp_id.")
     return at_step[0] if at_step else None
+
+
+def _match_inputs(task: Any) -> tuple:
+    """What a task's agent match is ranked from: an edit to any of it ranks again."""
+    context = task.input_context if isinstance(task.input_context, dict) else {}
+    return tuple(getattr(task, field, None) for field in _EDITABLE_TASK_FIELDS) + (context.get("pinned_agent_id"),)
 
 
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
@@ -3360,6 +3366,7 @@ class CoordinatorService:
         agents: List[Agent],
         tasks: List[OrchestrationTask],
         signals_by_task: Optional[Dict[Any, Any]] = None,
+        rank_only: Optional[Set[Any]] = None,
     ) -> None:
         """PRD-164 S2: rank candidate agents per planned task and persist the
         match preview — ``input_context['agent_match']`` on each task row and
@@ -3367,6 +3374,8 @@ class CoordinatorService:
         approval card's source). Explicit agent overrides (PRD-163 S4) rank
         first by construction. Best-effort: a failure here never blocks
         mission creation — the dispatcher re-matches authoritatively anyway.
+        ``rank_only`` (task ids) ranks those tasks again and leaves the rest's
+        previews as they are; ``tasks`` is still the whole plan.
         """
         try:
             match_by_seq: Dict[int, Dict[str, Any]] = {}
@@ -3375,6 +3384,8 @@ class CoordinatorService:
             for task in tasks:
                 at_step[int(task.sequence_number)] = at_step.get(int(task.sequence_number), 0) + 1
             for task in tasks:
+                if rank_only is not None and task.id not in rank_only:
+                    continue
                 input_context = task.input_context if isinstance(task.input_context, dict) else {}
                 spec = {
                     "agent_role": task.agent_role,
@@ -3550,9 +3561,16 @@ class CoordinatorService:
             .all()
         )
         task_edits = [_pin_the_named_agent(edit, roster) for edit in (task_edits or [])]
+        before = {task.id: _match_inputs(task) for task in tasks}
         new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
         if fields_changed:
             run.plan = new_plan  # reassign so the JSON column is marked dirty
+            # F162 (b): an edited task's "who would run it" is ranked again. The
+            # card kept the plan-time pick: 5da0c52b's step 3, edited to OPS,
+            # still said NEWSROOM.
+            edited = {task.id for task in tasks if _match_inputs(task) != before[task.id]}
+            if edited:
+                self._annotate_match_previews(db, run, roster, tasks, None, rank_only=edited)
             emit_event(
                 db=db,
                 run_id=run.id,
