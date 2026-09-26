@@ -93,7 +93,9 @@ class SQLExampleStore:
         em = self._get_embedding_manager()
         if em:
             try:
-                vec = em.embed_text(question)
+                # F172: the manager's real method. ``embed_text`` never existed, so
+                # every example was saved without an embedding.
+                vec = await em.generate_embedding(question)
                 if vec is not None:
                     embedding_vector = [float(x) for x in vec]
                     embedding_id = f"{self.COLLECTION_NAME}:{example_id}"
@@ -166,7 +168,7 @@ class SQLExampleStore:
             q_vec = None
             if em:
                 try:
-                    raw = em.embed_text(question)
+                    raw = await em.generate_embedding(question)  # F172
                     if raw is not None:
                         q_vec = [float(x) for x in raw]
                 except Exception as e:
