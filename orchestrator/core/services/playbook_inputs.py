@@ -54,8 +54,10 @@ def playbook_inputs(value: Any) -> Tuple[Dict[str, Any], Optional[str]]:
 
 _INPUT_FIELD_RE = re.compile(r"\{input\.([A-Za-z0-9_]+)\}")
 _BARE_INPUT = "{" + INPUT_KEY + "}"
-# One "name: value" (or "name = value") line of the owner's answer.
-_ANSWER_LINE_RE = re.compile(r"^\s*(?:[-*\u2022]\s*)?([A-Za-z_][A-Za-z0-9_ -]{0,60}?)\s*[:=]\s*(.+?)\s*$")
+# One "name: value" (or "name = value") line of the owner's answer. The value is
+# the rest of the line, stripped in code: a lazy value before a trailing \s*$
+# backtracked quadratically on a long run of spaces (CodeQL py/polynomial-redos).
+_ANSWER_LINE_RE = re.compile(r"^\s*(?:[-*\u2022]\s*)?([A-Za-z_][A-Za-z0-9_ -]{0,60}?)\s*[:=](.*)$")
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -181,8 +183,9 @@ def inputs_from_answer(answer: str, missing: List[str], contract: Dict[str, Dict
     for line in text.splitlines():
         match = _ANSWER_LINE_RE.match(line)
         name = names.get(_normal(match.group(1))) if match else None
-        if name:
-            values[name] = match.group(2)
+        value = match.group(2).strip() if name else ""
+        if value:
+            values[name] = value
     if not values and len(missing) == 1:
         values[missing[0]] = text
     return values
