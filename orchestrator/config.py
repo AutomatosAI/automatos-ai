@@ -1534,6 +1534,9 @@ class Config:
     # Composio tools. The SDK's lookup calls give up after as long, un-retried,
     # so a hung call frees its thread too.
     COMPOSIO_LOOKUP_TIMEOUT_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_TIMEOUT_SECONDS", "20"))
+    # F105: when the event loop stands still this long, the loop watchdog logs
+    # one WARNING with the loop thread's stack (core/loop_watchdog.py). 0 = off.
+    LOOP_STALL_LOG_SECONDS: float = float(os.getenv("LOOP_STALL_LOG_SECONDS", "2"))
     # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
     # unless it fetched fewer than this share of the models listed before: a
     # partial answer would otherwise retire the rest of the catalog.
