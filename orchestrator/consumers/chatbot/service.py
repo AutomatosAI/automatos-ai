@@ -2106,10 +2106,15 @@ class StreamingChatService:
         try:
             result = await runner_task
         except Exception as loop_err:
+            # F169 (B10/B26): the reply says what failed in plain words
+            # (turn_errors); the raw provider text stays in this log line.
+            from consumers.chatbot.turn_errors import describe_turn_error
+
             logger.error(f"Tool loop failed: {loop_err}", exc_info=True)
-            yield {"_final_response": SimpleNamespace(
-                content=f"Error: {loop_err}", tool_calls=None, usage=None,
-            )}
+            err = describe_turn_error(
+                loop_err, agent_name=self._agent_display_name(getattr(agent_runtime, "agent_id", None)),
+            )
+            yield {"_final_response": SimpleNamespace(content=err.message, tool_calls=None, usage=None)}
             return
 
         # PRD-232 US-011a: a tool-warranted turn (tools were offered) that ran NO
