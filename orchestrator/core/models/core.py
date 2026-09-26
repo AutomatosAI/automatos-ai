@@ -1283,6 +1283,14 @@ class Artifact(Base):
     )
 
 
+# A playbook step's type: an agent step (the default, no "type") or a fixed
+# generate_document step, which renders a template with no agent and no prompt
+# (PRD-63; social formats, PRD-251 US-117). api/recipe_executor.py runs both.
+PLAYBOOK_DOCUMENT_STEP = "generate_document"
+PLAYBOOK_STEP_FIELDS = ("step_id", "order", "agent_id", "prompt_template")
+PLAYBOOK_DOCUMENT_STEP_FIELDS = ("step_id", "order")
+
+
 class WorkflowTemplate(Base):
     """
     Workflow templates that users can use to quickly create workflows.
@@ -1383,7 +1391,8 @@ class WorkflowTemplate(Base):
             if not isinstance(step, dict):
                 return False, f"Step {idx} must be an object"
 
-            required_fields = ['step_id', 'order', 'agent_id', 'prompt_template']
+            is_document_step = step.get("type") == PLAYBOOK_DOCUMENT_STEP
+            required_fields = PLAYBOOK_DOCUMENT_STEP_FIELDS if is_document_step else PLAYBOOK_STEP_FIELDS
             for field in required_fields:
                 if field not in step:
                     return False, f"Step {idx} missing required field: {field}"

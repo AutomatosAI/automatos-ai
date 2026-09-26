@@ -104,6 +104,16 @@ actions:
     source: authored
   - text: render a cover for blog post 22
     source: authored
+  - text: 'generate a 4:5 image for an instagram post'
+    source: example
+  - text: 'make a 9:16 still for our story'
+    source: example
+  - text: create a square image for a linkedin carousel slide
+    source: authored
+  - text: i need a vertical picture for a reel, no words on it
+    source: authored
+  - text: make an image for the social post about the launch
+    source: authored
   platform_get_blog_post:
   - text: read blog post
     source: example

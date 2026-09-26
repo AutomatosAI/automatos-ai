@@ -14,6 +14,10 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# What generate_document made, by the file it returned: a social template
+# renders an MP4 or a PNG (PRD-251 US-117); anything else is a document.
+GENERATED_FILE_KINDS = {"mp4": "video", "png": "image"}
+
 
 class ToolResultFormatter:
     """
@@ -957,7 +961,8 @@ class ToolResultFormatter:
             fmt = doc_result.get('format', 'pdf')
             size_kb = doc_result.get('size_kb', 0)
             download_url = doc_result.get('download_url', '')
-            summary_parts.append(f"\nGenerated {fmt.upper()} document: {filename} ({size_kb} KB)")
+            kind = GENERATED_FILE_KINDS.get(str(fmt).lower(), "document")
+            summary_parts.append(f"\nGenerated {fmt.upper()} {kind}: {filename} ({size_kb} KB)")
             if doc_result.get('template_name'):
                 summary_parts.append(f"Template used: {doc_result['template_name']}")
             summary_parts.append(f"Download URL: {download_url}")

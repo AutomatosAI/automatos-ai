@@ -34,7 +34,8 @@ from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
-from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.models.core import PLAYBOOK_DOCUMENT_STEP, RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.services.playbook_step_refs import resolve_step_references, step_values
 
 logger = logging.getLogger(__name__)
 
@@ -1364,6 +1365,8 @@ async def _execute_recipe_inner(
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
         step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
+        # PRD-251 US-117: what each finished step offers a fixed step's {{ step_N.key }}.
+        finished_steps: Dict[int, Dict[str, Any]] = {}
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
@@ -1437,8 +1440,10 @@ async def _execute_recipe_inner(
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+            step_type = step.get("type", "agent")
 
-            if not prompt_template:
+            # A fixed generate_document step has no agent and no prompt (PRD-251 US-117).
+            if not prompt_template and step_type != PLAYBOOK_DOCUMENT_STEP:
                 msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
                 logger.warning(f"[recipe_direct] {msg}")
                 step_result = {
@@ -1518,24 +1523,21 @@ async def _execute_recipe_inner(
                 if context_block_parts:
                     clean_step_prompt = "\n\n".join(context_block_parts) + f"\n\n## Your Task\n{clean_step_prompt}"
 
-            # Check for generate_document step type (PRD-63)
-            step_type = step.get("type", "agent")
-            if step_type == "generate_document":
+            # A fixed generate_document step (PRD-63): a PDF/DOCX/XLSX, or a social
+            # image/video rendered by media-render (PRD-251 US-117).
+            if step_type == PLAYBOOK_DOCUMENT_STEP:
                 try:
                     from modules.documents.generation_service import (
                         DocumentGenerationService,
                         deliverables_app_url,
                     )
                     gen = _document_step_config(step)
-
-                    # Resolve {{step_N.field}} variables in data from scratchpad
-                    gen_data = gen["data"]
-                    if scratchpad and isinstance(gen_data, dict):
-                        gen_data = _resolve_doc_step_variables(gen_data, scratchpad)
+                    # {{ step_N.key }} in the title and data: what earlier steps produced.
+                    gen_title, gen_data = _resolved_document_step(gen, finished_steps)
 
                     gen_service = DocumentGenerationService(db, workspace_id)
                     gen_result = await gen_service.generate(
-                        title=gen["title"],
+                        title=gen_title,
                         format=gen["format"],
                         data=gen_data,
                         workspace_id=workspace_id,
@@ -1546,7 +1548,7 @@ async def _execute_recipe_inner(
                     # it used to live only inside the step's output JSON.
                     registration = gen_service.register_as_deliverable(
                         gen_result,
-                        title=gen["title"],
+                        title=gen_title,
                         source_type="playbook",
                         source_id=str(getattr(execution, "execution_id", "") or ""),
                         agent_name=getattr(recipe, "name", None),
@@ -1575,6 +1577,7 @@ async def _execute_recipe_inner(
                             agent_output=step_result["output"],
                             agent_exports={},
                         )
+                    finished_steps[step_order] = step_values(step_result["output"])
 
                     logger.info(f"[recipe_direct] Step {step_order} (generate_document) completed: {gen_result.filename}")
                     compact = _build_compact_step_result(step_result)
@@ -1816,7 +1819,11 @@ async def _execute_recipe_inner(
 
                         success = True
 
-                        # Write to scratchpad (auto-extract)
+                        # Write to scratchpad (auto-extract). The step's own saved keys
+                        # first: write_step_results replaces them with every export so far.
+                        finished_steps[step_order] = step_values(
+                            step_result["output"], scratchpad.step_exports(step_order) if scratchpad else {}
+                        )
                         agent_exports = scratchpad.get_exports() if scratchpad else {}
                         scratchpad.write_step_results(
                             step_order=step_order,
@@ -2196,6 +2203,8 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     (a UUID string — the id ``platform_list_templates`` hands out) is parsed
     here so an invalid one fails the step with a clear message instead of a
     stack trace deep in the renderer; it takes precedence over ``template_name``.
+    ``data`` is an object, or (PRD-251 US-117) one ``{{ step_N.key }}`` string
+    naming an object an earlier step produced.
     """
     cfg = step.get("config", step) if isinstance(step, dict) else {}
     raw_id = cfg.get("template_id")
@@ -2209,33 +2218,27 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": cfg.get("title", "Document"),
         "format": cfg.get("format", "pdf"),
-        "data": data if isinstance(data, dict) else {},
+        "data": data if isinstance(data, (dict, str)) else {},
         "template_name": cfg.get("template_name"),
         "template_id": template_id,
     }
 
 
-def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
-    """
-    Resolve {{ step_N.field }} placeholders in document step data from scratchpad.
-    Works recursively on dicts, lists, and strings.
-    """
-    import re
+def _resolved_document_step(gen: Dict[str, Any], finished_steps: Dict[int, Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    """The step's title and data with every ``{{ step_N.key }}`` resolved (PRD-251 US-117). Pure.
 
-    if isinstance(data, str):
-        # Replace {{ step_N.field }} or {{ step_N.output }}
-        def _replace(match):
-            step_num = int(match.group(1))
-            field = match.group(2)
-            ctx = scratchpad.format_context_for_step(step_num + 1)  # get results UP TO step_num
-            return ctx if ctx else match.group(0)
-
-        return re.sub(r"\{\{\s*step_(\d+)\.(\w+)\s*\}\}", _replace, data)
-    elif isinstance(data, dict):
-        return {k: _resolve_doc_step_variables(v, scratchpad) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [_resolve_doc_step_variables(item, scratchpad) for item in data]
-    return data
+    What each reference reads is ``core/services/playbook_step_refs.py``: an
+    earlier step's output, its scratchpad_write keys, or the keys of its JSON
+    answer. A reference no earlier step answers fails the step, naming it, and
+    nothing is rendered. The data must come out an object.
+    """
+    title = resolve_step_references(gen["title"], finished_steps)
+    data = resolve_step_references(gen["data"], finished_steps)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"generate_document step: data must be an object, or a reference to one, not {type(data).__name__}"
+        )
+    return str(title), data
 
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:

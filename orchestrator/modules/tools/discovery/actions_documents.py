@@ -261,7 +261,7 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "format": {
                     "type": "string",
-                    "description": "Optional filter — pdf, docx or xlsx.",
+                    "description": "Optional filter — pdf, docx, xlsx, social_image or social_video.",
                 },
                 "category": {
                     "type": "string",

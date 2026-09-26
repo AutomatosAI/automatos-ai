@@ -297,14 +297,31 @@ async def create_blog_post_from_topic(
 
 
 # ---------------------------------------------------------------------------
-# platform_generate_cover_image — wraps Gemini Nano Banana Pro server-side.
-# Generates → uploads via image_store → updates blog_posts.cover_image_url.
+# platform_generate_cover_image — the one image tool (CLAUDE.md §4). The image
+# model (config.BLOG_COVER_MODEL, default Gemini Nano Banana Pro) runs
+# server-side and the image goes to the platform image store.
+#   With a post_id: a 16:9 cover, attached as blog_posts.cover_image_url.
+#   Without (PRD-251 US-117): a still in the aspect ratio asked for (a social
+#   post's image, a slide), registered as an image Deliverable; no blog post
+#   is read or written. A Socials post can carry its deliverable_id in media.
 # CANVAS (or any agent) calls this with a single tool call.
 # ---------------------------------------------------------------------------
 
 _DATA_URL_RE = re.compile(
     r"data:(image/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\n\r]+)"
 )
+
+COVER_ASPECT_RATIO = "16:9"
+# The shapes a still is asked for: 9:16 stories and reels, 4:5 and 1:1 feed
+# posts, 16:9 links and slides (actions_blog.py repeats them as literals).
+IMAGE_ASPECT_RATIOS = ("16:9", "1:1", "4:5", "9:16")
+IMAGE_TITLE_CHARS = 80
+IMAGE_SOURCE_TYPE = "agent_output"
+_ERROR_DETAIL_CHARS = 200
+
+
+class ImageNotMade(Exception):
+    """The image model or the image store failed; the message is the tool's error."""
 
 
 def _extract_image_from_response(content: str) -> Optional[tuple]:
@@ -320,22 +337,86 @@ def _extract_image_from_response(content: str) -> Optional[tuple]:
     return mime, b64
 
 
+async def _image_from_model(workspace_id: UUID, full_prompt: str, context: str) -> tuple:
+    """(mime, base64) from the configured image model; raises :class:`ImageNotMade`.
+
+    The cost path of every image this tool makes: one OpenRouter call through
+    the LLM manager, tracked as ``blog_cover_gen`` / ``cover_image``.
+    """
+    from config import config
+    from core.llm import create_llm_manager
+
+    try:
+        llm = create_llm_manager(
+            service_name="blog_cover_gen",
+            provider="openrouter",
+            model=config.BLOG_COVER_MODEL,
+            workspace_id=str(workspace_id),
+            request_type="cover_image",
+        )
+        response = await llm.generate_response(
+            messages=[{"role": "user", "content": full_prompt}],
+        )
+    except Exception as e:
+        logger.error("Cover image LLM call failed: %s", e, exc_info=True)
+        raise ImageNotMade(f"Image generation failed: {str(e)[:_ERROR_DETAIL_CHARS]}") from e
+
+    content = getattr(response, "content", "") or ""
+    extracted = _extract_image_from_response(content)
+    if not extracted:
+        logger.warning(
+            "Cover image generation returned no image data | %s | content_len=%d", context, len(content),
+        )
+        raise ImageNotMade("Image model did not return base64 image data — try a clearer prompt")
+    return extracted
+
+
+async def _saved_image(workspace_id: UUID, mime: str, b64: str) -> str:
+    """The image store's id for the image; raises :class:`ImageNotMade`."""
+    from core.services.image_store import get_image_store
+
+    try:
+        return await get_image_store().save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
+    except Exception as e:
+        logger.error("Image store save failed: %s", e, exc_info=True)
+        raise ImageNotMade(f"Image upload failed: {str(e)[:_ERROR_DETAIL_CHARS]}") from e
+
+
+def _image_url(image_id: str) -> str:
+    from config import config
+    from core.services.image_store import generated_image_path
+
+    return f"{config.BACKEND_URL.rstrip('/')}{generated_image_path(image_id)}"
+
+
 async def generate_cover_image(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Generate a blog cover image via Gemini Nano Banana Pro and attach it to the
-    post in one tool call. Saves the image to the standard image_store (S3 or
-    local) and updates blog_posts.cover_image_url.
+    Generate an image and save it to the standard image_store (S3 or local).
+    With a post_id it is the post's 16:9 cover (blog_posts.cover_image_url);
+    without one it is registered as an image Deliverable (PRD-251 US-117).
     """
-    from core.services.blog_service import BlogService
-    from core.services.image_store import get_image_store
-    from core.llm import create_llm_manager
-
     post_id = params.get("post_id")
     prompt = (params.get("prompt") or "").strip()
-    if not post_id or not prompt:
-        return {"success": False, "error": "post_id and prompt are required"}
+    aspect = params.get("aspect_ratio") or COVER_ASPECT_RATIO
+    if not prompt:
+        return {"success": False, "error": "prompt is required"}
+    if aspect not in IMAGE_ASPECT_RATIOS:
+        return {"success": False, "error": f"aspect_ratio must be one of {', '.join(IMAGE_ASPECT_RATIOS)}"}
+    try:
+        if post_id:
+            if aspect != COVER_ASPECT_RATIO:
+                return {"success": False, "error": f"A blog cover is {COVER_ASPECT_RATIO}; leave out aspect_ratio or post_id"}
+            return await _cover_for_post(db, workspace_id, post_id, prompt)
+        return await _image_deliverable(db, workspace_id, params, prompt, aspect)
+    except ImageNotMade as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _cover_for_post(db: Session, workspace_id: UUID, post_id: Any, prompt: str) -> Dict[str, Any]:
+    """The blog cover: generated, saved, attached to the post."""
+    from core.services.blog_service import BlogService
 
     svc = BlogService(db, workspace_id)
     try:
@@ -346,56 +427,20 @@ async def generate_cover_image(
         return {"success": False, "error": f"Post {post_id} not found"}
 
     full_prompt = (
-        f"Generate a 16:9 cover image for a blog post titled: '{post.title}'. "
+        f"Generate a {COVER_ASPECT_RATIO} cover image for a blog post titled: '{post.title}'. "
         f"Image direction: {prompt}. "
         "Style: abstract/conceptual, modern and clean, no embedded text "
         "(title overlay handled by CSS). Output the image only."
     )
-
-    try:
-        from config import config
-
-        cover_model = config.BLOG_COVER_MODEL
-        llm = create_llm_manager(
-            service_name="blog_cover_gen",
-            provider="openrouter",
-            model=cover_model,
-            workspace_id=str(workspace_id),
-            request_type="cover_image",
-        )
-        response = await llm.generate_response(
-            messages=[{"role": "user", "content": full_prompt}],
-        )
-    except Exception as e:
-        logger.error("Cover image LLM call failed: %s", e, exc_info=True)
-        return {"success": False, "error": f"Image generation failed: {str(e)[:200]}"}
-
-    extracted = _extract_image_from_response(getattr(response, "content", "") or "")
-    if not extracted:
-        logger.warning(
-            "Cover image generation returned no image data | post_id=%s | content_len=%d",
-            post_id, len(getattr(response, "content", "") or ""),
-        )
-        return {
-            "success": False,
-            "error": "Image model did not return base64 image data — try a clearer prompt",
-        }
-    mime, b64 = extracted
-
-    try:
-        store = get_image_store()
-        image_id = await store.save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
-    except Exception as e:
-        logger.error("Image store save failed: %s", e, exc_info=True)
-        return {"success": False, "error": f"Image upload failed: {str(e)[:200]}"}
-
-    cover_url = f"{config.BACKEND_URL.rstrip('/')}/api/generated-images/{image_id}"
+    mime, b64 = await _image_from_model(workspace_id, full_prompt, context=f"post_id={post_id}")
+    image_id = await _saved_image(workspace_id, mime, b64)
+    cover_url = _image_url(image_id)
 
     try:
         updated = await svc.update_post(post.id, cover_image_url=cover_url)
     except Exception as e:
         logger.error("Update post cover failed: %s", e, exc_info=True)
-        return {"success": False, "error": f"Cover saved but post update failed: {str(e)[:200]}"}
+        return {"success": False, "error": f"Cover saved but post update failed: {str(e)[:_ERROR_DETAIL_CHARS]}"}
 
     if not updated:
         return {"success": False, "error": "Post not found during cover attach"}
@@ -409,3 +454,60 @@ async def generate_cover_image(
         "image_id": image_id,
         "message": f"Cover image generated and attached to post '{updated.title}'.",
     }
+
+
+async def _image_deliverable(
+    db: Session, workspace_id: UUID, params: Dict[str, Any], prompt: str, aspect: str
+) -> Dict[str, Any]:
+    """A still with no blog post: generated, saved, registered as an image Deliverable."""
+    full_prompt = (
+        f"Generate a {aspect} image. Image direction: {prompt}. "
+        "Style: modern and clean, no embedded text or lettering (any words are set "
+        "by the template or the post). Output the image only."
+    )
+    mime, b64 = await _image_from_model(workspace_id, full_prompt, context=f"aspect={aspect}")
+    image_id = await _saved_image(workspace_id, mime, b64)
+    image_url = _image_url(image_id)
+    title = (params.get("title") or "").strip()[:IMAGE_TITLE_CHARS] or prompt[:IMAGE_TITLE_CHARS]
+    registration = _register_image(db, workspace_id, params, image_id=image_id, mime=mime, b64=b64,
+                                   title=title, prompt=prompt, aspect=aspect)
+    if not registration.get("success") or not registration.get("deliverable_id"):
+        return {
+            "success": False,
+            "error": f"The image was saved ({image_url}) but not added to Deliverables: {registration.get('error')}",
+            "image_id": image_id,
+            "image_url": image_url,
+        }
+    return {
+        "success": True,
+        "deliverable_id": registration["deliverable_id"],
+        "image_id": image_id,
+        "image_url": image_url,
+        "title": title,
+        "aspect_ratio": aspect,
+        "message": f"Image '{title}' ({aspect}) saved to Deliverables.",
+    }
+
+
+def _register_image(db: Session, workspace_id: UUID, params: Dict[str, Any], *, image_id: str, mime: str,
+                    b64: str, title: str, prompt: str, aspect: str) -> Dict[str, Any]:
+    """The image's Deliverable: its file is the image store's object, served by the image route."""
+    import base64
+
+    from core.services.image_store import generated_image_path, image_extension, image_key
+    from services.deliverable_service import DeliverableService
+
+    return DeliverableService(db, workspace_id).register(
+        file_path=image_key(image_id, mime, str(workspace_id)),
+        title=title,
+        source_type=IMAGE_SOURCE_TYPE,
+        agent_id=params.get("_agent_id"),
+        agent_name=params.get("_agent_name"),
+        artifact_type="image",
+        storage_type="s3",
+        file_type=image_extension(mime),
+        file_size_bytes=len(base64.b64decode(b64)),
+        preview_url=generated_image_path(image_id),
+        preview_type="image",
+        extra={"image_id": image_id, "prompt": prompt, "aspect_ratio": aspect},
+    )
