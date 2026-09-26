@@ -143,12 +143,14 @@ export function useUpdateTaskStatus() {
 
       return { previous }
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) {
         for (const [key, data] of context.previous) {
           queryClient.setQueryData(key, data)
         }
       }
+      // #1094: a refused move says why ("Assign an agent first…"), not just snaps back.
+      toast.error(err instanceof Error ? err.message : 'Could not change the status')
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
