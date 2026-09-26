@@ -423,6 +423,7 @@ def register_documents_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        admin_only=True,  # F151: REST PUT /brand-kit is workspace:manage
         tags=["documents", "brand", "brand kit", "colours", "fonts", "voice", "socials", "setup"],
         examples=[
             "set our primary brand colour to #0055aa",
