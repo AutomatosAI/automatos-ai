@@ -11,6 +11,10 @@ envs/*.local
 scripts/ralph/
 .claude/ralph-loop.local.md
 
+# Customer-night sim workspace files: the local stack writes them here through
+# the bind mount. Local only (the repo is public).
+orchestrator/documents/
+
 # Node.js
 node_modules/
 .next/
