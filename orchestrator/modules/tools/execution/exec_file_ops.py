@@ -2,7 +2,8 @@
 File operation executors -- read, write, list, create, delete files.
 
 All operations are proxied to the workspace-worker service via
-exec_workspace.execute_workspace_action(). This guarantees files land in
+exec_workspace.execute_gated_workspace_action(), which also clears any gate a
+workspace tool declares (F179). This guarantees files land in
 the actual workspace volume (shared with the frontend file browser and
 agent workspace views) rather than the API container's ephemeral /tmp.
 
@@ -55,7 +56,7 @@ async def execute_file_op(
     )
 
     if tool_name == "read_file":
-        return await exec_workspace.execute_workspace_action(
+        return await exec_workspace.execute_gated_workspace_action(
             executor,
             "workspace_read_file",
             {"path": path},
@@ -66,7 +67,7 @@ async def execute_file_op(
         )
 
     if tool_name == "write_file":
-        return await exec_workspace.execute_workspace_action(
+        return await exec_workspace.execute_gated_workspace_action(
             executor,
             "workspace_write_file",
             {"path": path, "content": parameters.get("content", "")},
@@ -77,7 +78,7 @@ async def execute_file_op(
         )
 
     if tool_name == "list_directory":
-        return await exec_workspace.execute_workspace_action(
+        return await exec_workspace.execute_gated_workspace_action(
             executor,
             "workspace_list_dir",
             {"path": path or "."},
@@ -92,7 +93,7 @@ async def execute_file_op(
             return {"success": False, "error": "dir_path is required", "tool": tool_name}
         # Worker has no mkdir endpoint — use exec. Path is shell-quoted.
         quoted = "'" + path.replace("'", "'\\''") + "'"
-        return await exec_workspace.execute_workspace_action(
+        return await exec_workspace.execute_gated_workspace_action(
             executor,
             "workspace_exec",
             {"command": f"mkdir -p {quoted}"},
@@ -106,7 +107,7 @@ async def execute_file_op(
         if not path:
             return {"success": False, "error": "file_path is required", "tool": tool_name}
         quoted = "'" + path.replace("'", "'\\''") + "'"
-        return await exec_workspace.execute_workspace_action(
+        return await exec_workspace.execute_gated_workspace_action(
             executor,
             "workspace_exec",
             {"command": f"rm -rf {quoted}"},

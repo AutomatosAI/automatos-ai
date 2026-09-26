@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple, Union
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -530,6 +530,45 @@ def _subject_line(params: Dict[str, Any]) -> str:
     return f" on {', '.join(named[:3])}" if named else ""
 
 
+class Cleared(NamedTuple):
+    """How a call cleared PlatformActionExecutor.clear: its definition, the
+    full-autonomy dial, the grant that said yes, and whether the instructing
+    owner's or admin's request was the approval."""
+
+    action_def: Any
+    full_autonomy: bool
+    approved_via_grant_id: Optional[int]
+    human_directed: bool
+
+
+def marked(result: Any, cleared: Cleared) -> Any:
+    """``result`` marked with how its call cleared the confirmation gate; the
+    universal telemetry hook persists each mark to tool_execution_logs."""
+    if not isinstance(result, dict):
+        return result
+    action_def = cleared.action_def
+    # PRD-143 S8: an invocation that ran only because the full-autonomy
+    # dial skipped the confirmation gate is marked here, and the
+    # universal telemetry hook persists it to tool_execution_logs
+    # (router_decision->>'autonomous') — the Wave 4 audit trail
+    # records autonomous actions distinctly and queryably.
+    if cleared.full_autonomy and action_def is not None and action_def.requires_confirmation:
+        result = {**result, "autonomous": True}
+    # PRD-193 S2: a grant-authorised execution records WHICH grant
+    # said yes (router_decision->>'approved_via_grant_id' via the
+    # same universal telemetry hook) — distinct from the dial-skip
+    # marker above. Attribution must be honest: approved is not
+    # autonomous.
+    if cleared.approved_via_grant_id is not None:
+        result = {**result, "approved_via_grant_id": cleared.approved_via_grant_id}
+    # 2026-08-06: executed because the instructing human admin's
+    # interactive request IS the approval — distinct from both the
+    # dial-skip (autonomous) and a card-approved grant.
+    if cleared.human_directed:
+        result = {**result, "human_directed": True}
+    return result
+
+
 class PlatformActionExecutor:
     """
     Executes platform actions using direct database queries.
@@ -888,38 +927,21 @@ class PlatformActionExecutor:
             )
             return False
 
-    async def execute(
+    def clear(
         self,
         action_name: str,
         params: Dict[str, Any],
         caller_context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Execute a platform action by name with permission checking.
-
-        Args:
-            action_name: Registered platform action name.
-            params: Action parameters.
-            caller_context: The chat's server-built context
-                (``build_tool_caller_context``): ``user_id`` (the driving
-                user's Clerk id), ``driving_user_id`` (their users.id),
-                ``system_role`` (only ever the literal ``super_admin``) and,
-                on an interactive turn, ``conversation_id``. The
-                super_admin_only gate (PRD-143) reads ``system_role``; the
-                admin_only gate (US-003, F145) reads the driving user's active
-                owner/admin membership. With no caller context,
-                super_admin_only is denied and admin_only passes only under the
-                workspace's opt-in ``agents_inherit_admin`` policy.
+        *,
+        card_subject: str = "",
+    ) -> Union["Cleared", Dict[str, Any]]:
+        """The permission gates a call clears before it runs, fail closed: a
+        registered definition, the super admin and admin gates, then the
+        confirmation gate (the instructing owner or admin, a grant that said yes,
+        or the card). Returns the refusal or card to hand back, or how the call
+        cleared. The workspace tools clear these same gates (F179); a card whose
+        parameters cannot name what it acts on is given ``card_subject``.
         """
-        # LLMs sometimes send params as a JSON string instead of a dict
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except (json.JSONDecodeError, TypeError):
-                return {"success": False, "error": f"Invalid params format: expected dict, got string"}
-        handler = self._handlers.get(action_name)
-        if not handler:
-            return {"success": False, "error": f"Unknown platform action: {action_name}"}
-
         # PRD-193 S2 (P2-12): when a human grant authorises this exact call,
         # its id is recorded here so the execution is audit-marked as
         # grant-authorised — distinct from the full-autonomy dial skipping
@@ -1049,7 +1071,7 @@ class PlatformActionExecutor:
                     found, missing = resolve_targets(self.db, self.workspace_id, params, action_name)
                     if missing:
                         return missing_targets_error(action_name, missing)
-                    subject = named_subject(found) or _subject_line(params)
+                    subject = card_subject or named_subject(found) or _subject_line(params)
                     ask = {
                         "success": False,
                         "requires_confirmation": True,
@@ -1109,6 +1131,47 @@ class PlatformActionExecutor:
                 )
             except Exception:  # pragma: no cover - attach_ask_grant never raises
                 return ask
+
+        return Cleared(action_def, full_autonomy, approved_via_grant_id, human_directed)
+
+    async def execute(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Execute a platform action by name with permission checking.
+
+        Args:
+            action_name: Registered platform action name.
+            params: Action parameters.
+            caller_context: The chat's server-built context
+                (``build_tool_caller_context``): ``user_id`` (the driving
+                user's Clerk id), ``driving_user_id`` (their users.id),
+                ``system_role`` (only ever the literal ``super_admin``) and,
+                on an interactive turn, ``conversation_id``. The
+                super_admin_only gate (PRD-143) reads ``system_role``; the
+                admin_only gate (US-003, F145) reads the driving user's active
+                owner/admin membership. With no caller context,
+                super_admin_only is denied and admin_only passes only under the
+                workspace's opt-in ``agents_inherit_admin`` policy.
+        """
+        # LLMs sometimes send params as a JSON string instead of a dict
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                return {"success": False, "error": f"Invalid params format: expected dict, got string"}
+        handler = self._handlers.get(action_name)
+        if not handler:
+            return {"success": False, "error": f"Unknown platform action: {action_name}"}
+
+        # F179: the gates a call clears are one method, so the workspace tools
+        # clear the same ones.
+        cleared = self.clear(action_name, params, caller_context)
+        if not isinstance(cleared, Cleared):
+            return cleared
+        action_def, full_autonomy = cleared.action_def, cleared.full_autonomy
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the
         # rate limiter so denied calls don't spend rate-limit budget.
@@ -1445,31 +1508,7 @@ class PlatformActionExecutor:
             params = {**params, "_turn_id": str(_turn)}
         try:
             result = await handler(self.db, self.workspace_id, params)
-            # PRD-143 S8: an invocation that ran only because the full-autonomy
-            # dial skipped the confirmation gate is marked here, and the
-            # universal telemetry hook persists it to tool_execution_logs
-            # (router_decision->>'autonomous') — the Wave 4 audit trail
-            # records autonomous actions distinctly and queryably.
-            if (
-                full_autonomy
-                and action_def is not None
-                and action_def.requires_confirmation
-                and isinstance(result, dict)
-            ):
-                result = {**result, "autonomous": True}
-            # PRD-193 S2: a grant-authorised execution records WHICH grant
-            # said yes (router_decision->>'approved_via_grant_id' via the
-            # same universal telemetry hook) — distinct from the dial-skip
-            # marker above. Attribution must be honest: approved is not
-            # autonomous.
-            if approved_via_grant_id is not None and isinstance(result, dict):
-                result = {**result, "approved_via_grant_id": approved_via_grant_id}
-            # 2026-08-06: executed because the instructing human admin's
-            # interactive request IS the approval — distinct from both the
-            # dial-skip (autonomous) and a card-approved grant.
-            if human_directed and isinstance(result, dict):
-                result = {**result, "human_directed": True}
-            return result
+            return marked(result, cleared)
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
             try:

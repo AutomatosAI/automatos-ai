@@ -331,12 +331,15 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="workspace_get_public_url",
+        # F179: publishing is a write. It waits for an owner's or admin's approval
+        # unless one of them asked for it in their own chat turn.
         description=(
-            "Get a publicly accessible URL for a workspace file (image or document). "
-            "Use when you need to share a workspace file with an external service "
-            "that requires a public URL — e.g. posting an image to Instagram, "
-            "Twitter, or LinkedIn. The file is uploaded to a CDN-backed store and "
-            "the returned URL is accessible without authentication."
+            "Publish a workspace image at a public URL: anyone who has the link can open it, "
+            "without signing in. "
+            "Only a PNG, JPEG, GIF or WebP image is published; share a document "
+            "through its Deliverables link. Use when an external service needs a "
+            "public image URL, e.g. posting to Instagram, Twitter or LinkedIn. "
+            "It waits for an owner's or admin's approval unless one of them asked for it in chat."
         ),
         category="workspace_files",
         parameters={
@@ -345,14 +348,15 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "path": {
                     "type": "string",
                     "description": (
-                        "Relative path to the file inside the workspace "
+                        "Relative path to the image inside the workspace "
                         "(e.g. 'content/social/instagram/post.png')."
                     ),
                 },
             },
             "required": ["path"],
         },
-        permission_level="read",
+        permission_level="write",
+        requires_confirmation=True,
         promoted=True,
         tags=["workspace", "files", "share", "public", "url", "social", "instagram"],
         examples=[

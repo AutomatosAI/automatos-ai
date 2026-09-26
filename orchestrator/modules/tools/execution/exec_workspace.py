@@ -183,6 +183,63 @@ def public_image_type(data: bytes) -> Optional[str]:
     return None
 
 
+def public_image_url(image_id: str) -> str:
+    """Where the public image store serves ``image_id``: anyone with the link opens it."""
+    from config import config
+
+    return f"{(config.BACKEND_URL or '').rstrip('/')}/api/generated-images/{image_id}"
+
+
+# F179 (B): a confirmation card names what it acts on. A public link's id is minted
+# only when the image is stored, so the card names the file and where it will be.
+PATH_ON_CARD_CHARS = 160
+
+
+def _public_url_card(params: Dict[str, Any]) -> str:
+    path = str(params.get("path") or "").strip()[:PATH_ON_CARD_CHARS]
+    return f" on {path!r}, published at {public_image_url('<new id>')} for anyone with the link"
+
+
+_CARD_SUBJECTS = {"workspace_get_public_url": _public_url_card}
+
+
+def clear_declared_gates(
+    db,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    *,
+    workspace_id: Optional[UUID],
+    agent_id: Optional[int] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
+):
+    """F179 (B): a workspace tool clears the gates its definition declares, the
+    platform actions' own (PlatformActionExecutor.clear): super admin, admin and
+    confirmation. None when it declares none, as the file tools do, so they run
+    as before without touching the database; otherwise the refusal or card to
+    return, or how the call cleared (for ``marked``)."""
+    from modules.tools.discovery import get_action_registry
+
+    action_def = get_action_registry().get(tool_name)
+    declared = action_def is not None and (
+        action_def.requires_confirmation or action_def.admin_only or action_def.super_admin_only
+    )
+    if not declared or not workspace_id:
+        return None
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    # The actor is the runtime's agent, never a parameter (exec_platform's rule).
+    params = {
+        k: v for k, v in (parameters if isinstance(parameters, dict) else {}).items()
+        if k not in ("_agent_id", "_agent_name")
+    }
+    if agent_id:
+        params["_agent_id"] = agent_id
+    card = _CARD_SUBJECTS.get(tool_name)
+    return PlatformActionExecutor(db=db, workspace_id=workspace_id).clear(
+        tool_name, params, caller_context, card_subject=card(params) if card else "",
+    )
+
+
 async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
     """Download a workspace IMAGE and upload it to the public image store.
 
@@ -208,9 +265,7 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
     store = get_image_store()
     image_id = await store.save_image(b64_data, mime_type=content_type, workspace_id=str(workspace_id))
 
-    from config import config
-    backend_url = (config.BACKEND_URL or "").rstrip("/")
-    public_url = f"{backend_url}/api/generated-images/{image_id}"
+    public_url = public_image_url(image_id)
 
     logger.info(
         "[tool-trace %s] workspace_get_public_url: %s -> %s (%d bytes)",
@@ -223,6 +278,37 @@ async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optio
         "size_bytes": len(file_bytes),
         "content_type": content_type,
     }
+
+
+async def execute_gated_workspace_action(
+    executor,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    workspace_id: Optional[UUID] = None,
+    trace_id: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """F179 (B): how every workspace tool is dispatched, by its own name or a file
+    tool's (exec_file_ops): it clears the gates its definition declares, then runs."""
+    async def run() -> Dict[str, Any]:
+        return await execute_workspace_action(
+            executor, tool_name, parameters,
+            workspace_id=workspace_id, trace_id=trace_id,
+            agent_id=agent_id, caller_context=caller_context,
+        )
+
+    cleared = clear_declared_gates(
+        getattr(executor, "db", None), tool_name, parameters,
+        workspace_id=workspace_id, agent_id=agent_id, caller_context=caller_context,
+    )
+    if cleared is None:
+        return await run()
+    from modules.tools.discovery.platform_executor import Cleared, marked
+
+    if not isinstance(cleared, Cleared):
+        return cleared
+    return marked(await run(), cleared)
 
 
 async def resolve_repo_dir(client) -> Optional[str]:

@@ -1153,7 +1153,10 @@ class UnifiedToolExecutor:
         return await exec_document.execute_document_tool(self, tool_name, parameters, agent_id)
 
     async def _execute_workspace_action(self, tool_name, parameters, workspace_id=None, trace_id=None, agent_id=None, caller_context=None):
-        return await exec_workspace.execute_workspace_action(
+        # F179: a workspace tool clears the gates its definition declares, as a
+        # platform action does. A direct call, platform_execute and an approved
+        # card's resume all dispatch workspace tools here.
+        return await exec_workspace.execute_gated_workspace_action(
             self, tool_name, parameters,
             workspace_id=workspace_id, trace_id=trace_id,
             agent_id=agent_id, caller_context=caller_context,

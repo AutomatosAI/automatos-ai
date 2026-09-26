@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """CI gate — every mutating platform_* action is gated (PRD-140 Phase 1, F151).
 
-Every ActionDefinition registered in an ``actions_*.py`` file under
-``orchestrator/modules/tools/discovery/`` (at any depth) with permission_level
-``write`` or ``destructive`` must be one of:
+Every ActionDefinition registered in any file under
+``orchestrator/modules/tools/discovery/`` (at any depth: the workspace tools in
+``workspace_actions.py`` too, F179) with permission_level ``write`` or
+``destructive`` must be one of:
 
   1. hierarchy-gated: a key of ``_HIERARCHY_TARGETS`` in platform_executor.py;
   2. flag-gated: registered with ``super_admin_only=True`` or
-     ``admin_only=True``, which the executor enforces for the caller;
+     ``admin_only=True``, which the executor enforces for the caller (a
+     workspace tool clears the same gates, exec_workspace.clear_declared_gates);
   3. on ALLOW_LIST below, with a comment saying why it needs neither.
 
 The audit keys on the declared type, not on the name: an ungated write whose
@@ -113,6 +115,15 @@ ALLOW_LIST: Set[str] = {
     # F151: runs only where platform_set_skill_script_execution (admin_only +
     # confirmation) enabled scripts for the skill.
     "platform_run_skill_script",
+    # F179: the workspace's own sandbox (its files, shell, renders and repos);
+    # no agent, ticket or member to scope.
+    "workspace_write_file",
+    "workspace_exec",
+    "workspace_html_to_png",
+    "workspace_git",
+    # F179: confirmation-gated, a card on every lane but an owner's or admin's
+    # own chat turn; it publishes a raster image only.
+    "workspace_get_public_url",
 }
 
 # A hint only — names that suggest a mutation against a specific target, whose
@@ -164,9 +175,9 @@ def _read_registration(path: Path, definition: ast.Call) -> tuple:
 
 
 def collect_registrations() -> Dict[str, Registration]:
-    """Map every action registered in an actions_*.py file to its declared level and flags."""
+    """Map every action registered under ACTIONS_DIR to its declared level and flags."""
     found: Dict[str, Registration] = {}
-    for path in sorted(ACTIONS_DIR.rglob("actions_*.py")):
+    for path in sorted(ACTIONS_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         registered = [d for d in map(_registered_definition, ast.walk(tree)) if d is not None]
         built = [n for n in ast.walk(tree) if _is_action_definition(n)]
