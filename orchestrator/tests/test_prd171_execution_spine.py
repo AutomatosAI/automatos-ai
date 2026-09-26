@@ -249,6 +249,9 @@ class _FakeSession:
     def query(self, _model):
         return _FakeQuery(self._task)
 
+    def get(self, *_a, **_k):  # the writer's locked read (F175 review)
+        return self._task
+
     def commit(self):
         self.committed += 1
 

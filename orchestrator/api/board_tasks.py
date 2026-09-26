@@ -1601,7 +1601,11 @@ async def finalize_board_task_run(
         or ""
     )
 
-    task = db.query(BoardTask).get(task_id)
+    # F175 review (MEDIUM): three writers close a run here (its own result, a CLI
+    # host's result, the stall sweep). Lock the row so a second writer waits for the
+    # first, sees its ending, and leaves it, instead of both reading in_progress
+    # and the later commit overwriting the earlier one.
+    task = db.get(BoardTask, task_id, with_for_update=True, populate_existing=True)
     if not task or task.status != "in_progress":
         return None
 

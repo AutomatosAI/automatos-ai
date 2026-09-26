@@ -55,7 +55,7 @@ class _Session:
     def query(self, *_a, **_k):
         return self
 
-    def get(self, _id):
+    def get(self, *_a, **_k):  # db.get(BoardTask, id, with_for_update=..., populate_existing=...)
         return self.task
 
     def commit(self):

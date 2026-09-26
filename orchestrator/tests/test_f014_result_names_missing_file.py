@@ -153,7 +153,7 @@ class _Session:
     def query(self, *_a, **_k):
         return self
 
-    def get(self, _id):
+    def get(self, *_a, **_k):  # db.get(BoardTask, id, with_for_update=..., populate_existing=...)
         return self.task
 
     def commit(self):
@@ -202,7 +202,7 @@ def test_a_result_saved_as_a_knowledge_base_document_closes_done_saying_where(mo
             super().__init__("deliverables/cafe_onboarding_pack.md")
             self.task = task
 
-        def get(self, _id):
+        def get(self, *_a, **_k):
             return self.task
 
         def commit(self):
