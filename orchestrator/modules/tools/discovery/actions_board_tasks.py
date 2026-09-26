@@ -337,9 +337,10 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         description=(
             "Change a task's status — one task via task_id, or MANY tasks to the "
             "same status in ONE call via task_ids (use this for 'close all …'; "
-            "never loop one call per task). Moving to 'in_progress' triggers "
-            "immediate agent execution if an agent is assigned. Moving to 'done' "
-            "completes it. 'blocked' requires blocked_reason."
+            "never loop one call per task). Moving to 'in_progress' starts the "
+            "assigned agent at once; a task with no agent is refused, so assign one "
+            "first (platform_assign_task). Moving to 'done' completes it. "
+            "'blocked' requires blocked_reason."
         ),
         category="tasks",
         parameters={

@@ -47,6 +47,9 @@ router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 # no longer wanted. Closed is terminal, claims nothing about the work, and keeps
 # the board honest.
 VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled", "closed"}
+# #1094: a ticket with no agent cannot run, so it is never in progress. The
+# board's PATCHes and platform_update_task_status refuse it in these words.
+NO_AGENT_NO_PROGRESS = "Assign an agent first: a ticket with no agent cannot be in progress."
 # An operator note is read on a card, not in a document.
 MAX_TASK_NOTE_CHARS = 1000
 # A reviewer's verdict is folded into the next attempt's prompt, so it is read
@@ -641,6 +644,20 @@ async def update_task(
             ),
         )
 
+    # #1094: refused before anything changes; an agent this body assigns counts,
+    # read as an id first (review LOW), never by the truth of what was sent.
+    agent_after = task.assigned_agent_id
+    if "assigned_agent_id" in body:
+        raw_agent = body["assigned_agent_id"]
+        try:
+            if isinstance(raw_agent, bool):  # true is not agent 1 (review LOW)
+                raise TypeError("a boolean is not an id")
+            agent_after = int(raw_agent) if raw_agent is not None else None
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="assigned_agent_id must be an agent's id, or null")
+    if body.get("status") == "in_progress" and not agent_after:
+        raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)
+
     if "review_feedback" in body:
         # The reviewer's verdict. The dispatcher folds it into the prompt of the
         # next attempt (see _ticket_prompt) and clears it once consumed.
@@ -1162,8 +1179,12 @@ async def update_task_status(
     new_status = body.get("status", "").strip()
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
+    if new_status == "in_progress" and not task.assigned_agent_id:
+        raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
 
     old_status = task.status
+    if new_status == "in_progress":
+        keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))  # its result is cleared below
     task.status = new_status
     end_session_claim(task, old_status, new_status)
     if new_status == "in_progress":

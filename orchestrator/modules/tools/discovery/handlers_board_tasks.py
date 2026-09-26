@@ -847,7 +847,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # PRD-227 US-001: agent-side vocabulary reaches parity with the HTTP path by
     # reusing its VALID_STATUSES set — so 'blocked'/'failed' are accepted and any
     # future status the HTTP path adds is accepted identically, never drifting.
-    from api.board_tasks import VALID_STATUSES
+    from api.board_tasks import NO_AGENT_NO_PROGRESS, VALID_STATUSES
     if new_status not in VALID_STATUSES:
         return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {sorted(VALID_STATUSES)}"}
 
@@ -863,6 +863,10 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     ).first()
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
+    # #1094: set in progress with no agent, then assigned, a ticket sat 'in
+    # progress' with nothing running it.
+    if new_status == "in_progress" and not task.assigned_agent_id:
+        return {"success": False, "error": NO_AGENT_NO_PROGRESS}
 
     old_status = task.status
 
@@ -888,11 +892,21 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         review_mode = task.review_mode or "auto"
         now = datetime.now(timezone.utc)
 
+        # PRD-227 P227-RVW-4: a redo starts clean, as the board's PATCH does: the
+        # last run's completed_at, error_message and result are cleared, so a redo
+        # that succeeds never renders as failed. (It lived on the no-agent write,
+        # the only in_progress that reached it, which #1094 now refuses.) The last
+        # run is kept on record first, as Run Now keeps it (review MEDIUM): a draft
+        # in Review is never lost.
+        from api.board_tasks import keep_previous_run
+
+        keep_previous_run(task, why="moved to in progress", by="an agent")
         won = db.execute(
             text(
                 "UPDATE board_tasks "
                 "SET status = 'in_progress', "
                 "    started_at = COALESCE(started_at, :now), "
+                "    completed_at = NULL, error_message = NULL, result = NULL, "
                 "    blocked_at = NULL, blocked_reason = NULL, "
                 "    updated_at = :now "
                 "WHERE id = :id AND status <> 'in_progress' "
@@ -928,20 +942,8 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         }
 
     # Every other transition is a plain ORM write with no launch and no dispatcher
-    # race (in_progress WITHOUT an assigned agent cannot run, so it falls here too).
+    # race (in_progress without an agent was refused above).
     task.status = new_status
-    # PRD-227 P227-RVW-4: mirror the HTTP update_task_status in_progress reset
-    # (api/board_tasks.py:890-895) — clear the terminal fields so a redone task
-    # (done → in_progress → done) does not carry a stale completed_at/error_message/
-    # result. Without this, a task that previously failed then succeeds still renders
-    # as the red 'failed' strip (board-card.tsx isFailed = error_message != null &&
-    # status == 'done') — a board-state lie this PRD exists to kill. started_at is
-    # set unconditionally, matching the HTTP path (restart the clock on a redo).
-    if new_status == "in_progress":
-        task.started_at = datetime.now(timezone.utc)
-        task.completed_at = None
-        task.error_message = None
-        task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).
