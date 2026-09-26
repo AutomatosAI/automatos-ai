@@ -67,6 +67,7 @@ from consumers.chatbot.empty_completion import is_empty_completion, with_fallbac
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 
 logger = logging.getLogger(__name__)
 
@@ -2141,9 +2142,35 @@ class StreamingChatService:
                 return await _run_loop(retry)
             return ToolLoopResult(response=retry, iterations=result.iterations)
 
+        # F205: after a failed call, the reply says what the owner can do in their
+        # words; one that names the platform's tools or parameters is re-prompted
+        # once, with no tools.
+        vocabulary: Dict[str, Any] = {}
+
+        async def _owner_words(result):
+            if called_tools(result.response) or result.forced_final or not executor.tracker.failed:
+                return result
+            if "names" not in vocabulary:
+                vocabulary["names"] = internal_vocabulary(use_tools)
+            answer = getattr(result.response, "content", "") or ""
+            names = internal_names(answer, vocabulary["names"], owner_text)
+            if not names:
+                return result
+            logger.warning(f"[F205] the reply after a failed call names {names} — re-prompting once")
+            llm_messages.append({"role": "assistant", "content": answer})
+            llm_messages.append({"role": "system", "content": owner_words_nudge(names)})
+            retry = await _llm_callback(llm_messages, None)
+            said = getattr(retry, "content", "") or ""
+            if called_tools(retry) or not said.strip():
+                return result
+            still = internal_names(said, vocabulary["names"], owner_text)
+            if still:
+                logger.warning(f"[F205] the retry still names {still}")
+            return ToolLoopResult(response=retry, iterations=result.iterations)
+
         async def _runner():
             try:
-                return await _ground_ids(await _run_loop(response))
+                return await _owner_words(await _ground_ids(await _run_loop(response)))
             finally:
                 await sse_queue.put(DONE)
 

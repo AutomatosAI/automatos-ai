@@ -479,8 +479,9 @@ class ToolLoopExecutor:
                         content = post.llm_context_override
 
             tool_results.append(_tool_msg(call_id, name, content))
-            if success:
-                self.tracker.record_outcome(name, args, result)   # F108: what a reply may claim
+            # F108: what a reply may claim; F205: what failed (a raised call's
+            # result says success False, so it is recorded as failed).
+            self.tracker.record_outcome(name, args, result)
 
             # Per-tool result inspection: fatal-error short-circuit signal.
             if isinstance(result, dict) and result.get("fatal_error"):

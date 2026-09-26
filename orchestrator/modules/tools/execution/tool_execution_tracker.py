@@ -87,6 +87,8 @@ class ToolExecutionTracker:
         # F108: the actions that did what they were asked this turn (a result
         # that reports a failure does not count) — what a reply may claim.
         self.succeeded: Set[str] = set()
+        # F205: the actions that answered with a failure this turn.
+        self.failed: Set[str] = set()
         # F120: how many queries per search tool came from EARLIER model responses;
         # None until a caller marks rounds (then every earlier query counts).
         self._round_start: Optional[Dict[str, int]] = None
@@ -181,9 +183,11 @@ class ToolExecutionTracker:
         """F108: record an action that succeeded — the inner action for the
         platform_execute dispatcher. A result that says it failed
         (``success: False``, Composio's ``successful: False``) is not recorded."""
+        action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
+            self.failed.add(action)
             return
-        self.succeeded.add(self._counting_key(tool_name, tool_args).split(":", 1)[-1])
+        self.succeeded.add(action)
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)
