@@ -183,7 +183,7 @@ models.** Offer the masked in-chat key entry. List other providers \
 (OpenAI, Anthropic, …) collapsed beneath, for users who already have one.
 A saved key is validated live and unlocks the full model catalogue. Declining is \
 fine — the remaining trial credit keeps working.
-Then present the run-and-learn checklist (connect a second app · invite a teammate \
+Then present the run-and-learn checklist (connect {an_app} · invite a teammate \
 · run your first mission · take the 10-minute course).
 To finish, write the onboarding summary — what you built, why, and what happens \
 next — with `platform_submit_report` (report_type `onboarding`, plus a title and \
@@ -301,8 +301,20 @@ class OnboardingSection(BaseSection):
         if stage == "boom":
             return _STAGE_BOOM
         if stage == "powerup":
-            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding))
+            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding), an_app=self._next_app(ctx))
         return ""  # defensive — terminal stages never reach here
+
+    @staticmethod
+    def _next_app(ctx: SectionContext) -> str:
+        """F188: the checklist item as the setup checklist words it — "an app"
+        while none is connected (night 6 asked for "a second app" with 0)."""
+        try:
+            from core.composio.entity_manager import EntityManager
+
+            connected = EntityManager(ctx.db_session).get_connected_apps(ctx.workspace_id)
+        except Exception:  # noqa: BLE001 -- unreadable: the first app is the ask
+            connected = []
+        return "a second app" if connected else "an app"
 
     def _plan_recommendation(self, onboarding: dict[str, Any]) -> str:
         """The plan-recommendation line for the proposal stage (US-025).

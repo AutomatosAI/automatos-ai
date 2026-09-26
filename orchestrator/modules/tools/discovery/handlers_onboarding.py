@@ -199,6 +199,13 @@ async def update_onboarding(
     advance_to = params.get("advance_to")
     segment = params.get("segment")
     plan = params.get("plan")
+    # F188: on local, powerup (the key and the checklist cards) has no UI. The
+    # stage after boom is completed, as advance_past_boom moves it there.
+    from config import config
+
+    local_finish = advance_to == "powerup" and config.IS_LOCAL_EDITION
+    if local_finish:
+        advance_to = "completed"
 
     if not advance_to and not segment and not plan and not params.get("_bare_answer"):
         return {
@@ -354,4 +361,8 @@ async def update_onboarding(
             db.rollback()
         return {"success": False, "error": str(exc)}
 
-    return {"success": True, "data": public_snapshot(workspace)}
+    result: Dict[str, Any] = {"success": True, "data": public_snapshot(workspace)}
+    if local_finish:
+        result["message"] = ("This local install has no powerup step (a key and the checklist are SaaS), "
+                             "so onboarding is completed.")
+    return result
