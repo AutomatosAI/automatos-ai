@@ -1156,6 +1156,15 @@ async def run_task_now(
         raise HTTPException(status_code=409, detail=owned)
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
+    # #1115: an agent whose model cannot run is never handed the task (F141's rule).
+    from modules.tools.discovery.handlers_board_tasks import _cannot_take_tasks
+
+    agent = db.query(Agent).filter(
+        Agent.id == task.assigned_agent_id, Agent.workspace_id == ctx.workspace_id,
+    ).first()
+    unable = _cannot_take_tasks(db, agent) if agent is not None else None
+    if unable:
+        raise HTTPException(status_code=409, detail=unable)
     if _running_now(db, task):
         raise HTTPException(
             status_code=409,
@@ -1177,13 +1186,18 @@ async def run_task_now(
 
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
+    # #1115: a Claude Code agent's ticket waits for a host that serves this
+    # workspace; queued, it is claimed the moment one is back, but it has not started.
+    waiting = _waiting_for_a_host(task)
     return {
         "success": True,
         "task_id": task.id,
         "status": task.status,
         "rerun_of": was if rerun else None,
+        "started": not waiting,
         "message": (
-            f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
+            f"Ticket #{task.id} is queued, but nothing can start it yet: {task.blocked_reason}" if waiting
+            else f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
             "ticket's history." if rerun
             else f"Ticket #{task.id} said in progress, but nothing was running it — started it now." if stale
             else f"Ticket #{task.id} started."
@@ -1567,6 +1581,14 @@ def _agent_runtime_kind(db: Session, agent_id: int) -> str:
             # the attribute; anything unreadable is an API agent (today's default).
             configuration = getattr(row, "configuration", None)
     return runtime_kind_of(configuration)
+
+
+def _waiting_for_a_host(task: Any) -> bool:
+    """Whether a ticket's line says it waits for a CLI host (_note_no_host_for_cli's words)."""
+    from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
+
+    reason = getattr(task, "blocked_reason", None)
+    return reason == NO_HOST_REASON or is_no_cli_host_reason(reason)
 
 
 def _note_no_host_for_cli(db: Session, task: "BoardTask") -> bool:
