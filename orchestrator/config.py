@@ -794,6 +794,10 @@ class Config:
     TASK_MAX_RETRIES: int = int(os.getenv("TASK_MAX_RETRIES", "2"))
     TASK_MAX_RETRY_BACKOFF_MS: int = int(os.getenv("TASK_MAX_RETRY_BACKOFF_MS", "300000"))  # 5 min cap
     TASK_RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("TASK_RECONCILE_INTERVAL_SECONDS", "60"))
+    # PRD-251 US-120: how often a playbook step that waits on a render (a fixed
+    # generate_document step) stamps the run's progress. Keep it well under
+    # TASK_STALL_TIMEOUT_SECONDS, or the reconciler fails the run as stalled.
+    PLAYBOOK_PROGRESS_STAMP_SECONDS: int = int(os.getenv("PLAYBOOK_PROGRESS_STAMP_SECONDS", "60"))
 
     # Playbook (Recipe) execution timeouts — defaults used when a recipe's
     # execution_config is empty; the MIN_* values floor whatever the recipe configures

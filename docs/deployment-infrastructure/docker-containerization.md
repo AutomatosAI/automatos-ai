@@ -151,6 +151,7 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 | `SOCIALS_RENDER_TIMEOUT_SECONDS` | 900 | Read timeout of each call; `POST /render` answers once the job is staged, spoken, mixed and checked. |
 | `SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS` | 10 | How long a connection may take before the renderer counts as unreachable. |
 | `SOCIALS_RENDER_POLL_SECONDS` / `SOCIALS_RENDER_MAX_WAIT_SECONDS` | 5 / 1500 | How often a render is polled, and how long it is waited for (queue and render). Keep the wait under `BOOT_REAPER_STALE_MINUTES`. |
+| `PLAYBOOK_PROGRESS_STAMP_SECONDS` | 60 | How often a Playbook's render step (a fixed `generate_document` step) stamps the run's progress while it waits. Keep it well under `TASK_STALL_TIMEOUT_SECONDS`, or the reconciler fails the run as stalled and starts it again. |
 
 **Local edition.** The optional compose profile `media` (`docker compose --profile media up -d media-render`), capped at 4 CPUs and 8 GB. Without it, a render answers "Rendering needs the media profile". See [self-hosting](../getting-started/self-hosting.md#7b-media-rendering-the-media-profile).
 

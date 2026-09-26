@@ -28,7 +28,9 @@ this service never half-installs a closure.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
+from itertools import chain, count
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -193,17 +195,9 @@ def _find_marketplace_agent(db: Any, ref: str) -> Any:
 
 
 def _existing_workspace_clone(db: Any, workspace_id: UUID, marketplace_agent: Any) -> Any:
-    from core.models.core import Agent
+    from modules.tools.discovery.cascade_installer import workspace_clone_of
 
-    return (
-        db.query(Agent)
-        .filter(
-            Agent.cloned_from_id == marketplace_agent.id,
-            Agent.workspace_id == workspace_id,
-            Agent.owner_type == "workspace",
-        )
-        .first()
-    )
+    return workspace_clone_of(db, workspace_id, marketplace_agent)
 
 
 async def install_marketplace_agent(
@@ -243,12 +237,27 @@ async def install_marketplace_agent(
 # --------------------------------------------------------------------------- #
 
 
+def free_template_id(db: Any, base: str, workspace_id: UUID) -> str:
+    """A ``template_id`` no row holds: it is unique across every workspace and the
+    marketplace (``ix_workflow_recipes_template_id``), not per workspace. The plain
+    id when it is free, else the workspace's own suffix, then a counter."""
+    from core.models.core import WorkflowTemplate
+
+    def taken(candidate: str) -> bool:
+        return db.query(WorkflowTemplate.id).filter(WorkflowTemplate.template_id == candidate).first() is not None
+
+    suffix = str(workspace_id).replace("-", "")[:8]
+    candidates = chain((base, f"{base}-{suffix}"), (f"{base}-{suffix}-{n}" for n in count(2)))
+    return next(candidate for candidate in candidates if not taken(candidate))
+
+
 def _clone_recipe_to_workspace(db: Any, workspace_id: UUID, marketplace_recipe: Any,
                                user_id: Optional[int] = None):
     """Clone a marketplace playbook (``workflow_recipes`` row) into the workspace,
     owner swapped to the workspace (D3). Mirrors ``clone_agent_to_workspace`` and
     the recipe API's inline clone; column values are copied reflectively so new
-    recipe columns are preserved without edits here.
+    recipe columns are preserved without edits here, and deep-copied so the clone
+    never shares its steps with the marketplace row.
     """
     from sqlalchemy import inspect as sa_inspect
 
@@ -267,17 +276,7 @@ def _clone_recipe_to_workspace(db: Any, workspace_id: UUID, marketplace_recipe: 
     recipe_name = f"{marketplace_recipe.name} (Copy)" if name_exists else marketplace_recipe.name
 
     base_template_id = (marketplace_recipe.template_id or "playbook").replace("marketplace-", "")
-    template_id, counter = base_template_id, 1
-    while (
-        db.query(WorkflowTemplate)
-        .filter(
-            WorkflowTemplate.template_id == template_id,
-            WorkflowTemplate.workspace_id == workspace_id,
-            WorkflowTemplate.owner_type == "workspace",
-        )
-        .first()
-    ):
-        template_id, counter = f"{base_template_id}-{counter}", counter + 1
+    template_id = free_template_id(db, base_template_id, workspace_id)
 
     cloned = WorkflowTemplate()
     identity = {
@@ -287,7 +286,7 @@ def _clone_recipe_to_workspace(db: Any, workspace_id: UUID, marketplace_recipe: 
     }
     for col in sa_inspect(WorkflowTemplate).columns.keys():
         if col not in identity:
-            setattr(cloned, col, getattr(marketplace_recipe, col, None))
+            setattr(cloned, col, deepcopy(getattr(marketplace_recipe, col, None)))
     cloned.template_id = template_id
     cloned.name = recipe_name
     cloned.workspace_id = workspace_id
@@ -337,9 +336,11 @@ async def _install_playbook(db: Any, workspace_id: UUID, ref: str,
         status = "cloned"
 
     manifest.add(Registration("playbook", str(cloned_recipe.id), recipe_name, status))
+    # A re-install back-fills the agents' dependencies but leaves the workspace's
+    # own copy of the playbook (its steps' agents included) as the workspace has it.
     cascade = await cascade_recipe_dependencies(
         db=db, workspace_id=workspace_id, marketplace_recipe=marketplace_recipe,
-        cloned_recipe=cloned_recipe, user_id_int=user_id,
+        cloned_recipe=cloned_recipe, user_id_int=user_id, remap_steps=status == "cloned",
     )
     _absorb_cascade(manifest, cascade)
     return manifest

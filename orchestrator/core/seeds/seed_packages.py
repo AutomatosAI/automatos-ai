@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PRD-230 US-008 — Seed the two Shopify marketplace packages.
-===========================================================
+PRD-230 US-008 — Seed the marketplace packages.
+===============================================
 
 **Shopify Management** (run the store) + **Shopify Development** (build / theme /
 dev) — curated from the EXISTING 12 Shopify marketplace agents seeded by
@@ -27,6 +27,10 @@ Curation is v1 (Gerard tunes content later). The picks are defensible and cited:
     shopify-app-dev           Shopify App Architect
     shopify-storefront-dev    Shopify Storefront Developer
     shopify-extension-dev     Shopify Extension Builder
+
+PRD-251 US-120 adds **Socials** (``core/seeds/seed_socials_package.py``): its two
+agents and four Playbooks are seeded there, at every boot, and its members are
+built from that roster the same way.
 """
 from __future__ import annotations
 
@@ -34,6 +38,7 @@ import logging
 
 from core.database.database import SessionLocal
 from core.seeds.seed_shopify_agents import SHOPIFY_AGENTS
+from core.seeds.seed_socials_package import SOCIALS_PACKAGE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -221,14 +226,15 @@ DEVELOPMENT_PACKAGE: dict = {
 }
 
 
-PACKAGES: list[dict] = [MANAGEMENT_PACKAGE, DEVELOPMENT_PACKAGE]
+SHOPIFY_PACKAGES: list[dict] = [MANAGEMENT_PACKAGE, DEVELOPMENT_PACKAGE]
+PACKAGES: list[dict] = SHOPIFY_PACKAGES + [SOCIALS_PACKAGE]
 
 # The JSONB fields rebuilt (not mutated) on update — assign fresh copies.
 _JSONB_FIELDS = ("vertical_tags", "matching", "members", "setup_manifest")
 
 
 def seed_packages(db=None, create_only: bool = False) -> tuple[int, int]:
-    """Idempotently upsert the Shopify packages into ``marketplace_packages``
+    """Idempotently upsert the packages into ``marketplace_packages``
     (keyed by slug). Re-running is a no-op create-wise: existing rows are
     refreshed, never duplicated. Returns ``(created, updated)``.
 

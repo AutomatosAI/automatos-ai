@@ -25,7 +25,7 @@ import time
 import uuid as uuid_mod
 from datetime import datetime, timezone
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -382,19 +382,41 @@ def _step_deadline(step_timeout_sec: float, session_step: bool, cfg) -> float:
     return max(float(step_timeout_sec), float(getattr(cfg, "CLI_LANE_STEP_TIMEOUT_SECONDS", 1800)))
 
 
-def _stamp_progress(db, execution) -> None:
-    """Record that the run is alive (execution_metadata.last_progress_at, naive UTC
-    like started_at); the reconciler's stall rule reads it. Rebuild the JSONB,
-    never mutate; a failure to stamp must never end the step."""
+def _progress_stamped(metadata) -> Dict[str, Any]:
+    """``metadata`` with the run's last progress time (naive UTC, like started_at):
+    a new dict. The reconciler's stall rule reads it."""
     from datetime import datetime as _dt
 
+    return {**dict(metadata or {}), "last_progress_at": _dt.utcnow().replace(microsecond=0).isoformat()}
+
+
+def _stamp_progress(db, execution) -> None:
+    """Record that the run is alive (execution_metadata.last_progress_at). Rebuild
+    the JSONB, never mutate; a failure to stamp must never end the step."""
     try:
-        meta = dict(getattr(execution, "execution_metadata", None) or {})
-        meta["last_progress_at"] = _dt.utcnow().replace(microsecond=0).isoformat()
-        execution.execution_metadata = meta
+        execution.execution_metadata = _progress_stamped(getattr(execution, "execution_metadata", None))
         db.commit()
     except Exception:  # noqa: BLE001
         logger.debug("[recipe_direct] progress stamp failed", exc_info=True)
+
+
+async def _stamping_progress(work: Awaitable[Any], stamp: Callable[[], None], every_seconds: float) -> Any:
+    """Await ``work``, calling ``stamp`` every ``every_seconds`` while it runs.
+
+    A fixed generate_document step waits on media-render for minutes (PRD-251
+    US-120): without a fresh stamp the reconciler fails the run as stalled after
+    TASK_STALL_TIMEOUT_SECONDS and starts it again, render and all.
+    """
+    async def beat() -> None:
+        while True:
+            await asyncio.sleep(every_seconds)
+            stamp()
+
+    beating = asyncio.ensure_future(beat())
+    try:
+        return await work
+    finally:
+        beating.cancel()
 
 
 def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str:
@@ -1247,7 +1269,7 @@ async def _execute_recipe_inner(
 
         # F113: whatever the trigger stored (a string from a tool call, a retried
         # row), the steps read key-value pairs.
-        from core.services.playbook_inputs import playbook_inputs
+        from core.services.playbook_inputs import playbook_inputs, with_input_defaults
 
         input_data, _input_problem = playbook_inputs(input_data)
         if _input_problem:
@@ -1259,6 +1281,9 @@ async def _execute_recipe_inner(
         if not recipe:
             await _fail_execution(db, recipe_execution_id, "Recipe not found")
             return
+        # A scheduled run, a tool's run and a retry carry only what they were
+        # given: the playbook's declared defaults fill the rest, as the run route's do.
+        input_data = with_input_defaults(input_data, getattr(recipe, "inputs", None))
 
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == recipe_execution_id
@@ -1479,8 +1504,10 @@ async def _execute_recipe_inner(
             )
             logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
-            # Update execution progress
+            # Update execution progress. The stamp tells the reconciler the run is
+            # alive: a run of several steps outlives TASK_STALL_TIMEOUT_SECONDS.
             execution.current_step = idx + 1
+            execution.execution_metadata = _progress_stamped(execution.execution_metadata)
             db.commit()
 
             # PRD-239 S3b: a session agent's step is a Claude Code session on the
@@ -1546,13 +1573,17 @@ async def _execute_recipe_inner(
                     gen_title, gen_data = _resolved_document_step(gen, finished_steps)
 
                     gen_service = DocumentGenerationService(db, workspace_id)
-                    gen_result = await gen_service.generate(
-                        title=gen_title,
-                        format=gen["format"],
-                        data=gen_data,
-                        workspace_id=workspace_id,
-                        template_name=gen["template_name"],
-                        template_id=gen["template_id"],
+                    gen_result = await _stamping_progress(
+                        gen_service.generate(
+                            title=gen_title,
+                            format=gen["format"],
+                            data=gen_data,
+                            workspace_id=workspace_id,
+                            template_name=gen["template_name"],
+                            template_id=gen["template_id"],
+                        ),
+                        _mark_progress,
+                        app_config.PLAYBOOK_PROGRESS_STAMP_SECONDS,
                     )
                     # PRD-242 S4: a playbook-rendered document is a Deliverable —
                     # it used to live only inside the step's output JSON.

@@ -282,6 +282,20 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("Built-in skills seed: %s", e)
 
+        # PRD-251 US-120: the Socials package's two marketplace agents and four
+        # Playbooks (core/seeds/seed_socials_package.py). Creates what is missing
+        # and leaves existing rows alone, except the agents' skill links: every
+        # boot links the built-in skills that exist now, so a skill the owner
+        # syncs after the first boot attaches on the next one. After the built-in
+        # skills above; the package row itself is seed_packages below.
+        try:
+            from core.seeds.seed_socials_package import seed_socials_marketplace
+            with get_db_session() as db:
+                socials_seeded = seed_socials_marketplace(db)
+            logger.info("Socials package seed: %s", socials_seeded)
+        except Exception as e:
+            logger.warning("Socials package seed: %s", e)
+
         # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
         # manual script, so prod carried ZERO packages — the Packages tab was
         # empty and onboarding's proposal silently fell back to custom-design
