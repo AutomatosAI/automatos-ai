@@ -47,6 +47,9 @@ router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 # no longer wanted. Closed is terminal, claims nothing about the work, and keeps
 # the board honest.
 VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled", "closed"}
+# F194: the source kinds a request may file: the board's own create ('user') and a
+# Command Centre follow-up ('activity'). Every other kind is the platform's.
+USER_CREATABLE_SOURCE_TYPES = frozenset({"user", "activity"})
 # #1094: a ticket with no agent cannot run, so it is never in progress. The
 # board's PATCHes and platform_update_task_status refuse it in these words.
 NO_AGENT_NO_PROGRESS = "Assign an agent first: a ticket with no agent cannot be in progress."
@@ -398,7 +401,14 @@ async def create_task(
     # PRD-221 S14: a caller (e.g. a Command Centre activity card) may attach
     # the source it was created from, so the board card links back. Defaults
     # to 'user' when absent — unchanged for every existing caller.
-    source_type = body.get("source_type", "user")
+    # F194: only a person's kinds. A mission's or playbook's step, a session or
+    # a lane's ticket is filed by the platform; a request claiming one made a
+    # ticket the dispatcher and the host treat as the platform's own.
+    source_type = body.get("source_type") or "user"
+    if source_type not in USER_CREATABLE_SOURCE_TYPES:
+        raise HTTPException(status_code=422, detail=(
+            f"source_type '{source_type}' is filed by the platform, not by a request. "
+            f"Use one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or leave it out."))
     source_id = body.get("source_id")
 
     task = BoardTask(
