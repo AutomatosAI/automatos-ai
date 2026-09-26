@@ -304,8 +304,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "times. Use platform_execute_playbook for immediate one-off runs. "
             "For one run at a set time, give a dated cron: '20 18 23 9 *' is "
             "18:20 on 23 September, once. The cron is read in the schedule's "
-            "timezone (default: the workspace's); the reply names it. "
-            "Provide playbook_id or playbook_name."
+            "timezone: pass the owner's own (UK time is 'Europe/London'), and ask "
+            "them first when you do not know where they are — never assume UTC. "
+            "The reply names the zone used. Provide playbook_id or playbook_name."
         ),
         category="playbooks",
         parameters={
@@ -325,7 +326,11 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "timezone": {
                     "type": "string",
-                    "description": "IANA timezone the cron is read in (e.g. 'Europe/London'). Defaults to the workspace's timezone (its heartbeat setting), else UTC.",
+                    "description": (
+                        "The owner's IANA timezone, which the cron is read in (UK time is "
+                        "'Europe/London'). Ask the owner when you do not know it; never assume "
+                        "UTC. Left out, the workspace's zone (its heartbeat setting) is used, else UTC."
+                    ),
                 },
                 "enabled": {
                     "type": "boolean",

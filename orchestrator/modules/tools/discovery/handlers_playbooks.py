@@ -571,13 +571,24 @@ async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, A
         playbook.name, playbook.id, cron_expression, timezone, enabled,
     )
 
+    # F132 (night 6): "7am Monday" from a UK owner was saved in UTC — no zone was
+    # passed, and a new workspace has none. The reply says what was assumed.
+    zone_note = "" if params.get("timezone") else ZONE_ASSUMED.format(zone=timezone)
     return {
         "success": True,
         "playbook_id": playbook.id,
         "playbook_name": playbook.name,
         "schedule_config": schedule_config,
-        "message": f"Playbook '{playbook.name}' scheduled: {cron_expression} in {timezone}. {schedule_note}",
+        "timezone_given": bool(params.get("timezone")),
+        "message": f"Playbook '{playbook.name}' scheduled: {cron_expression} in {timezone}. {schedule_note}{zone_note}",
     }
+
+
+ZONE_ASSUMED = (
+    " No timezone was given, so it fires in {zone}, the workspace's default. Tell the owner the "
+    "time is {zone}; if that is not where they are, ask for their zone and schedule it again "
+    "with timezone set."
+)
 
 
 def _schedule_text(schedule_config) -> str:
