@@ -1481,6 +1481,9 @@ class PlatformActionExecutor:
                 k: v for k, v in params.items()
                 if k not in ("_user_id", "_origin_chat_id")
             }
+            if action_name == "platform_store_memory":
+                # F189: a memory is never filed as another agent (it recalls it as its own).
+                params = {k: v for k, v in params.items() if k != "agent_id"}
             _mem_user = (caller_context or {}).get("user_id")
             if _mem_user:
                 params = {**params, "_user_id": str(_mem_user)}

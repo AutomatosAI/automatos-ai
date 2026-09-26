@@ -229,9 +229,11 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
-        agent_id = params.get("agent_id")
-        # Cast to int if provided (may come as string from tool params)
-        agent_id_int = int(agent_id) if agent_id else None
+        # F189: a model-chosen agent_id filed the memory in THAT agent's namespace,
+        # recalled as its own, and a widget agent recalls only its own: injected
+        # text could reach public visitors. Memories go to the workspace, as this
+        # tool says; nothing files for another agent (the executor strips the key).
+        agent_id_int = None
 
         # PRD-206 S1: both write paths build the SAME canonical metadata via
         # the write contract — type + scope (Q7 split default) + provenance +

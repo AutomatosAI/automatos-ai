@@ -92,7 +92,6 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not query:
         return {"success": False, "error": "query parameter is required"}
 
-    agent_id = params.get("agent_id")
     try:
         limit = min(int(params.get("limit", 10)), 50)
     except (TypeError, ValueError):
@@ -111,47 +110,35 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
             workspace_id=ws_id, query=query, limit=limit,
         )
 
-        # Search agent-specific if agent_id given, otherwise search all agents
+        # Search the workspace's agents. F189: no model-chosen agent_id any more;
+        # the search reads the workspace's own memories as it always could.
         agent_results = []
-        partial = False
-        scanned_agents = 0
-        total_agents = 0
-        if agent_id:
-            agent_results = await service.search_long_term(
-                workspace_id=ws_id, query=query, agent_id=int(agent_id), limit=limit,
+        from core.models.core import Agent
+        agents = (
+            db.query(Agent.id)
+            .filter(Agent.workspace_id == workspace_id)
+            .limit(5)
+            .all()
+        )
+        total_agents_query = (
+            db.query(func.count(Agent.id))
+            .filter(Agent.workspace_id == workspace_id)
+            .scalar()
+        ) or 0
+        total_agents = int(total_agents_query)
+        scanned_agents = len(agents)
+        partial = total_agents > scanned_agents
+        agent_tasks = [
+            service.search_long_term(
+                workspace_id=ws_id, query=query, agent_id=aid, limit=5,
             )
-            for m in agent_results:
-                m["_tier"] = f"agent-{agent_id}"
-            scanned_agents = 1
-            total_agents = 1
-        else:
-            # Search top agents
-            from core.models.core import Agent
-            agents = (
-                db.query(Agent.id)
-                .filter(Agent.workspace_id == workspace_id)
-                .limit(5)
-                .all()
-            )
-            total_agents_query = (
-                db.query(func.count(Agent.id))
-                .filter(Agent.workspace_id == workspace_id)
-                .scalar()
-            ) or 0
-            total_agents = int(total_agents_query)
-            scanned_agents = len(agents)
-            partial = total_agents > scanned_agents
-            agent_tasks = [
-                service.search_long_term(
-                    workspace_id=ws_id, query=query, agent_id=aid, limit=5,
-                )
-                for (aid,) in agents
-            ]
-            agent_batches = await asyncio.gather(*agent_tasks) if agent_tasks else []
-            for (aid,), res in zip(agents, agent_batches):
-                for m in (res or []):
-                    m["_tier"] = f"agent-{aid}"
-                agent_results.extend(res or [])
+            for (aid,) in agents
+        ]
+        agent_batches = await asyncio.gather(*agent_tasks) if agent_tasks else []
+        for (aid,), res in zip(agents, agent_batches):
+            for m in (res or []):
+                m["_tier"] = f"agent-{aid}"
+            agent_results.extend(res or [])
 
         # Mark global
         for m in (global_results or []):

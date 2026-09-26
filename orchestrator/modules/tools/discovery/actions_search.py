@@ -59,10 +59,6 @@ def register_search_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "What to search for in memory.",
                 },
-                "agent_id": {
-                    "type": "integer",
-                    "description": "Optional: search memories for a specific agent only.",
-                },
                 "limit": {
                     "type": "integer",
                     "description": "Max results (default 10, max 50).",
