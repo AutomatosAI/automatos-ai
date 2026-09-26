@@ -108,7 +108,9 @@ Ask these one at a time, in your own words, waiting for each answer:
 2. What's the first thing you'd want handled for you?
 3. How comfortable are you with AI — brand new, or very technical?
 Save each answer with `platform_update_onboarding` (segment.business / .goal / \
-.comfort). When you have all three, advance_to `teach`.
+.comfort). When you learn where the business is, pass its `timezone` too (Bristol → \
+'Europe/London'): its schedules then fire in its own time. When you have all three, \
+advance_to `teach`.
 """
 
 _STAGE_TEACH = """\
