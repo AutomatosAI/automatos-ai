@@ -11,6 +11,7 @@ Features:
 - Webhook trigger subscription
 """
 
+import copy
 import logging
 import threading
 import time
@@ -19,6 +20,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from config import config
+from core.composio import lookup_cache
 from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
@@ -1287,6 +1289,21 @@ class ComposioClient:
             logger.warning("Composio toolset not initialized — cannot search actions")
             return []
 
+        # F105: the same search as the same entity within the TTL is answered from
+        # memory (core.composio.lookup_cache), as a copy: callers hand the schemas
+        # on to a turn's tools.
+        kept_key = (
+            entity_id, search_query, tuple(n.lower() for n in app_names), limit, tuple(explicit_actions or ()),
+        )
+        kept = lookup_cache.STEP_SEARCHES.get(kept_key)
+        if kept is not None:
+            logger.info(
+                f"[ComposioClient] search_actions_for_step query={search_query!r} "
+                f"apps={app_names} explicit={bool(explicit_actions)} → {len(kept)} actions (kept): "
+                f"{[r['action_name'] for r in kept]}"
+            )
+            return copy.deepcopy(kept)
+
         results: List[Dict[str, Any]] = []
         seen: set = set()
 
@@ -1340,6 +1357,8 @@ class ComposioClient:
 
         except Exception as e:
             logger.error(f"Composio semantic search failed (query={search_query!r}): {e}")
+        else:
+            lookup_cache.STEP_SEARCHES.put(kept_key, copy.deepcopy(results))
 
         logger.info(
             f"[ComposioClient] search_actions_for_step query={search_query!r} "

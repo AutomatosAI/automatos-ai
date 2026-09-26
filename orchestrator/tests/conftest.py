@@ -87,6 +87,21 @@ def _reset_composio_deny_list_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_composio_lookup_cache():
+    """F105: Composio lookups are answered from memory for minutes
+    (core/composio/lookup_cache.py), so no test may inherit another test's
+    answers. Like the deny list above, only a module already imported."""
+    def _reset():
+        forget_all = getattr(sys.modules.get("core.composio.lookup_cache"), "forget_all", None)
+        if callable(forget_all):
+            forget_all()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _repair_stubbed_package_bindings():
     """Repair parent->child module attribute bindings that sibling tests broke.
 
