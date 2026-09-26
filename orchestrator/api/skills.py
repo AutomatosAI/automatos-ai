@@ -79,6 +79,34 @@ class SkillFileInfo(BaseModel):
     estimated_tokens: Optional[int]
     load_level: int
 
+# F204 (night 6): a skill made with platform_create_workspace_skill keeps its
+# SKILL.md in prompt_template and has no file rows, so the Skills page showed every
+# such skill as "no files, 0 tokens" (#358 held 475 characters). Its content is its
+# SKILL.md, listed with its size and tokens.
+PROMPT_SKILL_FILE = "SKILL.md"
+PROMPT_SKILL_LOAD_LEVEL = 2  # the core-content level of GET /skills/{id}/content
+CONTENT_SUMMARY_CHARS = 200
+
+
+def _skill_files(skill: Any) -> List[SkillFileInfo]:
+    files = [
+        SkillFileInfo(file_path=f.file_path, file_type=f.file_type, content_summary=f.content_summary,
+                      file_size_bytes=f.file_size_bytes, estimated_tokens=f.estimated_tokens,
+                      load_level=f.load_level)
+        for f in (getattr(skill, "files", None) or [])
+    ]
+    body = getattr(skill, "prompt_template", None) or ""
+    if files or not body.strip():
+        return files
+    from modules.agents.services.skill_loader import estimate_tokens
+
+    first_line = body.strip().splitlines()[0]
+    return [SkillFileInfo(file_path=PROMPT_SKILL_FILE, file_type="markdown",
+                          content_summary=(skill.description or first_line)[:CONTENT_SUMMARY_CHARS],
+                          file_size_bytes=len(body.encode("utf-8")), estimated_tokens=estimate_tokens(body),
+                          load_level=PROMPT_SKILL_LOAD_LEVEL)]
+
+
 class SkillContentResponse(BaseModel):
     skill_id: int
     skill_name: str
@@ -575,17 +603,7 @@ async def list_skills(
                 created_at=skill.created_at,
                 updated_at=skill.updated_at,
                 last_sync_at=skill.last_sync_at,
-                files=[
-                    SkillFileInfo(
-                        file_path=f.file_path,
-                        file_type=f.file_type,
-                        content_summary=f.content_summary,
-                        file_size_bytes=f.file_size_bytes,
-                        estimated_tokens=f.estimated_tokens,
-                        load_level=f.load_level
-                    )
-                    for f in skill.files
-                ] if hasattr(skill, 'files') else []
+                files=_skill_files(skill)
             )
             result.append(skill_dict)
         
@@ -632,17 +650,7 @@ async def get_skill_details(
             created_at=skill.created_at,
             updated_at=skill.updated_at,
             last_sync_at=skill.last_sync_at,
-            files=[
-                SkillFileInfo(
-                    file_path=f.file_path,
-                    file_type=f.file_type,
-                    content_summary=f.content_summary,
-                    file_size_bytes=f.file_size_bytes,
-                    estimated_tokens=f.estimated_tokens,
-                    load_level=f.load_level
-                )
-                for f in skill.files
-            ] if hasattr(skill, 'files') else []
+            files=_skill_files(skill)
         )
         
     except HTTPException:
