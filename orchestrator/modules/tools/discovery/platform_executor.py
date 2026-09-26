@@ -57,6 +57,8 @@ from modules.tools.discovery.handlers_documents import (
     search_documents,
     list_templates,
     get_template_schema,
+    get_brand_kit_tool,  # PRD-251 US-115
+    update_brand_kit_tool,  # PRD-251 US-115
 )
 from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
     list_channels,
@@ -494,6 +496,9 @@ class PlatformActionExecutor:
             "platform_search_documents": search_documents,
             "platform_list_templates": list_templates,
             "platform_get_template_schema": get_template_schema,
+            # PRD-251 US-115: the brand kit (the REST routes' functions)
+            "platform_get_brand_kit": get_brand_kit_tool,
+            "platform_update_brand_kit": update_brand_kit_tool,
             "platform_get_workspace_info": get_workspace_info,
             "platform_get_memory_stats": get_memory_stats,
             "platform_list_connected_apps": list_connected_apps,

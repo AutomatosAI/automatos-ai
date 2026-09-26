@@ -21,16 +21,19 @@ inlines, each with routes that mirror the logo's:
 * ``POST /brand-kit/fonts`` (a woff2 file plus the face it provides),
   ``GET/DELETE /brand-kit/fonts/{font_id}`` — the brand's font files
   (``modules.documents.brand_fonts``).
+
+The body of the PUT, the kit's one writer and the suggestions live in
+``modules.documents.brand_kit``: the agent tools ``platform_get_brand_kit`` and
+``platform_update_brand_kit`` (PRD-251 US-115) call the same functions.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel, ValidationInfo, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
@@ -38,38 +41,12 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from modules.documents.brand_kit import BrandKitPatch
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["document-generation"])
 
 _MANAGE = Depends(require_workspace_permission("workspace:manage"))
-
-
-class BrandKitUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    tagline: Optional[str] = None
-    logo_url: Optional[str] = None
-    primary_color: Optional[str] = None
-    secondary_color: Optional[str] = None
-    accent_color: Optional[str] = None
-    text_color: Optional[str] = None
-    font_family: Optional[str] = None
-    company: Optional[dict] = None
-    # PRD-251 D5 (S1.3). The uploaded files (logo_mark_path, font_files) have their own routes.
-    heading_font: Optional[str] = None
-    logo_mark_url: Optional[str] = None
-    social_handles: Optional[Dict[str, str]] = None
-    voice: Optional[dict] = None
-
-    @field_validator("logo_url", "logo_mark_url")
-    @classmethod
-    def _http_only(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
-        from modules.documents.brand_kit import is_acceptable_logo_url
-
-        if not is_acceptable_logo_url(v):
-            what = "a logo mark" if info.field_name == "logo_mark_url" else "a logo"
-            raise ValueError(f"{info.field_name} must be an http(s) URL (or upload {what} instead)")
-        return v
 
 
 def _workspace_or_404(db: Session, workspace_id):
@@ -79,14 +56,6 @@ def _workspace_or_404(db: Session, workspace_id):
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
-
-
-def _persist_kit(db: Session, ws, new_kit: Dict[str, Any]) -> None:
-    from modules.documents.brand_kit import BRAND_KIT_SETTINGS_KEY
-
-    # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
-    ws.settings = {**(ws.settings or {}), BRAND_KIT_SETTINGS_KEY: new_kit}
-    db.commit()
 
 
 # ------------------------------------------------------------------
@@ -108,26 +77,20 @@ async def get_brand_kit_endpoint(
 
 @router.put("/brand-kit", dependencies=[_MANAGE])
 async def update_brand_kit_endpoint(
-    body: BrandKitUpdateRequest,
+    body: BrandKitPatch,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """Update the workspace brand kit (validated, persisted on workspace.settings)."""
     from pydantic import ValidationError
 
-    from modules.documents.brand_kit import BRAND_KIT_SETTINGS_KEY, validate_brand_kit
+    from modules.documents.brand_kit import brand_kit_errors, update_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    existing = (ws.settings or {}).get(BRAND_KIT_SETTINGS_KEY)
-    patch = {k: v for k, v in body.model_dump().items() if v is not None}
     try:
-        new_kit = validate_brand_kit(patch, existing)
+        return update_brand_kit(db, ws, body.model_dump())
     except ValidationError as e:
-        # Without the context, which carries the raised exception: the detail must serialise.
-        errors = e.errors(include_context=False, include_url=False)
-        raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": errors})
-    _persist_kit(db, ws, new_kit)
-    return new_kit
+        raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": brand_kit_errors(e)})
 
 
 # ------------------------------------------------------------------
@@ -135,59 +98,19 @@ async def update_brand_kit_endpoint(
 # ------------------------------------------------------------------
 
 
-def build_brand_suggestions(workspace, business_profile, user) -> Dict[str, Dict[str, str]]:
-    """Prefill candidates ``field -> {value, source}``; only fields with a value. Pure."""
-    out: Dict[str, Dict[str, str]] = {}
-
-    def put(field: str, value: Any, source: str) -> None:
-        if field in out:
-            return
-        text = str(value).strip() if value is not None else ""
-        if text:
-            out[field] = {"value": text, "source": source}
-
-    if business_profile is not None:
-        put("name", getattr(business_profile, "company_name", None), "business_profile")
-        put("company_name", getattr(business_profile, "company_name", None), "business_profile")
-        domain = getattr(business_profile, "domain", None)
-        if domain:
-            website = domain if str(domain).startswith(("http://", "https://")) else f"https://{domain}"
-            put("website", website, "business_profile")
-        brands = getattr(business_profile, "brands", None) or []
-        for brand in brands if isinstance(brands, list) else []:
-            if isinstance(brand, dict) and brand.get("logo_url"):
-                put("logo_url", brand["logo_url"], "business_profile")
-                break
-        voice = getattr(business_profile, "voice_notes", None)
-        if voice:
-            put("tagline", str(voice).strip().splitlines()[0][:120], "business_profile")
-    if workspace is not None:
-        put("name", getattr(workspace, "name", None), "workspace")
-        put("company_name", getattr(workspace, "name", None), "workspace")
-    if user is not None:
-        put("email", getattr(user, "email", None), "user")
-    return out
-
-
 @router.get("/brand-kit/suggestions")
-async def brand_kit_suggestions(
+async def get_brand_kit_suggestions(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """Prefill candidates from the workspace, its business profile and the signed-in user."""
-    from core.models.business_profiles import BusinessProfile
     from core.models.core import User
+    from modules.documents.brand_kit import brand_kit_suggestions
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    profile = (
-        db.query(BusinessProfile)
-        .filter(BusinessProfile.workspace_id == ctx.workspace_id)
-        .order_by(BusinessProfile.created_at.desc())
-        .first()
-    )
     user_pk = resolve_user_pk(db, ctx)
     user = db.query(User).filter(User.id == user_pk).first() if user_pk is not None else None
-    return {"suggestions": build_brand_suggestions(ws, profile, user)}
+    return {"suggestions": brand_kit_suggestions(db, ws, user)}
 
 
 # ------------------------------------------------------------------
@@ -200,7 +123,7 @@ _LOGO_FIELDS = {"logo_path": "logo_url", "logo_mark_path": "logo_mark_url"}
 
 async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session, path_field: str) -> Dict[str, Any]:
     """Store an uploaded logo or logo mark and point the kit at it; the old file goes."""
-    from modules.documents.brand_kit import get_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
     from modules.documents.brand_logo import (
         MAX_LOGO_BYTES,
         BrandLogoError,
@@ -223,7 +146,7 @@ async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session,
         delete_brand_logo(previous)
     # An uploaded file supersedes any external URL the kit carried.
     new_kit = {**kit, path_field: stored_path, _LOGO_FIELDS[path_field]: ""}
-    _persist_kit(db, ws, new_kit)
+    save_brand_kit(db, ws, new_kit)
     logger.info("[BrandKit] %s uploaded for workspace %s (%d bytes)", path_field, ctx.workspace_id, len(data))
     return new_kit
 
@@ -247,7 +170,7 @@ def _stream_logo(ctx: RequestContext, db: Session, path_field: str, missing: str
 
 def _remove_logo(ctx: RequestContext, db: Session, path_field: str) -> Dict[str, Any]:
     """Remove a stored logo or logo mark and clear it from the kit."""
-    from modules.documents.brand_kit import get_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
     from modules.documents.brand_logo import delete_brand_logo
 
     ws = _workspace_or_404(db, ctx.workspace_id)
@@ -255,7 +178,7 @@ def _remove_logo(ctx: RequestContext, db: Session, path_field: str) -> Dict[str,
     if kit.get(path_field):
         delete_brand_logo(kit[path_field])
     new_kit = {**kit, path_field: ""}
-    _persist_kit(db, ws, new_kit)
+    save_brand_kit(db, ws, new_kit)
     return new_kit
 
 
@@ -337,7 +260,7 @@ async def upload_brand_font(
 ):
     """Store a woff2 font file for the face it provides; the same face uploaded again replaces it."""
     from modules.documents.brand_fonts import MAX_FONT_BYTES, BrandFontError, add_brand_font
-    from modules.documents.brand_kit import BrandKit, get_brand_kit
+    from modules.documents.brand_kit import BrandKit, get_brand_kit, save_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
     data = await file.read(MAX_FONT_BYTES + 1)
@@ -355,7 +278,7 @@ async def upload_brand_font(
     except BrandFontError as e:
         raise HTTPException(status_code=422, detail=str(e))
     new_kit = BrandKit.model_validate({**kit, "font_files": fonts}).model_dump()
-    _persist_kit(db, ws, new_kit)
+    save_brand_kit(db, ws, new_kit)
     logger.info("[BrandKit] font %r uploaded for workspace %s (%d bytes)", family, ctx.workspace_id, len(data))
     return new_kit
 
@@ -386,7 +309,7 @@ async def delete_brand_font(
 ):
     """Remove a stored font file and take it out of the kit."""
     from modules.documents.brand_fonts import remove_brand_font
-    from modules.documents.brand_kit import get_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
     kit = get_brand_kit(ws.settings)
@@ -394,8 +317,8 @@ async def delete_brand_font(
     if fonts is None:
         raise HTTPException(status_code=404, detail="No such font file")
     new_kit = {**kit, "font_files": fonts}
-    _persist_kit(db, ws, new_kit)
+    save_brand_kit(db, ws, new_kit)
     return new_kit
 
 
-__all__ = ["router", "build_brand_suggestions"]
+__all__ = ["router"]

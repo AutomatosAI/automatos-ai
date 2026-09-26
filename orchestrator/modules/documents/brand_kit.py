@@ -18,6 +18,12 @@ PRD-251 D5 (S1.3) adds what a social render reads (``core/media_render_bundle.py
   network's own handle rule;
 * ``voice``: three to five tone words and the phrases the brand never uses.
 
+PRD-251 US-115 gives agents the kit through ``platform_get_brand_kit`` and
+``platform_update_brand_kit``. Those tools and the REST routes
+(``api/document_brand_kit.py``) share what is here: :func:`update_brand_kit`
+applies a :class:`BrandKitPatch`, :func:`save_brand_kit` is the kit's one writer,
+and :func:`brand_kit_suggestions` supplies the prefill candidates.
+
 Defaults are a neutral professional palette — an unconfigured workspace renders cleanly
 (and *not* in Automatos orange).
 """
@@ -28,7 +34,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Pattern, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
 
@@ -303,11 +309,47 @@ class BrandKit(BaseModel):
 def is_acceptable_logo_url(value: Optional[str]) -> bool:
     """An external logo URL is empty or http(s) — the only schemes the render-time
     fetchers will ever open (PRD-156 S4 keeps the host checks). Applied on the WRITE
-    path (the API request model), never on read: a lenient read must not drop a
+    path (:class:`BrandKitPatch`), never on read: a lenient read must not drop a
     whole stored kit over one bad field."""
     if not value:
         return True
     return value.startswith(("http://", "https://"))
+
+
+class BrandKitPatch(BaseModel):
+    """A change to the kit: any of these fields, and one left out (or null) keeps its value.
+
+    The body of ``PUT /api/documents/brand-kit`` and the arguments of
+    ``platform_update_brand_kit``. The stored files (:data:`SERVER_MANAGED_FIELDS`)
+    are not here: only their upload routes write them. A field this model does not
+    know is dropped, as the PUT always did.
+    """
+
+    name: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    text_color: Optional[str] = None
+    font_family: Optional[str] = None
+    company: Optional[dict] = None
+    # PRD-251 D5 (S1.3).
+    heading_font: Optional[str] = None
+    logo_mark_url: Optional[str] = None
+    social_handles: Optional[Dict[str, str]] = None
+    voice: Optional[dict] = None
+
+    @field_validator("logo_url", "logo_mark_url")
+    @classmethod
+    def _http_only(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        if not is_acceptable_logo_url(v):
+            what = "a logo mark" if info.field_name == "logo_mark_url" else "a logo"
+            raise ValueError(f"{info.field_name} must be an http(s) URL (or upload {what} instead)")
+        return v
+
+
+PATCH_FIELDS = tuple(BrandKitPatch.model_fields)
 
 
 def get_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -353,18 +395,110 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     return BrandKit.model_validate(merged).model_dump()
 
 
+def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, Any]:
+    """Store ``kit`` as the workspace's brand kit and commit: the kit's one writer.
+
+    The PUT, the logo, logo mark and font uploads and deletes, and
+    ``platform_update_brand_kit`` all save through here.
+    """
+    # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
+    workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: kit}
+    db.commit()
+    return kit
+
+
+def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply ``patch`` to the workspace's stored kit and save the result.
+
+    The patch is read as a :class:`BrandKitPatch` and merged by
+    :func:`validate_brand_kit`; either raises ``pydantic.ValidationError`` before
+    anything is written (:func:`brand_kit_errors` lists why). The PUT route and
+    ``platform_update_brand_kit`` both call this.
+    """
+    fields = {k: v for k, v in BrandKitPatch.model_validate(patch).model_dump().items() if v is not None}
+    existing = (workspace.settings or {}).get(BRAND_KIT_SETTINGS_KEY)
+    return save_brand_kit(db, workspace, validate_brand_kit(fields, existing))
+
+
+def brand_kit_errors(exc: ValidationError) -> List[Dict[str, Any]]:
+    """Why a patch was refused: each error's field (``loc``) and rule (``msg``).
+
+    Without the context, which carries the raised exception: the errors must serialise.
+    """
+    return exc.errors(include_context=False, include_url=False)
+
+
+def build_brand_suggestions(workspace: Any, business_profile: Any, user: Any) -> Dict[str, Dict[str, str]]:
+    """Prefill candidates ``field -> {value, source}``; only fields with a value. Pure."""
+    out: Dict[str, Dict[str, str]] = {}
+
+    def put(field: str, value: Any, source: str) -> None:
+        if field in out:
+            return
+        text = str(value).strip() if value is not None else ""
+        if text:
+            out[field] = {"value": text, "source": source}
+
+    if business_profile is not None:
+        put("name", getattr(business_profile, "company_name", None), "business_profile")
+        put("company_name", getattr(business_profile, "company_name", None), "business_profile")
+        domain = getattr(business_profile, "domain", None)
+        if domain:
+            website = domain if str(domain).startswith(("http://", "https://")) else f"https://{domain}"
+            put("website", website, "business_profile")
+        brands = getattr(business_profile, "brands", None) or []
+        for brand in brands if isinstance(brands, list) else []:
+            if isinstance(brand, dict) and brand.get("logo_url"):
+                put("logo_url", brand["logo_url"], "business_profile")
+                break
+        voice = getattr(business_profile, "voice_notes", None)
+        if voice:
+            put("tagline", str(voice).strip().splitlines()[0][:120], "business_profile")
+    if workspace is not None:
+        put("name", getattr(workspace, "name", None), "workspace")
+        put("company_name", getattr(workspace, "name", None), "workspace")
+    if user is not None:
+        put("email", getattr(user, "email", None), "user")
+    return out
+
+
+def brand_kit_suggestions(db: Any, workspace: Any, user: Any = None) -> Dict[str, Dict[str, str]]:
+    """Prefill candidates from what the platform already knows (PRD-242 S3).
+
+    The candidates come from the workspace's latest business profile and its
+    name, plus, when a person asks, their own ``user`` record. The Brand Kit
+    form reads them, and so does ``platform_get_brand_kit``, which has no user.
+    """
+    from core.models.business_profiles import BusinessProfile
+
+    profile = (
+        db.query(BusinessProfile)
+        .filter(BusinessProfile.workspace_id == workspace.id)
+        .order_by(BusinessProfile.created_at.desc())
+        .first()
+    )
+    return build_brand_suggestions(workspace, profile, user)
+
+
 __all__ = [
     "BRAND_KIT_SETTINGS_KEY",
     "BrandFontFile",
     "BrandKit",
+    "BrandKitPatch",
     "BrandVoice",
     "CompanyContact",
     "HANDLE_RULES",
     "MAX_FONT_FILES",
+    "PATCH_FIELDS",
     "SERVER_MANAGED_FIELDS",
+    "brand_kit_errors",
+    "brand_kit_suggestions",
+    "build_brand_suggestions",
     "get_brand_kit",
     "is_acceptable_logo_url",
     "normalise_handle",
+    "save_brand_kit",
+    "update_brand_kit",
     "validate_brand_kit",
     "DEFAULT_FONT",
 ]
