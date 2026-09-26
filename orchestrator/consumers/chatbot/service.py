@@ -65,6 +65,7 @@ from services.page_context import (
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
+from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 
 logger = logging.getLogger(__name__)
@@ -3092,6 +3093,13 @@ class StreamingChatService:
             if _correction:
                 full_response = f"{full_response}\n\n{_correction}"
                 async for chunk in self.streaming_handler.stream_text_aisdk(f"\n\n{_correction}"):
+                    yield chunk
+
+            # F196: an answer cut at its token budget says so where it is saved.
+            _cut = cut_note_for(final_round)
+            if _cut:
+                full_response = f"{full_response}{_cut}"
+                async for chunk in self.streaming_handler.stream_text_aisdk(_cut):
                     yield chunk
 
             # Send usage data

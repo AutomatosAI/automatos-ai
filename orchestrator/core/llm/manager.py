@@ -676,9 +676,7 @@ class LLMManager:
                     response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
             self._note_success()
-            note = self._note_cut(response, budget)
-            if note and on_delta is not None and getattr(response, "streamed", False):
-                await on_delta("text", note)
+            self._note_cut(response, budget)
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
@@ -741,17 +739,17 @@ class LLMManager:
         except Exception:  # noqa: BLE001 — never breaks the call it follows
             logger.debug("[F197] success note skipped", exc_info=True)
 
-    def _note_cut(self, response: Any, budget: Optional[int]) -> Optional[str]:
+    def _note_cut(self, response: Any, budget: Optional[int]) -> None:
         from .usage_context import current_usage_scope
 
         if not budget:
-            return None
+            return
         purpose = output_budget.call_purpose(
             current_usage_scope().get("request_type"),
             own_purpose=getattr(self, "_own_purpose", None),
             from_settings=getattr(self, "_from_settings", False),
         )
-        return output_budget.note_cut(response, purpose=purpose, budget=budget,
+        output_budget.note_cut(response, purpose=purpose, budget=budget,
                                       model=getattr(getattr(self, "config", None), "model", "unknown"))
 
     def _remember_refusal(self, exc: Exception) -> None:

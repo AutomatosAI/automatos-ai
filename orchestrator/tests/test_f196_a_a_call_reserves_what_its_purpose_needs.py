@@ -214,8 +214,9 @@ def test_a_cut_report_is_written_again_at_a_long_deliverables_budget():
 
 # ── a cut is never silent ──────────────────────────────────────────────────
 
-def test_a_cut_chat_answer_says_so(settings_built, caplog):
+def test_a_cut_answer_is_logged_and_flagged_and_its_final_writer_says_so(settings_built, caplog):
     from core.llm.manager import LLMManager
+    from core.llm.output_budget import cut_note_for
 
     cut = NS(content="Here is the newsletter: …", tool_calls=None, finish_reason="length", usage=None, streamed=False)
     agent = LLMManager(config=_config(8000, GEMINI_FLASH_CEILING), agent_id=322)
@@ -223,15 +224,37 @@ def test_a_cut_chat_answer_says_so(settings_built, caplog):
     with caplog.at_level(logging.WARNING, logger="core.llm.output_budget"):
         _ask(agent, scope="chat")
 
-    assert cut.content.endswith("[Cut here: this answer reached its 8,000-token limit.]") and cut.cut is True
     assert "[F196] chat output cut at its 8,000-token budget (model google/gemini-2.5-flash)" in caplog.text
+    assert cut.cut == 8000 and cut.content == "Here is the newsletter: …"      # the text is the caller's
+    assert cut_note_for(cut) == "\n\n[Cut here: this answer reached its 8,000-token limit.]"
 
 
-def test_a_cut_json_answer_is_flagged_but_left_parseable(settings_built):
-    mgr = settings_built("complexity_assessor")
-    mgr.provider.reply = NS(content='{"complexity": "atom"', tool_calls=None, finish_reason="length", usage=None)
-    _ask(mgr)
-    assert mgr.provider.reply.content == '{"complexity": "atom"' and mgr.provider.reply.cut is True
+def test_the_chat_and_an_agent_run_add_the_note_to_the_finished_answer():
+    from consumers.chatbot import service
+    from modules.agents.factory import agent_factory
+
+    chat = inspect.getsource(service.StreamingChatService)
+    noted = chat.index("_cut = cut_note_for(final_round)")
+    assert noted < chat.index("assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)")
+    run = inspect.getsource(agent_factory.AgentFactory)
+    assert run.index("Completed %d continuation(s)") < run.index("_cut = cut_note_for(response)")
+
+
+def test_an_agent_answer_continued_after_a_cut_has_no_note_in_its_middle(settings_built):
+    """Code review of the first build: the note went onto the first part, and the
+    agent run's own continuation ("continue exactly where you left off") was
+    appended after it."""
+    from core.llm.manager import LLMManager
+    from core.llm.output_budget import cut_note_for
+
+    first = NS(content="Part one of the report", tool_calls=None, finish_reason="length", usage=None, streamed=False)
+    agent = LLMManager(config=_config(8000, GEMINI_FLASH_CEILING), agent_id=325)
+    agent.provider, agent._track_usage = _OpenRouterShaped(agent.config, first), (lambda *a, **k: None)
+    _ask(agent, scope="board_task")
+    first.content += ", and part two."                                          # the factory's continuation
+    first.finish_reason = "stop"
+
+    assert first.content == "Part one of the report, and part two." and cut_note_for(first) is None
 
 
 def test_a_json_helpers_cut_inside_a_chat_turn_is_left_parseable(settings_built):
@@ -241,7 +264,7 @@ def test_a_json_helpers_cut_inside_a_chat_turn_is_left_parseable(settings_built)
     mgr = settings_built("entity_extraction")
     mgr.provider.reply = NS(content='[{"name": "Harbourline"}]', tool_calls=None, finish_reason="length", usage=None)
     _ask(mgr, scope="chat")
-    assert mgr.provider.reply.content == '[{"name": "Harbourline"}]' and mgr.provider.reply.cut is True
+    assert mgr.provider.reply.content == '[{"name": "Harbourline"}]' and mgr.provider.reply.cut == 2457
 
 
 def test_a_budget_setting_is_never_read_on_the_event_loop(monkeypatch):

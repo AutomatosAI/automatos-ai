@@ -1630,6 +1630,13 @@ class AgentFactory:
                             continuation, agent_id, len(response.content) if response and response.content else 0,
                         )
 
+                    # F196: an answer still cut after its continuations says so.
+                    from core.llm.output_budget import cut_note_for
+
+                    _cut = cut_note_for(response)
+                    if _cut:
+                        response.content = f"{response.content}{_cut}"
+
                     if response and response.content:
                         tokens_used = response.usage.get("total_tokens", 0) if response.usage else 0
                         agent_runtime.update_metrics(execution_time, tokens_used, True)

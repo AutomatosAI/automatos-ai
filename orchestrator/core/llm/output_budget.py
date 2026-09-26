@@ -72,10 +72,6 @@ DEFAULT_BUDGETS: Dict[str, int] = {
 # these lanes does the lane's work, so it keeps its configured budget there.
 GENERIC_PURPOSE = "orchestrator"
 CONFIGURED_PURPOSES = frozenset({CHAT, AGENT_RUN, "board_task", "recipe", "session", "mission"})
-# A cut text answer gets a visible note; a cut JSON answer is only flagged,
-# because a note would break its parse.
-TEXT_PURPOSES = frozenset({CHAT, AGENT_RUN, LONG_DELIVERABLE, "board_task", "recipe", "session", "mission"})
-
 CUT_NOTE = "\n\n[Cut here: this answer reached its {budget:,}-token limit.]"
 
 _purpose: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("llm_output_purpose", default=None)
@@ -181,22 +177,26 @@ def current_call_budget() -> Optional[int]:
     return _call_budget.get()
 
 
-def note_cut(response: Any, *, purpose: str, budget: int, model: str) -> Optional[str]:
-    """A response cut at its budget is logged and flagged; a text answer with no
-    tool calls also gets the note, which is returned so a stream can show it."""
+def note_cut(response: Any, *, purpose: str, budget: int, model: str) -> None:
+    """A response cut at its budget is logged, and flagged with the budget
+    (``response.cut``). Its text is left alone: a caller may continue it (an
+    agent run asks for the rest twice), and a JSON answer must stay parseable.
+    The caller that writes the finished answer adds the note (cut_note_for)."""
     if getattr(response, "finish_reason", None) != "length":
-        return None
+        return
     logger.warning(f"[F196] {purpose} output cut at its {budget:,}-token budget (model {model})")
     try:
-        response.cut = True
+        response.cut = budget
     except Exception:  # noqa: BLE001 — a frozen response is still logged
         pass
-    content = getattr(response, "content", None)
-    if purpose not in TEXT_PURPOSES or getattr(response, "tool_calls", None) or not content:
+
+
+def cut_note_for(response: Any) -> Optional[str]:
+    """The note a finished text answer carries when it is still cut at its
+    budget, else None."""
+    budget = getattr(response, "cut", None)
+    if (getattr(response, "finish_reason", None) != "length" or not isinstance(budget, int)
+            or isinstance(budget, bool) or getattr(response, "tool_calls", None)
+            or not getattr(response, "content", None)):
         return None
-    note = CUT_NOTE.format(budget=budget)
-    try:
-        response.content = f"{content}{note}"
-    except Exception:  # noqa: BLE001
-        return None
-    return note
+    return CUT_NOTE.format(budget=budget)
