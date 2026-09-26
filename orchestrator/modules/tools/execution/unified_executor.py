@@ -131,6 +131,16 @@ def _placeholder(prop: Dict[str, Any]) -> str:
             "array": "[...]", "object": "{...}"}.get(kind, "<value>")
 
 
+# F077 (refresh 4): after this refusal Auto asked the owner to "confirm the exact
+# question" instead of making the call it was shown. A refused call is Auto's to fix,
+# with the values it has. A value only the user can give is still theirs to give, and
+# never invented (review LOW).
+REFUSED_CALL_IS_YOURS = (
+    "Make this call yourself now with the values you have. Ask the user only for a value only they can "
+    "give, and never invent one: a refused call is never a question for the user otherwise."
+)
+
+
 def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List[str], sent: Any) -> str:
     """F027-C (night 3): the call to make, spelled out. 69 of the night's 98
     failed platform_execute calls were "Missing required params" — models
@@ -142,6 +152,7 @@ def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List
     lines = [
         f"Missing required params for '{action_name}': {missing}. Pass them inside params={{...}}.",
         f'Call it exactly like this: {{"action": "{action_name}", "params": {{{example}}}}}',
+        REFUSED_CALL_IS_YOURS,
     ]
     if not sent:
         lines.append("Your params was empty — the values go inside it.")
