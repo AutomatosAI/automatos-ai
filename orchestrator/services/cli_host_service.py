@@ -896,6 +896,7 @@ def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[st
 
 def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     from services.ticket_owner_ask import ticket_answers_block
+    from services.ticket_redo import redo_block
 
     prompt = task.raw_prompt or task.description or task.title or ""
     answers = _answers_fold_in(task)
@@ -907,12 +908,10 @@ def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
         prompt = f"{prompt}\n\n{owners}"
     if field_memory:
         prompt = f"{prompt}\n\n{field_memory}"
-    if task.review_feedback:
-        # Same redo fold-in as the dispatcher (Q44); consumed for this attempt only.
-        prompt = (
-            f"{prompt}\n\n## Reviewer feedback on your previous attempt\n"
-            f"{task.review_feedback}\n\nAddress this feedback in your redo."
-        )
+    # Same redo fold-in as the dispatcher (Q44 + F198); consumed for this attempt.
+    redo = redo_block(task)
+    if redo:
+        prompt = f"{prompt}\n\n{redo}"
         task.review_feedback = None
     return prompt
 

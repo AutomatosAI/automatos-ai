@@ -34,6 +34,7 @@ from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
 from services.ticket_owner_ask import ticket_answers_block
+from services.ticket_redo import redo_block
 
 logger = logging.getLogger(__name__)
 
@@ -636,14 +637,11 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
             answers = ticket_answers_block(getattr(t, "planning_data", None))
             if answers:
                 prompt = f"{prompt}\n\n{answers}"
-            if t.review_feedback:
-                # Q44: a rejected task redoes the work with reviewer feedback in
-                # context. Consume it so the correction applies to this run only.
-                prompt = (
-                    f"{prompt}\n\n## Reviewer feedback on your previous attempt\n"
-                    f"{t.review_feedback}\n\n"
-                    "Address this feedback in your redo."
-                )
+            # Q44 + F198: a sent-back task corrects its last draft with every
+            # correction on the ticket; the waiting feedback is consumed here.
+            redo = redo_block(t)
+            if redo:
+                prompt = f"{prompt}\n\n{redo}"
                 t.review_feedback = None
             out.append(
                 {

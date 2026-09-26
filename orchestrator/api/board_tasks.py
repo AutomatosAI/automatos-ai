@@ -37,6 +37,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import notify_task_available
+from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 
@@ -1107,10 +1108,15 @@ async def reject_task(
         raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
-    feedback = (body.get("feedback") or "").strip()
+    feedback = str(body.get("feedback") or "").strip()[:MAX_REVIEW_FEEDBACK_CHARS]
     seen = task.status
-    if seen == "done":
-        keep_previous_run(task, why="sent back", by=_operator_ref(ctx))
+    # F198: the redo corrects this draft with every note the ticket has had, so
+    # both are kept: the draft from review too (F190), the note beside the others.
+    by = _operator_ref(ctx)
+    keep_previous_run(task, why=SENT_BACK, by=by)
+    if feedback:
+        task.planning_data = with_correction(task.planning_data, feedback, by=by,
+                                             at=datetime.now(timezone.utc).isoformat())
 
     # Q44: back to the same agent for another attempt, feedback in context.
     # F195: only from the status this request saw, so a second click (or an
@@ -1122,7 +1128,7 @@ async def reject_task(
     task.result = None
     task.lease_until = None
     task.attempts = 0  # a human-driven redo is a fresh attempt cycle
-    task.review_feedback = feedback or None
+    task.review_feedback = feedback or SENT_BACK_WITHOUT_A_NOTE
 
     # Wake the dispatch loop so the redo starts immediately (single spine).
     # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
