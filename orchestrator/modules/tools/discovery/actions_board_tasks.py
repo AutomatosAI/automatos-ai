@@ -138,6 +138,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
             "what's assigned to the researcher?",
             "list urgent tasks",
         ],
+        accepts=("tags",),
     ))
 
     registry.register(ActionDefinition(

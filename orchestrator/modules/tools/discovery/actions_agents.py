@@ -192,6 +192,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "make a new researcher agent",
             "create a support agent using claude sonnet with a helpful persona",
         ],
+        accepts=("model", "provider"),
     ))
 
     registry.register(ActionDefinition(
@@ -274,6 +275,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "change the support agent's model to claude sonnet",
             "update agent 3's system prompt to be more formal",
         ],
+        accepts=("provider",),
     ))
 
     # ── Destructive ──────────────────────────────────────────────────

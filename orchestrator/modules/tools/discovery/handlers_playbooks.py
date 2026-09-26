@@ -1,5 +1,6 @@
 """Playbook CRUD + execution handlers for PlatformActionExecutor."""
 
+import json
 import logging
 from typing import Any, Dict, List
 from uuid import UUID
@@ -7,6 +8,9 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# F182: how much of a run's stored inputs execute_playbook repeats back.
+INPUTS_ECHO_CHARS = 400
 
 
 def next_run_note(db, playbook_id) -> str:
@@ -513,6 +517,14 @@ async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, A
     }
 
 
+def _inputs_text(input_data: Dict[str, Any]) -> str:
+    """A run's stored inputs as the caller is told them: ``none`` when empty."""
+    if not input_data:
+        return "none"
+    text = json.dumps(input_data, default=str, ensure_ascii=False)
+    return text if len(text) <= INPUTS_ECHO_CHARS else text[:INPUTS_ECHO_CHARS] + "…"
+
+
 def _schedule_text(schedule_config) -> str:
     sc = schedule_config or {}
     if sc.get("type") != "cron":
@@ -674,13 +686,17 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         playbook.name, playbook.id, execution_id,
     )
 
+    # F182 (night 6): the run's inputs, as stored, go back to the caller. Run 207
+    # started with none and Auto told the owner it was running for Gull & Anchor.
     return {
         "success": True,
         "execution_id": execution_id,
         "playbook_id": playbook.id,
         "playbook_name": playbook.name,
         "status": "pending",
-        "message": f"Playbook '{playbook.name}' triggered. Track with execution_id: {execution_id}",
+        "input_data": input_data,
+        "message": (f"Playbook '{playbook.name}' triggered with inputs: {_inputs_text(input_data)}. "
+                    f"Track with execution_id: {execution_id}"),
     }
 
 

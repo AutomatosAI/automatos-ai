@@ -110,6 +110,7 @@ def register_report_actions(registry: ActionRegistry) -> None:
             "create an incident report about the API errors",
             "submit research findings",
         ],
+        accepts=("agent_id",),
     ))
 
     registry.register(ActionDefinition(

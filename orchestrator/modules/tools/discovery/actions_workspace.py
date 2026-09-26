@@ -140,6 +140,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "remember we decided to ship the pilot without SSO (type=decision)",
             "store with source_type=platform_verified after running the check",
         ],
+        accepts=("agent_id",),
     ))
 
     registry.register(ActionDefinition(

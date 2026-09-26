@@ -104,6 +104,12 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "create a playbook for daily standup summaries",
             "make an automation for code review",
         ],
+        misplaced={
+            "steps": (
+                "a playbook is created with no steps: create it, then add each step "
+                "with platform_add_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
@@ -153,6 +159,13 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "update the bug triage playbook description",
             "set playbook 3 to run on a cron schedule",
         ],
+        misplaced={
+            "steps": (
+                "steps change one at a time, with platform_update_playbook_step "
+                "(step_index plus what changes), platform_add_playbook_step or "
+                "platform_delete_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
@@ -386,6 +399,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "execute playbook 5",
             "trigger the bug triage automation",
         ],
+        accepts=("inputs", "input"),
+        # F182: night 6 nested the café's details under "params".
+        misplaced={key: "input_data" for key in ("params", "parameters", "variables", "data")},
     ))
 
     registry.register(ActionDefinition(

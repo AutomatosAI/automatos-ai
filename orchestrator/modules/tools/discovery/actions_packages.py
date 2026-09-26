@@ -54,6 +54,7 @@ def register_package_actions(registry: ActionRegistry) -> None:
             "what starter team fits an online jewellery shop",
             "search packages for ecommerce",
         ],
+        accepts=("query",),
     ))
 
     registry.register(ActionDefinition(
