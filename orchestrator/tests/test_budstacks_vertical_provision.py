@@ -246,3 +246,28 @@ def test_vertical_key_verifier_triad(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _verify_vertical_internal_key("nonexistent", authorization="Bearer s3cret")
     assert exc.value.status_code == 503
+
+
+def test_a_roster_seeded_over_the_plan_is_logged_not_refused(monkeypatch, caplog):
+    """F200: the vertical's roster is the product's own, so provisioning never meets
+    the plan's agent limit; one bigger than the plan is logged (Shopify's is 9 on basic's 5)."""
+    import logging
+
+    db = _FakeSession(
+        {
+            "Workspace": _FakeQuery(first_result=None),
+            "Agent": _FakeQuery(count_result=0),  # a fresh workspace: the roster is seeded
+            "SdkApiKey": _FakeQuery(first_result=None),
+        }
+    )
+    monkeypatch.setattr("integrations.provisioning._create_widget_key", _mint_counter([]))
+    monkeypatch.setattr("integrations.provisioning._seed_roster", lambda db, ws_id, provisioner: 9)
+
+    with caplog.at_level(logging.WARNING, logger="integrations.provisioning"):
+        result = provision_vertical(
+            db=db, vertical="budstacks", external_id="tenant-3", name="Roastery Supply",
+            metadata={"domains": ["roastery.budstacks.io"]},
+        )
+
+    assert result["is_new"] is True                                   # provisioned, never refused
+    assert "[F200] vertical budstacks seeded 9 agents on a basic plan of 5" in caplog.text   # before: silent

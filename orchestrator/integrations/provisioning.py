@@ -224,6 +224,17 @@ def _create_widget_key(**kwargs) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _warn_if_the_roster_is_over_the_plan(workspace: Any, vertical: str, seeded: int) -> None:
+    """F200: a vertical's roster is the product's own, so provisioning is never
+    refused by the plan's agent limit. An owner who starts over it is refused on
+    their first own create, for agents they did not make, so it is logged."""
+    from services.agent_quota import plan_agent_limit
+
+    plan, max_agents = plan_agent_limit(workspace)
+    if max_agents and seeded > max_agents:
+        logger.warning("[F200] vertical %s seeded %d agents on a %s plan of %d", vertical, seeded, plan, max_agents)
+
+
 def provision_vertical(
     *,
     db: Session,
@@ -295,6 +306,7 @@ def provision_vertical(
     agents_installed = 0
     if existing_agent_count == 0:
         agents_installed = _seed_roster(db, workspace.id, provisioner)
+        _warn_if_the_roster_is_over_the_plan(workspace, vertical, agents_installed)
 
     # Resolve the allowlist BEFORE any key decision so a malformed request
     # (VerticalConfigError) rejects without side effects either way.

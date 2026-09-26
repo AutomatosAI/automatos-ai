@@ -101,8 +101,12 @@ def clone_agent_to_workspace(
     """
     Clone a marketplace agent into a workspace.
     Returns the cloned Agent instance (already flushed, has an id).
+    Raises AgentLimitReached when the plan has no room for it (F200).
     """
     from core.models.core import Agent
+    from services.agent_quota import require_agent_room
+
+    require_agent_room(db, workspace_id)
 
     # Name collision check
     name_exists = db.query(Agent).filter(

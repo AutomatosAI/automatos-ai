@@ -319,6 +319,13 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if temperature is not None:
         model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
 
+    # F200: the plan's agent limit, told before it is crossed; nothing is created.
+    from services.agent_quota import agent_limit_refusal
+
+    refusal = agent_limit_refusal(db, workspace_id)
+    if refusal:
+        return refusal
+
     agent = Agent(
         name=name,
         agent_type=agent_type,

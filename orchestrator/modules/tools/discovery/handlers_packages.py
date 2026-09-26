@@ -45,14 +45,8 @@ def _load_workspace(db: Any, workspace_id: UUID) -> Any:
     return db.query(Workspace).filter(Workspace.id == workspace_id).first()
 
 
-def _workspace_agent_count(db: Any, workspace_id: UUID) -> int:
-    from core.models.core import Agent
-
-    return (
-        db.query(Agent)
-        .filter(Agent.workspace_id == workspace_id, Agent.owner_type == "workspace")
-        .count()
-    )
+# F200: the one count every create path's limit uses (services.agent_quota).
+from services.agent_quota import AgentLimitReached, workspace_agent_count as _workspace_agent_count  # noqa: E402
 
 
 def _package_agent_refs(package: Any) -> set:
@@ -175,11 +169,9 @@ def _over_quota_response(db: Any, workspace: Any, package: Any, package_agents: 
 def _check_quota(db: Any, workspace: Any, workspace_id: UUID, package: Any) -> Dict[str, Any]:
     """D9: does installing this package exceed the tier's agent cap? Read-only —
     NEVER installs. Returns {ok: True} or the honest over-quota response."""
-    from services.plan_tiers import get_tier
+    from services.agent_quota import plan_agent_limit
 
-    plan = (getattr(workspace, "plan", None) or "basic") if workspace else "basic"
-    tier = get_tier(plan) or {}
-    max_agents = int(tier.get("max_agents", 0) or 0)
+    _, max_agents = plan_agent_limit(workspace)
     package_agents = len(_package_agent_refs(package))
     if max_agents <= 0:  # 0 = unlimited
         return {"ok": True}
@@ -236,10 +228,22 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
     if onboarding_active:
         onboarding_state.record_package_event(db, workspace, "package_accepted", slug, commit=True)
 
+    # F200 review HIGH: the plan can fill up between the check above and a member's
+    # clone (another create at the same moment). The refusal says nothing was
+    # created, so the members cloned before it are rolled back with the savepoint.
+    installing = db.begin_nested()
     try:
         manifest = await install_package(db, workspace_id, slug, user_id=None)
+    except AgentLimitReached as full:
+        installing.rollback()
+        return full.refusal
     except PackageInstallError as exc:
+        installing.commit()  # as before: a failed member leaves what installed
         return {"success": False, "error": str(exc)}
+    except Exception:
+        installing.rollback()  # never a savepoint left open for the caller to find
+        raise
+    installing.commit()
 
     if onboarding_active:
         onboarding_state.record_package_event(db, workspace, "package_installed", slug, commit=False)
@@ -298,6 +302,8 @@ async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Di
     ref = str(agent_id) if agent_id is not None else str(agent_name)
     try:
         manifest = await install_marketplace_agent(db, workspace_id, ref, user_id=None)
+    except AgentLimitReached as full:  # refused before anything was cloned
+        return full.refusal
     except PackageInstallError as exc:
         package = _package_named(db, ref) if "not found" in str(exc).lower() else None
         if package is not None:

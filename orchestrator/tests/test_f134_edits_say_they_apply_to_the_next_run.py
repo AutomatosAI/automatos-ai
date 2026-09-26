@@ -65,6 +65,14 @@ class _Db:
     def flush(self):
         pass
 
+    def execute(self, *a, **k):  # F200's agent-count lock: this workspace has no other create
+        return _LockHeld()
+
+
+class _LockHeld:
+    def scalar(self):
+        return True
+
 
 def _roast_log_playbook():
     return WorkflowTemplate(id=82, name="Roast log write-up", workspace_id=WS, steps=[
