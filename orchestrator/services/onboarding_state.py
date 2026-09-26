@@ -563,6 +563,51 @@ def build_evidence(db: Any, workspace: Any) -> dict[str, Any]:
 # tick can never drift from reality. Server is the record (D8) — no localStorage.
 # =========================================================================== #
 
+# F188 (night 6): the payoff happened (the owner's own documents answered a
+# question at 02:08:39, the first mission ran at 02:53) and the workspace sat at
+# boom all night: only Auto's platform_update_onboarding(advance_to=powerup) moved
+# it, and Auto never made that call. The events now move it. On SaaS it goes to
+# powerup (the key and the checklist cards); on local to completed, since powerup
+# has no local UI.
+PAYOFF_NEXT_SAAS = "powerup"
+PAYOFF_NEXT_LOCAL = "completed"
+
+
+def advance_past_boom(db: Any, workspace: Any, reason: str, *, commit: bool = True) -> Optional[str]:
+    """Move a workspace at boom on, now that its payoff happened. Returns the
+    stage it moved to, or None (not at boom, or the move was refused)."""
+    if current_stage(workspace) != BUILD_EVIDENCE_STAGE:
+        return None
+    from config import config
+
+    target = PAYOFF_NEXT_LOCAL if config.IS_LOCAL_EDITION else PAYOFF_NEXT_SAAS
+    try:
+        advance_onboarding_stage(db, workspace, target, commit=commit)
+    except InvalidStageTransition:
+        return None
+    logger.info("[F188] workspace %s at boom: %s, so onboarding moves to %s",
+                getattr(workspace, "id", None), reason, target)
+    return target
+
+
+def note_payoff(workspace_id: Any, reason: str) -> Optional[str]:
+    """``advance_past_boom`` on its own session, for a caller whose transaction
+    it should not share (a search tool mid-turn). Never raises."""
+    from core.database.database import SessionLocal
+    from core.models.workspaces import Workspace
+
+    db = SessionLocal()
+    try:
+        workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        return advance_past_boom(db, workspace, reason) if workspace is not None else None
+    except Exception:  # noqa: BLE001 -- the search or the run goes on either way
+        db.rollback()
+        logger.warning("[F188] could not move workspace %s past boom", workspace_id, exc_info=True)
+        return None
+    finally:
+        db.close()
+
+
 CHECKLIST_KEY = "checklist"
 
 # The Academy lives in a sibling repo at academy.automatos.app. This is the
@@ -612,7 +657,8 @@ def build_checklist(
     items: list[dict[str, Any]] = [
         {
             "id": "connect_second_app",
-            "label": "Connect a second app",
+            # F188: with none connected, the first one is what is left to do.
+            "label": "Connect an app" if connections_count == 0 else "Connect a second app",
             "done": connections_count >= 2,
         },
         {

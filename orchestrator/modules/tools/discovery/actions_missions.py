@@ -168,7 +168,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "type": "object",
             "properties": {
                 **_MISSION_ID_PARAM,
-                "reason": {"type": "string", "description": "Why the plan was rejected (returned to Auto's context)."},
+                "reason": {"type": "string", "description": (
+                    "Why the owner turned the plan down, in the owner's own words: quote what they "
+                    "asked to change, do not summarise it. The next plan for this conversation reads it.")},
             },
             "required": ["mission_id"],
         },

@@ -160,6 +160,122 @@ def missing_params_error(action_name: str, schema: Dict[str, Any], missing: List
     return "\n".join(lines)
 
 
+# F182: how much of a refused call the corrected example repeats.
+EXAMPLE_CALL_CHARS = 400
+# F182: how close a refused key must be to a declared one to be named as it.
+CLOSE_KEY_CUTOFF = 0.75
+
+
+def undeclared_params(action_def: Any, params: Dict[str, Any]) -> List[str]:
+    """F182 (night 6): the keys in ``params`` that the action would drop.
+
+    The keys it takes are the schema's, the undeclared ones its handler reads
+    (``accepts``), and any known other name of a declared one (``_PARAM_ALIASES``,
+    which ``_fill_required_from_aliases`` and ``map_optional_aliases`` fill from).
+    Server keys (a leading ``_``) and empty values are not counted, since
+    dropping them loses nothing.
+    """
+    if not isinstance(params, dict):
+        return []
+    schema = action_def.parameters or {}
+    taken = set(schema.get("properties") or {}) | set(getattr(action_def, "accepts", ()) or ())
+    for name in schema.get("properties") or {}:
+        taken.update(_PARAM_ALIASES.get(name, ()))
+    return [key for key, value in params.items()
+            if key not in taken and not str(key).startswith("_") and value not in (None, "", [], {})]
+
+
+def _where_it_goes(
+    key: str, value: Any, props: Dict[str, Any], misplaced: Dict[str, str],
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """What the refusal says about one key, and the params that carry its value
+    instead (None when nothing in this action does)."""
+    import difflib
+
+    inner = {k: v for k, v in value.items() if k in props} if isinstance(value, dict) else {}
+    if inner:
+        return f"its fields {list(inner)} go straight into params, not inside '{key}'.", inner
+    target = misplaced.get(key)
+    if target in props:
+        return f"put these values under '{target}'.", {target: value}
+    if target:
+        return target, None
+    stray = next((k for k in value if k in misplaced and misplaced[k] not in props), None) \
+        if isinstance(value, dict) else None
+    if stray:
+        return f"inside it, '{stray}': {misplaced[stray]}", None
+    close = difflib.get_close_matches(str(key), list(props), n=1, cutoff=CLOSE_KEY_CUTOFF)
+    if close:
+        return f"did you mean '{close[0]}'?", {close[0]: value}
+    return "not a parameter of this action.", None
+
+
+# F182: the two ways a model calls a platform action, as the refusal log names them.
+VIA_DISPATCHER = "platform_execute"
+VIA_DIRECT_CALL = "direct call"
+
+
+def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], sent: Dict[str, Any],
+                         via: str = VIA_DISPATCHER) -> str:
+    """F182: the refusal names each key the action does not take, where it goes,
+    and the call with it moved there, in the form the caller used. Nothing ran."""
+    schema = action_def.parameters or {}
+    props = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    misplaced = getattr(action_def, "misplaced", None) or {}
+    lines = [f"'{action_name}' does not take {unknown}, so nothing was done. Fix the call and send it again:"]
+    kept = {k: v for k, v in sent.items() if k not in unknown}
+    fixed = kept
+    for key in unknown:
+        where, moved = _where_it_goes(key, sent[key], props, misplaced)
+        lines.append(f"  {key}: {where}")
+        fixed = {**fixed, **(moved or {})}
+    if via == VIA_DISPATCHER:
+        example = json.dumps({"action": action_name, "params": fixed}, default=str, ensure_ascii=False)
+    else:
+        example = f"{action_name}({json.dumps(fixed, default=str, ensure_ascii=False)})"
+    if fixed != kept and len(example) <= EXAMPLE_CALL_CHARS:
+        lines.append(f"Call it like this: {example}")
+    takes = ", ".join(f"{name} ({(props[name] or {}).get('type', 'any')}{', required' if name in required else ''})"
+                      for name in props)
+    lines.append(f"'{action_name}' takes: {takes or 'no parameters'}.")
+    return "\n".join(lines)
+
+
+def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
+                         via: str = VIA_DISPATCHER) -> Dict[str, Any]:
+    """F182: an optional param sent under a known other name (create_agent's
+    "desc") is kept under its declared name, not refused and not dropped; each
+    mapping is logged. The required ones are ``_fill_required_from_aliases``'s.
+    A key the action itself declares is never taken for another. Returns new
+    params; the caller's are not changed."""
+    if not isinstance(params, dict):
+        return params
+    schema = action_def.parameters or {}
+    props, required = schema.get("properties") or {}, set(schema.get("required") or [])
+    mapped = dict(params)
+    for name in props:
+        if name in required or mapped.get(name) not in (None, ""):
+            continue
+        for alias in _PARAM_ALIASES.get(name, ()):
+            if alias in props or mapped.get(alias) in (None, "", [], {}):
+                continue
+            mapped[name] = mapped.pop(alias)
+            logger.info(f"[F182] {via} mapped param '{alias}' to '{name}' for {action_name} (trace {trace})")
+            break
+    return mapped
+
+
+def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
+                              via: str = VIA_DISPATCHER) -> Optional[str]:
+    """F182: the refusal for the keys in ``params`` the action does not take,
+    each logged to be counted, or None when there are none."""
+    unknown = undeclared_params(action_def, params)
+    for key in unknown:
+        logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")
+    return unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None
+
+
 def unknown_action_error(action_name: str, registry: Any) -> str:
     """F121: the actions an unknown-action error suggests are ones that can
     run here — never one F078 leaves out of every surface."""
@@ -873,14 +989,21 @@ class UnifiedToolExecutor:
                 # synonym.
                 required = action_def.parameters.get("required", [])
                 action_params = _fill_required_from_aliases(action_params, required)
+                action_params = map_optional_aliases(action_name, action_def, action_params, trace)
                 missing = [p for p in required if p not in action_params]
-                if missing:
-                    # F027-C: the exact call, every required key with its type.
-                    result = {
-                        "success": False,
-                        "error": missing_params_error(action_name, action_def.parameters, missing, action_params),
-                        "tool": tool_name,
-                    }
+                # F182 (night 6): a key the action does not take is refused, not
+                # dropped. Run 207 started with no inputs because they came nested
+                # under "params", and two update_playbook calls changed nothing
+                # and reported success. Each refusal is logged, to be counted.
+                refused = undeclared_params_refusal(action_name, action_def, action_params, trace)
+                if missing or refused:
+                    errors = []
+                    if missing:
+                        # F027-C: the exact call, every required key with its type.
+                        errors.append(missing_params_error(action_name, action_def.parameters, missing, action_params))
+                    if refused:
+                        errors.append(refused)
+                    result = {"success": False, "error": "\n".join(errors), "tool": tool_name}
                     return result
 
                 logger.info(f"[tool-trace {trace}] platform_execute -> {action_name}")
@@ -900,6 +1023,19 @@ class UnifiedToolExecutor:
             # PRD-64: Route platform_* actions to PlatformActionExecutor (direct calls)
             if tool_name.startswith("platform_"):
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
+                # F182: a direct call is held to platform_execute's rule. Night 6's
+                # update_task_status sent "reason", which it does not take, and the
+                # reason was dropped without a word.
+                from modules.tools.discovery import get_action_registry
+
+                action_def = get_action_registry().get(tool_name)
+                if action_def is not None and isinstance(parameters, dict):
+                    parameters = _fill_required_from_aliases(parameters, action_def.parameters.get("required", []))
+                    parameters = map_optional_aliases(tool_name, action_def, parameters, trace, VIA_DIRECT_CALL)
+                    refused = undeclared_params_refusal(tool_name, action_def, parameters, trace, VIA_DIRECT_CALL)
+                    if refused:
+                        result = {"success": False, "error": refused, "tool": tool_name}
+                        return result
                 result = await self._execute_platform_action(
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
                     caller_context=caller_context, agent_id=agent_id,

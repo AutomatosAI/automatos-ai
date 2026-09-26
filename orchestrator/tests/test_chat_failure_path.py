@@ -8,18 +8,16 @@ reflect Chat's real-time state.
 This file pins those two contracts against the converged spine (W3-S4):
 
 1. ``_stream_tool_loop`` LLM-call exception → yields ``_final_response``
-   carrying ``Error: <e>`` text → caller streams it via ``stream_text_aisdk``
-   (the user sees the error).
+   carrying ``describe_turn_error``'s plain sentence (F169) → caller streams
+   it via ``stream_text_aisdk`` (the user sees the error).
 2. ``_stream_tool_loop`` fatal-error short-circuit → forces a user-facing
    message instead of letting the loop hang silently.
 3. ``stream_response_with_agent`` outer ``except`` → yields the AI SDK
    ``e:{"message": "..."}`` frame (the AI SDK error frame).
-4. ``stream_response`` outer ``except`` → yields the SSE
-   ``data: {"type": "error", "error": "..."}`` frame (legacy SSE error).
-5. Tool-callback returns ``success=False`` → executor still drives the
+4. Tool-callback returns ``success=False`` → executor still drives the
    loop to completion and the failed-tool ``tool-end`` is emitted to SSE
    (the user sees which tool failed).
-6. Chat primitive heartbeat emit:
+5. Chat primitive heartbeat emit:
    - ``emit_primitive_finding`` is called with ``"green"`` on a clean turn,
    - ``emit_primitive_finding`` is called with ``"down"`` on a caught
      exception,
@@ -287,20 +285,6 @@ def test_aisdk_error_frame_is_emitted_on_outer_exception():
     assert frame.startswith("e:"), f"AI SDK error frame must start with 'e:', got: {frame!r}"
     assert "boom" in frame
     assert json.loads(frame[2:].rstrip("\n"))["message"] == "boom"
-
-
-def test_sse_error_frame_is_emitted_on_outer_exception():
-    """The stream_response outer except yields the legacy SSE error frame.
-    Mirrors the same visibility contract on the older endpoint."""
-    from consumers.chatbot.streaming import get_streaming_handler
-
-    handler = get_streaming_handler()
-    frame = handler.format_sse_error("kaboom")
-    assert frame.startswith("data: "), f"SSE error frame must start with 'data:', got: {frame!r}"
-    assert "kaboom" in frame
-    payload = json.loads(frame[len("data: "):].strip())
-    assert payload["type"] == "error"
-    assert payload["error"] == "kaboom"
 
 
 # ---------------------------------------------------------------------------

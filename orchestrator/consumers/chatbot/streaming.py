@@ -3,7 +3,6 @@ Streaming Handler - SSE Response Formatting
 ============================================
 
 Handles:
-- Formatting SSE chunks for legacy format
 - Formatting AI SDK Data Stream format
 - Word-boundary-aware chunking for smooth streaming
 - Widget-related SSE events (memory, workflow)
@@ -11,7 +10,6 @@ Handles:
 
 import json
 import logging
-import uuid
 from typing import Dict, Any, AsyncGenerator, List, Optional
 import asyncio
 
@@ -21,82 +19,8 @@ logger = logging.getLogger(__name__)
 class StreamingHandler:
     """
     Handles SSE formatting for chat responses.
-    Supports both legacy SSE format and AI SDK Data Stream format.
+    Formats the AI SDK Data Stream.
     """
-
-    # ==========================================================================
-    # LEGACY SSE FORMAT (data: {json}\n\n)
-    # ==========================================================================
-
-    def format_sse_chunk(self, chunk: Dict[str, Any]) -> str:
-        """Format chunk as SSE data (legacy format)."""
-        if chunk.get('type') == 'text':
-            data = {
-                'type': 'text-delta',
-                'id': str(uuid.uuid4()),
-                'delta': chunk.get('text', '')
-            }
-        elif chunk.get('type') == 'tool_call':
-            data = {
-                'type': 'tool-result',
-                'toolName': chunk.get('tool_name'),
-                'result': chunk.get('result')
-            }
-        elif chunk.get('type') == 'usage':
-            data = {
-                'type': 'data-usage',
-                'data': {
-                    'promptTokens': chunk.get('prompt_tokens', 0),
-                    'completionTokens': chunk.get('completion_tokens', 0),
-                    'totalTokens': chunk.get('total_tokens', 0),
-                    'cost': chunk.get('cost')
-                }
-            }
-        else:
-            data = chunk
-
-        return f"data: {json.dumps(data)}\n\n"
-
-    def format_sse_tool_data(self, tool_data: Dict[str, Any]) -> str:
-        """Format tool data for SSE."""
-        return f"data: {json.dumps({'type': 'tool-data', 'data': tool_data})}\n\n"
-
-    def format_sse_text_start(self, message_id: str) -> str:
-        """Format text-start event."""
-        return f"data: {json.dumps({'type': 'text-start', 'id': message_id})}\n\n"
-
-    def format_sse_text_delta(self, message_id: str, delta: str) -> str:
-        """Format text-delta event."""
-        return f"data: {json.dumps({'type': 'text-delta', 'id': message_id, 'delta': delta})}\n\n"
-
-    def format_sse_text_end(self, message_id: str) -> str:
-        """Format text-end event."""
-        return f"data: {json.dumps({'type': 'text-end', 'id': message_id})}\n\n"
-
-    def format_sse_done(self) -> str:
-        """Format done event."""
-        return f"data: {json.dumps({'type': 'done'})}\n\n"
-
-    def format_sse_error(self, error: str) -> str:
-        """Format error event."""
-        return f"data: {json.dumps({'type': 'error', 'error': error})}\n\n"
-
-    async def stream_text_legacy(
-        self,
-        text: str,
-        message_id: str = None
-    ) -> AsyncGenerator[str, None]:
-        """Stream text word-by-word in legacy SSE format."""
-        message_id = message_id or str(uuid.uuid4())
-
-        yield self.format_sse_text_start(message_id)
-
-        words = text.split(' ')
-        for i, word in enumerate(words):
-            chunk_text = word + (' ' if i < len(words) - 1 else '')
-            yield self.format_sse_text_delta(message_id, chunk_text)
-
-        yield self.format_sse_text_end(message_id)
 
     # ==========================================================================
     # AI SDK DATA STREAM FORMAT (0:"text"\n, d:{json}\n, e:{json}\n)
@@ -121,6 +45,12 @@ class StreamingHandler:
     def format_aisdk_reasoning(self, delta: str) -> str:
         """PRD-238 S1: a reasoning delta — the thinking channel, never the answer."""
         return self.format_aisdk_data("reasoning", {"delta": delta})
+
+    def format_aisdk_narration(self, text: str, retracted: bool = False) -> str:
+        """F186: the text just streamed was not the answer. The round ended in
+        tool calls, so it is narration and belongs with the progress lines; or,
+        ``retracted``, the loop nudged it (F108) and the retry replaces it."""
+        return self.format_aisdk_data("narration", {"text": text, **({"retracted": True} if retracted else {})})
 
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped

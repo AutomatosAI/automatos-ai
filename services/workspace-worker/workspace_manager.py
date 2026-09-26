@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -36,6 +37,31 @@ from worker_config import workspace_root
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUOTA_GB = int(os.environ.get("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
+
+
+# F178: names no file route may ever serve or list: deploy keys and git identity
+# (injected per task), cloud credentials, the workspace's own metadata, canvas SDK
+# state and transcripts (PRD-170 S1), and a task's env file. The listing, content
+# and download routes all check against this one list.
+SENSITIVE_NAMES = frozenset({".ssh", ".gitconfig", ".aws", ".gcp", ".workspace_meta.json", ".canvas"})
+SENSITIVE_PREFIXES = (".task_env_",)
+
+
+def is_sensitive_name(name: str) -> bool:
+    """A file or directory name no file route may serve or list, in any case
+    (".SSH" is ".ssh" on a case-insensitive filesystem)."""
+    folded = name.lower()
+    return folded in SENSITIVE_NAMES or folded.startswith(SENSITIVE_PREFIXES)
+
+
+def is_workspace_id(value: object) -> bool:
+    """F173: only a canonical UUID (lower case, with dashes) may name a workspace
+    directory. Anything else could climb out of the volume root ("..") or give
+    one workspace two directories (upper case, bare hex)."""
+    try:
+        return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
 
 
 class WorkspaceManager:
@@ -141,8 +167,15 @@ class WorkspaceManager:
         logger.debug("Created task dir: %s", task_dir)
         return task_dir
 
-    def cleanup_task(self, task_id: str) -> None:
-        """Remove ephemeral task directory + task-specific credentials."""
+    def cleanup_task(self, task_id: str, *, clear_credentials: bool = False) -> None:
+        """Remove ephemeral task directory + task-specific credentials.
+
+        F178: with ``clear_credentials``, the injected deploy key and git
+        identity go too. They are shared files at the workspace root, so the
+        task runner asks for it only when no other task in this workspace is
+        still running. Nothing removed them before, and a deploy key stayed on
+        the volume for good.
+        """
         task_dir = self.root / "tasks" / f"task_{task_id}"
         if task_dir.exists():
             shutil.rmtree(task_dir, ignore_errors=True)
@@ -152,6 +185,9 @@ class WorkspaceManager:
         task_env = self.root / f".task_env_{task_id}"
         if task_env.exists():
             task_env.unlink(missing_ok=True)
+
+        if clear_credentials:
+            self.clear_credentials()
 
     def cleanup_all_stale_tasks(self, max_age_hours: int = 24) -> int:
         """Remove task dirs older than max_age_hours. Returns count removed."""
@@ -268,6 +304,11 @@ class WorkspaceManager:
             )
 
         return resolved
+
+    def is_sensitive_path(self, target: Path) -> bool:
+        """Any part of ``target`` (resolved, inside this workspace) is a
+        sensitive name (F178: one check for every file route)."""
+        return any(is_sensitive_name(part) for part in target.relative_to(self.root.resolve()).parts)
 
     # =========================================================================
     # Repo management

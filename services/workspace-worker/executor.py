@@ -342,6 +342,38 @@ class WorkspaceToolExecutor:
     # Cap viewport so an agent can't request a 32k×32k canvas and OOM the worker.
     _MAX_VIEWPORT_DIM = 4096
 
+    def _file_url_blocked(self, url: str) -> bool:
+        """F178: a file:// URL a rendered page may not load. That is anything
+        outside this workspace (another workspace, /etc) or a protected name
+        inside it (.ssh/, .canvas/ ...). Non-file URLs are not this gate's."""
+        if not url.startswith("file:"):
+            return False
+        from urllib.parse import unquote, urlparse
+
+        target = Path(unquote(urlparse(url).path)).resolve()
+        try:
+            target.relative_to(self.ws.root.resolve())
+        except ValueError:
+            return True
+        return self.ws.is_sensitive_path(target)
+
+    async def _gate_render_request(self, route) -> None:
+        """F178: every request of a rendered page passes here, sub-resources
+        included. Chromium runs with --allow-file-access-from-files, so a
+        workspace page could iframe .ssh/<key> or another workspace's files and
+        the screenshot would show them. A file:// URL this gate cannot judge is
+        refused."""
+        url = route.request.url
+        try:
+            blocked = self._file_url_blocked(url)
+        except Exception:  # noqa: BLE001 — fail closed
+            blocked = url.startswith("file:")
+        if blocked:
+            logger.warning("html_to_png refused %s in %s", url[:200], self.ws.workspace_id[:8])
+            await route.abort()
+        else:
+            await route.continue_()
+
     async def html_to_png(
         self,
         url: str,
@@ -432,6 +464,10 @@ class WorkspaceToolExecutor:
                     "success": False,
                     "error": f"file:// URL must point inside the workspace: {e}",
                 }
+            # F178: nor may it render a credential or the workspace's metadata
+            # into a PNG, which would then be an ordinary, downloadable file.
+            if self.ws.is_sensitive_path(resolved_target):
+                return {"success": False, "error": "file:// URL must not point at a protected file"}
             if not resolved_target.exists():
                 return {
                     "success": False,
@@ -474,6 +510,8 @@ class WorkspaceToolExecutor:
                         viewport={"width": int(viewport_w), "height": int(viewport_h)},
                         device_scale_factor=1,
                     )
+                    # F178: the page, its frames and their loads all pass the gate.
+                    await context.route("**/*", self._gate_render_request)
                     page = await context.new_page()
                     try:
                         await page.goto(url, wait_until="load", timeout=self._RENDER_TIMEOUT_MS)

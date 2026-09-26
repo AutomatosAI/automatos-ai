@@ -62,6 +62,7 @@ from services.page_context import (
 )
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 
 logger = logging.getLogger(__name__)
 
@@ -1400,7 +1401,7 @@ class StreamingChatService:
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
 
-    def _inject_composio_tools(
+    async def _inject_composio_tools(
         self,
         llm_messages: List[Dict[str, Any]],
         use_tools: Optional[List[Dict[str, Any]]],
@@ -1412,8 +1413,11 @@ class StreamingChatService:
     ) -> Tuple[Optional[List[Dict[str, Any]]], Any]:
         """
         Inject Composio per-action tools (primary) or hint fallback.
-        Returns (updated use_tools, composio_result).
+        Returns (updated use_tools, composio_result). F105: both lookups run
+        off the loop (core.composio.off_loop).
         """
+        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+
         _composio_result = None
         _tool_hints = (
             complexity_assessment.tool_hints
@@ -1424,15 +1428,18 @@ class StreamingChatService:
             if latest_text and agent_id and self.workspace_id and not skip_composio:
                 from modules.tools.services.composio_tool_service import ComposioToolService
 
-                _composio_svc = ComposioToolService(self.db)
+                workspace_id = self.workspace_id
                 _search_prompt = (
                     " ".join(_tool_hints) if _tool_hints else latest_text
                 )
-                _composio_result = _composio_svc.get_tools_for_step(
-                    agent_id=agent_id,
-                    workspace_id=self.workspace_id,
-                    task_prompt=_search_prompt,
-                    tool_hints=_tool_hints,
+                _composio_result = await composio_lookup(
+                    lambda db: ComposioToolService(db).get_tools_for_step(
+                        agent_id=agent_id,
+                        workspace_id=workspace_id,
+                        task_prompt=_search_prompt,
+                        tool_hints=_tool_hints,
+                    ),
+                    step=f"chat turn (agent {agent_id}): tool search",
                 )
                 if _composio_result and _composio_result.tools:
                     if use_tools:
@@ -1454,11 +1461,13 @@ class StreamingChatService:
                 else:
                     from modules.tools.services.composio_hint_service import ComposioHintService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
-                        agent_id=agent_id,
-                        prompt=latest_text,
-                        workspace_id=self.workspace_id,
+                    hint_result = await composio_lookup(
+                        lambda db: ComposioHintService(db).build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=workspace_id,
+                        ),
+                        step=f"chat turn (agent {agent_id}): action hints",
                     )
                     if hint_result.hint_lines:
                         llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -1466,6 +1475,8 @@ class StreamingChatService:
                             f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} "
                             f"apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}"
                         )
+        except ComposioLookupTimeout:
+            pass  # warned where it gave up; the turn goes on without Composio tools
         except Exception as exc:
             logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
@@ -1679,7 +1690,7 @@ class StreamingChatService:
         conversation_id: Optional[str] = None,
         assign_lane: bool = False,
         is_super_admin: bool = False,
-        streamed_text: Optional[List[str]] = None,
+        streamed_rounds: Optional[List[Any]] = None,
         reasoning_log: Optional[List[str]] = None,
         prefetched: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
     ) -> AsyncGenerator[Any, None]:
@@ -2041,8 +2052,16 @@ class StreamingChatService:
                     reasoning_log.append(reasoning)
                 if not getattr(resp, "streamed", False):
                     await sse_queue.put(self.streaming_handler.format_aisdk_reasoning(reasoning))
-            if getattr(resp, "streamed", False) and getattr(resp, "content", None) and streamed_text is not None:
-                streamed_text.append(resp.content)
+            if streamed_rounds is not None:
+                # F186: the loop only calls the model again after a reply with no
+                # tool call when it nudged that reply (F108), so it was never the answer.
+                if streamed_rounds and not called_tools(streamed_rounds[-1]) and streamed_rounds[-1] is not resp:
+                    await sse_queue.put(self.streaming_handler.format_aisdk_narration(
+                        streamed_rounds[-1].content, retracted=True))
+                if getattr(resp, "streamed", False) and getattr(resp, "content", None):
+                    streamed_rounds.append(resp)
+                    if called_tools(resp):  # it spoke before its tool calls: narration
+                        await sse_queue.put(self.streaming_handler.format_aisdk_narration(resp.content))
             return resp
 
         async def _llm_callback(messages, tools):
@@ -2124,10 +2143,15 @@ class StreamingChatService:
         try:
             result = await runner_task
         except Exception as loop_err:
+            # F169 (B10/B26): the reply says what failed in plain words
+            # (turn_errors); the raw provider text stays in this log line.
+            from consumers.chatbot.turn_errors import describe_turn_error
+
             logger.error(f"Tool loop failed: {loop_err}", exc_info=True)
-            yield {"_final_response": SimpleNamespace(
-                content=f"Error: {loop_err}", tool_calls=None, usage=None,
-            )}
+            err = describe_turn_error(
+                loop_err, agent_name=self._agent_display_name(getattr(agent_runtime, "agent_id", None)),
+            )
+            yield {"_final_response": SimpleNamespace(content=err.message, tool_calls=None, usage=None)}
             return
 
         # PRD-232 US-011a: a tool-warranted turn (tools were offered) that ran NO
@@ -2823,7 +2847,7 @@ class StreamingChatService:
             # Inject Composio per-action tools (never on a widget turn: they act
             # on the owner's connected apps, F155)
             if _complexity != Complexity.ATOM and not self.widget_mode:
-                use_tools, _composio_result = self._inject_composio_tools(
+                use_tools, _composio_result = await self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
                 )
@@ -2875,7 +2899,9 @@ class StreamingChatService:
                 logger.info(f"Available tools: {tool_names}")
 
             # PRD-238 S2: the first call streams its text and reasoning live.
-            streamed_text: List[str] = []
+            # F186: each streamed round is kept whole: which ones called tools
+            # decides what was narration and what is the answer.
+            streamed_rounds: List[Any] = []
             reasoning_log: List[str] = []
             response = None
             async for item in self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools):
@@ -2888,7 +2914,9 @@ class StreamingChatService:
                 if not getattr(response, "streamed", False):
                     yield self.streaming_handler.format_aisdk_reasoning(response.reasoning)
             if getattr(response, "streamed", False) and response.content:
-                streamed_text.append(response.content)
+                streamed_rounds.append(response)
+                if called_tools(response):  # F186: it spoke before its tool calls
+                    yield self.streaming_handler.format_aisdk_narration(response.content)
             if is_empty_completion(response):
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
@@ -2908,7 +2936,6 @@ class StreamingChatService:
             )
 
             # Track response
-            assistant_parts = []
             full_response = ""
             tool_data = {}
 
@@ -2930,7 +2957,7 @@ class StreamingChatService:
                     conversation_id=chat_id,
                     assign_lane=_assign_lane,
                     is_super_admin=is_super_admin,
-                    streamed_text=streamed_text,
+                    streamed_rounds=streamed_rounds,
                     reasoning_log=reasoning_log,
                     prefetched=_prefetched,
                 ):
@@ -2943,6 +2970,7 @@ class StreamingChatService:
                 if final_response and final_response.content:
                     final_text = final_response.content
                     final_streamed = bool(getattr(final_response, "streamed", False))
+                    final_round = final_response
                 else:
                     logger.warning("Tool loop completed without final response - forcing synthesis")
                     llm_messages.append({
@@ -2953,9 +2981,11 @@ class StreamingChatService:
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
                     final_text = forced.content or nothing_said_fallback(tool_data)
                     final_streamed = False
+                    final_round = forced
             else:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
+                final_round = response
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
@@ -2971,22 +3001,21 @@ class StreamingChatService:
                 except Exception:
                     logger.debug("[no-tool-call] first-reply notice skipped", exc_info=True)
 
-            # PRD-238 S2: the saved message is exactly what the screen showed —
-            # every round's streamed text in order, plus a final answer that the
-            # provider could not stream. Only that unstreamed tail is emitted here.
-            shown_so_far = "\n\n".join(t for t in streamed_text if t)
-            if final_streamed:
-                full_response = shown_so_far
-                unstreamed_tail = ""
-            else:
-                full_response = f"{shown_so_far}\n\n{final_text}".strip() if shown_so_far else final_text
-                unstreamed_tail = final_text
+            # PRD-238 S2 / F186: every round streamed live; the reply is the
+            # answer, and what the model said before its tool calls is narration,
+            # saved as its own part (narration.split_reply). Only an answer the
+            # provider could not stream is emitted here.
+            narration, full_response = split_reply(streamed_rounds, final_round, final_text)
+            unstreamed_tail = "" if final_streamed else final_text
 
             # Upload inline base64 images to S3
             _ws_id_img = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
             full_response = await _upload_inline_images(
                 full_response, workspace_id=str(_ws_id_img) if _ws_id_img else None,
             )
+            narration_text = await _upload_inline_images(
+                "\n\n".join(narration), workspace_id=str(_ws_id_img) if _ws_id_img else None,
+            ) if narration else ""
 
             # Stream whatever the screen has not seen yet (nothing, when every round streamed)
             if unstreamed_tail:
@@ -3008,11 +3037,10 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_finish()
 
             # Save assistant message — PRD-238 S1: the reasoning rides as its
-            # own part (never the answer text, never fed back to the model).
+            # own part (never the answer text, never fed back to the model), and
+            # F186: so does the narration. Memory takes the answer (below).
             joined_reasoning = "\n\n".join(r for r in reasoning_log if r)
-            if joined_reasoning:
-                assistant_parts.append({'type': 'reasoning', 'reasoning': joined_reasoning})
-            assistant_parts.append({'type': 'text', 'text': full_response})
+            assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)
             self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,
@@ -3076,121 +3104,6 @@ class StreamingChatService:
             )
         except Exception:  # noqa: BLE001
             logger.debug("[Chat] could not persist the turn error note", exc_info=True)
-
-    async def stream_response(
-        self,
-        chat_id: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Any]] = None
-    ) -> AsyncGenerator[str, None]:
-        """Stream chat response using legacy SSE format."""
-        from core.llm import create_llm_manager
-
-        # PRD-185 S7: start the turn with clean retrieval provenance.
-        self._reset_turn_retrieval()
-
-        # Get tools from SINGLE SOURCE if not provided.
-        # PRD-138 US-009: extract latest user turn first so the dispatcher
-        # enum can be narrowed to relevant actions for this query.
-        if tools is None:
-            _query = self.prompt_analyzer.extract_latest_user_text(messages)
-            tools = await get_tools_for_agent_async(query=_query)
-
-        try:
-            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
-            messages = self._resolve_file_parts(messages)
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            if self.prompt_analyzer.is_fresh_start_request(latest_text):
-                messages = [m for m in messages if m.get("role") == "user"][-1:]
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-                messages, available_tools=tools,
-            )
-            # PRD-157 S5: keep the chat's pinned documents always in context.
-            self._inject_pinned_documents(llm_messages, chat_id)
-            assistant_parts = []
-
-            if hasattr(llm_manager, 'generate_response_stream'):
-                async for chunk in llm_manager.generate_response_stream(messages=llm_messages, tools=tools):
-                    yield self.streaming_handler.format_sse_chunk(chunk)
-                    if chunk.get('type') == 'text':
-                        assistant_parts.append({'type': 'text', 'text': chunk.get('text', '')})
-            else:
-                latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-                is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-                use_tools = None if is_simple else tools
-
-                self._before_model_call()
-                response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
-
-                if response.tool_calls:
-                    tool_data = {}
-                    tool_results = []
-
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
-                        tool_id = tool_call.get('id')
-
-                        result = await self.tool_router.execute_and_format(
-                            tool_name, tool_args,
-                            agent_id=1, workspace_id=self.workspace_id,
-                            original_intent=latest_text,
-                        )
-                        # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
-                        self._collect_tool_retrieval(tool_name, result)
-                        if result['success']:
-                            tool_data.update(result['frontend_data'])
-
-                        tool_results.append({
-                            "role": "tool",
-                            "tool_call_id": tool_id,
-                            "content": result['llm_context'],
-                        })
-
-                    if tool_data:
-                        yield self.streaming_handler.format_sse_tool_data(tool_data)
-
-                    llm_messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": response.tool_calls,
-                    })
-                    llm_messages.extend(tool_results)
-
-                    self._before_model_call()
-                    final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
-                    response_text = final_response.content or ""
-                else:
-                    response_text = response.content or ""
-
-                message_id = str(uuid.uuid4())
-                async for chunk in self.streaming_handler.stream_text_legacy(response_text, message_id):
-                    yield chunk
-
-                assistant_parts.append({'type': 'text', 'text': response_text})
-
-            if assistant_parts:
-                self.chat_service.save_message(
-                    chat_id=chat_id, role='assistant',
-                    parts=assistant_parts, workspace_id=self.workspace_id,
-                    # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
-                    retrieval_context=self._turn_retrieval_context(latest_text),
-                )
-
-            yield self.streaming_handler.format_sse_done()
-
-            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
-            _emit_chat_primitive(
-                self.workspace_id, success=True, detail="chat turn completed",
-            )
-
-        except Exception as e:
-            logger.error(f"Error streaming response: {e}", exc_info=True)
-            yield self.streaming_handler.format_sse_error(str(e))
-            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
-            _emit_chat_primitive(
-                self.workspace_id, success=False, detail=str(e),
-            )
 
     async def _execute_pretriggered_tools(
         self,

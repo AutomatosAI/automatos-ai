@@ -315,6 +315,27 @@ async def execute_gated_workspace_action(
     return marked(result, cleared)
 
 
+def exec_failure(result: Dict[str, Any]) -> Optional[str]:
+    """F191 (night 6): why a command the worker ran failed, read from its exit
+    code, or None.
+
+    python3 scripts/profile.py exited 2 ("can't open file") and the call said
+    success. The worker answers /exec with HTTP 200 and the exit code in the
+    body, and nothing read it, so telemetry, F137's step summary and F131's
+    failed-last-call rule all saw a success. Any non-zero exit fails the call,
+    except 1 with nothing on stderr: that is a command's "no" (grep found
+    nothing, test was false, diff found a difference), and a step that ends on
+    one has not failed.
+    """
+    code = result.get("exit_code")
+    if not isinstance(code, int) or code == 0 or result.get("error"):
+        return None
+    stderr = str(result.get("stderr") or "").strip()
+    if code == 1 and not stderr:
+        return None
+    return f"the command exited {code}: {stderr.splitlines()[-1] if stderr else 'nothing on stderr'}"
+
+
 async def resolve_repo_dir(client) -> Optional[str]:
     """Auto-detect the git repo directory inside a workspace.
 
@@ -487,6 +508,11 @@ async def execute_workspace_action(
 
         else:
             return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
+
+        # F191: a command that failed says so; its output stays for the model.
+        failed = exec_failure(result) if tool_name == "workspace_exec" else None
+        if failed:
+            result = {**result, "success": False, "error": failed}
 
         # Worker returned an error
         if result.get("success") is False or result.get("error"):

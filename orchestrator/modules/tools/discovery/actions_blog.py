@@ -174,6 +174,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
             "create blog post topic: AI agents for SaaS",
             "start a blog mission about LLM observability",
         ],
+        accepts=("config",),
     ))
 
     registry.register(ActionDefinition(

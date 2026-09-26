@@ -53,6 +53,7 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "load_skill data-analysis",
             "pull the full instructions for the sql skill",
         ],
+        accepts=("skill_name",),
     ))
 
     # PRD-202 S3: L3 script execution via the workspace worker (sandboxed,
@@ -84,6 +85,7 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "run the convert.py script from the docx skill",
             "run_skill_script skill=analytics script=summarize.py args='--period 7d'",
         ],
+        accepts=("name", "skill_name"),
     ))
 
     # PRD-202 S4: workspace-admin enablement gate for L3 execution. Importing /
@@ -118,6 +120,7 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "enable script execution for the analytics skill",
             "turn off L3 scripts for skill 42",
         ],
+        accepts=("skill",),
     ))
 
     registry.register(ActionDefinition(

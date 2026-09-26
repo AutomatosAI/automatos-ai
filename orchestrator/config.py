@@ -712,6 +712,13 @@ class Config:
     # the model is on the operator's own plan; this stops a looping session from
     # hammering the board. 0 = no cap.
     SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
+    # F161 (night 5): the most of one file an earlier mission step saved that a
+    # session reads in one read_step_file call; a longer file comes back cut,
+    # with a note saying so. Held under the bridge's own result cap.
+    SESSION_STEP_FILE_MAX_CHARS: int = int(os.getenv("SESSION_STEP_FILE_MAX_CHARS", "30000"))
+    # F170 (night 5): how long a running mission's steps sit queued behind
+    # another mission's Claude Code step before the mission says so.
+    MISSION_WAIT_NOTE_AFTER_SECONDS: int = int(os.getenv("MISSION_WAIT_NOTE_AFTER_SECONDS", "300"))
     # PRD-234 S2 (local edition): the owner's projects folder on the HOST machine, as
     # the CLI host sees it. Only used to map a session's file paths onto the
     # worker's "projects/" view (the folder is bind-mounted read-only into the
@@ -1512,10 +1519,28 @@ class Config:
     # most 402 characters; a longer answer is the step's work, even if it ends
     # on a question.
     PLAYBOOK_OWNER_ASK_MAX_CHARS: int = int(os.getenv("PLAYBOOK_OWNER_ASK_MAX_CHARS", "600"))
+    # F183: an answer that says what it lacks, asks for it and puts its work off
+    # until it has it ("Once I have …, I will …") is an ask up to this long,
+    # wherever its questions sit. Night 6's #1097 was 662 characters.
+    OWNER_ASK_DEFERRED_MAX_CHARS: int = int(os.getenv("OWNER_ASK_DEFERRED_MAX_CHARS", "1200"))
     # F105: document-vector searches run on this many threads of their own, never
     # on the loop; the local search is a full scan (F107) that holds a pool
     # connection for its whole length, so this also caps how many run at once.
     DOCUMENT_SEARCH_THREADS: int = int(os.getenv("DOCUMENT_SEARCH_THREADS", "4"))
+    # F105: the Composio lookups before a model call (tool search, action hints)
+    # run on this many threads of their own, never on the loop; each holds a pool
+    # connection for its whole length, so this also caps how many run at once.
+    COMPOSIO_LOOKUP_THREADS: int = int(os.getenv("COMPOSIO_LOOKUP_THREADS", "4"))
+    # ...and an app's action list or a step search, once fetched, is answered
+    # from memory for this long (core.composio.lookup_cache).
+    COMPOSIO_LOOKUP_CACHE_TTL_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_CACHE_TTL_SECONDS", "600"))
+    # ...and a turn waits at most this long for one; then it goes on without
+    # Composio tools. The SDK's lookup calls give up after as long, un-retried,
+    # so a hung call frees its thread too.
+    COMPOSIO_LOOKUP_TIMEOUT_SECONDS: float = float(os.getenv("COMPOSIO_LOOKUP_TIMEOUT_SECONDS", "20"))
+    # F105: when the event loop stands still this long, the loop watchdog logs
+    # one WARNING with the loop thread's stack (core/loop_watchdog.py). 0 = off.
+    LOOP_STALL_LOG_SECONDS: float = float(os.getenv("LOOP_STALL_LOG_SECONDS", "2"))
     # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
     # unless it fetched fewer than this share of the models listed before: a
     # partial answer would otherwise retire the rest of the catalog.

@@ -112,11 +112,11 @@ MONDAY_DISPATCH = [
 
 
 def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None, input_data=None, calls=None,
-                 agent_status="active", execution_metadata=None, on_step=None, after_run=None):
+                 agent_status="active", execution_metadata=None, on_step=None, after_run=None, inputs=None):
     """Run a playbook (default: the two-step Monday dispatch) through the real
     loop; return (execution, card). ``calls`` collects what each step was sent;
     ``on_step`` is called inside each step, ``after_run`` in the run's task once
-    the run returns."""
+    the run returns. ``inputs`` is the playbook's declared inputs (F182)."""
     clock = [1_000_000.0]
     results = iter(outcomes)
 
@@ -137,7 +137,8 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
     card = SimpleNamespace(id=760, status="in_progress", result=None, error_message=None,
                            review_feedback=None, completed_at=None)
     session = _Session({
-        WorkflowTemplate: [SimpleNamespace(id=79, name="Monday dispatch", steps=steps, execution_config=exec_config)],
+        WorkflowTemplate: [SimpleNamespace(id=79, name="Monday dispatch", steps=steps, execution_config=exec_config,
+                                           inputs=inputs)],
         RecipeExecution: [execution],
         Workspace: [SimpleNamespace(deleted_at=None, paused_at=None, paused_reason=None)],
         Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={}, status=agent_status)],

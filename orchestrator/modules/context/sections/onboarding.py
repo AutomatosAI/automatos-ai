@@ -93,7 +93,8 @@ widgets and agents." And early: "you're on Basic while we set up — we'll pick 
 plan together shortly."
 - Stages are EXACTLY `not_started`, `questions`, `teach`, `proposal`, `building`, \
 `boom`, `powerup`, `completed`, `skipped` — pass one to `platform_update_onboarding`; \
-never invent one.
+never invent one. The ids are internal: never say one to the owner; say what is \
+built and what is left, in plain words.
 """
 
 _FIRST_MESSAGE_PREFIX = (
@@ -175,8 +176,9 @@ _STAGE_BOOM = """\
 ### Now: the payoff moment
 Invite the user to ask you something about THEIR business, and answer it grounded \
 in what you just learned — this is the value moment, still on their trial credit. \
-Offer to put the team to work now — run their first Playbook or report; the setup \
-checklist card carries the remaining steps. Once they've seen it, advance_to `powerup`.
+Offer to put the team to work now — run their first Playbook or report. If they ask \
+whether setup is done: "Your team is built — the last step is seeing it answer or do one \
+real thing for you." They see no checklist yet. Once they've seen it, advance_to `powerup`.
 """
 
 _STAGE_POWERUP = """\
@@ -188,7 +190,7 @@ models.** Offer the masked in-chat key entry. List other providers \
 (OpenAI, Anthropic, …) collapsed beneath, for users who already have one.
 A saved key is validated live and unlocks the full model catalogue. Declining is \
 fine — the remaining trial credit keeps working.
-Then present the run-and-learn checklist (connect a second app · invite a teammate \
+Then present the run-and-learn checklist (connect {an_app} · invite a teammate \
 · run your first mission · take the 10-minute course).
 To finish, write the onboarding summary — what you built, why, and what happens \
 next — with `platform_submit_report` (report_type `onboarding`, plus a title and \
@@ -306,8 +308,20 @@ class OnboardingSection(BaseSection):
         if stage == "boom":
             return _STAGE_BOOM
         if stage == "powerup":
-            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding))
+            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding), an_app=self._next_app(ctx))
         return ""  # defensive — terminal stages never reach here
+
+    @staticmethod
+    def _next_app(ctx: SectionContext) -> str:
+        """F188: the checklist item as the setup checklist words it — "an app"
+        while none is connected (night 6 asked for "a second app" with 0)."""
+        try:
+            from core.composio.entity_manager import EntityManager
+
+            connected = EntityManager(ctx.db_session).get_connected_apps(ctx.workspace_id)
+        except Exception:  # noqa: BLE001 -- unreadable: the first app is the ask
+            connected = []
+        return "a second app" if connected else "an app"
 
     def _plan_recommendation(self, onboarding: dict[str, Any]) -> str:
         """The plan-recommendation line for the proposal stage (US-025).

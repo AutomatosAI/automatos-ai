@@ -53,7 +53,9 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "(.json). The document is stored, chunked and embedded exactly like "
             "a dashboard upload, so agents can retrieve it via RAG. Duplicate "
             "content is detected and not re-uploaded. Use to capture notes, "
-            "policies, FAQs or generated knowledge for the workspace."
+            "policies, FAQs or generated knowledge for the workspace. Only for "
+            "text you wrote — never ask the owner to paste a file; their files "
+            "go through Knowledge Base → Upload Documents."
         ),
         category="documents",
         parameters={

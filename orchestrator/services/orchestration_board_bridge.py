@@ -32,8 +32,12 @@ from core.models.orchestration_enums import (
 
 # Priority → SLA deadline hours: the shared table (services.board_sla).
 from services.board_sla import PRIORITY_SLA_HOURS as _PRIORITY_SLA_HOURS  # noqa: E402
+from services.cli_ticket_lane import is_lane_owned, release_step_card
 
 logger = logging.getLogger(__name__)
+
+# One mission step's card (the session lane claims it when a Claude Code agent runs the step).
+STEP_CARD_SOURCE_TYPE = "orchestration_task"
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +245,18 @@ def sync_board_status(
             task.id,
         )
         return
+
+    # F094 (night 5): a card the session lane claimed is the ticket its Claude
+    # Code session works, and the lane alone writes its status (#964 said done
+    # while that session's ticket sat in review). A step moved to another agent
+    # follows the mission again. An unassigned step (a retry, a stall recovery)
+    # keeps its card as it is: its session may still be working, and a card
+    # moved out of in_progress refuses that session's result.
+    if is_lane_owned(board_task):
+        if task.assigned_agent_id is None or task.assigned_agent_id == board_task.assigned_agent_id:
+            logger.debug("Board task %s is run by the session lane — its status is the lane's", board_task.id)
+            return
+        release_step_card(board_task)
 
     task_state = TaskState(task.state)
     new_status = _resolve_board_status(task_state)

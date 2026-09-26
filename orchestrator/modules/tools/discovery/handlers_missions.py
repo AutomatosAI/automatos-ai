@@ -65,6 +65,10 @@ def _plan_task_summary(plan_tasks: list) -> list:
             "agent_role": t.get("agent_role", ""),
             "sequence": t.get("sequence_number", 0),
         }
+        # F162 (c): the card edits a task by its temp_id; side-by-side tasks
+        # share a sequence number, and an edit by step number is refused then.
+        if t.get("temp_id") is not None:
+            entry["temp_id"] = str(t["temp_id"])
         if t.get("match_agent"):
             entry["match_agent"] = t["match_agent"]
         if t.get("match_agent_id") is not None:  # F142 (c): which of several same-named agents
@@ -455,7 +459,12 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().approve_plan(db, run.id, actor_id)
-        return _ok(updated, "approved → running")
+        result = _ok(updated, "approved → running")
+        # F170: the reply says what it waits for, when another mission's step holds it.
+        from services.mission_wait import wait_note_of
+
+        waiting = wait_note_of(db, updated.id)
+        return {**result, "message": f"{result['message']} {waiting}", "waiting": waiting} if waiting else result
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:  # pragma: no cover - defensive

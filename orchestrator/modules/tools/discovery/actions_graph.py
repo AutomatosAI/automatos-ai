@@ -143,6 +143,7 @@ def register_graph_actions(registry: ActionRegistry) -> None:
             "find the path between onboarding and retention",
             "shortest path from product to revenue",
         ],
+        accepts=("from", "to"),
     ))
 
     registry.register(ActionDefinition(

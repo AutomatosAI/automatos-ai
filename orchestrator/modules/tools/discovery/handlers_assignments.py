@@ -57,6 +57,26 @@ def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
     return agent, None
 
 
+def _connection(db: Session, workspace_id: UUID, app_name: str, said: str) -> Dict[str, Any]:
+    """F188 (night 6): whether the assigned app is connected, and a message that
+    says so. At 02:03:19 GMAIL was assigned with no app connected, the result
+    said nothing of it, and Auto told the owner Gmail was ready."""
+    from core.composio.entity_manager import EntityManager
+
+    try:
+        connected = app_name in {a.upper().strip() for a in EntityManager(db).get_connected_apps(workspace_id)}
+    except Exception:  # noqa: BLE001 -- unknown is not connected: never "ready"
+        logger.warning("[F188] could not read the connected apps for %s", workspace_id, exc_info=True)
+        connected = False
+    if connected:
+        return {"connected": True, "message": f"{said}."}
+    shown = app_name.replace("_", " ").title()
+    return {"connected": False, "message": (
+        f"{said}, but {app_name} is NOT connected for this workspace, so the agent cannot use it yet. Tell the "
+        f"owner it is assigned but not connected — never that it is ready. They connect it on "
+        f"Tools & Integrations → {shown} → Connect.")}
+
+
 async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a Composio tool/app to an agent."""
     from core.models.composio_cache import AgentAppAssignment
@@ -88,7 +108,7 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
                 "already_assigned": True,
                 "agent": {"id": agent.id, "name": agent.name},
                 "app_name": app_name,
-                "message": f"Tool '{app_name}' is already assigned to agent '{agent.name}'.",
+                **_connection(db, workspace_id, app_name, f"Tool '{app_name}' is already assigned to agent '{agent.name}'"),
             }
         # Re-activate
         existing.is_active = True
@@ -99,7 +119,7 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
             "reactivated": True,
             "agent": {"id": agent.id, "name": agent.name},
             "app_name": app_name,
-            "message": f"Tool '{app_name}' re-activated for agent '{agent.name}'.",
+            **_connection(db, workspace_id, app_name, f"Tool '{app_name}' re-activated for agent '{agent.name}'"),
         }
 
     # Create assignment
@@ -118,7 +138,7 @@ async def assign_tool_to_agent(db: Session, workspace_id: UUID, params: Dict[str
         "success": True,
         "agent": {"id": agent.id, "name": agent.name},
         "app_name": app_name,
-        "message": f"Tool '{app_name}' assigned to agent '{agent.name}'.",
+        **_connection(db, workspace_id, app_name, f"Tool '{app_name}' assigned to agent '{agent.name}'"),
     }
 
 
@@ -377,9 +397,11 @@ async def configure_agent_heartbeat(db: Session, workspace_id: UUID, params: Dic
         changes.append("checklist updated")
 
     if not changes:
+        from modules.tools.discovery.action_registry import nothing_changed
+
         return {
-            "success": True,
-            "message": "No changes specified",
+            "success": False,
+            "error": nothing_changed("platform_configure_agent_heartbeat", "agent_id", "agent_name"),
             "current_heartbeat": hb,
             "agent_id": agent.id,
         }

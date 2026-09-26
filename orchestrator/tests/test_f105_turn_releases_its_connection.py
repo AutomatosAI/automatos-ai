@@ -133,7 +133,7 @@ def test_every_model_call_in_the_chat_turn_releases_first():
 
     source = inspect.getsource(chat.StreamingChatService)
     calls = [m.start() for m in re.finditer(r"generate_response\(", source)]
-    assert len(calls) >= 8
+    assert len(calls) >= 6       # the scan found them (the dead stream_response held two more)
     for pos in calls:
         window = "\n".join(source[:pos].splitlines()[-3:])
         assert "self._before_model_call()" in window, window

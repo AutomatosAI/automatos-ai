@@ -476,7 +476,10 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         changes.append(f"tags -> {tags}")
 
     if not changes:
-        return {"success": True, "message": "No changes specified", "agent_id": agent.id}
+        from modules.tools.discovery.action_registry import nothing_changed
+
+        return {"success": False, "error": nothing_changed("platform_update_agent", "agent_id", "agent_name"),
+                "agent_id": agent.id}
 
     db.flush()
     logger.info(f"[PlatformExecutor] Updated agent {agent.id}: {', '.join(changes)}")

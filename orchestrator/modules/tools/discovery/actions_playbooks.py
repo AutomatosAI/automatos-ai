@@ -2,6 +2,16 @@
 
 from .action_registry import ActionDefinition, ActionRegistry
 
+# F182 (night 6): what each run needs, declared the way a function signature is.
+_INPUTS_PARAM = {
+    "type": "object",
+    "description": (
+        'What each run needs, by name: {"cafe_name": {"required": true, "description": "The café\'s '
+        'name"}}. Steps read a value as {{cafe_name}}. A run started without a required one does '
+        "not start: it asks the owner for it."
+    ),
+}
+
 
 def register_playbooks_actions(registry: ActionRegistry) -> None:
     """Register all playbook-related platform actions."""
@@ -94,6 +104,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "items": {"type": "string"},
                     "description": "Optional tags for categorization.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["name", "description"],
         },
@@ -104,14 +115,20 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "create a playbook for daily standup summaries",
             "make an automation for code review",
         ],
+        misplaced={
+            "steps": (
+                "a playbook is created with no steps: create it, then add each step "
+                "with platform_add_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
         name="platform_update_playbook",
         description=(
-            "Update a playbook's metadata — name, description, tags, execution config, "
-            "or schedule. Use when the user asks to rename, update, or reconfigure a "
-            "playbook. To modify steps, use platform_update_playbook_step instead."
+            "Update a playbook's metadata — name, description, tags, the inputs each run "
+            "needs, execution config, or schedule. Use when the user asks to rename, update, "
+            "or reconfigure a playbook. To modify steps, use platform_update_playbook_step instead."
         ),
         category="playbooks",
         parameters={
@@ -142,6 +159,7 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                     "type": "object",
                     "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
                 },
+                "inputs": dict(_INPUTS_PARAM),
             },
             "required": ["playbook_id"],
         },
@@ -153,6 +171,13 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "update the bug triage playbook description",
             "set playbook 3 to run on a cron schedule",
         ],
+        misplaced={
+            "steps": (
+                "steps change one at a time, with platform_update_playbook_step "
+                "(step_index plus what changes), platform_add_playbook_step or "
+                "platform_delete_playbook_step."
+            ),
+        },
     ))
 
     registry.register(ActionDefinition(
@@ -391,6 +416,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
             "execute playbook 5",
             "trigger the bug triage automation",
         ],
+        accepts=("inputs", "input"),
+        # F182: night 6 nested the café's details under "params".
+        misplaced={key: "input_data" for key in ("params", "parameters", "variables", "data")},
     ))
 
     registry.register(ActionDefinition(

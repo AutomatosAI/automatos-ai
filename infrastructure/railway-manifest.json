@@ -242,7 +242,7 @@
         "max_retries": 10
       },
       "sleep": false,
-      "replicas": null,
+      "replicas": 1,
       "domains": {
         "railway": [],
         "custom": []

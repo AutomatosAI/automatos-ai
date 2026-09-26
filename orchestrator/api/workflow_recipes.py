@@ -870,14 +870,12 @@ async def execute_recipe(
 
         logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
 
-        input_data = body.get('input_data') or {}
+        # F182 (night 6): a declared default fills in a missing input, and ''
+        # never does. A required input still missing stops the run before step 1,
+        # which asks the owner for it (api.recipe_executor).
+        from core.services.playbook_inputs import contract_of, with_defaults
 
-        # Fill in defaults for missing required inputs
-        if recipe.inputs:
-            for param_name, param_def in recipe.inputs.items():
-                if isinstance(param_def, dict) and param_name not in input_data:
-                    default = param_def.get('default', '')
-                    input_data[param_name] = default
+        input_data = with_defaults(contract_of(recipe), body.get('input_data') or {})
 
         # Concurrency guard — reject with 429 if workspace is at capacity
         from services.concurrency_guard import check_concurrency

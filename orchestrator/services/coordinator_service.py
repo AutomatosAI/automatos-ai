@@ -21,7 +21,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, text
@@ -273,6 +273,12 @@ def _the_row_at_step(tasks: List[Any], step: Any) -> Any:
         raise ValueError(f"Step {step} has {len(at_step)} tasks that run side by side; name the one to "
                          "change by its task_id or temp_id.")
     return at_step[0] if at_step else None
+
+
+def _match_inputs(task: Any) -> tuple:
+    """What a task's agent match is ranked from: an edit to any of it ranks again."""
+    context = task.input_context if isinstance(task.input_context, dict) else {}
+    return tuple(getattr(task, field, None) for field in _EDITABLE_TASK_FIELDS) + (context.get("pinned_agent_id"),)
 
 
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
@@ -2424,11 +2430,22 @@ class CoordinatorService:
         # works — nothing to activate here; the I/O phase files it and waits.
         from services.cli_ticket_lane import is_cli_agent
         if is_cli_agent(db, agent_id):
+            # F161: the session opens only its own folder; the ticket lists what
+            # the mission's other steps saved, for its read_step_file tool.
+            from services.step_files import earlier_step_files, step_files_block
+
+            try:
+                files_block = step_files_block(
+                    earlier_step_files(db, workspace_id=run.workspace_id, run_id=run.id, step_task_id=task.id)
+                )
+            except Exception:  # noqa: BLE001 -- the step still runs, without the list
+                logger.warning("[F161] could not list earlier steps' files for task %s", task.id, exc_info=True)
+                files_block = ""
             return {
                 "task": task,
                 "agent_id": agent_id,
                 "agent_runtime": None,
-                "prompt": prompt,
+                "prompt": f"{prompt}\n\n{files_block}" if files_block else prompt,
                 "factory": factory,
                 "attachment_ids": task_attachment_ids,
                 "mode_caps": mode_caps,
@@ -2582,23 +2599,29 @@ class CoordinatorService:
         wait; the ticket carries on and its result lands on the board."""
         from core.database.database import SessionLocal
         from services.cli_ticket_lane import MISSION_SOURCE_TYPE, run_cli_ticket_and_wait
+        from services.mission_wait import awaiting_session_step
 
         own = SessionLocal()
         try:
-            return await run_cli_ticket_and_wait(
-                own,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                title=(getattr(task, "title", None) or f"Mission task {task.id}")[:255],
-                prompt=prompt,
-                source_type=MISSION_SOURCE_TYPE,
-                source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
-                timeout_s=float(timeout_s) if timeout_s else None,
-                hard_timeout_s=float(hard_timeout_s) if hard_timeout_s else None,
-                tags=["mission"],
-                orchestration_run_id=run_id,
-                orchestration_task_id=task.id,
-            )
+            # F170: which Claude Code step the tick awaits, for missions queued
+            # behind it to name. A record only: set here, cleared in a finally.
+            with awaiting_session_step(run_id=run_id, task_id=task.id, workspace_id=workspace_id,
+                                       title=getattr(task, "title", None)) as saw_ticket:
+                return await run_cli_ticket_and_wait(
+                    own,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=(getattr(task, "title", None) or f"Mission task {task.id}")[:255],
+                    prompt=prompt,
+                    source_type=MISSION_SOURCE_TYPE,
+                    source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
+                    timeout_s=float(timeout_s) if timeout_s else None,
+                    hard_timeout_s=float(hard_timeout_s) if hard_timeout_s else None,
+                    tags=["mission"],
+                    orchestration_run_id=run_id,
+                    orchestration_task_id=task.id,
+                    on_poll=saw_ticket,
+                )
         except Exception as exc:  # noqa: BLE001 — recorded like any other task failure
             logger.error("session-agent ticket failed for task %s: %s", task.id, exc, exc_info=True)
             return {"status": "error", "error": str(exc)}
@@ -2825,6 +2848,14 @@ class CoordinatorService:
         # under its widget key's restrictions (the planning pack's documents,
         # graph and history), even later on the tick.
         from core.security.surface import origin_surface
+        from services.turned_down_plans import turned_down_before, turned_down_block
+
+        # F171 (B34): the plans this conversation just turned down, and why.
+        try:
+            owner_feedback = turned_down_block(turned_down_before(db, run))
+        except Exception:  # noqa: BLE001 -- the plan is still made, without them
+            logger.warning("[F171] could not read the turned-down plans for run %s", run.id, exc_info=True)
+            owner_feedback = ""
 
         try:
             with origin_surface(mission_config):
@@ -2834,6 +2865,7 @@ class CoordinatorService:
                     agents=agents,
                     config=mission_config,
                     db=db,  # PRD-164 S1: enables the planning context pack
+                    owner_feedback=owner_feedback or None,
                 )
         except PlanValidationError:
             transition_run(
@@ -3327,6 +3359,7 @@ class CoordinatorService:
         agents: List[Agent],
         tasks: List[OrchestrationTask],
         signals_by_task: Optional[Dict[Any, Any]] = None,
+        rank_only: Optional[Set[Any]] = None,
     ) -> None:
         """PRD-164 S2: rank candidate agents per planned task and persist the
         match preview — ``input_context['agent_match']`` on each task row and
@@ -3334,6 +3367,8 @@ class CoordinatorService:
         approval card's source). Explicit agent overrides (PRD-163 S4) rank
         first by construction. Best-effort: a failure here never blocks
         mission creation — the dispatcher re-matches authoritatively anyway.
+        ``rank_only`` (task ids) ranks those tasks again and leaves the rest's
+        previews as they are; ``tasks`` is still the whole plan.
         """
         try:
             match_by_seq: Dict[int, Dict[str, Any]] = {}
@@ -3342,6 +3377,8 @@ class CoordinatorService:
             for task in tasks:
                 at_step[int(task.sequence_number)] = at_step.get(int(task.sequence_number), 0) + 1
             for task in tasks:
+                if rank_only is not None and task.id not in rank_only:
+                    continue
                 input_context = task.input_context if isinstance(task.input_context, dict) else {}
                 spec = {
                     "agent_role": task.agent_role,
@@ -3517,9 +3554,16 @@ class CoordinatorService:
             .all()
         )
         task_edits = [_pin_the_named_agent(edit, roster) for edit in (task_edits or [])]
+        before = {task.id: _match_inputs(task) for task in tasks}
         new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
         if fields_changed:
             run.plan = new_plan  # reassign so the JSON column is marked dirty
+            # F162 (b): an edited task's "who would run it" is ranked again. The
+            # card kept the plan-time pick: 5da0c52b's step 3, edited to OPS,
+            # still said NEWSROOM.
+            edited = {task.id for task in tasks if _match_inputs(task) != before[task.id]}
+            if edited:
+                self._annotate_match_previews(db, run, roster, tasks, None, rank_only=edited)
             emit_event(
                 db=db,
                 run_id=run.id,
@@ -3576,6 +3620,10 @@ class CoordinatorService:
             f"Mission approved — starting {_n} task{'s' if _n != 1 else ''}: {(run.goal or '')[:120]}",
             level="run", event="run_started",
         )
+        # F170 (B52): when another mission's Claude Code step holds the tick, say what it waits for.
+        from services.mission_wait import note_wait_at_approval
+
+        note_wait_at_approval(db, run)
 
         logger.info("Mission %s approved by %s → running", run_id, actor_id)
         return run
@@ -3758,6 +3806,11 @@ class CoordinatorService:
             run_id=run.id,
             reason="Mission cancelled",
         )
+        # F094: a step whose Claude Code session is still working keeps its card
+        # (the session's); the card says the mission was cancelled.
+        from services.cli_ticket_lane import cancelled_note, note_open_step_cards
+
+        note_open_step_cards(db, run_id=run.id, note_for=cancelled_note)
 
         VerificationService.clear_cache(run.id)
         # PRD-227 US-002: narrate the cancel into the launching thread (run-level).

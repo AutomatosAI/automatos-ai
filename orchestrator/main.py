@@ -642,6 +642,12 @@ async def lifespan(app: FastAPI):
         app.state.bootstrap_report = report
         app.state.ready = True
 
+        # F105: from here on, a stall of the loop logs the stack that caused it
+        # (LOOP_STALL_LOG_SECONDS; 0 starts nothing). Never raises.
+        from core.loop_watchdog import start_loop_watchdog
+
+        app.state.loop_watchdog = start_loop_watchdog()
+
         failed = report.failed_stages
         if failed:
             logger.warning(
@@ -663,6 +669,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
+
+    _watchdog = getattr(app.state, "loop_watchdog", None)
+    if _watchdog is not None:
+        _watchdog.stop()
 
     # Stop unified scheduler (shuts down all heartbeat + recipe + coordinator jobs at once)
     if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:

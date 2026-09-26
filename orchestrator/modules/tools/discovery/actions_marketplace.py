@@ -291,6 +291,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "add model google/gemini-2.5-pro",
             "enable openai/gpt-4o",
         ],
+        accepts=("provider",),
     ))
 
     # PRD-143 S11: the disable side of platform_install_plugin (administration
