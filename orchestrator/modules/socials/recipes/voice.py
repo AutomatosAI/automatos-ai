@@ -22,8 +22,8 @@ script through that toolkit (:func:`speak`):
   line and after the last (the ``balance`` action) and the difference is booked
   on the media lane against the post. One credit window per workspace and
   toolkit runs at a time across every worker process (a Postgres advisory lock,
-  ``_credit_window``), so two renders' readings never overlap and neither books
-  the other's spend. ElevenLabs bills the customer's own plan and has no balance
+  ``toolkit.credit_window``), so two renders' readings never overlap and neither
+  books the other's spend. ElevenLabs bills the customer's own plan and has no balance
   action on the allowlist: its lines are booked as units (characters) at $0.
 
 The voice picker reads :func:`voice_sources` (Kokoro always; each voice toolkit
@@ -39,14 +39,12 @@ import hashlib
 import logging
 import tempfile
 import time
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import nullcontext
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
-
-from sqlalchemy import text
 
 from config import config
 from core.composio.tool_executor import ComposioToolExecutor
@@ -56,15 +54,18 @@ from modules.socials import service
 from modules.socials.capabilities import BALANCE, TTS, VOICES, MediaCapabilities, OfferedAction
 from modules.socials.media_store import MediaNameError, MediaStore, media_key
 from modules.socials.recipes.files import FileOutputError, fetch, returned_file
+from modules.socials.recipes.toolkit import (
+    ToolkitSchemaChanged,
+    balance_of,
+    call,
+    credit_window,
+    error_of,
+    params_for,
+)
 
 logger = logging.getLogger(__name__)
 
 EXECUTION_PREFIX = "social_post:"
-# The admin pattern (api/bug_reports.py): the platform calls the workspace's own
-# connection for a person's render, not an agent. The registry already checked
-# the toolkit is connected, allowlisted, cached and not denied; the executor
-# checks the deny list again.
-PLATFORM_AGENT_ID = 0
 KOKORO_LABEL = "Kokoro (built in)"
 AVAILABLE, CONNECT, UNAVAILABLE = "available", "connect", "unavailable"
 # The keys a voice listing's items carry, in the order they are trusted.
@@ -241,33 +242,12 @@ def voice_sources(caps: MediaCapabilities) -> Dict[str, Any]:
 
 # ── calling the toolkit ─────────────────────────────────────────────────────
 def _params(action: OfferedAction, wanted: Mapping[str, Any], required: Sequence[str]) -> Dict[str, Any]:
-    """``wanted`` as the action's cached schema takes it: a parameter the schema
-    does not list is left out, and a required one it does not list refuses the
-    call. A schema the sync has not filled yet (``{}``) takes them all."""
-    properties = action.parameters.get("properties") if isinstance(action.parameters, Mapping) else None
-    if not isinstance(properties, Mapping) or not properties:
-        return dict(wanted)
-    missing = [name for name in required if name not in properties]
-    if missing:
-        raise VoiceToolError(
-            f"{action.slug} takes no {', '.join(missing)} (its cached schema changed): sync the toolkit's actions"
-        )
-    return {name: value for name, value in wanted.items() if name in properties}
-
-
-async def _call(executor: Any, workspace_id: UUID, action: OfferedAction, params: Mapping[str, Any]) -> Dict[str, Any]:
-    return await executor.execute(
-        action=action.slug,
-        params=dict(params),
-        agent_id=PLATFORM_AGENT_ID,
-        workspace_id=workspace_id,
-        app_name=action.toolkit.upper(),
-        skip_validation=True,
-    )
-
-
-def _error_of(result: Mapping[str, Any]) -> str:
-    return str(result.get("error") or "no reason given").strip()[:300]
+    """``wanted`` as the action's cached schema takes it (``toolkit.params_for``);
+    a required parameter the schema no longer lists is a :class:`VoiceToolError`."""
+    try:
+        return params_for(action, wanted, required)
+    except ToolkitSchemaChanged as exc:
+        raise VoiceToolError(str(exc)) from None
 
 
 def audio_extension(data: bytes) -> Optional[str]:
@@ -290,42 +270,16 @@ def audio_extension(data: bytes) -> Optional[str]:
     return None
 
 
-def _decimal(value: Any) -> Optional[Decimal]:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        number = Decimal(str(value).strip())
-    except (InvalidOperation, ValueError):
-        return None
-    return number if number.is_finite() else None
-
-
-def balance_of(response: Any, keys: Sequence[str]) -> Optional[Decimal]:
-    """The credit a balance action reports under ``keys``, shallowest first."""
-    frontier = [response]
-    for _ in range(6):
-        objects = [item for item in frontier if isinstance(item, dict)]
-        for key in keys:
-            for obj in objects:
-                number = _decimal(obj.get(key))
-                if number is not None:
-                    return number
-        frontier = [v for item in frontier for v in (item.values() if isinstance(item, dict) else item if isinstance(item, list) else [])]
-        if not frontier:
-            break
-    return None
-
-
 async def _read_balance(executor: Any, workspace_id: UUID, plan: VoicePlan) -> Optional[Decimal]:
     if plan.balance_action is None:
         return None
     try:
-        result = await _call(executor, workspace_id, plan.balance_action, {})
+        result = await call(executor, workspace_id, plan.balance_action, {})
     except Exception:  # noqa: BLE001 — a balance that cannot be read is said so by the caller
         logger.exception("[SocialsVoice] %s's balance could not be read", plan.label)
         return None
     if not result.get("success"):
-        logger.warning("[SocialsVoice] %s's balance could not be read: %s", plan.label, _error_of(result))
+        logger.warning("[SocialsVoice] %s's balance could not be read: %s", plan.label, error_of(result))
         return None
     return balance_of(result.get("data"), RECIPES[plan.toolkit].balance_keys)
 
@@ -401,60 +355,13 @@ async def list_voices(
     params = _params(action, wanted, ())
     # A toolkit that does not take the filter lists everything: filter here instead.
     filtered_by_toolkit = bool(recipe.list_query_param) and recipe.list_query_param in params
-    result = await _call(executor or ComposioToolExecutor(db), workspace_id, action, params)
+    result = await call(executor or ComposioToolExecutor(db), workspace_id, action, params)
     if not result.get("success"):
-        raise VoiceToolError(f"{recipe.label} did not list its voices: {_error_of(result)}")
+        raise VoiceToolError(f"{recipe.label} did not list its voices: {error_of(result)}")
     return parse_voices(result.get("data"), limit=limit, query=None if filtered_by_toolkit else query)
 
 
 # ── speaking the script ─────────────────────────────────────────────────────
-# The credit window's advisory lock: the namespace keeps its keys apart from
-# every other advisory lock in the database ('socv').
-CREDIT_LOCK_NAMESPACE = 0x736F6376
-_TRY_CREDIT_LOCK = text("SELECT pg_try_advisory_xact_lock(:namespace, hashtext(:key))")
-# Within one process, the same window is also an asyncio lock: renders on this
-# event loop queue here without holding a database connection each.
-_ACCOUNT_LOCKS: Dict[Tuple[str, str], asyncio.Lock] = {}
-
-
-def _account_lock(workspace_id: UUID, toolkit: str) -> asyncio.Lock:
-    return _ACCOUNT_LOCKS.setdefault((str(workspace_id), toolkit), asyncio.Lock())
-
-
-def credit_lock_key(workspace_id: UUID, toolkit: str) -> str:
-    return f"{workspace_id}:{toolkit}"
-
-
-@asynccontextmanager
-async def _postgres_credit_lock(session_factory: Callable[[], Any], workspace_id: UUID, toolkit: str) -> AsyncIterator[None]:
-    """Hold the credit window's advisory lock across every worker process.
-
-    Production runs several uvicorn workers, and a render runs in whichever took
-    its request. The lock is transaction-scoped and held on its own connection
-    for the whole window, so it is released when the window ends, and with the
-    connection if anything fails; waiting for it polls every
-    ``SOCIALS_RENDER_POLL_SECONDS`` within the render's own deadline. A database
-    without advisory locks (SQLite, in the unit tests) has one process: the
-    asyncio lock is the window there."""
-    db = session_factory()
-    try:
-        if db.get_bind().dialect.name == "postgresql":
-            params = {"namespace": CREDIT_LOCK_NAMESPACE, "key": credit_lock_key(workspace_id, toolkit)}
-            while not await asyncio.to_thread(lambda: bool(db.execute(_TRY_CREDIT_LOCK, params).scalar())):
-                await asyncio.sleep(config.SOCIALS_RENDER_POLL_SECONDS)
-        yield
-    finally:
-        await asyncio.to_thread(db.close)  # ends the transaction, and with it the lock
-
-
-@asynccontextmanager
-async def _credit_window(session_factory: Callable[[], Any], workspace_id: UUID, toolkit: str) -> AsyncIterator[None]:
-    """One credit window per workspace and toolkit at a time: in this process, then across processes."""
-    async with _account_lock(workspace_id, toolkit):
-        async with _postgres_credit_lock(session_factory, workspace_id, toolkit):
-            yield
-
-
 def voice_file_name(line_id: str, extension: str) -> str:
     return f"voice-{line_id.lower()}.{extension}"
 
@@ -494,9 +401,9 @@ async def _speak_line(
     voice = [plan.voice_id] if recipe.voice_as_list else plan.voice_id
     wanted = {recipe.text_param: text, recipe.voice_param: voice, **recipe.speak_extra}
     params = _params(plan.speak_action, wanted, (recipe.text_param, recipe.voice_param))
-    result = await _call(executor, workspace_id, plan.speak_action, params)
+    result = await call(executor, workspace_id, plan.speak_action, params)
     if not result.get("success"):
-        raise VoiceToolError(f"{plan.label} could not speak line {line_id}: {_error_of(result)}")
+        raise VoiceToolError(f"{plan.label} could not speak line {line_id}: {error_of(result)}")
     data, extension = await _audio_of(result, plan, line_id)
     try:
         key = media_key(workspace_id, post_id, voice_file_name(line_id, extension))
@@ -558,7 +465,7 @@ async def speak(
     try:
         executor = ComposioToolExecutor(db)
         # Only a credit-billed toolkit reads a balance difference: only it needs the window.
-        window = _credit_window(session_factory, workspace_id, plan.toolkit) if recipe.credit_billed else nullcontext()
+        window = credit_window(session_factory, workspace_id, plan.toolkit) if recipe.credit_billed else nullcontext()
         async with window:
             started = time.monotonic()
             before = await _read_balance(executor, workspace_id, plan)

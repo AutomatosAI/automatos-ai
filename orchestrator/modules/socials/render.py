@@ -5,10 +5,17 @@ monthly quota (``core/media_render_quota.py``), storage and the renderer, moves
 the post to ``rendering`` and hands a :class:`RenderJob` to :func:`run_render`,
 which runs in the background:
 
-0. when the post chose a voice toolkit (US-111, D11), speak its script through
-   the workspace's Composio connection first, one call per line, each line
-   copied into our storage as it returns, and make the bundle's lines name
-   those files (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
+0. when the post asks for footage (US-114, D12), generate it through the
+   workspace's Composio generation toolkit first: priced and capped before any
+   submit (D13), submitted and polled, each file copied into our storage and
+   registered as a Deliverable before its slot is marked done, and booked on the
+   media lane; a slot generated earlier for the same prompt is reused, and one
+   no connected toolkit can make plays the template's own motion graphics
+   (``modules/socials/recipes/footage.py``). Then, when the post chose a voice
+   toolkit (US-111, D11), speak its script through the workspace's Composio
+   connection, one call per line, each line copied into our storage as it
+   returns, and make the bundle's lines name those files
+   (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
 1. submit the bundle to media-render (``core/media_render_client.py``), which
    answers once the job is staged, spoken, mixed and checked; a full renderer
    is asked again after its ``Retry-After``;
@@ -54,7 +61,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from uuid import UUID
 
 from config import config
-from core.media_render_bundle import build_bundle, voice_script, with_voice_files
+from core.media_render_bundle import build_bundle, render_size, voice_script, with_slot_files, with_voice_files
 from core.media_render_client import (
     BAD_RESPONSE,
     JOB_DONE,
@@ -70,6 +77,7 @@ from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
+from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
 
 logger = logging.getLogger(__name__)
@@ -146,12 +154,20 @@ def composition_of(template: Any) -> Optional[Dict[str, Any]]:
 
 
 def bundle_for(
-    post: Any, template: Any, brand_kit: Optional[Mapping[str, Any]] = None, *, fallback_name: str = ""
+    post: Any,
+    template: Any,
+    brand_kit: Optional[Mapping[str, Any]] = None,
+    *,
+    fallback_name: str = "",
+    footage_slots: Sequence[str] = (),
 ) -> Dict[str, Any]:
     """The render bundle media-render takes (``services/media-render/media_render/bundle.py``).
 
     ``brand_kit`` is the workspace's, render-ready; ``fallback_name`` (the
-    workspace's name) is the brand name when the kit has none.
+    workspace's name) is the brand name when the kit has none. ``footage_slots``
+    are the slots this render fills with footage (S1.8): they stay in the
+    composition, and their files join the bundle once they are in our storage;
+    every other slot plays the template's own motion graphics.
     :class:`NotRenderable` when the post has no social template, the template
     breaks its contract, or the post leaves a variable without a default empty.
     """
@@ -179,8 +195,25 @@ def bundle_for(
         values=resolved.values,
         brand_kit=brand_kit,
         fallback_name=fallback_name,
+        keep_slots=footage_slots,
         fmt=template.format,
     )
+
+
+def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_recipes.FootagePlan]:
+    """The footage the post asks for (US-114), planned over its template's slots
+    with the workspace's media capabilities ``caps``; ``None`` when it asks for none."""
+    if not getattr(post, "footage", None):
+        return None
+    blocks = composition_of(template)
+    if blocks is None:
+        raise NotRenderable("this post has no social template to render: choose a template with a composition")
+    try:
+        blocks = validate_social_blocks(blocks, template.format)
+    except SocialTemplateError as exc:
+        raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
+    width, height = render_size(blocks)
+    return footage_recipes.plan_for(post.footage, blocks.get("slots"), caps, width=width, height=height)
 
 
 @dataclass(frozen=True)
@@ -197,6 +230,8 @@ class RenderJob:
     bundle: Mapping[str, Any]
     # D11: the voice toolkit the post chose, resolved as the render started; None is Kokoro.
     voice: Optional[voice_recipes.VoicePlan] = None
+    # D12: the footage the post asks for, resolved as the render started; None asks for none.
+    footage: Optional[footage_recipes.FootagePlan] = None
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -245,13 +280,44 @@ def _poll_failure(exc: MediaRenderError) -> RenderFailure:
 
 
 # ── the background render ───────────────────────────────────────────────────
-async def _voiced(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> Mapping[str, Any]:
+async def _footaged(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> Mapping[str, Any]:
+    """The bundle with the footage its post asks for (US-114): each shot generated
+    now, or reused from an earlier render, a file in our storage that media-render
+    reaches through a presigned link. A render asking for none: the bundle as it is."""
+    plan = job.footage
+    if plan is None or not plan.shown:
+        return job.bundle
+    try:
+        made = await footage_recipes.generate(
+            plan, workspace_id=job.workspace_id, post_id=job.post_id, title=job.title,
+            session_factory=session_factory, store=store,
+        )
+    except footage_recipes.FootageRefused as exc:
+        message = f"{str(exc).rstrip('.')}. Nothing was rendered."
+        raise RenderFailure("footage_refused", message, {"footage": plan.report()}) from exc
+    except footage_recipes.FootageError as exc:
+        message = f"The footage could not be made: {str(exc).rstrip('.')}. Nothing was rendered."
+        raise RenderFailure("footage_failed", message, {"footage": plan.report()}) from exc
+    keys = {kept.path: media_key(job.workspace_id, job.post_id, kept.name) for kept in plan.kept}
+    keys.update({clip.path: clip.key for clip in made.values()})
+    ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS
+    try:
+        links = {path: await asyncio.to_thread(store.presigned_get, key, ttl) for path, key in keys.items()}
+    except Exception as exc:  # noqa: BLE001 — storage cannot link the footage: fail the render, loudly
+        logger.exception("[Socials] linking the footage of post %s failed", job.post_id)
+        raise RenderFailure("storage_failed", "The footage could not be handed to the renderer.") from exc
+    return with_slot_files(job.bundle, links)
+
+
+async def _voiced(
+    job: RenderJob, bundle: Mapping[str, Any], store: MediaStore, session_factory: Callable[[], Any]
+) -> Mapping[str, Any]:
     """The bundle, its script spoken by the post's voice toolkit when it chose one
     (US-111): each line now a file in our storage, reached by media-render through
     a presigned link. Kokoro speaks inside media-render: the bundle as it is."""
-    lines = voice_script(job.bundle)
+    lines = voice_script(bundle)
     if job.voice is None or not lines:
-        return job.bundle
+        return bundle
     try:
         spoken = await voice_recipes.speak(
             job.voice, workspace_id=job.workspace_id, post_id=job.post_id, lines=lines,
@@ -268,7 +334,7 @@ async def _voiced(job: RenderJob, store: MediaStore, session_factory: Callable[[
     except Exception as exc:  # noqa: BLE001 — storage cannot link the lines: fail the render, loudly
         logger.exception("[Socials] linking the voice lines of post %s failed", job.post_id)
         raise RenderFailure("storage_failed", "The spoken lines could not be handed to the renderer.") from exc
-    return with_voice_files(job.bundle, links)
+    return with_voice_files(bundle, links)
 
 
 async def _submit(client: MediaRenderClient, bundle: Mapping[str, Any], deadline: float) -> Dict[str, Any]:
@@ -513,7 +579,8 @@ async def run_render(
     deadline = started + budget
 
     async def render_and_store():
-        bundle = await _voiced(job, store, factory)
+        bundle = await _footaged(job, store, factory)
+        bundle = await _voiced(job, bundle, store, factory)
         accepted = await _submit(client, bundle, deadline)
         finished = await _wait(client, job, accepted, deadline)
         music = _music_of(job, finished)
@@ -534,6 +601,8 @@ async def run_render(
         await asyncio.to_thread(_finish, factory, job, failure=failure)
         raise
     report = _report(report=finished.get("report") if isinstance(finished.get("report"), dict) else None)
+    if job.footage is not None and job.footage.report():
+        report["footage"] = job.footage.report()
     credits = [music.line] if music is not None and music.line else []
     ended = await asyncio.to_thread(_finish, factory, job, media=media, report=report, credits=credits)
     if ended != service.NEEDS_APPROVAL:

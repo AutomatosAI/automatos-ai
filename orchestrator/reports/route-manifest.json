@@ -1,5 +1,5 @@
 {
-  "route_count": 841,
+  "route_count": 842,
   "routes": [
     {
       "method": "GET",
@@ -2068,6 +2068,10 @@
     {
       "method": "PATCH",
       "path": "/api/sites/{site_id}/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/footage"
     },
     {
       "method": "GET",

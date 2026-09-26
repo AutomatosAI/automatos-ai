@@ -14,7 +14,8 @@ carries a composition in ``blocks``, which media-render renders:
       "sizes": ["1080x1920", "1080x1350"],   WIDTHxHEIGHT, the first is the default
       "audio_plan": {"voice": …, "music": {"track": "deep-house-003", "start": 32.0}, "sfx": […]},  social_video only
       "slots": {                             optional: footage and stills a post may supply
-        "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"}
+        "hook": {"kind": "video", "label": "Hook footage", "path": "assets/slots/hook.mp4"},
+        "app_loop": {"kind": "video", "path": "assets/slots/app_loop.mp4", "generate": false}
       },
       "stills": [{"at": 0.5}, {"at": 1.5, "when": "point_3"}]   social_image only: one PNG each
       "data": {"rows": 5, "label": "row_{n}_label", "value": "row_{n}_value", "source": "source_label"}
@@ -34,7 +35,10 @@ carries a composition in ``blocks``, which media-render renders:
   ``data-slot="<name>"`` and ``src`` the slot's path. A filled slot reaches
   media-render as a media file at that path; an empty one has its elements
   removed (:func:`without_slots`), and the template's own motion graphics play in
-  its place.
+  its place. A generation toolkit fills a slot only when the post asks for it
+  (S1.8); ``"generate": false`` marks a slot only the workspace's own file may
+  fill, such as an app's real screen recording (never generated UI, D12):
+  :func:`slot_generatable`.
 * **Stills.** An image renders as PNG snapshots of its composition, one per
   moment in ``stills`` (US-107): one for a card, one per slide for a carousel.
   A still with ``when`` is taken only when that variable has a value, so a
@@ -109,7 +113,7 @@ MAX_REPORTED_ERRORS = 50
 VIDEO_SLOT, IMAGE_SLOT = "video", "image"
 SLOT_EXTENSIONS = {VIDEO_SLOT: ("mp4", "webm", "mov"), IMAGE_SLOT: ("png", "jpg", "jpeg", "webp")}
 SLOT_TAGS = {VIDEO_SLOT: "video", IMAGE_SLOT: "img"}
-SLOT_SPEC_KEYS = ("kind", "label", "description", "path")
+SLOT_SPEC_KEYS = ("kind", "label", "description", "path", "generate")
 SLOT_DIR = "assets/slots/"
 MAX_SLOTS = 12
 
@@ -353,6 +357,11 @@ def without_slots(html: str, slots: Mapping[str, Any], keep: Iterable[str] = ())
     return html
 
 
+def slot_generatable(spec: Mapping[str, Any]) -> bool:
+    """Whether a generation toolkit may fill the slot (S1.8): every slot but one marked ``"generate": false``."""
+    return spec.get("generate") is not False
+
+
 def _slot_spec_errors(name: Any, spec: Any) -> List[Dict[str, str]]:
     where = f"slots.{name}"
     if not isinstance(name, str) or not VARIABLE_NAME.match(name):
@@ -367,6 +376,8 @@ def _slot_spec_errors(name: Any, spec: Any) -> List[Dict[str, str]]:
     for key in ("label", "description"):
         if key in spec and (not isinstance(spec[key], str) or len(spec[key]) > MAX_LABEL_CHARS):
             errors.append(_error(f"{where}.{key}", f"must be text of at most {MAX_LABEL_CHARS} characters"))
+    if "generate" in spec and not isinstance(spec["generate"], bool):
+        errors.append(_error(f"{where}.generate", "must be true or false (false: only the workspace's own file fills it)"))
     kind = spec.get("kind")
     if kind not in SLOT_EXTENSIONS:
         return errors + [_error(f"{where}.kind", f"must be one of {list(SLOT_EXTENSIONS)}")]
@@ -835,6 +846,7 @@ __all__ = [
     "placeholders",
     "resolve_variables",
     "root_duration",
+    "slot_generatable",
     "slot_names_in",
     "still_moments",
     "strip_var_calls",

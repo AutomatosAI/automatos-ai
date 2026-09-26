@@ -2,8 +2,9 @@
 
 Two writers build these tables: the model layer (``create_all`` — the fresh
 path and the unit tests) and the migrations (existing databases): the
-``prd251_socials`` migration, plus the column Wave 1's one migration adds
-(``prd251_wave1``: ``social_posts.voice``, US-111). A table that differs between
+``prd251_socials`` migration, plus the columns Wave 1's one migration adds
+(``prd251_wave1``: ``social_posts.voice``, US-111, and ``social_posts.footage``,
+US-114). A table that differs between
 them is how a column goes missing on one path, so the migrations are RUN here
 (alembic ``Operations`` on SQLite) and their schema is compared with the
 model's, table by table: columns (type, nullability, server default), primary
@@ -100,11 +101,13 @@ def _migration_engine():
     SystemSetting.__table__.create(bind=engine)  # the seed's table
     with engine.begin() as conn:
         _run_migration(conn, "upgrade")
-        # Wave 1's one migration adds social_posts.voice (US-111); its other steps
-        # are Postgres DDL on other tables, so only the column step runs here.
+        # Wave 1's one migration adds social_posts.voice (US-111) and .footage
+        # (US-114); its other steps are Postgres DDL on other tables, so only the
+        # column steps run here.
         wave1 = _load_migration(WAVE1_MIGRATION, "prd251_wave1_migration_models")
         with Operations.context(MigrationContext.configure(conn)):
             wave1.add_post_voice_column()
+            wave1.add_post_footage_column()
     return engine
 
 
@@ -168,6 +171,8 @@ def test_social_posts_carries_every_d2_column():
         "scheduled_for", "timezone", "created_at", "updated_at",
         # Wave 1 (S1.5, D11): the voice a render speaks the script with.
         "voice",
+        # Wave 1 (S1.8, D12): the footage a post asks its template's slots for.
+        "footage",
     }
 
 
@@ -187,6 +192,7 @@ def test_social_post_targets_carries_every_d2_column():
         ("social_posts", "sources"),
         ("social_posts", "media"),
         ("social_posts", "voice"),
+        ("social_posts", "footage"),
         ("social_posts", "review_log"),
         ("social_post_targets", "action_plan"),
     ],

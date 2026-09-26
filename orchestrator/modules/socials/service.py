@@ -40,6 +40,14 @@
   ``modules/socials/recipes/voice.py`` whether the workspace can speak with
   it). It is a render setting, not content: it is outside the hash, and what
   it changes reaches the hash through the next render's file digests.
+* **Footage (D12, Wave 1 S1.8).** ``footage`` is what the post asks its
+  template's slots to be filled with: ``{slot: {"prompt"}}``, footage or a still
+  from the workspace's Composio generation toolkit. A render generates it,
+  copies the file into our storage and records it on the slot
+  (``record_footage``: ``"status": "done"``, its Deliverable, sha256, cost). An
+  edit that keeps a slot's prompt keeps what was made for it; a new prompt asks
+  again. Like the voice it is a render setting, outside the hash: the rendered
+  files' digests carry what it changed.
 * **Music credit (Wave 1 S1.6).** A CC BY track asks for credit wherever the
   video is published: ``with_credits`` appends its line to the post's copy,
   the base text and every channel's own text, once. A render appends the line
@@ -64,6 +72,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, update
 
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
+from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 
 # ── statuses ────────────────────────────────────────────────────────────────
 DRAFT = "draft"
@@ -125,11 +134,11 @@ ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
 EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, FAILED})
 PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
 
-# What the hash covers (D6), and what a post edit may change. The voice is a
-# render setting (D11): editable, never hashed.
+# What the hash covers (D6), and what a post edit may change. The voice (D11)
+# and the footage (D12) are render settings: editable, never hashed.
 CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media")
 LABEL_FIELDS = ("title", "brief")
-RENDER_FIELDS = ("voice",)
+RENDER_FIELDS = ("voice", "footage")
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
@@ -138,6 +147,17 @@ KOKORO = "kokoro"
 VOICE_KEYS = ("toolkit", "voice_id", "name")
 VOICE_TOOLKIT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 VOICE_TEXT_MAX_CHARS = 200
+
+# D12 (S1.8): footage a post asks for, per slot, and what a render recorded for
+# it. A client writes the prompt; the rest is the server's, and a client that
+# sends it back has it ignored.
+FOOTAGE_REQUEST_KEYS = ("prompt",)
+FOOTAGE_RECORD_KEYS = (
+    "status", "toolkit", "model", "deliverable_id", "name", "sha256", "bytes", "content_type",
+    "estimate_usd", "cost_usd", "generated_at",
+)
+FOOTAGE_DONE = "done"
+FOOTAGE_PROMPT_MAX_CHARS = 1500
 
 # D7: where a claim's source may come from.
 SOURCE_KINDS = ("deliverable", "report", "document", "url", "metric")
@@ -390,6 +410,64 @@ def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
     return clean
 
 
+def validate_footage(value: Any) -> Optional[Dict[str, Dict[str, str]]]:
+    """The footage the post asks for (D12): ``None`` (or ``{}``) asks for none, and
+    every slot plays the template's own motion graphics; otherwise ``{slot:
+    {"prompt"}}``. The shape only: whether the template has the slot, and lets
+    a toolkit fill it, is the api's check against the template."""
+    if value is None:
+        return None
+    footage = _require_dict("footage", value)
+    if not footage:
+        return None
+    if len(footage) > MAX_SLOTS:
+        raise InvalidPost(f"footage names at most {MAX_SLOTS} slots")
+    clean: Dict[str, Dict[str, str]] = {}
+    for slot, request in footage.items():
+        if not isinstance(slot, str) or not VARIABLE_NAME.match(slot):
+            raise InvalidPost(f"footage.{slot} is not a slot name (letters, digits and _, not starting with a digit)")
+        if not isinstance(request, dict):
+            raise InvalidPost(f'footage.{slot} must be an object such as {{"prompt": "a calm sea at dawn"}}')
+        unknown = [k for k in request if k not in FOOTAGE_REQUEST_KEYS + FOOTAGE_RECORD_KEYS]
+        if unknown:
+            raise InvalidPost(f"footage.{slot} takes a prompt, got {unknown!r}")
+        prompt = request.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise InvalidPost(f"footage.{slot}.prompt is required")
+        text = prompt.strip()
+        if len(text) > FOOTAGE_PROMPT_MAX_CHARS:
+            raise InvalidPost(f"footage.{slot}.prompt must be at most {FOOTAGE_PROMPT_MAX_CHARS} characters")
+        clean[slot] = {"prompt": text}
+    return clean
+
+
+def footage_after_edit(stored: Any, requested: Optional[Mapping[str, Mapping[str, str]]]) -> Optional[Dict[str, Any]]:
+    """``requested`` (``validate_footage``'s shape) keeping what a render already
+    made for every slot whose prompt did not change: a new prompt asks again."""
+    if requested is None:
+        return None
+    before = stored if isinstance(stored, dict) else {}
+    kept: Dict[str, Any] = {}
+    for slot, request in requested.items():
+        record = before.get(slot)
+        same = isinstance(record, dict) and record.get("prompt") == request["prompt"]
+        kept[slot] = dict(record) if same else dict(request)
+    return kept
+
+
+def record_footage(post: SocialPost, slot: str, record: Mapping[str, Any]) -> bool:
+    """Record what a render made for ``slot`` (S1.8), marked done. Only while the
+    post still asks for the slot with the prompt it was made for: ``False``, and
+    nothing changes, when the request has changed since."""
+    footage = dict(post.footage) if isinstance(post.footage, dict) else {}
+    asked = footage.get(slot)
+    if not isinstance(asked, dict) or asked.get("prompt") != record.get("prompt"):
+        return False
+    footage[slot] = {**dict(record), "status": FOOTAGE_DONE}
+    post.footage = footage
+    return True
+
+
 _VALIDATORS = {
     "title": _validate_title,
     "brief": _validate_brief,
@@ -400,6 +478,7 @@ _VALIDATORS = {
     "sources": validate_sources,
     "media": _validate_media,
     "voice": validate_voice,
+    "footage": validate_footage,
 }
 
 
@@ -496,6 +575,7 @@ def create_draft(
     sources: Optional[Mapping[str, Any]] = None,
     media: Optional[Mapping[str, Any]] = None,
     voice: Optional[Mapping[str, Any]] = None,
+    footage: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits)."""
     fields = {
@@ -508,6 +588,7 @@ def create_draft(
         "sources": sources,
         "media": media,
         "voice": voice,
+        "footage": footage,
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
@@ -534,6 +615,8 @@ def update_post(post: SocialPost, actor: str, changes: Mapping[str, Any]) -> Soc
         raise IllegalTransition(post.status, ACTION_EDIT)
 
     clean = {name: _VALIDATORS[name](value) for name, value in changes.items()}
+    if "footage" in clean:
+        clean["footage"] = footage_after_edit(post.footage, clean["footage"])
     for name, value in clean.items():
         setattr(post, name, value)
 

@@ -9,4 +9,10 @@ provider client (D15). What a tool returns is copied into our storage the
 moment it arrives (``files.py``).
 
 - :mod:`modules.socials.recipes.voice`: Fish Audio and ElevenLabs speech (S1.5).
+- :mod:`modules.socials.recipes.footage`: footage and stills for a template's
+  slots (S1.8): the plan, the caps and the money (D13), submit and poll, the
+  copy into our storage; the per-toolkit recipes are
+  :mod:`modules.socials.recipes.footage_toolkits` (fal.ai, Kie.ai, Higgsfield MCP).
+- :mod:`modules.socials.recipes.toolkit`: what every recipe shares: calling an
+  offered action, reading its answer, a credit balance and the credit window.
 """

@@ -452,6 +452,26 @@ export interface SocialPostVoice {
   name?: string
 }
 
+/**
+ * D12 (S1.8): footage or a still a post asks one of its template's slots to be
+ * filled with. A client writes `prompt`; a render records the rest once the
+ * file is in our storage (`status: 'done'`), and reuses it while the prompt stands.
+ */
+export interface SocialPostFootage {
+  prompt: string
+  status?: 'done'
+  toolkit?: string
+  model?: string
+  deliverable_id?: string
+  name?: string
+  sha256?: string
+  bytes?: number
+  content_type?: string
+  estimate_usd?: number
+  cost_usd?: number
+  generated_at?: string
+}
+
 export interface SocialPost {
   id: string
   workspace_id: string
@@ -465,6 +485,8 @@ export interface SocialPost {
   sources: Record<string, unknown>
   media: Record<string, unknown>
   voice?: SocialPostVoice | null
+  /** Slot name → the footage it asks for; `null` plays the template's own motion graphics. */
+  footage?: Record<string, SocialPostFootage> | null
   status: SocialPostStatus
   content_hash: string
   approved_hash: string | null
@@ -495,6 +517,8 @@ export interface UpdateSocialPostInput {
   copy?: SocialPostCopy
   /** `null` (or `{ toolkit: 'kokoro' }`) speaks with Kokoro. */
   voice?: SocialPostVoice | { toolkit: 'kokoro' } | null
+  /** Slot name → `{ prompt }`; `null` asks for no footage. */
+  footage?: Record<string, { prompt: string }> | null
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */

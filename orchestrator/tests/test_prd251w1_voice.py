@@ -77,6 +77,7 @@ import core.media_render_client as media_render_client  # noqa: E402
 import core.media_render_quota as render_quota  # noqa: E402
 import modules.socials.media_store as media_store  # noqa: E402
 import modules.socials.recipes.files as files  # noqa: E402
+import modules.socials.recipes.toolkit as toolkit  # noqa: E402
 import modules.socials.recipes.voice as voice  # noqa: E402
 import modules.socials.render as render  # noqa: E402
 import modules.socials.service as service  # noqa: E402
@@ -674,7 +675,7 @@ def test_only_a_credit_billed_toolkit_takes_the_credit_window(env, monkeypatch):
         windows.append((workspace_id, toolkit))
         yield
 
-    monkeypatch.setattr(voice, "_credit_window", window)
+    monkeypatch.setattr(voice, "credit_window", window)
     _script_fish(env)
     inline = "data:audio/mpeg;base64," + base64.b64encode(_mp3("eleven")).decode()
     env.composio.answers[ELEVEN_SPEAK] = lambda params: _ok({"audio": inline})
@@ -692,8 +693,8 @@ def test_only_a_credit_billed_toolkit_takes_the_credit_window(env, monkeypatch):
 
 def test_on_a_database_without_advisory_locks_the_window_is_the_process_lock(env):
     async def go():
-        async with voice._credit_window(env.factory, WS, "fish_audio"):
-            return voice._account_lock(WS, "fish_audio").locked()
+        async with toolkit.credit_window(env.factory, WS, "fish_audio"):
+            return toolkit.account_lock(WS, "fish_audio").locked()
 
     assert asyncio.run(go()) is True
 
@@ -1083,15 +1084,15 @@ def test_a_credit_window_held_by_another_worker_is_waited_for(pg_engine, monkeyp
     """Production runs several uvicorn workers: a window another process holds (here,
     another connection) keeps this one out until it ends, so two renders' balance
     readings never overlap."""
-    monkeypatch.setattr(voice.config, "SOCIALS_RENDER_POLL_SECONDS", 0.05, raising=False)
+    monkeypatch.setattr(toolkit.config, "SOCIALS_RENDER_POLL_SECONDS", 0.05, raising=False)
     factory = sessionmaker(bind=pg_engine)
-    params = {"namespace": voice.CREDIT_LOCK_NAMESPACE, "key": voice.credit_lock_key(WS, "fish_audio")}
+    params = {"namespace": toolkit.CREDIT_LOCK_NAMESPACE, "key": toolkit.credit_lock_key(WS, "fish_audio")}
 
     async def scenario():
         entered = asyncio.Event()
 
         async def second():
-            async with voice._postgres_credit_lock(factory, WS, "fish_audio"):
+            async with toolkit.advisory_lock(factory, params["namespace"], params["key"]):
                 entered.set()
 
         with pg_engine.connect() as holder:

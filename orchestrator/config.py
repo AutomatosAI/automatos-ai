@@ -1881,6 +1881,44 @@ class Config:
     SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS", "60"))
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
+    # S1.8 (D12): footage and stills from the workspace's own Composio generation
+    # toolkit (modules/socials/recipes/footage.py). The toolkits a render tries,
+    # in this order, for a slot its post asks footage for; each toolkit's model
+    # per kind (the owner sets these after the small-spend quality test, PRD-251
+    # open question 7); the clip length asked for; the words every prompt ends
+    # with (every word on screen is template text, never generated); how often a
+    # job is polled and for how long (inside the render's own
+    # SOCIALS_RENDER_MAX_WAIT_SECONDS, leaving the render its time); the largest
+    # file kept.
+    SOCIALS_FOOTAGE_TOOLKITS: str = os.getenv("SOCIALS_FOOTAGE_TOOLKITS", "fal_ai,kieai,higgsfield_mcp")
+    SOCIALS_FOOTAGE_FAL_VIDEO_MODEL: str = os.getenv(
+        "SOCIALS_FOOTAGE_FAL_VIDEO_MODEL", "fal-ai/kling-video/v2.1/standard/text-to-video"
+    ).strip()
+    SOCIALS_FOOTAGE_FAL_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_FAL_IMAGE_MODEL", "fal-ai/flux-pro/v1.1-ultra").strip()
+    SOCIALS_FOOTAGE_KIEAI_VIDEO_MODEL: str = os.getenv("SOCIALS_FOOTAGE_KIEAI_VIDEO_MODEL", "veo3_fast").strip()
+    SOCIALS_FOOTAGE_KIEAI_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_KIEAI_IMAGE_MODEL", "flux-kontext-pro").strip()
+    SOCIALS_FOOTAGE_HIGGSFIELD_VIDEO_MODEL: str = os.getenv("SOCIALS_FOOTAGE_HIGGSFIELD_VIDEO_MODEL", "kling3_0").strip()
+    SOCIALS_FOOTAGE_HIGGSFIELD_IMAGE_MODEL: str = os.getenv("SOCIALS_FOOTAGE_HIGGSFIELD_IMAGE_MODEL", "gpt_image_2").strip()
+    SOCIALS_FOOTAGE_CLIP_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_CLIP_SECONDS", "5"))
+    SOCIALS_FOOTAGE_PROMPT_GUARD: str = os.getenv("SOCIALS_FOOTAGE_PROMPT_GUARD", "no readable text, no logos").strip()
+    SOCIALS_FOOTAGE_POLL_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_POLL_SECONDS", "10"))
+    SOCIALS_FOOTAGE_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_FOOTAGE_MAX_WAIT_SECONDS", "900"))
+    SOCIALS_FOOTAGE_MAX_BYTES: int = int(os.getenv("SOCIALS_FOOTAGE_MAX_BYTES", "134217728"))
+    # D13: money. A toolkit that prices a call (fal: its estimate action) is
+    # priced before any submit; one that prices nothing (Kie.ai, Higgsfield) is
+    # budgeted at these ceilings per shot, so the caps still hold (the reference
+    # client's rule: a 5 s 720p Cinema Studio shot was $2.31, an unpriced image
+    # budgeted at $0.30). Every submit fits the post's cap and the workspace's
+    # monthly media cap: the workspace setting socials.media_monthly_cap_usd, whose
+    # default this is. A credit-billed toolkit books its balance difference at its
+    # credit's price: Kie.ai $0.005 a credit; Higgsfield $0.0625, its smallest
+    # top-up pack (the dearest credit, so a cap binds early).
+    SOCIALS_FOOTAGE_CEILING_VIDEO_USD: float = float(os.getenv("SOCIALS_FOOTAGE_CEILING_VIDEO_USD", "2.50"))
+    SOCIALS_FOOTAGE_CEILING_IMAGE_USD: float = float(os.getenv("SOCIALS_FOOTAGE_CEILING_IMAGE_USD", "0.30"))
+    SOCIALS_MEDIA_POST_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_POST_CAP_USD", "10"))
+    SOCIALS_MEDIA_MONTHLY_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_MONTHLY_CAP_USD", "30"))
+    SOCIALS_KIEAI_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_KIEAI_USD_PER_CREDIT", "0.005"))
+    SOCIALS_HIGGSFIELD_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_HIGGSFIELD_USD_PER_CREDIT", "0.0625"))
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".

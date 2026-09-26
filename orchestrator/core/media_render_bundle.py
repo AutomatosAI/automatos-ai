@@ -32,7 +32,10 @@ The template becomes the composition, with two things done to it here:
 * a slot the caller fills (``slot_media``: slot name → a presigned GET URL on
   our storage) reaches media-render as a media file at the slot's path; a slot
   left empty has its elements taken out of the html, so the template's own
-  motion graphics play where the footage would have been;
+  motion graphics play where the footage would have been. A slot whose file is
+  still to come (``keep_slots``: footage a Socials render generates first, S1.8)
+  keeps its elements, and ``with_slot_files`` adds its file once it is in our
+  storage;
 * the audio plan's voice lines are template text: their ``{{ name }}`` are
   filled with the variables, and a line that fills in empty is dropped;
 * a ``social_image`` renders as stills (US-107): the bundle asks media-render
@@ -55,7 +58,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from core.brand_palette import paper_palette, stage_palette
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
@@ -203,14 +206,18 @@ def _audio(plan: Mapping[str, Any], variables: Mapping[str, Any]) -> Dict[str, A
     return audio
 
 
-def _slots(blocks: Mapping[str, Any], slot_media: Mapping[str, str]) -> Tuple[str, List[Dict[str, str]]]:
-    """The html with every empty slot taken out, and the media entries of the filled ones."""
+def _slots(
+    blocks: Mapping[str, Any], slot_media: Mapping[str, str], keep_slots: Iterable[str] = ()
+) -> Tuple[str, List[Dict[str, str]]]:
+    """The html with every empty slot taken out, and the media entries of the
+    filled ones. A slot in ``keep_slots`` keeps its elements; its file comes later."""
     slots = blocks.get("slots") or {}
-    unknown = sorted(set(slot_media) - set(slots))
+    kept = set(slot_media) | set(keep_slots)
+    unknown = sorted(kept - set(slots))
     if unknown:
         raise ValueError(f"this template has no slot {', '.join(unknown)}")
     media = [{"path": slots[name]["path"], "url": url} for name, url in slot_media.items()]
-    return without_slots(blocks["html"], slots, keep=slot_media), media
+    return without_slots(blocks["html"], slots, keep=kept), media
 
 
 def build_bundle(
@@ -223,6 +230,7 @@ def build_bundle(
     fallback_name: str = "",
     size: Optional[str] = None,
     slot_media: Optional[Mapping[str, str]] = None,
+    keep_slots: Iterable[str] = (),
     fmt: str = SOCIAL_VIDEO,
 ) -> Dict[str, Any]:
     """The bundle for one render of ``blocks`` (a checked social template of format ``fmt``) at ``size``.
@@ -231,12 +239,13 @@ def build_bundle(
     (``core.social_templates.resolve_variables``); the brand and size variables
     are added here and always win over a same-named value. ``slot_media`` fills
     slots with footage or stills already in our storage (presigned GET URLs,
-    which media-render checks against its allowlist); every other slot is empty.
-    A ``social_image`` asks for stills instead of a film.
+    which media-render checks against its allowlist); a slot in ``keep_slots``
+    is shown and gets its file later (:func:`with_slot_files`); every other slot
+    is empty. A ``social_image`` asks for stills instead of a film.
     """
     kit = brand_kit or {}
     width, height = render_size(blocks, size)
-    html, media = _slots(blocks, slot_media or {})
+    html, media = _slots(blocks, slot_media or {}, keep_slots)
     logo_files, logo, logo_mark = _logos(kit)
     font_files, faces = _fonts(kit)
     variables = {
@@ -315,6 +324,30 @@ def with_voice_files(bundle: Mapping[str, Any], files: Mapping[str, Tuple[str, s
     return out
 
 
+def with_slot_files(bundle: Mapping[str, Any], files: Mapping[str, str]) -> Dict[str, Any]:
+    """A copy of ``bundle`` whose kept slots carry their files (S1.8, D12).
+
+    ``files`` maps a slot's path (``assets/slots/hook.mp4``) to a presigned GET
+    URL on our storage; each joins the bundle's media, which media-render
+    fetches through its storage allowlist. A path the composition does not show,
+    or one the bundle already carries, is refused. Nothing else changes.
+    """
+    out = copy.deepcopy(dict(bundle))
+    html = str((out.get("composition") or {}).get("html") or "")
+    media = list(out.get("media") or [])
+    carried = {entry.get("path") for entry in media if isinstance(entry, Mapping)}
+    unshown = sorted(path for path in files if path not in html)
+    if unshown:
+        raise ValueError(f"the composition shows no slot at {', '.join(unshown)}")
+    doubled = sorted(path for path in files if path in carried)
+    if doubled:
+        raise ValueError(f"the bundle already carries {', '.join(doubled)}")
+    if not files:
+        return out
+    out["media"] = media + [{"path": path, "url": url} for path, url in files.items()]
+    return out
+
+
 __all__ = [
     "NO_LOGO",
     "VOICE_DIR",
@@ -323,5 +356,6 @@ __all__ = [
     "build_bundle",
     "render_size",
     "voice_script",
+    "with_slot_files",
     "with_voice_files",
 ]

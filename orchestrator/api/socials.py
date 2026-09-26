@@ -38,6 +38,16 @@ a save or a render with a voice the workspace cannot speak with now answers
 toolkits, and the allowlisted ones to connect), and ``GET /voices/{toolkit}``
 a toolkit's own voices (``modules/socials/recipes/voice.py``).
 
+Footage (S1.8, D12, D13): a post may ask its template's slots for footage or a
+still (``footage``: ``{slot: {"prompt"}}``); a save names only slots the
+template has and lets a toolkit fill (422 otherwise). The render generates them
+through the workspace's Composio generation toolkit, priced and checked against
+the post's cap and the workspace's monthly media cap before anything is
+submitted (``modules/socials/recipes/footage.py``); with no generation toolkit
+connected, the slots play the template's own motion graphics. ``GET /footage``
+lists what the slots can be filled with here, and this month's media spend
+against the cap.
+
 Music credit (S1.6): a CC BY track needs its credit wherever the video is
 published. Every save appends to the post's copy the credit lines the music of
 its media asks for (``modules/socials/credits.py``: each rendered file records
@@ -86,16 +96,17 @@ from core.media_render_bundle import voice_script
 from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
-from core.social_templates import SocialTemplateError, validate_social_blocks
+from core.social_templates import SocialTemplateError, slot_generatable, validate_social_blocks
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_store, render, service
+from modules.socials import media_caps, media_store, render, service
 from modules.socials import credits as post_credits
 from modules.socials import report_charts
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.publisher import PublishingUnavailable, publish_post
+from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
 from modules.socials.settings import require_socials_enabled
 
@@ -146,6 +157,8 @@ class CreateSocialPostRequest(_Strict):
     media: Optional[Dict[str, Any]] = None
     # D11: None is Kokoro; {"toolkit", "voice_id", "name"} a connected voice toolkit.
     voice: Optional[Dict[str, Any]] = None
+    # D12: {slot: {"prompt"}}, footage or stills from a connected generation toolkit.
+    footage: Optional[Dict[str, Any]] = None
 
 
 class UpdateSocialPostRequest(_Strict):
@@ -158,6 +171,7 @@ class UpdateSocialPostRequest(_Strict):
     sources: Optional[Dict[str, Any]] = None
     media: Optional[Dict[str, Any]] = None
     voice: Optional[Dict[str, Any]] = None
+    footage: Optional[Dict[str, Any]] = None
 
 
 class ApproveRequest(_Strict):
@@ -306,6 +320,29 @@ async def _check_voice(db: Session, ctx: RequestContext, voice: Any) -> None:
         voice_recipes.plan_for(clean, await _capabilities(db, ctx))
 
 
+def _check_footage(db: Session, ctx: RequestContext, footage: Any, template_id: Optional[UUID]) -> None:
+    """The footage a save asks for names only slots the post's template has and
+    lets a generation toolkit fill (S1.8). With no template yet, the render checks."""
+    clean = service.validate_footage(footage)
+    if not clean or template_id is None:
+        return
+    row = (
+        db.query(DocumentTemplate.blocks)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    blocks = row.blocks if row is not None and isinstance(row.blocks, dict) else {}
+    slots = blocks.get("slots") if isinstance(blocks.get("slots"), dict) else {}
+    for slot in clean:
+        spec = slots.get(slot)
+        if not isinstance(spec, dict):
+            has = f"its slots are {', '.join(sorted(slots))}" if slots else "it has none"
+            raise service.InvalidPost(f"footage.{slot}: the post's template has no slot {slot} ({has})")
+        if not slot_generatable(spec):
+            label = spec.get("label") or slot
+            raise service.InvalidPost(f"footage.{slot}: {label} takes the workspace's own file, never generated footage")
+
+
 def _credited(db: Session, ctx: RequestContext, changes: Dict[str, Any], post: Optional[SocialPost] = None) -> Dict[str, Any]:
     """``changes`` whose copy carries the credit lines the post's media asks for
     after this save (S1.6): the media the save sets, else the post's own."""
@@ -372,6 +409,7 @@ async def create_social_post(
     fields = body.model_dump(by_alias=True)
     try:
         await _check_voice(db, ctx, fields["voice"])
+        _check_footage(db, ctx, fields["footage"], body.template_id)
         if fields["sources"]:
             post_sources.require_resolved(db, ctx.workspace_id, fields["sources"])
         fields = _credited(db, ctx, fields)
@@ -401,8 +439,10 @@ async def update_social_post(
     adds or changes must resolve in the workspace (D7); one it keeps as it was
     is checked again at approval. A voice toolkit the edit names must be one the
     workspace can speak with now (D11); the voice is a render setting, so
-    changing it alone voids nothing. The copy keeps the credit lines its
-    media's music asks for (S1.6): an edit that drops one gets it back."""
+    changing it alone voids nothing. So is the footage (D12): a slot the edit
+    asks for with its prompt unchanged keeps what a render made for it. The
+    copy keeps the credit lines its media's music asks for (S1.6): an edit that
+    drops one gets it back."""
     post = _load(db, ctx, post_id)
     status, content_hash = post.status, post.content_hash
     changes = body.model_dump(exclude_unset=True, by_alias=True)
@@ -412,6 +452,8 @@ async def update_social_post(
     try:
         if "voice" in changes:
             await _check_voice(db, ctx, changes["voice"])
+        if "footage" in changes:
+            _check_footage(db, ctx, changes["footage"], changes.get("template_id", post.template_id))
         if changes.get("sources"):
             post_sources.require_resolved(db, ctx.workspace_id, changes["sources"], unchanged_from=post.sources)
         changes = _credited(db, ctx, changes, post)
@@ -570,7 +612,8 @@ async def render_social_post(
     its render minutes this month (429, before any call to media-render), or
     there is no storage or renderer to use (503). The render ends the post in
     ``needs_approval`` with the files in ``media``, or in ``failed`` with the
-    report in ``review_log``.
+    report in ``review_log``: a render whose footage would take the post or the
+    workspace over its media cap submits nothing and fails saying why (D13).
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
@@ -581,7 +624,14 @@ async def render_social_post(
         template = _render_template(db, ctx, post)
         workspace = _workspace(db, ctx)
         brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
-        bundle = render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "")
+        # D12: the footage the post asks for, planned now over the template's slots;
+        # a slot no connected toolkit can make plays the template's motion graphics.
+        caps = await _capabilities(db, ctx) if post.footage else None
+        footage_plan = render.footage_plan_for(post, template, caps) if caps is not None else None
+        bundle = render.bundle_for(
+            post, template, brand_kit, fallback_name=workspace.name or "",
+            footage_slots=footage_plan.shown if footage_plan is not None else (),
+        )
         # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
         await report_charts.check_bound_chart(
             db, ctx.workspace_id, render.composition_of(template), post.sources, bundle["variables"]
@@ -590,7 +640,7 @@ async def render_social_post(
         # so a toolkit the workspace cannot use is refused with nothing changed.
         voice_plan = None
         if voice and voice_script(bundle):
-            voice_plan = voice_recipes.plan_for(voice, await _capabilities(db, ctx))
+            voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, ctx))
         render_quota.enforce_render_quota(db, workspace)
         await render.ensure_renderer()
         service.start_render(post, actor)
@@ -607,6 +657,7 @@ async def render_social_post(
             format=post.format,
             bundle=bundle,
             voice=voice_plan,
+            footage=footage_plan,
         )
     )
     return saved
@@ -689,6 +740,26 @@ async def list_social_toolkit_voices(
     except voice_recipes.VoiceToolError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"toolkit": toolkit, "voices": voices}
+
+
+# ---------------------------------------------------------------------------
+# Footage (S1.8)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/footage")
+async def list_social_footage_sources(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """What a post's slots can be filled with here (D12, D15, D16): per kind
+    (footage, stills), the connected generation toolkit a render would use or why
+    none can; each generation toolkit ``available``, to ``connect`` (the Composio
+    connect flow) or ``unavailable`` and why; and this month's media spend
+    against the workspace's monthly media cap (D13)."""
+    caps = await _capabilities(db, ctx)
+    spend = media_caps.media_spend(db, _workspace(db, ctx))
+    return {**footage_recipes.footage_sources(caps), "spend": spend.to_dict()}
 
 
 # ---------------------------------------------------------------------------

@@ -17,13 +17,18 @@
   ``{"toolkit", "voice_id", "name"}`` names a voice toolkit the workspace has
   connected in Composio (``modules/socials/recipes/voice.py``). Nullable JSON
   (JSONB on Postgres), added only when missing.
+* S1.8 (US-114, D12): ``social_posts.footage``, the footage and stills a post
+  asks its template's slots to be filled with, and what its renders generated
+  for them (``modules/socials/recipes/footage.py``). NULL: every slot plays the
+  template's own motion graphics. Nullable JSON (JSONB on Postgres), added only
+  when missing.
 
 Create_all-first safe (the 89d89c250 lesson: on the 2026-09-23 refresh a backend
 that had already loaded the new models ran ``create_all`` before the migration,
 and ``prd251_socials`` crash-looped on DuplicateTable). Here ``create_all`` has
 already built the wide CHECK itself, and the upgrade drops it and adds the same
-rule again; ``social_posts.voice`` is added only when the table does not carry
-it yet. The seed is insert-if-absent: ``system_settings`` has no (category,
+rule again; ``social_posts.voice`` and ``social_posts.footage`` are added only
+when the table does not carry them yet. The seed is insert-if-absent: ``system_settings`` has no (category,
 key) unique constraint, so the upgrade checks first, and a re-run never
 overwrites a super-admin's edit. Running the upgrade twice changes nothing.
 Later Wave 1 stories extend THIS revision, so the wave stays one migration, and
@@ -31,7 +36,9 @@ every step they add must tolerate what ``create_all`` already built.
 
 The downgrade brings the narrow CHECK back ``NOT VALID``: the social templates a
 workspace already holds are kept, and new rows and updates follow the old rule.
-It drops ``social_posts.voice`` (each post renders with Kokoro again), and it
+It drops ``social_posts.voice`` (each post renders with Kokoro again) and
+``social_posts.footage`` (each slot plays the template's own motion graphics
+again; the generated files stay in storage and in Deliverables), and it
 deletes the settings rows this revision created (``created_by`` = this
 revision), edited since or not, and never a row a person created.
 
@@ -63,6 +70,7 @@ FORMATS_AFTER = FORMATS_BEFORE + ("social_image", "social_video")
 
 POSTS_TABLE = "social_posts"
 POST_VOICE_COLUMN = "voice"
+POST_FOOTAGE_COLUMN = "footage"
 
 SEED_CREATED_BY = "prd251_wave1"
 
@@ -201,13 +209,31 @@ def drop_post_voice_column() -> None:
         op.drop_column("social_posts", POST_VOICE_COLUMN)
 
 
+def add_post_footage_column() -> None:
+    """US-114 (D12): ``social_posts.footage``, unless ``create_all`` already built it."""
+    columns = _post_columns()
+    if not columns or POST_FOOTAGE_COLUMN in columns:
+        return
+    op.add_column(
+        "social_posts",
+        sa.Column(POST_FOOTAGE_COLUMN, sa.JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    )
+
+
+def drop_post_footage_column() -> None:
+    if POST_FOOTAGE_COLUMN in _post_columns():
+        op.drop_column("social_posts", POST_FOOTAGE_COLUMN)
+
+
 def upgrade() -> None:
     _replace_format_check(FORMATS_AFTER, validate=True)
     add_post_voice_column()
+    add_post_footage_column()
     seed_settings(op.get_bind(), settings_seed())
 
 
 def downgrade() -> None:
     unseed_settings(op.get_bind(), settings_seed())
+    drop_post_footage_column()
     drop_post_voice_column()
     _replace_format_check(FORMATS_BEFORE, validate=False)

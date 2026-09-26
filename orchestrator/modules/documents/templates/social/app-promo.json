@@ -493,7 +493,8 @@
       "kind": "video",
       "path": "assets/slots/app_loop.mp4",
       "label": "The app's own loop",
-      "description": "9:16, about 4 s: the app's real animation or screen recording (never generated UI). Plays 4.95-8.85 s behind the slogan."
+      "description": "9:16, about 4 s: the app's real animation or screen recording (never generated UI). Plays 4.95-8.85 s behind the slogan.",
+      "generate": false
     },
     "desk": {
       "kind": "video",

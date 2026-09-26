@@ -501,8 +501,11 @@ async def save_socials_settings(
 ):
     """PRD-251 S0.1 (D1): the workspace's own Socials switch.
 
-    Body: ``{"socials": {"enabled": bool}}`` — validated fail-closed (unknown
-    keys and a non-boolean ``enabled`` are 400), merged never replace-blind.
+    Body: ``{"socials": {"enabled": bool, "media_monthly_cap_usd": number}}``,
+    either key or both — validated fail-closed (unknown keys, a non-boolean
+    ``enabled`` and a cap that is not a number of dollars, 0 or more, are 400),
+    merged never replace-blind. The cap (PRD-251 D13, S1.8) bounds what the
+    workspace's connected media tools may spend for Socials in a month.
     The platform master switch is a system setting, not this route.
 
     PRD-251 S1.2: turning Socials on also seeds the social video starters into
