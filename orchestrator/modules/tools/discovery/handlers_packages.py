@@ -113,6 +113,14 @@ def _record_offer_if_onboarding(db: Any, workspace_id: UUID, slug: str) -> None:
         logger.debug("package_offered funnel record skipped: %s", exc)
 
 
+# F184 (night 6): after one package search with its own label, Auto said nothing
+# ready-made existed and never saw the Shopify Business Analyst agent.
+NO_PACKAGE_NEXT = (
+    "No package matches. Before you tell the owner nothing ready-made exists, search the "
+    "marketplace agents too (platform_browse_marketplace_agents) with their own words."
+)
+
+
 async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_search_packages — rank marketplace packages against business signals."""
     from services.marketplace_packages import list_packages, match_by_signals
@@ -126,11 +134,15 @@ async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -
     matches = match_by_signals(signals, list_packages(db))
     if matches:
         _record_offer_if_onboarding(db, workspace_id, matches[0].package.slug)
-    return {
+    result = {
         "success": True,
+        "searched": "packages",  # F184: what a "nothing ready-made" rests on, checkable
         "matches": [_match_summary(m) for m in matches],
         "count": len(matches),
     }
+    if not matches:
+        result["next"] = NO_PACKAGE_NEXT
+    return result
 
 
 # --------------------------------------------------------------------------- #

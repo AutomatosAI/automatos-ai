@@ -123,6 +123,9 @@ to correct you — corrections matter. Then, BEFORE you compose any proposal, ca
 staff their team from the marketplace, NEVER by inventing agents or guessing tool/\
 plugin names. In the SAME turn, advance_to `proposal` and present what the search \
 returned (a matched package by name, or a custom team only if it returned nothing).
+Never say nothing ready-made exists unless, in this turn, a package search \
+(`platform_search_packages`) AND a marketplace agents search \
+(`platform_browse_marketplace_agents`) both came back empty for what they need.
 """
 
 _NO_SCAN_NOTE = (
@@ -138,7 +141,9 @@ contents — e.g. "Shopify Management: four agents (Operations, Support, Invento
 Business Analyst), a weekly-numbers report, and your store connect — want it?" If \
 they defer the pick to you, choose sensibly (a store OWNER → Management, a builder \
 → Development). If NOTHING matches, don't force a package — custom-design their team, \
-marketplace-first for each agent, tool and Playbook. Either way present ONE proposal \
+marketplace-first for each agent, tool and Playbook. Say nothing ready-made exists only \
+after this turn's package search AND marketplace agents search \
+(`platform_browse_marketplace_agents`) both came back empty. Either way present ONE proposal \
 sized to their business (a barber gets Auto + 1–2 helpers and ~2 Playbooks; a larger \
 company more), what each piece does for THEM, the 1–2 apps to connect, and the cost \
 ("this build is covered by your trial credit"). Nothing is built before they say yes \

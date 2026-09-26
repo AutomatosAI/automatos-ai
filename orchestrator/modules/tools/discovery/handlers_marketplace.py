@@ -149,6 +149,7 @@ async def browse_marketplace_agents(db: Session, workspace_id: UUID, params: Dic
 
     return {
         "success": True,
+        "searched": "marketplace_agents",  # F184: half of what "nothing ready-made" rests on
         "agents": results,
         "count": len(results),
     }
