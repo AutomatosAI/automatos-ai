@@ -291,7 +291,7 @@ async def _boot_phase_1_core():
         try:
             from core.boot.reaper import reap_orphaned_runs
             with get_db_session() as db:
-                reap_orphaned_runs(db)
+                await reap_orphaned_runs(db)
         except Exception as reap_err:
             logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
             from core.utils.exception_telemetry import record_error

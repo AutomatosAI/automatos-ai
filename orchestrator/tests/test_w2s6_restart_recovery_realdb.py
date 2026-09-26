@@ -26,6 +26,7 @@ impossible, the module *skips* unless the engine points at a local, disposable
 test database (CI's Postgres service, or a developer's local ``test_db``); it
 never runs against Railway. Marked ``integration`` so it joins the live-DB job.
 """
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -170,11 +171,11 @@ def test_reaper_marks_stale_orphans_terminal(seed):
     not merely that an in-memory attribute was set — the real-DB proof W1-S6 lacked.
     """
     db = seed.db
-    reaped = reaper.reap_orphaned_runs(db, now=seed.now)
+    reaped = asyncio.run(reaper.reap_orphaned_runs(db, now=seed.now))
     assert reaped >= 3  # at least our three stale rows (other test data may add more)
 
     board = db.get(BoardTask, seed.board_stale)
-    assert board.status == "done"  # the board's own failure convention (no 'failed' column)
+    assert board.status == "failed"  # F175's rule: an orphan is a failed run, never 'done'
     assert board.completed_at is not None
     assert _ORPHAN in (board.error_message or "")
 
@@ -194,7 +195,7 @@ def test_reaper_leaves_fresh_runs_untouched(seed):
     """A job that started moments ago is still legitimately running and must
     survive the sweep — the reaper must not kill live work."""
     db = seed.db
-    reaper.reap_orphaned_runs(db, now=seed.now)
+    asyncio.run(reaper.reap_orphaned_runs(db, now=seed.now))
 
     assert db.get(BoardTask, seed.board_fresh).status == "in_progress"
     assert db.get(BusinessProfile, seed.prof_fresh).status == "scraping"

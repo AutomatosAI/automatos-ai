@@ -5,8 +5,9 @@ old process is stranded forever — nothing remains to move it to a terminal
 state. ``reap_orphaned_runs`` runs once per deploy (under the boot leader lock)
 and sweeps the three durable-launch surfaces:
 
-  - **board task** stuck ``in_progress`` → ``done`` + ``error_message``
-    (the board has no 'failed' Kanban column; this mirrors its own failure path);
+  - **board task** stuck ``in_progress`` → ``failed`` with the reason, through
+    the one completion writer (``finalize_board_task_run``): the owner is told
+    (task_failed) and the report written, as for any failed run (F175's rule);
   - **wizard profile** stuck ``scraping``/``scanning`` → ``failed`` +
     ``quality_findings`` (the wizard's own failure convention);
   - **workflow execution** stuck ``pending``/``running`` → ``failed`` +
@@ -26,9 +27,11 @@ them here would race that state machine.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional, Union
 
 from config import config
 from core.models.business_profiles import BusinessProfile
@@ -38,6 +41,12 @@ from core.utils.exception_telemetry import record_error
 logger = logging.getLogger(__name__)
 
 _ORPHAN_REASON = "orphaned_on_restart"
+# Boot waits on each orphan's close: its task_failed notice can reach Telegram or
+# Slack. The status is committed before the notice, so a slow channel only cuts
+# the notice short (review MEDIUM on adc84365e). The bound cuts awaits, not the
+# row lock the close takes first; nothing else holds an orphan's row at boot (the
+# old process is gone and the dispatcher starts after the reaper).
+ORPHAN_CLOSE_SECONDS = 15
 
 
 class OrphanedRunError(RuntimeError):
@@ -70,23 +79,36 @@ def _is_stale(ts: Optional[datetime], cutoff: datetime) -> bool:
     return _coerce_aware(ts) < cutoff
 
 
-def _reap_board_tasks(db, cutoff: datetime, now: datetime) -> int:
+async def _reap_board_tasks(db, cutoff: datetime, now: datetime) -> int:
+    """An orphaned ticket is a failed run (F175's rule, night 6 #1078/#1091 closed
+    'done'): the one completion writer closes it 'failed' with the reason, tells
+    the owner and writes its report. A ticket no longer in progress is left alone."""
+    from api.board_tasks import finalize_board_task_run
+
     rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
-    stale = [r for r in rows if _is_stale(r.started_at or r.updated_at, cutoff)]
-    for r in stale:
-        # The board has no 'failed' column; its own failure path marks 'done'
-        # + error_message, so we mirror that exactly.
-        r.status = "done"
-        r.error_message = f"{_ORPHAN_REASON}: executor lost on restart"
-        r.completed_at = now
-    if stale:
+    stale = [(r.id, str(r.workspace_id), r.assigned_agent_id)
+             for r in rows if _is_stale(r.started_at or r.updated_at, cutoff)]
+    closed = []
+    for task_id, workspace_id, agent_id in stale:
+        try:
+            if await asyncio.wait_for(finalize_board_task_run(
+                db, task_id=task_id, workspace_id=workspace_id, agent_id=agent_id,
+                exec_result={"status": "error", "error": f"{_ORPHAN_REASON}: executor lost on restart"},
+            ), timeout=ORPHAN_CLOSE_SECONDS):
+                closed.append(task_id)
+        except Exception:  # noqa: BLE001 — one ticket never stops the rest of the sweep
+            db.rollback()
+            logger.exception("Boot reaper: closing orphaned board task %s did not finish", task_id)
+            if db.query(BoardTask.status).filter(BoardTask.id == task_id).scalar() == "failed":
+                closed.append(task_id)  # closed; only its notice or report was cut short
+    if closed:
         record_error(
             subsystem="board",
             operation="boot_reap",
-            error=OrphanedRunError(f"reaped {len(stale)} orphaned board task(s)"),
-            extra={"reaped_ids": [r.id for r in stale], "reason": _ORPHAN_REASON},
+            error=OrphanedRunError(f"reaped {len(closed)} orphaned board task(s)"),
+            extra={"reaped_ids": closed, "reason": _ORPHAN_REASON},
         )
-    return len(stale)
+    return len(closed)
 
 
 def _reap_business_profiles(db, cutoff: datetime, now: datetime) -> int:
@@ -186,26 +208,28 @@ def _reap_recipe_executions(db, cutoff: datetime, now: datetime) -> int:
     return len(stale)
 
 
-def _run_surface(
+async def _run_surface(
     db,
     cutoff: datetime,
     now: datetime,
     subsystem: str,
-    fn: Callable[[object, datetime, datetime], int],
+    fn: Callable[[object, datetime, datetime], Union[int, Awaitable[int]]],
 ) -> int:
     """Run one surface reaper in isolation — a failure is recorded, not raised.
 
     One broken surface must not stop the others from being swept.
     """
     try:
-        return fn(db, cutoff, now)
+        reaped = fn(db, cutoff, now)
+        return await reaped if inspect.isawaitable(reaped) else reaped
     except Exception as exc:  # noqa: BLE001 — surface isolation by design
+        db.rollback()  # a failed statement would poison the session for the next surface
         logger.exception("Boot reaper: %s surface failed", subsystem)
         record_error(subsystem=subsystem, operation="boot_reap", error=exc)
         return 0
 
 
-def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
+async def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     """Sweep orphaned in-flight rows across board / wizard / workflow surfaces.
 
     Returns the number of rows marked terminal. Mutations are committed once at
@@ -220,14 +244,14 @@ def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     cutoff = now - timedelta(minutes=config.BOOT_REAPER_STALE_MINUTES)
 
     reaped = 0
-    reaped += _run_surface(db, cutoff, now, "board", _reap_board_tasks)
-    reaped += _run_surface(db, cutoff, now, "wizard", _reap_business_profiles)
-    reaped += _run_surface(db, cutoff, now, "workflow", _reap_workflow_executions)
+    reaped += await _run_surface(db, cutoff, now, "board", _reap_board_tasks)
+    reaped += await _run_surface(db, cutoff, now, "wizard", _reap_business_profiles)
+    reaped += await _run_surface(db, cutoff, now, "workflow", _reap_workflow_executions)
     # PRD-142 Wave 3 · W3-S12: Playbook restart-durability — port the Mission
     # durability primitive (boot-time terminal-transition sweep) onto the
     # RecipeExecution log so an in-flight playbook cannot silently die when
     # the process restarts (§H DoD #3 + §A E1).
-    reaped += _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
+    reaped += await _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
 
     if reaped:
         try:
