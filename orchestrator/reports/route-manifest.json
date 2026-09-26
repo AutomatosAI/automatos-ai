@@ -1,5 +1,5 @@
 {
-  "route_count": 838,
+  "route_count": 840,
   "routes": [
     {
       "method": "GET",
@@ -2128,6 +2128,14 @@
     {
       "method": "GET",
       "path": "/api/socials/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voices/{toolkit}"
     },
     {
       "method": "GET",

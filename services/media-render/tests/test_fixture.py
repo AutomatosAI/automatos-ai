@@ -9,11 +9,16 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from media_render import hyperframes
+from media_render import fit, hyperframes
+from media_render.bundle import parse_bundle
 from media_render.config import load_settings
-from media_render.fixture import COMPOSITION, fixture_bundle
+from media_render.fixture import BUNDLES, COMPOSITION, SCRIPT_COMPOSITION, fixture_bundle, script_bundle
 
 HTML = COMPOSITION.read_text()
+SCRIPT_HTML = SCRIPT_COMPOSITION.read_text()
+# The fixture's own line, as Kokoro speaks it (af_heart at 0.95): 2.091 s in the
+# US-101 CI render (run 36131814406).
+FIXTURE_LINE_SECONDS = 2.091
 
 
 def test_one_root_composition_of_three_seconds_at_1080x1920():
@@ -93,3 +98,38 @@ def test_a_preview_snapshots_exactly_the_moments_asked_for_without_a_gpu(tmp_pat
     assert argv[argv.index("--at") + 1] == "0.5,2"
     assert argv[argv.index("--describe") + 1] == "false"
     assert "--no-end" in argv and "--no-browser-gpu" in argv
+
+
+# ── the fixture script (US-111): four lines, each in its own script window ───
+def test_the_script_follows_the_same_composition_rules_at_nine_seconds():
+    root = re.search(r"<div[^>]*data-composition-id=\"main\"[^>]*>", SCRIPT_HTML).group(0)
+    for attribute in ('data-duration="9"', 'data-width="1080"', 'data-height="1920"'):
+        assert attribute in root
+    assert SCRIPT_HTML.count("gsap.timeline({ paused: true })") == 1
+    script = SCRIPT_HTML[SCRIPT_HTML.rindex("<script>") : SCRIPT_HTML.rindex("</script>")]
+    assert script.rstrip().endswith('window.__timelines["main"] = tl;')
+    for banned in ("Math.random", "Date.now", "repeat: -1", "http"):
+        assert banned not in SCRIPT_HTML, banned
+    assert SCRIPT_HTML.count("<audio") == 1 and 'src="assets/audio/mix.wav"' in SCRIPT_HTML
+    assert '<h1 id="title">{{ headline }}</h1>' in SCRIPT_HTML
+
+
+def test_the_script_is_four_kokoro_lines_and_the_first_needs_its_window_fitted():
+    bundle = script_bundle()
+    assert bundle["composition"]["html"] == SCRIPT_HTML and BUNDLES["script"] is script_bundle
+    lines = bundle["audio"]["voice"]["lines"]
+    assert [line["id"] for line in lines] == ["l01", "l02", "l03", "l04"]
+    assert all("text" in line and "path" not in line for line in lines)
+    # the first line is the fixture's own, in a window shorter than it: the render must fit it
+    assert lines[0]["text"] == fixture_bundle()["audio"]["voice"]["lines"][0]["text"]
+    settings = load_settings()
+    timed = [fit.Timed(line["id"], line["at"], None) for line in lines]
+    window_end = fit.window_ends(timed, 9.0)["l01"]
+    tempo = fit.tempo_to_fit(lines[0]["at"], FIXTURE_LINE_SECONDS, window_end, settings.voice_fit_gap_seconds)
+    assert tempo is not None and 1.0 < tempo <= settings.voice_max_tempo
+
+
+def test_the_script_bundle_parses(settings):
+    parsed = parse_bundle(script_bundle(), settings, {})
+    assert parsed.composition.duration == 9.0
+    assert [line.id for line in parsed.audio.voice.lines] == ["l01", "l02", "l03", "l04"]

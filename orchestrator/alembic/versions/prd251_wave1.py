@@ -12,12 +12,18 @@
   (``modules/socials/capabilities.py`` reads it). The allowlist is data a
   super-admin edits; this seed is its first value and its default. An unknown
   toolkit offers nothing until it is added there.
+* S1.5 (US-111, D11): ``social_posts.voice``, the voice a render speaks the
+  post's script with. NULL is Kokoro, the template's own voice; otherwise
+  ``{"toolkit", "voice_id", "name"}`` names a voice toolkit the workspace has
+  connected in Composio (``modules/socials/recipes/voice.py``). Nullable JSON
+  (JSONB on Postgres), added only when missing.
 
 Create_all-first safe (the 89d89c250 lesson: on the 2026-09-23 refresh a backend
 that had already loaded the new models ran ``create_all`` before the migration,
 and ``prd251_socials`` crash-looped on DuplicateTable). Here ``create_all`` has
 already built the wide CHECK itself, and the upgrade drops it and adds the same
-rule again. The seed is insert-if-absent: ``system_settings`` has no (category,
+rule again; ``social_posts.voice`` is added only when the table does not carry
+it yet. The seed is insert-if-absent: ``system_settings`` has no (category,
 key) unique constraint, so the upgrade checks first, and a re-run never
 overwrites a super-admin's edit. Running the upgrade twice changes nothing.
 Later Wave 1 stories extend THIS revision, so the wave stays one migration, and
@@ -25,7 +31,8 @@ every step they add must tolerate what ``create_all`` already built.
 
 The downgrade brings the narrow CHECK back ``NOT VALID``: the social templates a
 workspace already holds are kept, and new rows and updates follow the old rule.
-It deletes the settings rows this revision created (``created_by`` = this
+It drops ``social_posts.voice`` (each post renders with Kokoro again), and it
+deletes the settings rows this revision created (``created_by`` = this
 revision), edited since or not, and never a row a person created.
 
 Chains single-parent on f049_prd251_merge_heads (the single head of main after
@@ -42,6 +49,7 @@ from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "prd251_wave1"
 down_revision = "f049_prd251_merge_heads"
@@ -52,6 +60,9 @@ TEMPLATES_TABLE = "document_templates"
 FORMAT_CHECK_NAME = "check_document_template_format"
 FORMATS_BEFORE = ("pdf", "docx", "xlsx")
 FORMATS_AFTER = FORMATS_BEFORE + ("social_image", "social_video")
+
+POSTS_TABLE = "social_posts"
+POST_VOICE_COLUMN = "voice"
 
 SEED_CREATED_BY = "prd251_wave1"
 
@@ -163,11 +174,40 @@ def unseed_settings(conn, rows) -> None:
         )
 
 
+def _post_columns() -> Sequence[str]:
+    """The columns ``social_posts`` carries; none when the table is not there."""
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table(POSTS_TABLE):
+        return ()
+    return [column["name"] for column in inspector.get_columns(POSTS_TABLE)]
+
+
+def add_post_voice_column() -> None:
+    """US-111 (D11): ``social_posts.voice``, unless ``create_all`` already built it.
+
+    ``prd251_socials`` builds the table before this revision runs; a schema
+    without it (a partial test schema) has no table to add the column to."""
+    columns = _post_columns()
+    if not columns or POST_VOICE_COLUMN in columns:
+        return
+    op.add_column(
+        "social_posts",
+        sa.Column(POST_VOICE_COLUMN, sa.JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    )
+
+
+def drop_post_voice_column() -> None:
+    if POST_VOICE_COLUMN in _post_columns():
+        op.drop_column("social_posts", POST_VOICE_COLUMN)
+
+
 def upgrade() -> None:
     _replace_format_check(FORMATS_AFTER, validate=True)
+    add_post_voice_column()
     seed_settings(op.get_bind(), settings_seed())
 
 
 def downgrade() -> None:
     unseed_settings(op.get_bind(), settings_seed())
+    drop_post_voice_column()
     _replace_format_check(FORMATS_BEFORE, validate=False)

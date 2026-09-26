@@ -30,6 +30,13 @@ post in ``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}``
 streams a rendered file (the Deliverable's preview link), and ``GET /usage``
 reads the render minutes used and the quota.
 
+Voice (S1.5, D11): a post is spoken by Kokoro unless its ``voice`` names a
+voice toolkit the workspace has connected in Composio (Fish Audio, ElevenLabs);
+a save or a render with a voice the workspace cannot speak with now answers
+422 saying why. ``GET /voices`` lists the choices (Kokoro, the connected voice
+toolkits, and the allowlisted ones to connect), and ``GET /voices/{toolkit}``
+a toolkit's own voices (``modules/socials/recipes/voice.py``).
+
 An approval binds to the content the approver saw (D6): the approve request
 carries that version's ``content_hash``, and a post that changed before the
 click answers 409.
@@ -56,11 +63,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from config import config
 from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from core.media_render_bundle import voice_script
 from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
@@ -69,7 +78,9 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_store, render, service
 from modules.socials import sources as post_sources
+from modules.socials.capabilities import media_capabilities
 from modules.socials.publisher import PublishingUnavailable, publish_post
+from modules.socials.recipes import voice as voice_recipes
 from modules.socials.settings import require_socials_enabled
 
 logger = logging.getLogger(__name__)
@@ -86,6 +97,7 @@ CAN_REVIEW = Depends(require_workspace_permission("socials:approve"))
 CAN_READ_SOURCES = Depends(require_workspace_permission("documents:read"))
 
 POST_NOT_FOUND = "Post not found"
+VOICE_QUERY_MAX_CHARS = 100
 MEDIA_NOT_FOUND = "Media not found"
 MEDIA_STORAGE_UNAVAILABLE = "Media storage unavailable"
 # A re-render replaces a file under the same name, so it is never cached as fresh.
@@ -116,6 +128,8 @@ class CreateSocialPostRequest(_Strict):
     variables: Optional[Dict[str, Any]] = None
     sources: Optional[Dict[str, Any]] = None
     media: Optional[Dict[str, Any]] = None
+    # D11: None is Kokoro; {"toolkit", "voice_id", "name"} a connected voice toolkit.
+    voice: Optional[Dict[str, Any]] = None
 
 
 class UpdateSocialPostRequest(_Strict):
@@ -127,6 +141,7 @@ class UpdateSocialPostRequest(_Strict):
     variables: Optional[Dict[str, Any]] = None
     sources: Optional[Dict[str, Any]] = None
     media: Optional[Dict[str, Any]] = None
+    voice: Optional[Dict[str, Any]] = None
 
 
 class ApproveRequest(_Strict):
@@ -255,6 +270,20 @@ def _render_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return brand_kit_for_media_render(get_brand_kit(settings))
 
 
+async def _capabilities(db: Session, ctx: RequestContext):
+    """The workspace's media capability registry (D16). It reads the database and
+    may commit the session (a pending connection upgraded): call it before any
+    change of the request's own is staged."""
+    return await asyncio.to_thread(media_capabilities, db, ctx.workspace_id)
+
+
+async def _check_voice(db: Session, ctx: RequestContext, voice: Any) -> None:
+    """A voice toolkit a save names must be one the workspace can speak with now (D11)."""
+    clean = service.validate_voice(voice)
+    if clean is not None:
+        voice_recipes.plan_for(clean, await _capabilities(db, ctx))
+
+
 def _launch_render(job: render.RenderJob) -> None:
     """The render runs in the background; its end is written by the task itself."""
     launch_guarded(
@@ -307,6 +336,7 @@ async def create_social_post(
     _check_template(db, ctx, body.template_id)
     fields = body.model_dump(by_alias=True)
     try:
+        await _check_voice(db, ctx, fields["voice"])
         if fields["sources"]:
             post_sources.require_resolved(db, ctx.workspace_id, fields["sources"])
         post = service.create_draft(db, workspace_id=ctx.workspace_id, created_by=_actor(ctx), **fields)
@@ -333,7 +363,9 @@ async def update_social_post(
 ):
     """Edit a post. A content change voids an approval (D6). A source the edit
     adds or changes must resolve in the workspace (D7); one it keeps as it was
-    is checked again at approval."""
+    is checked again at approval. A voice toolkit the edit names must be one the
+    workspace can speak with now (D11); the voice is a render setting, so
+    changing it alone voids nothing."""
     post = _load(db, ctx, post_id)
     status, content_hash = post.status, post.content_hash
     changes = body.model_dump(exclude_unset=True, by_alias=True)
@@ -341,6 +373,8 @@ async def update_social_post(
         raise HTTPException(status_code=422, detail="title cannot be empty")
     _check_template(db, ctx, changes.get("template_id"))
     try:
+        if "voice" in changes:
+            await _check_voice(db, ctx, changes["voice"])
         if changes.get("sources"):
             post_sources.require_resolved(db, ctx.workspace_id, changes["sources"], unchanged_from=post.sources)
         service.update_post(post, _actor(ctx), changes)
@@ -491,21 +525,28 @@ async def render_social_post(
     """Render the post in the background: 202 with it in ``rendering``.
 
     Refused, with nothing changed, when the post holds an approval or is already
-    rendering (409), has no social template (422), the workspace has used its
-    render minutes this month (429, before any call to media-render), or there
-    is no storage or renderer to use (503). The render ends the post in
+    rendering (409), has no social template (422), names a voice toolkit the
+    workspace cannot speak with now (422, saying why), the workspace has used
+    its render minutes this month (429, before any call to media-render), or
+    there is no storage or renderer to use (503). The render ends the post in
     ``needs_approval`` with the files in ``media``, or in ``failed`` with the
     report in ``review_log``.
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
     status, content_hash = post.status, post.content_hash
+    voice = post.voice
     try:
         service.assert_can_render(post)
         template = _render_template(db, ctx, post)
         workspace = _workspace(db, ctx)
         brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
         bundle = render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "")
+        # D11: a voice toolkit speaks the script before the render; resolved now,
+        # so a toolkit the workspace cannot use is refused with nothing changed.
+        voice_plan = None
+        if voice and voice_script(bundle):
+            voice_plan = voice_recipes.plan_for(voice, await _capabilities(db, ctx))
         render_quota.enforce_render_quota(db, workspace)
         await render.ensure_renderer()
         service.start_render(post, actor)
@@ -521,6 +562,7 @@ async def render_social_post(
             title=post.title,
             format=post.format,
             bundle=bundle,
+            voice=voice_plan,
         )
     )
     return saved
@@ -564,6 +606,45 @@ async def get_socials_usage(
     """This month's render minutes used and the plan's quota (``null`` = no quota)."""
     reading = render_quota.render_quota(db, _workspace(db, ctx))
     return {"render_minutes": reading.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Voice (S1.5)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/voices")
+async def list_social_voice_sources(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """What a post can be spoken with (D11, D15): Kokoro, always; each voice
+    toolkit the workspace can speak with (``available``); each allowlisted one it
+    has not connected (``connect``: the Composio connect flow); a connected one
+    it cannot use now (``unavailable``, with the reason)."""
+    return voice_recipes.voice_sources(await _capabilities(db, ctx))
+
+
+@router.get("/voices/{toolkit}", dependencies=[CAN_UPDATE])
+async def list_social_toolkit_voices(
+    toolkit: str,
+    q: Optional[str] = Query(None, max_length=VOICE_QUERY_MAX_CHARS, description="Only voices whose name holds this"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """A connected voice toolkit's voices, through its allowlisted ``voices``
+    action on the workspace's own connection: 422 when the workspace cannot use
+    the toolkit, 502 when the toolkit does not answer."""
+    caps = await _capabilities(db, ctx)
+    try:
+        voices = await voice_recipes.list_voices(
+            db, ctx.workspace_id, toolkit, caps=caps, query=q, limit=config.SOCIALS_VOICE_LIST_LIMIT
+        )
+    except voice_recipes.VoiceUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except voice_recipes.VoiceToolError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"toolkit": toolkit, "voices": voices}
 
 
 # ---------------------------------------------------------------------------

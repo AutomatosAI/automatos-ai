@@ -5,6 +5,10 @@ monthly quota (``core/media_render_quota.py``), storage and the renderer, moves
 the post to ``rendering`` and hands a :class:`RenderJob` to :func:`run_render`,
 which runs in the background:
 
+0. when the post chose a voice toolkit (US-111, D11), speak its script through
+   the workspace's Composio connection first, one call per line, each line
+   copied into our storage as it returns, and make the bundle's lines name
+   those files (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
 1. submit the bundle to media-render (``core/media_render_client.py``), which
    answers once the job is staged, spoken, mixed and checked; a full renderer
    is asked again after its ``Retry-After``;
@@ -18,7 +22,7 @@ which runs in the background:
 5. book the rendered seconds on the ``media`` lane at $0 (US-103), the units
    the quota counts.
 
-Steps 1-3 together get at most ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays
+Steps 0-3 together get at most ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays
 under the boot reaper's stale cutoff, so the reaper only ever fails a render no
 live task owns. A post that moved on while it rendered (the reaper failed it)
 is left as it is, and nothing is booked. The renderer assembles; it never
@@ -47,7 +51,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from config import config
-from core.media_render_bundle import build_bundle
+from core.media_render_bundle import build_bundle, voice_script, with_voice_files
 from core.media_render_client import (
     BAD_RESPONSE,
     JOB_DONE,
@@ -62,6 +66,7 @@ from core.media_render_quota import book_render_seconds
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
+from modules.socials.recipes import voice as voice_recipes
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +191,8 @@ class RenderJob:
     title: str
     format: Optional[str]
     bundle: Mapping[str, Any]
+    # D11: the voice toolkit the post chose, resolved as the render started; None is Kokoro.
+    voice: Optional[voice_recipes.VoicePlan] = None
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -234,10 +241,36 @@ def _poll_failure(exc: MediaRenderError) -> RenderFailure:
 
 
 # ── the background render ───────────────────────────────────────────────────
-async def _submit(client: MediaRenderClient, job: RenderJob, deadline: float) -> Dict[str, Any]:
+async def _voiced(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> Mapping[str, Any]:
+    """The bundle, its script spoken by the post's voice toolkit when it chose one
+    (US-111): each line now a file in our storage, reached by media-render through
+    a presigned link. Kokoro speaks inside media-render: the bundle as it is."""
+    lines = voice_script(job.bundle)
+    if job.voice is None or not lines:
+        return job.bundle
+    try:
+        spoken = await voice_recipes.speak(
+            job.voice, workspace_id=job.workspace_id, post_id=job.post_id, lines=lines,
+            session_factory=session_factory, store=store,
+        )
+    except voice_recipes.VoiceError as exc:
+        raise RenderFailure("voice_failed", f"{str(exc).rstrip('.')}. Nothing was rendered.") from exc
+    ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS
+    try:
+        links = {
+            line_id: (line.extension, await asyncio.to_thread(store.presigned_get, line.key, ttl))
+            for line_id, line in spoken.items()
+        }
+    except Exception as exc:  # noqa: BLE001 — storage cannot link the lines: fail the render, loudly
+        logger.exception("[Socials] linking the voice lines of post %s failed", job.post_id)
+        raise RenderFailure("storage_failed", "The spoken lines could not be handed to the renderer.") from exc
+    return with_voice_files(job.bundle, links)
+
+
+async def _submit(client: MediaRenderClient, bundle: Mapping[str, Any], deadline: float) -> Dict[str, Any]:
     """Submit the bundle; a busy renderer is asked again while the deadline allows."""
     try:
-        return await client.submit_when_free(job.bundle, deadline=deadline, poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS)
+        return await client.submit_when_free(bundle, deadline=deadline, poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS)
     except MediaRenderError as exc:
         raise _failure_from(exc) from exc
 
@@ -450,7 +483,8 @@ async def run_render(
     deadline = started + budget
 
     async def render_and_store():
-        accepted = await _submit(client, job, deadline)
+        bundle = await _voiced(job, store, factory)
+        accepted = await _submit(client, bundle, deadline)
         finished = await _wait(client, job, accepted, deadline)
         return finished, await _store_outputs(client, store, factory, job, finished)
 

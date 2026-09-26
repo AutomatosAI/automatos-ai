@@ -35,6 +35,11 @@ vi.mock('@/lib/api-client', () => {
   const apiClient = {
     listSocialPosts: vi.fn(async () => ({ posts: server.posts, total: server.posts.length })),
     getSocialsUsage: vi.fn(async () => ({ render_minutes: server.usage })),
+    // S1.5: a video post's detail shows its voice; Kokoro alone here.
+    getSocialVoiceSources: vi.fn(async () => ({
+      sources: [{ toolkit: 'kokoro', label: 'Kokoro (built in)', status: 'available', builtin: true, lists_voices: false }],
+      problem: null,
+    })),
     renderSocialPost: vi.fn(async (id: string) => {
       if (server.renderError) {
         throw Object.assign(new Error(server.renderError.message), { status: server.renderError.status })

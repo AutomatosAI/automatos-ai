@@ -11,6 +11,9 @@ the calendar and published through the workspace's own Composio connections.
 - :mod:`modules.socials.capabilities`: the media capability registry (D16) —
   which actions of the workspace's connected Composio toolkits Socials may call,
   and what for (an allowlist per toolkit, under the deny list).
+- :mod:`modules.socials.recipes`: one small recipe per Composio media toolkit
+  (D12), through the registry and the Composio executor: speech from Fish
+  Audio or ElevenLabs (``recipes.voice``, S1.5).
 - :mod:`modules.socials.publisher`: ``publish_post``, the one way a post leaves
   Automatos (the guard first; channel publishers arrive in Wave 3).
 """

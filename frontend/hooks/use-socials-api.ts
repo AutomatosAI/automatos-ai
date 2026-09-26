@@ -4,7 +4,8 @@
  *
  * React Query over the apiClient socials methods — the workspace switch and the
  * post lifecycle (create, edit, submit, approve, request changes, reject,
- * render), plus this month's render minutes. While any post renders, the list
+ * render), this month's render minutes, and (S1.5) the voices a post can be
+ * spoken with. While any post renders, the list
  * polls until the render ends (needs approval, or failed). The
  * server enforces every rule (the gate, the role, the status machine, D6's
  * approval hash); these hooks only call it and refresh the list. Approve sends
@@ -25,6 +26,8 @@ import type {
   SocialPost,
   SocialPostsResponse,
   SocialsUsageResponse,
+  SocialToolkitVoicesResponse,
+  SocialVoiceSourcesResponse,
   UpdateSocialPostInput,
 } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
@@ -36,6 +39,9 @@ export const socialsQueryKeys = {
   all: (workspaceId: string | null) => ['socials', workspaceId] as const,
   posts: (workspaceId: string | null) => ['socials', workspaceId, 'posts'] as const,
   usage: (workspaceId: string | null) => ['socials', workspaceId, 'usage'] as const,
+  voices: (workspaceId: string | null) => ['socials', workspaceId, 'voices'] as const,
+  toolkitVoices: (workspaceId: string | null, toolkit: string | null, query: string) =>
+    ['socials', workspaceId, 'voices', toolkit, query] as const,
 }
 
 /** How often the list refetches while a post renders. */
@@ -112,6 +118,30 @@ export function useSocialsUsage() {
     enabled: socialsOn,
     queryFn: () => apiClient.getSocialsUsage(),
     staleTime: 30_000,
+  })
+}
+
+/** What a post can be spoken with (S1.5, D11): Kokoro, the voice toolkits the
+ * workspace has connected in Composio, and the ones to connect. */
+export function useSocialVoiceSources() {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialVoiceSourcesResponse>({
+    queryKey: socialsQueryKeys.voices(workspaceId),
+    enabled: socialsOn,
+    queryFn: () => apiClient.getSocialVoiceSources(),
+    staleTime: 60_000,
+  })
+}
+
+/** A connected voice toolkit's voices, read only while `toolkit` is set. */
+export function useSocialToolkitVoices(toolkit: string | null, query: string) {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialToolkitVoicesResponse>({
+    queryKey: socialsQueryKeys.toolkitVoices(workspaceId, toolkit, query),
+    enabled: socialsOn && !!toolkit,
+    queryFn: () => apiClient.listSocialToolkitVoices(toolkit as string, query),
+    staleTime: 60_000,
+    retry: false,
   })
 }
 

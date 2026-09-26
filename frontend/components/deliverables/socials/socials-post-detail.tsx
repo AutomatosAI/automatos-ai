@@ -8,6 +8,8 @@
  * sends the content_hash of the version shown here, so it approves only that.
  * S1.1c: a post with a template renders; the render ends it in Needs approval,
  * or in Failed with the reason shown here and in the history.
+ * S1.5: a video post's voice is chosen here: Kokoro, or a voice toolkit the
+ * workspace has connected in Composio (SocialsVoicePicker).
  */
 import { useEffect, useState, type FormEvent } from 'react'
 import { formatDistanceToNow } from 'date-fns'
@@ -30,7 +32,9 @@ import {
   SOCIAL_STATUS_LABELS,
   canAuthorPosts,
   postActions,
+  speaksAScript,
 } from './socials-status'
+import { SocialsVoicePicker } from './socials-voice-picker'
 
 interface SocialsPostDetailProps {
   post: SocialPost
@@ -139,6 +143,8 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
           <p className="text-xs text-muted-foreground">Saving a change sends this post back for approval.</p>
         )}
       </div>
+
+      {speaksAScript(post) && <SocialsVoicePicker post={post} editable={actions.edit} />}
 
       <div className="flex flex-wrap gap-2">
         {actions.edit && (

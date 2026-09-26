@@ -34,6 +34,12 @@
   its bytes, so the content hash (and an approval) binds to the exact files.
   Records come only from a render (``finish_render``); an edit may set
   ``media`` only to Deliverable ids, so no client can forge a digest.
+* **The voice (D11, Wave 1 S1.5).** ``voice`` is how the next render speaks the
+  script: ``None`` is Kokoro, the template's own voice, and a voice toolkit is
+  ``{"toolkit", "voice_id", "name"}`` (``validate_voice`` checks the shape;
+  ``modules/socials/recipes/voice.py`` whether the workspace can speak with
+  it). It is a render setting, not content: it is outside the hash, and what
+  it changes reaches the hash through the next render's file digests.
 
 No FastAPI here: the API maps these exceptions to status codes. Every review
 action appends to ``review_log``, the history the approval UI shows. JSON
@@ -114,10 +120,19 @@ ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
 EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, FAILED})
 PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
 
-# What the hash covers (D6), and what a post edit may change.
+# What the hash covers (D6), and what a post edit may change. The voice is a
+# render setting (D11): editable, never hashed.
 CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media")
 LABEL_FIELDS = ("title", "brief")
-EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS
+RENDER_FIELDS = ("voice",)
+EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
+
+# D11: the default voice, Kokoro inside media-render; any other toolkit is a
+# Composio voice toolkit (modules/socials/recipes/voice.py).
+KOKORO = "kokoro"
+VOICE_KEYS = ("toolkit", "voice_id", "name")
+VOICE_TOOLKIT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+VOICE_TEXT_MAX_CHARS = 200
 
 # D7: where a claim's source may come from.
 SOURCE_KINDS = ("deliverable", "report", "document", "url", "metric")
@@ -329,6 +344,47 @@ def _validate_media(value: Any) -> Dict[str, Any]:
     return dict(media)
 
 
+def _voice_text(value: Any, where: str, *, required: bool) -> Optional[str]:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if required:
+            raise InvalidPost(f"{where} is required for a voice toolkit")
+        return None
+    if not isinstance(value, str):
+        raise InvalidPost(f"{where} must be a string")
+    text = value.strip()
+    if len(text) > VOICE_TEXT_MAX_CHARS:
+        raise InvalidPost(f"{where} must be at most {VOICE_TEXT_MAX_CHARS} characters")
+    return text
+
+
+def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
+    """The post's voice (D11): ``None`` (or ``{}``, or ``{"toolkit": "kokoro"}``)
+    is Kokoro, stored as ``None``; a voice toolkit is ``{"toolkit", "voice_id",
+    "name"?}``. The shape only: whether the workspace can speak with the
+    toolkit now is ``modules/socials/recipes/voice.py``'s to say."""
+    if value is None:
+        return None
+    voice = _require_dict("voice", value)
+    if not voice:
+        return None
+    unknown = [k for k in voice if k not in VOICE_KEYS]
+    if unknown:
+        raise InvalidPost(f"voice keys must be {list(VOICE_KEYS)}, got {unknown!r}")
+    toolkit = voice.get("toolkit")
+    toolkit = toolkit.strip().lower() if isinstance(toolkit, str) else ""
+    if not VOICE_TOOLKIT.match(toolkit):
+        raise InvalidPost("voice.toolkit must name a voice, such as kokoro or fish_audio")
+    if toolkit == KOKORO:
+        if set(voice) - {"toolkit"}:
+            raise InvalidPost("Kokoro speaks with the template's own voice: set only voice.toolkit")
+        return None
+    clean = {"toolkit": toolkit, "voice_id": _voice_text(voice.get("voice_id"), "voice.voice_id", required=True)}
+    name = _voice_text(voice.get("name"), "voice.name", required=False)
+    if name:
+        clean["name"] = name
+    return clean
+
+
 _VALIDATORS = {
     "title": _validate_title,
     "brief": _validate_brief,
@@ -338,6 +394,7 @@ _VALIDATORS = {
     "variables": _validate_variables,
     "sources": validate_sources,
     "media": _validate_media,
+    "voice": validate_voice,
 }
 
 
@@ -406,6 +463,7 @@ def create_draft(
     variables: Optional[Mapping[str, Any]] = None,
     sources: Optional[Mapping[str, Any]] = None,
     media: Optional[Mapping[str, Any]] = None,
+    voice: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits)."""
     fields = {
@@ -417,6 +475,7 @@ def create_draft(
         "variables": variables,
         "sources": sources,
         "media": media,
+        "voice": voice,
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(

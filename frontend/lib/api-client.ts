@@ -445,6 +445,13 @@ export interface SocialReviewEntry {
   comment: string | null
 }
 
+/** D11 (S1.5): the voice toolkit a post is spoken with; `null` on the post is Kokoro, the template's own voice. */
+export interface SocialPostVoice {
+  toolkit: string
+  voice_id: string
+  name?: string
+}
+
 export interface SocialPost {
   id: string
   workspace_id: string
@@ -457,6 +464,7 @@ export interface SocialPost {
   variables: Record<string, unknown>
   sources: Record<string, unknown>
   media: Record<string, unknown>
+  voice?: SocialPostVoice | null
   status: SocialPostStatus
   content_hash: string
   approved_hash: string | null
@@ -485,6 +493,39 @@ export interface UpdateSocialPostInput {
   title?: string
   brief?: string | null
   copy?: SocialPostCopy
+  /** `null` (or `{ toolkit: 'kokoro' }`) speaks with Kokoro. */
+  voice?: SocialPostVoice | { toolkit: 'kokoro' } | null
+}
+
+/** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
+export type SocialVoiceSourceStatus = 'available' | 'connect' | 'unavailable'
+
+export interface SocialVoiceSource {
+  toolkit: string
+  label: string
+  /** available: choose it; connect: connect it in Composio first; unavailable: connected, but `reason`. */
+  status: SocialVoiceSourceStatus
+  builtin: boolean
+  /** Whether the toolkit lists its voices here (otherwise a voice id is typed in). */
+  lists_voices: boolean
+  reason?: string | null
+}
+
+export interface SocialVoiceSourcesResponse {
+  sources: SocialVoiceSource[]
+  problem: string | null
+}
+
+/** GET /api/socials/voices/{toolkit}: a connected voice toolkit's own voices. */
+export interface SocialToolkitVoice {
+  id: string
+  name: string
+  description?: string | null
+}
+
+export interface SocialToolkitVoicesResponse {
+  toolkit: string
+  voices: SocialToolkitVoice[]
 }
 
 /** The `socials` block of GET /api/workspaces/current (D1): the platform master switch and this workspace's. */
@@ -2592,6 +2633,17 @@ class ApiClient {
 
   async getSocialsUsage(): Promise<SocialsUsageResponse> {
     return this.request<SocialsUsageResponse>('/api/socials/usage')
+  }
+
+  /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */
+  async getSocialVoiceSources(): Promise<SocialVoiceSourcesResponse> {
+    return this.request<SocialVoiceSourcesResponse>('/api/socials/voices')
+  }
+
+  /** A connected voice toolkit's voices, optionally only those whose name holds `query`. */
+  async listSocialToolkitVoices(toolkit: string, query?: string): Promise<SocialToolkitVoicesResponse> {
+    const q = query && query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
+    return this.request<SocialToolkitVoicesResponse>(`/api/socials/voices/${encodeURIComponent(toolkit)}${q}`)
   }
 }
 

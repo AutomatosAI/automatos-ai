@@ -1,9 +1,10 @@
-"""``python -m media_render [serve | boot-check | fixture-bundle]``
+"""``python -m media_render [serve | boot-check | fixture-bundle [fixture | script]]``
 
 The image's entrypoint. Every command boots through the assertions first
 (boot.py): a container that would render wrong exits with code 2 instead.
-``fixture-bundle`` prints the committed fixture as a POST /render body, which
-the media-render CI job renders through the API.
+``fixture-bundle`` prints a committed fixture (``fixture`` by default, or the
+``script`` of US-111) as a POST /render body, which the media-render CI job
+renders through the API.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="run the HTTP service (the default)")
     commands.add_parser("boot-check", help="run the boot assertions and exit")
-    commands.add_parser("fixture-bundle", help="print the committed fixture as a POST /render body")
+    fixture = commands.add_parser("fixture-bundle", help="print a committed fixture as a POST /render body")
+    fixture.add_argument("name", nargs="?", default="fixture", choices=("fixture", "script"))
     return parser
 
 
@@ -50,9 +52,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("media-render: boot checks passed")
         return 0
     if command == "fixture-bundle":
-        from .fixture import fixture_bundle
+        from .fixture import BUNDLES
 
-        print(json.dumps(fixture_bundle()))
+        print(json.dumps(BUNDLES[args.name]()))
         return 0
 
     from .server import serve

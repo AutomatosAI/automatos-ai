@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--brand-bg, #14171c); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; }
+      .clip { position: absolute; inset: 0; }
+      #title { position: absolute; left: 90px; right: 90px; top: 800px; text-align: center;
+        font-size: 96px; font-weight: 700; line-height: 1.15; color: var(--brand-text, #f3efe6); }
+      #bar { position: absolute; left: 240px; top: 1100px; width: 600px; height: 12px; border-radius: 6px;
+        background: var(--brand-accent, #e96235); transform-origin: 0 50%; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="9" data-width="1080" data-height="1920">
+      <section id="scene" class="clip" data-start="0" data-duration="9" data-track-index="0">
+        <h1 id="title">{{ headline }}</h1>
+        <div id="bar"></div>
+      </section>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="9" data-track-index="1" data-volume="1"></audio>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#title", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 0.2);
+      tl.fromTo("#bar", { scaleX: 0 }, { scaleX: 1, duration: 8.4, ease: "none" }, 0.3);
+      tl.to("#title", { opacity: 0, duration: 0.3 }, 8.6);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

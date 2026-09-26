@@ -731,6 +731,53 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
           retention-days: 7
+      # US-111 (S1.5): the fixture script, four Kokoro lines each in its own
+      # script window (services/media-render/fixtures/script). Its first line is
+      # the fixture's own (2.09 s) in a 1.9 s window, so the render must speed it
+      # up into the window (media_render/fit.py). The MP4 is probed, its audio is
+      # decoded by the image's ffmpeg, and every script window must carry speech
+      # well above the quiet between the lines (ci/assert_script_windows.py).
+      - name: The fixture script renders with Kokoro speech in every script window (a line longer than its window is fitted)
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/script"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle script > "$out/bundle.json"
+          docker run -d --name media-render-script --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8092:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8092/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-script; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/render_bundle.py --url http://127.0.0.1:8092 --token "$TOKEN" \
+            --bundle "$out/bundle.json" --out "$out" --output render.mp4 --save-as script.mp4
+          code=$?
+          set -e
+          docker logs media-render-script 2>&1 | tail -n 40
+          docker rm -f media-render-script > /dev/null
+          if [ "$code" != 0 ]; then echo "::error::the fixture script did not render"; exit 1; fi
+          docker run --rm -v "$out:/out:ro" --entrypoint ffprobe "$IMAGE" \
+            -v error -show_streams -show_format -of json /out/script.mp4 > "$out/probe.json"
+          python3 services/media-render/ci/assert_output.py "$out/probe.json" \
+            --video-codec h264 --width 1080 --height 1920 --fps 30 \
+            --audio-codec aac --duration 9.0 --tolerance 0.1 \
+            --job "$out/job.json" --min-line-seconds 0.5
+          docker run --rm -v "$out:/out:ro" --entrypoint ffmpeg "$IMAGE" -v error \
+            -i /out/script.mp4 -map 0:a:0 -ac 1 -ar 16000 -f s16le - > "$out/script.pcm"
+          python3 services/media-render/ci/assert_script_windows.py --job "$out/job.json" \
+            --pcm "$out/script.pcm" --rate 16000 --duration 9.0 --expect-fitted l01 --max-tempo 1.25
+      - name: Keep the rendered fixture script
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-fixture-script
+          path: ${{ runner.temp }}/script
+          if-no-files-found: ignore
+          retention-days: 7
       # US-106 (S1.2b): the four reference videos, seeded as templates. Each one's
       # bundle is built by the orchestrator's own seed loader and bundle builder
       # (standard library only, the runner's python3) from its sample data (the

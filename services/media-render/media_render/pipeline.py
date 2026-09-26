@@ -1,11 +1,13 @@
-"""The render pipeline: stage, fetch, speak, mix and check; then render.
+"""The render pipeline: stage, fetch, speak, fit, mix and check; then render.
 
 POST /render runs ``prepare_and_check`` before it answers. The composition is
 staged with its inline files and GSAP, the media are fetched from our storage,
-the Kokoro lines are spoken, the mix is made, and `hyperframes check` runs on
-the result. Any error refuses the job: 422, nothing rendered. A job that passes
-waits for a render slot, then ``render`` runs `hyperframes render` and probes
-the file. The renderer assembles; it never calls a generation provider (D3).
+the Kokoro lines are spoken, every voice line (Kokoro's, or a voice toolkit's
+file) is fitted into its script window (fit.py), the mix is made, and
+`hyperframes check` runs on the result. Any error refuses the job: 422, nothing
+rendered. A job that passes waits for a render slot, then ``render`` runs
+`hyperframes render` and probes the file. The renderer assembles; it never
+calls a generation provider (D3).
 
 A bundle with a ``preview`` is checked the same way, and then its slot takes
 PNG snapshots of the composition at the moments asked for instead of the full
@@ -25,14 +27,14 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 import aiohttp
 from yarl import URL
 
-from . import audio, hyperframes, probe
+from . import audio, fit, hyperframes, probe
 from .bundle import Bundle, MediaInput
 from .check_report import CheckReportError, parse_check_output
 from .composition import GSAP_PATH, MIX_PATH
@@ -49,6 +51,7 @@ PREVIEW_FRAME = "preview-{:02d}.png"
 PREVIEW_FRAMES = "preview-%02d.png"
 PREVIEW_REEL = "preview.mp4"
 SNAPSHOT_DIR = "snapshots"
+FIT_DIR = "fit"
 CHUNK_BYTES = 1 << 16
 # How far one voice line may run into the next, or past the end, before it counts.
 VOICE_TOLERANCE_SECONDS = 0.05
@@ -96,9 +99,17 @@ class PlacedLine:
     path: Path
     seconds: Optional[float]
     segments: Tuple[Tuple[float, float], ...] = ()
+    # The script window's end (fit.py): the next line's start, or the composition's end.
+    window_end: Optional[float] = None
+    # Set when the line was sped up to fit its window.
+    tempo: Optional[float] = None
 
     def report(self) -> Dict[str, Any]:
         entry: Dict[str, Any] = {"id": self.id, "source": self.source, "at": self.at, "seconds": self.seconds}
+        if self.window_end is not None:
+            entry["window_end"] = self.window_end
+        if self.tempo is not None:
+            entry["tempo"] = self.tempo
         if self.segments:
             entry["segments"] = [{"start": start, "end": end} for start, end in self.segments]
         return entry
@@ -163,11 +174,26 @@ async def fetch_media(
             raise MediaFetchError(f"{item.path} ({redact(item.url)}): {type(exc).__name__}") from None
 
 
-def voice_findings(lines: Sequence[PlacedLine], duration: float) -> Tuple[Dict[str, Any], ...]:
-    """Lines that run past the end, or into each other, are refused before the check."""
+def voice_findings(
+    lines: Sequence[PlacedLine], duration: float, *, max_tempo: Optional[float] = None
+) -> Tuple[Dict[str, Any], ...]:
+    """Lines that run past the end, or into each other, are refused before the check.
+
+    Run after the fit (fit.py): a line still too long here could not be sped up
+    into its window within ``max_tempo``, and the finding says so.
+    """
 
     def finding(code: str, line: PlacedLine, message: str) -> Dict[str, Any]:
         return {"section": "audio", "severity": "error", "code": code, "line": line.id, "message": message}
+
+    def too_long(line: PlacedLine, window_end: float) -> str:
+        if max_tempo is None:
+            return ""
+        window = window_end - line.at
+        return (
+            f": it lasts {line.seconds:.2f} s and its window is {window:.2f} s, more than {max_tempo:g}x "
+            "speed can fit; shorten the line"
+        )
 
     findings = []
     ordered = sorted(lines, key=lambda line: line.at)
@@ -177,11 +203,11 @@ def voice_findings(lines: Sequence[PlacedLine], duration: float) -> Tuple[Dict[s
         elif line.at + line.seconds > duration + VOICE_TOLERANCE_SECONDS:
             end = line.at + line.seconds
             message = f"line {line.id} runs from {line.at:g} s to {end:.2f} s, past the end of the {duration:g} s composition"
-            findings.append(finding("voice_line_overruns", line, message))
+            findings.append(finding("voice_line_overruns", line, message + too_long(line, duration)))
     for previous, current in zip(ordered, ordered[1:]):
         if previous.seconds is not None and previous.at + previous.seconds > current.at + VOICE_TOLERANCE_SECONDS:
             message = f"line {previous.id} is still speaking at {current.at:g} s, when line {current.id} starts"
-            findings.append(finding("voice_lines_overlap", current, message))
+            findings.append(finding("voice_lines_overlap", current, message + too_long(previous, current.at)))
     return tuple(findings)
 
 
@@ -234,15 +260,52 @@ class RenderPipeline:
                 placed.append(PlacedLine(line.id, "kokoro", line.at, said.path, said.seconds, said.segments))
                 continue
             path = job.project_dir / line.path
+            placed.append(PlacedLine(line.id, "file", line.at, path, await self._seconds(path)))
+        return await self._fit(job, placed)
+
+    async def _seconds(self, path: Path) -> Optional[float]:
+        """How long an audio file lasts, or ``None`` when ffprobe cannot tell."""
+        settings = self._settings
+        try:
+            info = await asyncio.to_thread(
+                probe.probe, path, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
+            )
+        except probe.ProbeError:
+            return None
+        return probe.duration_seconds(info)
+
+    async def _fit(self, job: Job, lines: List[PlacedLine]) -> List[PlacedLine]:
+        """Every line in its script window: one that runs past it is sped up, within the cap (fit.py)."""
+        settings, duration = self._settings, job.bundle.composition.duration
+        timed = [fit.Timed(line.id, line.at, line.seconds) for line in lines]
+        ends = fit.window_ends(timed, duration)
+        plan = fit.plan_fit(timed, duration, max_tempo=settings.voice_max_tempo, gap=settings.voice_fit_gap_seconds)
+        fitted = []
+        for line in lines:
+            tempo = plan.get(line.id)
+            if tempo is None:
+                fitted.append(replace(line, window_end=ends[line.id]))
+                continue
+            target = job.audio_dir / FIT_DIR / f"{line.id}.wav"
             try:
-                info = await asyncio.to_thread(
-                    probe.probe, path, ffprobe_bin=self._settings.ffprobe_bin, timeout_seconds=self._settings.probe_timeout_seconds
+                await asyncio.to_thread(
+                    fit.stretch, line.path, target, tempo,
+                    ffmpeg_bin=settings.ffmpeg_bin, timeout_seconds=settings.mix_timeout_seconds,
                 )
-                seconds = probe.duration_seconds(info)
-            except probe.ProbeError:
-                seconds = None
-            placed.append(PlacedLine(line.id, "file", line.at, path, seconds))
-        return placed
+            except fit.FitError as exc:
+                raise PipelineError("voice_fit_failed", f"line {line.id} could not be fitted to its window", detail=str(exc)) from None
+            seconds = await self._seconds(target)
+            fitted.append(
+                replace(
+                    line,
+                    path=target,
+                    seconds=seconds if seconds is not None else round(line.seconds / tempo, 3),
+                    segments=fit.scaled_segments(line.segments, tempo),
+                    window_end=ends[line.id],
+                    tempo=tempo,
+                )
+            )
+        return fitted
 
     async def prepare_and_check(self, job: Job) -> CheckOutcome:
         settings, bundle = self._settings, job.bundle
@@ -257,7 +320,7 @@ class RenderPipeline:
         with _timed(timings, "voice_seconds"):
             lines = await self._voice(job)
         report: Dict[str, Any] = {"voice": [line.report() for line in lines], "timings": timings}
-        findings = voice_findings(lines, bundle.composition.duration)
+        findings = voice_findings(lines, bundle.composition.duration, max_tempo=settings.voice_max_tempo)
         if findings:
             return _refused(findings, report)
         try:

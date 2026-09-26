@@ -113,6 +113,15 @@ export function postActions(
   }
 }
 
+// S1.5: the post formats that render as a still, with no voice to choose.
+const STILL_FORMATS: ReadonlySet<string> = new Set(['image', 'carousel', 'fact_card', 'infographic'])
+
+/** Whether a post renders with a spoken script, so it has a voice to choose (S1.5): a
+ * post with a template whose format is video, or not chosen yet. */
+export function speaksAScript(post: Pick<SocialPost, 'template_id' | 'format'>): boolean {
+  return !!post.template_id && !(post.format && STILL_FORMATS.has(post.format))
+}
+
 /** Whether any post is rendering: the list polls until none is. */
 export function anyRendering(posts: ReadonlyArray<SocialPost>): boolean {
   return posts.some((post) => post.status === 'rendering')

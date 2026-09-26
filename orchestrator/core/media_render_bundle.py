@@ -40,6 +40,12 @@ The template becomes the composition, with two things done to it here:
   variable has a value (``core.social_templates.still_moments``): one for a
   card, one per slide for a carousel.
 
+Kokoro speaks the voice lines from their text inside media-render. When a post
+chooses a voice toolkit instead (US-111, ``modules/socials/recipes/voice.py``),
+its lines are spoken first and kept in our storage, and ``with_voice_files``
+makes each spoken line name its file (a media input at ``assets/voice/``)
+instead of its text: nothing else in the bundle changes.
+
 An external ``logo_url`` or ``logo_mark_url`` is never fetched: a render reads
 only the files its bundle carries and our own storage (D9), so a logo reaches a
 render once it is uploaded. Nothing here generates anything: the renderer assembles (D3).
@@ -72,6 +78,8 @@ MAX_TOKEN_CHARS = 200
 
 BRAND_DIR = "assets/brand/"
 FONTS_DIR = "assets/brand/fonts/"
+# A voice toolkit's lines (US-111), fetched by media-render from our storage.
+VOICE_DIR = "assets/voice/"
 LOGO_NAME = "logo"
 LOGO_MARK_NAME = "logo-mark"
 LOGO_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg"}
@@ -263,10 +271,57 @@ def build_bundle(
     return bundle
 
 
+def voice_script(bundle: Mapping[str, Any]) -> List[Tuple[str, str]]:
+    """``(line id, text)`` of each voice line the bundle speaks from text, in script order."""
+    audio = bundle.get("audio") if isinstance(bundle.get("audio"), Mapping) else {}
+    voice = audio.get("voice") if isinstance(audio.get("voice"), Mapping) else {}
+    return [
+        (str(line["id"]), line["text"])
+        for line in voice.get("lines") or []
+        if isinstance(line, Mapping) and isinstance(line.get("text"), str) and line.get("id") is not None
+    ]
+
+
+def with_voice_files(bundle: Mapping[str, Any], files: Mapping[str, Tuple[str, str]]) -> Dict[str, Any]:
+    """A copy of ``bundle`` whose spoken lines are files (US-111, D11).
+
+    ``files`` maps a line id to ``(extension, presigned GET URL on our storage)``.
+    Each of those lines keeps its id and start and names
+    ``assets/voice/<id>.<extension>`` instead of its text, and that path joins
+    the bundle's media, which media-render fetches through its storage
+    allowlist. Nothing else changes. Every file must be for a spoken line.
+    """
+    out = copy.deepcopy(dict(bundle))
+    spoken = {line_id for line_id, _ in voice_script(out)}
+    unknown = sorted(set(files) - spoken)
+    if unknown:
+        raise ValueError(f"the bundle speaks no line {', '.join(unknown)}")
+    if not files:
+        return out
+    voice = out["audio"]["voice"]
+    media = list(out.get("media") or [])
+    lines = []
+    for line in voice["lines"]:
+        entry = files.get(str(line.get("id"))) if isinstance(line, dict) and "text" in line else None
+        if entry is None:
+            lines.append(line)
+            continue
+        extension, url = entry
+        path = f"{VOICE_DIR}{line['id']}.{extension}"
+        lines.append({"id": line["id"], "at": line["at"], "path": path})
+        media.append({"path": path, "url": url})
+    voice["lines"] = lines
+    out["media"] = media
+    return out
+
+
 __all__ = [
     "NO_LOGO",
+    "VOICE_DIR",
     "brand_name",
     "brand_tokens",
     "build_bundle",
     "render_size",
+    "voice_script",
+    "with_voice_files",
 ]

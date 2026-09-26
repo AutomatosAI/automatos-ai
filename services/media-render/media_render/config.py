@@ -35,6 +35,9 @@ TOKEN_ENV = "SOCIALS_RENDER_TOKEN"
 
 RENDER_QUALITIES = frozenset({"draft", "looks", "standard", "high", "delivery"})
 RENDER_FPS = frozenset({24, 25, 30, 50, 60})
+# ffmpeg's atempo keeps speech natural this far; past it a line is rewritten, not sped up.
+VOICE_TEMPO_RANGE = (1.0, 2.0)
+VOICE_FIT_GAP_RANGE = (0.0, 1.0)
 
 MEBIBYTE = 1024 * 1024
 
@@ -100,6 +103,11 @@ class Settings:
     max_brand_tokens: int
     tts_max_lines: int
     tts_max_chars: int
+    # Script windows (US-111, fit.py): a voice line longer than its window is
+    # sped up (pitch kept) to end this many seconds before the next line, at most
+    # this many times as fast; a line that needs more is refused.
+    voice_max_tempo: float
+    voice_fit_gap_seconds: float
     # A preview (US-106): snapshot frames of the composition instead of the full
     # render, scaled to this width, joined into a short reel at this many frames a second.
     preview_width: int
@@ -218,6 +226,20 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         max_brand_tokens=positive_int("MEDIA_RENDER_MAX_BRAND_TOKENS", 64),
         tts_max_lines=positive_int("MEDIA_RENDER_TTS_MAX_LINES", 40),
         tts_max_chars=positive_int("MEDIA_RENDER_TTS_MAX_CHARS", 500),
+        voice_max_tempo=_parse(
+            "MEDIA_RENDER_VOICE_MAX_TEMPO",
+            text("MEDIA_RENDER_VOICE_MAX_TEMPO", "1.25"),
+            float,
+            lambda v: VOICE_TEMPO_RANGE[0] <= v <= VOICE_TEMPO_RANGE[1],
+            f"a tempo from {VOICE_TEMPO_RANGE[0]:g} to {VOICE_TEMPO_RANGE[1]:g}",
+        ),
+        voice_fit_gap_seconds=_parse(
+            "MEDIA_RENDER_VOICE_FIT_GAP_SECONDS",
+            text("MEDIA_RENDER_VOICE_FIT_GAP_SECONDS", "0.1"),
+            float,
+            lambda v: VOICE_FIT_GAP_RANGE[0] <= v < VOICE_FIT_GAP_RANGE[1],
+            f"seconds from {VOICE_FIT_GAP_RANGE[0]:g} up to {VOICE_FIT_GAP_RANGE[1]:g}",
+        ),
         preview_width=positive_int("MEDIA_RENDER_PREVIEW_WIDTH", 540),
         preview_max_frames=positive_int("MEDIA_RENDER_PREVIEW_MAX_FRAMES", 12),
         preview_reel_fps=positive_int("MEDIA_RENDER_PREVIEW_REEL_FPS", 2),

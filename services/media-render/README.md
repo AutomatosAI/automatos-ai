@@ -71,6 +71,11 @@ The media-render CI job previews every seeded social video template this way (`s
 
 A still has no sound, so a bundle with `still` and an `audio` plan is refused, and so is one with `still` and `preview` (a still is its own preview). `MEDIA_RENDER_STILL_MAX_FRAMES` bounds the moments. The media-render CI job renders every seeded social image template this way, at every size it declares.
 
+**Script windows** (US-111, `media_render/fit.py`). The script is one audio file per line, whatever the source: a Kokoro line spoken here, or a voice toolkit's file (Fish Audio, ElevenLabs) that the orchestrator copied into our storage. A line's window runs from its start to the next line's start, the last line's to the end of the composition. The template times the scenes; the voice's own pace decides how long a line lasts, so the timing flexes to the audio:
+- a line that ends inside its window plays as it is;
+- a line that runs past its window is sped up with ffmpeg's `atempo` (the pitch is kept) to end `MEDIA_RENDER_VOICE_FIT_GAP_SECONDS` before the next line, at most `MEDIA_RENDER_VOICE_MAX_TEMPO` times as fast. The report gives each line its `window_end`, and a fitted line its `tempo`, with its word segments scaled;
+- a line that would need more is refused (422, before the check), naming the line, its length and its window.
+
 **The mix** is the reference's ffmpeg graph (`docs/PRDS/prd251-reference/mix-reference.py`):
 - voice placed with `adelay`;
 - music ducked by `sidechaincompress` (threshold 0.015, ratio 10, attack 10, release 420) and held at ×0.6;
@@ -97,6 +102,7 @@ Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS
 python -m media_render serve            # the HTTP service (default); /health is open
 python -m media_render boot-check       # the boot assertions only
 python -m media_render fixture-bundle   # print fixtures/fixture as a POST /render body
+python -m media_render fixture-bundle script   # fixtures/script: four lines, each in its window (US-111)
 ```
 
 ## Settings
@@ -117,6 +123,7 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_MAX_FILES` / `_MAX_DURATION_SECONDS` | `32` / `180` |
 | `MEDIA_RENDER_MAX_VARIABLES` / `_MAX_VARIABLE_CHARS` / `_MAX_BRAND_TOKENS` | `200` / `2000` / `64` |
 | `MEDIA_RENDER_TTS_MAX_LINES` / `_TTS_MAX_CHARS` | `40` / `500` |
+| `MEDIA_RENDER_VOICE_MAX_TEMPO` / `_VOICE_FIT_GAP_SECONDS` | `1.25` / `0.1`: how much faster a line may play to fit its script window, and the breath left before the next line |
 | `MEDIA_RENDER_WORK_DIR` / `MEDIA_RENDER_MUSIC_DIR` | `/tmp/media-render` / `/opt/media-render/music` |
 | `MEDIA_RENDER_ESPEAK_DATA_PATH` | `/opt/espeak` |
 | `MEDIA_RENDER_KOKORO_MODEL` / `_VOICES` | `/opt/kokoro/kokoro-v1.0.onnx` / `voices-v1.0.bin` |
@@ -133,6 +140,7 @@ Nothing runs on a developer machine. The `media-render` CI job:
 3. proves the boot assertion and `/health`;
 4. posts the fixture bundle to `POST /render` with the token, timed;
 5. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`);
-6. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
+6. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
+7. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
 
 The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.

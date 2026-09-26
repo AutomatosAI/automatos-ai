@@ -1870,6 +1870,17 @@ class Config:
     # live process still owns.
     SOCIALS_RENDER_POLL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_POLL_SECONDS", "5"))
     SOCIALS_RENDER_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_WAIT_SECONDS", "1500"))
+    # How long a presigned link to a render's input in our storage (a voice line
+    # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
+    # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
+    SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS", "3600"))
+    # S1.5 (D11): a voice toolkit's line (Fish Audio, ElevenLabs through the
+    # workspace's Composio connection) is copied into our storage the moment it
+    # returns: at most this many bytes, fetched within this many seconds.
+    SOCIALS_VOICE_LINE_MAX_BYTES: int = int(os.getenv("SOCIALS_VOICE_LINE_MAX_BYTES", "16777216"))
+    SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS", "60"))
+    # The voices a voice toolkit lists in the Socials voice picker, at most.
+    SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".

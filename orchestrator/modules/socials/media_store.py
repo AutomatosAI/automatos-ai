@@ -6,7 +6,9 @@ the documents bucket. The app serves them back through
 ``GET /api/socials/posts/{post}/media/{file}``: that route is the Deliverable's
 stable preview link, and it streams the object, never a presigned URL that
 expires. Channels that fetch media by URL get presigned links at publish time
-(Wave 3).
+(Wave 3). A render's own inputs kept here (a voice toolkit's lines, S1.5,
+``voice-<line>.<ext>``) reach media-render through short presigned links
+(``presigned_get``).
 
 A file name is lowercase letters, digits, ``.``, ``_`` and ``-`` only, so a
 key can never climb out of its post's prefix.
@@ -92,6 +94,16 @@ class MediaStore:
         with path.open("rb") as handle:
             get_s3_client().put_object(Bucket=self.bucket, Key=key, Body=handle, ContentType=content_type)
         logger.info("[Socials] stored s3://%s/%s (%d bytes)", self.bucket, key, path.stat().st_size)
+
+    def presigned_get(self, key: str, ttl_seconds: int) -> str:
+        """A GET link to ``key`` for media-render, which fetches a render's inputs
+        from our storage (a voice toolkit's lines, S1.5). It is minted against the
+        backend's own endpoint (``S3_ENDPOINT_URL``: MinIO on the compose network,
+        AWS in SaaS), the one media-render's storage allowlist names; never the
+        public endpoint a browser reaches."""
+        return get_s3_client().generate_presigned_url(
+            "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=ttl_seconds
+        )
 
     def open(self, key: str) -> Optional[MediaObject]:
         """The object for streaming, or ``None`` when it is not there."""

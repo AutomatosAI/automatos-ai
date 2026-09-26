@@ -218,6 +218,9 @@ def test_the_router_serves_every_wave_0_and_wave_1_route():
             ("GET", "/api/socials/usage"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
+            # Wave 1 (S1.5): the voice picker's choices, and a voice toolkit's voices.
+            ("GET", "/api/socials/voices"),
+            ("GET", "/api/socials/voices/{toolkit}"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )
