@@ -675,6 +675,7 @@ class LLMManager:
                 else:
                     response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
+            self._note_success()
             note = self._note_cut(response, budget)
             if note and on_delta is not None and getattr(response, "streamed", False):
                 await on_delta("text", note)
@@ -728,6 +729,17 @@ class LLMManager:
             service_budget=getattr(self, "_service_budget", None),
             long_budget=getattr(self, "_long_budget", None),
         )
+
+    def _note_success(self) -> None:
+        """F197: a call that worked can end a workspace's credit outage."""
+        try:
+            from .credit import note_model_success
+            from .usage_context import current_usage_scope
+
+            ctx = getattr(self, "_tracking_ctx", None) or {}
+            note_model_success(ctx.get("workspace_id") or current_usage_scope().get("workspace_id"))
+        except Exception:  # noqa: BLE001 — never breaks the call it follows
+            logger.debug("[F197] success note skipped", exc_info=True)
 
     def _note_cut(self, response: Any, budget: Optional[int]) -> Optional[str]:
         from .usage_context import current_usage_scope

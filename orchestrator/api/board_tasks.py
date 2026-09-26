@@ -1849,8 +1849,10 @@ async def finalize_board_task_run(
         return None
 
     if exec_status == "error":
+        from core.llm.credit import plain_failure  # F197: plain words on the ticket
+
         task.status = "failed"
-        task.error_message = str(
+        task.error_message = plain_failure(
             exec_result.get("error") or "Agent execution failed"
         )[:500]
         task.completed_at = datetime.now(timezone.utc)
@@ -2061,8 +2063,10 @@ def _launch_task_execution(
                 if task and task.status == "in_progress":
                     # PRD-161 S3: fail honestly — a crashed execution becomes
                     # terminal 'failed', not a silent 'done' with an error blob.
+                    from core.llm.credit import plain_failure  # F197: plain words on the ticket
+
                     task.status = "failed"
-                    task.error_message = str(e)[:500]
+                    task.error_message = plain_failure(e)[:500]
                     task.completed_at = datetime.now(timezone.utc)
                     db.commit()
                     await _dispatch_task_failed(db, workspace_id, task)

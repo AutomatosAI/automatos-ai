@@ -1693,9 +1693,14 @@ class AgentFactory:
             # All retries failed
             agent_runtime.update_metrics(time.time() - start_time, 0, False)
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
+            # F197: the owner reads it in plain words; the raw text is in the log above.
+            from core.llm.credit import is_out_of_credit, plain_failure
+
+            failure = plain_failure(last_error)
             return {
                 "status": "error",
-                "error": f"Task execution failed after {max_retries} attempts: {last_error}",
+                "error": failure if is_out_of_credit(last_error)
+                else f"Task execution failed after {max_retries} attempts: {failure}",
                 "agent": {
                     "id": agent_runtime.agent_id,
                     "name": agent_runtime.metadata.name,
@@ -1706,7 +1711,9 @@ class AgentFactory:
         except Exception as e:
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
             self.logger.error(f"Task execution error: {e}")
-            return {"status": "error", "error": str(e)}
+            from core.llm.credit import plain_failure
+
+            return {"status": "error", "error": plain_failure(e)}
 
     # ==================================================================
     # Composio Hint Injection
