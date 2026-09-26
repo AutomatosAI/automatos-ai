@@ -31,7 +31,7 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 from uuid import UUID
 
 # Add orchestrator to path so we can import shared code
@@ -81,6 +81,15 @@ class WorkspaceWorker:
         self._db_engine = None
         self._running = True
         self._active_tasks: Dict[str, asyncio.Task] = {}
+        # F178: the tasks running now, per workspace; the last one out clears the
+        # workspace's shared deploy key and git identity. The count lives in this
+        # process, which assumes ONE worker process per workspace volume: Railway
+        # runs agent-workspace-worker as a single instance with the
+        # agent-workspace-data volume (infrastructure/railway-manifest.json,
+        # "replicas": 1), and compose runs one container. Two replicas on one
+        # volume would each count only their own tasks, and one could clear the
+        # key while the other still pushes. Keep the worker at one replica.
+        self._running_in_workspace: Dict[str, Set[str]] = {}
         self._semaphore = asyncio.Semaphore(self.concurrency)
         self._worker_id = f"worker-{os.getpid()}-{int(time.time())}"
 
@@ -277,20 +286,25 @@ class WorkspaceWorker:
             await self._publish_event(task_id, "error", {"error": error_msg})
             return
 
-        # 3. Create ephemeral task dir
-        task_dir = ws_manager.create_task_dir(task_id)
-
-        # 4. Inject credentials
-        credentials = payload.get("credentials", {})
-        if credentials:
-            ws_manager.inject_credentials(task_id, credentials)
-
-        # 5. Execute task steps
-        executor = WorkspaceToolExecutor(ws_manager)
-        steps = payload.get("steps", [])
+        # F178: from here the task is counted as running in its workspace, before
+        # any credential is written, and the finally below always runs: a task
+        # that fails part-way through its injection strands no key.
         results = []
-
+        running_here = self._running_in_workspace.setdefault(workspace_id, set())
+        running_here.add(task_id)
         try:
+            # 3. Create ephemeral task dir
+            ws_manager.create_task_dir(task_id)
+
+            # 4. Inject credentials
+            credentials = payload.get("credentials", {})
+            if credentials:
+                ws_manager.inject_credentials(task_id, credentials)
+
+            # 5. Execute task steps
+            executor = WorkspaceToolExecutor(ws_manager)
+            steps = payload.get("steps", [])
+
             for i, step in enumerate(steps):
                 # Check for cancellation between steps
                 current_status = await self._redis.hget(status_key, "status")
@@ -367,8 +381,13 @@ class WorkspaceWorker:
             await self._publish_event(task_id, "status_changed", {"status": "failed"})
 
         finally:
-            # 7. Cleanup ephemeral task dir (workspace persists)
-            ws_manager.cleanup_task(task_id)
+            # 7. Cleanup ephemeral task dir (workspace persists). F178: the last
+            # task running in this workspace takes the injected deploy key and git
+            # identity with it; while another still runs (it may yet push), they stay.
+            running_here.discard(task_id)
+            if not running_here:
+                self._running_in_workspace.pop(workspace_id, None)
+            ws_manager.cleanup_task(task_id, clear_credentials=not running_here)
 
     # =========================================================================
     # Redis helpers
@@ -475,7 +494,7 @@ class WorkspaceWorker:
     async def _health_server(self) -> None:
         """HTTP server for health checks and file browsing endpoints."""
         from aiohttp import web
-        from workspace_manager import WorkspaceManager, SecurityError, is_workspace_id
+        from workspace_manager import WorkspaceManager, SecurityError, is_sensitive_name, is_workspace_id
 
         volume_path = str(workspace_root())
         max_file_size = 2 * 1024 * 1024  # 2 MB
@@ -483,17 +502,8 @@ class WorkspaceWorker:
         internal_token = os.environ.get("WORKER_INTERNAL_TOKEN", "")
         bind_host = os.environ.get("WORKER_BIND_HOST", "0.0.0.0")
 
-        # Sensitive paths that must never be exposed via file browsing
-        # (.canvas holds SDK session state + transcripts — PRD-170 S1)
-        _SENSITIVE_NAMES = {".ssh", ".gitconfig", ".aws", ".gcp", ".workspace_meta.json", ".canvas"}
-
-        def _is_sensitive(name: str) -> bool:
-            """Check if a file/dir name is sensitive and should be hidden."""
-            if name in _SENSITIVE_NAMES:
-                return True
-            if name.startswith(".task_env_"):
-                return True
-            return False
+        # Sensitive paths that must never be exposed via file browsing: one list
+        # for every file route (workspace_manager.SENSITIVE_NAMES, F178).
 
         # Language detection map (Monaco-compatible)
         _lang_map = {
@@ -578,9 +588,8 @@ class WorkspaceWorker:
                 return web.json_response({"error": str(exc)}, status=403)
 
             # Block access to sensitive paths
-            for part in target.relative_to(ws_dir.resolve()).parts:
-                if _is_sensitive(part):
-                    return web.json_response({"error": "Access denied"}, status=403)
+            if ws_manager.is_sensitive_path(target):
+                return web.json_response({"error": "Access denied"}, status=403)
 
             if not target.exists():
                 return web.json_response({"error": "Path not found"}, status=404)
@@ -594,7 +603,7 @@ class WorkspaceWorker:
                     sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
                 ):
                     # Skip sensitive entries
-                    if _is_sensitive(item.name):
+                    if is_sensitive_name(item.name):
                         continue
                     if i >= max_dir_entries:
                         truncated = True
@@ -619,7 +628,6 @@ class WorkspaceWorker:
 
         async def file_content_handler(request):
             """GET /workspaces/{workspace_id}/files/content?path=file.py — file content."""
-            from pathlib import Path as P
             import mimetypes
 
             rel_path = request.query.get("path")
@@ -629,7 +637,6 @@ class WorkspaceWorker:
             ws_manager, refused = _open_workspace(request)
             if refused is not None:
                 return refused
-            ws_dir = P(volume_path) / ws_manager.workspace_id
 
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
@@ -637,9 +644,8 @@ class WorkspaceWorker:
                 return web.json_response({"error": str(exc)}, status=403)
 
             # Block access to sensitive paths
-            for part in target.relative_to(ws_dir.resolve()).parts:
-                if _is_sensitive(part):
-                    return web.json_response({"error": "Access denied"}, status=403)
+            if ws_manager.is_sensitive_path(target):
+                return web.json_response({"error": "Access denied"}, status=403)
 
             if not target.exists():
                 return web.json_response({"error": "File not found"}, status=404)
@@ -894,11 +900,14 @@ class WorkspaceWorker:
             if not rel_path:
                 return web.json_response({"error": "path parameter required"}, status=400)
 
-            # The same traversal guard as the listing and content routes.
+            # The same traversal and sensitive-name guards as the listing and
+            # content routes (F178: download served .ssh/, .canvas/ and the rest).
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
             except SecurityError:
                 return web.json_response({"error": "Path traversal denied"}, status=403)
+            if ws_manager.is_sensitive_path(target):
+                return web.json_response({"error": "Access denied"}, status=403)
             if not target.is_file():
                 return web.json_response({"error": "File not found"}, status=404)
 

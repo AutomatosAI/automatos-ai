@@ -12,79 +12,18 @@ canonical UUID may name a workspace directory.
 The worker's own HTTP server runs on a free port over a temporary volume, and
 its task runner over a recorded Redis. No database.
 """
-import asyncio
-import contextlib
-import importlib.util
-import json
-import socket
-import sys
-import types
 import uuid
-from pathlib import Path
 
-import aiohttp
 import pytest
 
-_WORKER_DIR = Path(__file__).resolve().parents[2] / "services" / "workspace-worker"
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-def _load_worker_main(monkeypatch, volume):
-    """The worker's main module over ``volume`` (its logging and metrics stubbed)."""
-    monkeypatch.setattr(sys, "path", [str(_WORKER_DIR), *sys.path])  # main.py edits sys.path too
-    monkeypatch.setitem(sys.modules, "automatos_logging", types.SimpleNamespace(setup_logging=lambda **_: None))
-    # Prometheus metrics register once per process; a second server would collide.
-    monkeypatch.setitem(sys.modules, "automatos_metrics",
-                        types.SimpleNamespace(add_aiohttp_metrics=lambda app, **_: None))
-    monkeypatch.setenv("WORKSPACE_VOLUME_PATH", str(volume))
-    spec = importlib.util.spec_from_file_location("workspace_worker_main_f173", _WORKER_DIR / "main.py")
-    worker_main = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(worker_main)
-    return worker_main
-
-
-@contextlib.asynccontextmanager
-async def _worker(monkeypatch, volume):
-    """The worker's HTTP server, listening, over ``volume``; its base URL."""
-    port = _free_port()
-    for name, value in {"WORKER_INTERNAL_TOKEN": "", "WORKER_BIND_HOST": "127.0.0.1",
-                        "WORKER_HEALTH_PORT": str(port)}.items():
-        monkeypatch.setenv(name, value)
-    worker_main = _load_worker_main(monkeypatch, volume)
-
-    worker = worker_main.WorkspaceWorker()
-    server = asyncio.create_task(worker._health_server())
-    base = f"http://127.0.0.1:{port}"
-    try:
-        async with aiohttp.ClientSession() as http:
-            for _ in range(100):
-                with contextlib.suppress(aiohttp.ClientError):
-                    async with http.get(f"{base}/health") as health:
-                        if health.status == 200:
-                            break
-                await asyncio.sleep(0.05)
-            yield base, http
-    finally:
-        worker._running = False
-        server.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await server
-
-
-async def _answer(response):
-    return response.status, await response.json(content_type=None)
+from tests.helpers_workspace_worker import answer, task_runner, worker_server
 
 
 @pytest.mark.asyncio
 async def test_a_new_workspaces_first_file_is_saved(monkeypatch, tmp_path):
     ws = str(uuid.uuid4())
-    async with _worker(monkeypatch, tmp_path) as (base, http):
-        status, body = await _answer(await http.post(
+    async with worker_server(monkeypatch, tmp_path) as (base, http):
+        status, body = await answer(await http.post(
             f"{base}/workspaces/{ws}/files/write", json={"path": "reports/first-report.md", "content": "# Q3"}))
 
     assert status == 200, body
@@ -95,10 +34,10 @@ async def test_a_new_workspaces_first_file_is_saved(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_a_new_workspace_can_run_search_and_fetch(monkeypatch, tmp_path):
     ws = str(uuid.uuid4())
-    async with _worker(monkeypatch, tmp_path) as (base, http):
-        ran = await _answer(await http.post(f"{base}/workspaces/{ws}/exec", json={"command": "echo saved"}))
-        searched = await _answer(await http.get(f"{base}/workspaces/{ws}/files/grep", params={"pattern": "Q3"}))
-        fetched = await _answer(await http.get(f"{base}/workspaces/{ws}/files/download", params={"path": "none.md"}))
+    async with worker_server(monkeypatch, tmp_path) as (base, http):
+        ran = await answer(await http.post(f"{base}/workspaces/{ws}/exec", json={"command": "echo saved"}))
+        searched = await answer(await http.get(f"{base}/workspaces/{ws}/files/grep", params={"pattern": "Q3"}))
+        fetched = await answer(await http.get(f"{base}/workspaces/{ws}/files/download", params={"path": "none.md"}))
 
     assert ran[0] == 200 and "saved" in ran[1].get("stdout", ""), ran
     assert searched[0] == 200 and searched[1]["matches"] == [], searched
@@ -108,36 +47,14 @@ async def test_a_new_workspace_can_run_search_and_fetch(monkeypatch, tmp_path):
 @pytest.mark.parametrize("not_a_workspace", ["not-a-uuid", str(uuid.uuid4()).upper(), uuid.uuid4().hex])
 @pytest.mark.asyncio
 async def test_only_a_canonical_uuid_names_a_workspace_directory(monkeypatch, tmp_path, not_a_workspace):
-    async with _worker(monkeypatch, tmp_path) as (base, http):
-        written = await _answer(await http.post(
+    async with worker_server(monkeypatch, tmp_path) as (base, http):
+        written = await answer(await http.post(
             f"{base}/workspaces/{not_a_workspace}/files/write", json={"path": "x.md", "content": "x"}))
-        listed = await _answer(await http.get(f"{base}/workspaces/{not_a_workspace}/files"))
+        listed = await answer(await http.get(f"{base}/workspaces/{not_a_workspace}/files"))
 
     assert written == (400, {"error": "Invalid workspace id"})
     assert listed == (400, {"error": "Invalid workspace id"})
     assert list(tmp_path.iterdir()) == []
-
-
-class _Redis:
-    """The task runner's Redis, recorded."""
-
-    def __init__(self):
-        self.statuses, self.results, self.events = [], {}, []
-
-    async def hget(self, key, field):
-        return None
-
-    async def hset(self, key, mapping):
-        self.statuses.append(dict(mapping))
-
-    async def expire(self, key, seconds):
-        pass
-
-    async def set(self, key, value, ex=None):
-        self.results[key] = json.loads(value)
-
-    async def publish(self, channel, message):
-        self.events.append(json.loads(message))
 
 
 @pytest.mark.asyncio
@@ -145,19 +62,14 @@ async def test_a_queued_task_for_a_non_uuid_workspace_makes_nothing(monkeypatch,
     """Security review: the task runner also names a directory from its id."""
     volume = tmp_path / "volume"
     volume.mkdir()
-    worker = _load_worker_main(monkeypatch, volume).WorkspaceWorker()
-    worker._redis = redis = _Redis()
-
-    async def _no_database(*args, **kwargs):
-        return None
-
-    worker._update_db_execution = _no_database
+    worker = task_runner(monkeypatch, volume)
 
     await worker._execute_task({"task_id": "task-f173-dotdot", "workspace_id": ".."})
 
     assert [p.name for p in tmp_path.iterdir()] == ["volume"]  # nothing beside the volume
     assert list(volume.iterdir()) == []
-    assert (redis.statuses[-1]["status"], redis.statuses[-1]["error"]) == ("failed", "Invalid workspace id")
+    last = worker._redis.statuses[-1]
+    assert (last["status"], last["error"]) == ("failed", "Invalid workspace id")
 
 
 @pytest.mark.asyncio
@@ -165,10 +77,10 @@ async def test_a_download_never_leaves_its_workspace(monkeypatch, tmp_path):
     ws = str(uuid.uuid4())
     (tmp_path / ws).mkdir()
     (tmp_path / "outside.txt").write_text("another workspace's")
-    async with _worker(monkeypatch, tmp_path) as (base, http):
-        climbed = await _answer(await http.get(
+    async with worker_server(monkeypatch, tmp_path) as (base, http):
+        climbed = await answer(await http.get(
             f"{base}/workspaces/{ws}/files/download", params={"path": "../outside.txt"}))
-        rooted = await _answer(await http.get(
+        rooted = await answer(await http.get(
             f"{base}/workspaces/{ws}/files/download", params={"path": str(tmp_path / "outside.txt")}))
 
     assert climbed == (403, {"error": "Path traversal denied"})

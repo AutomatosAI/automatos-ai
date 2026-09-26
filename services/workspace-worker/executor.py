@@ -432,6 +432,10 @@ class WorkspaceToolExecutor:
                     "success": False,
                     "error": f"file:// URL must point inside the workspace: {e}",
                 }
+            # F178: nor may it render a credential or the workspace's metadata
+            # into a PNG, which would then be an ordinary, downloadable file.
+            if self.ws.is_sensitive_path(resolved_target):
+                return {"success": False, "error": "file:// URL must not point at a protected file"}
             if not resolved_target.exists():
                 return {
                     "success": False,
