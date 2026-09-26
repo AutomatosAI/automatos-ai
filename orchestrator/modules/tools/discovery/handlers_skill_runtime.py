@@ -257,14 +257,19 @@ async def run_skill_script(db: Session, workspace_id: UUID, params: Dict[str, An
         # Transport/worker error (unreachable, etc.) — no script output produced.
         return {"success": False, "skill": skill.name, "script": script_rel, "error": result.get("error")}
 
+    # F191: a script that failed is not a success (its output still comes back).
+    from modules.tools.execution.exec_workspace import exec_failure
+
+    failed = exec_failure(result)
     cap = config.SKILL_SCRIPT_OUTPUT_MAX_CHARS
     return {
-        "success": True,
+        "success": failed is None,
         "skill": skill.name,
         "script": script_rel,
         "exit_code": result.get("exit_code", result.get("returncode")),
         "stdout": _cap(result.get("stdout") or result.get("output"), cap),
         "stderr": _cap(result.get("stderr"), cap),
+        **({"error": failed} if failed else {}),
     }
 
 
