@@ -126,11 +126,15 @@ def _repair_stubbed_package_bindings():
     yield
 
 
-@pytest.fixture(autouse=True)
-def _drain_best_effort_writes():
-    """F105: best-effort writes a test handed to their threads finish before the
-    next test starts, so a late write never lands in the next test's fakes."""
-    yield
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_teardown(item, nextitem):
+    """F105: best-effort writes a test handed to their threads finish BEFORE its
+    fixtures tear down. A usage row booked on the event loop (``UsageTracker.track``
+    is ``off_loop``) lands after the call returns; drained only after the fixtures
+    (the autouse fixture this replaces ran last), it could land between a real-DB
+    sweep's ``DELETE FROM llm_usage`` and its ``DELETE FROM workspaces`` and fail
+    that teardown on the FK (test_prd234_s1a_cli_hosts_realdb, refresh 4). A late
+    write also never lands in the next test's fakes."""
     best_effort = sys.modules.get("core.best_effort")
     if best_effort is not None and hasattr(best_effort, "drain"):
         best_effort.drain(timeout=5)
