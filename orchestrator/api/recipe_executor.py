@@ -494,6 +494,7 @@ async def _execute_step(
     from core.composio.tool_executor import resolve_file_uploads
     from core.composio.client import get_composio_client
     from core.composio.deny_list import composio_action_denial_async
+    from core.composio.off_loop import composio_lookup
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -543,14 +544,19 @@ async def _execute_step(
     #    Falls back to hint-based composio_execute if SDK search returns empty.
     #    F155: none on a widget turn — the owner's connected apps are not the
     #    widget key's (the widget chat is never offered them either).
+    #    F105: both lookups run off the loop, with a session of their own
+    #    (core.composio.off_loop), so they read nothing through `agent`.
     composio_result = None
+    lookup_agent_id = agent.id
+    lookup_prompt = prompt_for_hints or clean_prompt
     if not widget_turn():
-        tool_service = ComposioToolService(db)
         try:
-            composio_result = tool_service.get_tools_for_step(
-                agent_id=agent.id,
-                workspace_id=workspace_id,
-                task_prompt=prompt_for_hints or clean_prompt,
+            composio_result = await composio_lookup(
+                lambda session: ComposioToolService(session).get_tools_for_step(
+                    agent_id=lookup_agent_id,
+                    workspace_id=workspace_id,
+                    task_prompt=lookup_prompt,
+                )
             )
         except Exception as exc:
             logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
@@ -568,12 +574,13 @@ async def _execute_step(
         if composio_result:
             composio_result.strategy = "hint_fallback"
         try:
-            hint_service = ComposioHintService(db)
-            hint_result = hint_service.build_hints(
-                agent_id=agent.id,
-                prompt=prompt_for_hints or clean_prompt,
-                workspace_id=workspace_id,
-                recipe_mode=True,
+            hint_result = await composio_lookup(
+                lambda session: ComposioHintService(session).build_hints(
+                    agent_id=lookup_agent_id,
+                    prompt=lookup_prompt,
+                    workspace_id=workspace_id,
+                    recipe_mode=True,
+                )
             )
             if hint_result.hint_lines:
                 messages.append({"role": "system", "content": "\n".join(hint_result.hint_lines)})

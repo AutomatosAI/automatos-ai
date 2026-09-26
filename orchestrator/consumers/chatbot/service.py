@@ -1382,7 +1382,7 @@ class StreamingChatService:
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
 
-    def _inject_composio_tools(
+    async def _inject_composio_tools(
         self,
         llm_messages: List[Dict[str, Any]],
         use_tools: Optional[List[Dict[str, Any]]],
@@ -1394,7 +1394,8 @@ class StreamingChatService:
     ) -> Tuple[Optional[List[Dict[str, Any]]], Any]:
         """
         Inject Composio per-action tools (primary) or hint fallback.
-        Returns (updated use_tools, composio_result).
+        Returns (updated use_tools, composio_result). F105: both lookups run
+        off the loop (core.composio.off_loop).
         """
         _composio_result = None
         _tool_hints = (
@@ -1404,17 +1405,20 @@ class StreamingChatService:
         )
         try:
             if latest_text and agent_id and self.workspace_id and not skip_composio:
+                from core.composio.off_loop import composio_lookup
                 from modules.tools.services.composio_tool_service import ComposioToolService
 
-                _composio_svc = ComposioToolService(self.db)
+                workspace_id = self.workspace_id
                 _search_prompt = (
                     " ".join(_tool_hints) if _tool_hints else latest_text
                 )
-                _composio_result = _composio_svc.get_tools_for_step(
-                    agent_id=agent_id,
-                    workspace_id=self.workspace_id,
-                    task_prompt=_search_prompt,
-                    tool_hints=_tool_hints,
+                _composio_result = await composio_lookup(
+                    lambda db: ComposioToolService(db).get_tools_for_step(
+                        agent_id=agent_id,
+                        workspace_id=workspace_id,
+                        task_prompt=_search_prompt,
+                        tool_hints=_tool_hints,
+                    )
                 )
                 if _composio_result and _composio_result.tools:
                     if use_tools:
@@ -1436,11 +1440,12 @@ class StreamingChatService:
                 else:
                     from modules.tools.services.composio_hint_service import ComposioHintService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
-                        agent_id=agent_id,
-                        prompt=latest_text,
-                        workspace_id=self.workspace_id,
+                    hint_result = await composio_lookup(
+                        lambda db: ComposioHintService(db).build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=workspace_id,
+                        )
                     )
                     if hint_result.hint_lines:
                         llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -2809,7 +2814,7 @@ class StreamingChatService:
             # Inject Composio per-action tools (never on a widget turn: they act
             # on the owner's connected apps, F155)
             if _complexity != Complexity.ATOM and not self.widget_mode:
-                use_tools, _composio_result = self._inject_composio_tools(
+                use_tools, _composio_result = await self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
                 )

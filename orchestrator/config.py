@@ -1523,6 +1523,10 @@ class Config:
     # on the loop; the local search is a full scan (F107) that holds a pool
     # connection for its whole length, so this also caps how many run at once.
     DOCUMENT_SEARCH_THREADS: int = int(os.getenv("DOCUMENT_SEARCH_THREADS", "4"))
+    # F105: the Composio lookups before a model call (tool search, action hints)
+    # run on this many threads of their own, never on the loop; each holds a pool
+    # connection for its whole length, so this also caps how many run at once.
+    COMPOSIO_LOOKUP_THREADS: int = int(os.getenv("COMPOSIO_LOOKUP_THREADS", "4"))
     # F141: an OpenRouter catalog sync marks the models it no longer lists inactive
     # unless it fetched fewer than this share of the models listed before: a
     # partial answer would otherwise retire the rest of the catalog.

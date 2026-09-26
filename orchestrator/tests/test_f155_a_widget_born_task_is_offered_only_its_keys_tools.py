@@ -72,7 +72,11 @@ def _run_task(monkeypatch, responses):
     monkeypatch.setattr(af, "get_monitoring_service", lambda: NS(record_agent_execution=lambda **kw: None))
     monkeypatch.setattr("modules.tools.tool_router.get_tools_for_agent_async",
                         AsyncMock(side_effect=lambda **kw: [dict(schema) for schema in OFFERED]))
-    monkeypatch.setattr(af.AgentFactory, "_inject_composio_hints", lambda self, *a, **k: hints.append("hints"))
+
+    async def _inject_composio_hints(self, *a, **k):
+        hints.append("hints")
+
+    monkeypatch.setattr(af.AgentFactory, "_inject_composio_hints", _inject_composio_hints)
     monkeypatch.setattr("modules.memory.memory_tool.MemoryToolBackend", _MemoryTool)
     monkeypatch.setattr("modules.memory.memory_tool.DurableMemoryStoreBackend", lambda: None)
 

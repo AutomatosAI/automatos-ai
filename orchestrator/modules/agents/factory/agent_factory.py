@@ -1309,7 +1309,7 @@ class AgentFactory:
                     )
                 else:
                     # Default path: hint service
-                    self._inject_composio_hints(
+                    await self._inject_composio_hints(
                         tool_schemas, messages, agent_runtime, original_user_prompt, workspace_id,
                     )
 
@@ -1721,7 +1721,7 @@ class AgentFactory:
             f"Composio (semantic): constrained to {len(sorted_actions)} actions: {sorted_actions}"
         )
 
-    def _inject_composio_hints(
+    async def _inject_composio_hints(
         self,
         tool_schemas: List[Dict],
         messages: List[Dict],
@@ -1737,15 +1737,21 @@ class AgentFactory:
 
         Fallback: ComposioHintService injects action names as system prompt
         hints and constrains composio_execute's action enum.
+
+        F105: both lookups run off the loop (core.composio.off_loop).
         """
+        from core.composio.off_loop import composio_lookup
+
+        agent_id = agent_runtime.agent_id
         try:
             from modules.tools.services.composio_tool_service import ComposioToolService
 
-            composio_svc = ComposioToolService(self.db_session)
-            composio_result = composio_svc.get_tools_for_step(
-                agent_id=agent_runtime.agent_id,
-                workspace_id=workspace_id,
-                task_prompt=original_user_prompt,
+            composio_result = await composio_lookup(
+                lambda db: ComposioToolService(db).get_tools_for_step(
+                    agent_id=agent_id,
+                    workspace_id=workspace_id,
+                    task_prompt=original_user_prompt,
+                )
             )
 
             if composio_result and composio_result.tools:
@@ -1777,11 +1783,12 @@ class AgentFactory:
         try:
             from modules.tools.services.composio_hint_service import ComposioHintService
 
-            hint_service = ComposioHintService(self.db_session)
-            hint_result = hint_service.build_hints(
-                agent_id=agent_runtime.agent_id,
-                prompt=original_user_prompt,
-                workspace_id=workspace_id,
+            hint_result = await composio_lookup(
+                lambda db: ComposioHintService(db).build_hints(
+                    agent_id=agent_id,
+                    prompt=original_user_prompt,
+                    workspace_id=workspace_id,
+                )
             )
 
             if hint_result.hint_lines:
