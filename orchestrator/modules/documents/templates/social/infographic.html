@@ -53,11 +53,11 @@
         font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.2; }
       .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
         border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
-      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(84 * var(--s));
+      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(100 * var(--s));
         line-height: 0.98; letter-spacing: -0.02em; color: var(--ink); }
       .headline .line { display: block; }
       .hot { color: var(--accent-large); }
-      .subline { max-width: 100%; font-family: var(--body); font-size: calc(32 * var(--s)); line-height: 1.35; color: var(--muted); }
+      .subline { max-width: 100%; font-family: var(--body); font-size: calc(36 * var(--s)); line-height: 1.35; color: var(--muted); }
       .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
         padding-top: calc(20 * var(--s)); border-top: calc(2 * var(--u)) solid var(--card);
         font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
@@ -67,63 +67,70 @@
       .cta { color: var(--dim); text-align: right; }
 
       /* The chart, its source chip and a note. Text wears text tokens; only the marks wear the brand.
-         A figure never breaks across lines (the fit shrinks the page instead); a label wraps. */
-      .aside { display: flex; flex-direction: column; gap: calc(22 * var(--s)); width: 100%; }
+         The chart's own unit --c is the page's --s times --k: 1, larger on a tall story, where the
+         chart takes the room. A figure never breaks across lines: a group of figures shrinks to fit
+         its room (the script), then the page fit steps down; a label wraps. */
+      .page { --k: 1; --c: calc(var(--s) * var(--k)); }
+      .aside { display: flex; flex-direction: column; gap: calc(26 * var(--s)); width: 100%; }
       .chart { width: 100%; font-family: var(--body); }
 
       /* Bars: one baseline at zero, each bar as long as its figure, the figure at its tip. */
-      .bars { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); column-gap: calc(22 * var(--s));
-        row-gap: calc(20 * var(--s)); align-items: center; --reserve: 0px; }
+      .bars { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); column-gap: calc(26 * var(--c));
+        row-gap: calc(28 * var(--c)); align-items: center; --reserve: 0px; }
       .bar-row { display: contents; }
-      .bar-label { font-size: calc(29 * var(--s)); font-weight: 600; line-height: 1.2; color: var(--ink); overflow-wrap: break-word; }
-      .bar-track { display: flex; align-items: center; gap: calc(14 * var(--s)); min-width: 0;
-        min-height: calc(46 * var(--s)); border-left: calc(3 * var(--u)) solid var(--card); }
-      .bar { flex: none; height: calc(34 * var(--s)); background: var(--accent-large);
+      .bar-label { font-size: calc(36 * var(--c)); font-weight: 600; line-height: 1.2; color: var(--ink); overflow-wrap: break-word; }
+      .bar-track { display: flex; align-items: center; gap: calc(16 * var(--c)); min-width: 0;
+        min-height: calc(64 * var(--c)); border-left: calc(3 * var(--u)) solid var(--card); }
+      .bar { flex: none; height: calc(52 * var(--c)); background: var(--accent-large);
         width: max(0px, calc(var(--f, 0) * (100% - var(--reserve))));
-        border-radius: 0 calc(4 * var(--s)) calc(4 * var(--s)) 0; }
-      .bar-value { flex: none; white-space: nowrap; font-size: calc(32 * var(--s)); font-weight: 700; line-height: 1.1; color: var(--ink); }
+        border-radius: 0 calc(6 * var(--c)) calc(6 * var(--c)) 0; }
+      .bar-value { flex: none; white-space: nowrap; font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); }
 
       /* A line: the trace and a dot per row over a baseline; each figure and label sits under its dot. */
-      .line-chart { display: flex; flex-direction: column; gap: calc(18 * var(--s)); --n: 5; }
-      .plot { position: relative; width: 100%; height: calc(var(--plot-h, 360) * var(--s)); border-bottom: calc(3 * var(--u)) solid var(--card); }
+      .line-chart { display: flex; flex-direction: column; gap: calc(20 * var(--c)); --n: 5; }
+      .plot { position: relative; width: 100%; height: calc(var(--plot-h, 480) * var(--c)); border-bottom: calc(3 * var(--u)) solid var(--card); }
       .plot-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
       .plot-svg .area { fill: color-mix(in srgb, var(--accent-large) 12%, transparent); stroke: none; }
-      .plot-svg .trace { fill: none; stroke: var(--accent-large); stroke-width: calc(5 * var(--s));
+      .plot-svg .trace { fill: none; stroke: var(--accent-large); stroke-width: calc(6 * var(--c));
         stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-      .dot { position: absolute; width: calc(20 * var(--s)); height: calc(20 * var(--s)); border-radius: 50%;
-        background: var(--accent-large); box-shadow: 0 0 0 calc(4 * var(--s)) var(--paper); transform: translate(-50%, -50%); }
+      .dot { position: absolute; width: calc(24 * var(--c)); height: calc(24 * var(--c)); border-radius: 50%;
+        background: var(--accent-large); box-shadow: 0 0 0 calc(5 * var(--c)) var(--paper); transform: translate(-50%, -50%); }
       /* No gap between the columns: each column's middle is its dot's x. */
       .axis { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
-      .tick { display: flex; flex-direction: column; align-items: center; gap: calc(6 * var(--s)); min-width: 0;
-        padding: 0 calc(6 * var(--s)); text-align: center; }
-      .tick-value { font-size: calc(32 * var(--s)); font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
-      .tick-label { font-size: calc(24 * var(--s)); line-height: 1.25; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+      .tick { display: flex; flex-direction: column; align-items: center; gap: calc(6 * var(--c)); min-width: 0;
+        padding: 0 calc(6 * var(--c)); text-align: center; }
+      .tick-value { font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
+      .tick-label { font-size: calc(28 * var(--c)); line-height: 1.25; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
 
       /* A number grid: each figure in its own tile, sized to fill whole rows. The figure wears ink (it
-         stays readable at any fit); the brand shows in the rule along each tile's top. */
-      .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: calc(14 * var(--s)); }
+         stays readable at any size); the brand shows in the rule along each tile's top. */
+      .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: calc(16 * var(--c)); }
       .tile { grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: calc(10 * var(--s)); min-width: 0; background: var(--card); border-radius: calc(14 * var(--s));
-        border-top: calc(6 * var(--s)) solid var(--accent-large);
-        padding: calc(22 * var(--s)) calc(16 * var(--s)) calc(24 * var(--s)); text-align: center; }
-      .tile-value { font-size: calc(64 * var(--s)); font-weight: 800; line-height: 1; letter-spacing: -0.01em;
+        gap: calc(12 * var(--c)); min-width: 0; background: var(--card); border-radius: calc(16 * var(--c));
+        border-top: calc(6 * var(--c)) solid var(--accent-large);
+        padding: calc(26 * var(--c)) calc(16 * var(--c)) calc(28 * var(--c)); text-align: center; }
+      .tile-value { font-size: calc(72 * var(--c)); font-weight: 800; line-height: 1; letter-spacing: -0.01em;
         color: var(--ink); white-space: nowrap; }
-      .tile-label { font-size: calc(25 * var(--s)); line-height: 1.3; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+      .tile-label { font-size: calc(28 * var(--c)); line-height: 1.3; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
 
       /* The source chip: where every figure on the chart comes from. */
       .chip { display: inline-flex; align-self: flex-start; flex-wrap: wrap; align-items: baseline; column-gap: calc(12 * var(--s));
         row-gap: calc(4 * var(--s)); max-width: 100%; background: var(--card); border-radius: calc(10 * var(--s));
-        padding: calc(10 * var(--s)) calc(18 * var(--s)); font-family: var(--mono); font-size: calc(22 * var(--s)); line-height: 1.3; }
+        padding: calc(10 * var(--s)) calc(18 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s)); line-height: 1.3; }
       .chip-caption { color: var(--accent); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
       .chip-text { color: var(--dim); overflow-wrap: anywhere; }
-      .note { font-family: var(--body); font-size: calc(24 * var(--s)); line-height: 1.4; color: var(--muted); }
+      .note { font-family: var(--body); font-size: calc(28 * var(--s)); line-height: 1.4; color: var(--muted); }
 
+      /* A tall story (9:16): the chart takes the room. */
+      @media (max-aspect-ratio: 3/5) {
+        .page { --k: 1.25; }
+      }
       /* Landscape (1.91:1 and 16:9): the headline takes the left, the chart the right. */
       @media (min-aspect-ratio: 3/2) {
         .main { flex-direction: row; align-items: center; gap: calc(56 * var(--s)); }
         .lead { flex: 1 1 0; min-width: 0; }
         .aside { flex: 1.5 1 0; min-width: 0; }
-        .line-chart { --plot-h: 250; }
+        .line-chart { --plot-h: 280; }
       }
     </style>
   </head>
@@ -311,6 +318,33 @@
         const gap = track ? parseFloat(getComputedStyle(track).columnGap) || 0 : 0;
         bars.style.setProperty("--reserve", (widest + gap + 1).toFixed(1) + "px");
       }
+      // A group of figures shares one size: the largest at which each fits its room, never under
+      // FIGURE_FLOOR of its design size (past that, the page fit steps down instead). A bar's figure
+      // takes at most BAR_FIGURE_SHARE of its track, so the bars keep the rest.
+      const FIGURE_FLOOR = 0.4;
+      const FIGURE_MARGIN = 0.98;
+      const BAR_FIGURE_SHARE = 0.4;
+      function inner(el) {
+        const style = getComputedStyle(el);
+        return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      }
+      function fitFigures(figures, roomOf) {
+        figures.forEach((el) => el.style.removeProperty("font-size"));
+        let ratio = 1;
+        figures.forEach((el) => {
+          const room = roomOf(el);
+          if (room > 0 && el.scrollWidth > room) ratio = Math.min(ratio, room / el.scrollWidth);
+        });
+        if (ratio >= 1) return;
+        const size = parseFloat(getComputedStyle(figures[0]).fontSize) * Math.max(FIGURE_FLOOR, ratio * FIGURE_MARGIN);
+        figures.forEach((el) => el.style.setProperty("font-size", size.toFixed(2) + "px"));
+      }
+      function layoutChart() {
+        fitFigures(Array.from(chart.querySelectorAll(".tile-value")), (el) => inner(el.parentElement));
+        fitFigures(Array.from(chart.querySelectorAll(".tick-value")), (el) => inner(el.parentElement));
+        fitFigures(Array.from(chart.querySelectorAll(".bar-value")), (el) => inner(el.parentElement) * BAR_FIGURE_SHARE);
+        layoutBars();
+      }
 
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
       function overflowing(page) {
@@ -333,12 +367,12 @@
         for (let step = 0; ; step += 1) {
           const scale = Math.max(MIN_FIT, 1 - step * FIT_STEP);
           page.style.setProperty("--fit", scale.toFixed(2));
-          layoutBars();
+          layoutChart();
           if (!overflowing(page) || scale === MIN_FIT) break;
         }
         if (overflowing(page)) {
           page.classList.add("wrap-words");
-          layoutBars();
+          layoutChart();
         }
       }
       function fitAll() {

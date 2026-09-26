@@ -416,6 +416,16 @@ INFOGRAPHIC_RENDERS = (
     ("programmes-line", PROGRAMME_REPORT, None, "line"),
     ("programmes-grid", PROGRAMME_REPORT, None, "grid"),
 )
+# Each bound render's own copy (the rest is the starter's sample copy), so a preview reads as a post would.
+RENDER_COPY: Dict[str, Dict[str, str]] = {
+    "followers-line": {"eyebrow": "FIVE MONTHS", "headline": "FOLLOWERS,|MONTH BY|MONTH", "headline_accent": "MONTH BY",
+                       "note": "Followers at each month's end."},
+    "engagement-grid": {"eyebrow": "SEPTEMBER IN NUMBERS", "headline": "WHERE PEOPLE|TALKED BACK", "headline_accent": "TALKED BACK",
+                        "note": "Engagement rate: interactions per account reached."},
+    "programmes-bar": {"eyebrow": "SPEND TO DATE", "headline": "WHERE THE|BUDGET WENT", "headline_accent": "BUDGET",
+                       "note": "The top 5 of 6 programmes, in the report's order."},
+}
+RENDER_COPY["programmes-line"] = RENDER_COPY["programmes-grid"] = RENDER_COPY["programmes-bar"]
 
 
 def bind_fixture(starter: Mapping[str, Any], report: Mapping[str, str], column: Optional[str], kind: str) -> Tuple[Dict[str, str], Series]:
@@ -496,7 +506,7 @@ def run_infographic(renderer: Renderer, out: Path, kit: Mapping[str, Any], repor
             folder.mkdir(parents=True, exist_ok=True)
             print(f"\n== {starter['name']} bound to {source['title']!r} ({series.value_header}, {kind}) at {size}")
             try:
-                bundle = chart_bundle_for(starter, kit, size, values)
+                bundle = chart_bundle_for(starter, kit, size, {**RENDER_COPY.get(name, {}), **values})
                 shown = check_chart_from_report(bundle, starter, source, series)
                 data = _one_png(_checked(renderer, bundle))
                 if png_size(data) != parse_size(size):
