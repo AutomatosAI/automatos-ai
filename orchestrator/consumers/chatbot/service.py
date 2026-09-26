@@ -31,7 +31,9 @@ from difflib import SequenceMatcher
 from modules.tools.execution.tool_loop import (
     RoundState,
     ToolLoopExecutor,
+    ToolLoopResult,
     ToolPostResult,
+    claimed_action_not_done,
 )
 from modules.tools.execution.telemetry import resolve_action_name
 
@@ -62,6 +64,7 @@ from services.page_context import (
 )
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 
 logger = logging.getLogger(__name__)
@@ -2087,17 +2090,41 @@ class StreamingChatService:
         for _ran_name, _ran_args in prefetched or []:
             executor.tracker.record_execution(_ran_name, _ran_args)
 
+        async def _run_loop(initial):
+            return await executor.run(
+                initial_response=initial,
+                messages=llm_messages,
+                tools=use_tools,
+                workspace_id=self.workspace_id,
+                on_event=_on_event,
+                on_tool_result=_on_tool_result,
+                on_round_end=_on_round_end,
+            )
+
+        # F187 tier 2: an answer that names an id that does not exist is
+        # re-prompted once; a retry that makes calls runs them here.
+        owner_text = self._extract_user_text(llm_messages)
+        f187 = {"reprompted": False}
+
+        async def _ground_ids(result):
+            if called_tools(result.response) or result.forced_final or result.max_iterations_reached:
+                return result
+            answer = getattr(result.response, "content", "") or ""
+            missing = await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
+            if not missing:
+                return result
+            f187["reprompted"] = True
+            logger.warning(f"[F187] the answer names {missing}, which do not exist — re-prompting once")
+            llm_messages.append({"role": "assistant", "content": answer})
+            llm_messages.append({"role": "system", "content": id_nudge(missing)})
+            retry = await _llm_callback(llm_messages, use_tools)
+            if called_tools(retry):
+                return await _run_loop(retry)
+            return ToolLoopResult(response=retry, iterations=result.iterations)
+
         async def _runner():
             try:
-                return await executor.run(
-                    initial_response=response,
-                    messages=llm_messages,
-                    tools=use_tools,
-                    workspace_id=self.workspace_id,
-                    on_event=_on_event,
-                    on_tool_result=_on_tool_result,
-                    on_round_end=_on_round_end,
-                )
+                return await _ground_ids(await _run_loop(response))
             finally:
                 await sse_queue.put(DONE)
 
@@ -2197,7 +2224,23 @@ class StreamingChatService:
             yield {"_final_response": final}
             return
 
-        yield {"_final_response": result.response}
+        # F187: what the answer still claims or names, for its correction line
+        # (tiers 1-2) and the [F187] log (tier 3). ``tools`` is the model's own calls.
+        verdict = None
+        try:
+            answer = getattr(result.response, "content", "") or ""
+            verdict = Verdict(
+                tools=sum(executor.tracker.tool_counts.values()) - len(prefetched or []),
+                claim=claimed_action_not_done(answer, executor.tracker.succeeded),
+                passive=passive_claim(answer),
+                ids=(await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
+                     if f187["reprompted"] else []),
+                reprompted=f187["reprompted"],
+            )
+        except Exception:
+            logger.debug("[F187] claim check skipped", exc_info=True)
+
+        yield {"_final_response": result.response, "_f187": verdict}
 
     # PRD-192 S4: `_execute_composio_action` (the raw ComposioToolService
     # shortcut) is DELETED — per-action Composio calls dispatch through
@@ -2920,9 +2963,25 @@ class StreamingChatService:
             full_response = ""
             tool_data = {}
 
+            # F187 (night 6): a first reply that ran no tool but says an action
+            # was done (tier 1) or names an id that does not exist (tier 2) goes
+            # through the loop, which nudges the claim once (F108) and re-prompts
+            # the id once. What it still gets wrong is corrected where it is saved.
+            f187_verdict: Optional[Verdict] = None
+            _first_reply_check = bool(use_tools) and not response.tool_calls and bool(response.content)
+            if _first_reply_check:
+                try:
+                    _first_reply_check = bool(
+                        claimed_action_not_done(response.content, {name for name, _args in _prefetched})
+                        or await asyncio.to_thread(invented_ids, response.content, latest_text, self.workspace_id)
+                    )
+                except Exception:  # the check never breaks a turn
+                    logger.debug("[F187] first-reply check skipped", exc_info=True)
+                    _first_reply_check = False
+
             # Handle tool calls via unified tool loop
-            if response.tool_calls:
-                logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
+            if response.tool_calls or _first_reply_check:
+                logger.info(f"Agent requested {len(response.tool_calls or [])} tool calls")
                 final_response = None
                 # PRD-224 US-005: mark the ASSIGN lane so the create-task tool
                 # auto-attaches supervision (the flag rides caller_context, never
@@ -2944,6 +3003,7 @@ class StreamingChatService:
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
+                        f187_verdict = chunk.get('_f187')
                     else:
                         yield chunk
                     await asyncio.sleep(0)
@@ -2967,6 +3027,7 @@ class StreamingChatService:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
                 final_round = response
+                f187_verdict = Verdict(tools=0, passive=passive_claim(final_text)) if use_tools else None
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
@@ -3006,6 +3067,14 @@ class StreamingChatService:
                 async for chunk in self.streaming_handler.stream_text_aisdk(tail):
                     yield chunk
 
+            # F187: a claim its retry kept, or an id that does not exist, is
+            # corrected in the answer that is saved, remembered and read next turn.
+            _correction = f187_verdict.correction if f187_verdict else None
+            if _correction:
+                full_response = f"{full_response}\n\n{_correction}"
+                async for chunk in self.streaming_handler.stream_text_aisdk(f"\n\n{_correction}"):
+                    yield chunk
+
             # Send usage data
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
@@ -3022,7 +3091,7 @@ class StreamingChatService:
             # F186: so does the narration. Memory takes the answer (below).
             joined_reasoning = "\n\n".join(r for r in reasoning_log if r)
             assistant_parts = reply_parts(joined_reasoning, narration_text, full_response)
-            self.chat_service.save_message(
+            _saved = self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,
                 # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
@@ -3033,6 +3102,8 @@ class StreamingChatService:
                     getattr(orchestrated, "context_trace", None), page_context
                 ),
             )
+            if f187_verdict is not None:
+                f187_verdict.log(getattr(_saved, "id", None))
 
             # Post-response: memory, metrics, eval
             async for chunk in self._post_response(

@@ -687,6 +687,11 @@ def looks_like_narrated_action(text: str) -> bool:
 
 
 _I_HAVE = r"\bi(?:'ve|’ve| have)(?: just| now| already)? "
+# F187 (nights 5-6), not claims: "I've started reading the document" (it read a
+# page; nothing started) and "I've noted that you're happy to increase the
+# budget" (it heard the owner; nothing was stored).
+_READING = r"\s+(?:to\s+)?(?:read|review|look|go(?:ing)?\s+through|check|analy[sz]|process|search|dig)"
+_OWNER_SAID = r"\s+(?:that\s+)?you(?:'re|’re| are|'d|’d| would| want| wish| have|'ve|’ve)\b"
 # F108: a reply that says an action is done. Each family names what it claims
 # and the actions that would have done it (substrings of the action names that
 # succeeded this turn — the inner action for platform_execute).
@@ -694,9 +699,10 @@ _ACTION_CLAIMS = (
     ("approved", re.compile(_I_HAVE + r"approved\b|\b(?:is|it's|it is) now approved\b", re.I),
      ("approve",)),
     ("started", re.compile(r"\b(?:is|it's|it is) now running\b|" + _I_HAVE
-                              + r"(?:started|launched|kicked off|resumed)\b", re.I),
+                              + r"(?:started(?!" + _READING + r")|launched|kicked off|resumed)\b", re.I),
      ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "update_task_status", "schedule_")),
-    ("noted", re.compile(_I_HAVE + r"(?:noted|made a note|saved|stored|recorded|remembered)\b", re.I),
+    ("noted", re.compile(_I_HAVE + r"(?:noted(?!" + _OWNER_SAID + r")|made a note|saved|stored|recorded|remembered)\b",
+                         re.I),
      ("store_memory", "update_", "field_inject", "submit_report")),
     ("put on the board", re.compile(_I_HAVE + r"(?:put|added|placed)\b[^.!?\n]{0,80}\b(?:on|onto|to) the board\b|"
                                        + _I_HAVE + r"(?:created|opened|added|raised) (?:a |an |the |your )?"
@@ -709,7 +715,7 @@ _ACTION_CLAIMS = (
     ("sent", re.compile(_I_HAVE + r"(?:sent|emailed|messaged|notified|texted|posted)\b", re.I),
      ("send", "notify", "notification", "publish", "post", "mail", "message")),
     ("deleted", re.compile(_I_HAVE + r"(?:deleted|removed|cancelled|canceled|uninstalled|revoked)\b", re.I),
-     ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_")),
+     ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_", "update_task_status")),
     ("changed", re.compile(_I_HAVE + r"(?:updated|renamed|changed|assigned|reassigned|moved|switched)\b", re.I),
      ("update_", "assign_", "set_", "configure_", "rename", "move")),
 )
