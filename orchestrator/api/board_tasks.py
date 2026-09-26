@@ -2062,7 +2062,12 @@ async def finalize_board_task_run(
     # cleared error_message.
     task.error_message = None
     status = task.status
-    db.commit()  # F210: the ending is written and the row let go before anything awaits
+    # F210: the ending commits (and lets the row go) before anything awaits, as the
+    # failure path's always has. An interruption between this commit and the next
+    # (a restart mid-report) leaves the ticket done with its result but no notice or
+    # report. Before, the same interruption lost the result too: the ticket stayed
+    # in_progress and the boot reaper failed it.
+    db.commit()
     # PRD-128: dispatch task_complete only on terminal 'done'
     if status == "done":
         await _dispatch_task_complete(db, workspace_id, task)
