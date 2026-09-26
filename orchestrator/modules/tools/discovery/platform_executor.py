@@ -1187,6 +1187,25 @@ class PlatformActionExecutor:
         cleared = self.clear(action_name, params, caller_context)
         if not isinstance(cleared, Cleared):
             return cleared
+        # F193: a single-use yes whose call did nothing (a refusal after the gates,
+        # or a handler that failed) is given back, so the next call runs on it.
+        result = await self._run_cleared(action_name, params, caller_context, cleared, handler)
+        from modules.tools.execution.tool_grants import give_back_unused
+
+        give_back_unused(self.db, cleared.approved_via_grant_id, result)
+        return result
+
+    async def _run_cleared(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]],
+        cleared: "Cleared",
+        handler: Callable,
+    ) -> Dict[str, Any]:
+        """Everything after the permission gates (``clear``): the hierarchy check,
+        the rate limit, the destructive backstop, the server-side params and the
+        handler itself."""
         action_def, full_autonomy = cleared.action_def, cleared.full_autonomy
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the

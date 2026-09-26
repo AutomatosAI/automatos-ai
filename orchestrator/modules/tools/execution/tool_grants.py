@@ -374,12 +374,20 @@ def consume_tool_grant(
         return None
 
 
-def give_back_grant(db: Any, grant_id: Any, action: str) -> bool:
-    """F179 (review MEDIUM): a single-use yes whose action did nothing (the file
-    was gone, or not an image) is given back, so the next call runs on it
-    instead of asking again for what was never done. Only this module's own
-    consumption is undone. Never raises."""
-    if action not in SINGLE_USE_ACTIONS or db is None or grant_id is None:
+def give_back_unused(db: Any, grant_id: Any, result: Any) -> bool:
+    """F179/F193: a single-use yes whose call did nothing — its result says
+    ``success: False`` (the file was gone, a refusal after the gates, a handler
+    that failed) — is given back, so the next call runs on it instead of asking
+    again for what was never done."""
+    if grant_id is None or not (isinstance(result, dict) and result.get("success") is False):
+        return False
+    return give_back_grant(db, grant_id)
+
+
+def give_back_grant(db: Any, grant_id: Any) -> bool:
+    """Undo this module's own consumption of a grant (``revoked_by`` is
+    ``system:consumed``); a human's revoke or deny is never undone. Never raises."""
+    if db is None or grant_id is None:
         return False
     try:
         from core.models.approval_grants import ApprovalGrant, GrantStatus

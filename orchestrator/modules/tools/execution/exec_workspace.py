@@ -309,10 +309,9 @@ async def execute_gated_workspace_action(
     if not isinstance(cleared, Cleared):
         return cleared
     result = await run()
-    if cleared.approved_via_grant_id is not None and not (isinstance(result, dict) and result.get("success")):
-        from modules.tools.execution.tool_grants import give_back_grant
+    from modules.tools.execution.tool_grants import give_back_unused
 
-        give_back_grant(getattr(executor, "db", None), cleared.approved_via_grant_id, tool_name)
+    give_back_unused(getattr(executor, "db", None), cleared.approved_via_grant_id, result)
     return marked(result, cleared)
 
 
