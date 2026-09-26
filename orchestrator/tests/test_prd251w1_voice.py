@@ -305,7 +305,7 @@ for _table in (
 
 def _set_config(monkeypatch, **values):
     """Patch the config object every module under test reads (one object, unless a reload split it)."""
-    modules = (render, render_quota, media_render_client, media_store, voice, files, socials_api)
+    modules = (render, render_quota, media_render_client, media_store, voice, socials_api)
     for cfg in {id(m.config): m.config for m in modules}.values():
         for name, value in values.items():
             monkeypatch.setattr(cfg, name, value, raising=False)
