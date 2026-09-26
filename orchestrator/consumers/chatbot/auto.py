@@ -625,6 +625,14 @@ _PLATFORM_KEYWORDS = {
         "make a cover for", "design cover image", "add cover to post",
         "generate cover for blog",
     ],
+    # PRD-251 US-116 (S4.1): Socials drafts. Agents draft; a person approves in the Socials tab.
+    "platform_create_social_post": [
+        "draft a social post", "create a social post", "new social post",
+        "social media post about", "draft a linkedin post",
+    ],
+    "platform_list_social_posts": [
+        "list social posts", "show social posts", "social posts awaiting approval",
+    ],
     # PRD-82A: Missions
     "platform_create_mission": [
         "launch a mission", "start a mission", "create a mission",

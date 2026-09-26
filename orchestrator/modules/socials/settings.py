@@ -24,7 +24,9 @@ Every plan gets Socials (owner, 2026-09-23), so there is no plan exposure key.
 
 ``require_socials_enabled`` is the one route gate: every ``/api/socials/*``
 route depends on it, and it answers 404 unless BOTH switches are on. A
-workspace that can't use Socials never learns the routes exist.
+workspace that can't use Socials never learns the routes exist. The agent
+tools (US-116) ask ``socials_off_reason`` instead, which reads the same two
+switches and says which one is off and who turns it on.
 
 The master switch is read on every request, so flipping it takes effect on
 the next one. The read is strict (``core.llm.manager.read_system_setting``): a
@@ -60,6 +62,16 @@ KEY_ENABLED = "enabled"
 
 MASTER_READ_FAILED_LOG = (
     "[Socials] system setting %s.%s could not be read; the Socials master switch is OFF until it can be"
+)
+
+# What the agent tools answer while a switch is off (US-116): nothing is read or written.
+SOCIALS_OFF_FOR_PLATFORM = (
+    "Socials is not switched on for this platform, so nothing was read or saved. "
+    "The platform's super-admin turns it on in Settings → System Settings."
+)
+SOCIALS_OFF_FOR_WORKSPACE = (
+    "Socials is off for this workspace, so nothing was read or saved. "
+    "A workspace owner or admin turns it on in the Socials tab under Deliverables."
 )
 
 # The workspace settings key, and the only keys its object may carry.
@@ -163,6 +175,18 @@ def media_monthly_cap_usd(settings: Optional[Dict[str, Any]]) -> Tuple[float, Op
         logger.error("[Socials] %s", why)
         return 0.0, why
     return cap, None
+
+
+def socials_off_reason(workspace: Optional[Workspace]) -> Optional[str]:
+    """Why Socials is off for ``workspace`` (D1), or ``None`` when both switches
+    are on: the check behind the agent tools (US-116), on the route gate's two
+    switches. A missing workspace is off; a master switch that cannot be read is
+    off (``socials_master_enabled``)."""
+    if not socials_master_enabled():
+        return SOCIALS_OFF_FOR_PLATFORM
+    if workspace is None or not parse_workspace_socials(workspace.settings).enabled:
+        return SOCIALS_OFF_FOR_WORKSPACE
+    return None
 
 
 def socials_state(settings: Optional[Dict[str, Any]]) -> Dict[str, bool]:

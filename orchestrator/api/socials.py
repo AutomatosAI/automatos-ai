@@ -16,7 +16,7 @@ errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 422 (naming each claim and why), NotPublishable → 409, PublishingUnavailable →
 501, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
 RendererUnavailable → 503, ReportNotFound → 404, ChartNotBindable → 422,
-ReportUnreadable → 503.
+ReportUnreadable → 503, PostNotFound → 404.
 
 Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
 unless it resolves in the caller's workspace (``modules/socials/sources.py``);
@@ -71,6 +71,13 @@ rolls back, writes nothing and answers 409 with the current ``content_hash``.
 An edit can therefore never slip under an approval, and an approval never lands
 on copy nobody reviewed. ``review_log`` is reassigned whole, so this also keeps a
 stale copy from erasing entries another writer committed.
+
+Agents draft through the same code (US-116, S4.1): creating, editing, submitting
+and rendering a post are the flows ``create_post``, ``edit_post``,
+``submit_post`` and ``render_post``, which the routes and the platform tools
+(``modules/tools/discovery/handlers_socials.py``) both call. There is no flow
+that approves, schedules or publishes for a tool to reach: a person approves in
+the Socials tab (D6), and the platform publishes (Wave 3).
 """
 
 from __future__ import annotations
@@ -233,6 +240,8 @@ def _raise_for(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, report_charts.ReportUnreadable):
         raise HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, service.PostNotFound):
+        raise HTTPException(status_code=404, detail=POST_NOT_FOUND)
     raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -243,17 +252,17 @@ def _load(db: Session, ctx: RequestContext, post_id: UUID) -> SocialPost:
     return post
 
 
-def _check_template(db: Session, ctx: RequestContext, template_id: Optional[UUID]) -> None:
-    """A template must be one of the caller's own (never another workspace's)."""
+def _check_template(db: Session, workspace_id: UUID, template_id: Optional[UUID]) -> None:
+    """A template must be one of the workspace's own (never another workspace's)."""
     if template_id is None:
         return
     found = (
         db.query(DocumentTemplate.id)
-        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == workspace_id)
         .first()
     )
     if found is None:
-        raise HTTPException(status_code=422, detail="template_id is not a template in this workspace")
+        raise service.InvalidPost("template_id is not a template in this workspace")
 
 
 def _save(db: Session, post: SocialPost) -> Dict[str, Any]:
@@ -262,18 +271,20 @@ def _save(db: Session, post: SocialPost) -> Dict[str, Any]:
     return post.to_dict()
 
 
-def _commit_unchanged(
-    db: Session, ctx: RequestContext, post: SocialPost, *, status: str, content_hash: str
-) -> Dict[str, Any]:
+def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_hash: str) -> Dict[str, Any]:
     """Commit the request's change to ``post`` only if its row still has
     ``status`` and ``content_hash``, the version the request checked. When
-    another writer committed first, roll back, write nothing and answer 409 with
-    the post's current hash. Call it straight after the service mutation: a
-    query in between would autoflush the change before the check."""
-    post_id = post.id
+    another writer committed first, roll back, write nothing and raise
+    :class:`service.StaleContent` with the post's current hash (409). Call it
+    straight after the service mutation: a query in between would autoflush the
+    change before the check."""
+    post_id, workspace_id = post.id, post.workspace_id
     if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
-        _raise_for(service.StaleContent(service.compute_content_hash(_load(db, ctx, post_id))))
+        current = service.get_post(db, workspace_id, post_id)
+        if current is None:
+            raise service.PostNotFound()
+        raise service.StaleContent(service.compute_content_hash(current))
     return _save(db, post)
 
 
@@ -284,13 +295,13 @@ def _workspace(db: Session, ctx: RequestContext) -> Workspace:
     return workspace
 
 
-def _render_template(db: Session, ctx: RequestContext, post: SocialPost) -> Any:
-    """The post's template (its format and ``blocks``), from the caller's workspace only."""
+def _render_template(db: Session, workspace_id: UUID, post: SocialPost) -> Any:
+    """The post's template (its format and ``blocks``), from the workspace's own only."""
     template = None
     if post.template_id is not None:
         template = (
             db.query(DocumentTemplate.id, DocumentTemplate.format, DocumentTemplate.blocks)
-            .filter(DocumentTemplate.id == post.template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+            .filter(DocumentTemplate.id == post.template_id, DocumentTemplate.workspace_id == workspace_id)
             .first()
         )
     if template is None:
@@ -306,21 +317,21 @@ def _render_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return brand_kit_for_media_render(get_brand_kit(settings))
 
 
-async def _capabilities(db: Session, ctx: RequestContext):
+async def _capabilities(db: Session, workspace_id: UUID):
     """The workspace's media capability registry (D16). It reads the database and
     may commit the session (a pending connection upgraded): call it before any
     change of the request's own is staged."""
-    return await asyncio.to_thread(media_capabilities, db, ctx.workspace_id)
+    return await asyncio.to_thread(media_capabilities, db, workspace_id)
 
 
-async def _check_voice(db: Session, ctx: RequestContext, voice: Any) -> None:
+async def _check_voice(db: Session, workspace_id: UUID, voice: Any) -> None:
     """A voice toolkit a save names must be one the workspace can speak with now (D11)."""
     clean = service.validate_voice(voice)
     if clean is not None:
-        voice_recipes.plan_for(clean, await _capabilities(db, ctx))
+        voice_recipes.plan_for(clean, await _capabilities(db, workspace_id))
 
 
-def _check_footage(db: Session, ctx: RequestContext, footage: Any, template_id: Optional[UUID]) -> None:
+def _check_footage(db: Session, workspace_id: UUID, footage: Any, template_id: Optional[UUID]) -> None:
     """The footage a save asks for names only slots the post's template has and
     lets a generation toolkit fill (S1.8). With no template yet, the render checks."""
     clean = service.validate_footage(footage)
@@ -328,7 +339,7 @@ def _check_footage(db: Session, ctx: RequestContext, footage: Any, template_id: 
         return
     row = (
         db.query(DocumentTemplate.blocks)
-        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == ctx.workspace_id)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == workspace_id)
         .first()
     )
     blocks = row.blocks if row is not None and isinstance(row.blocks, dict) else {}
@@ -343,11 +354,11 @@ def _check_footage(db: Session, ctx: RequestContext, footage: Any, template_id: 
             raise service.InvalidPost(f"footage.{slot}: {label} takes the workspace's own file, never generated footage")
 
 
-def _credited(db: Session, ctx: RequestContext, changes: Dict[str, Any], post: Optional[SocialPost] = None) -> Dict[str, Any]:
+def _credited(db: Session, workspace_id: UUID, changes: Dict[str, Any], post: Optional[SocialPost] = None) -> Dict[str, Any]:
     """``changes`` whose copy carries the credit lines the post's media asks for
     after this save (S1.6): the media the save sets, else the post's own."""
     media = changes["media"] if "media" in changes or post is None else post.media
-    lines = post_credits.media_credits(db, ctx.workspace_id, media)
+    lines = post_credits.media_credits(db, workspace_id, media)
     if not lines:
         return changes
     copy_before = changes["copy"] if "copy" in changes or post is None else post.copy
@@ -370,6 +381,132 @@ def _parse_statuses(status: Optional[str]) -> Optional[List[str]]:
     if unknown:
         raise HTTPException(status_code=422, detail=f"unknown status {unknown!r}")
     return statuses
+
+
+# ---------------------------------------------------------------------------
+# The post writes: one flow each, shared by the routes and the agent tools (US-116)
+# ---------------------------------------------------------------------------
+# Each is what its route does once the caller's post is loaded, so an agent's
+# draft passes every check a person's does. They raise only the lifecycle's
+# errors (service.SocialsError, and RenderQuotaExceeded from a render): the
+# routes answer them through _raise_for, the tools with a refusal. ``agent``
+# names the agent a tool acts for, and review_log records it (the service).
+
+
+async def create_post(
+    db: Session, workspace_id: UUID, actor: str, fields: Dict[str, Any], *, agent: Optional[str] = None
+) -> SocialPost:
+    """A new draft of ``fields`` (``CreateSocialPostRequest``'s, by alias), committed.
+
+    The template must be the workspace's own, a voice toolkit one it can speak
+    with now (D11) and footage only slots its template lets a toolkit fill
+    (D12); every source must resolve in the workspace (D7). The copy carries
+    the credit lines its media's music asks for (S1.6).
+    """
+    _check_template(db, workspace_id, fields.get("template_id"))
+    await _check_voice(db, workspace_id, fields.get("voice"))
+    _check_footage(db, workspace_id, fields.get("footage"), fields.get("template_id"))
+    if fields.get("sources"):
+        post_sources.require_resolved(db, workspace_id, fields["sources"])
+    fields = _credited(db, workspace_id, fields)
+    post = service.create_draft(db, workspace_id=workspace_id, created_by=actor, agent=agent, **fields)
+    db.commit()
+    db.refresh(post)
+    return post
+
+
+async def edit_post(
+    db: Session, post: SocialPost, actor: str, changes: Dict[str, Any], *, agent: Optional[str] = None
+) -> Dict[str, Any]:
+    """Edit ``post`` with ``changes`` (``UpdateSocialPostRequest``'s set fields, by
+    alias); the compare-and-set commit.
+
+    A content change voids an approval (D6). A source the edit adds or changes
+    must resolve in the workspace (D7); one it keeps as it was is checked again
+    at approval. A voice toolkit it names must be one the workspace can speak
+    with now (D11); the voice is a render setting, so changing it alone voids
+    nothing. So is the footage (D12): a slot asked for with its prompt unchanged
+    keeps what a render made for it. The copy keeps the credit lines its
+    media's music asks for (S1.6): an edit that drops one gets it back.
+    """
+    status, content_hash = post.status, post.content_hash
+    if "title" in changes and changes["title"] is None:
+        raise service.InvalidPost("title cannot be empty")
+    workspace_id = post.workspace_id
+    _check_template(db, workspace_id, changes.get("template_id"))
+    if "voice" in changes:
+        await _check_voice(db, workspace_id, changes["voice"])
+    if "footage" in changes:
+        _check_footage(db, workspace_id, changes["footage"], changes.get("template_id", post.template_id))
+    if changes.get("sources"):
+        post_sources.require_resolved(db, workspace_id, changes["sources"], unchanged_from=post.sources)
+    changes = _credited(db, workspace_id, changes, post)
+    service.update_post(post, actor, changes, agent=agent)
+    return _commit_unchanged(db, post, status=status, content_hash=content_hash)
+
+
+def submit_post(db: Session, post: SocialPost, actor: str, *, note: Optional[str] = None) -> Dict[str, Any]:
+    """draft or changes_requested → needs_approval, with the submitter's ``note``
+    for the reviewer (an agent's); the compare-and-set commit."""
+    status, content_hash = post.status, post.content_hash
+    service.submit(post, actor, note=note)
+    return _commit_unchanged(db, post, status=status, content_hash=content_hash)
+
+
+async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor: str) -> Dict[str, Any]:
+    """Start rendering ``post`` in the background: it is ``rendering`` when this returns.
+
+    Refused, with nothing changed, when the post holds an approval or is already
+    rendering (IllegalTransition), has no social template (NotRenderable), is a
+    chart bound to a report that no longer shows the report's rows or names it,
+    names a voice toolkit the workspace cannot speak with now, the workspace has
+    used its render minutes this month (RenderQuotaExceeded, before any call to
+    media-render), or there is no storage or renderer to use
+    (RendererUnavailable). The render ends the post in ``needs_approval`` with
+    the files in ``media``, or in ``failed`` with the report in ``review_log``:
+    a render whose footage would take the post or the workspace over its media
+    cap submits nothing and fails saying why (D13).
+    """
+    status, content_hash = post.status, post.content_hash
+    voice = post.voice
+    service.assert_can_render(post)
+    template = _render_template(db, workspace.id, post)
+    brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
+    # D12: the footage the post asks for, planned now over the template's slots;
+    # a slot no connected toolkit can make plays the template's motion graphics.
+    caps = await _capabilities(db, workspace.id) if post.footage else None
+    footage_plan = render.footage_plan_for(post, template, caps) if caps is not None else None
+    bundle = render.bundle_for(
+        post, template, brand_kit, fallback_name=workspace.name or "",
+        footage_slots=footage_plan.shown if footage_plan is not None else (),
+    )
+    # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
+    await report_charts.check_bound_chart(
+        db, workspace.id, render.composition_of(template), post.sources, bundle["variables"]
+    )
+    # D11: a voice toolkit speaks the script before the render; resolved now,
+    # so a toolkit the workspace cannot use is refused with nothing changed.
+    voice_plan = None
+    if voice and voice_script(bundle):
+        voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, workspace.id))
+    render_quota.enforce_render_quota(db, workspace)
+    await render.ensure_renderer()
+    service.start_render(post, actor)
+    saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
+    _launch_render(
+        render.RenderJob(
+            post_id=post.id,
+            workspace_id=post.workspace_id,
+            actor=actor,
+            content_hash=content_hash,
+            title=post.title,
+            format=post.format,
+            bundle=bundle,
+            voice=voice_plan,
+            footage=footage_plan,
+        )
+    )
+    return saved
 
 
 # ---------------------------------------------------------------------------
@@ -403,20 +540,15 @@ async def create_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Create a draft. Every source must resolve in the workspace (D7). The copy
-    carries the credit lines its media's music asks for (S1.6)."""
-    _check_template(db, ctx, body.template_id)
-    fields = body.model_dump(by_alias=True)
+    """Create a draft (``create_post``). Every source must resolve in the
+    workspace (D7). The copy carries the credit lines its media's music asks
+    for (S1.6)."""
+    actor = _actor(ctx)
     try:
-        await _check_voice(db, ctx, fields["voice"])
-        _check_footage(db, ctx, fields["footage"], body.template_id)
-        if fields["sources"]:
-            post_sources.require_resolved(db, ctx.workspace_id, fields["sources"])
-        fields = _credited(db, ctx, fields)
-        post = service.create_draft(db, workspace_id=ctx.workspace_id, created_by=_actor(ctx), **fields)
+        post = await create_post(db, ctx.workspace_id, actor, body.model_dump(by_alias=True))
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _save(db, post)
+    return post.to_dict()
 
 
 @router.get("/posts/{post_id}")
@@ -435,32 +567,20 @@ async def update_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Edit a post. A content change voids an approval (D6). A source the edit
-    adds or changes must resolve in the workspace (D7); one it keeps as it was
-    is checked again at approval. A voice toolkit the edit names must be one the
-    workspace can speak with now (D11); the voice is a render setting, so
-    changing it alone voids nothing. So is the footage (D12): a slot the edit
-    asks for with its prompt unchanged keeps what a render made for it. The
-    copy keeps the credit lines its media's music asks for (S1.6): an edit that
-    drops one gets it back."""
+    """Edit a post (``edit_post``). A content change voids an approval (D6). A
+    source the edit adds or changes must resolve in the workspace (D7); one it
+    keeps as it was is checked again at approval. A voice toolkit the edit names
+    must be one the workspace can speak with now (D11); the voice is a render
+    setting, so changing it alone voids nothing. So is the footage (D12): a slot
+    the edit asks for with its prompt unchanged keeps what a render made for it.
+    The copy keeps the credit lines its media's music asks for (S1.6): an edit
+    that drops one gets it back."""
     post = _load(db, ctx, post_id)
-    status, content_hash = post.status, post.content_hash
-    changes = body.model_dump(exclude_unset=True, by_alias=True)
-    if "title" in changes and changes["title"] is None:
-        raise HTTPException(status_code=422, detail="title cannot be empty")
-    _check_template(db, ctx, changes.get("template_id"))
+    actor = _actor(ctx)
     try:
-        if "voice" in changes:
-            await _check_voice(db, ctx, changes["voice"])
-        if "footage" in changes:
-            _check_footage(db, ctx, changes["footage"], changes.get("template_id", post.template_id))
-        if changes.get("sources"):
-            post_sources.require_resolved(db, ctx.workspace_id, changes["sources"], unchanged_from=post.sources)
-        changes = _credited(db, ctx, changes, post)
-        service.update_post(post, _actor(ctx), changes)
+        return await edit_post(db, post, actor, body.model_dump(exclude_unset=True, by_alias=True))
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -475,12 +595,11 @@ async def submit_social_post(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     post = _load(db, ctx, post_id)
-    status, content_hash = post.status, post.content_hash
+    actor = _actor(ctx)
     try:
-        service.submit(post, _actor(ctx))
+        return submit_post(db, post, actor)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/approve", dependencies=[CAN_REVIEW])
@@ -506,9 +625,9 @@ async def approve_social_post(
             comment=body.comment,
             unresolved_sources=unresolved,
         )
+        return _commit_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])
@@ -522,9 +641,9 @@ async def request_changes_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.request_changes(post, _actor(ctx), body.comment)
+        return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/reject", dependencies=[CAN_REVIEW])
@@ -539,9 +658,9 @@ async def reject_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.reject(post, _actor(ctx), body.reason)
+        return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/schedule", dependencies=[CAN_UPDATE])
@@ -555,9 +674,9 @@ async def schedule_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.schedule(post, _actor(ctx), body.scheduled_for, body.timezone)
+        return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/unschedule", dependencies=[CAN_UPDATE])
@@ -570,9 +689,9 @@ async def unschedule_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.unschedule(post, _actor(ctx))
+        return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
 
 
 @router.post("/posts/{post_id}/publish-now", dependencies=[CAN_UPDATE])
@@ -602,7 +721,7 @@ async def render_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Render the post in the background: 202 with it in ``rendering``.
+    """Render the post in the background (``render_post``): 202 with it in ``rendering``.
 
     Refused, with nothing changed, when the post holds an approval or is already
     rendering (409), has no social template (422), is a chart bound to a report
@@ -617,50 +736,11 @@ async def render_social_post(
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
-    status, content_hash = post.status, post.content_hash
-    voice = post.voice
+    workspace = _workspace(db, ctx)
     try:
-        service.assert_can_render(post)
-        template = _render_template(db, ctx, post)
-        workspace = _workspace(db, ctx)
-        brand_kit = await asyncio.to_thread(_render_brand_kit, workspace.settings)
-        # D12: the footage the post asks for, planned now over the template's slots;
-        # a slot no connected toolkit can make plays the template's motion graphics.
-        caps = await _capabilities(db, ctx) if post.footage else None
-        footage_plan = render.footage_plan_for(post, template, caps) if caps is not None else None
-        bundle = render.bundle_for(
-            post, template, brand_kit, fallback_name=workspace.name or "",
-            footage_slots=footage_plan.shown if footage_plan is not None else (),
-        )
-        # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
-        await report_charts.check_bound_chart(
-            db, ctx.workspace_id, render.composition_of(template), post.sources, bundle["variables"]
-        )
-        # D11: a voice toolkit speaks the script before the render; resolved now,
-        # so a toolkit the workspace cannot use is refused with nothing changed.
-        voice_plan = None
-        if voice and voice_script(bundle):
-            voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, ctx))
-        render_quota.enforce_render_quota(db, workspace)
-        await render.ensure_renderer()
-        service.start_render(post, actor)
+        return await render_post(db, workspace, post, actor)
     except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         _raise_for(exc)
-    saved = _commit_unchanged(db, ctx, post, status=status, content_hash=content_hash)
-    _launch_render(
-        render.RenderJob(
-            post_id=post.id,
-            workspace_id=post.workspace_id,
-            actor=actor,
-            content_hash=content_hash,
-            title=post.title,
-            format=post.format,
-            bundle=bundle,
-            voice=voice_plan,
-            footage=footage_plan,
-        )
-    )
-    return saved
 
 
 @router.get("/posts/{post_id}/media/{file_name}")
@@ -717,7 +797,7 @@ async def list_social_voice_sources(
     toolkit the workspace can speak with (``available``); each allowlisted one it
     has not connected (``connect``: the Composio connect flow); a connected one
     it cannot use now (``unavailable``, with the reason)."""
-    return voice_recipes.voice_sources(await _capabilities(db, ctx))
+    return voice_recipes.voice_sources(await _capabilities(db, ctx.workspace_id))
 
 
 @router.get("/voices/{toolkit}", dependencies=[CAN_UPDATE])
@@ -730,7 +810,7 @@ async def list_social_toolkit_voices(
     """A connected voice toolkit's voices, through its allowlisted ``voices``
     action on the workspace's own connection: 422 when the workspace cannot use
     the toolkit, 502 when the toolkit does not answer."""
-    caps = await _capabilities(db, ctx)
+    caps = await _capabilities(db, ctx.workspace_id)
     try:
         voices = await voice_recipes.list_voices(
             db, ctx.workspace_id, toolkit, caps=caps, query=q, limit=config.SOCIALS_VOICE_LIST_LIMIT
@@ -757,7 +837,7 @@ async def list_social_footage_sources(
     none can; each generation toolkit ``available``, to ``connect`` (the Composio
     connect flow) or ``unavailable`` and why; and this month's media spend
     against the workspace's monthly media cap (D13)."""
-    caps = await _capabilities(db, ctx)
+    caps = await _capabilities(db, ctx.workspace_id)
     spend = media_caps.media_spend(db, _workspace(db, ctx))
     return {**footage_recipes.footage_sources(caps), "spend": spend.to_dict()}
 

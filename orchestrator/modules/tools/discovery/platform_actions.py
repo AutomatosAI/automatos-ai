@@ -53,6 +53,7 @@ from .actions_onboarding import register_onboarding_actions  # PRD-222 W1S3
 from .actions_intake import register_intake_actions  # PRD-222 W1S8
 from .actions_packages import register_package_actions  # PRD-230 US-006
 from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + platform_web_search
+from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials drafts (never approve/publish)
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -99,6 +100,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_intake_actions(registry)  # PRD-222 W1S8: platform_scan_business_site + status
     register_package_actions(registry)  # PRD-230 US-006: package search/install tools
     register_web_actions(registry)  # PRD-240: every agent can read and search the web
+    register_socials_actions(registry)  # PRD-251 US-116: agents draft Socials posts; people approve
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions

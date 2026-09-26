@@ -283,6 +283,13 @@ from modules.tools.discovery.handlers_web import (  # PRD-240
     web_fetch,
     web_search,
 )
+from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116
+    create_social_post,
+    update_social_post,
+    submit_social_post,
+    get_social_post,
+    list_social_posts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +506,12 @@ class PlatformActionExecutor:
             # PRD-251 US-115: the brand kit (the REST routes' functions)
             "platform_get_brand_kit": get_brand_kit_tool,
             "platform_update_brand_kit": update_brand_kit_tool,
+            # PRD-251 US-116 (S4.1): Socials drafts. No tool approves, schedules or publishes.
+            "platform_create_social_post": create_social_post,
+            "platform_update_social_post": update_social_post,
+            "platform_submit_social_post": submit_social_post,
+            "platform_get_social_post": get_social_post,
+            "platform_list_social_posts": list_social_posts,
             "platform_get_workspace_info": get_workspace_info,
             "platform_get_memory_stats": get_memory_stats,
             "platform_list_connected_apps": list_connected_apps,

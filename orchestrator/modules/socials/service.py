@@ -53,6 +53,12 @@
   the base text and every channel's own text, once. A render appends the line
   of the music it mixed (``finish_render``); a save appends those of the media
   it names (``modules/socials/credits.py``).
+* **Agents draft (Wave 1 US-116, S4.1).** An agent's tools save through the
+  same lifecycle, and ``review_log`` names the agent that wrote what a person
+  approves: ``create_draft(agent=)`` opens it with a ``draft`` entry, and
+  ``update_post(agent=)`` logs an ``edit`` entry naming the fields it changed.
+  A person's own saves are not logged. No agent tool approves, schedules or
+  publishes.
 
 No FastAPI here: the API maps these exceptions to status codes. Every review
 action appends to ``review_log``, the history the approval UI shows. JSON
@@ -97,6 +103,8 @@ ACTION_APPROVAL_VOIDED = "approval_voided"
 ACTION_RENDER = "render"
 ACTION_RENDER_DONE = "render_done"
 ACTION_RENDER_FAILED = "render_failed"
+# US-116: an agent drafted the post. Only logged, never a move of the status machine.
+ACTION_DRAFT = "draft"
 
 # The whole status machine: action → {from status: to status}. An action
 # applies only from the statuses listed for it.
@@ -226,6 +234,13 @@ class StaleContent(SocialsError):
         super().__init__(
             "the post changed since you opened it: review the current version, then try again"
         )
+
+
+class PostNotFound(SocialsError):
+    """No such post in the caller's workspace (another workspace's included)."""
+
+    def __init__(self) -> None:
+        super().__init__("Post not found")
 
 
 # ── time ────────────────────────────────────────────────────────────────────
@@ -576,8 +591,13 @@ def create_draft(
     media: Optional[Mapping[str, Any]] = None,
     voice: Optional[Mapping[str, Any]] = None,
     footage: Optional[Mapping[str, Any]] = None,
+    agent: Optional[str] = None,
 ) -> SocialPost:
-    """A new post in ``draft``, added to ``db`` (the caller commits)."""
+    """A new post in ``draft``, added to ``db`` (the caller commits).
+
+    ``agent`` names the agent drafting it (US-116): ``review_log`` then opens
+    with a ``draft`` entry by ``created_by`` that names it.
+    """
     fields = {
         "title": title,
         "brief": brief,
@@ -600,14 +620,23 @@ def create_draft(
         **clean,
     )
     post.content_hash = compute_content_hash(post)
+    if agent:
+        _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent)
     db.add(post)
     return post
 
 
-def update_post(post: SocialPost, actor: str, changes: Mapping[str, Any]) -> SocialPost:
+def update_post(
+    post: SocialPost, actor: str, changes: Mapping[str, Any], *, agent: Optional[str] = None
+) -> SocialPost:
     """Apply an edit. A content change recomputes the hash; if the post was
     approved or scheduled, it goes back to ``needs_approval`` and its approval
-    is void (``approved_hash`` no longer matches ``content_hash``)."""
+    is void (``approved_hash`` no longer matches ``content_hash``).
+
+    ``agent`` names the agent editing (US-116): an edit that changes a field
+    logs an ``edit`` entry by ``actor`` naming the agent and the fields, before
+    the approval it voids.
+    """
     unknown = [k for k in changes if k not in EDITABLE_FIELDS]
     if unknown:
         raise InvalidPost(f"only {list(EDITABLE_FIELDS)} can be edited, got {unknown!r}")
@@ -617,8 +646,11 @@ def update_post(post: SocialPost, actor: str, changes: Mapping[str, Any]) -> Soc
     clean = {name: _VALIDATORS[name](value) for name, value in changes.items()}
     if "footage" in clean:
         clean["footage"] = footage_after_edit(post.footage, clean["footage"])
+    changed = [name for name in EDITABLE_FIELDS if name in clean and getattr(post, name) != clean[name]]
     for name, value in clean.items():
         setattr(post, name, value)
+    if agent and changed:
+        _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed)
 
     new_hash = compute_content_hash(post)
     if new_hash == post.content_hash:
@@ -631,10 +663,13 @@ def update_post(post: SocialPost, actor: str, changes: Mapping[str, Any]) -> Soc
     return post
 
 
-def submit(post: SocialPost, actor: str) -> SocialPost:
-    """draft or changes_requested → needs_approval."""
-    _move(post, ACTION_SUBMIT)
-    _log(post, actor, ACTION_SUBMIT)
+def submit(post: SocialPost, actor: str, note: Optional[str] = None) -> SocialPost:
+    """draft or changes_requested → needs_approval. ``note`` tells the reviewer
+    what to look at (an agent's, US-116); it is the history entry's comment."""
+    target = _target(post, ACTION_SUBMIT)
+    note = _validate_comment(note, required=False, what="note")
+    post.status = target
+    _log(post, actor, ACTION_SUBMIT, note)
     return post
 
 
@@ -901,8 +936,9 @@ def list_posts(
     statuses: Optional[Sequence[str]] = None,
     window_from: Optional[datetime] = None,
     window_to: Optional[datetime] = None,
+    limit: Optional[int] = None,
 ) -> List[SocialPost]:
-    """The caller's posts, newest first.
+    """The caller's posts, newest first; the ``limit`` newest when given.
 
     ``window_from`` / ``window_to`` bound a post's date: its slot when it is
     scheduled, otherwise when it was created (``[from, to)``, UTC).
@@ -915,4 +951,5 @@ def list_posts(
         query = query.filter(post_date >= _as_utc(window_from))
     if window_to is not None:
         query = query.filter(post_date < _as_utc(window_to))
-    return query.order_by(SocialPost.created_at.desc(), SocialPost.id.desc()).all()
+    query = query.order_by(SocialPost.created_at.desc(), SocialPost.id.desc())
+    return (query.limit(limit) if limit is not None else query).all()

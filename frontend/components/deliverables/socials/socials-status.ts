@@ -16,6 +16,8 @@ export const SOCIAL_COMMENT_MAX_CHARS = 2000
 
 /** review_log actions (modules/socials/service.py ACTION_*) as the history shows them. */
 export const REVIEW_ACTION_LABELS: Record<string, string> = {
+  // US-116: an agent drafted the post; the entry's comment names the agent.
+  draft: 'Drafted',
   submit: 'Sent for approval',
   approve: 'Approved',
   request_changes: 'Changes requested',
