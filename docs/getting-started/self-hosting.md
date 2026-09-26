@@ -459,15 +459,26 @@ Deliverable feature that exists in the code runs locally.
 ## 10. Updating
 
 ```bash
+docker compose stop backend                  # 1. stop the API before the code changes
 git pull
-docker compose up -d --build
+docker compose up -d --build                 # 2. rebuild; migrations run as the backend boots
+docker compose exec backend alembic current  # 3. one revision, marked (head)
 ```
 
-Source directories are bind-mounted, so most code changes are picked up by
-the running containers; `--build` matters when dependencies or Dockerfiles
-changed. Database migrations run on every backend boot
-(`alembic upgrade heads`, fail-closed — a failing migration stops the backend
-rather than serving a half-built schema), and the seeds are idempotent.
+**Stop the backend before you pull.** The backend runs in reload mode with
+`./orchestrator` bind-mounted, so a pull under a running backend loads the
+new code at once, and its startup `create_all` builds any new tables before
+the new migrations run. Migrations are written to survive that
+([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first keeps the
+order they expect: migrations first, then the code that uses them.
+
+`--build` rebuilds the images when dependencies or Dockerfiles changed.
+Database migrations run on every backend boot (`alembic upgrade heads`,
+fail-closed — a failing migration stops the backend rather than serving a
+half-built schema), and the seeds are idempotent. If you use media
+rendering, rebuild that service as well:
+`docker compose --profile media up -d --build media-render` (§7b).
+Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
 
@@ -516,6 +527,13 @@ builds the schema, replays migrations and seeds the catalogue before serving;
 `Starting Backend Application` banner; a red `❌` line names the step that
 failed (a bad migration or a missing local workspace stops the boot on
 purpose).
+
+**Backend stops on boot with `DuplicateTable` or "already exists" after an
+update.** New code ran before its migration (usually a pull under a running
+backend, §10), and the migration named in the backend log does not tolerate a
+table that `create_all` had already built. That is a bug in the migration
+([AGENTS.md](../../AGENTS.md) → Migrations): open an issue with the log. Don't
+edit `alembic_version` or stamp revisions by hand.
 
 **Chat answers nothing; banner "Add an LLM key to bring Auto to life".** No
 model key is stored. Settings → API Keys, or one of the keys in §2.

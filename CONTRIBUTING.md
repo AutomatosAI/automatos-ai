@@ -42,7 +42,7 @@ docker compose up
 
 - **Reload mode.** The backend and frontend containers bind-mount their source directories (`./orchestrator` → `/app`, `./frontend` → `/app`) and run in reload mode (`uvicorn --reload`, `npm run dev`), so edits are picked up without a rebuild. A dependency change needs `docker compose up -d --build`.
 - **Frontend-only work** can run the UI on the host instead (`cd frontend && npm install && npm run dev`), against the containerised API at `http://localhost:8000`.
-- **Migrations.** Database migrations run on every backend boot (`alembic upgrade heads`). A fresh, empty database is first built by `python -m scripts.init_fresh_db`.
+- **Migrations.** Database migrations run on every backend boot (`alembic upgrade heads`). A fresh, empty database is first built by `python -m scripts.init_fresh_db`. To update an existing environment, stop the backend before you pull ([self-hosting guide §10](docs/getting-started/self-hosting.md#10-updating)).
 - **Everything else** — services, ports, dials, troubleshooting — is in the [self-hosting guide](docs/getting-started/self-hosting.md).
 
 ---
