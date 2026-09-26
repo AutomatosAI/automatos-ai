@@ -1,4 +1,4 @@
-"""Document ActionDefinitions (list, upload, delete, reprocess)."""
+"""Document ActionDefinitions (list, upload, read, search, delete, reprocess, templates, brand kit)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -274,7 +274,7 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "format": {
                     "type": "string",
-                    "description": "Optional filter — pdf, docx or xlsx.",
+                    "description": "Optional filter — pdf, docx, xlsx, social_image or social_video.",
                 },
                 "category": {
                     "type": "string",
@@ -316,5 +316,118 @@ def register_documents_actions(registry: ActionRegistry) -> None:
         examples=[
             "what fields does the Branded Letter template need?",
             "show the schema for that template",
+        ],
+    ))
+
+    # PRD-251 US-115: the brand kit every branded document and Socials post renders
+    # with. The tools call the functions the REST routes call
+    # (modules/documents/brand_kit.py). The logo, logo mark and font FILES are
+    # uploaded by a person; neither tool uploads anything.
+    registry.register(ActionDefinition(
+        name="platform_get_brand_kit",
+        description=(
+            "Read the workspace brand kit: name, tagline, hex colours, body and heading "
+            "fonts, logo and logo mark, company contact details, the brand's social handle "
+            "per network, and its voice (tone words and banned phrases). Branded documents "
+            "and Socials posts render with it. Also returns suggestions: values the "
+            "workspace already knows (its business profile and name) to fill empty fields "
+            "with. Read it before drafting on-brand copy or changing the kit."
+        ),
+        category="documents",
+        parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
+        tags=["documents", "brand", "brand kit", "colours", "fonts", "logo", "voice", "socials"],
+        examples=[
+            "what's our brand kit?",
+            "which colours and fonts does our brand use?",
+            "what tone of voice should our posts have?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_brand_kit",
+        description=(
+            "Change fields of the workspace brand kit. Send only the fields to change; "
+            "every other field keeps its value. company and voice merge key by key; "
+            "social_handles replaces the whole map, so send every handle to keep (a "
+            "network left out, or given an empty handle, is removed). The kit is "
+            "validated first: an invalid value is refused with the reason and nothing "
+            "is saved. The logo, logo mark and font files are uploaded by a person in "
+            "the brand kit settings; this tool sets text, colours, fonts and http(s) "
+            "logo URLs only."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The brand's name."},
+                "tagline": {"type": "string", "description": "The brand's tagline."},
+                "primary_color": {"type": "string", "description": "Hex colour, such as #1a1a2e or #abc."},
+                "secondary_color": {"type": "string", "description": "Hex colour."},
+                "accent_color": {"type": "string", "description": "Hex colour."},
+                "text_color": {"type": "string", "description": "Hex colour of body text."},
+                "font_family": {
+                    "type": "string",
+                    "description": "The body font as a CSS font stack, such as Inter, sans-serif.",
+                },
+                "heading_font": {
+                    "type": "string",
+                    "description": "The headings' font stack, such as \"Brand Display\", serif. Empty: the body font.",
+                },
+                "logo_url": {
+                    "type": "string",
+                    "description": "An http(s) URL of the logo. An uploaded logo is used instead when there is one.",
+                },
+                "logo_mark_url": {
+                    "type": "string",
+                    "description": "An http(s) URL of the square logo mark (the icon beside or instead of the logo).",
+                },
+                "company": {
+                    "type": "object",
+                    "description": "Contact details; merged key by key.",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "address": {"type": "string"},
+                        "email": {"type": "string"},
+                        "phone": {"type": "string"},
+                        "website": {"type": "string"},
+                    },
+                },
+                "social_handles": {
+                    "type": "object",
+                    "description": (
+                        "The brand's handle per network, keyed by toolkit name (twitter, "
+                        "instagram, linkedin, tiktok, youtube or another connected toolkit), "
+                        "with or without the @, such as {\"twitter\": \"@acme\", \"linkedin\": "
+                        "\"acme-inc\"}. Replaces the whole map."
+                    ),
+                },
+                "voice": {
+                    "type": "object",
+                    "description": "How the brand sounds; merged key by key.",
+                    "properties": {
+                        "tone": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "3 to 5 tone words, such as warm, plain, confident. An empty list clears them.",
+                        },
+                        "banned_phrases": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Phrases the brand never uses (up to 50).",
+                        },
+                    },
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        admin_only=True,  # F151: REST PUT /brand-kit is workspace:manage
+        tags=["documents", "brand", "brand kit", "colours", "fonts", "voice", "socials", "setup"],
+        examples=[
+            "set our primary brand colour to #0055aa",
+            "our tone of voice is warm, plain and confident",
+            "add our instagram handle to the brand kit",
         ],
     ))

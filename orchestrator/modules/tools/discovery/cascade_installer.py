@@ -138,6 +138,10 @@ def clone_agent_to_workspace(
         is_featured=False,
         install_count=0,
         version=marketplace_agent.version,
+        # The persona is the agent's voice: its clone keeps it (PRD-251 US-120).
+        persona_id=marketplace_agent.persona_id,
+        custom_persona_prompt=marketplace_agent.custom_persona_prompt,
+        use_custom_persona=bool(marketplace_agent.use_custom_persona),
     )
     db.add(cloned)
     db.flush()
@@ -147,6 +151,21 @@ def clone_agent_to_workspace(
         cloned.skills = list(marketplace_agent.skills)
 
     return cloned, agent_name
+
+
+def workspace_clone_of(db: Session, workspace_id: UUID, marketplace_agent):
+    """The workspace's own copy of ``marketplace_agent``, or None: an install reuses it."""
+    from core.models.core import Agent
+
+    return (
+        db.query(Agent)
+        .filter(
+            Agent.cloned_from_id == marketplace_agent.id,
+            Agent.workspace_id == workspace_id,
+            Agent.owner_type == 'workspace',
+        )
+        .first()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -436,12 +455,15 @@ async def cascade_recipe_dependencies(
     marketplace_recipe,
     cloned_recipe,
     user_id_int: Optional[int] = None,
+    remap_steps: bool = True,
 ) -> CascadeResult:
     """
     After cloning a marketplace recipe, auto-install its dependencies:
-      1. Clone all recommended agents from marketplace
+      1. Clone each recommended agent from the marketplace, or reuse the
+         workspace's clone of it (a package installs its agents first)
       2. Cascade each agent's dependencies (model, skills, tools)
-      3. Remap recipe steps to point to cloned agent IDs
+      3. Remap recipe steps to point to the workspace's agent IDs; a re-install
+         passes remap_steps=False, so the workspace's own copy is left as it is
       4. Warn about OAuth connections for required_tools
     """
     from core.models.core import Agent
@@ -492,20 +514,20 @@ async def cascade_recipe_dependencies(
             continue
 
         try:
-            cloned_agent, final_name = clone_agent_to_workspace(
-                db, workspace_id, marketplace_agent, user_id_int,
-            )
+            cloned_agent = workspace_clone_of(db, workspace_id, marketplace_agent)
+            if cloned_agent is None:
+                cloned_agent, final_name = clone_agent_to_workspace(
+                    db, workspace_id, marketplace_agent, user_id_int,
+                )
+                result.cloned_items.append({
+                    "type": "agent",
+                    "name": final_name,
+                    "id": cloned_agent.id,
+                })
+                # Increment install count on marketplace agent
+                marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
             agent_name_to_cloned_id[marketplace_agent.name] = cloned_agent.id
             marketplace_id_to_cloned_id[marketplace_agent.id] = cloned_agent.id
-
-            result.cloned_items.append({
-                "type": "agent",
-                "name": final_name,
-                "id": cloned_agent.id,
-            })
-
-            # Increment install count on marketplace agent
-            marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
 
             # Cascade agent's own dependencies
             agent_cascade = await cascade_agent_dependencies(
@@ -523,7 +545,7 @@ async def cascade_recipe_dependencies(
             result.warnings.append(f"Failed to install agent '{agent_name}': {e}")
 
     # --- 2. Remap recipe steps ---
-    if (agent_name_to_cloned_id or marketplace_id_to_cloned_id) and cloned_recipe.steps:
+    if remap_steps and (agent_name_to_cloned_id or marketplace_id_to_cloned_id) and cloned_recipe.steps:
         _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id, marketplace_id_to_cloned_id)
 
     # --- 3. OAuth warnings for recipe-level required_tools not covered by agents ---
@@ -573,19 +595,25 @@ def _remap_recipe_steps(
       - agent_id (int) — matched by marketplace agent ID → cloned ID map
       - prompt_template text — fuzzy match agent name in prompt text
       - (none) — round-robin assign from cloned agents list
+
+    A fixed generate_document step renders a template and has no agent: it is
+    never given one (PRD-251 US-120). The steps are new dicts: the clone never
+    shares its steps with the marketplace row it was copied from.
     """
     from sqlalchemy.orm.attributes import flag_modified
 
-    steps = cloned_recipe.steps
-    if not isinstance(steps, list):
+    from core.models.core import PLAYBOOK_DOCUMENT_STEP
+
+    if not isinstance(cloned_recipe.steps, list):
         return
+    steps = [dict(step) if isinstance(step, dict) else step for step in cloned_recipe.steps]
 
     id_map = marketplace_id_to_cloned_id or {}
     cloned_ids = list(agent_name_to_id.values())
     changed = False
 
     for idx, step in enumerate(steps):
-        if not isinstance(step, dict):
+        if not isinstance(step, dict) or step.get("type") == PLAYBOOK_DOCUMENT_STEP:
             continue
 
         matched = False

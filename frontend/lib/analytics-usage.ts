@@ -58,6 +58,39 @@ export function billingBadge(billing: string | null | undefined): BillingBadge {
   }
 }
 
+/** What each ``request_type`` (the LANE that spent) reads as on the page. */
+export const LANE_LABELS: Record<string, string> = {
+  chat: 'Chat',
+  board_task: 'Board tickets',
+  mission: 'Missions',
+  heartbeat: 'Heartbeats',
+  scheduled_task: 'Scheduled tasks',
+  session: 'Claude Code sessions',
+  embedding: 'Embeddings',
+  rerank: 'Rerank',
+  // PRD-251 D13: renders (seconds at $0) and toolkit footage, stills and voice.
+  media: 'Media',
+  recipe: 'Playbooks',
+  watch: 'Watches',
+  digest: 'Digests',
+  memory_distill: 'Memory distil',
+  thread_checkpoint: 'Thread checkpoints',
+  complexity_assessor: 'Complexity assessor',
+  graph_extraction: 'Knowledge graph',
+  graph_community_title: 'Graph communities',
+  entity_extraction: 'Entity extraction',
+  planner: 'Mission planner',
+  verifier: 'Mission verifier',
+  planning: 'Board planning',
+  orchestrator: 'Orchestrator (untagged)',
+  manual_run: 'Manual runs',
+}
+
+/** A known lane's label; an unknown one keeps its name, underscores spaced. */
+export function laneLabel(lane: string): string {
+  return LANE_LABELS[lane] || lane.replace(/_/g, ' ')
+}
+
 /** ``anthropic/claude-opus-4.6`` → ``claude-opus-4.6``; a bare id stays. */
 export function shortenModelName(name: string | null | undefined): string {
   if (!name) return 'unknown'

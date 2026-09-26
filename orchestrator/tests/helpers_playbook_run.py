@@ -1,6 +1,8 @@
 """A two-step playbook ("Monday dispatch") through the real step loop and the
 real board bridge, faking only the edges: the session, the step's agent call,
-the clock, the log upload and the notifications. Shared by F123, F125 and F130."""
+the clock, the log upload and the notifications. Shared by F123, F125 and F130;
+``patch_edges`` is the same faking for a test that brings its own steps
+(PRD-251 US-117)."""
 from __future__ import annotations
 
 import asyncio
@@ -76,6 +78,9 @@ class _Pad:
     def get_exports(self):
         return {}
 
+    def step_exports(self, step_order):
+        return {}
+
     def _hgetall(self):
         return {}
 
@@ -144,8 +149,23 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
         Agent: [SimpleNamespace(id=7, name="CLUB SECRETARY", configuration={}, status=agent_status)],
         BoardTask: [card],
     })
+    patch_edges(monkeypatch, session=session, step=_step, clock=clock)
+
+    async def _run():
+        await rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None)
+        if after_run is not None:
+            after_run()
+
+    asyncio.run(_run())
+    return execution, card
+
+
+def patch_edges(monkeypatch, *, session, step, pad=_Pad, clock=None):
+    """Fake one run's edges: its session (rows by model), the agent step call
+    ``step(**kwargs)``, the scratchpad class ``pad``, memory, the clock (a
+    one-item list, when given), the log upload, notifications, the board bridge."""
     pad_mod = types.ModuleType("core.services.playbook_scratchpad")
-    pad_mod.PlaybookScratchpad = _Pad
+    pad_mod.PlaybookScratchpad = pad
     mem_mod = types.ModuleType("core.services.playbook_memory_service")
     mem_mod.PlaybookMemoryService = _Memory
     monkeypatch.setitem(sys.modules, pad_mod.__name__, pad_mod)
@@ -153,8 +173,9 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
     # The loop reads this system_setting eagerly, and the test DB seeds none.
     monkeypatch.setattr(type(app_config), "RECIPE_DEFAULT_MAX_ITERATIONS", 3)
     monkeypatch.setattr(rex, "SessionLocal", lambda: session)
-    monkeypatch.setattr(rex, "time", SimpleNamespace(time=lambda: clock[0]))
-    monkeypatch.setattr(rex, "_execute_step", _step)
+    if clock is not None:
+        monkeypatch.setattr(rex, "time", SimpleNamespace(time=lambda: clock[0]))
+    monkeypatch.setattr(rex, "_execute_step", step)
     monkeypatch.setattr(rex, "_is_session_step", lambda db, agent: False)
     monkeypatch.setattr(rex, "_upload_step_log_to_s3", lambda ws, ex, order, log: LOG.format(order))
     monkeypatch.setattr(rex, "_dispatch_playbook_event", _nothing)
@@ -164,11 +185,3 @@ def run_playbook(monkeypatch, *, outcomes, step_seconds, exec_config, steps=None
     monkeypatch.setattr(board_task_bridge, "create_recipe_board_task", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "update_recipe_board_task_progress", lambda *a, **k: None)
     monkeypatch.setattr(playbook_engine_heartbeat, "_emit_playbooks_primitive", lambda *a, **k: None)
-
-    async def _run():
-        await rex._execute_recipe_inner("exec-120", 79, WS, input_data or {}, None)
-        if after_run is not None:
-            after_run()
-
-    asyncio.run(_run())
-    return execution, card

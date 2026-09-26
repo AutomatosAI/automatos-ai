@@ -153,10 +153,8 @@ async def test_generate_stamps_template_attribution(monkeypatch, tmp_path):
 
 
 def _suggestions():
-    try:
-        from api.document_brand_kit import build_brand_suggestions
-    except Exception as e:  # env without the heavy router deps
-        pytest.skip(f"api.document_brand_kit not importable in this env: {e}")
+    from modules.documents.brand_kit import build_brand_suggestions
+
     return build_brand_suggestions
 
 

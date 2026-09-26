@@ -1,0 +1,70 @@
+{
+  "name": "Quote card",
+  "description": "A pull-quote set large on the brand's paper, one phrase in the brand colour, with who said it. Ported from the automatos-social quote family.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "quote": {
+      "type": "text",
+      "label": "Quote",
+      "description": "The words, without quotation marks: the card adds them. Use | to break the line.",
+      "max_chars": 180
+    },
+    "quote_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the quote shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 60
+    },
+    "attribution": {
+      "type": "text",
+      "label": "Attribution",
+      "description": "Who said it, and where or when, e.g. LangChain, 2026.",
+      "max_chars": 80
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Save this post. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "sample_data": {
+    "eyebrow": "FIELD NOTES",
+    "quote": "The model is now a commodity. The harness is the moat.",
+    "quote_accent": "harness is the moat",
+    "attribution": "LangChain, canonical definition, 2026",
+    "counter": "",
+    "handle": "@automatos.app",
+    "cta": "Save this post"
+  }
+}

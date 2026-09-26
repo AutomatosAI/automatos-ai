@@ -200,3 +200,20 @@ def inputs_problem(value: Any) -> Optional[str]:
     if bad:
         return f"inputs names must be letters, digits and _ (a step reads each as {{{{name}}}}): {bad}"
     return None
+
+
+def with_input_defaults(inputs: Dict[str, Any], declared: Any) -> Dict[str, Any]:
+    """``inputs`` plus the declared default of each input the run was not given (a new dict).
+
+    The run route fills them before a run starts; a scheduled run, a tool's run
+    and a retry start with only what they were given (PRD-251 US-120: the weekly
+    Socials Playbook is scheduled). An input declared without a default stays
+    missing, and F055 names it.
+    """
+    filled = dict(inputs)
+    if not isinstance(declared, dict):
+        return filled
+    for name, spec in declared.items():
+        if name not in filled and isinstance(spec, dict) and "default" in spec:
+            filled[name] = spec["default"]
+    return filled

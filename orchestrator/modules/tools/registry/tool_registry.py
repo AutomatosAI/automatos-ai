@@ -35,6 +35,24 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+# generate_document's wording (PRD-251 US-117). The chat lane's inline schema
+# (modules/agents/services/agent_platform_tools.py) reads the same text, so both
+# lanes route a social image or video request to it and describe it alike.
+GENERATE_DOCUMENT_DESCRIPTION = (
+    "Generate a polished PDF, DOCX, or XLSX document from data, or render a social image (PNG) or "
+    "social video (MP4) from one of the workspace's social templates. Use when the user asks for a "
+    "report, invoice, export, or any formatted document, or for a social media image, card, "
+    "carousel slide, reel, story or short video made from a template. The file is saved to "
+    "Deliverables. To draft a post for people to approve in the Socials tab, use "
+    "platform_create_social_post instead."
+)
+GENERATE_DOCUMENT_FORMAT_DESCRIPTION = (
+    "Output format: pdf, docx or xlsx; social_image (a PNG) or social_video (an MP4) render a "
+    "social template of that format and need its template_id or template_name "
+    "(platform_list_templates lists them)."
+)
+
+
 class ToolCategory(Enum):
     """Tool categories for organization and filtering"""
     RESEARCH = "research"              # RAG, semantic search, CodeGraph
@@ -1178,11 +1196,15 @@ class ToolRegistry:
         # DOCUMENT GENERATION (PRD-63)
         # ==========================================
 
+        # PRD-251 US-117: the social formats render a social template through
+        # media-render; every format generate() dispatches is offered.
+        from core.models.core import DOCUMENT_TEMPLATE_FORMATS
+
         self.register_tool(ToolSpec(
             name="generate_document",
             category=ToolCategory.FILE_OPERATIONS,
             description=(
-                "Generate a polished PDF, DOCX, or XLSX document for download. "
+                f"{GENERATE_DOCUMENT_DESCRIPTION} "
                 "PREFER this over write_file when the user needs a formatted, downloadable document. "
                 "WILL produce a BLANK document if you omit the 'data' parameter — you MUST include "
                 "actual written content. For PDFs, include 'sections' with full paragraphs. "
@@ -1200,9 +1222,9 @@ class ToolRegistry:
                 ToolParameter(
                     name="format",
                     type="string",
-                    description="Output format: pdf, docx, or xlsx",
+                    description=GENERATE_DOCUMENT_FORMAT_DESCRIPTION,
                     required=True,
-                    enum=["pdf", "docx", "xlsx"]
+                    enum=list(DOCUMENT_TEMPLATE_FORMATS)
                 ),
                 ToolParameter(
                     name="data",
@@ -1213,7 +1235,9 @@ class ToolRegistry:
                         "paragraphs of text here — this is the body of the document.\"}], "
                         "\"author\": \"...\", \"date\": \"...\"}. "
                         "You MUST write out the full text content for each section — do not leave sections empty. "
-                        "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}."
+                        "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}. "
+                        "For a social template (social_image / social_video): its variables by name, "
+                        "as platform_get_template_schema lists them; one left out takes its default."
                     ),
                     required=True
                 ),

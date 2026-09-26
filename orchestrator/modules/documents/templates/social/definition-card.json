@@ -1,0 +1,107 @@
+{
+  "name": "Definition card",
+  "description": "\"What is X?\": a headline and up to three numbered cards that explain it, on the brand's paper. A carousel's second slide or a single explainer. Ported from the automatos-social definition family.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1200x628",
+    "1600x900"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Eyebrow",
+      "description": "A short label in the dark pill, e.g. WHY IT MATTERS. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. WHAT IS|AN AGENT?",
+      "max_chars": 80
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in the brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "card_1_title": {
+      "type": "text",
+      "label": "Card 1 heading",
+      "description": "The heading of card 1.",
+      "max_chars": 60
+    },
+    "card_1_body": {
+      "type": "text",
+      "label": "Card 1 text",
+      "description": "One or two sentences under it.",
+      "max_chars": 180
+    },
+    "card_2_title": {
+      "type": "text",
+      "label": "Card 2 heading",
+      "description": "The heading of card 2.",
+      "max_chars": 60
+    },
+    "card_2_body": {
+      "type": "text",
+      "label": "Card 2 text",
+      "description": "One or two sentences under it.",
+      "max_chars": 180
+    },
+    "card_3_title": {
+      "type": "text",
+      "label": "Card 3 heading",
+      "description": "The heading of card 3. Leave empty for none.",
+      "default": "",
+      "max_chars": 60
+    },
+    "card_3_body": {
+      "type": "text",
+      "label": "Card 3 text",
+      "description": "One or two sentences under it. Leave empty for none.",
+      "default": "",
+      "max_chars": 180
+    },
+    "counter": {
+      "type": "text",
+      "label": "Page counter",
+      "description": "For a post in a series, e.g. 02 / 10. Leave empty for none.",
+      "default": "",
+      "max_chars": 12
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "cta": {
+      "type": "text",
+      "label": "Call to action",
+      "description": "The footer's call to action, e.g. Swipe to know more. Leave empty for none.",
+      "default": "",
+      "max_chars": 48
+    }
+  },
+  "sample_data": {
+    "eyebrow": "FIRST, THE CONCEPT",
+    "headline": "WHAT IS|AN AGENT?",
+    "headline_accent": "AGENT?",
+    "card_1_title": "Not just a chatbot",
+    "card_1_body": "A chatbot replies. An agent acts: it plans, uses tools, loops on results and drives toward a goal.",
+    "card_2_title": "The core loop",
+    "card_2_body": "Perceive the input, reason about it, pick an action, run it, observe the result, and repeat until done.",
+    "card_3_title": "Three must-haves",
+    "card_3_body": "A model to think with, tools to call, and a loop that keeps running until the goal is met.",
+    "counter": "02 / 10",
+    "handle": "@automatos.app",
+    "cta": "Swipe to know more"
+  }
+}

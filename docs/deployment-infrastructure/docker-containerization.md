@@ -128,6 +128,39 @@ Workers utilize a centralized environment configuration via `worker_config.py` t
 
 Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/tests/test_prd203_cs8_worker_auth.py:1-116](), [orchestrator/requirements.txt:136-143](), [infrastructure/.env.example:120](), [orchestrator/tests/test_dockerfile_prod_parity.py:33]()
 
+## 4. `media-render` — the Socials renderer (PRD-251)
+
+`media-render` turns a template, the brand kit, the voice and the music into a finished MP4 or PNG. It assembles; it never generates: footage, stills and premium voice come from the workspace's own Composio tools and reach it as files (PRD-251 D3). Its Dockerfile is `services/media-render/Dockerfile`, and its API and settings are in `services/media-render/README.md`.
+
+| | |
+|---|---|
+| **Image** | `python:3.12-slim` + Node 22 + Hyperframes **0.8.62** (pinned) + chrome-headless-shell (installed at build) + ffmpeg + Kokoro v1.0 (fetched at build, hash-checked). Hyperframes telemetry, skill installs and update checks are switched off, and boot refuses to start without those switches. |
+| **Build** | No build args (`orchestrator/tests/test_dockerfile_prod_parity.py` registers none). The last stage, `production`, is what Railway builds; CI also builds `test`, which adds pytest. |
+| **Port** | 8090 (`MEDIA_RENDER_PORT`), internal only. Every route but `/health` needs `X-Internal-Token`. |
+| **Token** | `SOCIALS_RENDER_TOKEN`: the same name on the service and on the backend, which sends it (`orchestrator/core/media_render_client.py`). Boot refuses production without one. |
+| **Media inputs** | Presigned GETs on our own storage only: `MEDIA_RENDER_MEDIA_URL_PREFIXES`. Any other URL is refused before a fetch. |
+| **Concurrency** | Two renders at once overall, one per workspace; further jobs queue, first come first served (`MEDIA_RENDER_MAX_CONCURRENT_RENDERS`, `MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE`). The lanes are in-process, so run **one replica**. |
+| **GPL boundary** | `phonemizer` and espeak-ng (GPL-3.0, pulled in by `kokoro-onnx`) live only in this image; the orchestrator never imports them. |
+
+**How the backend uses it.** `POST /api/socials/posts/{id}/render` checks the post, its template, the plan's monthly render minutes (`render_minutes_month` in `config.PLAN_TIERS`: Basic 10, Pro 60, Business 240; refused before any call to the renderer), storage and the renderer's `/health`. Then it moves the post to `rendering` and renders in the background (`orchestrator/modules/socials/render.py`): submit, poll, copy each output to S3 under `social-media/{workspace}/{post}/{file}`, register it as a Deliverable, and end the post in `needs_approval` with the files and their sha256 in `media`, or in `failed` with the report in its history. The rendered seconds are booked on the `media` usage lane at $0; they are what the quota counts. A render stranded by a restart is failed by the boot reaper (`core/boot/reaper.py`).
+
+| Backend setting | Default | What it does |
+|---|---|---|
+| `SOCIALS_RENDER_URL` | empty (local: `http://media-render:8090`) | Where the renderer is. Empty = rendering is not configured. |
+| `SOCIALS_RENDER_TOKEN` | empty | Sent as `X-Internal-Token`. |
+| `SOCIALS_RENDER_TIMEOUT_SECONDS` | 900 | Read timeout of each call; `POST /render` answers once the job is staged, spoken, mixed and checked. |
+| `SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS` | 10 | How long a connection may take before the renderer counts as unreachable. |
+| `SOCIALS_RENDER_POLL_SECONDS` / `SOCIALS_RENDER_MAX_WAIT_SECONDS` | 5 / 1500 | How often a render is polled, and how long it is waited for (queue and render). Keep the wait under `BOOT_REAPER_STALE_MINUTES`. |
+| `PLAYBOOK_PROGRESS_STAMP_SECONDS` | 60 | How often a Playbook's render step (a fixed `generate_document` step) stamps the run's progress while it waits. Keep it well under `TASK_STALL_TIMEOUT_SECONDS`, or the reconciler fails the run as stalled and starts it again. |
+
+**Local edition.** The optional compose profile `media` (`docker compose --profile media up -d media-render`), capped at 4 CPUs and 8 GB. Without it, a render answers "Rendering needs the media profile". See [self-hosting](../getting-started/self-hosting.md#7b-media-rendering-the-media-profile).
+
+**SaaS.** Its own Railway service, 4 vCPU / 8 GB, one replica (`infrastructure/railway-manifest.json`). The owner's setup steps are in [self-hosting](../getting-started/self-hosting.md#media-render-on-railway-saas).
+
+**CI.** The `media-render` job in `.github/workflows/test.yml` checks that `docker compose --profile media config` carries the service (and the default profile does not), builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and `/health`, renders the fixture bundle through the API with the token, and asserts the MP4 with ffprobe and its loudness with ebur128.
+
+Sources: [services/media-render/Dockerfile](), [services/media-render/README.md](), [orchestrator/core/media_render_client.py](), [orchestrator/modules/socials/render.py](), [docker-compose.yml]()
+
 ## Multi-Service Coordination
 
 The `docker-compose.yml` file orchestrates the local stack, including a local S3-compatible store (MinIO) to provide a durable knowledge flywheel during development [docker-compose.yml:83-89](). It also includes an optional Qdrant service for durable and field memory, activated via the `memory` profile [docker-compose.yml:116-133]().

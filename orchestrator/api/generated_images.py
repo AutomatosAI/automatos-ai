@@ -22,6 +22,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
 from core.services.image_store import (
+    IMAGE_ROUTE,
     ImageRangeNotSatisfiable,
     get_image_store,
     parse_byte_range,
@@ -30,7 +31,7 @@ from core.services.image_store import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/generated-images", tags=["Generated Images"])
+router = APIRouter(prefix=IMAGE_ROUTE, tags=["Generated Images"])
 
 CACHE_CONTROL = "public, max-age=86400, immutable"
 # On every response, errors too. nosniff is also what makes a declared type safe:

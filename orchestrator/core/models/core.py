@@ -10,6 +10,8 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, 
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
+# PRD-251 S1.2: the social template formats live with their contract, which is pure.
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -1291,6 +1293,14 @@ class Artifact(Base):
     )
 
 
+# A playbook step's type: an agent step (the default, no "type") or a fixed
+# generate_document step, which renders a template with no agent and no prompt
+# (PRD-63; social formats, PRD-251 US-117). api/recipe_executor.py runs both.
+PLAYBOOK_DOCUMENT_STEP = "generate_document"
+PLAYBOOK_STEP_FIELDS = ("step_id", "order", "agent_id", "prompt_template")
+PLAYBOOK_DOCUMENT_STEP_FIELDS = ("step_id", "order")
+
+
 class WorkflowTemplate(Base):
     """
     Workflow templates that users can use to quickly create workflows.
@@ -1391,7 +1401,8 @@ class WorkflowTemplate(Base):
             if not isinstance(step, dict):
                 return False, f"Step {idx} must be an object"
 
-            required_fields = ['step_id', 'order', 'agent_id', 'prompt_template']
+            is_document_step = step.get("type") == PLAYBOOK_DOCUMENT_STEP
+            required_fields = PLAYBOOK_DOCUMENT_STEP_FIELDS if is_document_step else PLAYBOOK_STEP_FIELDS
             for field in required_fields:
                 if field not in step:
                     return False, f"Step {idx} missing required field: {field}"
@@ -1499,8 +1510,16 @@ class WorkflowTemplate(Base):
 # PRD-63: Document Generation Module
 # ===================================================================
 
+# PRD-251 S1.2 (D4): social_image and social_video templates are compositions
+# the media-render service renders; their ``blocks`` shape, and the two format
+# names (SOCIAL_TEMPLATE_FORMATS, imported above), are core/social_templates.py.
+# The prd251_wave1 migration moves the CHECK below to this list.
+DOCUMENT_TEMPLATE_FORMATS = ("pdf", "docx", "xlsx") + SOCIAL_TEMPLATE_FORMATS
+
+
 class DocumentTemplate(Base):
-    """Document templates for PDF, DOCX, XLSX generation (PRD-63)"""
+    """Document templates: PDF, DOCX and XLSX (PRD-63), and social image and video
+    compositions (PRD-251 D4)."""
     __tablename__ = 'document_templates'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -1522,6 +1541,8 @@ class DocumentTemplate(Base):
     # PRD-167 S2: canonical block-tree body ({"version", "blocks": [...]}).
     # When present, this is the source of truth and renders to PDF/DOCX via the block
     # renderers; templates without blocks fall back to the legacy template_content path.
+    # PRD-251 D4: a social template's composition instead —
+    # {html, css, variables_schema, sizes, audio_plan}, checked on save.
     blocks = Column(JSONB, nullable=True)
 
     # Metadata
@@ -1539,7 +1560,10 @@ class DocumentTemplate(Base):
     updated_at = Column(DateTime, default=func.now(), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        CheckConstraint("format IN ('pdf', 'docx', 'xlsx')", name='check_document_template_format'),
+        CheckConstraint(
+            "format IN (" + ", ".join(f"'{fmt}'" for fmt in DOCUMENT_TEMPLATE_FORMATS) + ")",
+            name='check_document_template_format',
+        ),
         UniqueConstraint('workspace_id', 'name', 'version', name='uq_template_workspace_name_version'),
         {'extend_existing': True}
     )

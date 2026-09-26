@@ -2,6 +2,7 @@
 import { apiClient } from '@/lib/api-client'
 import type {
   BlockDocument,
+  BrandFontFile,
   BrandKit,
   BrandSuggestions,
   GenerateDocumentResult,
@@ -19,6 +20,16 @@ export interface PreviewBlocksResult {
 }
 
 export const BRAND_LOGO_PATH = '/api/documents/brand-kit/logo'
+// PRD-251 D5: the square logo mark and the font files, stored like the logo.
+export const BRAND_LOGO_MARK_PATH = '/api/documents/brand-kit/logo-mark'
+export const BRAND_FONTS_PATH = '/api/documents/brand-kit/fonts'
+
+// The face an uploaded font file provides.
+export interface BrandFontFace {
+  family: string
+  weight: number
+  style: BrandFontFile['style']
+}
 
 export const templateBlocksApi = {
   // Variable catalog with resolved sample values (drives the chip picker).
@@ -52,12 +63,30 @@ export const templateBlocksApi = {
     return apiClient.post<BrandKit & { logo_route: string }>(BRAND_LOGO_PATH, form)
   },
   deleteLogo: () => apiClient.delete<BrandKit>(BRAND_LOGO_PATH),
+  uploadLogoMark: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<BrandKit & { logo_mark_route: string }>(BRAND_LOGO_MARK_PATH, form)
+  },
+  deleteLogoMark: () => apiClient.delete<BrandKit>(BRAND_LOGO_MARK_PATH),
 
-  // The stored logo needs auth headers a plain <img src> cannot send (SaaS), so
-  // fetch it and hand back an object URL (the FilePreview pattern). null = none.
-  fetchLogoObjectUrl: async (): Promise<string | null> => {
+  // Font files (PRD-251 D5): a woff2 and the face it provides. The same face again replaces it.
+  uploadFont: (file: File, face: BrandFontFace) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('family', face.family)
+    form.append('weight', String(face.weight))
+    form.append('style', face.style)
+    return apiClient.post<BrandKit>(BRAND_FONTS_PATH, form)
+  },
+  deleteFont: (id: string) => apiClient.delete<BrandKit>(`${BRAND_FONTS_PATH}/${id}`),
+
+  // A stored brand file (the logo, the mark, a font) needs auth headers a plain
+  // <img src> or @font-face cannot send (SaaS), so fetch it and hand back an
+  // object URL (the FilePreview pattern). null = none.
+  fetchBrandFileObjectUrl: async (path: string): Promise<string | null> => {
     const headers = await apiClient.getAuthHeaders()
-    const resp = await fetch(`${apiClient.getBaseUrl()}${BRAND_LOGO_PATH}`, { headers })
+    const resp = await fetch(`${apiClient.getBaseUrl()}${path}`, { headers })
     if (!resp.ok) return null
     return URL.createObjectURL(await resp.blob())
   },

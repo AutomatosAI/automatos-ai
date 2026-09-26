@@ -105,6 +105,9 @@ ALLOW_LIST: Set[str] = {
     "platform_cancel_watch",
     # F151: the workspace's own content and indexes.
     "platform_create_blog_post",
+    "platform_create_social_post",         # PRD-251: REST POST documents:create, editor and up
+    "platform_update_social_post",         # PRD-251: REST PATCH documents:update, editor and up
+    "platform_submit_social_post",         # PRD-251: REST POST .../submit documents:update; asks a person, never publishes
     "platform_generate_cover_image",
     "platform_upload_document",
     "platform_scan_business_site",
@@ -149,7 +152,11 @@ def _is_action_definition(node: ast.AST) -> bool:
 
 
 def _is_register_call(node: ast.AST) -> bool:
-    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "register"
+    """``registry.register(...)``, as every actions module writes it. Another
+    object's register (a Deliverable's, PRD-251 US-117) is not a registration; an
+    ActionDefinition registered any other way still fails the built-outside check."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "register"
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "registry")
 
 
 def _registered_definition(node: ast.AST) -> Optional[ast.Call]:

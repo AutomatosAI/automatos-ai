@@ -88,6 +88,13 @@ PLATFORM_KEY_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 WORKER_INTERNAL_URL=http://workspace-worker:8081
 # WORKER_INTERNAL_TOKEN -> root .env (optional; compose passes it to both services)
 
+# [ACTIVE] Where the backend reaches media-render, the Socials renderer (PRD-251
+# D3). It runs only with the media profile:
+#   docker compose --profile media up -d media-render
+# Without it, rendering a post says "Rendering needs the media profile".
+SOCIALS_RENDER_URL=http://media-render:8090
+# SOCIALS_RENDER_TOKEN -> root .env (optional; compose passes it to both services)
+
 # [ACTIVE] The worker's files live on YOUR machine: compose bind-mounts the host
 # directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} (root .env dial) at
 # /workspaces in both containers — read-write for the worker, read-only here.

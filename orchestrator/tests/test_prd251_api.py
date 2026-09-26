@@ -205,13 +205,26 @@ _VALID_BODY = {
 # ---------------------------------------------------------------------------
 
 
-def test_the_router_serves_every_wave_0_route():
+def test_the_router_serves_every_wave_0_and_wave_1_route():
     assert _router_routes() == sorted(
         [
             ("GET", "/api/socials/posts"),
             ("POST", "/api/socials/posts"),
             ("GET", "/api/socials/posts/{post_id}"),
             ("PATCH", "/api/socials/posts/{post_id}"),
+            # Wave 1 (S1.1c): rendering, the rendered files, the render minutes.
+            ("POST", "/api/socials/posts/{post_id}/render"),
+            ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
+            ("GET", "/api/socials/usage"),
+            # Wave 1 (S1.4): the source picker's search.
+            ("GET", "/api/socials/sources"),
+            # Wave 1 (S1.7): a chart template filled from a report (the infographic).
+            ("GET", "/api/socials/sources/reports/{report_id}/chart"),
+            # Wave 1 (S1.5): the voice picker's choices, and a voice toolkit's voices.
+            ("GET", "/api/socials/voices"),
+            ("GET", "/api/socials/voices/{toolkit}"),
+            # Wave 1 (S1.8): what a post's slots can be filled with, and the month's media spend.
+            ("GET", "/api/socials/footage"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

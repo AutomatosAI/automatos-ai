@@ -49,7 +49,7 @@ import {
   useDailyCostByModel,
 } from '@/hooks/use-unified-analytics'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
-import { billingBadge, shortenModelName } from '@/lib/analytics-usage'
+import { billingBadge, laneLabel, shortenModelName } from '@/lib/analytics-usage'
 import { AnalyticsOpenRouterCredits } from './analytics-openrouter-credits'
 
 interface Props {
@@ -107,35 +107,6 @@ function costText(cost: number, tokens: number, billing?: string | null): string
   if (tokens > 0 && billing === 'subscription') return 'plan'
   if (tokens > 0 && billing === 'free') return 'free'
   return formatCost(0)
-}
-
-const LANE_LABELS: Record<string, string> = {
-  chat: 'Chat',
-  board_task: 'Board tickets',
-  mission: 'Missions',
-  heartbeat: 'Heartbeats',
-  scheduled_task: 'Scheduled tasks',
-  session: 'Claude Code sessions',
-  embedding: 'Embeddings',
-  rerank: 'Rerank',
-  recipe: 'Playbooks',
-  watch: 'Watches',
-  digest: 'Digests',
-  memory_distill: 'Memory distil',
-  thread_checkpoint: 'Thread checkpoints',
-  complexity_assessor: 'Complexity assessor',
-  graph_extraction: 'Knowledge graph',
-  graph_community_title: 'Graph communities',
-  entity_extraction: 'Entity extraction',
-  planner: 'Mission planner',
-  verifier: 'Mission verifier',
-  planning: 'Board planning',
-  orchestrator: 'Orchestrator (untagged)',
-  manual_run: 'Manual runs',
-}
-
-function laneLabel(lane: string): string {
-  return LANE_LABELS[lane] || lane.replace(/_/g, ' ')
 }
 
 // Period selector component

@@ -359,6 +359,24 @@ describe('Socials on', () => {
     expect(statusOf('Off brand')).toHaveTextContent('Archived')
   })
 
+  it("an agent's draft reads as Drafted in the history, naming the agent (US-116)", async () => {
+    seedPost({
+      title: 'Agent draft', status: 'needs_approval', created_by: 'agent:7',
+      review_log: [
+        { at: '2026-09-22T09:00:00Z', by: 'agent:7', action: 'draft', comment: 'Drafted by Social Media Director.' },
+        { at: '2026-09-22T09:01:00Z', by: 'agent:7', action: 'submit', comment: null },
+      ],
+    })
+    renderTab()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agent draft/ }))
+    const history = within(detail('Agent draft')).getByRole('region', { name: 'History' })
+    expect(within(history).getByText('Drafted')).toBeInTheDocument()
+    expect(within(history).getByText('Drafted by Social Media Director.')).toBeInTheDocument()
+    expect(within(history).getByText('Sent for approval')).toBeInTheDocument()
+    expect(within(history).queryByText('draft')).toBeNull()
+  })
+
   it('an editor may review; a viewer may only read', async () => {
     seedPost({ title: 'For review', status: 'needs_approval' })
     server.role = 'editor'

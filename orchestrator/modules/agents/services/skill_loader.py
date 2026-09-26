@@ -29,12 +29,12 @@ from datetime import datetime
 from functools import lru_cache
 from collections import OrderedDict
 
+from core.builtin_skills import builtin_skill_paths, read_seed
 from core.security.git_sanitizer import (
     validate_git_url as _secure_validate_git_url,
     validate_branch as _secure_validate_branch,
     build_git_clone_cmd,
 )
-import hashlib
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -927,42 +927,30 @@ class SkillLoader:
     # Builtin-core runtime freshness
     # ========================================================================
 
-    # Map builtin-core skill names to their on-disk .md paths
-    _BUILTIN_PATHS: Dict[str, Path] = {
-        "platform-management": Path(__file__).resolve().parents[3] / "core" / "seeds" / "platform-management-skill.md",
-    }
+    # Builtin skill name → its generated seed file, built from the built-in
+    # skills manifest (core/seeds/skills/manifest.json), which the boot seeder
+    # and scripts/sync-skills.py read too. platform-management stays at
+    # core/seeds/platform-management-skill.md.
+    _BUILTIN_PATHS: Dict[str, Path] = builtin_skill_paths()
 
     def _refresh_builtin_if_stale(self, skill, db: Session) -> Optional[str]:
-        """Check if a builtin-core skill's DB row is stale vs the on-disk .md.
+        """Check if a builtin skill's DB row is stale vs its seed file.
 
-        Compares SHA-256 of the on-disk content against skill.content_hash.
+        Compares SHA-256 of the seed's body against skill.content_hash.
         If different, updates prompt_template + content_hash inline (~5ms).
         Returns the (possibly refreshed) prompt_template, or None to fall through.
         """
-        import hashlib
-
         disk_path = self._BUILTIN_PATHS.get(skill.name)
-        if not disk_path or not disk_path.exists():
-            return skill.prompt_template
-
-        raw = disk_path.read_text(encoding="utf-8").strip()
-        if raw.startswith("---"):
-            parts = raw.split("---", 2)
-            markdown_body = parts[2].strip() if len(parts) > 2 else raw
-        else:
-            markdown_body = raw
-
-        disk_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
-
-        if skill.content_hash == disk_hash:
+        seed = read_seed(disk_path) if disk_path else None
+        if seed is None or skill.content_hash == seed.content_hash:
             return skill.prompt_template
 
         # Stale — update DB inline
-        skill.prompt_template = markdown_body
-        skill.content_hash = disk_hash
+        skill.prompt_template = seed.body
+        skill.content_hash = seed.content_hash
         try:
             db.commit()
-            logger.info("Refreshed builtin-core skill '%s' from disk (hash=%s…)", skill.name, disk_hash[:12])
+            logger.info("Refreshed builtin skill '%s' from disk (hash=%s…)", skill.name, seed.content_hash[:12])
         except Exception:
             db.rollback()
             logger.warning("Failed to refresh builtin skill '%s' — using DB version", skill.name, exc_info=True)

@@ -312,20 +312,30 @@ BILLING_FREE = "free"                # the provider does not bill for calls (NVI
 BILLING_SUBSCRIPTION = "subscription"  # the user's own CLI plan (Claude Code, Codex)
 BILLING_UNKNOWN = "unknown"
 
+# PRD-251 D13: the ``media`` lane's own renderer. A render on the media-render
+# service costs nothing per call: it books its rendered seconds as units at $0,
+# and the monthly render quota reads them. Paid media rows name the workspace's
+# Composio toolkit (``fal_ai``, ``kieai``, …) and read under that slug.
+MEDIA_RENDER_PROVIDER = "media_render"
+MEDIA_RENDER_LABEL = "Media render"
+
 
 def describe_usage_provider(provider: Optional[str]) -> Dict[str, object]:
     """How a ``llm_usage.provider`` value reads on the analytics page.
 
-    Covers the registry (API providers) AND the session runtimes
+    Covers the registry (API providers), the session runtimes
     (``claude_code`` / ``codex``), which are not API providers and never carry
-    a key. ``billing`` is what the calls cost the operator: metered, free or
-    subscription. Unknown slugs keep their name so an old row is never hidden.
+    a key, and the media renderer. ``billing`` is what the calls cost the
+    operator: metered, free or subscription. Unknown slugs keep their name so
+    an old row is never hidden.
     """
     from core.cli_runtime import BILLING_SUBSCRIPTION as _SUB, USAGE_PROVIDER_LABELS
 
     raw = str(provider or "").strip().lower()
     if raw in USAGE_PROVIDER_LABELS:
         return {"slug": raw, "label": USAGE_PROVIDER_LABELS[raw], "kind": "runtime", "billing": _SUB}
+    if raw == MEDIA_RENDER_PROVIDER:
+        return {"slug": raw, "label": MEDIA_RENDER_LABEL, "kind": "media", "billing": BILLING_FREE}
     spec = get_spec(raw)
     if spec is None:
         return {"slug": raw or "unknown", "label": raw or "unknown", "kind": "unknown", "billing": BILLING_UNKNOWN}

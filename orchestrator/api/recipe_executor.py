@@ -26,7 +26,7 @@ import uuid as uuid_mod
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -35,10 +35,11 @@ from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
-from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
+from core.models.core import PLAYBOOK_DOCUMENT_STEP, RecipeExecution, WorkflowTemplate as WorkflowRecipe
 from core.security.surface import origin_surface, widget_scopes, widget_turn
 from core.security.widget_scopes import widget_tool_surface
 from core.services.playbook_scratchpad import answer_for_next_step
+from core.services.playbook_step_refs import resolve_step_references, step_values
 
 logger = logging.getLogger(__name__)
 
@@ -388,19 +389,41 @@ def _step_deadline(step_timeout_sec: float, session_step: bool, cfg) -> float:
     return max(float(step_timeout_sec), float(getattr(cfg, "CLI_LANE_STEP_TIMEOUT_SECONDS", 1800)))
 
 
-def _stamp_progress(db, execution) -> None:
-    """Record that the run is alive (execution_metadata.last_progress_at, naive UTC
-    like started_at); the reconciler's stall rule reads it. Rebuild the JSONB,
-    never mutate; a failure to stamp must never end the step."""
+def _progress_stamped(metadata) -> Dict[str, Any]:
+    """``metadata`` with the run's last progress time (naive UTC, like started_at):
+    a new dict. The reconciler's stall rule reads it."""
     from datetime import datetime as _dt
 
+    return {**dict(metadata or {}), "last_progress_at": _dt.utcnow().replace(microsecond=0).isoformat()}
+
+
+def _stamp_progress(db, execution) -> None:
+    """Record that the run is alive (execution_metadata.last_progress_at). Rebuild
+    the JSONB, never mutate; a failure to stamp must never end the step."""
     try:
-        meta = dict(getattr(execution, "execution_metadata", None) or {})
-        meta["last_progress_at"] = _dt.utcnow().replace(microsecond=0).isoformat()
-        execution.execution_metadata = meta
+        execution.execution_metadata = _progress_stamped(getattr(execution, "execution_metadata", None))
         db.commit()
     except Exception:  # noqa: BLE001
         logger.debug("[recipe_direct] progress stamp failed", exc_info=True)
+
+
+async def _stamping_progress(work: Awaitable[Any], stamp: Callable[[], None], every_seconds: float) -> Any:
+    """Await ``work``, calling ``stamp`` every ``every_seconds`` while it runs.
+
+    A fixed generate_document step waits on media-render for minutes (PRD-251
+    US-120): without a fresh stamp the reconciler fails the run as stalled after
+    TASK_STALL_TIMEOUT_SECONDS and starts it again, render and all.
+    """
+    async def beat() -> None:
+        while True:
+            await asyncio.sleep(every_seconds)
+            stamp()
+
+    beating = asyncio.ensure_future(beat())
+    try:
+        return await work
+    finally:
+        beating.cancel()
 
 
 def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str:
@@ -495,6 +518,7 @@ async def _execute_step(
     from core.composio.client import get_composio_client
     from core.composio.deny_list import composio_action_denial_async
     from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+    from core.composio.post_gate import post_action_refusal
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -829,10 +853,19 @@ async def _execute_step(
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
                 _denial = await composio_action_denial_async(tool_name)
                 call_ok = False  # F137: whether the call worked, never guessed from its text
+                # PRD-251 S3.5 (D14b): with Socials on, the step's agent drafts a
+                # post and a person approves it; it never publishes one directly —
+                # not from the dedup cache, the LinkedIn workaround or the spine.
+                # After the deny list, which always wins.
+                _post_refusal = None if _denial else await post_action_refusal(tool_name, workspace_id)
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
                     logger.warning(f"[recipe_step] Composio deny list refused {tool_name}")
+                elif _post_refusal:
+                    result_text = f"Error executing {tool_name}: {_post_refusal}"
+                    exec_ms = 0
+                    logger.warning(f"[recipe_step] Socials post gate refused {tool_name}")
                 elif _dedup_key in _composio_call_cache:
                     result_text, call_ok = _composio_call_cache[_dedup_key]
                     exec_ms = 0
@@ -1301,7 +1334,7 @@ async def _execute_recipe_inner(
 
         # F113: whatever the trigger stored (a string from a tool call, a retried
         # row), the steps read key-value pairs.
-        from core.services.playbook_inputs import playbook_inputs
+        from core.services.playbook_inputs import playbook_inputs, with_input_defaults
 
         input_data, _input_problem = playbook_inputs(input_data)
         if _input_problem:
@@ -1313,6 +1346,9 @@ async def _execute_recipe_inner(
         if not recipe:
             await _fail_execution(db, recipe_execution_id, "Recipe not found")
             return
+        # A scheduled run, a tool's run and a retry carry only what they were
+        # given: the playbook's declared defaults fill the rest, as the run route's do.
+        input_data = with_input_defaults(input_data, getattr(recipe, "inputs", None))
 
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == recipe_execution_id
@@ -1477,6 +1513,8 @@ async def _execute_recipe_inner(
         step_results: List[Dict[str, Any]] = []
         step_result: Dict[str, Any] = {}  # the last step's full dict (a budget stop reads its output)
         answers: Dict[str, str] = {}      # output_key -> that step's whole answer (F130 placeholders)
+        # PRD-251 US-117: what each finished step offers a fixed step's {{ step_N.key }}.
+        finished_steps: Dict[int, Dict[str, Any]] = {}
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
@@ -1550,8 +1588,10 @@ async def _execute_recipe_inner(
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+            step_type = step.get("type", "agent")
 
-            if not prompt_template:
+            # A fixed generate_document step has no agent and no prompt (PRD-251 US-117).
+            if not prompt_template and step_type != PLAYBOOK_DOCUMENT_STEP:
                 msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
                 logger.warning(f"[recipe_direct] {msg}")
                 step_result = {
@@ -1577,8 +1617,10 @@ async def _execute_recipe_inner(
             )
             logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
-            # Update execution progress
+            # Update execution progress. The stamp tells the reconciler the run is
+            # alive: a run of several steps outlives TASK_STALL_TIMEOUT_SECONDS.
             execution.current_step = idx + 1
+            execution.execution_metadata = _progress_stamped(execution.execution_metadata)
             db.commit()
 
             # PRD-239 S3b: a session agent's step is a Claude Code session on the
@@ -1631,35 +1673,36 @@ async def _execute_recipe_inner(
                 if context_block_parts:
                     clean_step_prompt = "\n\n".join(context_block_parts) + f"\n\n## Your Task\n{clean_step_prompt}"
 
-            # Check for generate_document step type (PRD-63)
-            step_type = step.get("type", "agent")
-            if step_type == "generate_document":
+            # A fixed generate_document step (PRD-63): a PDF/DOCX/XLSX, or a social
+            # image/video rendered by media-render (PRD-251 US-117).
+            if step_type == PLAYBOOK_DOCUMENT_STEP:
                 try:
                     from modules.documents.generation_service import (
                         DocumentGenerationService,
                         deliverables_app_url,
                     )
                     gen = _document_step_config(step)
-
-                    # Resolve {{step_N.field}} variables in data from scratchpad
-                    gen_data = gen["data"]
-                    if scratchpad and isinstance(gen_data, dict):
-                        gen_data = _resolve_doc_step_variables(gen_data, scratchpad)
+                    # {{ step_N.key }} in the title and data: what earlier steps produced.
+                    gen_title, gen_data = _resolved_document_step(gen, finished_steps)
 
                     gen_service = DocumentGenerationService(db, workspace_id)
-                    gen_result = await gen_service.generate(
-                        title=gen["title"],
-                        format=gen["format"],
-                        data=gen_data,
-                        workspace_id=workspace_id,
-                        template_name=gen["template_name"],
-                        template_id=gen["template_id"],
+                    gen_result = await _stamping_progress(
+                        gen_service.generate(
+                            title=gen_title,
+                            format=gen["format"],
+                            data=gen_data,
+                            workspace_id=workspace_id,
+                            template_name=gen["template_name"],
+                            template_id=gen["template_id"],
+                        ),
+                        _mark_progress,
+                        app_config.PLAYBOOK_PROGRESS_STAMP_SECONDS,
                     )
                     # PRD-242 S4: a playbook-rendered document is a Deliverable —
                     # it used to live only inside the step's output JSON.
                     registration = gen_service.register_as_deliverable(
                         gen_result,
-                        title=gen["title"],
+                        title=gen_title,
                         source_type="playbook",
                         source_id=str(getattr(execution, "execution_id", "") or ""),
                         agent_name=getattr(recipe, "name", None),
@@ -1688,6 +1731,7 @@ async def _execute_recipe_inner(
                             agent_output=step_result["output"],
                             agent_exports={},
                         )
+                    finished_steps[step_order] = step_values(step_result["output"])
 
                     logger.info(f"[recipe_direct] Step {step_order} (generate_document) completed: {gen_result.filename}")
                     compact = _build_compact_step_result(step_result)
@@ -1948,7 +1992,11 @@ async def _execute_recipe_inner(
                         step_result["status"] = "completed"
                         success = True
 
-                        # Write to scratchpad (auto-extract)
+                        # Write to scratchpad (auto-extract). The step's own saved keys
+                        # first: write_step_results replaces them with every export so far.
+                        finished_steps[step_order] = step_values(
+                            step_result["output"], scratchpad.step_exports(step_order) if scratchpad else {}
+                        )
                         agent_exports = scratchpad.get_exports() if scratchpad else {}
                         scratchpad.write_step_results(
                             step_order=step_order,
@@ -2291,6 +2339,8 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     (a UUID string — the id ``platform_list_templates`` hands out) is parsed
     here so an invalid one fails the step with a clear message instead of a
     stack trace deep in the renderer; it takes precedence over ``template_name``.
+    ``data`` is an object, or (PRD-251 US-117) one ``{{ step_N.key }}`` string
+    naming an object an earlier step produced.
     """
     cfg = step.get("config", step) if isinstance(step, dict) else {}
     raw_id = cfg.get("template_id")
@@ -2304,33 +2354,27 @@ def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": cfg.get("title", "Document"),
         "format": cfg.get("format", "pdf"),
-        "data": data if isinstance(data, dict) else {},
+        "data": data if isinstance(data, (dict, str)) else {},
         "template_name": cfg.get("template_name"),
         "template_id": template_id,
     }
 
 
-def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
-    """
-    Resolve {{ step_N.field }} placeholders in document step data from scratchpad.
-    Works recursively on dicts, lists, and strings.
-    """
-    import re
+def _resolved_document_step(gen: Dict[str, Any], finished_steps: Dict[int, Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    """The step's title and data with every ``{{ step_N.key }}`` resolved (PRD-251 US-117). Pure.
 
-    if isinstance(data, str):
-        # Replace {{ step_N.field }} or {{ step_N.output }}
-        def _replace(match):
-            step_num = int(match.group(1))
-            field = match.group(2)
-            ctx = scratchpad.format_context_for_step(step_num + 1)  # get results UP TO step_num
-            return ctx if ctx else match.group(0)
-
-        return re.sub(r"\{\{\s*step_(\d+)\.(\w+)\s*\}\}", _replace, data)
-    elif isinstance(data, dict):
-        return {k: _resolve_doc_step_variables(v, scratchpad) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [_resolve_doc_step_variables(item, scratchpad) for item in data]
-    return data
+    What each reference reads is ``core/services/playbook_step_refs.py``: an
+    earlier step's output, its scratchpad_write keys, or the keys of its JSON
+    answer. A reference no earlier step answers fails the step, naming it, and
+    nothing is rendered. The data must come out an object.
+    """
+    title = resolve_step_references(gen["title"], finished_steps)
+    data = resolve_step_references(gen["data"], finished_steps)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"generate_document step: data must be an object, or a reference to one, not {type(data).__name__}"
+        )
+    return str(title), data
 
 
 def step_failure(tool_calls: List[Dict[str, Any]], result: Dict[str, Any]) -> Optional[str]:

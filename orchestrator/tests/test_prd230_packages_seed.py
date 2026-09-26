@@ -1,10 +1,12 @@
-"""PRD-230 US-008 — the two Shopify package seeds.
+"""PRD-230 US-008 — the package seeds: the two Shopify packages, and (PRD-251
+US-120) Socials.
 
 PURE: validates the seed DATA (``PACKAGES``) against the REAL marketplace
-inventory (``SHOPIFY_AGENTS``), runs the shared matcher over the actual seed
-rows, and proves the upsert is idempotent with a fake session (no Postgres). The
-"every member ref resolves" guarantee is structural — the seed builds members
-from the roster, so a drifted slug fails at import — and re-asserted here.
+inventory (``SHOPIFY_AGENTS``, and the Socials roster and Playbooks), runs the
+shared matcher over the actual seed rows, and proves the upsert is idempotent
+with a fake session (no Postgres). The "every member ref resolves" guarantee is
+structural — the seed builds members from the roster, so a drifted slug fails at
+import — and re-asserted here.
 """
 from __future__ import annotations
 
@@ -13,13 +15,17 @@ from core.seeds.seed_packages import (
     DEVELOPMENT_PACKAGE,
     MANAGEMENT_PACKAGE,
     PACKAGES,
+    SHOPIFY_PACKAGES,
     seed_packages,
 )
 from core.seeds.seed_shopify_agents import SHOPIFY_AGENTS
+from core.seeds.seed_socials_package import SOCIALS_AGENTS, SOCIALS_PLAYBOOKS
 from services.marketplace_packages import match_by_signals
 
-_ROSTER_SLUGS = {a["slug"] for a in SHOPIFY_AGENTS}
-_ROSTER_NAMES = {a["name"] for a in SHOPIFY_AGENTS}
+_ROSTER_SLUGS = {a["slug"] for a in SHOPIFY_AGENTS + SOCIALS_AGENTS}
+_ROSTER_NAMES = {a["name"] for a in SHOPIFY_AGENTS + SOCIALS_AGENTS}
+_PLAYBOOK_REFS = {p["template_id"]: p["name"] for p in SOCIALS_PLAYBOOKS}
+_ALL_SLUGS = {p["slug"] for p in PACKAGES}
 
 
 def _instances() -> list[MarketplacePackage]:
@@ -39,6 +45,8 @@ def test_every_agent_member_ref_resolves_to_real_inventory():
                 assert m["ref"] in _ROSTER_SLUGS, f"unresolved agent ref: {m['ref']}"
                 # The cited name matches the real roster (no invented artifacts).
                 assert m["name"] in _ROSTER_NAMES, f"invented name: {m['name']}"
+            if m["type"] == "playbook":
+                assert _PLAYBOOK_REFS.get(m["ref"]) == m["name"], f"unresolved playbook ref: {m['ref']}"
 
 
 def test_no_invented_member_types_and_management_is_run_the_store():
@@ -71,7 +79,7 @@ def test_no_customer_data_in_seed():
 
 
 def test_both_packages_showcased_and_shopify_tagged():
-    for pkg in PACKAGES:
+    for pkg in SHOPIFY_PACKAGES:
         assert pkg["showcase"] is True
         tags = {t.lower() for t in pkg["vertical_tags"]}
         assert {"shopify", "ecommerce"} <= tags
@@ -122,7 +130,7 @@ def test_management_carries_weekly_numbers_report_and_shopify_two_step():
 
 
 def test_guide_steps_are_the_three_step_flow():
-    for pkg in PACKAGES:
+    for pkg in SHOPIFY_PACKAGES:
         steps = pkg["setup_manifest"]["guide_steps"]
         assert [s["step"] for s in steps] == [1, 2, 3]  # D7 three steps
         # Step 2 is the guided connect (never auto-connect — FR-4).
@@ -182,13 +190,13 @@ def test_seed_is_idempotent_no_duplicates():
     db = _FakeSession()
 
     created, updated = seed_packages(db)
-    assert (created, updated) == (2, 0)
-    assert set(db.store) == {"shopify-management", "shopify-development"}
+    assert (created, updated) == (len(PACKAGES), 0)
+    assert set(db.store) == _ALL_SLUGS == {"shopify-management", "shopify-development", "socials"}
 
     # Second run: every package already present → updated, nothing created.
     created2, updated2 = seed_packages(db)
-    assert (created2, updated2) == (0, 2)
-    assert len(db.store) == 2  # no dupes
+    assert (created2, updated2) == (0, len(PACKAGES))
+    assert len(db.store) == len(PACKAGES)  # no dupes
 
 
 # --------------------------------------------------------------------------- #
@@ -201,7 +209,7 @@ def test_create_only_seeds_missing_and_never_touches_existing_rows():
     db = _FakeSession()
 
     created, updated = seed_packages(db, create_only=True)
-    assert (created, updated) == (2, 0)
+    assert (created, updated) == (len(PACKAGES), 0)
 
     # Simulate Gerard's live curation of a row, then a redeploy's boot seed:
     # the curated row must survive byte-identical.
@@ -209,7 +217,7 @@ def test_create_only_seeds_missing_and_never_touches_existing_rows():
     created2, updated2 = seed_packages(db, create_only=True)
     assert (created2, updated2) == (0, 0)
     assert db.store["shopify-management"].description == "hand-tuned copy"
-    assert len(db.store) == 2
+    assert len(db.store) == len(PACKAGES)
 
 
 def test_boot_lane_runs_the_packages_seed_create_only():

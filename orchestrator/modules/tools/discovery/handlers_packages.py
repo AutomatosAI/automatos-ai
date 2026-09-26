@@ -83,6 +83,9 @@ def _match_summary(match: Any) -> Dict[str, Any]:
         "reasons": match.reasons,
         "contents": _member_counts(pkg),  # {"agent": 4, "playbook": 1, ...}
         "required_connects": manifest.get("required_connects", []),
+        # The guided setup (PRD-251 US-120): what to ask, and the steps to walk through.
+        "questions": manifest.get("questions", []),
+        "guide_steps": manifest.get("guide_steps", []),
         "showcase": bool(getattr(pkg, "showcase", False)),
     }
 

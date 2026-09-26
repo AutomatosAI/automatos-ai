@@ -1,0 +1,664 @@
+{
+  "name": "App promo",
+  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the Academy reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit.",
+  "format": "social_video",
+  "category": "social",
+  "sizes": [
+    "1080x1920"
+  ],
+  "variables_schema": {
+    "hook_line": {
+      "type": "text",
+      "label": "Hook: the headline",
+      "max_chars": 28,
+      "description": "Over the hook footage, word by word; the accent words follow it."
+    },
+    "hook_accent": {
+      "type": "text",
+      "label": "Hook: the accent words",
+      "max_chars": 10,
+      "description": "In the brand colour, after the headline.",
+      "default": ""
+    },
+    "hook_question": {
+      "type": "text",
+      "label": "Hook: the question",
+      "max_chars": 22,
+      "description": "In the brand colour, under the headline."
+    },
+    "app_name": {
+      "type": "text",
+      "label": "The app's name",
+      "max_chars": 28,
+      "description": "Over the app's own loop, and on the end card."
+    },
+    "slogan_line_1": {
+      "type": "text",
+      "label": "Reveal: the slogan's first line",
+      "max_chars": 11,
+      "description": "Very large, in caps."
+    },
+    "slogan_accent": {
+      "type": "text",
+      "label": "Reveal: the slogan's accent word",
+      "max_chars": 6,
+      "description": "In the brand colour, before the second line."
+    },
+    "slogan_line_2": {
+      "type": "text",
+      "label": "Reveal: the slogan's second line",
+      "max_chars": 8
+    },
+    "slogan_note": {
+      "type": "text",
+      "label": "Reveal: the line under the slogan",
+      "max_chars": 20,
+      "default": ""
+    },
+    "phone_time": {
+      "type": "text",
+      "label": "Phone: the clock",
+      "max_chars": 5,
+      "default": "9:41"
+    },
+    "phone_time_later": {
+      "type": "text",
+      "label": "Phone: the clock on the second screen",
+      "max_chars": 5,
+      "default": "9:42"
+    },
+    "course_code": {
+      "type": "text",
+      "label": "Phone: the course code",
+      "max_chars": 10
+    },
+    "today_label": {
+      "type": "text",
+      "label": "Phone: the today card's label",
+      "max_chars": 12,
+      "default": "Today"
+    },
+    "today_detail": {
+      "type": "text",
+      "label": "Phone: today's plan",
+      "max_chars": 48
+    },
+    "today_percent": {
+      "type": "number",
+      "label": "Phone: today's progress, in percent",
+      "min": 0,
+      "max": 100,
+      "description": "Fills the ring and shows as its figure."
+    },
+    "streak": {
+      "type": "text",
+      "label": "Phone: the streak",
+      "max_chars": 4
+    },
+    "question_topic": {
+      "type": "text",
+      "label": "Phone: the question's topic",
+      "max_chars": 44
+    },
+    "question_label": {
+      "type": "text",
+      "label": "Phone: the question label",
+      "max_chars": 12,
+      "default": "Question"
+    },
+    "question_text": {
+      "type": "text",
+      "label": "Phone: the question",
+      "max_chars": 140
+    },
+    "option_a": {
+      "type": "text",
+      "label": "Phone: answer A (the correct one)",
+      "max_chars": 48
+    },
+    "option_b": {
+      "type": "text",
+      "label": "Phone: answer B",
+      "max_chars": 48
+    },
+    "option_c": {
+      "type": "text",
+      "label": "Phone: answer C",
+      "max_chars": 48
+    },
+    "option_d": {
+      "type": "text",
+      "label": "Phone: answer D",
+      "max_chars": 48
+    },
+    "result_label": {
+      "type": "text",
+      "label": "Phone: the result",
+      "max_chars": 12,
+      "default": "Correct"
+    },
+    "tutor_button": {
+      "type": "text",
+      "label": "Phone: the tutor button",
+      "max_chars": 30,
+      "default": "Ask the tutor about this →"
+    },
+    "source_note": {
+      "type": "text",
+      "label": "Phone: the source note",
+      "max_chars": 28
+    },
+    "source_link": {
+      "type": "text",
+      "label": "Phone: the source link",
+      "max_chars": 30
+    },
+    "tutor_header": {
+      "type": "text",
+      "label": "Phone: the tutor screen's header",
+      "max_chars": 12,
+      "default": "Tutor"
+    },
+    "tutor_title": {
+      "type": "text",
+      "label": "Phone: the tutor screen's title",
+      "max_chars": 20,
+      "default": "Ask the tutor"
+    },
+    "tutor_about": {
+      "type": "text",
+      "label": "Phone: what the question is about",
+      "max_chars": 44
+    },
+    "tutor_question": {
+      "type": "text",
+      "label": "Phone: the question to the tutor",
+      "max_chars": 40
+    },
+    "tutor_answer": {
+      "type": "text",
+      "label": "Phone: the tutor's answer",
+      "max_chars": 240,
+      "description": "Types itself out word by word."
+    },
+    "cite_ok": {
+      "type": "text",
+      "label": "Phone: the citation chip",
+      "max_chars": 30
+    },
+    "cite_link": {
+      "type": "text",
+      "label": "Phone: the verify chip",
+      "max_chars": 30
+    },
+    "tutor_scope": {
+      "type": "text",
+      "label": "Phone: the tutor's scope note",
+      "max_chars": 48,
+      "default": ""
+    },
+    "ask_placeholder": {
+      "type": "text",
+      "label": "Phone: the ask bar's placeholder",
+      "max_chars": 24,
+      "default": "Type your question…"
+    },
+    "ask_speak": {
+      "type": "text",
+      "label": "Phone: the speak button",
+      "max_chars": 8,
+      "default": "Speak"
+    },
+    "ask_send": {
+      "type": "text",
+      "label": "Phone: the ask button",
+      "max_chars": 8,
+      "default": "Ask"
+    },
+    "dock_1": {
+      "type": "text",
+      "label": "Phone: dock item 1",
+      "max_chars": 10,
+      "default": "Feed"
+    },
+    "dock_2": {
+      "type": "text",
+      "label": "Phone: dock item 2",
+      "max_chars": 10,
+      "default": "Library"
+    },
+    "dock_3": {
+      "type": "text",
+      "label": "Phone: dock item 3",
+      "max_chars": 10,
+      "default": "Podcast"
+    },
+    "dock_4": {
+      "type": "text",
+      "label": "Phone: dock item 4",
+      "max_chars": 10,
+      "default": "Profile"
+    },
+    "mock_title": {
+      "type": "text",
+      "label": "Mock: the title",
+      "max_chars": 22
+    },
+    "mock_detail": {
+      "type": "text",
+      "label": "Mock: the detail",
+      "max_chars": 48
+    },
+    "mock_button": {
+      "type": "text",
+      "label": "Mock: the button",
+      "max_chars": 24
+    },
+    "gate_title": {
+      "type": "text",
+      "label": "Gate: the title",
+      "max_chars": 44
+    },
+    "gate_1": {
+      "type": "text",
+      "label": "Gate: condition 1",
+      "max_chars": 40
+    },
+    "gate_2": {
+      "type": "text",
+      "label": "Gate: condition 2",
+      "max_chars": 40
+    },
+    "grade_note": {
+      "type": "text",
+      "label": "Grade: the line above",
+      "max_chars": 40
+    },
+    "grade": {
+      "type": "text",
+      "label": "Grade: the grade",
+      "max_chars": 3,
+      "description": "Very large, e.g. 'A+'."
+    },
+    "grade_caveat": {
+      "type": "text",
+      "label": "Grade: the line below",
+      "max_chars": 16
+    },
+    "tracks_title": {
+      "type": "text",
+      "label": "Tracks: the title",
+      "max_chars": 16
+    },
+    "tracks_detail": {
+      "type": "text",
+      "label": "Tracks: the counts",
+      "max_chars": 56,
+      "description": "e.g. lesson, lab and question counts; each needs its source.",
+      "claim": true
+    },
+    "track_1_code": {
+      "type": "text",
+      "label": "Tracks: track 1's code",
+      "max_chars": 8
+    },
+    "track_1_name": {
+      "type": "text",
+      "label": "Tracks: track 1's name",
+      "max_chars": 44
+    },
+    "track_2_code": {
+      "type": "text",
+      "label": "Tracks: track 2's code",
+      "max_chars": 8
+    },
+    "track_2_name": {
+      "type": "text",
+      "label": "Tracks: track 2's name",
+      "max_chars": 44
+    },
+    "track_3_code": {
+      "type": "text",
+      "label": "Tracks: track 3's code",
+      "max_chars": 8
+    },
+    "track_3_name": {
+      "type": "text",
+      "label": "Tracks: track 3's name",
+      "max_chars": 44
+    },
+    "track_4_code": {
+      "type": "text",
+      "label": "Tracks: track 4's code",
+      "max_chars": 8
+    },
+    "track_4_name": {
+      "type": "text",
+      "label": "Tracks: track 4's name",
+      "max_chars": 44
+    },
+    "track_5_code": {
+      "type": "text",
+      "label": "Tracks: track 5's code",
+      "max_chars": 8
+    },
+    "track_5_name": {
+      "type": "text",
+      "label": "Tracks: track 5's name",
+      "max_chars": 44
+    },
+    "track_6_code": {
+      "type": "text",
+      "label": "Tracks: track 6's code",
+      "max_chars": 8
+    },
+    "track_6_name": {
+      "type": "text",
+      "label": "Tracks: track 6's name",
+      "max_chars": 44
+    },
+    "track_7_code": {
+      "type": "text",
+      "label": "Tracks: track 7's code",
+      "max_chars": 8
+    },
+    "track_7_name": {
+      "type": "text",
+      "label": "Tracks: track 7's name",
+      "max_chars": 44
+    },
+    "track_8_code": {
+      "type": "text",
+      "label": "Tracks: track 8's code",
+      "max_chars": 8
+    },
+    "track_8_name": {
+      "type": "text",
+      "label": "Tracks: track 8's name",
+      "max_chars": 44
+    },
+    "track_9_code": {
+      "type": "text",
+      "label": "Tracks: track 9's code",
+      "max_chars": 8
+    },
+    "track_9_name": {
+      "type": "text",
+      "label": "Tracks: track 9's name",
+      "max_chars": 44
+    },
+    "track_10_code": {
+      "type": "text",
+      "label": "Tracks: track 10's code",
+      "max_chars": 8
+    },
+    "track_10_name": {
+      "type": "text",
+      "label": "Tracks: track 10's name",
+      "max_chars": 44
+    },
+    "end_line": {
+      "type": "text",
+      "label": "End card: the line under the name",
+      "max_chars": 28
+    },
+    "end_accent": {
+      "type": "text",
+      "label": "End card: the closing words, in the brand colour",
+      "max_chars": 12
+    },
+    "end_url": {
+      "type": "text",
+      "label": "End card: the address",
+      "max_chars": 28
+    },
+    "end_note": {
+      "type": "text",
+      "label": "End card: the small print",
+      "max_chars": 110,
+      "description": "e.g. a non-affiliation note the copy rules require.",
+      "default": ""
+    },
+    "cap_practice": {
+      "type": "text",
+      "label": "Caption and voice: the practice",
+      "max_chars": 60
+    },
+    "cap_tutor": {
+      "type": "text",
+      "label": "Caption and voice: the tutor",
+      "max_chars": 60
+    },
+    "cap_mock": {
+      "type": "text",
+      "label": "Caption and voice: the mock",
+      "max_chars": 60
+    },
+    "beat_1": {
+      "type": "text",
+      "label": "Caption and voice: beat 1",
+      "max_chars": 18,
+      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+    },
+    "beat_2": {
+      "type": "text",
+      "label": "Caption and voice: beat 2",
+      "max_chars": 18,
+      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+    },
+    "beat_3": {
+      "type": "text",
+      "label": "Caption and voice: beat 3",
+      "max_chars": 18,
+      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+    },
+    "beat_4": {
+      "type": "text",
+      "label": "Caption and voice: beat 4",
+      "max_chars": 18,
+      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+    },
+    "beat_5": {
+      "type": "text",
+      "label": "Caption and voice: beat 5",
+      "max_chars": 18,
+      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+    },
+    "reveal_voice": {
+      "type": "text",
+      "label": "Voice: the reveal",
+      "max_chars": 60,
+      "description": "Spoken on the drop, e.g. 'Meet <app>. <slogan>.'"
+    },
+    "grade_voice": {
+      "type": "text",
+      "label": "Voice: the grade",
+      "max_chars": 40,
+      "description": "The grade as it is spoken, e.g. 'A-plus, or not yet.'"
+    },
+    "end_voice": {
+      "type": "text",
+      "label": "Voice: the end card",
+      "max_chars": 60
+    }
+  },
+  "slots": {
+    "hook": {
+      "kind": "video",
+      "path": "assets/slots/hook.mp4",
+      "label": "Hook footage",
+      "description": "9:16, 4-5 s, no readable text or logos: a person with a phone on the move, e.g. a commute. Plays 0-4.95 s under the hook and holds its last frame."
+    },
+    "app_loop": {
+      "kind": "video",
+      "path": "assets/slots/app_loop.mp4",
+      "label": "The app's own loop",
+      "description": "9:16, about 4 s: the app's real animation or screen recording (never generated UI). Plays 4.95-8.85 s behind the slogan.",
+      "generate": false
+    },
+    "desk": {
+      "kind": "video",
+      "path": "assets/slots/desk.mp4",
+      "label": "Desk footage",
+      "description": "9:16, 4 s, no readable text or logos: someone studying at a desk. Plays 8.85-12.9 s behind the phone."
+    },
+    "focus": {
+      "kind": "video",
+      "path": "assets/slots/focus.mp4",
+      "label": "Focus footage",
+      "description": "9:16, 4 s, no readable text or logos: a moment of concentration. Plays 17.1-21.1 s behind the mock exam."
+    },
+    "end": {
+      "kind": "video",
+      "path": "assets/slots/end.mp4",
+      "label": "End card footage",
+      "description": "9:16, 5 s, no readable text or logos: an open, hopeful shot, e.g. a rooftop at dusk. Plays 29.5-38 s behind the end card and holds its last frame."
+    }
+  },
+  "audio_plan": {
+    "voice": {
+      "voice": "af_heart",
+      "speed": 0.95,
+      "lines": [
+        {
+          "id": "l01",
+          "at": 0.33,
+          "text": "{{ hook_line }} {{ hook_accent }}"
+        },
+        {
+          "id": "l02",
+          "at": 2.6,
+          "text": "{{ hook_question }}"
+        },
+        {
+          "id": "l03",
+          "at": 5.0,
+          "text": "{{ reveal_voice }}"
+        },
+        {
+          "id": "l04",
+          "at": 8.92,
+          "text": "{{ cap_practice }}"
+        },
+        {
+          "id": "l05",
+          "at": 13.22,
+          "text": "{{ cap_tutor }}"
+        },
+        {
+          "id": "l06",
+          "at": 17.22,
+          "text": "{{ cap_mock }}"
+        },
+        {
+          "id": "l07",
+          "at": 21.3,
+          "text": "{{ grade_voice }}"
+        },
+        {
+          "id": "l08",
+          "at": 23.42,
+          "text": "{{ beat_1 }} {{ beat_2 }} {{ beat_3 }} {{ beat_4 }} {{ beat_5 }}"
+        },
+        {
+          "id": "l09",
+          "at": 29.7,
+          "text": "{{ end_voice }}"
+        }
+      ]
+    },
+    "music": {
+      "track": "spring-of-2026",
+      "start": 47.9,
+      "fade_in": 0.3,
+      "fade_out": 1.7
+    }
+  },
+  "sample_data": {
+    "hook_line": "Everyone says they know",
+    "hook_accent": "AI.",
+    "hook_question": "Can you prove it?",
+    "app_name": "Automatos Academy",
+    "slogan_line_1": "TRAIN YOUR",
+    "slogan_accent": "AI",
+    "slogan_line_2": "MIND",
+    "slogan_note": "Academy Coach",
+    "course_code": "CCA-F",
+    "today_detail": "18 reviews · 1 weak-domain drill · ~11 min",
+    "today_percent": 68,
+    "streak": "7",
+    "question_topic": "D1 · Agentic Architecture & Orchestration",
+    "question_text": "A product team can fully describe a 3-step pipeline (fetch → transform → notify) with known branching. Which architecture best fits?",
+    "option_a": "A code-orchestrated workflow with tool use",
+    "option_b": "An open-ended agent that decides the steps",
+    "option_c": "A multi-agent coordinator",
+    "option_d": "A single LLM call with no tools",
+    "source_note": "Cited — entailment-checked",
+    "source_link": "Verify against official docs ↗",
+    "tutor_about": "About: “Which architecture best fits?”",
+    "tutor_question": "Why a workflow — not an agent?",
+    "tutor_answer": "Because every step is known up front — fetch, transform, notify. A code-orchestrated workflow with tool use is predictable and testable. Reach for an agent when the steps can't be known in advance.",
+    "cite_ok": "✓ Cited — entailment-checked",
+    "cite_link": "Verify against official docs ↗",
+    "tutor_scope": "Exam-domain answers only — not general chat.",
+    "mock_title": "Exam conditions.",
+    "mock_detail": "60 questions — this takes ~120 minutes.",
+    "mock_button": "Begin the mock",
+    "gate_title": "The gate — both parts must be green",
+    "gate_1": "Every domain at 85% or better",
+    "gate_2": "One full mock at 720/1000 or better",
+    "grade_note": "Passed with margin — the A+ standard",
+    "grade": "A+",
+    "grade_caveat": "— or not yet.",
+    "tracks_title": "Ten tracks.",
+    "tracks_detail": "227 lessons · 85 labs · 1,691 practice questions",
+    "track_1_code": "CCA-F",
+    "track_1_name": "Claude Certified Architect — Foundations",
+    "track_2_code": "GH-300",
+    "track_2_name": "GitHub Copilot",
+    "track_3_code": "GH-500",
+    "track_3_name": "GitHub Advanced Security",
+    "track_4_code": "GAL",
+    "track_4_name": "Generative AI Leader (Google Cloud)",
+    "track_5_code": "AIGP",
+    "track_5_name": "AI Governance Professional (IAPP)",
+    "track_6_code": "APA",
+    "track_6_name": "Automatos Platform Architect",
+    "track_7_code": "ABF",
+    "track_7_name": "AI Business Foundations",
+    "track_8_code": "AIX",
+    "track_8_name": "AI Explained",
+    "track_9_code": "AIS",
+    "track_9_name": "AI Security — LLM & Agent Security",
+    "track_10_code": "CVF",
+    "track_10_name": "Cross-Vendor Fluency",
+    "end_line": "Free · Learn by doing.",
+    "end_accent": "Prove it.",
+    "end_url": "academy.automatos.app",
+    "end_note": "Independent exam prep. Not affiliated with Anthropic, GitHub, Google Cloud or IAPP.",
+    "cap_practice": "Ten minutes a day. Questions, labs and real scenarios.",
+    "cap_tutor": "Stuck? Ask the tutor. Every answer cites its source.",
+    "cap_mock": "Then sit the full mock. Real clock. Real standard.",
+    "beat_1": "Ten tracks.",
+    "beat_2": "Claude,",
+    "beat_3": "GitHub Copilot,",
+    "beat_4": "Google Cloud,",
+    "beat_5": "AI governance.",
+    "reveal_voice": "Meet Automatos Academy. Train your AI mind.",
+    "grade_voice": "A-plus, or not yet.",
+    "end_voice": "Automatos Academy. Free. Learn by doing. Prove it."
+  },
+  "preview": {
+    "at": [
+      1.6,
+      3.4,
+      7.5,
+      11.0,
+      15.0,
+      20.3,
+      22.4,
+      26.5,
+      34.0
+    ]
+  }
+}

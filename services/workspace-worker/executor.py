@@ -333,9 +333,8 @@ class WorkspaceToolExecutor:
     # PNG as a deliverable (artifact_type='image') so it appears in the
     # Deliverables Gallery, Workspace Explorer, and Mission Outputs view.
     #
-    # Designed for the daily-social-post playbook: an agent writes
-    # `repos/automatos-social/render/index.html` parameters, calls this tool,
-    # and gets back a path it can hand to a Composio poster.
+    # An agent writes an HTML page into the workspace (a chart, a diagram, a
+    # page it composed), calls this tool, and gets back the PNG's path.
 
     # Hard cap on render time. Pages with no animation should be done in <2s.
     _RENDER_TIMEOUT_MS = 60_000
@@ -406,7 +405,7 @@ class WorkspaceToolExecutor:
 
                 {
                     "success": True,
-                    "file_path": "deliverables/social/2026-04-29/definition_ig_post.png",
+                    "file_path": "deliverables/charts/2026-04-29/revenue.png",
                     "file_size_bytes": 187432,
                     "w": 1080, "h": 1350,
                     "ms": 1842,

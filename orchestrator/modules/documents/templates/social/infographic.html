@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width={{ size.width }}, height={{ size.height }}" />
+    <title>Infographic</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251 S1.7 (D4, D7, US-113): the "Infographic" template, a chart of a report's top rows: a bar
+         chart, a line or a number grid. The reference pattern (docs/PRDS/prd251-reference/markets-posh-charts.py):
+         data -> shapes -> text. The rows are variables a report fills (core/chart_binding.py); the script
+         reads each figure (the pattern core/report_tables.py shares), draws the shapes from it, and writes no
+         word or number of its own. Every colour and font reads the brand kit's paper palette, as the
+         automatos-social families do; the var() fallbacks are automatos-social's own. */
+      :root {
+        --paper: var(--brand-paper, #f1e9dd);
+        --card: var(--brand-paper-card, #e3d9c8);
+        --ink: var(--brand-on-paper, #191919);
+        --muted: var(--brand-on-paper-muted, #463f37);
+        --dim: var(--brand-on-paper-dim, #5a5248);
+        --accent: var(--brand-primary-on-paper, #9a3d1a);
+        --accent-large: var(--brand-primary-on-paper-large, #c24f25);
+        --brand: var(--brand-primary, #ff6932);
+        --dark: var(--brand-ink, #1a1714);
+        --on-dark: var(--brand-on-ink, #f0e8db);
+        --dark-accent: var(--brand-primary-on-ink, #e96235);
+        --display: var(--brand-heading-font, sans-serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+        /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
+        --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--paper); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--ink); background: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      #stripe { position: absolute; left: 0; top: 0; width: 100%; height: calc(14 * var(--u)); background: var(--brand); }
+
+      /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
+      .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
+        gap: calc(28 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
+      .page.wrap-words * { overflow-wrap: anywhere; }
+      .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+      .counter { color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
+      .handle { color: var(--dim); font-weight: 500; margin-left: auto; text-align: right; }
+      .main { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: calc(40 * var(--s)); }
+      .lead { display: flex; flex-direction: column; align-items: flex-start; gap: calc(24 * var(--s)); }
+      .eyebrow { display: inline-flex; align-items: center; gap: calc(14 * var(--s)); max-width: 100%;
+        background: var(--dark); color: var(--on-dark); border-radius: calc(10 * var(--s));
+        padding: calc(12 * var(--s)) calc(22 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s));
+        font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.2; }
+      .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
+        border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
+      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(100 * var(--s));
+        line-height: 0.98; letter-spacing: -0.02em; color: var(--ink); }
+      .headline .line { display: block; }
+      .hot { color: var(--accent-large); }
+      .subline { max-width: 100%; font-family: var(--body); font-size: calc(36 * var(--s)); line-height: 1.35; color: var(--muted); }
+      .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        padding-top: calc(20 * var(--s)); border-top: calc(2 * var(--u)) solid var(--card);
+        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+      .brand { display: flex; align-items: center; gap: calc(14 * var(--s)); color: var(--ink); font-weight: 700; }
+      .logo { flex: none; width: calc(44 * var(--s)); height: calc(44 * var(--s)); object-fit: contain; }
+      .logo[src^="data:image/gif"] { display: none; }
+      .cta { color: var(--dim); text-align: right; }
+
+      /* The chart, its source chip and a note. Text wears text tokens; only the marks wear the brand.
+         The chart's own unit --c is the page's --s times --k: 1, larger on a tall story, where the
+         chart takes the room. A figure never breaks across lines: a group of figures shrinks to fit
+         its room (the script), then the page fit steps down; a label wraps. */
+      .page { --k: 1; --c: calc(var(--s) * var(--k)); }
+      .aside { display: flex; flex-direction: column; gap: calc(26 * var(--s)); width: 100%; }
+      .chart { width: 100%; font-family: var(--body); }
+
+      /* Bars: one baseline at zero, each bar as long as its figure, the figure at its tip. */
+      .bars { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); column-gap: calc(26 * var(--c));
+        row-gap: calc(28 * var(--c)); align-items: center; --reserve: 0px; }
+      .bar-row { display: contents; }
+      .bar-label { font-size: calc(36 * var(--c)); font-weight: 600; line-height: 1.2; color: var(--ink); overflow-wrap: break-word; }
+      .bar-track { display: flex; align-items: center; gap: calc(16 * var(--c)); min-width: 0;
+        min-height: calc(64 * var(--c)); border-left: calc(3 * var(--u)) solid var(--card); }
+      .bar { flex: none; height: calc(52 * var(--c)); background: var(--accent-large);
+        width: max(0px, calc(var(--f, 0) * (100% - var(--reserve))));
+        border-radius: 0 calc(6 * var(--c)) calc(6 * var(--c)) 0; }
+      .bar-value { flex: none; white-space: nowrap; font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); }
+
+      /* A line: the trace and a dot per row over a baseline; each figure and label sits under its dot. */
+      .line-chart { display: flex; flex-direction: column; gap: calc(20 * var(--c)); --n: 5; }
+      .plot { position: relative; width: 100%; height: calc(var(--plot-h, 480) * var(--c)); border-bottom: calc(3 * var(--u)) solid var(--card); }
+      .plot-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+      .plot-svg .area { fill: color-mix(in srgb, var(--accent-large) 12%, transparent); stroke: none; }
+      .plot-svg .trace { fill: none; stroke: var(--accent-large); stroke-width: calc(6 * var(--c));
+        stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+      .dot { position: absolute; width: calc(24 * var(--c)); height: calc(24 * var(--c)); border-radius: 50%;
+        background: var(--accent-large); box-shadow: 0 0 0 calc(5 * var(--c)) var(--paper); transform: translate(-50%, -50%); }
+      /* No gap between the columns: each column's middle is its dot's x. */
+      .axis { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+      .tick { display: flex; flex-direction: column; align-items: center; gap: calc(6 * var(--c)); min-width: 0;
+        padding: 0 calc(6 * var(--c)); text-align: center; }
+      .tick-value { font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
+      .tick-label { font-size: calc(28 * var(--c)); line-height: 1.25; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+
+      /* A number grid: each figure in its own tile, sized to fill whole rows. The figure wears ink (it
+         stays readable at any size); the brand shows in the rule along each tile's top. */
+      .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: calc(16 * var(--c)); }
+      .tile { grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: calc(12 * var(--c)); min-width: 0; background: var(--card); border-radius: calc(16 * var(--c));
+        border-top: calc(6 * var(--c)) solid var(--accent-large);
+        padding: calc(26 * var(--c)) calc(16 * var(--c)) calc(28 * var(--c)); text-align: center; }
+      .tile-value { font-size: calc(72 * var(--c)); font-weight: 800; line-height: 1; letter-spacing: -0.01em;
+        color: var(--ink); white-space: nowrap; }
+      .tile-label { font-size: calc(28 * var(--c)); line-height: 1.3; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+
+      /* The source chip: where every figure on the chart comes from. */
+      .chip { display: inline-flex; align-self: flex-start; flex-wrap: wrap; align-items: baseline; column-gap: calc(12 * var(--s));
+        row-gap: calc(4 * var(--s)); max-width: 100%; background: var(--card); border-radius: calc(10 * var(--s));
+        padding: calc(10 * var(--s)) calc(18 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s)); line-height: 1.3; }
+      .chip-caption { color: var(--accent); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+      .chip-text { color: var(--dim); overflow-wrap: anywhere; }
+      .note { font-family: var(--body); font-size: calc(28 * var(--s)); line-height: 1.4; color: var(--muted); }
+
+      /* A tall story (9:16): the chart takes the room. */
+      @media (max-aspect-ratio: 3/5) {
+        .page { --k: 1.25; }
+      }
+      /* Landscape (1.91:1 and 16:9): the headline takes the left, the chart the right. */
+      @media (min-aspect-ratio: 3/2) {
+        .main { flex-direction: row; align-items: center; gap: calc(56 * var(--s)); }
+        .lead { flex: 1 1 0; min-width: 0; }
+        .aside { flex: 1.5 1 0; min-width: 0; }
+        .line-chart { --plot-h: 280; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="1" data-width="{{ size.width }}" data-height="{{ size.height }}">
+      <section id="card" class="clip" data-start="0" data-duration="1" data-track-index="0">
+        <div class="page">
+          <div class="top fit" data-optional>
+            <span class="counter v">{{ counter }}</span>
+            <span class="handle v">{{ handle }}</span>
+          </div>
+          <div class="main fit">
+            <div class="lead fit">
+              <div class="eyebrow" data-optional><span class="tri"></span><span class="v">{{ eyebrow }}</span></div>
+              <h1 class="headline fit" data-dress data-accent="{{ headline_accent }}">{{ headline }}</h1>
+              <p class="subline v">{{ subtitle }}</p>
+            </div>
+            <div class="aside fit">
+              <div class="chart fit" id="chart" data-chart="{{ chart }}">
+                <div class="bars" data-kind="bar">
+                  <div class="bar-row" data-row="1"><span class="bar-label">{{ row_1_label }}</span><span class="bar-track fit"><span class="bar"></span><span class="bar-value">{{ row_1_value }}</span></span></div>
+                  <div class="bar-row" data-row="2"><span class="bar-label">{{ row_2_label }}</span><span class="bar-track fit"><span class="bar"></span><span class="bar-value">{{ row_2_value }}</span></span></div>
+                  <div class="bar-row" data-row="3"><span class="bar-label">{{ row_3_label }}</span><span class="bar-track fit"><span class="bar"></span><span class="bar-value">{{ row_3_value }}</span></span></div>
+                  <div class="bar-row" data-row="4"><span class="bar-label">{{ row_4_label }}</span><span class="bar-track fit"><span class="bar"></span><span class="bar-value">{{ row_4_value }}</span></span></div>
+                  <div class="bar-row" data-row="5"><span class="bar-label">{{ row_5_label }}</span><span class="bar-track fit"><span class="bar"></span><span class="bar-value">{{ row_5_value }}</span></span></div>
+                </div>
+                <div class="line-chart" data-kind="line">
+                  <div class="plot">
+                    <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><polygon class="area" points=""></polygon><polyline class="trace" points=""></polyline></svg>
+                    <span class="dot" data-row="1"></span><span class="dot" data-row="2"></span><span class="dot" data-row="3"></span><span class="dot" data-row="4"></span><span class="dot" data-row="5"></span>
+                  </div>
+                  <div class="axis">
+                    <div class="tick fit" data-row="1"><span class="tick-value">{{ row_1_value }}</span><span class="tick-label">{{ row_1_label }}</span></div>
+                    <div class="tick fit" data-row="2"><span class="tick-value">{{ row_2_value }}</span><span class="tick-label">{{ row_2_label }}</span></div>
+                    <div class="tick fit" data-row="3"><span class="tick-value">{{ row_3_value }}</span><span class="tick-label">{{ row_3_label }}</span></div>
+                    <div class="tick fit" data-row="4"><span class="tick-value">{{ row_4_value }}</span><span class="tick-label">{{ row_4_label }}</span></div>
+                    <div class="tick fit" data-row="5"><span class="tick-value">{{ row_5_value }}</span><span class="tick-label">{{ row_5_label }}</span></div>
+                  </div>
+                </div>
+                <div class="tiles fit" data-kind="grid">
+                  <div class="tile fit" data-row="1"><span class="tile-value">{{ row_1_value }}</span><span class="tile-label">{{ row_1_label }}</span></div>
+                  <div class="tile fit" data-row="2"><span class="tile-value">{{ row_2_value }}</span><span class="tile-label">{{ row_2_label }}</span></div>
+                  <div class="tile fit" data-row="3"><span class="tile-value">{{ row_3_value }}</span><span class="tile-label">{{ row_3_label }}</span></div>
+                  <div class="tile fit" data-row="4"><span class="tile-value">{{ row_4_value }}</span><span class="tile-label">{{ row_4_label }}</span></div>
+                  <div class="tile fit" data-row="5"><span class="tile-value">{{ row_5_value }}</span><span class="tile-label">{{ row_5_label }}</span></div>
+                </div>
+              </div>
+              <div class="chip fit" data-optional><span class="chip-caption v">{{ source_caption }}</span><span class="chip-text v">{{ source_label }}</span></div>
+              <p class="note v">{{ note }}</p>
+            </div>
+          </div>
+          <div class="foot fit">
+            <div class="brand"><img class="logo" src="{{ brand.logo_mark }}" alt="" /><span class="v">{{ brand.name }}</span></div>
+            <span class="cta v">{{ cta }}</span>
+          </div>
+        </div>
+      </section>
+      <div id="stripe"></div>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="1" data-track-index="1" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the card's own text, dressed and fitted before anything is sampled ----------
+      const MIN_FIT = 0.5;
+      const FIT_STEP = 0.04;
+      // A block whose every value is empty is taken out (an unused eyebrow, no note),
+      // and so is any empty value, so it leaves no gap.
+      document.querySelectorAll("[data-optional]").forEach((block) => {
+        const values = block.querySelectorAll(".v");
+        const filled = Array.from(values.length ? values : [block]).some((el) => el.textContent.trim());
+        if (!filled) block.remove();
+      });
+      document.querySelectorAll(".v").forEach((el) => {
+        if (!el.textContent.trim()) el.remove();
+      });
+      // The display text: "|" breaks the line, and its accent words take the brand colour.
+      function dress(el) {
+        const accent = (el.getAttribute("data-accent") || "").trim();
+        const text = el.textContent;
+        const lines = text.split("|").map((line) => line.trim()).filter(Boolean);
+        let marked = !accent;
+        el.textContent = "";
+        lines.forEach((line) => {
+          const row = document.createElement("span");
+          row.className = "line";
+          const at = marked ? -1 : line.indexOf(accent);
+          if (at < 0) {
+            row.textContent = line;
+          } else {
+            marked = true;
+            const hot = document.createElement("span");
+            hot.className = "hot";
+            hot.textContent = accent;
+            row.append(line.slice(0, at), hot, line.slice(at + accent.length));
+          }
+          el.appendChild(row);
+        });
+      }
+      document.querySelectorAll("[data-dress]").forEach(dress);
+
+      // ---------- the chart: data -> shapes; the words and numbers are the rows' own ----------
+      const chart = document.getElementById("chart");
+      // A figure, read by the rule core/report_tables.py uses (FIGURE_PATTERN): sign, currency, number, unit.
+      const FIGURE = /^([+\-−])?(?:((?:[A-Z]{1,2})?\$|[€£¥₹₩₽¢]|[A-Z]{3}) ?)?([+\-−])?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(\.[0-9]+)?(?: ?([%×]|[A-Za-z]{1,12}))?$/;
+      function figure(text) {
+        const match = FIGURE.exec(text.trim());
+        if (!match || (match[1] && match[3])) return null;
+        const size = parseFloat(match[4].replace(/,/g, "") + (match[5] || ""));
+        const negative = /^[-−]$/.test(match[1] || match[3] || "");
+        return { value: negative ? -size : size, unit: (match[2] || "") + "|" + (match[6] || "") };
+      }
+      // The rows, as the grid tiles hold them; a row with neither label nor figure is taken out everywhere.
+      const rows = [];
+      chart.querySelectorAll(".tile").forEach((tile) => {
+        const n = tile.getAttribute("data-row");
+        const label = tile.querySelector(".tile-label").textContent.trim();
+        const text = tile.querySelector(".tile-value").textContent.trim();
+        if (label || text) {
+          rows.push({ n, label, text, figure: figure(text) });
+        } else {
+          chart.querySelectorAll('[data-row="' + n + '"]').forEach((el) => el.remove());
+        }
+      });
+      // The kind the post asks for, unless its figures cannot make that comparison: then the number grid.
+      const KINDS = ["bar", "line", "grid"];
+      const asked = (chart.getAttribute("data-chart") || "").trim().toLowerCase();
+      let kind = KINDS.includes(asked) ? asked : "bar";
+      const units = new Set(rows.map((row) => (row.figure ? row.figure.unit : null)));
+      const comparable = rows.length >= 2 && rows.every((row) => row.figure) && units.size === 1;
+      if (kind !== "grid" && (!comparable || (kind === "bar" && rows.some((row) => row.figure.value < 0)))) {
+        kind = "grid";
+      }
+      chart.querySelectorAll("[data-kind]").forEach((layout) => {
+        if (layout.getAttribute("data-kind") !== kind) layout.remove();
+      });
+      chart.setAttribute("data-shown", kind);
+
+      if (kind === "bar") {
+        // Every bar grows from zero on one scale: the longest is the largest figure.
+        const largest = Math.max(...rows.map((row) => row.figure.value));
+        rows.forEach((row) => {
+          const share = largest > 0 ? row.figure.value / largest : 0;
+          chart.querySelector('.bar-row[data-row="' + row.n + '"] .bar').style.setProperty("--f", share.toFixed(4));
+        });
+      }
+      if (kind === "line") {
+        // Each row at the middle of its column, its height on the figures' own span.
+        const TOP = 0.12;
+        const BOTTOM = 0.12;
+        const values = rows.map((row) => row.figure.value);
+        const low = Math.min(...values);
+        const high = Math.max(...values);
+        const points = rows.map((row, i) => {
+          const x = (i + 0.5) / rows.length;
+          const y = high > low ? TOP + (1 - (row.figure.value - low) / (high - low)) * (1 - TOP - BOTTOM) : 0.5;
+          const dot = chart.querySelector('.dot[data-row="' + row.n + '"]');
+          dot.style.left = (x * 100).toFixed(3) + "%";
+          dot.style.top = (y * 100).toFixed(3) + "%";
+          return [x * 1000, y * 1000];
+        });
+        const trace = points.map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1)).join(" ");
+        chart.querySelector(".trace").setAttribute("points", trace);
+        const first = points[0][0].toFixed(1);
+        const last = points[points.length - 1][0].toFixed(1);
+        chart.querySelector(".area").setAttribute("points", first + ",1000 " + trace + " " + last + ",1000");
+        chart.querySelector(".line-chart").style.setProperty("--n", String(rows.length));
+      }
+      if (kind === "grid") {
+        // Whole rows of tiles on a six-column grid: 1 -> 6; 2 -> 3+3; 3 -> 2+2+2; 4 -> 3+3 / 3+3; 5 -> 2+2+2 / 3+3.
+        const SPANS = { 1: [6], 2: [3, 3], 3: [2, 2, 2], 4: [3, 3, 3, 3], 5: [2, 2, 2, 3, 3] };
+        const spans = SPANS[rows.length] || [];
+        chart.querySelectorAll(".tile").forEach((tile, i) => {
+          tile.style.gridColumn = "span " + (spans[i] || 2);
+        });
+      }
+      // The bars leave room at their tips for the widest figure (measured at the current scale).
+      function layoutBars() {
+        const bars = chart.querySelector(".bars");
+        if (!bars) return;
+        const values = Array.from(bars.querySelectorAll(".bar-value"));
+        const widest = Math.max(0, ...values.map((el) => el.offsetWidth));
+        const track = bars.querySelector(".bar-track");
+        const gap = track ? parseFloat(getComputedStyle(track).columnGap) || 0 : 0;
+        bars.style.setProperty("--reserve", (widest + gap + 1).toFixed(1) + "px");
+      }
+      // A group of figures shares one size: the largest at which each fits its room, never under
+      // FIGURE_FLOOR of its design size (past that, the page fit steps down instead). A bar's figure
+      // takes at most BAR_FIGURE_SHARE of its track, so the bars keep the rest.
+      const FIGURE_FLOOR = 0.4;
+      const FIGURE_MARGIN = 0.98;
+      const BAR_FIGURE_SHARE = 0.4;
+      function inner(el) {
+        const style = getComputedStyle(el);
+        return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      }
+      function fitFigures(figures, roomOf) {
+        figures.forEach((el) => el.style.removeProperty("font-size"));
+        let ratio = 1;
+        figures.forEach((el) => {
+          const room = roomOf(el);
+          if (room > 0 && el.scrollWidth > room) ratio = Math.min(ratio, room / el.scrollWidth);
+        });
+        if (ratio >= 1) return;
+        const size = parseFloat(getComputedStyle(figures[0]).fontSize) * Math.max(FIGURE_FLOOR, ratio * FIGURE_MARGIN);
+        figures.forEach((el) => el.style.setProperty("font-size", size.toFixed(2) + "px"));
+      }
+      function layoutChart() {
+        fitFigures(Array.from(chart.querySelectorAll(".tile-value")), (el) => inner(el.parentElement));
+        fitFigures(Array.from(chart.querySelectorAll(".tick-value")), (el) => inner(el.parentElement));
+        fitFigures(Array.from(chart.querySelectorAll(".bar-value")), (el) => inner(el.parentElement) * BAR_FIGURE_SHARE);
+        layoutBars();
+      }
+
+      // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function overflowing(page) {
+        const box = page.getBoundingClientRect();
+        const style = getComputedStyle(page);
+        const bottom = box.bottom - parseFloat(style.paddingBottom) + 1;
+        const right = box.right - parseFloat(style.paddingRight) + 1;
+        for (const child of page.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.bottom > bottom || rect.right > right) return true;
+        }
+        return Array.from(page.querySelectorAll(".fit")).some(
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+        );
+      }
+      function fit(page) {
+        // A page taken out of the layout (display: none) measures nothing: it keeps the fit it had.
+        if (!page.getClientRects().length) return;
+        page.classList.remove("wrap-words");
+        for (let step = 0; ; step += 1) {
+          const scale = Math.max(MIN_FIT, 1 - step * FIT_STEP);
+          page.style.setProperty("--fit", scale.toFixed(2));
+          layoutChart();
+          if (!overflowing(page) || scale === MIN_FIT) break;
+        }
+        if (overflowing(page)) {
+          page.classList.add("wrap-words");
+          layoutChart();
+        }
+      }
+      function fitAll() {
+        document.querySelectorAll(".page").forEach(fit);
+      }
+      fitAll();
+      // A brand font file loads after this script: the card fits again once it has.
+      document.fonts.addEventListener("loadingdone", fitAll);
+      document.fonts.ready.then(fitAll);
+
+      // A still: nothing moves. The timeline only spans the card's one second.
+      const tl = gsap.timeline({ paused: true });
+      tl.set({}, {}, 1);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

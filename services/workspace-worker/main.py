@@ -836,9 +836,9 @@ class WorkspaceWorker:
 
             Body:
                 {
-                  "url": "file:///workspaces/{id}/repos/automatos-social/render/index.html?...",
+                  "url": "file:///workspaces/{id}/deliverables/charts/revenue.html",
                   "viewport": {"w": 1080, "h": 1350},
-                  "output_path": "deliverables/social/2026-04-29/definition_ig_post.png",
+                  "output_path": "deliverables/charts/2026-04-29/revenue.png",
                   "wait_for": "[data-render-ready='true']",   # optional
                   "full_page": false                            # optional
                 }

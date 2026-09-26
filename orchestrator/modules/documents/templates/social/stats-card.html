@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width={{ size.width }}, height={{ size.height }}" />
+    <title>Stats card</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251 S1.2 (D4, US-107): the "Stats card" template, ported from the automatos-social "stats" family
+         (templates/TplStats.jsx). Every colour and font reads the brand kit: the paper palette for
+         the page, the stage palette for the dark pill. The var() fallbacks are automatos-social's own. */
+      :root {
+        --paper: var(--brand-paper, #f1e9dd);
+        --card: var(--brand-paper-card, #e3d9c8);
+        --ink: var(--brand-on-paper, #191919);
+        --muted: var(--brand-on-paper-muted, #463f37);
+        --dim: var(--brand-on-paper-dim, #5a5248);
+        --accent: var(--brand-primary-on-paper, #9a3d1a);
+        --accent-large: var(--brand-primary-on-paper-large, #c24f25);
+        --brand: var(--brand-primary, #ff6932);
+        --dark: var(--brand-ink, #1a1714);
+        --on-dark: var(--brand-on-ink, #f0e8db);
+        --on-dark-muted: var(--brand-on-ink-muted, #b0a38d);
+        --dark-accent: var(--brand-primary-on-ink, #e96235);
+        --display: var(--brand-heading-font, sans-serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+        /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
+        --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--paper); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--ink); background: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      #stripe { position: absolute; left: 0; top: 0; width: 100%; height: calc(14 * var(--u)); background: var(--brand); }
+
+      /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
+      .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
+        gap: calc(32 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
+      .page.wrap-words * { overflow-wrap: anywhere; }
+      .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+      .counter { color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
+      .handle { color: var(--dim); font-weight: 500; margin-left: auto; text-align: right; }
+      .main { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: calc(40 * var(--s)); }
+      .lead { display: flex; flex-direction: column; align-items: flex-start; gap: calc(34 * var(--s)); }
+      .eyebrow { display: inline-flex; align-items: center; gap: calc(14 * var(--s)); max-width: 100%;
+        background: var(--dark); color: var(--on-dark); border-radius: calc(10 * var(--s));
+        padding: calc(12 * var(--s)) calc(22 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s));
+        font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.2; }
+      .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
+        border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
+      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(150 * var(--s));
+        line-height: 0.95; letter-spacing: -0.02em; color: var(--ink); }
+      .headline .line { display: block; }
+      .hot { color: var(--accent-large); }
+      .subline { max-width: calc(840 * var(--s)); font-family: var(--body); font-size: calc(36 * var(--s)); line-height: 1.4; color: var(--muted); }
+      .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        padding-top: calc(20 * var(--s)); border-top: calc(2 * var(--u)) solid var(--card);
+        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+      .brand { display: flex; align-items: center; gap: calc(14 * var(--s)); color: var(--ink); font-weight: 700; }
+      .logo { flex: none; width: calc(44 * var(--s)); height: calc(44 * var(--s)); object-fit: contain; }
+      .logo[src^="data:image/gif"] { display: none; }
+      .cta { color: var(--dim); text-align: right; }
+
+      .headline { font-size: calc(112 * var(--s)); }
+      .aside { display: flex; flex-direction: column; gap: calc(16 * var(--s)); width: 100%; }
+      .stats { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: calc(14 * var(--s)); }
+      .stat { display: flex; flex-direction: column; align-items: center; gap: calc(12 * var(--s)); min-width: 0;
+        background: var(--card); border-radius: calc(14 * var(--s)); padding: calc(26 * var(--s)) calc(18 * var(--s)); text-align: center; }
+      .stat-value { font-family: var(--display); font-weight: 900; font-size: calc(84 * var(--s)); line-height: 1;
+        letter-spacing: -0.02em; color: var(--accent-large); white-space: nowrap; }
+      .stat-label { font-family: var(--body); font-size: calc(25 * var(--s)); line-height: 1.35; color: var(--muted); }
+      .note { display: flex; flex-direction: column; gap: calc(8 * var(--s)); background: var(--dark);
+        border-radius: calc(14 * var(--s)); padding: calc(26 * var(--s)) calc(30 * var(--s)); }
+      .note-title { font-family: var(--body); font-size: calc(32 * var(--s)); font-weight: 700; line-height: 1.25; color: var(--on-dark); }
+      .note-body { font-family: var(--body); font-size: calc(27 * var(--s)); line-height: 1.45; color: var(--on-dark-muted); }
+
+      /* Landscape (LinkedIn 1.91:1, X 16:9): the headline takes the left, the rest the right. */
+      @media (min-aspect-ratio: 3/2) {
+        .main { flex-direction: row; align-items: center; gap: calc(56 * var(--s)); }
+        .lead { flex: 1 1 0; min-width: 0; }
+        .aside { flex: 1.2 1 0; min-width: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="1" data-width="{{ size.width }}" data-height="{{ size.height }}">
+      <section id="card" class="clip" data-start="0" data-duration="1" data-track-index="0">
+        <div class="page">
+          <div class="top fit" data-optional>
+            <span class="counter v">{{ counter }}</span>
+            <span class="handle v">{{ handle }}</span>
+          </div>
+          <div class="main fit">
+            <div class="lead fit">
+              <div class="eyebrow" data-optional><span class="tri"></span><span class="v">{{ eyebrow }}</span></div>
+              <h1 class="headline fit" data-dress data-accent="{{ headline_accent }}">{{ headline }}</h1>
+            </div>
+            <div class="aside fit">
+              <div class="stats">
+                <div class="stat fit" data-optional><div class="stat-value v">{{ stat_1_value }}</div><div class="stat-label v">{{ stat_1_label }}</div></div>
+                <div class="stat fit" data-optional><div class="stat-value v">{{ stat_2_value }}</div><div class="stat-label v">{{ stat_2_label }}</div></div>
+                <div class="stat fit" data-optional><div class="stat-value v">{{ stat_3_value }}</div><div class="stat-label v">{{ stat_3_label }}</div></div>
+              </div>
+              <div class="note fit" data-optional><h2 class="note-title v">{{ note_title }}</h2><p class="note-body v">{{ note_body }}</p></div>
+            </div>
+          </div>
+          <div class="foot fit">
+            <div class="brand"><img class="logo" src="{{ brand.logo_mark }}" alt="" /><span class="v">{{ brand.name }}</span></div>
+            <span class="cta v">{{ cta }}</span>
+          </div>
+        </div>
+      </section>
+      <div id="stripe"></div>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="1" data-track-index="1" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the card's own text, dressed and fitted before anything is sampled ----------
+      const MIN_FIT = 0.5;
+      const FIT_STEP = 0.04;
+      // A block whose every value is empty is taken out (an unused eyebrow, a third card),
+      // and so is any empty value, so it leaves no gap.
+      document.querySelectorAll("[data-optional]").forEach((block) => {
+        const values = block.querySelectorAll(".v");
+        const filled = Array.from(values.length ? values : [block]).some((el) => el.textContent.trim());
+        if (!filled) block.remove();
+      });
+      document.querySelectorAll(".v").forEach((el) => {
+        if (!el.textContent.trim()) el.remove();
+      });
+      // The display text: "|" breaks the line, and its accent words take the brand colour.
+      function dress(el) {
+        const accent = (el.getAttribute("data-accent") || "").trim();
+        const quoted = el.getAttribute("data-dress") === "quote";
+        const text = quoted ? "\u201c" + el.textContent.trim() + "\u201d" : el.textContent;
+        const lines = text.split("|").map((line) => line.trim()).filter(Boolean);
+        let marked = !accent;
+        el.textContent = "";
+        lines.forEach((line) => {
+          const row = document.createElement("span");
+          row.className = "line";
+          const at = marked ? -1 : line.indexOf(accent);
+          if (at < 0) {
+            row.textContent = line;
+          } else {
+            marked = true;
+            const hot = document.createElement("span");
+            hot.className = "hot";
+            hot.textContent = accent;
+            row.append(line.slice(0, at), hot, line.slice(at + accent.length));
+          }
+          el.appendChild(row);
+        });
+      }
+      document.querySelectorAll("[data-dress]").forEach(dress);
+      // The stats share their row equally, however many there are.
+      document.querySelectorAll(".stats").forEach((row) => {
+        row.style.setProperty("--n", String(Math.max(1, row.children.length)));
+      });
+      // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function overflowing(page) {
+        const box = page.getBoundingClientRect();
+        const style = getComputedStyle(page);
+        const bottom = box.bottom - parseFloat(style.paddingBottom) + 1;
+        const right = box.right - parseFloat(style.paddingRight) + 1;
+        for (const child of page.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.bottom > bottom || rect.right > right) return true;
+        }
+        return Array.from(page.querySelectorAll(".fit")).some(
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+        );
+      }
+      function fit(page) {
+        // A page taken out of the layout (display: none) measures nothing: it keeps the fit it had.
+        if (!page.getClientRects().length) return;
+        page.classList.remove("wrap-words");
+        for (let step = 0; ; step += 1) {
+          const scale = Math.max(MIN_FIT, 1 - step * FIT_STEP);
+          page.style.setProperty("--fit", scale.toFixed(2));
+          if (!overflowing(page) || scale === MIN_FIT) break;
+        }
+        if (overflowing(page)) page.classList.add("wrap-words");
+      }
+      function fitAll() {
+        document.querySelectorAll(".page").forEach(fit);
+      }
+      fitAll();
+      // A brand font file loads after this script: the card fits again once it has.
+      document.fonts.addEventListener("loadingdone", fitAll);
+      document.fonts.ready.then(fitAll);
+
+      // A still: nothing moves. The timeline only spans the card's one second.
+      const tl = gsap.timeline({ paused: true });
+      tl.set({}, {}, 1);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
