@@ -1925,6 +1925,15 @@ async def finalize_board_task_run(
     if nothing_done:
         task.result = f"{task.result or ''}\n\n{nothing_done}".strip()
         force_review = True
+    # F199: figures called verified or checked that no code computed in this run
+    # say so. A result that does not list its actions (a Claude Code session,
+    # which runs code itself) is left as it is.
+    from services.pasted_data import unverified_figures_note
+
+    ran = (exec_result.get("execution") or {}).get("actions")
+    unverified = unverified_figures_note(llm_text, ran) if ran is not None else None
+    if unverified:
+        task.result = f"{task.result or ''}{unverified}".strip()
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier

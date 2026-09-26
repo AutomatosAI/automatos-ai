@@ -1553,6 +1553,8 @@ class AgentFactory:
                         tools=tool_schemas,
                         workspace_id=workspace_id,
                     )
+                    # F199: which actions worked, so a result can be checked against them.
+                    succeeded_actions = sorted(loop_executor.tracker.succeeded)
                     response = loop_result.response
                     tool_iteration = loop_result.iterations
                     execution_time = time.time() - start_time
@@ -1681,6 +1683,7 @@ class AgentFactory:
                                 "provider": response.provider,
                                 "attempt": attempt + 1,
                                 "tool_iterations": tool_iteration,
+                                "actions": succeeded_actions,
                             },
                             "metrics": {
                                 "total_executions": agent_runtime.execution_count,
