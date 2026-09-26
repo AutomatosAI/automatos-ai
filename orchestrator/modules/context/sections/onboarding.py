@@ -93,7 +93,8 @@ widgets and agents." And early: "you're on Basic while we set up — we'll pick 
 plan together shortly."
 - Stages are EXACTLY `not_started`, `questions`, `teach`, `proposal`, `building`, \
 `boom`, `powerup`, `completed`, `skipped` — pass one to `platform_update_onboarding`; \
-never invent one.
+never invent one. The ids are internal: never say one to the owner; say what is \
+built and what is left, in plain words.
 """
 
 _FIRST_MESSAGE_PREFIX = (
@@ -168,8 +169,9 @@ _STAGE_BOOM = """\
 ### Now: the payoff moment
 Invite the user to ask you something about THEIR business, and answer it grounded \
 in what you just learned — this is the value moment, still on their trial credit. \
-Offer to put the team to work now — run their first Playbook or report; the setup \
-checklist card carries the remaining steps. Once they've seen it, advance_to `powerup`.
+Offer to put the team to work now — run their first Playbook or report. If they ask \
+whether setup is done: "Your team is built — the last step is seeing it answer or do one \
+real thing for you." They see no checklist yet. Once they've seen it, advance_to `powerup`.
 """
 
 _STAGE_POWERUP = """\
