@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,32 @@ async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     }
 
 
+def _playbooks_called(db: Session, workspace_id: UUID, name: Any) -> List[Any]:
+    """This workspace's playbooks carrying ``name`` (trimmed, any case), oldest first."""
+    from core.models.core import WorkflowTemplate
+
+    return (
+        db.query(WorkflowTemplate.id, WorkflowTemplate.name)
+        .filter(
+            WorkflowTemplate.workspace_id == workspace_id,
+            func.lower(func.trim(WorkflowTemplate.name)) == str(name).strip().lower(),
+        )
+        .order_by(WorkflowTemplate.id)
+        .all()
+    )
+
+
+def _playbook_namesakes_refusal(namesakes: List[Any]) -> str:
+    name = namesakes[0].name
+    if len(namesakes) == 1:
+        return (f"A playbook is already called '{name}' (id {namesakes[0].id}). Run it with "
+                "platform_execute_playbook, change it with platform_update_playbook, or give the "
+                "new one a different name.")
+    ids = ", ".join(str(playbook.id) for playbook in namesakes)
+    return (f"{len(namesakes)} playbooks are already called '{name}' (ids {ids}). Run or change one "
+            "of them, or give the new one a different name.")
+
+
 async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     import uuid
@@ -143,6 +170,17 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     description = params.get("description")
     if not name or not description:
         return {"success": False, "error": "Missing required: name and description"}
+
+    # F185 (night 6): asked to run the playbook it had just made, Auto made
+    # another of the same name. F144's namesake rule, for playbooks.
+    namesakes = _playbooks_called(db, workspace_id, name)
+    if namesakes:
+        return {
+            "success": False,
+            "existing_playbook_id": namesakes[0].id,
+            "existing_playbook_ids": [playbook.id for playbook in namesakes],
+            "error": _playbook_namesakes_refusal(namesakes),
+        }
 
     tags = params.get("tags", [])
     template_id = f"custom-{uuid.uuid4().hex[:8]}"
@@ -804,15 +842,27 @@ async def delete_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         WorkflowTemplate.workspace_id == workspace_id
     )
     if playbook_id:
-        query = query.filter(WorkflowTemplate.id == playbook_id)
+        playbook = query.filter(WorkflowTemplate.id == playbook_id).first()
+        if not playbook:
+            return {"success": False, "error": (
+                f"No playbook #{playbook_id} in this workspace — nothing was deleted. "
+                "List them (platform_list_playbooks) for the right id.")}
     elif playbook_name:
-        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
+        # F185: a delete names one playbook. The name used to match any playbook
+        # containing it and deleted the first; with namesakes that is a guess.
+        named = _playbooks_called(db, workspace_id, playbook_name)
+        if len(named) > 1:
+            ids = ", ".join(str(match.id) for match in named)
+            return {"success": False, "error": (
+                f"{len(named)} playbooks are called '{named[0].name}' (ids {ids}) — nothing was "
+                "deleted. Delete one by its playbook_id.")}
+        if not named:
+            return {"success": False, "error": (
+                f"No playbook is called '{playbook_name}' in this workspace — nothing was deleted. "
+                "List them (platform_list_playbooks) and delete by playbook_id.")}
+        playbook = query.filter(WorkflowTemplate.id == named[0].id).first()
     else:
         return {"success": False, "error": "Provide playbook_id or playbook_name"}
-
-    playbook = query.first()
-    if not playbook:
-        return {"success": False, "error": "Playbook not found"}
 
     # Guard against system playbooks
     if getattr(playbook, "is_system", False):

@@ -281,6 +281,20 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     return None
 
 
+# F185 (night 6): after two delete asks the model said nothing, and the owner was
+# told "encountered an issue … Please try again": the asks were never mentioned.
+NOTHING_SAID = "I apologize, but I encountered an issue generating a response. Please try again."
+
+
+def nothing_said_fallback(tool_data: Any) -> str:
+    """The reply when the model says nothing after its tools ran: a call waiting
+    for the owner's approval is named, never passed off as an error to retry."""
+    ask = tool_data.get("tool_approval") if isinstance(tool_data, dict) else None
+    if isinstance(ask, dict) and ask.get("message"):
+        return f"Nothing was done yet. {ask['message']} It waits for your approval on the card above."
+    return NOTHING_SAID
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -2937,7 +2951,7 @@ class StreamingChatService:
                     })
                     self._before_model_call()
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                    final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
+                    final_text = forced.content or nothing_said_fallback(tool_data)
                     final_streamed = False
             else:
                 final_text = response.content or ""

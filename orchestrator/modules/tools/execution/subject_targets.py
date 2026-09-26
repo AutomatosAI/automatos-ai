@@ -24,6 +24,7 @@ _TARGETS: Dict[str, Tuple[str, str, str]] = {
     "document_id": ("documents", "filename", "document"),
     "agent_id": ("agents", "name", "agent"),
     "task_id": ("board_tasks", "title", "ticket"),
+    "playbook_id": ("workflow_recipes", "name", "playbook"),  # F185: the delete card named none
 }
 # Where an action's id points when it is not the default table above.
 _ACTION_TARGETS: Dict[str, Dict[str, Tuple[str, str, str]]] = {

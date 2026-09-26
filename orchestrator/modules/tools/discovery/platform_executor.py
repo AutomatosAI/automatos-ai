@@ -514,7 +514,7 @@ def _bind_ask_orchestrator_context(
 # id nor the title of the schedule it would cancel).
 _SUBJECT_PARAMS: Tuple[str, ...] = (
     "title", "name", "task_id", "agent_id", "document_id", "mission_id",
-    "report_id", "id", "app_name", "query",
+    "report_id", "id", "app_name", "query", "playbook_name",
 )
 
 
