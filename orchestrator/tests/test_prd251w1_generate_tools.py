@@ -5,7 +5,9 @@ Pins:
 * **generate_document renders the social formats.** An agent calls it with
   ``social_video`` and a seeded template (Data story, the real starter): the
   real service builds the bundle, media-render (``httpx.MockTransport``, the
-  real client) renders it, and the tool answers with a video Deliverable. A
+  real client) renders it, and the tool answers with a video Deliverable (the
+  first test to run the tool with a template_id: that path raised NameError on
+  ``UUID`` since PRD-167). A
   social format with no template is refused before anything renders. Both
   lanes (the chat lane's inline schema and the ToolRegistry spec) offer every
   format ``generate()`` dispatches, in one wording that names social images
@@ -233,7 +235,7 @@ def test_a_social_format_without_a_template_is_refused_before_anything_renders(r
         "generate_document", {"title": "Launch", "format": fmt, "data": {"headline": "Launch day"}}, agent_id=AGENT.id,
     ))
 
-    assert result["success"] is False
+    assert not result["success"] and result["status"] == "error"
     assert f"rendered from a {fmt} template" in result["error"] and "template_id" in result["error"]
     assert render_env.renderer.bundles == [] and render_env.quota == [] and render_env.registered == []
 

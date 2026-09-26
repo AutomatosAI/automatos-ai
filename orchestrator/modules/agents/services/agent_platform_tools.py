@@ -14,6 +14,8 @@ Uses ToolResultFormatter for consistent result formatting across all tools.
 
 import logging
 from typing import Dict, Any, List, Optional
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
