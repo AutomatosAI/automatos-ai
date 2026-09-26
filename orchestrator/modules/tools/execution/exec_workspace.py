@@ -308,7 +308,12 @@ async def execute_gated_workspace_action(
 
     if not isinstance(cleared, Cleared):
         return cleared
-    return marked(await run(), cleared)
+    result = await run()
+    if cleared.approved_via_grant_id is not None and not (isinstance(result, dict) and result.get("success")):
+        from modules.tools.execution.tool_grants import give_back_grant
+
+        give_back_grant(getattr(executor, "db", None), cleared.approved_via_grant_id, tool_name)
+    return marked(result, cleared)
 
 
 async def resolve_repo_dir(client) -> Optional[str]:

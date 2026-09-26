@@ -78,6 +78,7 @@ def studio(db_session, seed_workspace, monkeypatch):
     db = db_session
     ws = UUID(seed_workspace())
     downloads, stored, announced, reads = [], [], [], []
+    broken = {"on": False}
 
     class Worker:  # the workspace worker, holding one image
         def __init__(self, workspace_id):
@@ -85,6 +86,8 @@ def studio(db_session, seed_workspace, monkeypatch):
 
         async def download_file(self, path):
             downloads.append(path)
+            if broken["on"]:
+                return {"success": False, "error": "File not found"}
             return {"success": True, "content": PNG}
 
         async def read_file(self, path):
@@ -101,7 +104,7 @@ def studio(db_session, seed_workspace, monkeypatch):
     monkeypatch.setattr("modules.tools.execution.tool_grants._notify_approval_pending",
                         lambda grant, workspace_id: announced.append(grant.reason))
     return NS(db=db, ws=ws, owner=_person(db, ws, "priya", "owner"), editor=_person(db, ws, "sam", "editor"),
-              downloads=downloads, stored=stored, announced=announced, reads=reads)
+              downloads=downloads, stored=stored, announced=announced, reads=reads, broken=broken)
 
 
 def _publish(studio, caller_context):
@@ -140,8 +143,7 @@ def test_an_editor_asking_in_chat_gets_the_card(studio):
     assert studio.stored == []
 
 
-def test_an_approved_card_publishes_the_image(studio):
-    from api.approval_grants import _resume_tool_call
+def _approved(studio):
     from core.models.approval_grants import ApprovalGrant
     from core.services.approval_grants import grant_grant
 
@@ -149,13 +151,44 @@ def test_an_approved_card_publishes_the_image(studio):
     grant = studio.db.get(ApprovalGrant, ask["grant_id"])
     grant_grant(grant, granted_by=f"user:{studio.owner.id}")
     studio.db.flush()
+    return grant
 
+
+def test_an_approved_card_publishes_the_image_once(studio):
+    """One yes, one public link (the TESTER's call): a repeat asks again."""
+    from api.approval_grants import _resume_tool_call
+
+    grant = _approved(studio)
     asyncio.run(_resume_tool_call(studio.db, grant))
     assert grant.details["executed_result"]["success"] is True
     assert studio.downloads == [PATH] and studio.stored == ["image/png"]
 
     again = _publish(studio, {"mission_id": "m-7"})
+    assert again["requires_confirmation"] is True and again["grant_id"] != grant.id
+    assert studio.stored == ["image/png"]
+
+
+def test_an_approval_whose_publish_did_nothing_is_given_back(studio):
+    """Review MEDIUM: the file was gone, so nothing was published; the yes stays."""
+    from api.approval_grants import _resume_tool_call
+    from core.models.approval_grants import GrantStatus
+
+    grant = _approved(studio)
+    studio.broken["on"] = True
+    asyncio.run(_resume_tool_call(studio.db, grant))
+    assert grant.details["executed_result"]["success"] is False and studio.stored == []
+    assert grant.status == GrantStatus.GRANTED.value
+
+    studio.broken["on"] = False
+    again = _publish(studio, {"mission_id": "m-7"})
     assert again["success"] is True and again["approved_via_grant_id"] == grant.id
+    assert studio.stored == ["image/png"]
+
+
+def test_a_publish_on_an_approved_card_is_marked_with_its_grant(studio):
+    grant = _approved(studio)
+    reply = _publish(studio, {"mission_id": "m-7"})
+    assert reply["success"] is True and reply["approved_via_grant_id"] == grant.id
 
 
 def test_a_file_tool_meets_the_gates_its_workspace_tool_declares(studio, monkeypatch):

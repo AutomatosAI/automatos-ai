@@ -91,6 +91,9 @@ class _Query:
     def order_by(self, *args):
         return _Query(list(reversed(self._rows)))
 
+    def with_for_update(self, **_kw):  # the single-use claim locks its row (F179)
+        return self
+
     def first(self):
         return self._rows[0] if self._rows else None
 
