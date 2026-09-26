@@ -251,18 +251,22 @@ async def run_board_task_action(
     # P224-RVW-2: never re-dispatch a task that is already running. The decider
     # reached this rerun off a TERMINAL read, but a concurrent Run-Now / dispatcher
     # claim (or the US-001 re-queue) may have restarted the ticket since — and
-    # _redispatch_task's contract requires the caller guarantee it is not
-    # in_progress (the Run-Now route enforces the same guard at api/board_tasks.py:871).
+    # _redispatch_task's contract requires the caller guarantee no run holds it.
     # A re-dispatch would reset the live run to 'assigned' and double-execute. Escalate
     # (like the sibling preconditions) rather than clobbering the in-flight run;
     # placed BEFORE the budget rail so a benign race costs no action budget.
-    if task.status == "in_progress":
+    # F176: decided as Run Now decides it (a live claim, a playbook run still going,
+    # or a mission's step in progress), never by the status word: #1094 said
+    # 'in_progress' with nothing running it.
+    from api.board_tasks import _running_now
+
+    if _running_now(db, task):
         await escalate_watch_now(
             db, watch,
-            reason=f"task {watch.target_id} already in_progress — not re-dispatching",
+            reason=f"task {watch.target_id} is already running — not re-dispatching",
         )
         return WatchActionOutcome(
-            action=action, escalated=True, detail="task already in_progress"
+            action=action, escalated=True, detail="task already running"
         )
 
     # --- budget hard rail (record at initiation; see module docstring) ---
