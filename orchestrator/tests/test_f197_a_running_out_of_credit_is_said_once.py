@@ -179,10 +179,10 @@ def test_the_first_call_that_works_after_an_outage_runs_the_marked_reports_once(
     monkeypatch.setattr(credit, "_rerun_marked", rerun)
 
     async def calls():
-        credit.note_model_success(WS)             # the first since start: marks from before a restart
-        credit.first_notice_of_outage(WS)         # credit runs out
-        credit.note_model_success(WS)             # and comes back
-        credit.note_model_success(WS)             # an ordinary call
+        credit.note_model_success(WS, reserved=8000)   # the first since start: marks from before a restart
+        credit.first_notice_of_outage(WS)              # credit runs out
+        credit.note_model_success(WS, reserved=8000)   # and comes back
+        credit.note_model_success(WS, reserved=8000)   # an ordinary call
         await asyncio.sleep(0)
 
     asyncio.run(calls())
@@ -193,5 +193,88 @@ def test_a_call_with_no_loop_running_leaves_the_outage_for_the_next_one(monkeypa
     from core.llm import credit
 
     credit.first_notice_of_outage(WS)
-    credit.note_model_success(WS)                 # a sync call: nothing can be launched, nothing consumed
+    credit.note_model_success(WS, reserved=8000)       # a sync call: nothing can be launched, nothing consumed
     assert credit.first_notice_of_outage(WS) is False
+
+
+# ── F196 × F197: small calls fit under leftover credit ─────────────────────
+
+LEFTOVER_402 = ("Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. "
+                "You requested up to 8000 tokens, but can only afford 4013', 'code': 402}}")
+MSG = [{"role": "user", "content": "go"}]
+
+
+class _Provider:
+    def __init__(self, outcome):
+        self.outcome = outcome
+
+    async def generate_response(self, messages, tools=None):
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return NS(content="ok", tool_calls=None, finish_reason="stop", usage=None)
+
+
+def _call(max_tokens, outcome=None):
+    """One model call for the workspace, reserving ``max_tokens``: refused when
+    ``outcome`` is an exception."""
+    from core.llm.clients.base import LLMConfig, LLMProvider
+    from core.llm.manager import LLMManager
+
+    config = LLMConfig(provider=LLMProvider.OPENROUTER, model="google/gemini-2.5-flash", max_tokens=max_tokens,
+                       api_key="k")
+    mgr = LLMManager(config=config, workspace_id=WS, agent_id=325)
+    mgr.provider, mgr._track_usage = _Provider(outcome), (lambda *a, **k: None)
+
+    async def run():
+        try:
+            await mgr.generate_response(MSG)
+        except Exception:
+            pass
+        await asyncio.sleep(0)
+    asyncio.run(run())
+
+
+@pytest.fixture
+def reruns(monkeypatch):
+    from core.llm import credit
+
+    went = []
+
+    async def rerun(ws):
+        went.append(ws)
+
+    monkeypatch.setattr(credit, "_rerun_marked", rerun)
+    return went
+
+
+def test_a_digest_that_fits_the_leftover_credit_does_not_end_the_outage(bell, reruns):
+    """TESTER: failure(8,000), success(1,024), failure rang the bell twice and
+    spent the mark. Now it rings once, and the mark waits for a success of 8,000."""
+    _call(8000, Exception(LEFTOVER_402))                                    # a ticket's run is refused
+    bell.ring("task_failed", "Task failed: Who owes me", f"Task execution failed: {LEFTOVER_402}")
+    _call(1024)                                                             # the digest fits under 4,013
+    bell.ring("task_failed", "Task failed: Friendly payment reminders", f"Task execution failed: {LEFTOVER_402}")
+
+    assert [title for _, title, _ in bell.rung] == ["Out of AI credit"] and reruns == []
+    _call(8000)                                                             # credit is back
+    assert reruns == [WS]
+
+
+def test_after_a_restart_only_a_success_as_big_as_an_agent_run_looks_for_marks(reruns):
+    _call(1024)
+    assert reruns == []
+    _call(8000)
+    assert reruns == [WS]
+
+
+def test_a_rerun_that_fails_on_credit_again_is_marked_again():
+    from core.llm.credit import mark_for_rerun
+
+    rerun = NS(triggered_by="credit_back", execution_metadata={"rerun_of": "cron-3f0c2b8e1d4a"})
+    assert mark_for_rerun(rerun) is True and rerun.execution_metadata["out_of_credit"] is True
+
+
+def test_an_agent_that_reserves_far_more_does_not_keep_the_outage_open(reruns):
+    _call(65535, Exception(LEFTOVER_402))                                   # its own setting: 65,535
+    _call(8000)                                                             # an ordinary agent run works again
+    assert reruns == [WS]

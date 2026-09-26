@@ -17,6 +17,13 @@ Now:
 
 The outage is tracked in this process. The marks are in the database, so a
 restart loses no run.
+
+With F196, a small call (a digest, 1,024 tokens) fits under leftover credit
+that an agent run (8,000) does not. So an outage records the most a refused call
+reserved, and only a success that reserved as much ends it. Otherwise the bell
+would ring again after every digest, and a marked report would run again too
+early, fail, and lose its mark. With nothing recorded, after a restart, the bar
+is an agent run's budget. A rerun that fails on credit again is marked again.
 """
 from __future__ import annotations
 
@@ -29,7 +36,8 @@ from typing import Any, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 OUT_OF_CREDIT = "out_of_credit"
-SCHEDULED_TRIGGERS = frozenset({"cron_scheduler"})
+# A scheduled run, or the rerun of one (which is marked again if credit is still short).
+SCHEDULED_TRIGGERS = frozenset({"cron_scheduler", "credit_back"})
 MARK_KEY = "out_of_credit"          # recipe_executions.execution_metadata
 
 OUT_OF_CREDIT_TEXT = ("The AI provider's account ran out of credit, so this stopped before it finished. "
@@ -54,7 +62,8 @@ CREDIT_EVENTS = frozenset({"task_failed", "playbook_failed", "playbook_step_fail
                            "report_submitted"})
 
 _lock = threading.Lock()
-_outage: Dict[str, bool] = {}
+# workspace -> {"needs": the most a refused call reserved, "noticed": the bell has rung}
+_outage: Dict[str, Dict[str, Any]] = {}
 _seen_since_start: Set[str] = set()
 _running: Set["asyncio.Task[None]"] = set()
 
@@ -76,24 +85,56 @@ def plain_failure(error: Any, *, scheduled: bool = False) -> str:
     return _ACCOUNT_ID.sub("user_…", text)
 
 
+def _default_need() -> int:
+    """An agent run's budget: the bar when no refusal was recorded (the table's
+    value, read without the database)."""
+    from core.llm.output_budget import AGENT_RUN, DEFAULT_BUDGETS
+
+    return DEFAULT_BUDGETS[AGENT_RUN]
+
+
+def note_refused(workspace_id: Any, reserved: Optional[int]) -> None:
+    """A call for ``workspace_id`` reserving ``reserved`` tokens was refused for credit."""
+    if not workspace_id:
+        return
+    with _lock:
+        state = _outage.setdefault(str(workspace_id), {"needs": 0, "noticed": False})
+        state["needs"] = max(state["needs"], int(reserved or 0))
+
+
 def first_notice_of_outage(workspace_id: Any) -> bool:
     """True for the first credit failure a workspace's bell hears about."""
-    key = str(workspace_id)
     with _lock:
-        if _outage.get(key):
+        state = _outage.setdefault(str(workspace_id), {"needs": 0, "noticed": False})
+        if state["noticed"]:
             return False
-        _outage[key] = True
+        state["noticed"] = True
         return True
 
 
-def _credit_is_back(workspace_id: str) -> bool:
-    """True when this success ends an outage, or is the workspace's first since
-    the process started (marks from before a restart are looked for then)."""
+def _credit_is_back(workspace_id: str, reserved: Optional[int]) -> bool:
+    """True when this success, reserving ``reserved``, ends the outage: it
+    reserved as much as the refused calls did, or as an agent run does when
+    none was recorded. With no outage, it is also true for the workspace's first
+    such success since the process started (marks from before a restart are
+    looked for then)."""
+    reserved = int(reserved or 0)
     with _lock:
-        ended = _outage.pop(workspace_id, False)
-        first = workspace_id not in _seen_since_start
+        state = _outage.get(workspace_id)
+        if state is not None:
+            # Never above an agent run's budget: an agent whose own setting
+            # reserves 65,535 must not keep the outage open for everyone. Its
+            # rerun, if still short, is marked again.
+            bar = min(state["needs"], _default_need()) if state["needs"] else _default_need()
+            if reserved < bar:
+                return False
+            _outage.pop(workspace_id)
+            _seen_since_start.add(workspace_id)
+            return True
+        if workspace_id in _seen_since_start or reserved < _default_need():
+            return False
         _seen_since_start.add(workspace_id)
-    return ended or first
+        return True
 
 
 def mark_for_rerun(execution: Any) -> bool:
@@ -154,11 +195,12 @@ async def _rerun_marked(workspace_id: str) -> None:
             logger.warning("[F197] could not launch rerun %s", rerun.execution_id, exc_info=True)
 
 
-def note_model_success(workspace_id: Any) -> None:
-    """A model call for ``workspace_id`` just succeeded. When that ends an outage
-    (or is the first since start), the workspace's marked runs go again. Only
-    dictionary work happens here; the database work runs off the loop. With no
-    loop running nothing is consumed, so the next call on a loop still sees it."""
+def note_model_success(workspace_id: Any, reserved: Optional[int] = None) -> None:
+    """A model call for ``workspace_id`` reserving ``reserved`` tokens just
+    succeeded. When that ends an outage (or is the first big enough since start),
+    the workspace's marked runs go again. Only dictionary work happens here; the
+    database work runs off the loop. With no loop running nothing is consumed,
+    so the next call on a loop still sees it."""
     if not workspace_id:
         return
     try:
@@ -166,7 +208,7 @@ def note_model_success(workspace_id: Any) -> None:
     except RuntimeError:
         return
     key = str(workspace_id)
-    if not _credit_is_back(key):
+    if not _credit_is_back(key, reserved):
         return
     task = loop.create_task(_rerun_marked(key))
     _running.add(task)

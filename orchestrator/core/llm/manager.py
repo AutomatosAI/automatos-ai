@@ -675,12 +675,13 @@ class LLMManager:
                 else:
                     response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
-            self._note_success()
+            self._note_success(budget)
             self._note_cut(response, budget)
             return response
         except Exception as exc:
             self._track_usage(None, start, status="error")
             self._remember_refusal(exc)
+            self._note_refusal(exc, budget)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -704,6 +705,7 @@ class LLMManager:
         except Exception as exc:
             self._track_usage(None, start, status="error")
             self._remember_refusal(exc)
+            self._note_refusal(exc, budget)
 
             if self._is_retriable_model_error(exc):
                 raise ValueError(
@@ -728,16 +730,34 @@ class LLMManager:
             long_budget=getattr(self, "_long_budget", None),
         )
 
-    def _note_success(self) -> None:
-        """F197: a call that worked can end a workspace's credit outage."""
+    def _credit_workspace(self) -> Any:
+        from .usage_context import current_usage_scope
+
+        ctx = getattr(self, "_tracking_ctx", None) or {}
+        return ctx.get("workspace_id") or current_usage_scope().get("workspace_id")
+
+    def _reserved(self, budget: Optional[int]) -> Optional[int]:
+        return budget or getattr(getattr(self, "config", None), "max_tokens", None)
+
+    def _note_success(self, budget: Optional[int] = None) -> None:
+        """F197: a call that worked, reserving ``budget``, can end a workspace's
+        credit outage when it reserved as much as the refused calls did."""
         try:
             from .credit import note_model_success
-            from .usage_context import current_usage_scope
 
-            ctx = getattr(self, "_tracking_ctx", None) or {}
-            note_model_success(ctx.get("workspace_id") or current_usage_scope().get("workspace_id"))
+            note_model_success(self._credit_workspace(), reserved=self._reserved(budget))
         except Exception:  # noqa: BLE001 — never breaks the call it follows
             logger.debug("[F197] success note skipped", exc_info=True)
+
+    def _note_refusal(self, exc: Exception, budget: Optional[int]) -> None:
+        """F197: a call refused for credit records how much it reserved."""
+        try:
+            from .credit import is_out_of_credit, note_refused
+
+            if is_out_of_credit(exc):
+                note_refused(self._credit_workspace(), self._reserved(budget))
+        except Exception:  # noqa: BLE001 — never breaks the failure it follows
+            logger.debug("[F197] refusal note skipped", exc_info=True)
 
     def _note_cut(self, response: Any, budget: Optional[int]) -> None:
         from .usage_context import current_usage_scope
