@@ -116,7 +116,8 @@ def clear_session_token(ref: Dict[str, Any]) -> None:
 def revoke_session_token(db: Session, task: Any) -> bool:
     """Kill this ticket's session credential on the row, now. True iff one was there.
 
-    Called from the two early returns in ``apply_result``; cancel does the same
+    Called from ``apply_result``'s early return for a ticket that left
+    ``in_progress`` (a stale attempt's token is already replaced, F211); cancel does the same
     thing inline (``clear_session_token``). The sweeper's requeue does NOT — it
     nulls the lease and leaves the hash, which is safe only because the lookup
     below requires a LIVE LEASE as well as ``in_progress``. ``in_progress`` alone is not enough to keep a token safe: a ticket
@@ -2260,15 +2261,16 @@ async def apply_result(
     task = _owned_task(db, host, task_id)
     ref = dict(task.runtime_ref or {})
     attempt = payload.get("attempt")
-    # Whatever else is true, this host's run of this ticket is over, so its
-    # credential dies here — BEFORE either early return. A result that arrives
-    # for a stale attempt, or for a ticket someone already moved, used to leave
-    # the hash on the row with the plaintext still in the transcript and in
-    # ``mcp.json``; the next flip back to ``in_progress`` revived it.
+    # F211: a stale attempt's credential is already dead. Every claim builds a
+    # fresh ref and mints its own token, so the hash on the row is the NEWER
+    # claim's; revoking it here cut the live session off its platform tools.
     if attempt is not None and ref.get("attempt") is not None and int(attempt) != int(ref["attempt"]):
-        if revoke_session_token(db, task):
-            db.commit()
         return {"applied": False, "reason": "stale attempt", "status": task.status}
+    # Whatever else is true, this host's run of this ticket is over, so its
+    # credential dies here — BEFORE the early return. A result that arrives for
+    # a ticket someone already moved used to leave the hash on the row with the
+    # plaintext still in the transcript and in ``mcp.json``; the next flip back
+    # to ``in_progress`` revived it.
     if task.status != "in_progress":
         if revoke_session_token(db, task):
             db.commit()
