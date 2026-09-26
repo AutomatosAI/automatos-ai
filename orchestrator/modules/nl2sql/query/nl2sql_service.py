@@ -32,6 +32,22 @@ _STOPWORDS = frozenset({
     'its', 'they', 'them', 'their', 'show', 'get', 'give', 'find', 'list',
 })
 
+# F077 (B, refresh 4): an answer grouped by a code ("REGULAR / TASTER / CLUB")
+# should read by name ("Regular / Taster / Harvest Club"). The column that names a
+# row for a person, in priority order.
+_LABEL_COLUMNS = ("name", "display_name", "title", "label")
+LOOKUP_TABLES_KEPT = 5
+
+
+def label_column(table: Dict[str, Any]) -> Optional[str]:
+    """The column a person reads a row by, or None when the table has none."""
+    names = [str(c.get("name") or "") for c in table.get("columns", []) or []]
+    for wanted in _LABEL_COLUMNS:
+        if wanted in names:
+            return wanted
+    return next((n for n in names if n.endswith("_name")), None) or ("description" if "description" in names else None)
+
+
 
 class NaturalLanguageToSQLService:
     """
@@ -145,6 +161,8 @@ CRITICAL RULES:
 5. Use appropriate aggregation functions when needed
 6. Consider performance - use indexes when available
 7. Return results in a user-friendly format with clear column aliases
+8. When you group or list by a code or id column that references another table, join that table and show
+   its name (RELATIONSHIPS gives the label column); show the code only if the question asks for it
 
 SMART QUERY INTERPRETATION:
 - If user asks about data "over", "in", or "during" a time period, they likely want a TIME-SERIES breakdown (GROUP BY date/day)
@@ -187,8 +205,12 @@ Database Dialect: {dialect}
         relationships = schema_metadata.get('relationships', [])
         if relationships:
             prompt_parts.append("\nRELATIONSHIPS:")
+            tables_by_name = {t.get('name'): t for t in schema_metadata.get('tables', []) or []}
             for rel in relationships:
-                prompt_parts.append(f"  - {rel['from_table']}.{rel['from_column']} -> {rel['to_table']}.{rel['to_column']} ({rel.get('type', 'foreign_key')})")
+                # F077 (B): the column the target is read by, so a grouped answer names it.
+                label = label_column(tables_by_name.get(rel['to_table']) or {})
+                labelled = f"; label: {rel['to_table']}.{label}" if label and label != rel['to_column'] else ""
+                prompt_parts.append(f"  - {rel['from_table']}.{rel['from_column']} -> {rel['to_table']}.{rel['to_column']} ({rel.get('type', 'foreign_key')}{labelled})")
 
         # Add semantic layer if available
         if semantic_layer:
@@ -238,6 +260,20 @@ Database Dialect: {dialect}
         prompt_parts.append("[brief explanation of what the query does]")
 
         return "\n".join(prompt_parts)
+
+    @staticmethod
+    def _with_lookup_tables(chosen: List[Dict[str, Any]], schema_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """F077 (B): a chosen table's foreign-key targets come with it, so the name a
+        code stands for is in the schema the model sees."""
+        by_name = {t.get("name"): t for t in schema_metadata.get("tables", []) or []}
+        seen = {t.get("name") for t in chosen}
+        extra: List[Dict[str, Any]] = []
+        for rel in schema_metadata.get("relationships", []) or []:
+            target = rel.get("to_table")
+            if rel.get("from_table") in seen and target in by_name and target not in seen:
+                seen.add(target)
+                extra.append(by_name[target])
+        return list(chosen) + extra[:LOOKUP_TABLES_KEPT]
 
     def _get_relevant_tables(
         self,
@@ -294,7 +330,7 @@ Database Dialect: {dialect}
         scored_tables.sort(key=lambda x: x[0], reverse=True)
 
         if scored_tables:
-            return [table for _, table in scored_tables[:max_tables]]
+            return self._with_lookup_tables([table for _, table in scored_tables[:max_tables]], schema_metadata)
 
         # Fallback: top 5 tables by row_count (most important), NOT all tables
         tables_sorted = sorted(
