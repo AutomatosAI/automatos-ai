@@ -278,3 +278,55 @@ def test_an_agent_that_reserves_far_more_does_not_keep_the_outage_open(reruns):
     _call(65535, Exception(LEFTOVER_402))                                   # its own setting: 65,535
     _call(8000)                                                             # an ordinary agent run works again
     assert reruns == [WS]
+
+
+# ── code review ────────────────────────────────────────────────────────────
+
+def test_a_report_about_a_customers_insufficient_funds_rings_as_itself(bell):
+    """Only the providers' own refusals and our sentence count as a credit failure."""
+    bell.ring("report_submitted", "Report: Weekly accounts", "Two orders bounced for insufficient funds this week.")
+    bell.ring("task_failed", "Task failed: Who owes me", RAW_402)
+
+    assert [title for _, title, _ in bell.rung] == ["Report: Weekly accounts", "Out of AI credit"]
+
+
+def test_a_marked_run_another_process_is_claiming_is_left_to_it(test_engine):
+    """Two processes ending the same outage could each stage a rerun of the same
+    run. The claim is a row lock now; the second process skips a claimed row."""
+    import threading
+    import uuid
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    from core.llm import credit
+    from core.models import WorkflowTemplate
+    from core.models.core import RecipeExecution
+
+    Session = sessionmaker(bind=test_engine)
+    ws = str(uuid.uuid4())
+    setup = Session()
+    setup.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'f197-lock')"), {"id": ws})
+    recipe = WorkflowTemplate(template_id=f"f197-{uuid.uuid4().hex[:10]}", name="Monday Stock Report",
+                              description="F197", workspace_id=ws, template_definition={"steps": []},
+                              created_by="user_test", steps=[])
+    setup.add(recipe)
+    setup.flush()
+    run_id = f"cron-{uuid.uuid4().hex[:12]}"
+    setup.add(RecipeExecution(execution_id=run_id, recipe_id=recipe.id, workspace_id=ws, status="failed",
+                              input_data={}, attempt_count=1, triggered_by="cron_scheduler",
+                              execution_metadata={"out_of_credit": True}))
+    setup.commit()
+    claimer = Session()
+    try:
+        claimer.query(RecipeExecution).filter(RecipeExecution.execution_id == run_id).with_for_update().one()
+        let_go = threading.Timer(2.0, claimer.rollback)      # the other process finishes its claim
+        let_go.start()
+        staged = credit._stage_reruns(ws)
+        let_go.join()
+        assert [r.retry_of for r in staged] == []
+    finally:
+        claimer.close()
+        setup.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws})
+        setup.commit()
+        setup.close()

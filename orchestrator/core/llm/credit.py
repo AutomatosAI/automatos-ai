@@ -49,9 +49,12 @@ OUTAGE_NOTICE = ("The AI provider's account ran out of credit, so tasks and play
                  "This is the only notice until credit is back. Scheduled reports that stopped run again by "
                  "themselves then.")
 
-# The provider's words (OpenRouter's 402 bodies) and our own sentence above.
+# The providers' own refusals (OpenRouter's 402 bodies, Anthropic's and OpenAI's
+# quota errors) and our own sentence above. Nothing a business report might say
+# ("two orders bounced for insufficient funds") counts.
 _CREDIT = re.compile(r"Error code: 402\b|\b402 Payment Required\b|requires more credits|exceed your available "
-                     r"credits|insufficient (?:credit|balance|funds)|ran out of credit", re.I)
+                     r"credits|credit balance is too low|exceeded your current quota|insufficient_quota"
+                     r"|The AI provider's account ran out of credit", re.I)
 _PROVIDER_STATUS = re.compile(r"Error code: (\d{3}) - \{")
 _ACCOUNT_ID = re.compile(r"\buser_[A-Za-z0-9]{8,}\b")
 PROVIDER_REFUSED_TEXT = ("The AI provider refused the request (HTTP {status}), so this stopped. "
@@ -157,10 +160,13 @@ def _stage_reruns(workspace_id: str) -> List[Any]:
     staged: List[Any] = []
     db = SessionLocal()
     try:
+        # Claimed under a row lock: another process ending the same outage
+        # skips these rows, and finds them unmarked once this commits.
         marked = (db.query(RecipeExecution)
                   .filter(RecipeExecution.workspace_id == workspace_id,
                           RecipeExecution.status == "failed",
                           RecipeExecution.execution_metadata[MARK_KEY].astext == "true")
+                  .with_for_update(skip_locked=True)
                   .all())
         for original in marked:
             recipe = db.query(WorkflowTemplate).filter(WorkflowTemplate.id == original.recipe_id).first()
