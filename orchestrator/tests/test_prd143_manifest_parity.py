@@ -124,13 +124,15 @@ ADMIN_ONLY = {
     "platform_connect_channel", "platform_start_channel", "platform_stop_channel",
     "platform_uninstall_plugin", "platform_set_skill_script_execution",
     "platform_set_power_mode", "platform_create_routing_rule", "platform_install_package",
+    # PRD-251 Wave 1: the brand kit, as REST (PUT /brand-kit is workspace:manage).
+    "platform_update_brand_kit",
 }
 
 
 def test_the_admin_only_tier_is_the_decided_set(registry):
     """Rev 2 emptied the admin_only tier. Since F145 the gate checks the person
-    the call is made for, and F147, F148 and F151 each put decided actions behind
-    it; a new entry is a decision, never a drift."""
+    the call is made for, and F147, F148, F151 and PRD-251 Wave 1 each put decided
+    actions behind it; a new entry is a decision, never a drift."""
     admin_only = sorted(a.name for a in registry.get_all() if a.admin_only)
     assert admin_only == sorted(ADMIN_ONLY), (
         f"the admin_only tier drifted: added {sorted(set(admin_only) - ADMIN_ONLY)}, "
