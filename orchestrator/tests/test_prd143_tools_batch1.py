@@ -492,7 +492,7 @@ def test_batch1_tools_registered_and_operator_tier():
     from modules.tools.discovery.action_registry import ActionRegistry
 
     # F147 (25 Sep): a channel's config holds its trust gate and its
-    # credentials, so configuring one is an owner's or admin's (and confirmed).
+    # credentials, so configuring one is an owner's or admin's (F212: no card).
     # F151: so are connecting, starting and stopping one (REST: workspace:manage).
     admin_gated = {"platform_configure_channel", "platform_connect_channel",
                    "platform_start_channel", "platform_stop_channel"}

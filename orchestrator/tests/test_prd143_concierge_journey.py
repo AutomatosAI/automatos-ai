@@ -486,13 +486,13 @@ async def test_every_step_audited(real_registry):
     # The autonomous marker is distinct and queryable: EXACTLY the
     # confirmation-skipped administrative steps carry it
     # (router_decision->>'autonomous'), nothing else does. F148: inviting is
-    # confirmed too, so both member steps carry it; F151: so is connecting a
-    # channel.
+    # confirmed too, so both member steps carry it. F212: connecting a channel
+    # asks for no card, so it carries none.
     autonomous = [
         r for r in rows if (r.router_decision or {}).get("autonomous") is True
     ]
     assert sorted(_identity(r) for r in autonomous) == [
-        "platform_connect_channel", "platform_invite_member", "platform_set_member_role"]
+        "platform_invite_member", "platform_set_member_role"]
 
     # Dispatcher rows carry the S14 selection outcome (narrowed surface hit).
     role_row = next(r for r in autonomous if _identity(r) == "platform_set_member_role")

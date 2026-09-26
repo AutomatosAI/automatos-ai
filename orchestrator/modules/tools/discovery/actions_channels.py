@@ -74,7 +74,10 @@ def register_channels_actions(registry: ActionRegistry) -> None:
             "required": ["platform", "config"],
         },
         permission_level="write",
-        requires_confirmation=True,
+        # F212: no card. A card's approval grant stores the call's params, and
+        # these hold the bot token or signing secret; the card comes back once
+        # grant params are encrypted.
+        requires_confirmation=False,
         admin_only=True,  # F151: REST: workspace:manage; a new ingress and its credentials
         tags=["channels", "integrations", "messaging", "setup", "connect"],
         examples=[
@@ -112,8 +115,9 @@ def register_channels_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         # F147: a channel's config holds its trust gate (trigger_mode) and its
-        # credentials; an owner or admin confirms every change.
-        requires_confirmation=True,
+        # credentials, so only an owner or admin changes it. F212: with no card,
+        # since a card's approval grant would store those credentials.
+        requires_confirmation=False,
         admin_only=True,
         tags=["channels", "integrations", "messaging", "configure"],
         examples=[

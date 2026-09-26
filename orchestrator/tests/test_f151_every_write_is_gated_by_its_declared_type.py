@@ -25,7 +25,7 @@ ORCH = Path(__file__).resolve().parents[1]
 # action: whether it is also confirmed
 GATED = {
     "platform_revoke_api_key": True,
-    "platform_connect_channel": True,
+    "platform_connect_channel": False,  # F212: no card; its grant would store the credentials
     "platform_start_channel": False,
     "platform_stop_channel": False,
     "platform_uninstall_plugin": True,
@@ -91,14 +91,13 @@ def test_an_editor_or_a_lane_for_nobody_is_refused(cafe, action, params, caller)
     handler.assert_not_called()
 
 
-def test_an_admins_new_channel_waits_for_its_card(cafe):
-    """Made for an admin but instructed by nobody in chat (no conversation): the card
-    stands. An admin who instructs it in a chat turn is the approval, local and SaaS
-    alike (F166b)."""
+def test_an_admins_new_channel_runs_with_no_card(cafe):
+    """F212: connecting a channel asks for no card (its grant would store the
+    credentials); admin_only is the gate, so an admin's call runs."""
     reply, handler = _run(cafe, "platform_connect_channel", {"platform": "telegram", "config": {}},
                           {"driving_user_id": str(cafe.admin)})
-    assert reply.get("requires_confirmation") is True
-    handler.assert_not_called()
+    assert reply == {"success": True, "handler": "ran"}
+    handler.assert_called_once()
 
 
 def test_the_chat_cannot_create_an_api_key():

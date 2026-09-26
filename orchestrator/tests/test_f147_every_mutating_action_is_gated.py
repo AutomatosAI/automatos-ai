@@ -4,7 +4,8 @@ test.yml runs scripts/check_hierarchy_gate.py. The seven mutating actions it
 listed are accounted for:
 
 - platform_update_system_setting (a platform-wide setting) is super_admin_only;
-- platform_configure_channel is admin_only and confirmed, and the call's config
+- platform_configure_channel is admin_only (F212: with no card, since its grant
+  would store the channel's credentials), and the call's config
   merges into the stored one, keeping any key it does not name (as the REST PUT
   keeps trigger_mode);
 - platform_update_workspace_settings is admin_only;
@@ -50,7 +51,7 @@ def test_the_three_open_actions_are_gated():
     channel = registry.get("platform_configure_channel")
     workspace = registry.get("platform_update_workspace_settings")
     assert (system.super_admin_only, system.requires_confirmation) == (True, True)
-    assert (channel.admin_only, channel.requires_confirmation) == (True, True)
+    assert (channel.admin_only, channel.requires_confirmation) == (True, False)
     assert workspace.admin_only is True
 
 
