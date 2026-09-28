@@ -17,8 +17,11 @@ All data, on the PRD-230 machinery:
 ``seed_socials_marketplace`` runs at every boot (``main.py``, leader worker),
 after ``seed_builtin_skills`` and before ``seed_packages``. A row it finds is
 left as it is, so live curation survives a redeploy, except the agents' skill
-links: they are reconciled every time, so a built-in skill the owner syncs
-(``scripts/sync-skills.py``) after the first boot attaches on the next one.
+links and personas. Skill links are reconciled every time, so a built-in skill
+the owner syncs (``scripts/sync-skills.py``) after the first boot attaches on the
+next one. A persona is the seed's: every install copies it into the installing
+workspace, so one that differs from the seed is put back (P251W1-RVW-1,
+``core/seeds/marketplace_personas.py``), on the Shopify roster's rows too.
 A skill is linked only from a global row of a name its agent lists, and the
 roster lists only the built-in Socials skills: no skill that posts straight to
 a channel (D14: agents draft, the Socials tab and the platform publisher are
@@ -39,6 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.models.core import PLAYBOOK_DOCUMENT_STEP, Agent, Skill, WorkflowTemplate, agent_skills
+from core.seeds.marketplace_personas import restore_seeded_personas
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +166,8 @@ SOCIALS_AGENTS: List[Dict[str, Any]] = [
         "skills": ["brand-kit-builder", "visual-storyteller", "image-prompt-engineer", "social-brand-voice"],
     },
 ]
+# Each agent's persona, by slug: what every boot puts back on its marketplace row.
+SOCIALS_PERSONAS: Dict[str, str] = {spec["slug"]: spec["custom_persona_prompt"] for spec in SOCIALS_AGENTS}
 
 # ── The Playbooks ────────────────────────────────────────────────────────────
 # Steps carry the agent's slug; the stored rows carry the marketplace agent's id
@@ -480,8 +486,12 @@ SOCIALS_PACKAGE: Dict[str, Any] = {
 
 
 def seed_socials_marketplace(db: Session) -> Dict[str, Any]:
-    """Create the Socials agents and Playbooks that are missing, and link each agent's
-    built-in skills that exist now. Returns what happened, by slug; the caller commits."""
+    """Create the Socials agents and Playbooks that are missing, link each agent's
+    built-in skills that exist now, and put the seed's persona back on every seeded
+    marketplace agent whose persona differs from it (P251W1-RVW-1): the Socials
+    roster's and the Shopify roster's, since this is the marketplace seed every boot
+    runs and the Shopify seeder is not. Returns what happened, by slug; the caller
+    commits."""
     agents: Dict[str, Agent] = {}
     outcome: Dict[str, Any] = {"agents": {}, "skills": {}, "playbooks": {}}
     for spec in SOCIALS_AGENTS:
@@ -491,6 +501,11 @@ def seed_socials_marketplace(db: Session) -> Dict[str, Any]:
         outcome["skills"][spec["slug"]] = _link_skills(db, agent, spec["skills"])
     for spec in SOCIALS_PLAYBOOKS:
         outcome["playbooks"][spec["template_id"]] = _ensure_playbook(db, spec, agents)
+    # Imported here, not at the top: importing this module never loads the Shopify
+    # seed script (its own module sets up logging and sys.path for the command line).
+    from core.seeds.seed_shopify_agents import restore_shopify_personas
+
+    outcome["personas_restored"] = restore_seeded_personas(db, SOCIALS_PERSONAS) + restore_shopify_personas(db)
     db.flush()
     return outcome
 
