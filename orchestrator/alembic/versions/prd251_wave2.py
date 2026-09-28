@@ -60,6 +60,10 @@ CAMPAIGN_INDEXES = (
 # names it the same, so both writers agree and the downgrade finds it either way.
 POST_CAMPAIGN_FK = "social_posts_campaign_id_fkey"
 POST_CAMPAIGN_INDEX = "ix_social_posts_campaign_id"
+# Where batch mode copies the table (SQLite), it reflects social_posts alone: by
+# default it would also reflect every table the keys name (workspaces), which a
+# partial schema need not hold.
+POSTS_BATCH_REFLECT = {"resolve_fks": False}
 
 
 def _json():
@@ -128,7 +132,7 @@ def link_posts_to_campaigns() -> None:
     if not _has_table("social_posts"):
         return
     if not campaign_foreign_keys():
-        with op.batch_alter_table("social_posts") as batch:
+        with op.batch_alter_table("social_posts", reflect_kwargs=POSTS_BATCH_REFLECT) as batch:
             batch.create_foreign_key(
                 POST_CAMPAIGN_FK, "social_campaigns", ["campaign_id"], ["id"], ondelete="SET NULL"
             )
@@ -139,7 +143,7 @@ def unlink_posts_from_campaigns() -> None:
     """Drop the key (by the name the database holds) and the post index."""
     names = campaign_foreign_keys()
     if names:
-        with op.batch_alter_table("social_posts") as batch:
+        with op.batch_alter_table("social_posts", reflect_kwargs=POSTS_BATCH_REFLECT) as batch:
             for name in names:
                 batch.drop_constraint(name, type_="foreignkey")
     if _has_table("social_posts"):
