@@ -18,13 +18,24 @@ script through that toolkit (:func:`speak`):
   from our storage like any media. The same script, the same line ids and start
   times: the scene renders with no other change, and media-render fits each
   line into its script window (services/media-render/media_render/fit.py);
-* money (D13): Fish Audio bills credit, so its balance is read before the first
-  line and after the last (the ``balance`` action) and the difference is booked
-  on the media lane against the post. One credit window per workspace and
-  toolkit runs at a time across every worker process (a Postgres advisory lock,
-  ``toolkit.credit_window``), so two renders' readings never overlap and neither
-  books the other's spend. ElevenLabs bills the customer's own plan and has no balance
-  action on the allowlist: its lines are booked as units (characters) at $0.
+* money (D13): before the first line is spoken the script is priced, its units
+  (Fish Audio's UTF-8 bytes, ElevenLabs's characters) at the toolkit's
+  configured price per unit (``SOCIALS_VOICE_*_USD_PER_*``), and the price must
+  fit the post's cap and the workspace's monthly media cap
+  (``modules/socials/media_caps.py``). The check runs inside the workspace's
+  spend window, which the render's footage takes before it
+  (``toolkit.spend_window``), so footage and voice are checked against one
+  running total and two renders never spend the same headroom. Over either cap
+  nothing is spoken (:class:`VoiceRefused`). What speaking cost is booked on the
+  media lane against the post before the window closes, off the event loop, so
+  the row is written at once and never dropped. Fish Audio bills credit: its
+  balance is read before the first line and after the last (the ``balance``
+  action) and the difference is booked, inside one credit window per workspace
+  and toolkit across every worker process (a Postgres advisory lock,
+  ``toolkit.credit_window``), so two renders' readings never overlap; a balance
+  that cannot be read after speaking books the priced amount. ElevenLabs bills
+  the customer's own plan and has no balance action on the allowlist: its
+  characters are booked at the configured price, so the caps see them.
 
 The voice picker reads :func:`voice_sources` (Kokoro always; each voice toolkit
 the workspace can speak with; each allowlisted one it has not connected, to
@@ -52,6 +63,7 @@ from core.llm.usage_context import LANE_MEDIA, usage_scope
 from core.llm.usage_tracker import UsageTracker
 from modules.socials import service
 from modules.socials.capabilities import BALANCE, TTS, VOICES, MediaCapabilities, OfferedAction
+from modules.socials.media_caps import MediaCapExceeded, check_spend
 from modules.socials.media_store import MediaNameError, MediaStore, media_key
 from modules.socials.recipes.files import FileOutputError, fetch, returned_file
 from modules.socials.recipes.toolkit import (
@@ -61,6 +73,7 @@ from modules.socials.recipes.toolkit import (
     credit_window,
     error_of,
     params_for,
+    spend_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,8 +109,20 @@ class VoiceToolError(VoiceError):
     """The toolkit answered with an error, or with no audio (502 when listing voices)."""
 
 
+class VoiceRefused(VoiceError):
+    """Speaking the script would take the post or the workspace over its media cap: nothing was spoken."""
+
+
 def _utf8_bytes(text: str) -> int:
     return len(text.encode("utf-8"))
+
+
+def _fish_audio_usd_per_byte() -> float:
+    return float(config.SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE)
+
+
+def _elevenlabs_usd_per_character() -> float:
+    return float(config.SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER)
 
 
 @dataclass(frozen=True)
@@ -110,13 +135,15 @@ class VoiceRecipe:
     text_param: str
     voice_param: str
     voice_as_list: bool
+    # What the toolkit bills a line by, booked as units on the media lane, and
+    # the dollars one unit costs (D13, read from config when a script is priced).
+    units: Callable[[str], int]
+    usd_per_unit: Callable[[], float]
     speak_extra: Mapping[str, Any] = field(default_factory=dict)
     # The voices action's parameters: a title filter and a page size, where the toolkit takes them.
     list_query_param: Optional[str] = None
     list_limit_param: Optional[str] = None
     list_extra: Mapping[str, Any] = field(default_factory=dict)
-    # What the toolkit bills a line by, booked as units on the media lane.
-    units: Callable[[str], int] = len
     # A credit-billed toolkit books its balance difference (D13): the keys its
     # balance action carries the money under, in the order they are trusted.
     credit_billed: bool = False
@@ -135,6 +162,7 @@ RECIPES: Mapping[str, VoiceRecipe] = {
         voice_param="voice_id",
         voice_as_list=False,
         units=len,
+        usd_per_unit=_elevenlabs_usd_per_character,
     ),
     "fish_audio": VoiceRecipe(
         toolkit="fish_audio",
@@ -142,11 +170,12 @@ RECIPES: Mapping[str, VoiceRecipe] = {
         text_param="text",
         voice_param="voice_model_ids",
         voice_as_list=True,
+        units=_utf8_bytes,
+        usd_per_unit=_fish_audio_usd_per_byte,
         speak_extra={"format": "mp3"},
         list_query_param="title",
         list_limit_param="page_size",
         list_extra={"sort_by": "score"},
-        units=_utf8_bytes,
         credit_billed=True,
         # Fish Audio's API credit (dollars) is "credit"; its package allowance
         # ("balance", "total") is free quota, not money, and is never booked.
@@ -361,6 +390,63 @@ async def list_voices(
     return parse_voices(result.get("data"), limit=limit, query=None if filtered_by_toolkit else query)
 
 
+# ── the money (D13) ─────────────────────────────────────────────────────────
+def script_units(recipe: VoiceRecipe, texts: Sequence[str]) -> int:
+    """What the toolkit bills ``texts`` by: Fish Audio's UTF-8 bytes, ElevenLabs's characters."""
+    return sum(recipe.units(text) for text in texts)
+
+
+def price_usd(recipe: VoiceRecipe, texts: Sequence[str]) -> float:
+    """What speaking ``texts`` costs: their units at the toolkit's configured price per unit."""
+    return script_units(recipe, texts) * recipe.usd_per_unit()
+
+
+def _what(plan: VoicePlan, lines: Sequence[Tuple[str, str]]) -> str:
+    return f"The {plan.label} voice ({len(lines)} line{'' if len(lines) == 1 else 's'})"
+
+
+def _check_caps(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUID, price: float, what: str) -> None:
+    try:
+        check_spend(session_factory, workspace_id, post_id, price, what)
+    except MediaCapExceeded as exc:
+        raise VoiceRefused(str(exc)) from exc
+
+
+def _cost(plan: VoicePlan, recipe: VoiceRecipe, units: int, before: Optional[Decimal],
+          after: Optional[Decimal]) -> Tuple[float, Optional[str]]:
+    """What speaking ``units`` cost, and why it was priced rather than read: a
+    credit-billed toolkit's balance difference; otherwise, or when a balance
+    could not be read, the units at the configured price (never $0)."""
+    priced = units * recipe.usd_per_unit()
+    if not recipe.credit_billed:
+        return priced, None
+    if before is None or after is None:
+        return priced, f"{plan.label}'s balance could not be read after speaking: booked at its configured price"
+    return float(max(before - after, Decimal(0))), None
+
+
+def _book(plan: VoicePlan, recipe: VoiceRecipe, *, workspace_id: UUID, post_id: UUID, texts: Sequence[str],
+          before: Optional[Decimal], after: Optional[Decimal], latency_ms: int) -> None:
+    """Book what speaking cost on the media lane (D13), against the post. Called
+    off the event loop (``asyncio.to_thread``), the usage tracker writes inline:
+    the row is in before this returns, so the next cap check sees it."""
+    units = script_units(recipe, texts)
+    usd, problem = _cost(plan, recipe, units, before, after)
+    if problem:
+        logger.error("[SocialsVoice] %s (post %s)", problem, post_id)
+    if not units and not usd:
+        return
+    with usage_scope(request_type=LANE_MEDIA, execution_id=f"{EXECUTION_PREFIX}{post_id}", workspace_id=workspace_id):
+        UsageTracker.track_media(
+            provider=plan.toolkit,
+            model_id=plan.speak_action.slug.lower(),
+            units=units,
+            usd=usd,
+            latency_ms=latency_ms,
+            error_message=problem,
+        )
+
+
 # ── speaking the script ─────────────────────────────────────────────────────
 def voice_file_name(line_id: str, extension: str) -> str:
     return f"voice-{line_id.lower()}.{extension}"
@@ -421,32 +507,9 @@ async def _speak_line(
     )
 
 
-def _book(plan: VoicePlan, recipe: VoiceRecipe, *, workspace_id: UUID, post_id: UUID, texts: Sequence[str],
-          before: Optional[Decimal], after: Optional[Decimal], latency_ms: int) -> None:
-    """Book what speaking cost on the media lane (D13), against the post."""
-    units = sum(recipe.units(text) for text in texts)
-    usd, problem = Decimal(0), None
-    if recipe.credit_billed:
-        if before is None or after is None:
-            problem = f"{plan.label}'s balance could not be read after speaking: its spend is not known"
-            logger.error("[SocialsVoice] %s (post %s)", problem, post_id)
-        else:
-            usd = max(before - after, Decimal(0))
-    if not units and not usd:
-        return
-    with usage_scope(request_type=LANE_MEDIA, execution_id=f"{EXECUTION_PREFIX}{post_id}", workspace_id=workspace_id):
-        UsageTracker.track_media(
-            provider=plan.toolkit,
-            model_id=plan.speak_action.slug.lower(),
-            units=units,
-            usd=float(usd),
-            latency_ms=latency_ms,
-            error_message=problem,
-        )
-
-
-async def speak(
+async def _speak_lines(
     plan: VoicePlan,
+    recipe: VoiceRecipe,
     *,
     workspace_id: UUID,
     post_id: UUID,
@@ -454,19 +517,16 @@ async def speak(
     session_factory: Callable[[], Any],
     store: MediaStore,
 ) -> Dict[str, SpokenLine]:
-    """Speak each ``(line id, text)`` through the plan's toolkit, one call per
-    line, and copy each line's audio into our storage as it returns. What it
-    spent is booked on the media lane, whatever happened. :class:`VoiceError`
-    when a line cannot be spoken or kept."""
-    recipe = RECIPES[plan.toolkit]
+    """Each line spoken and stored, one call per line; what it spent is booked,
+    off the event loop, whatever happened."""
     spoken: Dict[str, SpokenLine] = {}
     attempted: List[str] = []
     db = session_factory()
     try:
         executor = ComposioToolExecutor(db)
-        # Only a credit-billed toolkit reads a balance difference: only it needs the window.
-        window = credit_window(session_factory, workspace_id, plan.toolkit) if recipe.credit_billed else nullcontext()
-        async with window:
+        # Only a credit-billed toolkit reads a balance difference: only it needs the credit window.
+        credits = credit_window(session_factory, workspace_id, plan.toolkit) if recipe.credit_billed else nullcontext()
+        async with credits:
             started = time.monotonic()
             before = await _read_balance(executor, workspace_id, plan)
             if recipe.credit_billed and before is None:
@@ -480,10 +540,39 @@ async def speak(
                     spoken[line_id] = await _speak_line(executor, store, plan, recipe, workspace_id, post_id, line_id, text)
             finally:
                 after = await _read_balance(executor, workspace_id, plan) if recipe.credit_billed else None
-                _book(
-                    plan, recipe, workspace_id=workspace_id, post_id=post_id, texts=attempted,
+                await asyncio.to_thread(
+                    _book, plan, recipe, workspace_id=workspace_id, post_id=post_id, texts=attempted,
                     before=before, after=after, latency_ms=int((time.monotonic() - started) * 1000),
                 )
     finally:
         db.close()
     return spoken
+
+
+async def speak(
+    plan: VoicePlan,
+    *,
+    workspace_id: UUID,
+    post_id: UUID,
+    lines: Sequence[Tuple[str, str]],
+    session_factory: Callable[[], Any],
+    store: MediaStore,
+) -> Dict[str, SpokenLine]:
+    """Speak each ``(line id, text)`` through the plan's toolkit, one call per
+    line, and copy each line's audio into our storage as it returns.
+
+    Priced first (D13): the script's units at the toolkit's configured price must
+    fit the post's cap and the workspace's monthly media cap, read inside the
+    workspace's spend window (the one footage takes), so every check sees what
+    was booked before it. Over either cap nothing is spoken:
+    :class:`VoiceRefused`. What speaking spent is booked on the media lane before
+    the window closes, whatever happened. :class:`VoiceError` when a line cannot
+    be spoken or kept."""
+    recipe = RECIPES[plan.toolkit]
+    price = price_usd(recipe, [text for _, text in lines])
+    async with spend_window(session_factory, workspace_id):
+        await asyncio.to_thread(_check_caps, session_factory, workspace_id, post_id, price, _what(plan, lines))
+        return await _speak_lines(
+            plan, recipe, workspace_id=workspace_id, post_id=post_id, lines=lines,
+            session_factory=session_factory, store=store,
+        )

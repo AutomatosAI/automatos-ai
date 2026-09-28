@@ -13,8 +13,10 @@ which runs in the background:
    no connected toolkit can make plays the template's own motion graphics
    (``modules/socials/recipes/footage.py``). Then, when the post chose a voice
    toolkit (US-111, D11), speak its script through the workspace's Composio
-   connection, one call per line, each line copied into our storage as it
-   returns, and make the bundle's lines name those files
+   connection: priced and capped before the first line (D13), in the same
+   per-workspace spend window as the footage, so the footage just booked counts
+   against the voice's check; one call per line, each line copied into our
+   storage as it returns, and the bundle's lines made to name those files
    (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
 1. submit the bundle to media-render (``core/media_render_client.py``), which
    answers once the job is staged, spoken, mixed and checked; a full renderer
@@ -323,6 +325,8 @@ async def _voiced(
             job.voice, workspace_id=job.workspace_id, post_id=job.post_id, lines=lines,
             session_factory=session_factory, store=store,
         )
+    except voice_recipes.VoiceRefused as exc:
+        raise RenderFailure("voice_refused", f"{str(exc).rstrip('.')}. Nothing was rendered.") from exc
     except voice_recipes.VoiceError as exc:
         raise RenderFailure("voice_failed", f"{str(exc).rstrip('.')}. Nothing was rendered.") from exc
     ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS

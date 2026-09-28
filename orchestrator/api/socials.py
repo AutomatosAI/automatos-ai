@@ -464,8 +464,8 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     media-render), or there is no storage or renderer to use
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
     the files in ``media``, or in ``failed`` with the report in ``review_log``:
-    a render whose footage would take the post or the workspace over its media
-    cap submits nothing and fails saying why (D13).
+    a render whose footage or voice would take the post or the workspace over
+    its media cap submits nothing more and fails saying why (D13).
     """
     status, content_hash = post.status, post.content_hash
     voice = post.voice

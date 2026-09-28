@@ -1973,6 +1973,17 @@ class Config:
     SOCIALS_MEDIA_MONTHLY_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_MONTHLY_CAP_USD", "30"))
     SOCIALS_KIEAI_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_KIEAI_USD_PER_CREDIT", "0.005"))
     SOCIALS_HIGGSFIELD_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_HIGGSFIELD_USD_PER_CREDIT", "0.0625"))
+    # A voice toolkit's script (S1.5) is priced before its first line is spoken,
+    # at these prices per unit, and must fit the same two caps (P251W1-RVW-2).
+    # Fish Audio bills API credit per UTF-8 byte: $15 per million bytes
+    # (docs.fish.audio, 2026-09-28); its render still books its balance
+    # difference. ElevenLabs bills the customer's own plan per character: $0.08
+    # per 1,000, its API rate for its dearest models (elevenlabs.io/pricing/api,
+    # 2026-09-28), so a cap binds early; its render books its characters at this.
+    SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE: float = float(os.getenv("SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE", "0.000015"))
+    SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER: float = float(
+        os.getenv("SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER", "0.00008")
+    )
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".

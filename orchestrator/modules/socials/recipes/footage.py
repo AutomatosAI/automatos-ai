@@ -12,13 +12,13 @@ before media-render (``modules/socials/render.py``):
    still) with every action it calls on offer in the media capability registry
    (``footage_toolkits.py``). With no such toolkit the slot plays the template's
    own motion graphics, and the render's report says why.
-2. **The money** (D13), inside one footage window per workspace across every
-   worker process (a Postgres advisory lock), so two renders never spend the
-   same headroom: every shot is priced (fal.ai by its estimate action, the
-   others at ``SOCIALS_FOOTAGE_CEILING_*_USD``) and the total must fit the
-   post's cap and the workspace's monthly media cap
-   (``modules/socials/media_caps.py``). Over a cap nothing is submitted, and the
-   render fails saying why.
+2. **The money** (D13), inside the workspace's spend window across every
+   worker process (a Postgres advisory lock, ``toolkit.spend_window``), which the
+   render's voice takes after it, so two renders never spend the same headroom:
+   every shot is priced (fal.ai by its estimate action, the others at
+   ``SOCIALS_FOOTAGE_CEILING_*_USD``) and the total must fit the post's cap and
+   the workspace's monthly media cap (``modules/socials/media_caps.py``). Over a
+   cap nothing is submitted, and the render fails saying why.
 3. **Submit, then poll**, never one long call: every shot is submitted, then
    polled every ``SOCIALS_FOOTAGE_POLL_SECONDS``, all of them within
    ``SOCIALS_FOOTAGE_MAX_WAIT_SECONDS`` of the window opening (one deadline for
@@ -60,11 +60,10 @@ from core.composio.tool_executor import ComposioToolExecutor
 from core.llm.usage_context import LANE_MEDIA, usage_scope
 from core.llm.usage_tracker import UsageTracker
 from core.models.socials import SocialPost
-from core.models.workspaces import Workspace
 from core.social_templates import IMAGE_SLOT, VIDEO_SLOT, slot_generatable
 from modules.socials import service
 from modules.socials.capabilities import MediaCapabilities
-from modules.socials.media_caps import MediaCapExceeded, check_caps, media_spend, post_execution_id
+from modules.socials.media_caps import MediaCapExceeded, check_spend, post_execution_id
 from modules.socials.media_store import MediaNameError, MediaStore, media_key, media_route, valid_file_name
 from modules.socials.recipes.files import FileOutputError, ReturnedFile, fetch
 from modules.socials.recipes.footage_toolkits import (
@@ -91,13 +90,11 @@ from modules.socials.recipes.toolkit import (
     error_of,
     output_of,
     params_for,
-    window,
+    spend_window,
 )
 
 logger = logging.getLogger(__name__)
 
-# The footage window's advisory lock namespace ('socf'): one window per workspace.
-FOOTAGE_LOCK_NAMESPACE = 0x736F6366
 # A job whose status cannot be read this many times running is given up on.
 MAX_POLL_FAILURES = 5
 FOOTAGE_FILE_PREFIX = "footage-"
@@ -490,16 +487,10 @@ async def _price(executor: Any, workspace_id: UUID, shots: Sequence[Tuple[Shot, 
 
 
 def _check_caps(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUID, price_usd: float, what: str) -> None:
-    db = session_factory()
     try:
-        workspace = db.get(Workspace, workspace_id)
-        if workspace is None:
-            raise FootageRefused("the workspace is gone: nothing was submitted.")
-        check_caps(media_spend(db, workspace, post_id), price_usd, what)
+        check_spend(session_factory, workspace_id, post_id, price_usd, what)
     except MediaCapExceeded as exc:
         raise FootageRefused(str(exc)) from exc
-    finally:
-        db.close()
 
 
 # ── polling ─────────────────────────────────────────────────────────────────
@@ -661,7 +652,7 @@ async def generate(plan: FootagePlan, *, workspace_id: UUID, post_id: UUID, titl
     db = session_factory()
     try:
         executor = ComposioToolExecutor(db)
-        async with window(session_factory, FOOTAGE_LOCK_NAMESPACE, str(workspace_id)):
+        async with spend_window(session_factory, workspace_id):
             deadline = time.monotonic() + config.SOCIALS_FOOTAGE_MAX_WAIT_SECONDS
             priced = await _price(executor, workspace_id, plan.shots)
             total = sum(price for _, _, price in priced)
