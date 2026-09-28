@@ -77,7 +77,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # social_image / social_video).
 # 2026-09-26: prd251w1_merge_heads joins llm_usage_execution_index and
 # prd251_wave1 into the single head (a merge revision, no operations).
-EXPECTED_HEAD = "prd251w1_merge_heads"
+# 2026-09-28 (PRD-251 Wave 2): prd251_wave2 chains onto that head — the ONE
+# migration of the Socials tab wave (social_campaigns, and the key from
+# social_posts.campaign_id to it).
+EXPECTED_HEAD = "prd251_wave2"
 
 
 def _literal(node: ast.AST):

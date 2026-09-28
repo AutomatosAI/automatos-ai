@@ -4,7 +4,8 @@ Two writers build these tables: the model layer (``create_all`` — the fresh
 path and the unit tests) and the migrations (existing databases): the
 ``prd251_socials`` migration, plus the columns Wave 1's one migration adds
 (``prd251_wave1``: ``social_posts.voice``, US-111, and ``social_posts.footage``,
-US-114). A table that differs between
+US-114), plus the key and index Wave 2's one migration adds (``prd251_wave2``:
+``social_posts.campaign_id`` → ``social_campaigns``, US-201). A table that differs between
 them is how a column goes missing on one path, so the migrations are RUN here
 (alembic ``Operations`` on SQLite) and their schema is compared with the
 model's, table by table: columns (type, nullability, server default), primary
@@ -18,8 +19,10 @@ Also pinned:
   real Postgres inside a rolled-back transaction (``@integration``: JSONB
   columns, the unique key, the seeded master switch) — skipped cleanly when no
   Postgres is reachable, run by ``test.yml``;
-* exactly one new revision chained onto ``kb_multimodal_tables``, and no
-  ``social_campaigns`` table anywhere (D2: Wave 2, only if series approval ships).
+* exactly one new revision chained onto ``kb_multimodal_tables``; and
+  ``social_campaigns`` is not Wave 0's: D2 creates it in Wave 2, where series
+  approval ships, and only Wave 2's migration builds it
+  (``tests/test_prd251w2_campaigns.py`` holds that table and its model together).
 """
 from __future__ import annotations
 
@@ -62,6 +65,7 @@ from core.models.system_settings import SystemSetting  # noqa: E402
 
 MIGRATION = _ORCH / "alembic" / "versions" / "prd251_socials.py"
 WAVE1_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave1.py"
+WAVE2_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave2.py"
 MODELS = _ORCH / "core" / "models" / "socials.py"
 TABLES = ("social_posts", "social_post_targets")
 
@@ -108,6 +112,11 @@ def _migration_engine():
         with Operations.context(MigrationContext.configure(conn)):
             wave1.add_post_voice_column()
             wave1.add_post_footage_column()
+        # Wave 2's one migration builds social_campaigns and gives
+        # social_posts.campaign_id its key and index (US-201).
+        wave2 = _load_migration(WAVE2_MIGRATION, "prd251_wave2_migration_models")
+        with Operations.context(MigrationContext.configure(conn)):
+            wave2.upgrade()
     return engine
 
 
@@ -284,7 +293,8 @@ def test_the_migration_builds_exactly_the_model_schema():
     for table in TABLES:
         for facet in ("columns", "pk", "unique", "checks", "fks", "indexes"):
             assert migration[table][facet] == model[table][facet], (
-                f"{table}.{facet} drifted between the migrations (prd251_socials, prd251_wave1) and "
+                f"{table}.{facet} drifted between the migrations (prd251_socials, prd251_wave1, "
+                f"prd251_wave2) and "
                 f"core/models/socials.py:\n migration={migration[table][facet]}\n model={model[table][facet]}"
             )
 
@@ -298,6 +308,8 @@ def test_the_migration_builds_exactly_the_model_schema():
     posts = model["social_posts"]
     assert {name for name, _sql in posts["checks"]} == {"ck_social_posts_status", "ck_social_posts_format"}
     assert any(fk[:3] == (("workspace_id",), "workspaces", ("id",)) for fk in posts["fks"])
+    assert (("campaign_id",), "social_campaigns", ("id",), "SET NULL") in posts["fks"]
+    assert ("ix_social_posts_campaign_id", ("campaign_id",), False) in posts["indexes"]
     assert ("ix_social_posts_workspace_status", ("workspace_id", "status"), False) in posts["indexes"]
     assert (
         "ix_social_posts_workspace_scheduled_for", ("workspace_id", "scheduled_for"), False
@@ -332,7 +344,7 @@ def test_the_migration_round_trips_and_the_downgrade_drops_exactly_what_it_creat
 
 
 # ---------------------------------------------------------------------------
-# One revision, no social_campaigns
+# One revision; social_campaigns is Wave 2's
 # ---------------------------------------------------------------------------
 
 
@@ -349,12 +361,18 @@ def test_one_revision_chained_onto_kb_multimodal_tables():
     assert sorted(chained) == ["llm_usage_agent_name.py", "prd251_socials.py"]
 
 
-def test_no_social_campaigns_table_or_model():
-    assert "social_campaigns" not in SocialPost.metadata.tables
-    for path in (MIGRATION, MODELS):
-        source = path.read_text(encoding="utf-8")
-        assert not re.search(r"create_table\(\s*['\"]social_campaigns", source)
-        assert "__tablename__ = \"social_campaigns\"" not in source
+def test_social_campaigns_is_built_by_wave_2s_migration_alone():
+    # D2: the campaigns table arrives in Wave 2, where series approval ships (US-201,
+    # US-210). The model declares it; Wave 0's migration never builds it, and of the
+    # whole forest only Wave 2's one migration does.
+    assert "social_campaigns" in SocialPost.metadata.tables
+    assert "__tablename__ = \"social_campaigns\"" in MODELS.read_text(encoding="utf-8")
+    assert not re.search(r"create_table\(\s*['\"]social_campaigns", MIGRATION.read_text(encoding="utf-8"))
+    creators = sorted(
+        p.name for p in (_ORCH / "alembic" / "versions").glob("*.py")
+        if re.search(r"create_table\(\s*['\"]social_campaigns", p.read_text(encoding="utf-8"))
+    )
+    assert creators == ["prd251_wave2.py"]
 
 
 # ---------------------------------------------------------------------------

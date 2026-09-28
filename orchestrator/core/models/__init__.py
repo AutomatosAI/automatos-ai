@@ -72,8 +72,8 @@ from .watch_enums import (  # noqa: F401
 from .core import BoardTask  # noqa: F811
 from .core import BlogPost  # noqa: F811
 
-# PRD-251 S0.2: Socials — posts and their per-channel targets
-from .socials import SocialPost, SocialPostTarget  # noqa: F401
+# PRD-251 S0.2: Socials — posts and their per-channel targets; Wave 2 (S2.4) — campaigns
+from .socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: F401
 from .harness import HarnessTaskLedger  # noqa: F401  # F156: the HARNESS task ledger
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)

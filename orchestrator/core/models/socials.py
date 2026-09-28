@@ -1,5 +1,8 @@
 """PRD-251 S0.2 (D2): the Socials tables.
 
+* ``social_campaigns`` (Wave 2, S2.4): a named set of posts, approved post by
+  post or as a series (D6). ``approved_hash_set`` holds the content hashes a
+  series approval approved.
 * ``social_posts``: one row per post. Its approval binds to ``content_hash``
   (D6), so the publisher refuses a post whose ``approved_hash`` no longer
   matches. ``review_log`` is the history the approval UI shows.
@@ -8,10 +11,12 @@
 
 JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns
 the portable ``Uuid`` (native UUID on Postgres, CHAR(32) elsewhere), so the
-tables also build under SQLite in the unit tests. The ``prd251_socials`` migration
-creates the same shape, and ``tests/test_prd251_models.py`` holds the two
-together. There is no campaigns table: D2 creates it in Wave 2, and only if
-series approval ships.
+tables also build under SQLite in the unit tests. The ``prd251_socials``
+migration creates the posts and targets, and ``tests/test_prd251_models.py``
+holds them and the model together. D2 creates the campaigns table in Wave 2,
+because series approval ships there: the ``prd251_wave2`` migration builds it
+and links ``social_posts.campaign_id`` to it, and
+``tests/test_prd251w2_campaigns.py`` holds that migration and the model together.
 """
 
 from __future__ import annotations
@@ -59,6 +64,10 @@ SOCIAL_POST_STATUSES = (
 SOCIAL_POST_FORMATS = ("video", "image", "carousel", "fact_card", "infographic")
 SOCIAL_TARGET_POST_KINDS = ("text", "image", "carousel", "video", "reel", "short", "story")
 SOCIAL_TARGET_STATUSES = ("pending", "uploading", "published", "failed")
+# D6 (Wave 2, S2.4): per_post approves each post on its own; series approves
+# every post of the campaign whose content hash is in the approved set when the
+# approval is given. A post added or edited later still needs its own approval.
+SOCIAL_CAMPAIGN_APPROVAL_MODES = ("per_post", "series")
 
 
 def _in_list(column: str, values: tuple) -> str:
@@ -74,6 +83,60 @@ def _iso(value) -> Any:
     return value.isoformat() if value is not None else None
 
 
+class SocialCampaign(Base):
+    """A named set of posts (D2, Wave 2).
+
+    Series approval (S2.4) approves every post whose content hash is in the
+    approved set when the approval is given, each through the same hash-bound
+    approve as a single post (D6); ``approved_hash_set`` records those hashes.
+    """
+
+    __tablename__ = "social_campaigns"
+    __table_args__ = (
+        CheckConstraint(
+            _in_list("approval_mode", SOCIAL_CAMPAIGN_APPROVAL_MODES),
+            name="ck_social_campaigns_approval_mode",
+        ),
+        Index("ix_social_campaigns_workspace_created", "workspace_id", "created_at"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(
+        Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(200), nullable=False)
+    # One of SOCIAL_CAMPAIGN_APPROVAL_MODES.
+    approval_mode = Column(
+        String(16), nullable=False, default="per_post", server_default="per_post"
+    )
+    # [content hash]: the posts' hashes (D6) a series approval approved.
+    approved_hash_set = Column(_json_type(), nullable=False, default=list)
+    approved_by = Column(String(255), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    # The user or agent that made the campaign.
+    created_by = Column(String(255), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "workspace_id": str(self.workspace_id),
+            "name": self.name,
+            "approval_mode": self.approval_mode,
+            "approved_hash_set": list(self.approved_hash_set or []),
+            "approved_by": self.approved_by,
+            "approved_at": _iso(self.approved_at),
+            "created_by": self.created_by,
+            "created_at": _iso(self.created_at),
+            "updated_at": _iso(self.updated_at),
+        }
+
+
 class SocialPost(Base):
     __tablename__ = "social_posts"
     __table_args__ = (
@@ -81,6 +144,7 @@ class SocialPost(Base):
         CheckConstraint(_in_list("format", SOCIAL_POST_FORMATS), name="ck_social_posts_format"),
         Index("ix_social_posts_workspace_status", "workspace_id", "status"),
         Index("ix_social_posts_workspace_scheduled_for", "workspace_id", "scheduled_for"),
+        Index("ix_social_posts_campaign_id", "campaign_id"),
         {"extend_existing": True},
     )
 
@@ -90,8 +154,16 @@ class SocialPost(Base):
     )
     # The user or agent that made the post.
     created_by = Column(String(255), nullable=False)
-    # The campaigns table arrives in Wave 2, only if series approval ships: no FK yet.
-    campaign_id = Column(Uuid(as_uuid=True), nullable=True)
+    # The campaign the post belongs to (Wave 2). Deleting a campaign keeps its
+    # posts, unlinked. The key carries the name Postgres gives an unnamed one, so
+    # a database create_all built and one the prd251_wave2 migration linked agree.
+    campaign_id = Column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            "social_campaigns.id", ondelete="SET NULL", name="social_posts_campaign_id_fkey"
+        ),
+        nullable=True,
+    )
 
     title = Column(String(500), nullable=False)
     # The ask the post answers.
