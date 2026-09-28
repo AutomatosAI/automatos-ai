@@ -36,7 +36,7 @@ _ORCH = pathlib.Path(__file__).resolve().parents[1]
 _REPO = _ORCH.parent
 _VERSIONS = _ORCH / "alembic" / "versions"
 _INIT_FRESH = _ORCH / "scripts" / "init_fresh_db.py"
-_ENTRYPOINT = _REPO / "docker-entrypoint.sh"
+_ENTRYPOINT = _ORCH / "docker-entrypoint.sh"
 _COMPOSE = _REPO / "docker-compose.yml"
 
 # The single head on this branch. Changing the head (a new terminal revision) is a

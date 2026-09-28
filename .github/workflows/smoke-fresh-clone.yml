@@ -19,7 +19,9 @@ on:
   push:
     paths:
       - "docker-compose.yml"
-      - "docker-entrypoint.sh"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/Dockerfile"
+      - "envs/api.defaults"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
@@ -30,7 +32,9 @@ on:
       - studio
     paths:
       - "docker-compose.yml"
-      - "docker-entrypoint.sh"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/Dockerfile"
+      - "envs/api.defaults"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
