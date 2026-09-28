@@ -74,13 +74,22 @@ def _credential_row(cred: dict) -> tuple:
 
 
 def _upsert_credential_type(cursor, cred: dict) -> bool:
-    """Upsert one credential type; log and report False on failure."""
+    """Upsert one credential type inside a savepoint; log and report False on failure.
+
+    A failed statement aborts the whole PostgreSQL transaction, so without the
+    savepoint one bad row would fail every later upsert and the final commit would
+    silently roll them all back. rowcount is read before RELEASE, which resets it.
+    """
+    cursor.execute("SAVEPOINT credential_type")
     try:
         cursor.execute(_UPSERT_CREDENTIAL_TYPE, _credential_row(cred))
+        written = cursor.rowcount > 0
     except Exception:
         logger.exception("Error inserting credential type %s", cred.get('name'))
+        cursor.execute("ROLLBACK TO SAVEPOINT credential_type")
         return False
-    return cursor.rowcount > 0
+    cursor.execute("RELEASE SAVEPOINT credential_type")
+    return written
 
 
 def _load_credential_types(conn) -> None:
@@ -101,6 +110,7 @@ def _load_credential_types(conn) -> None:
 
 
 def _count_credential_types(conn) -> int:
+    """How many credential types the database holds after loading."""
     with conn.cursor() as cursor:
         cursor.execute("SELECT COUNT(*) FROM credential_types")
         return cursor.fetchone()[0]
@@ -120,6 +130,7 @@ def _seed_system_settings() -> None:
 
 
 def _seed_models() -> None:
+    """LLM models."""
     try:
         from core.seeds.seed_models import seed_models
 
@@ -130,6 +141,7 @@ def _seed_models() -> None:
 
 
 def _seed_skills_and_patterns() -> None:
+    """Skills and patterns."""
     try:
         from core.seeds.seed_skills import seed_skills, seed_patterns
 
@@ -141,6 +153,7 @@ def _seed_skills_and_patterns() -> None:
 
 
 def _seed_personas() -> None:
+    """Personas."""
     try:
         from core.seeds.seed_personas import seed_personas
         from core.database.database import get_db_session
@@ -201,6 +214,7 @@ def _seed_packages() -> None:
 
 
 def _seed_plugin_categories() -> None:
+    """Plugin categories."""
     try:
         from core.seeds.seed_plugin_categories import seed_plugin_categories
         from core.database.database import get_db_session
