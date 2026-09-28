@@ -160,7 +160,11 @@ def render_env(monkeypatch, tmp_path):
     monkeypatch.setattr(generation_service, "is_storage_configured", lambda: False)
     monkeypatch.setattr(generation_service, "brand_kit_for_media_render", lambda kit: dict(kit))
     state = SimpleNamespace(quota=[], booked=[], registered=[], ingested=[], renderer=_Renderer())
-    monkeypatch.setattr(generation_service, "enforce_render_quota", lambda db, workspace: state.quota.append(workspace.id))
+
+    async def reserve(sessions, workspace, seconds, **kwargs):  # the quota's check, and its hold (P251W1-RVW-3)
+        state.quota.append(workspace.id)
+
+    monkeypatch.setattr(generation_service, "reserve_render", reserve)
     monkeypatch.setattr(generation_service, "book_render_seconds", lambda **kwargs: state.booked.append(kwargs))
 
     class Deliverables:

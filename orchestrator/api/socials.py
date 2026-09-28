@@ -24,12 +24,13 @@ an approval resolves every source again, and a claim whose source is gone counts
 as unsourced. ``GET /sources`` searches candidates per kind for the composer.
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
-the month's render minutes (refused before anything reaches media-render),
-storage and the renderer, then moves the post to ``rendering`` and answers 202;
-the render runs in the background (``modules/socials/render.py``) and ends the
-post in ``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}``
-streams a rendered file (the Deliverable's preview link), and ``GET /usage``
-reads the render minutes used and the quota.
+the month's render minutes, counting those renders in progress hold (refused
+before anything reaches media-render, P251W1-RVW-3), storage and the renderer,
+then moves the post to ``rendering`` and answers 202; the render runs in the
+background (``modules/socials/render.py``) and ends the post in
+``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}`` streams a
+rendered file (the Deliverable's preview link), and ``GET /usage`` reads the
+render minutes used and held, and the quota.
 
 Voice (S1.5, D11): a post is spoken by Kokoro unless its ``voice`` names a
 voice toolkit the workspace has connected in Composio (Fish Audio, ElevenLabs);
@@ -460,8 +461,9 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     rendering (IllegalTransition), has no social template (NotRenderable), is a
     chart bound to a report that no longer shows the report's rows or names it,
     names a voice toolkit the workspace cannot speak with now, the workspace has
-    used its render minutes this month (RenderQuotaExceeded, before any call to
-    media-render), or there is no storage or renderer to use
+    used its render minutes this month, counting those renders in progress hold
+    (RenderQuotaExceeded, before any call to media-render; a render holds its
+    seconds from then until it ends), or there is no storage or renderer to use
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
     the files in ``media``, or in ``failed`` with the report in ``review_log``:
     a render whose footage or voice would take the post or the workspace over
@@ -489,10 +491,14 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     voice_plan = None
     if voice and voice_script(bundle):
         voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, workspace.id))
-    render_quota.enforce_render_quota(db, workspace)
-    await render.ensure_renderer()
-    service.start_render(post, actor)
-    saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
+    reservation = await render.reserve_seconds(db, workspace, post, template)
+    try:
+        await render.ensure_renderer()
+        service.start_render(post, actor)
+        saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
+    except BaseException:
+        await render_quota.release_render(render_quota.sessions_for(db), reservation)
+        raise
     _launch_render(
         render.RenderJob(
             post_id=post.id,
@@ -504,6 +510,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             bundle=bundle,
             voice=voice_plan,
             footage=footage_plan,
+            reservation=reservation,
         )
     )
     return saved
@@ -728,11 +735,12 @@ async def render_social_post(
     that no longer shows the report's rows or names it (422, saying which row
     differs; 503 when the report's file cannot be read), names a voice toolkit the
     workspace cannot speak with now (422, saying why), the workspace has used
-    its render minutes this month (429, before any call to media-render), or
-    there is no storage or renderer to use (503). The render ends the post in
-    ``needs_approval`` with the files in ``media``, or in ``failed`` with the
-    report in ``review_log``: a render whose footage would take the post or the
-    workspace over its media cap submits nothing and fails saying why (D13).
+    its render minutes this month, counting those renders in progress hold (429,
+    before any call to media-render), or there is no storage or renderer to use
+    (503). The render ends the post in ``needs_approval`` with the files in
+    ``media``, or in ``failed`` with the report in ``review_log``: a render whose
+    footage would take the post or the workspace over its media cap submits
+    nothing and fails saying why (D13).
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)

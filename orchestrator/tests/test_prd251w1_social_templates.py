@@ -696,13 +696,13 @@ def social_env(monkeypatch, tmp_path):
 
     state = SimpleNamespace(events=[], booked=[])
 
-    def enforce(db, workspace):
+    async def reserve(sessions, workspace, seconds, **kwargs):  # the quota's check, and its hold (P251W1-RVW-3)
         state.events.append(f"quota {workspace.plan}")
 
     def book(**kwargs):
         state.booked.append(kwargs)
 
-    monkeypatch.setattr(generation_service, "enforce_render_quota", enforce)
+    monkeypatch.setattr(generation_service, "reserve_render", reserve)
     monkeypatch.setattr(generation_service, "book_render_seconds", book)
     workspace = SimpleNamespace(
         id=WS, name="Workspace One", plan="basic", plan_limits={},
@@ -809,10 +809,10 @@ def test_a_social_format_needs_a_template_of_that_format(social_env):
 
 
 def test_a_render_past_the_quota_never_reaches_media_render(social_env, monkeypatch):
-    def exhausted(db, workspace):
+    async def exhausted(sessions, workspace, seconds, **kwargs):
         raise RenderQuotaExceeded("This workspace has used 10.0 of its 10 render minutes this month.")
 
-    monkeypatch.setattr(generation_service, "enforce_render_quota", exhausted)
+    monkeypatch.setattr(generation_service, "reserve_render", exhausted)
     service = _service_with(_social_template())
     service.db.query.return_value.filter.return_value.first.return_value = social_env.workspace
     renderer = _Renderer(social_env.events)

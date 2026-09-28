@@ -62,8 +62,8 @@ def _safe_url_fetcher(url, *args, **kwargs):
 from config import config
 from core.media_render_bundle import build_bundle
 from core.media_render_client import MediaRenderClient
-from core.media_render_quota import book_render_seconds, enforce_render_quota
-from core.music_credit import credit_for_render
+from core.media_render_quota import book_render_seconds, declared_seconds, release_render, reserve_render, sessions_for
+from core.music_credit import MusicCredit, credit_for_render
 from core.social_templates import (
     SOCIAL_IMAGE,
     SOCIAL_VIDEO,
@@ -592,9 +592,9 @@ class DocumentGenerationService:
         uploaded logo, logo mark and font files inlined as data: URIs
         (``brand_kit_for_media_render``). A variable with neither a value
         nor a default blocks the file before anything renders, like an
-        unresolved chip. The month's render minutes are checked before
-        media-render is called (``RenderQuotaExceeded``), and the rendered
-        seconds are booked on the media lane after, like a Socials post's render.
+        unresolved chip. Like a Socials post's render, it holds its seconds against
+        the month's render minutes before media-render is called
+        (``RenderQuotaExceeded`` when none are left) and books them after (P251W1-RVW-3).
         An image renders as one still (US-107); a template that renders several
         (a carousel's slides) is refused: a document is one file, and a Socials
         post's render keeps every slide. The library track a video mixed rides
@@ -603,6 +603,35 @@ class DocumentGenerationService:
         asks for credit and gives no line, or does not name the track the bundle
         asked for, fails the render (``MusicCreditMissing``).
         """
+        blocks, values = self._social_values(template, data, format)
+        workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if workspace is None:
+            raise ValueError(f"workspace {workspace_id} not found")
+        reference = f"{SOCIAL_EXECUTION_PREFIX}{template.id}"
+        file_type = SOCIAL_FILE_TYPES[format]
+        sessions = sessions_for(self.db)
+        reservation = await reserve_render(sessions, workspace, declared_seconds(blocks, format), execution_id=reference)
+        try:
+            bundle = build_bundle(
+                workspace_id=workspace_id,
+                reference=reference,
+                blocks=blocks,
+                values=values,
+                brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
+                fallback_name=getattr(workspace, "name", None) or "",
+                fmt=format,
+            )
+            output_path = Path(self._output_path(workspace_id, title, file_type))
+            music = await self._render_social_file(bundle, output_path, workspace_id, reference)
+        finally:
+            await release_render(sessions, reservation)
+        result = self._build_result(str(output_path), file_type, title, workspace_id, template_lane=SOCIAL_LANE)
+        result.music = music.extra() if music is not None else None
+        return result
+
+    @staticmethod
+    def _social_values(template: Optional[DocumentTemplate], data: dict, format: str) -> tuple[dict, dict]:
+        """The template's checked ``blocks`` and its variables' values: refused before the quota or a render."""
         if template is None or getattr(template, "format", None) != format:
             raise ValueError(f"{format} renders a {format} template: pass its template_id or template_name")
         blocks = validate_social_blocks(template.blocks, format)
@@ -619,23 +648,12 @@ class DocumentGenerationService:
                 f"{template.name} renders {len(stills)} images, one per slide, and a document is one file: "
                 "draft it as a Socials post, whose render keeps every slide"
             )
+        return blocks, resolved.values
 
-        workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        if workspace is None:
-            raise ValueError(f"workspace {workspace_id} not found")
-        enforce_render_quota(self.db, workspace)
-        reference = f"{SOCIAL_EXECUTION_PREFIX}{template.id}"
-        bundle = build_bundle(
-            workspace_id=workspace_id,
-            reference=reference,
-            blocks=blocks,
-            values=resolved.values,
-            brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
-            fallback_name=getattr(workspace, "name", None) or "",
-            fmt=format,
-        )
-        file_type = SOCIAL_FILE_TYPES[format]
-        output_path = Path(self._output_path(workspace_id, title, file_type))
+    async def _render_social_file(
+        self, bundle: dict, output_path: Path, workspace_id: UUID, reference: str
+    ) -> Optional[MusicCredit]:
+        """Render ``bundle`` to ``output_path`` and book its seconds, written off the loop before this returns."""
         started = time.monotonic()
         try:
             finished = await self._render_client().render_to_file(
@@ -648,15 +666,14 @@ class DocumentGenerationService:
         except BaseException:
             output_path.unlink(missing_ok=True)  # never leave a half-fetched (or uncredited) file behind
             raise
-        book_render_seconds(
+        await asyncio.to_thread(
+            book_render_seconds,
             workspace_id=workspace_id,
             execution_id=reference,
             seconds=_rendered_seconds(finished),
             latency_ms=int((time.monotonic() - started) * 1000),
         )
-        result = self._build_result(str(output_path), file_type, title, workspace_id, template_lane=SOCIAL_LANE)
-        result.music = music.extra() if music is not None else None
-        return result
+        return music
 
     # ------------------------------------------------------------------
     # Helpers

@@ -433,9 +433,9 @@ TRACK_MEDIA = UsageTracker.__dict__["track_media"].__func__
 def ledger(env, monkeypatch):
     """The env with the real usage tracker writing the media lane into its
     ``llm_usage``, so a test reads what was booked when it was booked. The
-    renderer's own seconds stay recorded in ``env.booked``: run_render still hands
-    that booking to the best-effort threads, which share this harness's one
-    SQLite connection (the render quota's own story, P251W1-RVW-3)."""
+    renderer's own seconds stay recorded in ``env.booked``, so the media rows
+    these tests read are the voice's and the footage's alone; the render quota's
+    tests read the renderer's booking (test_prd251w1_render_quota.py, P251W1-RVW-3)."""
 
     def track_media(**kwargs):
         if kwargs.get("provider") == MEDIA_RENDER_PROVIDER:

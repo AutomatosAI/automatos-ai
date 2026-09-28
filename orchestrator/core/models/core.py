@@ -197,7 +197,7 @@ class LLMUsage(Base):
 
     # Performance
     latency_ms = Column(Integer)
-    status = Column(String(50))  # success, error, timeout, rate_limited
+    status = Column(String(50))  # success, error, timeout, rate_limited; reserved: a render's held seconds (media_render_quota)
     error_message = Column(Text)
 
     created_at = Column(DateTime, default=func.now())

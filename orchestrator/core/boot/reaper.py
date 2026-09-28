@@ -14,7 +14,10 @@ and sweeps the three durable-launch surfaces:
     ``error_message`` + ``completed_at``;
   - **social post** stuck ``rendering`` (PRD-251 S1.1c) → ``failed``, the reason
     in its ``review_log`` (the post lifecycle's own render failure), so it can
-    be edited and rendered again.
+    be edited and rendered again;
+  - **render reservation** (P251W1-RVW-3): the seconds a render held against its
+    workspace's render quota, which a render that died with the old process
+    never gave back → deleted once its render's deadline has passed.
 
 A row is reaped only once it has been in-flight longer than
 ``BOOT_REAPER_STALE_MINUTES`` — long enough that no legitimately running job
@@ -243,6 +246,29 @@ def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
     return len(stale)
 
 
+def _reap_render_reservations(db, cutoff: datetime, now: datetime) -> int:
+    """Release render-quota reservations whose render is gone — P251W1-RVW-3.
+
+    A render holds its seconds against the workspace's quota until it ends
+    (``core/media_render_quota.py``); one that died with the old process never
+    gave them back. Past its render's deadline a reservation no longer counts,
+    and here it is deleted, whichever path rendered it (a Socials post, or
+    ``generate_document``). A post reaped above is always past it: its render's
+    wait and the reservation's grace stay under the stale cutoff.
+    """
+    from core.media_render_quota import release_expired_reservations
+
+    released = release_expired_reservations(db, now)
+    if released:
+        record_error(
+            subsystem="media_render",
+            operation="boot_reap",
+            error=OrphanedRunError(f"released {released} orphaned render reservation(s)"),
+            extra={"reason": _ORPHAN_REASON},
+        )
+    return released
+
+
 async def _run_surface(
     db,
     cutoff: datetime,
@@ -289,6 +315,8 @@ async def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     reaped += await _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
     # PRD-251 S1.1c: a post whose render task died with the old process.
     reaped += await _run_surface(db, cutoff, now, "socials", _reap_social_renders)
+    # P251W1-RVW-3: the render minutes such a render still held against its quota.
+    reaped += await _run_surface(db, cutoff, now, "media_render", _reap_render_reservations)
 
     if reaped:
         try:

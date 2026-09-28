@@ -32,7 +32,12 @@ which runs in the background:
    (``core/music_credit.py``), or ``rendering`` → ``failed`` with the report in
    ``review_log``. A report that asks for credit and gives no line fails it;
 5. book the rendered seconds on the ``media`` lane at $0 (US-103), the units
-   the quota counts.
+   the quota counts, written before the render returns.
+
+The render arrives holding its seconds against the month's quota (the job's
+``reservation``, taken before anything reached media-render,
+``core/media_render_quota.py``); however it ends, the hold is given back, after
+the rendered seconds are booked when it finished (P251W1-RVW-3).
 
 Steps 0-3 together get at most ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays
 under the boot reaper's stale cutoff, so the reaper only ever fails a render no
@@ -74,7 +79,14 @@ from core.media_render_client import (
     MediaRenderError,
     MediaRenderUnavailable,
 )
-from core.media_render_quota import book_render_seconds
+from core.media_render_quota import (
+    RenderReservation,
+    book_render_seconds,
+    declared_seconds,
+    release_render,
+    reserve_render,
+    sessions_for,
+)
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import service
@@ -202,6 +214,19 @@ def bundle_for(
     )
 
 
+async def reserve_seconds(db: Any, workspace: Any, post: Any, template: Any) -> RenderReservation:
+    """Hold the post's render against the month's quota, before anything reaches
+    media-render (P251W1-RVW-3): its template's declared duration, in a session of
+    its own on ``db``'s database. ``RenderQuotaExceeded`` when the minutes used and
+    those renders in progress hold leave none."""
+    return await reserve_render(
+        sessions_for(db),
+        workspace,
+        declared_seconds(composition_of(template), getattr(template, "format", None)),
+        execution_id=f"{EXECUTION_PREFIX}{post.id}",
+    )
+
+
 def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_recipes.FootagePlan]:
     """The footage the post asks for (US-114), planned over its template's slots
     with the workspace's media capabilities ``caps``; ``None`` when it asks for none."""
@@ -234,6 +259,8 @@ class RenderJob:
     voice: Optional[voice_recipes.VoicePlan] = None
     # D12: the footage the post asks for, resolved as the render started; None asks for none.
     footage: Optional[footage_recipes.FootagePlan] = None
+    # P251W1-RVW-3: the seconds the render holds against the quota, given back when it ends.
+    reservation: Optional[RenderReservation] = None
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -574,10 +601,20 @@ async def run_render(
     store: Optional[MediaStore] = None,
     session_factory: Optional[Callable[[], Any]] = None,
 ) -> bool:
-    """Render the post in the background; ``True`` when it reached needs_approval."""
-    client = client or MediaRenderClient()
-    store = store or MediaStore()
+    """Render the post in the background; ``True`` when it reached needs_approval.
+
+    However it ends (done, failed, timed out, an unexpected error), the seconds
+    the job holds against the quota are given back, after its own were booked
+    when it finished (P251W1-RVW-3).
+    """
     factory = session_factory or _default_session_factory()
+    try:
+        return await _render(job, client or MediaRenderClient(), store or MediaStore(), factory)
+    finally:
+        await release_render(factory, job.reservation)
+
+
+async def _render(job: RenderJob, client: MediaRenderClient, store: MediaStore, factory: Callable[[], Any]) -> bool:
     started = time.monotonic()
     budget = config.SOCIALS_RENDER_MAX_WAIT_SECONDS
     deadline = started + budget
@@ -611,6 +648,7 @@ async def run_render(
     ended = await asyncio.to_thread(_finish, factory, job, media=media, report=report, credits=credits)
     if ended != service.NEEDS_APPROVAL:
         return False
-    # latency: the whole render, from submit to the files in storage.
-    _book(job, rendered_seconds(media), int((time.monotonic() - started) * 1000))
+    # latency: the whole render, from submit to the files in storage. Written
+    # inline, off the loop, before the render returns: the quota counts it next.
+    await asyncio.to_thread(_book, job, rendered_seconds(media), int((time.monotonic() - started) * 1000))
     return True

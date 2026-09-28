@@ -1924,6 +1924,11 @@ class Config:
     # live process still owns.
     SOCIALS_RENDER_POLL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_POLL_SECONDS", "5"))
     SOCIALS_RENDER_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_WAIT_SECONDS", "1500"))
+    # P251W1-RVW-3: the longest composition media-render renders (its own
+    # MEDIA_RENDER_MAX_DURATION_SECONDS). A render holds its composition's
+    # declared duration against the monthly quota while it runs, at most this;
+    # one whose duration cannot be read holds this much.
+    SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
