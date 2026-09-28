@@ -1,0 +1,236 @@
+name: images
+
+# Builds the platform's container images for linux/amd64 and linux/arm64 and
+# publishes them to GHCR as ghcr.io/<owner>/automatos-<image>.
+#
+# - Pull requests build both architectures but never push or sign.
+# - A push to main publishes `edge` and `sha-<short>`; a `v*` tag publishes
+#   `X.Y.Z` and `X.Y`.
+# - Each architecture builds on its own native runner (no QEMU) and pushes by
+#   digest. The merge job joins the digests into one multi-arch index, signs
+#   it with cosign (keyless, through GitHub OIDC) and scans it (report only).
+#
+# Build args match docker-compose.yml, i.e. the local edition: no graph extras,
+# no bundled Chromium, and the frontend built for AUTH_EDITION=local against
+# http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time). Railway
+# builds its own images and is unaffected.
+#
+# The owner comes from the repository, so a fork publishes to its own
+# namespace. New packages are private until an org owner makes them public.
+#
+# Third-party actions are pinned to a commit; the comment names the release.
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/images.yml"
+      - "orchestrator/Dockerfile"
+      - "orchestrator/.dockerignore"
+      - "orchestrator/requirements.txt"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "services/workspace-worker/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede stale PR builds; never cancel a publish half-way.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: api
+            context: orchestrator
+            target: production
+            build-args: |
+              INSTALL_GRAPH_EXTRAS=false
+          - name: frontend
+            context: frontend
+            target: production
+            build-args: |
+              NEXT_PUBLIC_AUTH_EDITION=local
+              NEXT_PUBLIC_API_URL=http://localhost:8000
+              NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+          - name: workspace-worker
+            context: services/workspace-worker
+            target: ""
+            build-args: |
+              INSTALL_BROWSER=false
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Image name
+        env:
+          NAME: ${{ matrix.image.name }}
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-${NAME}" >> "$GITHUB_ENV"
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.title=automatos-${{ matrix.image.name }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push by digest outside pull requests)
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.image.context }}
+          target: ${{ matrix.image.target }}
+          platforms: linux/${{ matrix.platform.arch }}
+          build-args: ${{ matrix.image.build-args }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: publish ${{ matrix.name }}
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      # cosign keyless signing exchanges the job's OIDC token for a certificate.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - api
+          - frontend
+          - workspace-worker
+
+    steps:
+      - name: Image name
+        env:
+          NAME: ${{ matrix.name }}
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-${NAME}" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.name }}-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          # No `latest` until the maintainers choose to publish one.
+          flavor: |
+            latest=false
+          tags: |
+            type=edge,branch=main
+            type=sha
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create the multi-arch index
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          mapfile -t tag_args < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+      - name: Resolve the index digest
+        id: index
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Published ${IMAGE}@${digest}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign (keyless)
+        env:
+          DIGEST: ${{ steps.index.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # Report only for now: findings go to the log and never fail the publish.
+      - name: Vulnerability scan (report only)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.index.outputs.digest }}
+          fail-build: false
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
