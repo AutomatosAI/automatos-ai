@@ -165,6 +165,17 @@ def test_database_url_is_used_when_postgres_host_is_unset(tmp_path):
     assert psql_calls and all(c.startswith(f"psql {_DATABASE_URL}") for c in psql_calls)
 
 
+@pytest.mark.parametrize("driver", ["psycopg2", "asyncpg"])
+def test_sqlalchemy_driver_suffix_is_dropped_for_libpq(tmp_path, driver):
+    """pg_isready and psql reject postgresql+<driver>://, which the app accepts."""
+    url = _DATABASE_URL.replace("postgresql://", f"postgresql+{driver}://")
+    code, calls, out = _run(tmp_path, ["migrate"], {"DATABASE_URL": url})
+    assert code == 0, out
+    assert f"pg_isready -d {_DATABASE_URL}" in calls
+    psql_calls = [c for c in calls if c.startswith("psql")]
+    assert psql_calls and all(c.startswith(f"psql {_DATABASE_URL}") for c in psql_calls)
+
+
 def test_local_edition_seeds_workspace_and_operator(tmp_path):
     env = {**_POSTGRES_ENV, "AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000000c1"}
     code, calls, out = _run(tmp_path, ["migrate"], env)

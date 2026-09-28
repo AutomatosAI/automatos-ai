@@ -47,11 +47,18 @@ require_database_settings() {
     fi
 }
 
+# libpq tools accept postgresql:// or postgres:// only. Drop a SQLAlchemy driver
+# suffix (postgresql+psycopg2://, postgresql+asyncpg://), which the app accepts
+# but pg_isready and psql reject.
+libpq_url() {
+    printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#'
+}
+
 pg_ready() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
         pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER"
     else
-        pg_isready -d "$DATABASE_URL"
+        pg_isready -d "$(libpq_url)"
     fi
 }
 
@@ -59,7 +66,7 @@ db_psql() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
         PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
     else
-        psql "$DATABASE_URL" "$@"
+        psql "$(libpq_url)" "$@"
     fi
 }
 
