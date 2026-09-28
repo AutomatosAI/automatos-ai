@@ -23,6 +23,10 @@
 #       Unset or anything else: runs the command directly, touching nothing.
 #       This is the image default, so Railway (which builds this image and
 #       relies on the CMD's own `alembic upgrade heads`) boots unchanged.
+#       Note the image CMD itself runs `alembic upgrade heads` before uvicorn.
+#       Where a migration Job owns the schema (Kubernetes), override the app
+#       container's command to start uvicorn directly, so several replicas
+#       don't race Alembic with each other or with the Job.
 #
 # Database connection: POSTGRES_HOST/PORT/USER/PASSWORD/DB when POSTGRES_HOST
 # is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets).
@@ -186,17 +190,28 @@ ensure_local_workspace() {
     # A brand-new install starts Auto-led onboarding: the row carries an explicit
     # not_started document (PRD-222's veteran backfill matches only stage-less rows
     # older than PRD-222 — see prd222_veteran_skip_backfill).
-    if db_psql -v ON_ERROR_STOP=1 -c \
-        "INSERT INTO workspaces (id, name, slug, is_personal, is_active, onboarding) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE, '{\"stage\": \"not_started\", \"stages\": {}, \"segment\": {}}'::jsonb) ON CONFLICT (id) DO NOTHING;"; then
+    # Values reach SQL as psql variables (:'name' quotes them), never by pasting
+    # them into the statement. psql only interpolates variables in SQL it reads
+    # itself, not in -c, so the statements come in on stdin.
+    if db_psql -v ON_ERROR_STOP=1 -v workspace_id="$DEFAULT_WORKSPACE_ID" <<'SQL'
+INSERT INTO workspaces (id, name, slug, is_personal, is_active, onboarding) VALUES (:'workspace_id', 'Local Workspace', 'local', TRUE, TRUE, '{"stage": "not_started", "stages": {}, "segment": {}}'::jsonb) ON CONFLICT (id) DO NOTHING;
+SQL
+    then
         echo "✅ Local workspace present"
-        # The single local operator (users id 1 — api/chat.py's own fallback).
-        # Idempotent; PRD-233 S6 makes name/email editable in Settings → Profile.
-        db_psql -v ON_ERROR_STOP=1 -c \
-            "INSERT INTO users (id, username, email, name, is_active) VALUES (1, 'local', '${LOCAL_OPERATOR_EMAIL:-local@automatos.local}', 'Local Operator', TRUE) ON CONFLICT (id) DO NOTHING; SELECT setval(pg_get_serial_sequence('users','id'), GREATEST((SELECT max(id) FROM users), 1));" >/dev/null \
-            && echo "✅ Local operator user present" \
-            || { echo "❌ Could not seed the local operator user — refusing to start a shell instance"; exit 1; }
     else
         echo "❌ Could not create the local workspace — refusing to start a shell instance"
+        exit 1
+    fi
+    # The single local operator (users id 1 — api/chat.py's own fallback).
+    # Idempotent; PRD-233 S6 makes name/email editable in Settings → Profile.
+    if db_psql -v ON_ERROR_STOP=1 -v operator_email="${LOCAL_OPERATOR_EMAIL:-local@automatos.local}" >/dev/null <<'SQL'
+INSERT INTO users (id, username, email, name, is_active) VALUES (1, 'local', :'operator_email', 'Local Operator', TRUE) ON CONFLICT (id) DO NOTHING;
+SELECT setval(pg_get_serial_sequence('users','id'), GREATEST((SELECT max(id) FROM users), 1));
+SQL
+    then
+        echo "✅ Local operator user present"
+    else
+        echo "❌ Could not seed the local operator user — refusing to start a shell instance"
         exit 1
     fi
 }

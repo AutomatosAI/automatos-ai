@@ -40,12 +40,13 @@ _POSTGRES_ENV = {
 }
 _DATABASE_URL = "postgresql://u:p@db.internal:5432/app"
 
-# psql answers the two queries the script parses; FAKE_HAS_VERSION="" makes the
-# database look empty (no alembic_version), anything else or unset looks migrated.
+# psql logs its arguments and any SQL it reads on stdin (one line), and answers
+# the two queries the script parses; FAKE_HAS_VERSION="" makes the database look
+# empty (no alembic_version), anything else or unset looks migrated.
 _STUBS = {
     "pg_isready": 'echo "pg_isready $*" >> "$CALL_LOG"',
     "psql": (
-        'echo "psql $*" >> "$CALL_LOG"\n'
+        'echo "psql $* $(cat | tr \'\\n\' \' \')" >> "$CALL_LOG"\n'
         'case "$*" in\n'
         '  *to_regclass*) echo "${FAKE_HAS_VERSION-alembic_version}" ;;\n'
         '  *COUNT*) echo 3 ;;\n'
@@ -84,6 +85,7 @@ def _run(tmp_path: Path, args: list[str], env: dict[str, str]) -> tuple[int, lis
     proc = subprocess.run(
         ["bash", str(_ENTRYPOINT), *args],
         env=full_env,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=60,
@@ -169,6 +171,21 @@ def test_local_edition_seeds_workspace_and_operator(tmp_path):
     assert code == 0, out
     assert any("INSERT INTO workspaces" in c for c in calls)
     assert any("INSERT INTO users" in c for c in calls)
+
+
+def test_local_seed_values_are_bound_not_pasted_into_sql(tmp_path):
+    """Workspace id and operator email reach SQL as psql variables, never inline."""
+    hostile = "x'); DROP TABLE users; --"
+    env = {**_POSTGRES_ENV, "AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": hostile, "LOCAL_OPERATOR_EMAIL": hostile}
+    code, calls, out = _run(tmp_path, ["migrate"], env)
+    assert code == 0, out
+    inserts = [c for c in calls if "INSERT INTO workspaces" in c or "INSERT INTO users" in c]
+    assert len(inserts) == 2
+    for call in inserts:
+        sql = call.split("INSERT INTO", 1)[1]
+        assert hostile not in sql, "a value was pasted into the SQL"
+    assert any(f"workspace_id={hostile}" in c for c in inserts)
+    assert any(f"operator_email={hostile}" in c for c in inserts)
 
 
 def test_migrate_without_database_settings_fails_clearly(tmp_path):
