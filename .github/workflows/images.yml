@@ -13,9 +13,11 @@ name: images
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
-# http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time), hence its
-# name, automatos-frontend-local. Railway builds its own images and is
-# unaffected.
+# http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time, for now).
+# The API reads AUTH_EDITION at runtime; only the frontend fixes its edition
+# at build time, and a hosted-edition frontend can't be published generically
+# because its Clerk key is per deployment. Railway builds its own images and
+# is unaffected.
 #
 # PRs build only when the image inputs change (Dockerfiles, dependencies,
 # this file): test.yml's prod-image-parity job already builds all three
@@ -76,7 +78,7 @@ jobs:
             target: production
             build-args: |
               INSTALL_GRAPH_EXTRAS=false
-          - name: frontend-local
+          - name: frontend
             context: frontend
             target: production
             build-args: |
@@ -173,9 +175,9 @@ jobs:
         # The description is set on the multi-arch index, where GHCR reads it.
         image:
           - name: api
-            description: Automatos AI backend API (orchestrator), local-edition build. Run it with the repository's docker compose, which supplies the wait-migrate-seed entrypoint.
-          - name: frontend-local
-            description: Automatos AI web app, local edition. The API address http://localhost:8000 is fixed at build time.
+            description: Automatos AI backend API (orchestrator), built without the graph-clustering extras. The edition is set at runtime by AUTH_EDITION. For now, run it with the repository's docker compose, which supplies the wait-migrate-seed entrypoint.
+          - name: frontend
+            description: Automatos AI web app, local edition. The API address is currently fixed at build time to http://localhost:8000; a runtime setting is coming.
           - name: workspace-worker
             description: Automatos AI workspace worker (Code Canvas runtime), built without Chromium.
 
