@@ -1,0 +1,4 @@
+# Not part of the packaged chart.
+tests/
+*.md.orig
+.DS_Store

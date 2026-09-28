@@ -1,0 +1,94 @@
+suite: API Deployment
+templates:
+  - templates/api-deployment.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: starts uvicorn directly, so only the migration Job changes the schema
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: uvicorn
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: migrate
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTOMATOS_MIGRATE_ON_BOOT
+            value: "true"
+  - it: runs one replica by default (the schedulers use a per-container lock)
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+  - it: takes every secret from the existing Secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: DATABASE_URL
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CREDENTIAL_ENCRYPTION_KEY
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: CREDENTIAL_ENCRYPTION_KEY
+  - it: sets the local edition and its workspace
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_EDITION
+            value: local
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEFAULT_WORKSPACE_ID
+            value: 00000000-0000-0000-0000-0000000000c1
+  - it: points the API at the worker service
+    release:
+      name: demo
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_URL
+            value: http://demo-automatos-worker:8081
+  - it: mounts the workspaces read-only
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspaces
+            mountPath: /workspaces
+            readOnly: true
+  - it: passes extra config through as env
+    set:
+      config:
+        S3_ENDPOINT_URL: http://minio:9000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: S3_ENDPOINT_URL
+            value: http://minio:9000
+  - it: defaults the image tag to the chart appVersion
+    chart:
+      appVersion: edge
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api:edge
+  - it: fails clearly without the Secret
+    set:
+      existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: existingSecret is required

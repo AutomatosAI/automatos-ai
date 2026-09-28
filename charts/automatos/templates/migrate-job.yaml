@@ -1,0 +1,51 @@
+{{- /*
+The schema lifecycle, once per install and upgrade, before the API pods start:
+`docker-entrypoint.sh migrate` waits for PostgreSQL, builds an empty database,
+migrates, seeds and (local edition) creates the workspace and operator, then
+exits. A failed seed fails the Job, and a failed Job fails the install/upgrade.
+
+As a hook it runs before the release's ordinary resources exist, so it takes its
+settings inline (automatos.apiEnv) and does not use the chart's ServiceAccount.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "automatos.fullname" . }}-migrate
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # Keep a failed Job for its logs; replace it on the next install or upgrade.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.name }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: migrate
+          image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.api.image) }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          args: ["migrate"]
+          env:
+            {{- include "automatos.apiEnv" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}

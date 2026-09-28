@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "automatos.workspacesClaim" . }}
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+  annotations:
+    # Agent files outlive the release: `helm uninstall` leaves this claim behind.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.workspaces.accessModes | nindent 4 }}
+  {{- with .Values.workspaces.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.workspaces.size }}

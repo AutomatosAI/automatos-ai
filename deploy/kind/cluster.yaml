@@ -1,0 +1,5 @@
+# A single-node kind cluster for the chart's end-to-end test (deploy/kind/e2e.sh).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
