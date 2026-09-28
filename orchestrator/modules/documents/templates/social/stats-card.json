@@ -1,6 +1,6 @@
 {
   "name": "Stats card",
-  "description": "By the numbers: a headline, up to three big figures with what each means, and an optional dark note card, on the brand's paper. Every figure is a claim that needs a source. Ported from the automatos-social stats family.",
+  "description": "By the numbers: a headline, up to three big figures with what each means, and an optional dark note card, on the brand's paper. Every figure is a claim that needs a source.",
   "format": "social_image",
   "category": "social",
   "sizes": [
@@ -120,7 +120,7 @@
     "note_title": "The harness decides the result",
     "note_body": "Changing only the harness moved a LangChain agent from outside the top 30 to the top 5 on TerminalBench 2.0.",
     "counter": "03 / 10",
-    "handle": "@automatos.app",
+    "handle": "@yourbrand",
     "cta": "Swipe to know more"
   }
 }

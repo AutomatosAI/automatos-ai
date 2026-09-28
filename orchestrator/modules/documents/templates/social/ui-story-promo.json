@@ -83,7 +83,7 @@
       "type": "text",
       "label": "Chat: the counter's label",
       "max_chars": 12,
-      "default": "AUTO NOW"
+      "default": "ACTIVE"
     },
     "chat_counter": {
       "type": "text",
@@ -93,7 +93,7 @@
     },
     "chat_greeting": {
       "type": "text",
-      "label": "Chat: Auto's greeting",
+      "label": "Chat: the assistant's greeting",
       "max_chars": 60,
       "description": "Shown before the request is typed."
     },
@@ -111,7 +111,7 @@
     },
     "chat_reply": {
       "type": "text",
-      "label": "Chat: Auto's reply",
+      "label": "Chat: the assistant's reply",
       "max_chars": 40,
       "default": "On it. Here's the plan."
     },
@@ -778,11 +778,11 @@
     "hook_accent": "six.",
     "problem_line": "Your business",
     "problem_accent": "doesn't.",
-    "tagline_lead": "An operating system for",
-    "tagline_accent": "autonomous",
-    "tagline_tail": "agent teams.",
+    "tagline_lead": "The one line that says",
+    "tagline_accent": "what",
+    "tagline_tail": "you do.",
     "chat_title": "Harvest Club launch",
-    "chat_greeting": "Hey Gerard, what can I do for you today?",
+    "chat_greeting": "Hey there, what can I do for you today?",
     "chat_request": "Launch the Harvest Club this week — site copy, a blog post and a plan.",
     "step_1_detail": "· 4 notes",
     "step_2_detail": "· Harvest Club brief",
@@ -832,9 +832,9 @@
     "team_roster": "HAMMER, COUNTINGHOUSE, CLUB SECRETARY, RESEARCHER, NEWSROOM, WRITER, OPS, SHOPKEEPER, TRACKER",
     "end_line": "Your business, running —",
     "end_accent": "even when you're not.",
-    "end_url": "automatos.app",
-    "end_note": "OPEN SOURCE · APACHE 2.0",
-    "cap_ask": "Tell Auto what you need.",
+    "end_url": "yourbrand.com",
+    "end_note": "LINK IN BIO",
+    "cap_ask": "Ask for what you need.",
     "cap_handoff": "The right agent takes it.",
     "beat_1": "Research.",
     "beat_2": "Writing.",

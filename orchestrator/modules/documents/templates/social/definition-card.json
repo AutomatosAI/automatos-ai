@@ -1,6 +1,6 @@
 {
   "name": "Definition card",
-  "description": "\"What is X?\": a headline and up to three numbered cards that explain it, on the brand's paper. A carousel's second slide or a single explainer. Ported from the automatos-social definition family.",
+  "description": "\"What is X?\": a headline and up to three numbered cards that explain it, on the brand's paper. A carousel's second slide or a single explainer.",
   "format": "social_image",
   "category": "social",
   "sizes": [
@@ -101,7 +101,7 @@
     "card_3_title": "Three must-haves",
     "card_3_body": "A model to think with, tools to call, and a loop that keeps running until the goal is met.",
     "counter": "02 / 10",
-    "handle": "@automatos.app",
+    "handle": "@yourbrand",
     "cta": "Swipe to know more"
   }
 }

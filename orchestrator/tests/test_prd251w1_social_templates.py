@@ -71,10 +71,10 @@ from core.media_render_bundle import NO_LOGO, build_bundle  # noqa: E402
 from core.media_render_client import MediaRenderClient, MediaRenderError  # noqa: E402
 from core.media_render_quota import RenderQuotaExceeded  # noqa: E402
 from core.models.core import DOCUMENT_TEMPLATE_FORMATS, SOCIAL_TEMPLATE_FORMATS, DocumentTemplate  # noqa: E402
+from core.social_brand_rule import brand_literals  # noqa: E402
 from core.social_templates import (  # noqa: E402
     InvalidVariableValues,
     SocialTemplateError,
-    brand_literals,
     is_social_format,
     resolve_variables,
     validate_social_blocks,
@@ -495,6 +495,24 @@ def test_no_seeded_social_template_hardcodes_a_colour_a_font_or_a_logo():
         pytest.param('<img src="https://cdn.example.com/logo.png" alt="">', "", "is a URL", id="logo-url"),
         pytest.param("", ".x { left: {{ offset }}px; color: #000; }", "hex colour #000", id="rule-with-a-placeholder"),
         pytest.param("", ".g { background: linear-gradient(var(--brand-primary, #111), #222); }", "hex colour #222", id="outside-the-var"),
+        # P251W1-RVW-6: a colour is more than a hex.
+        pytest.param("", ".a { color: orange; }", "named colour 'orange' outside a var() fallback in 'color'", id="css-named"),
+        pytest.param('<svg><path fill="red" d="M0 0h9v9z"/></svg>', "", "<path fill>: named colour 'red'", id="svg-fill-named"),
+        pytest.param(
+            '<p style="background: rgba(233, 98, 53, 0.5)">x</p>', "", "colour rgba(233, 98, 53, 0.5)", id="inline-style-rgba",
+        ),
+        pytest.param("", ".a { background: hsl(15 80% 56%); }", "colour hsl(15 80% 56%)", id="css-hsl"),
+        pytest.param(
+            '<script>tl.to("#bead", { backgroundColor: "rgb(233, 98, 53)" }, 0.2);</script>', "",
+            "script: colour rgb(233, 98, 53) as a value", id="script-tween-rgb",
+        ),
+        pytest.param('<script>el.style.color = "orange";</script>', "", "script: named colour 'orange'", id="script-named"),
+        pytest.param("", ":root { --accent: orange; }", "named colour 'orange' outside a var() fallback in '--accent'", id="own-token-named"),
+        pytest.param("", ".g { background: linear-gradient(red, var(--brand-primary)); }", "named colour 'red'", id="gradient-named"),
+        pytest.param("", ".m { background: color-mix(in srgb, red 40%, black); }", "named colour 'red'", id="a-hue-mixed-in"),
+        pytest.param("", ".s { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4); }", "colour rgba(0, 0, 0, 0.4)", id="shadow-rgba"),
+        pytest.param('<svg><stop offset="0" stop-color="white"/></svg>', "", "<stop stop-color>: named colour 'white'", id="svg-stop-named"),
+        pytest.param('<svg><rect fill="hsla(15, 80%, 56%, .5)"/></svg>', "", "<rect fill>: colour hsla(15, 80%, 56%, .5)", id="svg-fill-hsla"),
     ],
 )
 def test_the_brand_rule_finds_what_a_template_hardcodes(html, css, expected):

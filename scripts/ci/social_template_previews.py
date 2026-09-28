@@ -7,8 +7,11 @@ orchestrator's very code, so what it renders is what a workspace gets:
 * the starters come from ``modules.documents.social_starters`` (the seed files,
   checked against the template contract, the rows ``seed_social_starters`` writes);
 * each bundle is built by ``core.media_render_bundle.build_bundle`` from the
-  starter's sample data (the reference video's own copy) and a brand kit, with
-  every footage slot empty, so the templates' own motion graphics play.
+  starter's sample data and a brand kit, with every footage slot empty, so the
+  templates' own motion graphics play. The seeded samples are brand-neutral
+  (``@yourbrand``, ``yourbrand.com``); a video's preview lays its reference
+  video's own copy over them (``social_reference_text.json``), so it reads as the
+  reference did for the owner's side-by-side (Goal 8).
 
 For each template it posts the bundle with a ``preview`` (the template's key
 moments) to ``POST /render``. media-render stages it, speaks it with Kokoro,
@@ -90,6 +93,11 @@ KIT: Dict[str, Any] = {
     "font_family": '"Liberation Sans", sans-serif',
     "heading_font": '"Liberation Serif", serif',
 }
+# The reference videos' own copy, by starter: what the seeded rows no longer carry
+# (P251W1-RVW-6), laid back over a video's sample data for its preview.
+REFERENCE_COPY: Dict[str, Dict[str, str]] = json.loads(
+    Path(__file__).resolve().with_name("social_reference_text.json").read_text(encoding="utf-8")
+)
 # The primary the probe swaps in: a blue, as far from the kit's orange as it gets.
 PROBE_PRIMARY = "#2f7bf6"
 # US-108: the heading-font render. The Title card's headline is weight 900 and its
@@ -301,20 +309,20 @@ class Renderer:
         return job
 
 
-def _sample_values(starter: Mapping[str, Any]) -> Dict[str, Any]:
-    resolved = resolve_variables(starter["blocks"]["variables_schema"], starter["sample_data"])
+def _sample_values(starter: Mapping[str, Any], overlay: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    resolved = resolve_variables(starter["blocks"]["variables_schema"], {**starter["sample_data"], **(overlay or {})})
     if resolved.missing or resolved.invalid:
         raise PreviewFailure(f"{starter['name']}: its sample data leaves {resolved.missing} missing, {resolved.invalid} invalid")
     return resolved.values
 
 
 def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float]) -> Dict[str, Any]:
-    """A video's preview bundle: its sample data, snapshotted at ``at``."""
+    """A video's preview bundle: its sample data under its reference's own copy, snapshotted at ``at``."""
     bundle = build_bundle(
         workspace_id="ci-social-templates",
         reference=f"seeded template: {starter['name']}",
         blocks=starter["blocks"],
-        values=_sample_values(starter),
+        values=_sample_values(starter, REFERENCE_COPY.get(starter["slug"])),
         brand_kit=kit,
     )
     bundle["preview"] = {"at": at}

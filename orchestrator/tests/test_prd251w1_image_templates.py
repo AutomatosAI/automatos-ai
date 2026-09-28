@@ -63,11 +63,11 @@ from core.brand_palette import (  # noqa: E402
     parse_hex,
 )
 from core.media_render_bundle import build_bundle  # noqa: E402
+from core.social_brand_rule import brand_literals  # noqa: E402
 from core.social_templates import (  # noqa: E402
     MAX_STILLS,
     PLACEHOLDER,
     SocialTemplateError,
-    brand_literals,
     claim_names,
     parse_size,
     resolve_variables,
