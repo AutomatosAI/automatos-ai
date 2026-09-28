@@ -30,7 +30,9 @@ then moves the post to ``rendering`` and answers 202; the render runs in the
 background (``modules/socials/render.py``) and ends the post in
 ``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}`` streams a
 rendered file (the Deliverable's preview link), and ``GET /usage`` reads the
-render minutes used and held, and the quota.
+render minutes used and held, and the quota. ``GET /posts/{id}/media`` lists the
+post's media as presigned inline links (D9, S3.4: ``modules/socials/media_urls.py``),
+the exact files the approval view shows.
 
 Voice (S1.5, D11): a post is spoken by Kokoro unless its ``voice`` names a
 voice toolkit the workspace has connected in Composio (Fish Audio, ElevenLabs);
@@ -105,10 +107,11 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SocialTemplateError, slot_generatable, validate_social_blocks
+from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, render, service
+from modules.socials import media_caps, media_store, media_urls, render, service
 from modules.socials import credits as post_credits
 from modules.socials import report_charts
 from modules.socials import sources as post_sources
@@ -779,6 +782,24 @@ async def get_social_post_media(
             "Cache-Control": MEDIA_CACHE_CONTROL,
         },
     )
+
+
+@router.get("/posts/{post_id}/media")
+def list_social_post_media(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The caller's post's media as presigned inline links (D9, S3.4): the exact
+    files the approval view shows, each ``{aspect, deliverable_id, name, url,
+    content_type, bytes, error}``, living ``SOCIALS_MEDIA_URL_TTL_SECONDS``. A
+    file with no stored object has ``url`` null and says why; 503 when a file
+    has one and there is no storage to link to."""
+    post = _load(db, ctx, post_id)
+    try:
+        return media_urls.post_media_links(db, post)
+    except StorageNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=MEDIA_STORAGE_UNAVAILABLE) from exc
 
 
 @router.get("/usage")

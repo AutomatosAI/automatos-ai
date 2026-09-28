@@ -373,6 +373,32 @@ Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` 
 - **Render minutes.** The local edition has no monthly render quota. The hosted
   plans do: Basic 10, Pro 60 and Business 240 minutes a month.
 
+### Media links and public storage
+
+Socials hands out its media as presigned links: signed, expiring URLs to the
+stored file, served inline with the file's type (`video/mp4`, `image/jpeg`,
+`image/png`), so a browser plays them and a fetcher can ask for byte ranges. A
+link lives `SOCIALS_MEDIA_URL_TTL_SECONDS` (default 86400, one day).
+
+- **The approval view** shows a post's exact media through these links. Your
+  browser opens them, so they are signed against `S3_PUBLIC_ENDPOINT_URL`
+  (`http://localhost:9000` in `envs/api.defaults`, §6). Nothing else is needed.
+- **Publishing is file-first.** LinkedIn, X, Instagram, TikTok and YouTube get
+  the file itself through your Composio connection, so none of them needs to
+  reach your storage.
+- **Public storage** is needed only by a channel step that takes nothing but a
+  URL, which the platform then fetches: today, the YouTube custom thumbnail.
+  The hosted edition's AWS S3 serves such links as it is. The local edition's
+  MinIO is private, so that step shows **"Needs public storage"** and is skipped
+  until you set both of these in `envs/api.local`:
+  - `SOCIALS_PUBLIC_MEDIA_BUCKET`: the bucket platforms fetch from. Socials
+    copies the file into it under `social-media/<workspace>/<post>/<file>` and
+    links it from there. MinIO creates it on first use.
+  - `S3_PUBLIC_ENDPOINT_URL`: an address of your store that the internet can
+    reach (an `https://` host, never `localhost`). Every presigned link is
+    signed against it, so a reverse proxy in front of MinIO must pass the
+    `Host` header through unchanged. It can expose that bucket's path alone.
+
 ### media-render on Railway (SaaS)
 
 The hosted edition runs the renderer as its own Railway service (owner sizing,

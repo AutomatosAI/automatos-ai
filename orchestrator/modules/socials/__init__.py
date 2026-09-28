@@ -20,6 +20,9 @@ the calendar and published through the workspace's own Composio connections.
   Kie.ai or Higgsfield MCP (``recipes.footage``, S1.8).
 - :mod:`modules.socials.media_caps`: the post's media cap and the workspace's
   monthly media cap, checked before any spend (D13).
+- :mod:`modules.socials.media_urls`: presigned inline links to a post's media
+  (D9, S3.4): the approval view's, and a link a platform fetches, which needs
+  public storage.
 - :mod:`modules.socials.publisher`: ``publish_post``, the one way a post leaves
   Automatos (the guard first; channel publishers arrive in Wave 3).
 """

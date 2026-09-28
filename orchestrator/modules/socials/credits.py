@@ -17,7 +17,7 @@ the query, so an id Postgres cannot parse never reaches it.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -47,17 +47,23 @@ def _uuid(value: Any) -> Optional[str]:
         return None
 
 
-def media_deliverable_ids(media: Any) -> List[str]:
-    """The Deliverable ids ``media`` names (``{aspect: [id | file record]}``), in order, each once."""
-    ids: List[str] = []
+def media_entries(media: Any) -> List[Tuple[str, str]]:
+    """``(aspect, Deliverable id)`` for each file ``media`` names
+    (``{aspect: [id | file record]}``), in order. A malformed id is skipped."""
+    found: List[Tuple[str, str]] = []
     if not isinstance(media, Mapping):
-        return ids
-    for entries in media.values():
+        return found
+    for aspect, entries in media.items():
         for entry in entries if isinstance(entries, (list, tuple)) else ():
             ident = _uuid(entry.get("deliverable_id") if isinstance(entry, Mapping) else entry)
-            if ident and ident not in ids:
-                ids.append(ident)
-    return ids[:MAX_MEDIA_IDS]
+            if ident:
+                found.append((str(aspect), ident))
+    return found
+
+
+def media_deliverable_ids(media: Any) -> List[str]:
+    """The Deliverable ids ``media`` names (``{aspect: [id | file record]}``), in order, each once."""
+    return list(dict.fromkeys(ident for _, ident in media_entries(media)))[:MAX_MEDIA_IDS]
 
 
 def _extra(raw: Any) -> Dict[str, Any]:

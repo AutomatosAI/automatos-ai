@@ -205,7 +205,7 @@ _VALID_BODY = {
 # ---------------------------------------------------------------------------
 
 
-def test_the_router_serves_every_wave_0_and_wave_1_route():
+def test_the_router_serves_exactly_the_socials_routes():
     assert _router_routes() == sorted(
         [
             ("GET", "/api/socials/posts"),
@@ -216,6 +216,8 @@ def test_the_router_serves_every_wave_0_and_wave_1_route():
             ("POST", "/api/socials/posts/{post_id}/render"),
             ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
             ("GET", "/api/socials/usage"),
+            # Wave 2 (US-202, S3.4): the post's media as presigned inline links.
+            ("GET", "/api/socials/posts/{post_id}/media"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).

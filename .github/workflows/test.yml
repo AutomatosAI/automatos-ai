@@ -121,6 +121,28 @@ jobs:
       - name: Initialise test database schema
         run: python scripts/init_test_db.py
 
+      # PRD-251 US-202 (S3.4, D9): the Socials media-hosting test presigns links
+      # against a real object store and fetches them over HTTP (a HEAD, a Range
+      # GET). GitHub service containers cannot pass MinIO its `server /data`
+      # command, so this step starts it. The image is the one docker-compose.yml
+      # pins. The root credentials are throwaway values for a container that
+      # lives only for this job; the test step below gets the same ones.
+      - name: Start MinIO (the Socials media-hosting test)
+        env:
+          MINIO_ROOT_USER: ci-minio
+          MINIO_ROOT_PASSWORD: ci-minio-pass
+        run: |
+          docker run -d --name socials-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live; then echo "MinIO is live"; exit 0; fi
+            sleep 2
+          done
+          docker logs socials-minio
+          echo "::error::MinIO never answered /minio/health/live"
+          exit 1
+
       # The required gate stays pinned to `tests` explicitly. PRD-182 W12-S2
       # widened pytest.ini `testpaths` (so `--collect-only` shows the module
       # trees), but the green gate must keep running exactly what it ran before
@@ -132,6 +154,12 @@ jobs:
       # Collecting coverage cannot change a test's pass/fail, so it is safe to add
       # to the required job.
       - name: Run test net (with coverage)
+        env:
+          # The MinIO started above (tests/test_prd251w2_media_hosting.py fails,
+          # never skips, in CI without it).
+          SOCIALS_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          SOCIALS_TEST_S3_ACCESS_KEY: ci-minio
+          SOCIALS_TEST_S3_SECRET_KEY: ci-minio-pass
         run: |
           pytest tests \
             --timeout=60 \

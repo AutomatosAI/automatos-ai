@@ -573,6 +573,21 @@ export interface SocialsUsageResponse {
   render_minutes: SocialRenderMinutes
 }
 
+/**
+ * GET /api/socials/posts/{id}/media (D9, S3.4): one file of a post's media, with
+ * a presigned link served inline (it expires; fetch the list again for a fresh one).
+ * `url` is null when the file has no stored object, and `error` says why.
+ */
+export interface SocialPostMediaLink {
+  aspect: string
+  deliverable_id: string
+  name: string | null
+  url: string | null
+  content_type: string | null
+  bytes: number | null
+  error: string | null
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2657,6 +2672,11 @@ class ApiClient {
 
   async getSocialsUsage(): Promise<SocialsUsageResponse> {
     return this.request<SocialsUsageResponse>('/api/socials/usage')
+  }
+
+  /** The post's media as presigned inline links (D9): the exact files an approver sees. */
+  async getSocialPostMedia(postId: string): Promise<SocialPostMediaLink[]> {
+    return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
   }
 
   /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */
