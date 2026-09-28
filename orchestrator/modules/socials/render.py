@@ -75,6 +75,7 @@ from core.media_render_client import (
     NOT_CONFIGURED,
     NOT_FOUND,
     TIMEOUT,
+    WORKSPACE_BUSY,
     MediaRenderClient,
     MediaRenderError,
     MediaRenderUnavailable,
@@ -112,6 +113,8 @@ MEDIA_PROFILE_MESSAGE = (
 NOT_CONFIGURED_MESSAGE = "Rendering is not configured on this server (SOCIALS_RENDER_URL is empty)."
 UNREACHABLE_MESSAGE = "The renderer cannot be reached right now. Try again in a few minutes."
 STORAGE_MESSAGE = "Rendering needs object storage: the rendered files are kept there."
+# A render still refused at its deadline because its workspace has its share in progress (P251W1-RVW-4).
+WORKSPACE_BUSY_MESSAGE = "This workspace has too many renders in progress. Render again when one of them ends."
 
 
 class RendererUnavailable(service.SocialsError):
@@ -287,6 +290,8 @@ def _report(*, findings: Any = (), report: Optional[Mapping[str, Any]] = None) -
 def _failure_from(exc: MediaRenderError) -> RenderFailure:
     if isinstance(exc, MediaRenderUnavailable):
         return RenderFailure(exc.code, unavailable_message(exc))
+    if exc.code == WORKSPACE_BUSY:
+        return RenderFailure(exc.code, WORKSPACE_BUSY_MESSAGE)
     if exc.code == "check_failed":
         errors = sum(1 for f in exc.findings if isinstance(f, dict) and f.get("severity") == "error")
         first = next((f for f in exc.findings if isinstance(f, dict) and f.get("severity") == "error"), None)

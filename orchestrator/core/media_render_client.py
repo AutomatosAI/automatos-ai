@@ -16,13 +16,19 @@ Used by:
 
 The service's API is described in ``services/media-render/README.md``. Every
 failure raises :class:`MediaRenderError` with a ``code``: the renderer's own
-(``check_failed`` with its findings, ``invalid_bundle``, ``busy`` with
-``retry_after``, ``media_fetch_failed``), or ``not_configured``,
-``unreachable``, ``timeout``, ``not_found``, ``bad_response`` and
-``no_output`` from this side. ``submit_when_free`` and ``wait_for`` are the one
-submit-and-poll loop both renders use; ``render_to_file`` runs a render start
-to finish for a caller that waits for its file. Nothing here renders or
-generates anything: the renderer assembles (D3).
+(``check_failed`` with its findings, ``invalid_bundle``, ``busy`` and
+``workspace_busy`` with ``retry_after``, ``media_fetch_failed``), or
+``not_configured``, ``unreachable``, ``timeout``, ``not_found``,
+``bad_response`` and ``no_output`` from this side. ``submit_when_free`` and
+``wait_for`` are the one submit-and-poll loop both renders use;
+``render_to_file`` runs a render start to finish for a caller that waits for
+its file. Nothing here renders or generates anything: the renderer assembles (D3).
+
+The renderer admits a bounded number of unfinished jobs: ``busy`` (503) when
+the service as a whole is full, ``workspace_busy`` (429) when this workspace
+already has its share in progress (P251W1-RVW-4). ``submit_when_free`` waits
+out either one, after its ``Retry-After``, for as long as the render's deadline
+allows, then raises it.
 """
 
 from __future__ import annotations
@@ -54,10 +60,16 @@ JOB_TERMINAL = frozenset({JOB_DONE, JOB_FAILED, JOB_REJECTED})
 NOT_CONFIGURED = "not_configured"
 UNREACHABLE = "unreachable"
 TIMEOUT = "timeout"
-BUSY = "busy"
 NOT_FOUND = "not_found"
 BAD_RESPONSE = "bad_response"
 NO_OUTPUT = "no_output"
+
+# The renderer's refusals to submit again after Retry-After: the service is full
+# (503), or this workspace already has its share of renders in progress (429).
+BUSY = "busy"
+WORKSPACE_BUSY = "workspace_busy"
+RETRY_LATER_CODES = frozenset({BUSY, WORKSPACE_BUSY})
+RETRY_AFTER_STATUSES = frozenset({429, 503})
 
 # Singleton client — reused across the orchestrator process
 _client: Optional[httpx.AsyncClient] = None
@@ -137,7 +149,7 @@ def _error_for(resp: httpx.Response, action: str) -> MediaRenderError:
         status=resp.status_code,
         findings=findings,
         report=report,
-        retry_after=_retry_after(resp) if resp.status_code == 503 else None,
+        retry_after=_retry_after(resp) if resp.status_code in RETRY_AFTER_STATUSES else None,
     )
 
 
@@ -209,15 +221,16 @@ class MediaRenderClient:
         self, bundle: Mapping[str, Any], *, deadline: float, poll_seconds: float
     ) -> Dict[str, Any]:
         """:meth:`submit`, asked again after the renderer's ``Retry-After`` while
-        it is busy and ``deadline`` (a ``time.monotonic()`` instant) allows."""
+        it is busy, or this workspace has its share of renders in progress, and
+        ``deadline`` (a ``time.monotonic()`` instant) allows."""
         while True:
             try:
                 return await self.submit(bundle)
             except MediaRenderError as exc:
                 wait = exc.retry_after or poll_seconds
-                if exc.code != BUSY or time.monotonic() + wait >= deadline:
+                if exc.code not in RETRY_LATER_CODES or time.monotonic() + wait >= deadline:
                     raise
-                logger.info("MediaRenderClient: the renderer is busy; asking again in %ss", wait)
+                logger.info("MediaRenderClient: %s (%s); asking again in %ss", exc.code, exc, wait)
                 await asyncio.sleep(wait)
 
     async def wait_for(

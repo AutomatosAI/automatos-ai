@@ -456,6 +456,9 @@ services:
       # Two renders at once overall, one per workspace (owner, 2026-09-23).
       MEDIA_RENDER_MAX_CONCURRENT_RENDERS: ${MEDIA_RENDER_MAX_CONCURRENT_RENDERS:-2}
       MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE: ${MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE:-1}
+      # One workspace's jobs in progress (checking, queued or rendering); past it that
+      # workspace gets 429 and the others are still admitted (P251W1-RVW-4).
+      MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE: ${MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE:-4}
     # Chrome renders the frames; the CI job runs the image with 1 GB of /dev/shm too.
     shm_size: "1gb"
     deploy:

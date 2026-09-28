@@ -35,6 +35,18 @@ def test_a_job_is_replaced_never_changed(settings, tmp_path):
     assert "queue_position" not in body
 
 
+def test_the_active_count_is_the_services_or_one_workspaces(settings, tmp_path):
+    """P251W1-RVW-4: admission counts one workspace's unfinished jobs apart from the rest."""
+    store = JobStore(tmp_path, Clock())
+    ours = [store.create(parse_bundle(bundle("ws-a"), settings, {})) for _ in range(3)]
+    store.create(parse_bundle(bundle("ws-b"), settings, {}))
+    store.update(ours[1].id, status=QUEUED)
+    store.finish(ours[2].id, DONE)
+    assert store.active_count() == 3
+    assert store.active_count("ws-a") == 2 and store.active_count("ws-b") == 1
+    assert store.active_count("ws-c") == 0
+
+
 def test_finished_jobs_expire_after_the_ttl(settings, tmp_path):
     clock = Clock()
     store = JobStore(tmp_path, clock)
