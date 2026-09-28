@@ -3,7 +3,8 @@ name: images
 # Builds the platform's container images for linux/amd64 and linux/arm64 and
 # publishes them to GHCR as ghcr.io/<owner>/automatos-<image>.
 #
-# - Pull requests build both architectures but never push or sign.
+# - Only main and `v*` tags publish. Pull requests, and manual runs on any
+#   other branch, build both architectures but never push or sign.
 # - A push to main publishes `edge` and `sha-<short>`; a `v*` tag publishes
 #   `X.Y.Z` and `X.Y`.
 # - Each architecture builds on its own native runner (no QEMU) and pushes by
@@ -12,8 +13,13 @@ name: images
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
-# http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time). Railway
-# builds its own images and is unaffected.
+# http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time), hence its
+# name, automatos-frontend-local. Railway builds its own images and is
+# unaffected.
+#
+# PRs build only when the image inputs change (Dockerfiles, dependencies,
+# this file): test.yml's prod-image-parity job already builds all three
+# production images on amd64 for every PR.
 #
 # The owner comes from the repository, so a fork publishes to its own
 # namespace. New packages are private until an org owner makes them public.
@@ -49,6 +55,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # The merge job's `if:` repeats this: job-level `if:` can't read `env`.
+  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+
 jobs:
   build:
     name: build ${{ matrix.image.name }} (${{ matrix.platform.arch }})
@@ -66,7 +76,7 @@ jobs:
             target: production
             build-args: |
               INSTALL_GRAPH_EXTRAS=false
-          - name: frontend
+          - name: frontend-local
             context: frontend
             target: production
             build-args: |
@@ -86,7 +96,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Image name
         env:
@@ -105,14 +117,14 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build (and push by digest outside pull requests)
+      - name: Build (and push by digest when publishing)
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -121,14 +133,14 @@ jobs:
           platforms: linux/${{ matrix.platform.arch }}
           build-args: ${{ matrix.image.build-args }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
 
       - name: Export digest
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
@@ -136,7 +148,7 @@ jobs:
           touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -145,8 +157,8 @@ jobs:
           retention-days: 1
 
   merge:
-    name: publish ${{ matrix.name }}
-    if: github.event_name != 'pull_request'
+    name: publish ${{ matrix.image.name }}
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -158,22 +170,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name:
-          - api
-          - frontend
-          - workspace-worker
+        # The description is set on the multi-arch index, where GHCR reads it.
+        image:
+          - name: api
+            description: Automatos AI backend API (orchestrator), local-edition build. Run it with the repository's docker compose, which supplies the wait-migrate-seed entrypoint.
+          - name: frontend-local
+            description: Automatos AI web app, local edition. The API address http://localhost:8000 is fixed at build time.
+          - name: workspace-worker
+            description: Automatos AI workspace worker (Code Canvas runtime), built without Chromium.
 
     steps:
       - name: Image name
         env:
-          NAME: ${{ matrix.name }}
+          NAME: ${{ matrix.image.name }}
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-${NAME}" >> "$GITHUB_ENV"
 
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-${{ matrix.name }}-*
+          pattern: digests-${{ matrix.image.name }}-*
           merge-multiple: true
 
       - name: Set up Buildx
@@ -189,8 +205,13 @@ jobs:
       - name: Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ${{ env.IMAGE }}
+          annotations: |
+            org.opencontainers.image.title=automatos-${{ matrix.image.name }}
+            org.opencontainers.image.description=${{ matrix.image.description }}
           # No `latest` until the maintainers choose to publish one.
           flavor: |
             latest=false
@@ -202,18 +223,24 @@ jobs:
 
       - name: Create the multi-arch index
         working-directory: ${{ runner.temp }}/digests
+        env:
+          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
         run: |
           mapfile -t tag_args < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          annotation_args=()
+          while IFS= read -r annotation; do
+            [ -n "$annotation" ] && annotation_args+=(--annotation "$annotation")
+          done <<< "$ANNOTATIONS"
           sources=()
           for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
-          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          docker buildx imagetools create "${tag_args[@]}" "${annotation_args[@]}" "${sources[@]}"
 
       - name: Resolve the index digest
         id: index
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          digest=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
+          # A tag the previous step actually pushed.
+          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "Published ${IMAGE}@${digest}" >> "$GITHUB_STEP_SUMMARY"
 
