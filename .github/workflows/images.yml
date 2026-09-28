@@ -7,9 +7,10 @@ name: images
 #   other branch, build both architectures but never push or sign.
 # - A push to main publishes `edge` and `sha-<short>`; a `v*` tag publishes
 #   `X.Y.Z` and `X.Y`.
-# - Each architecture builds on its own native runner (no QEMU) and pushes by
-#   digest. The merge job joins the digests into one multi-arch index, signs
-#   it with cosign (keyless, through GitHub OIDC) and scans it (report only).
+# - Each architecture builds on its own native runner (no QEMU), pushes by
+#   digest and scans that digest (report only), so amd64 and arm64 are both
+#   scanned. The merge job joins the digests into one multi-arch index and
+#   signs it with cosign (keyless, through GitHub OIDC).
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
@@ -158,6 +159,21 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # Scans this architecture's image on its own runner: Grype picks one
+      # platform from a multi-arch index, so scanning the merged index would
+      # miss arm64. Report only: findings go to the log, and even a scanner
+      # error never blocks the publish.
+      - name: Vulnerability scan (report only)
+        if: env.PUBLISH == 'true'
+        continue-on-error: true
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          fail-build: false
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+
   merge:
     name: publish ${{ matrix.image.name }}
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -253,13 +269,3 @@ jobs:
         env:
           DIGEST: ${{ steps.index.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
-
-      # Report only for now: findings go to the log and never fail the publish.
-      - name: Vulnerability scan (report only)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          image: ${{ env.IMAGE }}@${{ steps.index.outputs.digest }}
-          fail-build: false
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
