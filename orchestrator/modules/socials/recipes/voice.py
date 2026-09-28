@@ -26,16 +26,21 @@ script through that toolkit (:func:`speak`):
   spend window, which the render's footage takes before it
   (``toolkit.spend_window``), so footage and voice are checked against one
   running total and two renders never spend the same headroom. Over either cap
-  nothing is spoken (:class:`VoiceRefused`). What speaking cost is booked on the
-  media lane against the post before the window closes, off the event loop, so
-  the row is written at once and never dropped. Fish Audio bills credit: its
-  balance is read before the first line and after the last (the ``balance``
-  action) and the difference is booked, inside one credit window per workspace
-  and toolkit across every worker process (a Postgres advisory lock,
+  nothing is spoken (:class:`VoiceRefused`). The priced amount is booked on the
+  media lane against the post before the first line is spoken
+  (``media_ledger.commit``, P251W1-RVW-5), off the event loop, so the row is
+  written at once and never dropped, and a process that stops mid-script (a
+  redeploy, a crash) leaves it booked. When the script ends, whatever happened,
+  the booking is settled in place to what speaking cost, before the window
+  closes (``media_ledger.settle``). Fish Audio bills credit: its balance is read
+  before the first line and after the last (the ``balance`` action) and the
+  difference is the cost, inside one credit window per workspace and toolkit
+  across every worker process (a Postgres advisory lock,
   ``toolkit.credit_window``), so two renders' readings never overlap; a balance
-  that cannot be read after speaking books the priced amount. ElevenLabs bills
-  the customer's own plan and has no balance action on the allowlist: its
-  characters are booked at the configured price, so the caps see them.
+  that cannot be read after speaking settles at the configured price of the
+  lines it was asked. ElevenLabs bills the customer's own plan and has no
+  balance action on the allowlist: its characters settle at the configured
+  price, so the caps see them.
 
 The voice picker reads :func:`voice_sources` (Kokoro always; each voice toolkit
 the workspace can speak with; each allowlisted one it has not connected, to
@@ -59,11 +64,10 @@ from uuid import UUID
 
 from config import config
 from core.composio.tool_executor import ComposioToolExecutor
-from core.llm.usage_context import LANE_MEDIA, usage_scope
-from core.llm.usage_tracker import UsageTracker
-from modules.socials import service
+from modules.socials import media_ledger, service
 from modules.socials.capabilities import BALANCE, TTS, VOICES, MediaCapabilities, OfferedAction
 from modules.socials.media_caps import MediaCapExceeded, check_spend
+from modules.socials.media_ledger import Settlement
 from modules.socials.media_store import MediaNameError, MediaStore, media_key
 from modules.socials.recipes.files import FileOutputError, fetch, returned_file
 from modules.socials.recipes.toolkit import (
@@ -78,7 +82,6 @@ from modules.socials.recipes.toolkit import (
 
 logger = logging.getLogger(__name__)
 
-EXECUTION_PREFIX = "social_post:"
 KOKORO_LABEL = "Kokoro (built in)"
 AVAILABLE, CONNECT, UNAVAILABLE = "available", "connect", "unavailable"
 # The keys a voice listing's items carry, in the order they are trusted.
@@ -425,26 +428,31 @@ def _cost(plan: VoicePlan, recipe: VoiceRecipe, units: int, before: Optional[Dec
     return float(max(before - after, Decimal(0))), None
 
 
-def _book(plan: VoicePlan, recipe: VoiceRecipe, *, workspace_id: UUID, post_id: UUID, texts: Sequence[str],
-          before: Optional[Decimal], after: Optional[Decimal], latency_ms: int) -> None:
-    """Book what speaking cost on the media lane (D13), against the post. Called
-    off the event loop (``asyncio.to_thread``), the usage tracker writes inline:
-    the row is in before this returns, so the next cap check sees it."""
+async def _commit(plan: VoicePlan, recipe: VoiceRecipe, session_factory: Callable[[], Any], *, workspace_id: UUID,
+                  post_id: UUID, texts: Sequence[str], price: float) -> int:
+    """Book the script's priced amount against the post before its first line is
+    spoken (D13, P251W1-RVW-5), off the event loop, so the row is written at
+    once: a process that stops mid-script leaves it booked. Its llm_usage row."""
+    try:
+        return await asyncio.to_thread(
+            media_ledger.commit, session_factory, workspace_id, post_id, provider=plan.toolkit,
+            model_id=plan.speak_action.slug.lower(), units=script_units(recipe, texts), usd=price,
+        )
+    except media_ledger.BookingFailed as exc:
+        raise VoiceError(f"What {plan.label} would spend could not be booked: nothing was spoken.") from exc
+
+
+def _settlement(plan: VoicePlan, recipe: VoiceRecipe, booking: int, texts: Sequence[str],
+                before: Optional[Decimal], after: Optional[Decimal]) -> Settlement:
+    """What the booking settles to (D13): what speaking ``texts``, the lines the
+    toolkit was asked, cost. A script none of which was asked is reversed."""
     units = script_units(recipe, texts)
     usd, problem = _cost(plan, recipe, units, before, after)
     if problem:
-        logger.error("[SocialsVoice] %s (post %s)", problem, post_id)
+        logger.error("[SocialsVoice] %s (booking %s)", problem, booking)
     if not units and not usd:
-        return
-    with usage_scope(request_type=LANE_MEDIA, execution_id=f"{EXECUTION_PREFIX}{post_id}", workspace_id=workspace_id):
-        UsageTracker.track_media(
-            provider=plan.toolkit,
-            model_id=plan.speak_action.slug.lower(),
-            units=units,
-            usd=usd,
-            latency_ms=latency_ms,
-            error_message=problem,
-        )
+        return Settlement(booking, reverse=True)
+    return Settlement(booking, units=units, usd=usd, error_message=problem)
 
 
 # ── speaking the script ─────────────────────────────────────────────────────
@@ -514,11 +522,13 @@ async def _speak_lines(
     workspace_id: UUID,
     post_id: UUID,
     lines: Sequence[Tuple[str, str]],
+    price: float,
     session_factory: Callable[[], Any],
     store: MediaStore,
 ) -> Dict[str, SpokenLine]:
-    """Each line spoken and stored, one call per line; what it spent is booked,
-    off the event loop, whatever happened."""
+    """Each line spoken and stored, one call per line. The script's price is
+    booked before the first line, and settled to what speaking spent, off the
+    event loop, whatever happened (P251W1-RVW-5)."""
     spoken: Dict[str, SpokenLine] = {}
     attempted: List[str] = []
     db = session_factory()
@@ -534,16 +544,17 @@ async def _speak_lines(
                     f"{plan.label}'s balance could not be read, so what it would spend could not be booked: "
                     "nothing was spoken."
                 )
+            booking = await _commit(plan, recipe, session_factory, workspace_id=workspace_id, post_id=post_id,
+                                    texts=[text for _, text in lines], price=price)
             try:
                 for line_id, text in lines:
                     attempted.append(text)
                     spoken[line_id] = await _speak_line(executor, store, plan, recipe, workspace_id, post_id, line_id, text)
             finally:
                 after = await _read_balance(executor, workspace_id, plan) if recipe.credit_billed else None
-                await asyncio.to_thread(
-                    _book, plan, recipe, workspace_id=workspace_id, post_id=post_id, texts=attempted,
-                    before=before, after=after, latency_ms=int((time.monotonic() - started) * 1000),
-                )
+                settlement = _settlement(plan, recipe, booking, attempted, before, after)
+                latency_ms = int((time.monotonic() - started) * 1000)
+                await asyncio.to_thread(media_ledger.settle, session_factory, [settlement], latency_ms)
     finally:
         db.close()
     return spoken
@@ -565,14 +576,15 @@ async def speak(
     fit the post's cap and the workspace's monthly media cap, read inside the
     workspace's spend window (the one footage takes), so every check sees what
     was booked before it. Over either cap nothing is spoken:
-    :class:`VoiceRefused`. What speaking spent is booked on the media lane before
-    the window closes, whatever happened. :class:`VoiceError` when a line cannot
-    be spoken or kept."""
+    :class:`VoiceRefused`. The price is booked on the media lane before the first
+    line is spoken, and settled to what speaking spent before the window closes,
+    whatever happened (P251W1-RVW-5). :class:`VoiceError` when a line cannot be
+    spoken or kept."""
     recipe = RECIPES[plan.toolkit]
     price = price_usd(recipe, [text for _, text in lines])
     async with spend_window(session_factory, workspace_id):
         await asyncio.to_thread(_check_caps, session_factory, workspace_id, post_id, price, _what(plan, lines))
         return await _speak_lines(
-            plan, recipe, workspace_id=workspace_id, post_id=post_id, lines=lines,
+            plan, recipe, workspace_id=workspace_id, post_id=post_id, lines=lines, price=price,
             session_factory=session_factory, store=store,
         )

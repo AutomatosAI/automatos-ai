@@ -223,6 +223,9 @@ def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
     ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays under the stale cutoff, so
     a reaped post has no task left to finish it. The failure goes through the
     post lifecycle (``fail_render``), which writes the reason to ``review_log``.
+    What the render's footage and voice spent stays in ``llm_usage``: each was
+    booked before its toolkit was called (P251W1-RVW-5), and the provider may
+    still bill a job the dead process submitted.
     """
     from core.models.socials import SocialPost
     from modules.socials import service as socials

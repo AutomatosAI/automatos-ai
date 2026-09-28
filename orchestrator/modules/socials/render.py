@@ -7,15 +7,17 @@ which runs in the background:
 
 0. when the post asks for footage (US-114, D12), generate it through the
    workspace's Composio generation toolkit first: priced and capped before any
-   submit (D13), submitted and polled, each file copied into our storage and
-   registered as a Deliverable before its slot is marked done, and booked on the
-   media lane; a slot generated earlier for the same prompt is reused, and one
-   no connected toolkit can make plays the template's own motion graphics
-   (``modules/socials/recipes/footage.py``). Then, when the post chose a voice
-   toolkit (US-111, D11), speak its script through the workspace's Composio
-   connection: priced and capped before the first line (D13), in the same
-   per-workspace spend window as the footage, so the footage just booked counts
-   against the voice's check; one call per line, each line copied into our
+   submit (D13), each shot's price booked on the media lane before it is
+   submitted and settled when its job ends (P251W1-RVW-5), submitted and polled,
+   each file copied into our storage and registered as a Deliverable before its
+   slot is marked done; a slot generated earlier for the same prompt is reused,
+   and one no connected toolkit can make plays the template's own motion
+   graphics (``modules/socials/recipes/footage.py``). Then, when the post chose a
+   voice toolkit (US-111, D11), speak its script through the workspace's
+   Composio connection: priced and capped before the first line (D13), in the
+   same per-workspace spend window as the footage, so the footage just booked
+   counts against the voice's check; the price booked before the first line and
+   settled when the script ends; one call per line, each line copied into our
    storage as it returns, and the bundle's lines made to name those files
    (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
 1. submit the bundle to media-render (``core/media_render_client.py``), which
@@ -42,8 +44,10 @@ the rendered seconds are booked when it finished (P251W1-RVW-3).
 Steps 0-3 together get at most ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays
 under the boot reaper's stale cutoff, so the reaper only ever fails a render no
 live task owns. A post that moved on while it rendered (the reaper failed it)
-is left as it is, and nothing is booked. The renderer assembles; it never
-generates (D3).
+is left as it is, and its rendered seconds are not booked. What its footage and
+voice spent stays booked either way: each was booked before its toolkit was
+called (P251W1-RVW-5), so a process that died mid-render leaves it counted. The
+renderer assembles; it never generates (D3).
 The bundle (``core/media_render_bundle.py``, S1.2) is the social template's
 composition, checked against its contract (``core/social_templates.py``), the
 post's variable values with the template's defaults, the audio plan, and the
