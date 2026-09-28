@@ -1,0 +1,75 @@
+name: chart
+
+# Checks charts/automatos without a cluster: helm lint, the rendered manifests
+# against the Kubernetes schemas (kubeconform), and the helm-unittest suites in
+# charts/automatos/tests. Seconds, not minutes.
+#
+# The end-to-end test on a real cluster (deploy/kind/e2e.sh) needs Docker and
+# several GB of images, so it runs locally, not here.
+#
+# Third-party actions are pinned to a commit; the comment names the release.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart.yml"
+  # Any base branch, so a PR stacked on another PR is checked too.
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: v4.3.0
+  HELM_UNITTEST_VERSION: v1.1.2
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  # The oldest Kubernetes minor the chart is validated against.
+  KUBERNETES_VERSION: 1.31.0
+
+jobs:
+  chart:
+    name: helm lint, kubeconform and helm-unittest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform and helm-unittest
+        run: |
+          curl -sSfL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}" --verify=false
+
+      - name: helm lint
+        run: helm lint charts/automatos --set existingSecret=ci
+
+      - name: kubeconform (every optional part switched on)
+        run: |
+          helm template ci charts/automatos \
+            --set existingSecret=ci --set ingress.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}"
+
+      - name: helm-unittest
+        run: helm unittest charts/automatos

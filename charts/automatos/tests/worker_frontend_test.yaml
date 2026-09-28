@@ -1,0 +1,41 @@
+suite: Worker and frontend
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: gives the worker the workspaces read-write, one pod at a time
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspaces
+            mountPath: /workspaces
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+  - it: renders nothing for a disabled worker
+    template: templates/worker.yaml
+    set:
+      worker:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: points the frontend's server side at the API service
+    template: templates/frontend.yaml
+    documentIndex: 0
+    release:
+      name: demo
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BACKEND_INTERNAL_URL
+            value: http://demo-automatos-api:8000
+  - it: keeps the workspaces claim on uninstall
+    template: templates/workspaces-pvc.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
