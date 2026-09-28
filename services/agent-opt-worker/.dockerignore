@@ -1,0 +1,12 @@
+# The Dockerfile does `COPY . .`: keep local state out of the image.
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+# Env files must never be baked into an image (PRD-209).
+.env
+.env.*
+**/.env
+**/.env.*

@@ -1,0 +1,14 @@
+# The Dockerfile does `COPY . .`: keep local state out of the image, which is
+# published to GHCR (.github/workflows/images.yml).
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.DS_Store
+# Env files must never be baked into an image (PRD-209).
+.env
+.env.*
+**/.env
+**/.env.*
