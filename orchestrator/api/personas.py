@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_agent import workspace_agent_or_404
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
@@ -398,23 +399,37 @@ async def delete_workspace_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _agent_persona_out(db: Session, agent) -> AgentPersonaOut:
+    """The agent's persona as the API returns it: the assigned persona's details, if any."""
+    from core.models.personas import Persona
+
+    persona = None
+    if agent.persona_id:
+        persona = db.query(Persona).filter(Persona.id == agent.persona_id).first()
+    return AgentPersonaOut(
+        agent_id=agent.id,
+        persona_id=str(agent.persona_id) if agent.persona_id else None,
+        persona_name=persona.name if persona else None,
+        persona_slug=persona.slug if persona else None,
+        system_prompt=persona.system_prompt if persona else None,
+        voice_description=persona.voice_description if persona else None,
+        custom_persona_prompt=agent.custom_persona_prompt,
+        use_custom_persona=agent.use_custom_persona or False,
+    )
+
+
 @router.put("/agents/{agent_id}/persona", response_model=AgentPersonaOut, dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def set_agent_persona(
+def set_agent_persona(
     agent_id: int,
     body: SetAgentPersonaBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Set agent persona. Can select a predefined persona, use a custom prompt, or clear."""
+    """Set the persona of one of the caller's workspace's agents: a predefined persona,
+    a custom prompt, or none. Any other agent, a marketplace one included, is a 404:
+    installs copy a marketplace agent's persona into every installing workspace."""
     try:
-        from core.models.core import Agent
-
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-
-        if agent.workspace_id and agent.workspace_id != ctx.workspace_id:
-            raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+        agent = workspace_agent_or_404(db, agent_id, ctx.workspace_id)
 
         # Validate persona_id if provided
         if body.persona_id:
@@ -438,32 +453,7 @@ async def set_agent_persona(
 
         db.commit()
         db.refresh(agent)
-
-        # Build response
-        persona_name = None
-        persona_slug = None
-        system_prompt = None
-        voice_description = None
-
-        if agent.persona_id:
-            from core.models.personas import Persona
-            p = db.query(Persona).filter(Persona.id == agent.persona_id).first()
-            if p:
-                persona_name = p.name
-                persona_slug = p.slug
-                system_prompt = p.system_prompt
-                voice_description = p.voice_description
-
-        return AgentPersonaOut(
-            agent_id=agent.id,
-            persona_id=str(agent.persona_id) if agent.persona_id else None,
-            persona_name=persona_name,
-            persona_slug=persona_slug,
-            system_prompt=system_prompt,
-            voice_description=voice_description,
-            custom_persona_prompt=agent.custom_persona_prompt,
-            use_custom_persona=agent.use_custom_persona or False,
-        )
+        return _agent_persona_out(db, agent)
 
     except HTTPException:
         raise
@@ -474,7 +464,7 @@ async def set_agent_persona(
 
 
 @router.get("/agents/{agent_id}/persona", response_model=AgentPersonaOut)
-async def get_agent_persona(
+def get_agent_persona(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -490,30 +480,7 @@ async def get_agent_persona(
         if agent.workspace_id and agent.workspace_id != ctx.workspace_id:
             raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
 
-        persona_name = None
-        persona_slug = None
-        system_prompt = None
-        voice_description = None
-
-        if agent.persona_id:
-            from core.models.personas import Persona
-            p = db.query(Persona).filter(Persona.id == agent.persona_id).first()
-            if p:
-                persona_name = p.name
-                persona_slug = p.slug
-                system_prompt = p.system_prompt
-                voice_description = p.voice_description
-
-        return AgentPersonaOut(
-            agent_id=agent.id,
-            persona_id=str(agent.persona_id) if agent.persona_id else None,
-            persona_name=persona_name,
-            persona_slug=persona_slug,
-            system_prompt=system_prompt,
-            voice_description=voice_description,
-            custom_persona_prompt=agent.custom_persona_prompt,
-            use_custom_persona=agent.use_custom_persona or False,
-        )
+        return _agent_persona_out(db, agent)
 
     except HTTPException:
         raise

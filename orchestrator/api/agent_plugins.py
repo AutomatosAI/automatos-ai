@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_agent import workspace_agent_or_404
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
@@ -61,6 +62,21 @@ class AssembledContextOut(BaseModel):
     plugins_loaded: List[str]
     tools: List[Dict[str, Any]]
     token_estimate: int
+
+
+def caller_owns_agent(
+    agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> None:
+    """Route dependency: 404 unless ``agent_id`` is one of the caller's workspace's agents.
+
+    Installs copy a marketplace agent's plugin assignments and skills into every
+    installing workspace (PRD-251 P251W1-RVW-1's class), so no workspace may change a
+    marketplace or global agent's. It runs before the route body, whose own check
+    lets a row with no workspace through.
+    """
+    workspace_agent_or_404(db, agent_id, ctx.workspace_id)
 
 
 # ===================================================================
@@ -125,7 +141,11 @@ async def list_agent_plugins(
         raise HTTPException(status_code=500, detail="Failed to list agent plugins")
 
 
-@router.put("/{agent_id}/plugins", response_model=None, dependencies=[Depends(require_workspace_permission("agents:update"))])
+@router.put(
+    "/{agent_id}/plugins",
+    response_model=None,
+    dependencies=[Depends(require_workspace_permission("agents:update")), Depends(caller_owns_agent)],
+)
 async def update_agent_plugins(
     agent_id: int,
     body: UpdateAgentPluginsBody,

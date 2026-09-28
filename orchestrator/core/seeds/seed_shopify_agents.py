@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import text
 from core.database.database import engine
 from core.models.core import Agent, Skill, agent_skills
+from core.seeds.marketplace_personas import restore_seeded_personas
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -535,6 +536,18 @@ def _lookup_composio_app_ids(db: Session, app_names: list[str]) -> list[int]:
     if missing:
         logger.warning("Composio apps not in cache (will be skipped): %s", missing)
     return [found[n.upper()] for n in app_names if n.upper() in found]
+
+
+def restore_shopify_personas(db: Session) -> list[str]:
+    """Put each Shopify marketplace agent's persona back where it differs from its seed
+    (PRD-251 P251W1-RVW-1: every install copies it into the installing workspace).
+
+    ``seed_shopify_agents`` below runs only from ``load_seed_data``'s platform defaults
+    (docker-compose and the command line), never at a production boot, and it skips a
+    row that exists. So ``seed_socials_marketplace``, the marketplace seed every boot
+    runs, calls this. Returns the slugs restored; the caller commits.
+    """
+    return restore_seeded_personas(db, {a["slug"]: a["custom_persona_prompt"] for a in SHOPIFY_AGENTS})
 
 
 def seed_shopify_agents():

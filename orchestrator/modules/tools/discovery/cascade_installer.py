@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,29 @@ def _configuration_with_runtime(configuration) -> dict:
     return config
 
 
+def _shared_persona_id(db: Session, persona_id):
+    """``persona_id`` when it names a shared (global) persona, else None.
+
+    A workspace's own persona never crosses into another workspace: a marketplace row
+    that carries one, however it got there, is cloned without it (PRD-251
+    P251W1-RVW-1). A persona id that names no persona is dropped too.
+    """
+    if persona_id is None:
+        return None
+    from core.models.personas import Persona
+
+    shared = (
+        db.query(Persona.id)
+        .filter(
+            Persona.id == persona_id,
+            Persona.workspace_id.is_(None),
+            func.coalesce(Persona.scope, "global") != "workspace",
+        )
+        .first()
+    )
+    return persona_id if shared is not None else None
+
+
 def clone_agent_to_workspace(
     db: Session,
     workspace_id: UUID,
@@ -138,8 +161,9 @@ def clone_agent_to_workspace(
         is_featured=False,
         install_count=0,
         version=marketplace_agent.version,
-        # The persona is the agent's voice: its clone keeps it (PRD-251 US-120).
-        persona_id=marketplace_agent.persona_id,
+        # The persona is the agent's voice: its clone keeps it (PRD-251 US-120),
+        # unless it is another workspace's own persona (P251W1-RVW-1).
+        persona_id=_shared_persona_id(db, marketplace_agent.persona_id),
         custom_persona_prompt=marketplace_agent.custom_persona_prompt,
         use_custom_persona=bool(marketplace_agent.use_custom_persona),
     )
