@@ -281,7 +281,7 @@ services:
     volumes:
       # Mount source for hot-reload in development
       - ./orchestrator:/app
-      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs

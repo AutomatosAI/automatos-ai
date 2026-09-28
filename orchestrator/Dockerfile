@@ -15,7 +15,8 @@
 # -----------------------------------------------------------------------------
 # gcc/g++/dev headers are needed to build wheels, not to run them; leaving them
 # in the shipped image cost ~250 MB in every install (PRD-233 slim pass).
-# Railway builds with Railpack, not this file — SaaS is unaffected either way.
+# Railway builds this file too (target production, default args), so the slim
+# pass applies to SaaS as well.
 FROM python:3.11-slim as pybuild
 
 WORKDIR /app
@@ -90,10 +91,10 @@ COPY --from=pybuild /install /usr/local
 # =============================================================================
 FROM base as development
 
-# Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
-# For docker-compose, the full entrypoint.sh will be mounted/overridden
-RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
+# The wait-migrate-seed entrypoint. It runs the lifecycle only for `migrate` or
+# AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
+# directly. Compose also bind-mounts it, so edits apply without a rebuild.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
 COPY . .
@@ -139,10 +140,11 @@ FROM base as production
 # .dockerignore will exclude unnecessary files
 COPY . .
 
-# Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
-# For docker-compose, the full entrypoint.sh will be mounted/overridden
-RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
+# The wait-migrate-seed entrypoint. By default it runs the CMD directly, so
+# Railway boots exactly as before (the CMD migrates). `docker-entrypoint.sh
+# migrate` runs the full lifecycle and exits (the Kubernetes migration Job);
+# AUTOMATOS_MIGRATE_ON_BOOT=true runs it before the CMD.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
