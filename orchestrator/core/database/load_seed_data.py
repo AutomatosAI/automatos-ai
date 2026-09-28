@@ -27,11 +27,16 @@ logger = logging.getLogger(__name__)
 
 _CREDENTIAL_TYPES_FILE = Path(__file__).parent / "credential_types_seed.json"
 
+# created_at/updated_at are set here: the model's default=func.now() is applied by
+# the ORM, not the database, so raw SQL that omits them stores NULL, and the
+# credential-types API (whose response requires datetimes) then answers 500. An
+# update also backfills a NULL created_at left by earlier seeds.
 _UPSERT_CREDENTIAL_TYPE = """
     INSERT INTO credential_types
     (id, name, display_name, category, icon, description,
-     schema_definition, test_endpoint, documentation_url, is_system, is_active)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+     schema_definition, test_endpoint, documentation_url, is_system, is_active,
+     created_at, updated_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
     ON CONFLICT (name) DO UPDATE SET
         display_name = EXCLUDED.display_name,
         category = EXCLUDED.category,
@@ -39,7 +44,9 @@ _UPSERT_CREDENTIAL_TYPE = """
         description = EXCLUDED.description,
         schema_definition = EXCLUDED.schema_definition,
         test_endpoint = EXCLUDED.test_endpoint,
-        documentation_url = EXCLUDED.documentation_url
+        documentation_url = EXCLUDED.documentation_url,
+        created_at = COALESCE(credential_types.created_at, NOW()),
+        updated_at = NOW()
 """
 
 

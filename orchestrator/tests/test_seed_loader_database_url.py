@@ -90,3 +90,12 @@ def test_platform_defaults_run_after_credential_types(monkeypatch, app_database_
     monkeypatch.setattr(seed_loader, "_load_platform_defaults", platform_defaults)
     assert seed_loader.load_seed_data(load_credentials=False, load_platform_defaults=True)
     platform_defaults.assert_called_once_with()
+
+
+def test_upsert_sets_the_timestamps_the_orm_would_have():
+    """Raw SQL skips the model's default=func.now(); NULL timestamps made the API 500."""
+    sql = seed_loader._UPSERT_CREDENTIAL_TYPE
+    assert "created_at, updated_at)" in sql
+    assert "NOW(), NOW())" in sql
+    assert "created_at = COALESCE(credential_types.created_at, NOW())" in sql
+    assert "updated_at = NOW()" in sql
