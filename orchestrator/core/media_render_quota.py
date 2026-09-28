@@ -50,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Mapping, Optional
 
 from sqlalchemy import func, or_, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
 from config import config
 from core.llm.providers import MEDIA_RENDER_PROVIDER
@@ -285,9 +285,10 @@ class RenderReservation:
 
 
 def sessions_for(db: Any) -> Callable[[], Any]:
-    """Sessions of their own on the database ``db`` is bound to: a reservation
-    commits alone, never inside the caller's transaction."""
-    return sessionmaker(bind=db.get_bind())
+    """Sessions of their own on the database ``db`` is bound to, opened only when
+    one is needed: a reservation commits alone, never inside the caller's
+    transaction, and a render with nothing to hold never touches ``db``."""
+    return lambda: Session(bind=db.get_bind())
 
 
 def _process_lock(workspace_id: Any) -> threading.Lock:

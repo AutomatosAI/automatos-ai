@@ -565,6 +565,20 @@ def test_get_usage_shows_the_minutes_renders_in_progress_hold(env):
     assert body["remaining_minutes"] == 8.0 and body["quota_minutes"] == 10.0 and body["exhausted"] is False
 
 
+def test_a_render_with_nothing_to_hold_never_touches_the_callers_session(monkeypatch):
+    """Sessions of the hold's own are opened only when needed: a caller's stand-in
+    session (a Playbook step's, a tool's) is never asked for its database."""
+    _set_config(monkeypatch, AUTH_EDITION="local")
+    sessions = render_quota.sessions_for(object())  # no get_bind(): any use would raise
+    workspace = SimpleNamespace(id=WS, plan="basic", plan_limits={})
+
+    held = asyncio.run(render_quota.reserve_render(sessions, workspace, 60, execution_id="document_template:t"))
+
+    assert held == render_quota.RenderReservation(WS)
+    assert asyncio.run(render_quota.release_render(sessions, held)) is True
+    assert asyncio.run(render_quota.release_render(sessions, None)) is True
+
+
 @pytest.mark.parametrize("edition, plan", [("local", "basic"), ("saas", "enterprise")])
 def test_with_no_quota_a_render_holds_nothing(env, monkeypatch, edition, plan):
     _set_config(monkeypatch, AUTH_EDITION=edition)
