@@ -124,9 +124,13 @@ jobs:
       # PRD-251 US-202 (S3.4, D9): the Socials media-hosting test presigns links
       # against a real object store and fetches them over HTTP (a HEAD, a Range
       # GET). GitHub service containers cannot pass MinIO its `server /data`
-      # command, so this step starts it. The image is the one docker-compose.yml
-      # pins. The root credentials are throwaway values for a container that
-      # lives only for this job; the test step below gets the same ones.
+      # command, so this step starts it. MinIO no longer publishes its community
+      # images: quay.io/minio/minio refuses anonymous pulls (2026-09-28), Docker
+      # Hub's minio/minio is gone, and dl.min.io answers 410. The image is
+      # pgsty/minio, the community fork built from the same code with the same
+      # entrypoint, pinned by tag and by digest. The root credentials are
+      # throwaway values for a container that lives only for this job; the test
+      # step below gets the same ones.
       - name: Start MinIO (the Socials media-hosting test)
         env:
           MINIO_ROOT_USER: ci-minio
@@ -134,7 +138,8 @@ jobs:
         run: |
           docker run -d --name socials-minio -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
-            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            server /data
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live; then echo "MinIO is live"; exit 0; fi
             sleep 2

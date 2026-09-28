@@ -597,7 +597,8 @@ def test_ci_starts_a_pinned_minio_before_the_test_net_and_hands_the_tests_its_en
     assert minio < net
     run, step_env = steps[minio]["run"], steps[minio].get("env") or {}
     assert "docker run -d" in run and "server /data" in run and "/minio/health/live" in run
-    assert re.search(r"minio/minio:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z", run), "the MinIO image is pinned"
+    pinned = r"minio:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z@sha256:[0-9a-f]{64}\s"
+    assert re.search(pinned, run), "the MinIO image is pinned by its release tag and its digest"
     env = steps[net]["env"]
     assert env["SOCIALS_TEST_S3_ENDPOINT"] == "http://127.0.0.1:9000"
     assert env["SOCIALS_TEST_S3_ACCESS_KEY"] == step_env["MINIO_ROOT_USER"]
