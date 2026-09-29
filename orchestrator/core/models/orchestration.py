@@ -265,13 +265,15 @@ class OrchestrationTask(Base):
     __table_args__ = (
         # Composite index for ordering tasks within a run
         Index("ix_orchestration_tasks_run_sequence", "run_id", "sequence_number"),
-        # Partial index on active (non-terminal) states for coordinator tick queries
+        # Partial index on active (non-terminal) states for coordinator tick queries.
+        # Sorted: DONE_TASK_STATES is a frozenset, whose order changes with every
+        # process's hash seed, so two fresh builds wrote different index text.
         Index(
             "ix_orchestration_tasks_active",
             "run_id",
             "state",
             postgresql_where=text(
-                f"state NOT IN ({', '.join(repr(s.value) for s in DONE_TASK_STATES)})"
+                f"state NOT IN ({', '.join(repr(v) for v in sorted(s.value for s in DONE_TASK_STATES))})"
             ),
         ),
         CheckConstraint(

@@ -139,7 +139,11 @@ You should not need to open the last three for a standard install.
    - **empty database?** run `python -m scripts.init_fresh_db` — builds the
      CI-proven schema (the SQLAlchemy models plus a tolerant replay of the
      migration history) and stamps Alembic at heads. Nothing is restored from
-     a committed SQL snapshot; the generator is the fresh path;
+     a committed SQL snapshot; the generator is the fresh path. If that build
+     is interrupted (Postgres restarts, the machine sleeps or shuts down), the
+     boot stops, and the next boot runs the build again to finish it
+     (`♻️ A previous fresh-database initialization was interrupted — resuming
+     it`) — no reset needed;
    - `alembic upgrade heads` — a no-op on a fresh database, incremental on an
      existing one;
    - `python -m core.database.load_seed_data` — idempotent seeds: credential
