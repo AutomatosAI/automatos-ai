@@ -1,0 +1,13 @@
+# Files that run inside the Linux containers keep LF line endings on every
+# checkout. Git for Windows defaults to core.autocrlf=true, which turned
+# "#!/bin/bash" into "#!/bin/bash\r" and crash-looped the backend and the
+# workspace-worker (issue #818). Only these patterns are pinned: a blanket
+# "* text=auto" would renormalise files git misdetects as text.
+*.sh         text eol=lf
+*.py         text eol=lf
+Dockerfile*  text eol=lf
+Makefile     text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+.env.example text eol=lf
+envs/*       text eol=lf
