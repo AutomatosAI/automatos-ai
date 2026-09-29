@@ -137,6 +137,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-worktrees", action="store_true",
                    help="run sessions in the registered directory itself instead of a git worktree")
     p.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
+    _add_session_args(p)
+    p.add_argument("--verbose", action="store_true")
+    p.add_argument("--no-terminal", action="store_true",
+                   help="do not serve the Canvas terminal (your own shell on 127.0.0.1 for the browser on this machine)")
+    p.add_argument("--terminal-port", type=int, default=0,
+                   help="fixed loopback port for the Canvas terminal (default: an ephemeral port, announced to the backend)")
+    _add_service_args(p)
+    return p
+
+
+def _add_session_args(p: argparse.ArgumentParser) -> None:
+    """What a session may do, and how long the host waits on it."""
     p.add_argument("--session-timeout", type=float, default=DEFAULT_SESSION_TIMEOUT_SECONDS,
                    help="wall-clock cap per session turn, seconds")
     p.add_argument("--permission-mode", choices=PERMISSION_MODES, default=None,
@@ -159,11 +171,10 @@ def build_parser() -> argparse.ArgumentParser:
                          f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)})"))
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument("--no-terminal", action="store_true",
-                   help="do not serve the Canvas terminal (your own shell on 127.0.0.1 for the browser on this machine)")
-    p.add_argument("--terminal-port", type=int, default=0,
-                   help="fixed loopback port for the Canvas terminal (default: an ephemeral port, announced to the backend)")
+
+
+def _add_service_args(p: argparse.ArgumentParser) -> None:
+    """Run, stop or restart this host as a login service."""
     svc = p.add_mutually_exclusive_group()
     svc.add_argument("--install", dest="service_action", action="store_const", const="install",
                      help="run this host as a login service (launchd on macOS, systemd --user on Linux) with these arguments")
@@ -175,7 +186,6 @@ def build_parser() -> argparse.ArgumentParser:
                      help="restart the login service now")
     svc.add_argument("--nudge", dest="service_action", action="store_const", const="nudge",
                      help="ask the running host to drain and restart (SIGHUP) — `make up` does this after a rebuild")
-    return p
 
 
 def parse_cli_binaries(flags: List[str], env_value: Optional[str] = None) -> Dict[str, str]:
