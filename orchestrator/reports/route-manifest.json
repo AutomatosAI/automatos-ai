@@ -1,5 +1,5 @@
 {
-  "route_count": 843,
+  "route_count": 850,
   "routes": [
     {
       "method": "GET",
@@ -2060,6 +2060,34 @@
     {
       "method": "PATCH",
       "path": "/api/sites/{site_id}/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/campaigns"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/campaigns/{campaign_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/socials/campaigns/{campaign_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns/{campaign_id}/approve"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/campaigns/{campaign_id}/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns/{campaign_id}/posts/{post_id}"
     },
     {
       "method": "GET",

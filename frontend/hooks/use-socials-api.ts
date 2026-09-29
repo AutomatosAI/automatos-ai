@@ -31,6 +31,13 @@ import type {
   SocialVoiceSourcesResponse,
   UpdateSocialPostInput,
 } from '@/lib/api-client'
+import type {
+  SocialCampaignApprovalMode,
+  SocialCampaignsResponse,
+  SocialCampaignWithPosts,
+  SocialSeriesApproval,
+  SocialSeriesShownPost,
+} from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
 import { anyRendering } from '@/components/deliverables/socials/socials-status'
 import { unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
@@ -309,6 +316,118 @@ export function useApproveSocialPost({ onStale, onUnsourced }: ApproveHandlers) 
         return
       }
       toast.error(error.message || 'Could not approve the post')
+    },
+  })
+}
+
+// ============= CAMPAIGNS AND SERIES APPROVAL (S2.4, D6) =============
+
+export const socialsCampaignKeys = {
+  list: (workspaceId: string | null) => ['socials', workspaceId, 'campaigns'] as const,
+  one: (workspaceId: string | null, campaignId: string | null) =>
+    ['socials', workspaceId, 'campaigns', campaignId] as const,
+}
+
+/** The workspace's campaigns, newest first, each with its post count. */
+export function useSocialCampaigns() {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialCampaignsResponse>({
+    queryKey: socialsCampaignKeys.list(workspaceId),
+    enabled: socialsOn,
+    queryFn: () => apiClient.listSocialCampaigns(),
+    staleTime: 15_000,
+  })
+}
+
+/** One campaign with its posts, read only while `campaignId` is set. */
+export function useSocialCampaign(campaignId: string | null) {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialCampaignWithPosts>({
+    queryKey: socialsCampaignKeys.one(workspaceId, campaignId),
+    enabled: socialsOn && !!campaignId,
+    queryFn: () => apiClient.getSocialCampaign(campaignId as string),
+    staleTime: 15_000,
+  })
+}
+
+export function useCreateSocialCampaign() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialCampaignWithPosts, Error, { name: string; approval_mode: SocialCampaignApprovalMode }>({
+    mutationFn: (input) => apiClient.createSocialCampaign(input),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Campaign created')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not create the campaign')
+    },
+  })
+}
+
+export function useUpdateSocialCampaign() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<
+    SocialCampaignWithPosts,
+    Error,
+    { campaignId: string; changes: { name?: string; approval_mode?: SocialCampaignApprovalMode } }
+  >({
+    mutationFn: ({ campaignId, changes }) => apiClient.updateSocialCampaign(campaignId, changes),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Campaign saved')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not save the campaign')
+    },
+  })
+}
+
+/** Put a post in a campaign, or take it out. */
+export function useSocialCampaignPost() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialPost, Error, { campaignId: string; postId: string; action: 'add' | 'remove' }>({
+    mutationFn: ({ campaignId, postId, action }) =>
+      action === 'add'
+        ? apiClient.addSocialCampaignPost(campaignId, postId)
+        : apiClient.removeSocialCampaignPost(campaignId, postId),
+    onSuccess: async (_post, { action }) => {
+      await invalidate()
+      toast.success(action === 'add' ? 'Post added to the campaign' : 'Post taken out of the campaign')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not change the campaign')
+    },
+  })
+}
+
+/** Turn the workspace's series approval on or off, then refetch the workspace. */
+export function useSetSeriesApproval() {
+  const { refreshWorkspace } = useWorkspace()
+  return useMutation<unknown, Error, boolean>({
+    mutationFn: (on) => apiClient.setWorkspaceSeriesApproval(on),
+    onSuccess: async (_result, on) => {
+      await refreshWorkspace()
+      toast.success(on ? 'Series approval is on' : 'Series approval is off')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not change series approval')
+    },
+  })
+}
+
+/** Approve the posts on screen as one series (D6). The answer names each post left
+ * unapproved and why; the posts and campaigns are refetched either way. */
+export function useApproveSocialSeries() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialSeriesApproval, Error, { campaignId: string; posts: SocialSeriesShownPost[] }>({
+    mutationFn: ({ campaignId, posts }) => apiClient.approveSocialCampaignSeries(campaignId, posts),
+    onSuccess: async (result) => {
+      await invalidate()
+      if (result.approved.length > 0) toast.success(`Approved ${result.approved.length} post(s)`)
+    },
+    onError: async (error) => {
+      await invalidate()
+      toast.error(error.message || 'Could not approve the series')
     },
   })
 }

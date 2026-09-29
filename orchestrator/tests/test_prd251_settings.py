@@ -361,6 +361,7 @@ def test_a_failed_read_reports_socials_unavailable(master_unreadable):
     assert socials_settings.socials_state({"socials": {"enabled": True}}) == {
         "available": False,
         "enabled": True,
+        "series_approval": False,
     }
 
 
@@ -386,7 +387,7 @@ def test_a_failed_read_is_404_over_http_and_current_reports_socials_unavailable(
 
     resp = client.get("/api/workspaces/current")
     assert resp.status_code == 200
-    assert resp.json()["socials"] == {"available": False, "enabled": True}
+    assert resp.json()["socials"] == {"available": False, "enabled": True, "series_approval": False}
 
 
 # ---------------------------------------------------------------------------
@@ -579,7 +580,10 @@ def test_put_persists_the_switch_with_flag_modified(monkeypatch, flag_spy, maste
     resp = client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}})
 
     assert resp.status_code == 200
-    assert resp.json() == {"status": "saved", "socials": {"available": True, "enabled": True}}
+    assert resp.json() == {
+        "status": "saved",
+        "socials": {"available": True, "enabled": True, "series_approval": False},
+    }
     assert ws.settings == {"voice_live": {"enabled": True}, "socials": {"enabled": True}}
     assert flag_spy == [(ws, "settings")]
     assert db.commits == 1
@@ -657,10 +661,16 @@ def test_put_route_is_gated_and_in_the_committed_manifest():
 @pytest.mark.parametrize(
     "master_value, ws_settings, expected",
     [
-        ("false", {}, {"available": False, "enabled": False}),
-        ("false", {"socials": {"enabled": True}}, {"available": False, "enabled": True}),
-        ("true", {}, {"available": True, "enabled": False}),
-        ("true", {"socials": {"enabled": True}}, {"available": True, "enabled": True}),
+        ("false", {}, {"available": False, "enabled": False, "series_approval": False}),
+        ("false", {"socials": {"enabled": True}}, {"available": False, "enabled": True, "series_approval": False}),
+        ("true", {}, {"available": True, "enabled": False, "series_approval": False}),
+        ("true", {"socials": {"enabled": True}}, {"available": True, "enabled": True, "series_approval": False}),
+        # US-210 (D6, S2.4): the series approval switch, beside the two.
+        (
+            "true",
+            {"socials": {"enabled": True, "series_approval": True}},
+            {"available": True, "enabled": True, "series_approval": True},
+        ),
     ],
 )
 def test_get_current_reports_both_switches(master, master_value, ws_settings, expected):

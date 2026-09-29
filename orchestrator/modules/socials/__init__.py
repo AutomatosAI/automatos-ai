@@ -9,6 +9,9 @@ the calendar and published through the workspace's own Composio connections.
 - :mod:`modules.socials.targets`: a post's channels (US-204), one target per
   channel and post kind: approved content, so the hash covers them; their shape,
   their ``sp:`` keys and how a new set replaces the rows.
+- :mod:`modules.socials.campaigns`: campaigns, named sets of posts, and their
+  series approval (D6, S2.4): each shown post approved as a single approval,
+  hash-bound, when the workspace's series approval switch is on.
 - :mod:`modules.socials.sources`: a claim's source resolved in the caller's
   workspace (S1.4), and the source picker's search.
 - :mod:`modules.socials.text_search`: what a person types into a search,

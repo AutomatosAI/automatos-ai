@@ -26,6 +26,7 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { SocialsBoard } from './socials-board'
+import { SocialsCampaigns } from './socials-campaigns-view'
 import { SocialsComposer } from './socials-composer'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
@@ -49,6 +50,8 @@ function SocialsPostsBody({ posts, groups, role, view, selectedId, onSelect }: S
   const compact = useIsTabletOrBelow()
   const selected = posts.find((post) => post.id === selectedId) ?? null
 
+  // S2.4: the Campaigns view, with series approval (D6).
+  if (view === 'campaigns') return <SocialsCampaigns role={role} posts={posts} />
   if (selected && (compact || view === 'board')) {
     return (
       <div className="space-y-3">

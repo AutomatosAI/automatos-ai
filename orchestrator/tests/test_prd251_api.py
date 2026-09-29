@@ -66,7 +66,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.core import DocumentTemplate  # noqa: E402
-from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
 
@@ -118,7 +118,9 @@ def api(monkeypatch):
     _sqlite_copy(Workspace.__table__, copies)
     _sqlite_copy(DocumentTemplate.__table__, copies)
     copies.create_all(engine)
-    SocialPost.metadata.create_all(engine, tables=[SocialPost.__table__, SocialPostTarget.__table__])
+    SocialPost.metadata.create_all(
+        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__]
+    )
 
     session = sessionmaker(bind=engine)()
     for ws_id, settings in (
@@ -185,8 +187,16 @@ def _router_routes():
     return sorted(out)
 
 
-def _url(path, post_id):
-    return path.replace("{post_id}", post_id)
+def _campaign(api, **body):
+    """A campaign of the caller's workspace (US-210), through the API."""
+    resp = api.client.post("/api/socials/campaigns", json={"name": "Countdown series", **body})
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _url(path, post_id, campaign_id=None):
+    """``path`` with the post's id, and a campaign's (a fresh id when none is given)."""
+    return path.replace("{post_id}", post_id).replace("{campaign_id}", campaign_id or str(uuid.uuid4()))
 
 
 # A body each route accepts, so a 404 proves the lookup, not a validation error.
@@ -198,6 +208,9 @@ _VALID_BODY = {
     ("POST", "/api/socials/posts/{post_id}/reject"): {"reason": "No"},
     ("POST", "/api/socials/posts/{post_id}/schedule"): {"scheduled_for": FUTURE_SLOT},
     ("PUT", "/api/socials/posts/{post_id}/targets"): {"targets": []},
+    # US-210: putting a post in a campaign and taking it out take no body.
+    ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
+    ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
 }
 
 
@@ -228,6 +241,15 @@ def test_the_router_serves_exactly_the_socials_routes():
             # Wave 2 (US-207): the composer turns a brief into a draft proposal
             # (api/socials_compose.py, included in this router).
             ("POST", "/api/socials/compose"),
+            # Wave 2 (US-210, S2.4): campaigns and their series approval
+            # (api/socials_campaigns.py, included in this router).
+            ("GET", "/api/socials/campaigns"),
+            ("POST", "/api/socials/campaigns"),
+            ("GET", "/api/socials/campaigns/{campaign_id}"),
+            ("PATCH", "/api/socials/campaigns/{campaign_id}"),
+            ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"),
+            ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"),
+            ("POST", "/api/socials/campaigns/{campaign_id}/approve"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).
@@ -244,17 +266,17 @@ def test_the_router_serves_exactly_the_socials_routes():
 
 @pytest.mark.parametrize("method, path", _router_routes())
 def test_every_route_is_404_when_the_master_switch_is_off(api, method, path):
-    post = _create(api)
+    post, campaign = _create(api), _campaign(api)
     api.master = "false"
-    resp = api.client.request(method, _url(path, post["id"]), json={})
+    resp = api.client.request(method, _url(path, post["id"], campaign["id"]), json={})
     assert resp.status_code == 404
 
 
 @pytest.mark.parametrize("method, path", _router_routes())
 def test_every_route_is_404_when_the_workspace_switch_is_off(api, method, path):
-    post = _create(api)
+    post, campaign = _create(api), _campaign(api)
     api.ctx = _ctx(WS_OFF)
-    resp = api.client.request(method, _url(path, post["id"]), json={})
+    resp = api.client.request(method, _url(path, post["id"], campaign["id"]), json={})
     assert resp.status_code == 404
 
 
@@ -282,12 +304,13 @@ def test_another_workspaces_post_is_404_everywhere(api):
     theirs = _create(api, title="Theirs")
     api.ctx = _ctx(WS_A)
     mine = _create(api, title="Mine")
+    my_campaign = _campaign(api)
 
     for method, path in _router_routes():
         if "{post_id}" not in path:
             continue
         body = _VALID_BODY.get((method, path))
-        resp = api.client.request(method, _url(path, theirs["id"]), json=body)
+        resp = api.client.request(method, _url(path, theirs["id"], my_campaign["id"]), json=body)
         assert resp.status_code == 404, (method, path, resp.status_code, resp.text)
 
     listed = api.client.get("/api/socials/posts").json()

@@ -21,10 +21,9 @@ ReportUnreadable → 503, PostNotFound → 404.
 Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
 unless it resolves in the caller's workspace (``modules/socials/sources.py``);
 an approval resolves every source again, and a claim whose source is gone counts
-as unsourced. ``GET /sources`` searches candidates per kind for the composer,
-``GET /channels`` (``api/socials_channels.py``, included below) lists what each
-connected channel can post (D8, S3.2), and ``PUT /posts/{id}/targets``
-(``api/socials_targets.py``, included below) sets a post's channels (US-204).
+as unsourced. ``GET /sources`` searches candidates per kind for the composer.
+Included below: ``api/socials_channels.py`` (D8, S3.2), ``api/socials_targets.py``
+(US-204) and ``api/socials_campaigns.py``, campaigns and series approval (S2.4).
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
 the month's render minutes, counting those renders in progress hold (refused
@@ -99,6 +98,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
 from api import socials_preview
 from api.socials_compose import router as compose_router
@@ -135,9 +135,8 @@ router = APIRouter(
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
-router.include_router(channels_router)  # its routes take this router's prefix and gate
-router.include_router(targets_router)  # so do these
-router.include_router(compose_router)  # and the composer's (US-207)
+for sub_router in (channels_router, targets_router, compose_router, campaigns_router):
+    router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))

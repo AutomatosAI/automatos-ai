@@ -680,6 +680,8 @@ export interface SocialToolkitVoicesResponse {
 export interface WorkspaceSocialsState {
   available: boolean
   enabled: boolean
+  /** D6 (S2.4): whether a campaign in series mode can be approved as one series. */
+  series_approval?: boolean
 }
 
 /** This month's render minutes (PRD-251 S1.1c): `quota_minutes` is null when the plan has no quota. */
@@ -746,6 +748,66 @@ export interface SocialCopyLimits {
   text: number
   title?: number
   hashtags?: number
+}
+
+/** PRD-251 S2.4 (D6): a campaign approves its posts one by one, or as one series. */
+export type SocialCampaignApprovalMode = 'per_post' | 'series'
+
+/** A named set of posts. `approved_hash_set` holds the content hashes a series approval approved. */
+export interface SocialCampaign {
+  id: string
+  workspace_id: string
+  name: string
+  approval_mode: SocialCampaignApprovalMode
+  approved_hash_set: string[]
+  approved_by: string | null
+  approved_at: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  /** GET /api/socials/campaigns: how many posts the campaign holds. */
+  post_count?: number
+}
+
+/** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
+export interface SocialCampaignWithPosts extends SocialCampaign {
+  posts: SocialPost[]
+}
+
+export interface SocialCampaignsResponse {
+  campaigns: SocialCampaign[]
+  total: number
+}
+
+/** A post the approver was shown: the content_hash of the version on screen (D6). */
+export interface SocialSeriesShownPost {
+  post_id: string
+  content_hash: string
+  /** D7's second confirmation, for this post's unsourced claims. */
+  override_unsourced?: boolean
+}
+
+/** Why a series approval left a post unapproved. */
+export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown'
+
+export interface SocialSeriesLeftPost {
+  post_id: string
+  title: string | null
+  status: SocialPostStatus | null
+  reason: SocialSeriesLeftReason
+  message: string
+  /** `changed`: the post's current hash. */
+  content_hash?: string
+  /** `unsourced`: the claims to confirm by name. */
+  claims?: string[]
+  unresolved?: Record<string, string>
+}
+
+/** POST /api/socials/campaigns/{id}/approve: the posts approved, and each post left, with why. */
+export interface SocialSeriesApproval {
+  campaign: SocialCampaign
+  approved: SocialPost[]
+  left: SocialSeriesLeftPost[]
 }
 
 class ApiClient {
@@ -2903,6 +2965,67 @@ class ApiClient {
   async listSocialToolkitVoices(toolkit: string, query?: string): Promise<SocialToolkitVoicesResponse> {
     const q = query && query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
     return this.request<SocialToolkitVoicesResponse>(`/api/socials/voices/${encodeURIComponent(toolkit)}${q}`)
+  }
+
+  // ===== PRD-251 S2.4 (D6): campaigns and series approval =====
+  /** Turn the workspace's series approval on or off (workspace:manage). */
+  async setWorkspaceSeriesApproval(on: boolean): Promise<{ status: string; socials: WorkspaceSocialsState }> {
+    return this.request('/api/workspaces/current/socials', {
+      method: 'PUT',
+      body: JSON.stringify({ socials: { series_approval: on } }),
+    })
+  }
+
+  async listSocialCampaigns(): Promise<SocialCampaignsResponse> {
+    return this.request<SocialCampaignsResponse>('/api/socials/campaigns')
+  }
+
+  async createSocialCampaign(input: {
+    name: string
+    approval_mode?: SocialCampaignApprovalMode
+  }): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>('/api/socials/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async getSocialCampaign(campaignId: string): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>(`/api/socials/campaigns/${campaignId}`)
+  }
+
+  async updateSocialCampaign(
+    campaignId: string,
+    changes: { name?: string; approval_mode?: SocialCampaignApprovalMode },
+  ): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>(`/api/socials/campaigns/${campaignId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    })
+  }
+
+  /** Put a post in the campaign (sets its campaign_id); its approval is untouched. */
+  async addSocialCampaignPost(campaignId: string, postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'POST' })
+  }
+
+  /** Take a post out of the campaign (clears its campaign_id). */
+  async removeSocialCampaignPost(campaignId: string, postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'DELETE' })
+  }
+
+  /** Approve the posts the approver was shown as one series (D6): each with the content_hash
+   * on screen. The answer reports the posts approved and each post left, with why; 409 when
+   * the workspace's series approval is off or the campaign approves post by post. */
+  async approveSocialCampaignSeries(
+    campaignId: string,
+    posts: SocialSeriesShownPost[],
+    comment?: string,
+  ): Promise<SocialSeriesApproval> {
+    return this.request<SocialSeriesApproval>(`/api/socials/campaigns/${campaignId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ posts, comment: comment || null }),
+    })
   }
 }
 

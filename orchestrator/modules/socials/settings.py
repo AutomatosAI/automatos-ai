@@ -20,6 +20,11 @@ An owner or admin sets it on the same route; without it the cap is
 dollars spends nothing until it is fixed: a money guard that cannot read its
 limit must deny.
 
+It also carries the workspace's series approval switch (D6, S2.4),
+``series_approval``: off unless it is a real ``True``. With it on, a campaign in
+``series`` mode can be approved as one series (``modules/socials/campaigns.py``);
+off, every post is approved on its own. An owner or admin sets it on the same route.
+
 Every plan gets Socials (owner, 2026-09-23), so there is no plan exposure key.
 
 ``require_socials_enabled`` is the one route gate: every ``/api/socials/*``
@@ -77,7 +82,10 @@ SOCIALS_OFF_FOR_WORKSPACE = (
 # The workspace settings key, and the only keys its object may carry.
 WORKSPACE_SOCIALS_SETTINGS_KEY = "socials"
 KEY_MEDIA_MONTHLY_CAP = "media_monthly_cap_usd"
-WORKSPACE_SOCIALS_KEYS = ("enabled", KEY_MEDIA_MONTHLY_CAP)
+KEY_SERIES_APPROVAL = "series_approval"
+# The keys a write sets to a real boolean.
+WORKSPACE_SOCIALS_SWITCHES = (KEY_ENABLED, KEY_SERIES_APPROVAL)
+WORKSPACE_SOCIALS_KEYS = (KEY_ENABLED, KEY_MEDIA_MONTHLY_CAP, KEY_SERIES_APPROVAL)
 
 
 def socials_master_default() -> str:
@@ -114,18 +122,23 @@ def socials_master_enabled() -> bool:
 @dataclass(frozen=True)
 class WorkspaceSocials:
     enabled: bool
+    series_approval: bool = False
 
 
 def parse_workspace_socials(settings: Optional[Dict[str, Any]]) -> WorkspaceSocials:
-    """Pure: ``workspace.settings`` → the workspace's Socials switch.
+    """Pure: ``workspace.settings`` → the workspace's Socials switch and its
+    series approval switch (D6, S2.4).
 
-    Missing or malformed → off (fail-closed). Only a real ``True`` turns it on,
-    so a stray string such as ``"false"`` never reads as on.
+    Missing or malformed → off (fail-closed). Only a real ``True`` turns either
+    on, so a stray string such as ``"false"`` never reads as on.
     """
     raw = (settings or {}).get(WORKSPACE_SOCIALS_SETTINGS_KEY) or {}
     if not isinstance(raw, dict):
         raw = {}
-    return WorkspaceSocials(enabled=raw.get(KEY_ENABLED) is True)
+    return WorkspaceSocials(
+        enabled=raw.get(KEY_ENABLED) is True,
+        series_approval=raw.get(KEY_SERIES_APPROVAL) is True,
+    )
 
 
 def _dollars(value: Any) -> Optional[float]:
@@ -139,9 +152,10 @@ def _dollars(value: Any) -> Optional[float]:
 def validate_socials_update(value: Any) -> Dict[str, Any]:
     """Pure, fail-closed validation for a workspace Socials write.
 
-    The object carries ``enabled`` (a boolean), ``media_monthly_cap_usd`` (a
-    non-negative number of dollars), or both. Returns the normalized object;
-    raises ``ValueError`` with the reason otherwise.
+    The object carries ``enabled`` and ``series_approval`` (booleans),
+    ``media_monthly_cap_usd`` (a non-negative number of dollars), or any of
+    them. Returns the normalized object; raises ``ValueError`` with the reason
+    otherwise.
     """
     if not isinstance(value, dict):
         raise ValueError("socials must be an object")
@@ -152,12 +166,14 @@ def validate_socials_update(value: Any) -> Dict[str, Any]:
             f"socials keys must be a subset of {list(WORKSPACE_SOCIALS_KEYS)}, got {unknown!r}"
         )
     if not value:
-        raise ValueError(f"socials.enabled or socials.{KEY_MEDIA_MONTHLY_CAP} is required")
+        named = " or ".join(f"socials.{key}" for key in WORKSPACE_SOCIALS_KEYS)
+        raise ValueError(f"{named} is required")
     normalized: Dict[str, Any] = {}
-    if KEY_ENABLED in value:
-        if not isinstance(value[KEY_ENABLED], bool):
-            raise ValueError("socials.enabled must be a boolean")
-        normalized[KEY_ENABLED] = value[KEY_ENABLED]
+    for key in WORKSPACE_SOCIALS_SWITCHES:
+        if key in value and not isinstance(value[key], bool):
+            raise ValueError(f"socials.{key} must be a boolean")
+        if key in value:
+            normalized[key] = value[key]
     if KEY_MEDIA_MONTHLY_CAP in value:
         cap = _dollars(value[KEY_MEDIA_MONTHLY_CAP])
         if cap is None:
@@ -204,11 +220,14 @@ def socials_state(settings: Optional[Dict[str, Any]]) -> Dict[str, bool]:
     """The ``socials`` block of ``GET /api/workspaces/current``.
 
     ``available`` is the master switch; ``enabled`` is the workspace switch.
-    The frontend gate reads only this.
+    The frontend gate reads only this. ``series_approval`` is the workspace's
+    series approval switch (D6, S2.4).
     """
+    workspace = parse_workspace_socials(settings)
     return {
         "available": socials_master_enabled(),
-        "enabled": parse_workspace_socials(settings).enabled,
+        "enabled": workspace.enabled,
+        "series_approval": workspace.series_approval,
     }
 
 

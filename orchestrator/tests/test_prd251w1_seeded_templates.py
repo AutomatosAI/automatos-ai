@@ -353,7 +353,10 @@ def test_turning_socials_on_seeds_the_starters_in_the_switchs_own_commit(monkeyp
 
     resp = client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}})
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"status": "saved", "socials": {"available": True, "enabled": True}}
+    assert resp.json() == {
+        "status": "saved",
+        "socials": {"available": True, "enabled": True, "series_approval": False},
+    }
     assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
 
     # On again: the same rows. Off: nothing seeded, nothing removed.
