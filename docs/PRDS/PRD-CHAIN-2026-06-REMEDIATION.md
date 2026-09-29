@@ -1,6 +1,6 @@
 # PRD Chain — Platform Remediation (2026-06)
 
-**Source of truth:** [`reports/PLATFORM_DEEP_REVIEW_2026-06.md`](../../reports/PLATFORM_DEEP_REVIEW_2026-06.md) (§2 evidence, §4 workstreams, §5 decisions Q1–Q97).
+**Source of truth:** `reports/PLATFORM_DEEP_REVIEW_2026-06.md` (internal review, not published) (§2 evidence, §4 workstreams, §5 decisions Q1–Q97).
 **Method:** Ralph chain — one PRD per workstream, stacked worktrees, verified story maps, build→accept→review per PRD, Gerard merges each morning.
 
 ## Locked decisions (BINDING across all PRDs)

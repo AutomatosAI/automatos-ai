@@ -152,3 +152,7 @@ orchestrator/scripts/eval/**/live/
 
 # TypeScript incremental build state (dropped by `tsc --noEmit` runs)
 *.tsbuildinfo
+
+# Playwright output from the root tests/ suite
+tests/playwright-report/
+tests/test-results/
