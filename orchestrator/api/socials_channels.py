@@ -24,6 +24,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from modules.socials.capabilities import social_channels
+from modules.socials.copy_limits import limits_for
 
 router = APIRouter()
 
@@ -33,6 +34,11 @@ def list_social_channels(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
-    """The connected channels and what each can post. A plain ``def``: FastAPI runs
-    its synchronous database reads in the threadpool (F105)."""
-    return [channel.to_dict() for channel in social_channels(db, ctx.workspace_id)]
+    """The connected channels, what each can post and (US-207) its copy limits
+    (``copy_limits``: ``text``, and ``title`` / ``hashtags`` where it has them; null
+    when none is known). A plain ``def``: FastAPI runs its synchronous database
+    reads in the threadpool (F105)."""
+    return [
+        {**channel.to_dict(), "copy_limits": limits_for(channel.toolkit)}
+        for channel in social_channels(db, ctx.workspace_id)
+    ]

@@ -225,6 +225,9 @@ def test_the_router_serves_exactly_the_socials_routes():
             # Wave 2 (US-204): a post's channels, approved content
             # (api/socials_targets.py, included in this router).
             ("PUT", "/api/socials/posts/{post_id}/targets"),
+            # Wave 2 (US-207): the composer turns a brief into a draft proposal
+            # (api/socials_compose.py, included in this router).
+            ("POST", "/api/socials/compose"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).

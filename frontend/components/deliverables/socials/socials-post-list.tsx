@@ -2,7 +2,8 @@
 
 /**
  * PRD-251 S0.5 — the Socials list: posts grouped by status with counts, newest
- * first, with an empty state; "New draft"; and the selected post's detail with
+ * first, with an empty state; "New post" (the composer, US-207) and "Blank draft";
+ * and the selected post's detail with
  * the actions the caller's role allows. S1.1c adds this month's render minutes
  * under the heading; S1.3 opens the brand kit (D5) from here for a role that
  * edits it.
@@ -16,7 +17,7 @@
  * that post.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Loader2, Palette, Plus, Share2 } from 'lucide-react'
+import { ArrowLeft, FilePlus, Loader2, Palette, Plus, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
@@ -25,6 +26,7 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { SocialsBoard } from './socials-board'
+import { SocialsComposer } from './socials-composer'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
 import { SocialsRenderMinutes } from './socials-render-minutes'
@@ -84,7 +86,8 @@ interface SocialsPostListProps {
 
 export function SocialsPostList({ role, focusPostId = null }: SocialsPostListProps) {
   const { data, isLoading, isError, error } = useSocialPosts()
-  const [creating, setCreating] = useState(false)
+  // US-207: 'post' is the composer ("New post"), 'blank' the bare form ("Blank draft").
+  const [creating, setCreating] = useState<'post' | 'blank' | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(focusPostId)
   const [brandKitOpen, setBrandKitOpen] = useState(false)
   const [view, setView] = useState<SocialsView>('list')
@@ -100,7 +103,7 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
   const canBrand = canEditBrandKit(role)
 
   const handleDraftDone = (post: SocialPost | null) => {
-    setCreating(false)
+    setCreating(null)
     if (post) setSelectedId(post.id)
   }
 
@@ -123,17 +126,24 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
             </Button>
           )}
           {canAuthor && !creating && (
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus className="mr-1.5 h-4 w-4" aria-hidden />
-              New draft
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => setCreating('blank')}>
+                <FilePlus className="mr-1.5 h-4 w-4" aria-hidden />
+                Blank draft
+              </Button>
+              <Button size="sm" onClick={() => setCreating('post')}>
+                <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+                New post
+              </Button>
+            </>
           )}
         </div>
       </div>
 
       {canBrand && <BrandKitDialog open={brandKitOpen} onOpenChange={setBrandKitOpen} />}
 
-      {creating && <SocialsNewDraft onDone={handleDraftDone} />}
+      {creating === 'post' && <SocialsComposer onDone={handleDraftDone} />}
+      {creating === 'blank' && <SocialsNewDraft onDone={handleDraftDone} />}
 
       {isLoading ? (
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
@@ -149,7 +159,7 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
           <Share2 className="h-7 w-7 text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium text-foreground">No posts yet</p>
           <p className="text-sm text-muted-foreground">
-            {canAuthor ? 'Start one with New draft.' : 'Posts your team drafts will show here.'}
+            {canAuthor ? 'Start one with New post.' : 'Posts your team drafts will show here.'}
           </p>
         </div>
       ) : (

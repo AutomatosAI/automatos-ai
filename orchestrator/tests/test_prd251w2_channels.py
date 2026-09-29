@@ -276,12 +276,15 @@ def test_linkedin_x_and_instagram_connected_are_listed_with_their_post_kinds(cha
     }
     for channel in listed.values():
         assert channel["verified"] is True
-        assert set(channel) == {"toolkit", "label", "post_kinds", "verified", "setup_note"}
+        # US-207: and the channel's copy limits, which the composer counts against.
+        assert set(channel) == {"toolkit", "label", "post_kinds", "verified", "setup_note", "copy_limits"}
         for kind in channel["post_kinds"]:
             assert kind == {"kind": kind["kind"], "available": True, "reason": None, "needs_public_storage": False}
     assert (listed["linkedin"]["label"], listed["twitter"]["label"], listed["instagram"]["label"]) == (
         "LinkedIn", "X", "Instagram",
     )
+    assert listed["twitter"]["copy_limits"] == {"text": 280}
+    assert listed["instagram"]["copy_limits"] == {"text": 2200, "hashtags": 30}
     assert listed["twitter"]["setup_note"] == X_NOTE
     assert listed["linkedin"]["setup_note"] is None and listed["instagram"]["setup_note"] is None
 

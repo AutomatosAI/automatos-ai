@@ -538,10 +538,41 @@ export interface SocialPostsResponse {
   total: number
 }
 
+/** A variable of the post's template, as the post stores it: its value, and whether it is a claim (D7). */
+export interface SocialPostVariable {
+  value: string | number | boolean
+  claim?: boolean
+}
+
 export interface CreateSocialPostInput {
   title: string
   brief?: string | null
   copy?: SocialPostCopy
+  /** US-207: what the composer's proposal fills in. */
+  format?: string | null
+  template_id?: string | null
+  variables?: Record<string, SocialPostVariable>
+  sources?: Record<string, SocialClaimSource>
+}
+
+/** POST /api/socials/compose (US-207): what the composer asks for. */
+export interface SocialComposeInput {
+  brief: string
+  /** The channels (toolkits) to write for; every connected one when omitted. */
+  channels?: string[]
+  format?: string | null
+}
+
+/** The composer's draft proposal: checked by the server, never saved until "Save draft". */
+export interface SocialComposeProposal {
+  title: string
+  copy: { base: string; per_channel: Record<string, string> }
+  format: string | null
+  template_id: string | null
+  variables: Record<string, SocialPostVariable>
+  sources: Record<string, SocialClaimSource>
+  channels: string[]
+  warnings: string[]
 }
 
 export interface UpdateSocialPostInput {
@@ -647,6 +678,14 @@ export interface SocialChannel {
   post_kinds: SocialChannelPostKind[]
   verified: boolean
   setup_note: string | null
+  /** US-207: the channel's copy limits (`text`; `title`, `hashtags` where it has them); null when none is known. */
+  copy_limits?: SocialCopyLimits | null
+}
+
+export interface SocialCopyLimits {
+  text: number
+  title?: number
+  hashtags?: number
 }
 
 class ApiClient {
@@ -2754,6 +2793,15 @@ class ApiClient {
   }
 
   /** The workspace's connected social channels and the post kinds each can publish (D8). */
+  /** POST /api/socials/compose (US-207): a brief becomes a draft proposal, not saved.
+   * 502 when the model's answer cannot be read; 504 when it is too slow. */
+  async composeSocialPost(input: SocialComposeInput): Promise<SocialComposeProposal> {
+    return this.request<SocialComposeProposal>('/api/socials/compose', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
   async listSocialChannels(): Promise<SocialChannel[]> {
     return this.request<SocialChannel[]>('/api/socials/channels')
   }

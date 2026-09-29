@@ -2001,6 +2001,9 @@ class Config:
     # socials.post_actions system setting) is cached per process
     # (core/composio/post_gate.py). An edit applies within this, with no restart.
     SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS: int = int(os.getenv("SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS", "30"))
+    # PRD-251 S2.2a (US-207): how long the composer waits for the model to turn a
+    # brief into a draft proposal (POST /api/socials/compose answers 504 after it).
+    SOCIALS_COMPOSE_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_COMPOSE_TIMEOUT_SECONDS", "60"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

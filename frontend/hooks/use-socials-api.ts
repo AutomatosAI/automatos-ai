@@ -77,7 +77,7 @@ function httpStatusOf(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
-function useInvalidateSocials() {
+export function useInvalidateSocials() {
   const workspaceId = useWorkspaceId()
   const queryClient = useQueryClient()
   return () => queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(workspaceId) })
@@ -99,7 +99,7 @@ function usePostWriteErrorHandler(fallback: string) {
 
 // ============= QUERY HOOKS =============
 
-function useSocialsOn(): { workspaceId: string | null; socialsOn: boolean } {
+export function useSocialsOn(): { workspaceId: string | null; socialsOn: boolean } {
   const { workspace } = useWorkspace()
   const workspaceId = workspace?.id ?? null
   const socialsOn = !!workspace?.socials?.available && !!workspace?.socials?.enabled

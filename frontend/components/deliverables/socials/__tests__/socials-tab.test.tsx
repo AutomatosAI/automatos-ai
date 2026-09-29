@@ -226,7 +226,7 @@ describe('Socials on', () => {
     server.role = 'editor'
     renderTab()
 
-    fireEvent.click(await screen.findByRole('button', { name: /New draft/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Blank draft/ }))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch week teaser' } })
     fireEvent.change(screen.getByLabelText('Brief'), { target: { value: 'Tease Monday’s launch' } })
     fireEvent.change(screen.getByLabelText('Copy'), { target: { value: 'Something big lands Monday.' } })
@@ -399,6 +399,7 @@ describe('Socials on', () => {
       expect(within(card).queryByRole('button', { name })).toBeNull()
     }
     expect(within(card).getByText('Your role can read posts but not change them.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /New draft/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /New post/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Blank draft/ })).toBeNull()
   })
 })

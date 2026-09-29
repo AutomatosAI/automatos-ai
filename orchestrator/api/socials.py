@@ -100,6 +100,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.socials_channels import router as channels_router
+from api.socials_compose import router as compose_router
 from api.socials_targets import router as targets_router
 from config import config
 from core import media_render_quota as render_quota
@@ -135,6 +136,7 @@ router = APIRouter(
 )
 router.include_router(channels_router)  # its routes take this router's prefix and gate
 router.include_router(targets_router)  # so do these
+router.include_router(compose_router)  # and the composer's (US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
