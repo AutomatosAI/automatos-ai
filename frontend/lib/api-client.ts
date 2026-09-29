@@ -496,8 +496,34 @@ export interface SocialPost {
   review_log: SocialReviewEntry[]
   scheduled_for: string | null
   timezone: string | null
+  /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
+  targets?: SocialPostTarget[]
   created_at: string
   updated_at: string
+}
+
+/** A target's options: the values of its post kind's `$option.<name>` (LinkedIn's author, TikTok's privacy level...). */
+export type SocialPostTargetOptions = Record<string, string | number | boolean | string[]>
+
+/** One channel and post kind a post publishes to, as PUT /api/socials/posts/{id}/targets takes it. */
+export interface SocialPostTargetInput {
+  toolkit: string
+  post_kind: SocialPostKind
+  options?: SocialPostTargetOptions
+}
+
+/** A post's target as the post answers it: its options, and the receipt the publisher fills (Wave 3). */
+export interface SocialPostTarget {
+  id: string
+  toolkit: string
+  post_kind: SocialPostKind
+  options: SocialPostTargetOptions
+  status: 'pending' | 'uploading' | 'published' | 'failed'
+  attempts: number
+  remote_id: string | null
+  permalink: string | null
+  error: string | null
+  published_at: string | null
 }
 
 export interface SocialPostsResponse {
@@ -2710,6 +2736,16 @@ class ApiClient {
   /** The workspace's connected social channels and the post kinds each can publish (D8). */
   async listSocialChannels(): Promise<SocialChannel[]> {
     return this.request<SocialChannel[]>('/api/socials/channels')
+  }
+
+  /** Replace where the post publishes (US-204): one target per channel and post kind. The
+   * channels are approved content, so changing an approved post's resets its approval.
+   * 422 names a kind the workspace cannot post now, and why. */
+  async setSocialPostTargets(postId: string, targets: SocialPostTargetInput[]): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/targets`, {
+      method: 'PUT',
+      body: JSON.stringify({ targets }),
+    })
   }
 
   /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */

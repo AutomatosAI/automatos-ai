@@ -21,9 +21,10 @@ ReportUnreadable → 503, PostNotFound → 404.
 Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
 unless it resolves in the caller's workspace (``modules/socials/sources.py``);
 an approval resolves every source again, and a claim whose source is gone counts
-as unsourced. ``GET /sources`` searches candidates per kind for the composer, and
+as unsourced. ``GET /sources`` searches candidates per kind for the composer,
 ``GET /channels`` (``api/socials_channels.py``, included below) lists what each
-connected channel can post (D8, S3.2).
+connected channel can post (D8, S3.2), and ``PUT /posts/{id}/targets``
+(``api/socials_targets.py``, included below) sets a post's channels (US-204).
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
 the month's render minutes, counting those renders in progress hold (refused
@@ -99,6 +100,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.socials_channels import router as channels_router
+from api.socials_targets import router as targets_router
 from config import config
 from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
@@ -132,6 +134,7 @@ router = APIRouter(
     dependencies=[Depends(require_socials_enabled)],
 )
 router.include_router(channels_router)  # its routes take this router's prefix and gate
+router.include_router(targets_router)  # so do these
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))

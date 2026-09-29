@@ -10,9 +10,11 @@
   be edited and rendered again. Publishing and missed arrive with Wave 3.
 * **The content hash (D6).** ``compute_content_hash`` is sha256 over canonical
   JSON of what is published: copy, variables, sources, format, template_id and
-  media. An approval binds to it: the approver sends the hash of the version
-  they were shown, and a post whose content has changed since refuses the
-  approval (:class:`StaleContent`, carrying the current hash). Any content edit
+  media, and where: the post's targets (Wave 2, US-204: a channel is approved
+  content, ``modules/socials/targets.py``). An approval binds to it: the
+  approver sends the hash of the version they were shown, and a post whose
+  content has changed since refuses the approval (:class:`StaleContent`,
+  carrying the current hash). Any content edit, a change of channels included,
   changes the hash, so an approved or scheduled post goes back to
   needs_approval and its approval is void, because ``approved_hash`` no longer
   matches.
@@ -72,13 +74,15 @@ import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, update
 
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
+from modules.socials import targets as post_targets
+from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
 DRAFT = "draft"
@@ -144,7 +148,7 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
 
 # What the hash covers (D6), and what a post edit may change. The voice (D11)
 # and the footage (D12) are render settings: editable, never hashed.
-CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media")
+CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", TARGETS)
 LABEL_FIELDS = ("title", "brief")
 RENDER_FIELDS = ("voice", "footage")
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
@@ -153,7 +157,7 @@ EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 # Composio voice toolkit (modules/socials/recipes/voice.py).
 KOKORO = "kokoro"
 VOICE_KEYS = ("toolkit", "voice_id", "name")
-VOICE_TOOLKIT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+VOICE_TOOLKIT = post_targets.TOOLKIT_NAME  # a Composio toolkit's name, as a channel's
 VOICE_TEXT_MAX_CHARS = 200
 
 # D12 (S1.8): footage a post asks for, per slot, and what a render recorded for
@@ -258,7 +262,7 @@ def _as_utc(value: datetime) -> datetime:
 # ── the content hash (D6) ───────────────────────────────────────────────────
 def _content_of(post: Any) -> Dict[str, Any]:
     template_id = getattr(post, "template_id", None)
-    return {
+    content = {
         "copy": getattr(post, "copy", None) or {},
         "variables": getattr(post, "variables", None) or {},
         "sources": getattr(post, "sources", None) or {},
@@ -266,15 +270,19 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
+    # Only a post with targets hashes them: one with none hashes as before (US-204).
+    targets = post_targets.target_set(post)
+    return {**content, TARGETS: targets} if targets else content
 
 
 def compute_content_hash(post: Any) -> str:
-    """sha256 over canonical JSON of copy, variables, sources, format, template_id and media.
+    """sha256 over canonical JSON of copy, variables, sources, format, template_id
+    and media, and the post's targets when it has any.
 
     Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
     ``ensure_ascii=False``, so key order never changes the hash.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
-    also binds to the exact rendered bytes.
+    also binds to the exact rendered bytes; Wave 2 adds where the post goes.
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -456,6 +464,14 @@ def validate_footage(value: Any) -> Optional[Dict[str, Dict[str, str]]]:
     return clean
 
 
+def validate_targets(value: Any) -> List[Dict[str, Any]]:
+    """The post's channels (US-204): ``modules/socials/targets.py``'s shape, as InvalidPost."""
+    try:
+        return post_targets.validate_targets(value)
+    except ValueError as exc:
+        raise InvalidPost(str(exc)) from None
+
+
 def footage_after_edit(stored: Any, requested: Optional[Mapping[str, Mapping[str, str]]]) -> Optional[Dict[str, Any]]:
     """``requested`` (``validate_footage``'s shape) keeping what a render already
     made for every slot whose prompt did not change: a new prompt asks again."""
@@ -492,6 +508,7 @@ _VALIDATORS = {
     "variables": _validate_variables,
     "sources": validate_sources,
     "media": _validate_media,
+    TARGETS: validate_targets,
     "voice": validate_voice,
     "footage": validate_footage,
 }
@@ -593,7 +610,8 @@ def create_draft(
     footage: Optional[Mapping[str, Any]] = None,
     agent: Optional[str] = None,
 ) -> SocialPost:
-    """A new post in ``draft``, added to ``db`` (the caller commits).
+    """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
+    which its targets' keys name (US-204).
 
     ``agent`` names the agent drafting it (US-116): ``review_log`` then opens
     with a ``draft`` entry by ``created_by`` that names it.
@@ -612,6 +630,7 @@ def create_draft(
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
+        id=uuid4(),
         workspace_id=workspace_id,
         created_by=created_by,
         status=DRAFT,
@@ -626,12 +645,18 @@ def create_draft(
     return post
 
 
+def _approved(name: str, value: Any) -> Any:
+    """A field's value as an edit compares it: targets by what an approval covers."""
+    return post_targets.approved_set(value) if name == TARGETS else value
+
+
 def update_post(
     post: SocialPost, actor: str, changes: Mapping[str, Any], *, agent: Optional[str] = None
 ) -> SocialPost:
     """Apply an edit. A content change recomputes the hash; if the post was
     approved or scheduled, it goes back to ``needs_approval`` and its approval
-    is void (``approved_hash`` no longer matches ``content_hash``).
+    is void (``approved_hash`` no longer matches ``content_hash``). ``targets``
+    replaces the post's channels (US-204), so changing them voids it too.
 
     ``agent`` names the agent editing (US-116): an edit that changes a field
     logs an ``edit`` entry by ``actor`` naming the agent and the fields, before
@@ -646,9 +671,15 @@ def update_post(
     clean = {name: _VALIDATORS[name](value) for name, value in changes.items()}
     if "footage" in clean:
         clean["footage"] = footage_after_edit(post.footage, clean["footage"])
-    changed = [name for name in EDITABLE_FIELDS if name in clean and getattr(post, name) != clean[name]]
+    changed = [
+        name for name in EDITABLE_FIELDS
+        if name in clean and _approved(name, getattr(post, name)) != _approved(name, clean[name])
+    ]
     for name, value in clean.items():
-        setattr(post, name, value)
+        if name == TARGETS:
+            post_targets.replace_targets(post, value)
+        else:
+            setattr(post, name, value)
     if agent and changed:
         _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed)
 

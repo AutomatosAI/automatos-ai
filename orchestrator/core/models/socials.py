@@ -7,7 +7,10 @@
   (D6), so the publisher refuses a post whose ``approved_hash`` no longer
   matches. ``review_log`` is the history the approval UI shows.
 * ``social_post_targets``: one row per channel per post, each with its own
-  idempotency key, attempts, remote id, permalink and error.
+  idempotency key, attempts, remote id, permalink and error. The post's
+  channels are approved content (Wave 2, US-204): ``SocialPost.targets`` loads
+  them with the post, and the content hash covers each one's toolkit, post kind
+  and options (``modules/socials/targets.py``).
 
 JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns
 the portable ``Uuid`` (native UUID on Postgres, CHAR(32) elsewhere), so the
@@ -40,6 +43,7 @@ from sqlalchemy import (
     false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from core.database.base import Base
@@ -212,6 +216,13 @@ class SocialPost(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    # The channels the post publishes to (US-204): approved content, like the
+    # copy, so the content hash reads them. Loaded with the post (selectin: one
+    # query for a whole list of posts). A target dropped from the list is deleted.
+    targets = relationship(
+        "SocialPostTarget", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin"
+    )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": str(self.id),
@@ -237,6 +248,10 @@ class SocialPost(Base):
             "review_log": self.review_log or [],
             "scheduled_for": _iso(self.scheduled_for),
             "timezone": self.timezone,
+            "targets": [
+                target.to_dict()
+                for target in sorted(self.targets or [], key=lambda t: (t.toolkit, t.post_kind))
+            ],
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
         }
@@ -263,8 +278,11 @@ class SocialPostTarget(Base):
     # The Composio app name (linkedin, twitter, instagram, ...).
     toolkit = Column(String(100), nullable=False)
     post_kind = Column(String(20), nullable=False)
-    # The resolved action slugs and parameters.
+    # The resolved action slugs and parameters: {"options": {name: value}, the
+    # target's own choices (``$option.<name>`` in its steps), and "steps", the
+    # kind's action sequence as the channel registry resolved it (US-204).
     action_plan = Column(_json_type(), nullable=False, default=dict)
+    # sp:{post_id}:{toolkit}:{post_kind}, one per channel and kind of a post.
     idempotency_key = Column(String(128), nullable=False)
     status = Column(String(20), nullable=False, default="pending", server_default="pending")
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
@@ -273,14 +291,21 @@ class SocialPostTarget(Base):
     error = Column(Text, nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
 
+    @property
+    def options(self) -> Dict[str, Any]:
+        """The target's options, from its ``action_plan`` (a new dict)."""
+        plan = self.action_plan if isinstance(self.action_plan, dict) else {}
+        options = plan.get("options")
+        return dict(options) if isinstance(options, dict) else {}
+
     def to_dict(self) -> Dict[str, Any]:
+        """As the post answers it (US-204): the options and the receipt. The
+        action sequence and the idempotency key stay server-side."""
         return {
-            "id": str(self.id),
-            "post_id": str(self.post_id),
+            "id": str(self.id) if self.id else None,
             "toolkit": self.toolkit,
             "post_kind": self.post_kind,
-            "action_plan": self.action_plan or {},
-            "idempotency_key": self.idempotency_key,
+            "options": self.options,
             "status": self.status,
             "attempts": self.attempts,
             "remote_id": self.remote_id,

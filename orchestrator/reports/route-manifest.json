@@ -1,5 +1,5 @@
 {
-  "route_count": 841,
+  "route_count": 842,
   "routes": [
     {
       "method": "GET",
@@ -2120,6 +2120,10 @@
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/submit"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/targets"
     },
     {
       "method": "POST",

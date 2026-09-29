@@ -197,6 +197,7 @@ _VALID_BODY = {
     ("POST", "/api/socials/posts/{post_id}/request-changes"): {"comment": "Change it"},
     ("POST", "/api/socials/posts/{post_id}/reject"): {"reason": "No"},
     ("POST", "/api/socials/posts/{post_id}/schedule"): {"scheduled_for": FUTURE_SLOT},
+    ("PUT", "/api/socials/posts/{post_id}/targets"): {"targets": []},
 }
 
 
@@ -221,6 +222,9 @@ def test_the_router_serves_exactly_the_socials_routes():
             # Wave 2 (US-203, S3.2): the connected channels and what each can post
             # (api/socials_channels.py, included in this router).
             ("GET", "/api/socials/channels"),
+            # Wave 2 (US-204): a post's channels, approved content
+            # (api/socials_targets.py, included in this router).
+            ("PUT", "/api/socials/posts/{post_id}/targets"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).
