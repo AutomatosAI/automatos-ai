@@ -5,7 +5,7 @@
 
 The following files were used as context for generating this wiki page:
 
-- [SPRINT0_OVERNIGHT_REPORT.md](SPRINT0_OVERNIGHT_REPORT.md)
+- [SPRINT0_OVERNIGHT_REPORT.md](../notes/SPRINT0_OVERNIGHT_REPORT.md)
 - [frontend/app/accept-invitation/page.tsx](frontend/app/accept-invitation/page.tsx)
 - [frontend/app/deliverables/explorer/page.tsx](frontend/app/deliverables/explorer/page.tsx)
 - [frontend/app/deliverables/page.tsx](frontend/app/deliverables/page.tsx)
