@@ -11,9 +11,12 @@ the calendar and published through the workspace's own Composio connections.
 - :mod:`modules.socials.report_charts`: a chart bound to a report (S1.7): the
   report's top rows filling a chart template (the infographic), and the check
   that a render shows the report's rows as the report has them now.
-- :mod:`modules.socials.capabilities`: the media capability registry (D16) —
-  which actions of the workspace's connected Composio toolkits Socials may call,
-  and what for (an allowlist per toolkit, under the deny list).
+- :mod:`modules.socials.capabilities`: the capability registry (D16) — which
+  actions of the workspace's connected Composio toolkits Socials may call, and
+  what for (an allowlist per toolkit, under the deny list); and (D8) which social
+  channels the workspace can post to, each post kind's action sequence, and which
+  actions publish (the post gate refuses those to agents, D14). The channels'
+  data is :mod:`modules.socials.channel_adapters`.
 - :mod:`modules.socials.recipes`: one small recipe per Composio media toolkit
   (D12), through the registry and the Composio executor: speech from Fish
   Audio or ElevenLabs (``recipes.voice``, S1.5); footage and stills from fal.ai,

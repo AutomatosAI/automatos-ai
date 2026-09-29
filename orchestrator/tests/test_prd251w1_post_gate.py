@@ -72,6 +72,8 @@ import modules.socials.settings as socials_settings  # noqa: E402
 from core.composio.client import ComposioClient  # noqa: E402
 from core.composio.tool_executor import ComposioToolExecutor  # noqa: E402
 from core.database.database import Base  # noqa: E402
+from core.models.composio import ComposioConnection, ComposioEntity  # noqa: E402
+from core.models.composio_cache import ComposioActionCache  # noqa: E402
 from core.models.system_settings import SystemSetting  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from tests.helpers_unreadable_settings import UNREADABLE_MODES, settings_unreadable  # noqa: E402
@@ -141,6 +143,11 @@ def _sqlite_copy(table: sa.Table, metadata: sa.MetaData) -> sa.Table:
 
 _TABLES = sa.MetaData()
 WORKSPACES = _sqlite_copy(Workspace.__table__, _TABLES)
+# The Socials channel registry's tables (PRD-251 Wave 2, US-203): for an action the
+# registry may class as publishing, the gate reads the workspace's connections and
+# (for the generic adapter) the action's cached schema. Empty unless a test fills them.
+for _table in (ComposioEntity.__table__, ComposioConnection.__table__, ComposioActionCache.__table__):
+    _sqlite_copy(_table, _TABLES)
 
 
 @pytest.fixture
@@ -148,7 +155,7 @@ def env(monkeypatch):
     """read_system_setting and the gate's workspace read → SessionLocal → one
     in-memory database: the Wave 0 deny list, the wave's settings (the post gate's
     list among them), the Socials master switch ON, a Socials-on and a Socials-off
-    workspace."""
+    workspace, and the channel registry's tables, empty (no toolkit connected)."""
     engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     _TABLES.create_all(engine)
     SystemSetting.__table__.create(bind=engine)

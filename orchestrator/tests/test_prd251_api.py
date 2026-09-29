@@ -218,6 +218,9 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/usage"),
             # Wave 2 (US-202, S3.4): the post's media as presigned inline links.
             ("GET", "/api/socials/posts/{post_id}/media"),
+            # Wave 2 (US-203, S3.2): the connected channels and what each can post
+            # (api/socials_channels.py, included in this router).
+            ("GET", "/api/socials/channels"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).

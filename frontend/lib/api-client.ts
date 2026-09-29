@@ -588,6 +588,34 @@ export interface SocialPostMediaLink {
   error: string | null
 }
 
+/** A post kind a channel publishes (social_post_targets.post_kind). */
+export type SocialPostKind = 'text' | 'image' | 'carousel' | 'video' | 'reel' | 'short' | 'story'
+
+/**
+ * One post kind of a connected channel (D8, S3.2). `reason` says why it is not
+ * available (a missing or blocked action, public storage); `needs_public_storage`
+ * marks a step that takes only a link, skipped or blocking without public storage.
+ */
+export interface SocialChannelPostKind {
+  kind: SocialPostKind
+  available: boolean
+  reason: string | null
+  needs_public_storage: boolean
+}
+
+/**
+ * GET /api/socials/channels: a social channel connected in the workspace. `verified`
+ * is false for a generic channel until one of its targets has published (its label
+ * says "unverified channel"); `setup_note` is what connecting it takes beyond Composio.
+ */
+export interface SocialChannel {
+  toolkit: string
+  label: string
+  post_kinds: SocialChannelPostKind[]
+  verified: boolean
+  setup_note: string | null
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2677,6 +2705,11 @@ class ApiClient {
   /** The post's media as presigned inline links (D9): the exact files an approver sees. */
   async getSocialPostMedia(postId: string): Promise<SocialPostMediaLink[]> {
     return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
+  }
+
+  /** The workspace's connected social channels and the post kinds each can publish (D8). */
+  async listSocialChannels(): Promise<SocialChannel[]> {
+    return this.request<SocialChannel[]>('/api/socials/channels')
   }
 
   /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */
