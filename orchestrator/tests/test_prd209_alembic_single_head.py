@@ -77,7 +77,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # social_image / social_video).
 # 2026-09-26: prd251w1_merge_heads joins llm_usage_execution_index and
 # prd251_wave1 into the single head (a merge revision, no operations).
-EXPECTED_HEAD = "prd251w1_merge_heads"
+# 2026-09-29: document_chunks_ingestion_columns chains onto that — the columns
+# document ingestion writes, which fresh-built databases lacked (#825).
+EXPECTED_HEAD = "document_chunks_ingestion_columns"
 
 
 def _literal(node: ast.AST):
