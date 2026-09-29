@@ -64,3 +64,15 @@ def env_clean(monkeypatch):
     monkeypatch.delenv("FAKE_CLAUDE_SCENARIO", raising=False)
     for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME", "FAKE_CODEX_SCENARIO"):
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_tools_present(monkeypatch):
+    """Every session here runs the fake ``claude``, which reads the settings
+    file but sandboxes nothing — so the host's own check for bubblewrap and
+    socat is answered "present" whatever the test machine has installed.
+    ``test_session_sandbox.py`` sets the answer itself where the check is
+    the point."""
+    from automatos_cli_host import sandbox
+
+    monkeypatch.setattr(sandbox, "missing_tools", lambda system=None, path=None: [])

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ..env import resolve_binary
+from ..sandbox import SessionSandbox
 from ..presets import (
     PROMPT_FLAG, PROMPT_POSITIONAL, PROMPT_TYPE_INTO_TUI, CliPreset,
 )
@@ -120,9 +121,13 @@ class PresetAdapter:
 
     preset: CliPreset
 
-    def __init__(self, preset: CliPreset, binary: Optional[str] = None) -> None:
+    def __init__(self, preset: CliPreset, binary: Optional[str] = None,
+                 sandbox: Optional[SessionSandbox] = None) -> None:
         self.preset = preset
         self._binary = binary  # an explicit --cli-binary path; None = the operator's PATH
+        # The host's session sandbox (``sandbox.py``); None = not a session (the
+        # operator's own terminal) or a host started with --no-session-sandbox.
+        self.sandbox = sandbox
 
     # ── identity ────────────────────────────────────────────────────────────
     @property
