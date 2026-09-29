@@ -13,11 +13,13 @@ SETUP = REPO / "SETUP.md"
 
 
 def _required_compose_variables() -> set:
+    """The variables docker-compose.yml refuses to start without (``${VAR:?}``)."""
     compose = (REPO / "docker-compose.yml").read_text()
     return set(re.findall(r"\$\{([A-Z_]+):\?", compose))
 
 
 def test_setup_generates_every_secret_compose_requires():
+    """Step 3's loop fills exactly the secrets compose requires, no more and no fewer."""
     runbook = SETUP.read_text()
     generated = re.search(r"for key in ([A-Z_ ]+); do", runbook)
     assert generated, "SETUP.md must generate the required secrets in a loop"
@@ -25,6 +27,7 @@ def test_setup_generates_every_secret_compose_requires():
 
 
 def test_setup_covers_every_platform_and_the_agent_rules():
+    """The runbook keeps its agent rules, both platform paths and troubleshooting."""
     runbook = SETUP.read_text()
     for heading in ("## For agents", "## Path W", "## Path A", "## Troubleshooting"):
         assert heading in runbook, f"SETUP.md lost its '{heading}' section"
@@ -33,5 +36,6 @@ def test_setup_covers_every_platform_and_the_agent_rules():
 
 
 def test_entry_points_link_to_setup():
+    """Agents and people reach SETUP.md from AGENTS.md, README and QUICKSTART."""
     for doc in ("AGENTS.md", "README.md", "QUICKSTART.md"):
         assert "(SETUP.md)" in (REPO / doc).read_text(), f"{doc} must link SETUP.md"

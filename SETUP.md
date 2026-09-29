@@ -91,7 +91,7 @@ forwards the ports.
 | git | `git --version` | macOS: `xcode-select --install` · Linux: your package manager |
 | make | `make --version` | macOS: comes with the Xcode tools · Linux: `sudo apt install make` |
 | ~5 GB free disk | `df -h .` | The images are about 3.7 GB |
-| Free ports 3000 and 8000 | `lsof -i :3000 -i :8000` prints nothing | Pick other ports in step 3 |
+| Free ports 3000, 8000, 5432, 6379, 9000, 9001 | `lsof -i :3000 -i :8000 -i :5432 -i :6379 -i :9000 -i :9001` prints nothing | Pick other ports in step 3 |
 
 On Linux, if `docker info` says *permission denied*, add the user to the `docker`
 group (`sudo usermod -aG docker $USER`), then log out and back in.
@@ -111,11 +111,18 @@ cd automatos-ai
 The stack refuses to start without `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and
 `API_KEY`. Generate random values; nobody needs to remember them.
 
+This block is safe to run again: it creates `.env` only if it's missing and
+fills in a secret only while it is still empty or a `CHANGE_ME` placeholder.
+**Never replace a secret on an install that has already started**: the database
+keeps the password it was created with, and the stack stops connecting.
+
 ```bash
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
-  value=$(openssl rand -hex 24)
-  sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+  if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
+    value=$(openssl rand -hex 24)
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+  fi
 done
 rm -f .env.bak
 ```
@@ -125,14 +132,22 @@ folder **Deliverables → Explorer** shows, and where agents' work lands:
 
 ```bash
 mkdir -p ~/automatos-deliverables
-echo "AUTOMATOS_WORKSPACE_DIR=$HOME/automatos-deliverables" >> .env
+grep -q '^AUTOMATOS_WORKSPACE_DIR=' .env || echo "AUTOMATOS_WORKSPACE_DIR=$HOME/automatos-deliverables" >> .env
 ```
 
 Optional, in the same way:
 - `LOCAL_PROJECTS_DIR=/absolute/path/to/your/projects`: your own code folders,
   shown read-only in Explorer under `projects/`.
-- If a port is taken: `POSTGRES_PORT=5433`, `API_PORT=8001`, `FRONTEND_PORT=3001`.
-  If you change `API_PORT`, also set `NEXT_PUBLIC_API_URL=http://localhost:<port>`.
+- If a port is taken, set its variable to a free port: `FRONTEND_PORT` (3000),
+  `API_PORT` (8000), `POSTGRES_PORT` (5432), `REDIS_PORT` (6379), `MINIO_PORT`
+  (9000), `MINIO_CONSOLE_PORT` (9001). Two of them need a companion setting:
+  - `API_PORT`: also set `NEXT_PUBLIC_API_URL=http://localhost:<port>` and
+    `NEXT_PUBLIC_WS_URL=ws://localhost:<port>/ws` in `.env`.
+  - `MINIO_PORT`: also set `S3_PUBLIC_ENDPOINT_URL=http://localhost:<port>` in
+    `envs/api.local` (create the file if it doesn't exist).
+
+  The rest of this guide uses the defaults, 3000 and 8000; use your ports
+  wherever it shows those.
 
 *Check:* `grep -cE '^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$' .env`
 prints `3`, and `grep -c CHANGE_ME .env` prints `0`.
@@ -154,12 +169,12 @@ docker compose up -d --build --remove-orphans
 ```
 
 *Check:* `docker compose ps` shows every service `running` or `healthy`, and
-`curl -fsS http://localhost:8000/health` returns JSON. The backend can take a
+`curl -fsS http://localhost:8000/health` returns JSON (use your `API_PORT` if you changed it). The backend can take a
 couple of minutes to turn healthy on the first boot while it creates the database.
 
 ### 5. Open it
 
-Open **http://localhost:3000**. There's no login in the local edition.
+Open **http://localhost:3000** (or your `FRONTEND_PORT`). There's no login in the local edition.
 
 To make the agents think, the person adds **one model key** in
 **Settings → API Keys**:
@@ -176,6 +191,17 @@ Then try the seeded **Two-minute brief** Playbook.
 Session mode runs your Claude Code subscription as agents. It runs on **macOS,
 Linux, or WSL2 on Windows**, not on native Windows.
 
+0. **Windows (WSL2) only, first:** the host installs as a `systemd --user`
+   service, so enable systemd and lingering before step 3 (tested in
+   [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)):
+   - Add this to `/etc/wsl.conf`, then run `wsl --shutdown` in PowerShell and
+     reopen Ubuntu:
+     ```ini
+     [boot]
+     systemd=true
+     ```
+     *Check:* `systemctl --user status` prints a status, not an error.
+   - Keep the host running without an open terminal: `sudo loginctl enable-linger $USER`.
 1. Install Claude Code on this machine (inside Ubuntu on Windows) and log in once:
    `claude`, then `claude login`. On WSL there's no browser, so open the login
    link it prints in your Windows browser.
@@ -187,15 +213,7 @@ Linux, or WSL2 on Windows**, not on native Windows.
    make cli-host-status             # check: installed and running
    ```
 
-**Extra steps on Windows (WSL2)**, tested in
-[issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818):
-- Enable systemd in the distro: add this to `/etc/wsl.conf`, then run
-  `wsl --shutdown` in PowerShell and reopen Ubuntu:
-  ```ini
-  [boot]
-  systemd=true
-  ```
-- Keep the host running without an open terminal: `sudo loginctl enable-linger $USER`.
+**Windows (WSL2), after step 3:**
 - WSL stops the distro a few seconds after its last window closes, and the host
   stops with it. To keep it alive, create a Windows **Task Scheduler** task that
   runs at logon with no time limit:
@@ -208,7 +226,7 @@ Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting
 ## Done — the checklist
 
 - [ ] `docker compose ps`: all services running or healthy
-- [ ] http://localhost:3000 opens, and http://localhost:8000/health returns JSON
+- [ ] http://localhost:3000 opens, and http://localhost:8000/health returns JSON (or your `FRONTEND_PORT` / `API_PORT`)
 - [ ] `.env` has real secrets (no `CHANGE_ME`) and an absolute `AUTOMATOS_WORKSPACE_DIR`
 - [ ] A model key is added in Settings → API Keys (by the person)
 - [ ] Optional: session mode paired, and `make cli-host-status` shows running
