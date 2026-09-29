@@ -13,6 +13,12 @@
 
 [Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted edition](https://automatos.app)
 
+<br>
+
+<a href="docs/assets/automatos-oss-launch-16x9.mp4"><img src="docs/assets/automatos-demo.gif" alt="Automatos in 12 seconds: one command to install, then Auto routes your work to your agents" width="800"></a>
+
+<sub>▶ <a href="docs/assets/automatos-oss-launch-16x9.mp4">Watch the full 60-second video</a></sub>
+
 </div>
 
 ---
