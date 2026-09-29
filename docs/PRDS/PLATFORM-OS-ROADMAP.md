@@ -6,7 +6,7 @@
 **Owner:** Gerard Kavanagh
 **Author:** Gerard Kavanagh + Claude (Opus 4.8)
 **Date:** 2026-07-02
-**Source:** [`reports/PLATFORM_OS_REVIEW_2026-07-01.md`](../../reports/PLATFORM_OS_REVIEW_2026-07-01.md) — §13 (the waves), §4 (fixes), §5 (missing), §9.3–9.5 (loop + policy design), §12 (north-star), §14 (owner decisions)
+**Source:** `reports/PLATFORM_OS_REVIEW_2026-07-01.md` (internal review, not published) — §13 (the waves), §4 (fixes), §5 (missing), §9.3–9.5 (loop + policy design), §12 (north-star), §14 (owner decisions)
 **Findings register pinned to commit:** `37fdecc4e` (94 verified findings, 13 critical — re-confirm each `file:line` on current `main` before editing)
 
 ---

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a capability, integration or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open-ended ideas are welcome in [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) first. Use this form when you have a concrete problem to solve.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: The behaviour you're proposing. Mention the surface it belongs to — Auto, Agents, Playbooks, Missions, Command Center, Knowledge, Marketplace.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself

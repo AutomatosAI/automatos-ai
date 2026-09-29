@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Automatos doesn't work the way the docs say it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. **Security problems go through [SECURITY.md](https://github.com/AutomatosAI/automatos-ai/blob/main/SECURITY.md), not a public issue.**
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Local edition (docker compose / make up)
+        - Hosted edition (automatos.app)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Chat and ask Auto to ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: For the local edition, the relevant lines from `make logs` or the browser console. Remove any keys or personal data first.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Commit or release
+      description: "`git rev-parse --short HEAD` in your clone, or the release tag."
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version, browser, and the model route the agent was using.
