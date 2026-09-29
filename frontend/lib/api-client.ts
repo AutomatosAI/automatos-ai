@@ -2669,8 +2669,12 @@ class ApiClient {
     })
   }
 
-  async listSocialPosts(): Promise<SocialPostsResponse> {
-    return this.request<SocialPostsResponse>('/api/socials/posts')
+  /** The workspace's posts, newest first; `q` keeps those whose title or brief holds it,
+   * case-insensitively (US-205: global search finds a post by its title). */
+  async listSocialPosts(params: { q?: string } = {}): Promise<SocialPostsResponse> {
+    const text = params.q?.trim()
+    const q = text ? `?q=${encodeURIComponent(text)}` : ''
+    return this.request<SocialPostsResponse>(`/api/socials/posts${q}`)
   }
 
   async createSocialPost(input: CreateSocialPostInput): Promise<SocialPost> {

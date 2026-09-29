@@ -3160,6 +3160,18 @@
     :is(.studio, .cc-page) .cc-headrow { flex-wrap: wrap; }
     :is(.studio, .cc-page) .cc-headrow > .cc-head { flex-basis: 100%; }
     :is(.studio, .cc-page) .cc-actions { flex-wrap: wrap; }
+
+    /* ── Socials · PRD-251 US-205 ──────────────────────────────────────
+       The board keeps one column per status and snaps column by column, as
+       the Command Centre's does; a column takes most of the width, so the
+       next one peeks in. Below 1024 the list and a post's detail are one
+       view at a time, with a back control (socials-post-list.tsx), so they
+       need no rule here; the back control and the List | Board toggle are
+       thumb targets (M4). The tab renders in both shells, so its rules hang
+       off its own root, `.socials-tab`, as well as `.studio`. */
+    :is(.studio, .socials-tab) .socials-board { scroll-snap-type: x mandatory; }
+    :is(.studio, .socials-tab) .socials-board-col { width: 84%; scroll-snap-align: start; }
+    :is(.studio, .socials-tab) :is(.socials-back, .socials-view-toggle button) { min-height: 44px; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */

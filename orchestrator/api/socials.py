@@ -118,7 +118,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, render, service
 from modules.socials import credits as post_credits
-from modules.socials import report_charts
+from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.publisher import PublishingUnavailable, publish_post
@@ -532,21 +532,24 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
 
 
 @router.get("/posts")
-async def list_social_posts(
+def list_social_posts(
     status: Optional[str] = Query(None, description="One status, or several comma-separated"),
     window_from: Optional[datetime] = Query(None, alias="from"),
     window_to: Optional[datetime] = Query(None, alias="to"),
+    q: Optional[str] = Query(None, max_length=text_search.QUERY_MAX_CHARS, description="Title or brief holds this"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """The workspace's posts, newest first. ``from``/``to`` bound a post's date:
-    its slot when scheduled, otherwise when it was created."""
+    its slot when scheduled, otherwise when it was created. ``q`` (global search,
+    US-205) keeps those whose title or brief holds it, case-insensitively."""
     posts = service.list_posts(
         db,
         ctx.workspace_id,
         statuses=_parse_statuses(status),
         window_from=window_from,
         window_to=window_to,
+        q=q,
     )
     return {"posts": [p.to_dict() for p in posts], "total": len(posts)}
 

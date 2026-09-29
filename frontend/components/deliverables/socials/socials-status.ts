@@ -3,6 +3,7 @@
  * the order the groups show in, and which actions a role and a status allow.
  * Wave 1 (S1.1c) adds rendering: a post with a template renders from any status
  * that holds no approval, and a failed render can be edited and rendered again.
+ * Wave 2 (S2.1) adds the board's columns, from the list's own grouping.
  * The server enforces all of it; this only decides which buttons to show.
  */
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
@@ -145,11 +146,22 @@ function newestFirst(a: SocialPost, b: SocialPost): number {
   return (b.created_at || '').localeCompare(a.created_at || '')
 }
 
-/** Posts grouped by status in SOCIAL_STATUS_ORDER, newest first; empty groups omitted. */
-export function groupPostsByStatus(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+/** Every status in SOCIAL_STATUS_ORDER with its posts, newest first. */
+function statusGroups(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
   return SOCIAL_STATUS_ORDER.map((status) => ({
     status,
     label: SOCIAL_STATUS_LABELS[status],
     posts: posts.filter((post) => post.status === status).sort(newestFirst),
-  })).filter((group) => group.posts.length > 0)
+  }))
+}
+
+/** The list's groups: posts by status in SOCIAL_STATUS_ORDER, newest first; empty groups omitted. */
+export function groupPostsByStatus(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+  return statusGroups(posts).filter((group) => group.posts.length > 0)
+}
+
+/** S2.1: the board's columns, one per status in SOCIAL_STATUS_ORDER, empty ones kept. The
+ * same grouping as the list's, so the two views show the same posts and the same counts. */
+export function boardColumns(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+  return statusGroups(posts)
 }

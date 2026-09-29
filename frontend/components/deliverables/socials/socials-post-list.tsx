@@ -6,40 +6,96 @@
  * the actions the caller's role allows. S1.1c adds this month's render minutes
  * under the heading; S1.3 opens the brand kit (D5) from here for a role that
  * edits it.
+ *
+ * S2.1 (US-205): a Board beside the List (the List | Board toggle). Both views
+ * read the one posts query, so they show the same posts and the same counts,
+ * and the board is read-only: a post moves only through its detail's actions.
+ * Below 1024 px (useIsTabletOrBelow), and from the board, a post's detail is a
+ * full-width view with a back control; on a wide screen the list keeps it
+ * beside. `focusPostId` (the page's `?post=`, where global search links) opens
+ * that post.
  */
-import { useMemo, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
-import { Loader2, Palette, Plus, Share2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, Loader2, Palette, Plus, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { badgeVariants } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
 import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { SocialsBoard } from './socials-board'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
 import { SocialsRenderMinutes } from './socials-render-minutes'
-import { anyRendering, canAuthorPosts, canEditBrandKit, groupPostsByStatus } from './socials-status'
+import { SocialsStatusList } from './socials-status-list'
+import { SocialsViewToggle, type SocialsView } from './socials-view-toggle'
+import { anyRendering, canAuthorPosts, canEditBrandKit, groupPostsByStatus, type StatusGroup } from './socials-status'
 
-function updatedAgo(post: SocialPost): string {
-  try {
-    return formatDistanceToNow(new Date(post.updated_at || post.created_at), { addSuffix: true })
-  } catch {
-    return ''
-  }
+interface SocialsPostsBodyProps {
+  posts: SocialPost[]
+  groups: StatusGroup[]
+  role: Workspace['role']
+  view: SocialsView
+  selectedId: string | null
+  onSelect: (postId: string | null) => void
 }
 
-export function SocialsPostList({ role }: { role: Workspace['role'] }) {
+/** The list (with the selected post beside it on a wide screen) or the board; a
+ * post opened below 1024 px, or from the board, takes their place until "back". */
+function SocialsPostsBody({ posts, groups, role, view, selectedId, onSelect }: SocialsPostsBodyProps) {
+  const compact = useIsTabletOrBelow()
+  const selected = posts.find((post) => post.id === selectedId) ?? null
+
+  if (selected && (compact || view === 'board')) {
+    return (
+      <div className="space-y-3">
+        <Button type="button" size="sm" variant="ghost" className="socials-back -ml-2" onClick={() => onSelect(null)}>
+          <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden />
+          {view === 'board' ? 'Back to board' : 'Back to posts'}
+        </Button>
+        <SocialsPostDetail post={selected} role={role} />
+      </div>
+    )
+  }
+  if (view === 'board') return <SocialsBoard posts={posts} selectedId={selectedId} onSelect={onSelect} />
+
+  const list = <SocialsStatusList groups={groups} selectedId={selectedId} onSelect={onSelect} />
+  if (compact) return list
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+      {list}
+      <div>
+        {selected ? (
+          <SocialsPostDetail post={selected} role={role} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Select a post to see its status and actions.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface SocialsPostListProps {
+  role: Workspace['role']
+  /** A post to open: the page's `?post=`, which global search links to. */
+  focusPostId?: string | null
+}
+
+export function SocialsPostList({ role, focusPostId = null }: SocialsPostListProps) {
   const { data, isLoading, isError, error } = useSocialPosts()
   const [creating, setCreating] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(focusPostId)
   const [brandKitOpen, setBrandKitOpen] = useState(false)
+  const [view, setView] = useState<SocialsView>('list')
+
+  // A new ?post= (another search result) opens that post.
+  useEffect(() => {
+    if (focusPostId) setSelectedId(focusPostId)
+  }, [focusPostId])
 
   const posts = useMemo(() => data?.posts ?? [], [data])
   const groups = useMemo(() => groupPostsByStatus(posts), [posts])
-  const selected = posts.find((post) => post.id === selectedId) ?? null
   const canAuthor = canAuthorPosts(role)
   const canBrand = canEditBrandKit(role)
 
@@ -49,7 +105,7 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="socials-tab space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">Posts</h2>
@@ -58,7 +114,8 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
           </p>
           <SocialsRenderMinutes rendering={anyRendering(posts)} />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <SocialsViewToggle value={view} onChange={setView} />
           {canBrand && (
             <Button size="sm" variant="outline" onClick={() => setBrandKitOpen(true)}>
               <Palette className="mr-1.5 h-4 w-4" aria-hidden />
@@ -96,43 +153,14 @@ export function SocialsPostList({ role }: { role: Workspace['role'] }) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-          <div className="space-y-5">
-            {groups.map((group) => (
-              <section key={group.status} aria-label={`${group.label} posts`} className="space-y-2">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  {group.label} <span className={badgeVariants({ variant: 'secondary' })}>{group.posts.length}</span>
-                </h3>
-                <ul className="space-y-1.5">
-                  {group.posts.map((post) => (
-                    <li key={post.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(post.id)}
-                        aria-pressed={post.id === selectedId}
-                        className={cn(
-                          'flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-card px-3 py-2 text-left transition',
-                          'hover:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/40',
-                          post.id === selectedId && 'border-primary/60',
-                        )}
-                      >
-                        <span className="text-sm font-medium text-foreground">{post.title}</span>
-                        <span className="text-xs text-muted-foreground">Updated {updatedAgo(post)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </div>
-          <div>
-            {selected ? (
-              <SocialsPostDetail post={selected} role={role} />
-            ) : (
-              <p className="text-sm text-muted-foreground">Select a post to see its status and actions.</p>
-            )}
-          </div>
-        </div>
+        <SocialsPostsBody
+          posts={posts}
+          groups={groups}
+          role={role}
+          view={view}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
       )}
     </div>
   )

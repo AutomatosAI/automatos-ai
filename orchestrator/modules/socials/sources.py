@@ -46,6 +46,7 @@ from sqlalchemy import func, or_
 
 from core.models.core import Document
 from modules.socials import service
+from modules.socials.text_search import LIKE_ESCAPE, contains_pattern, escape_like
 
 # The source picker (GET /api/socials/sources): results per kind, and q's length.
 SEARCH_DEFAULT_LIMIT = 10
@@ -57,7 +58,6 @@ REF_MAX_CHARS = 2048
 URL_SCHEMES = frozenset({"http", "https"})
 # documents.id is a Postgres INTEGER.
 DOCUMENT_ID_MAX = 2**31 - 1
-LIKE_ESCAPE = "\\"
 
 
 class SourceNotResolved(Exception):
@@ -168,15 +168,6 @@ def _is_figure(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return math.isfinite(value)
     return isinstance(value, str) and bool(value.strip())
-
-
-def _escape_like(text: str) -> str:
-    return text.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2).replace("%", LIKE_ESCAPE + "%").replace("_", LIKE_ESCAPE + "_")
-
-
-def _contains(text: str) -> str:
-    """A LIKE pattern matching ``text`` anywhere, case folded, wildcards literal."""
-    return f"%{_escape_like(text.lower())}%"
 
 
 def _utcnow() -> datetime:
@@ -313,7 +304,7 @@ def _resolve_metric(db: Any, workspace_id: UUID, ref: str, as_of: Optional[datet
         raise SourceNotResolved("a metric needs as_of, the time it was read at")
     if as_of > _utcnow():
         raise SourceNotResolved("a metric's as_of cannot be in the future")
-    key_pattern = f"%{_escape_like(json.dumps(ref, ensure_ascii=False))}%"
+    key_pattern = f"%{escape_like(json.dumps(ref, ensure_ascii=False))}%"
     rows = db.execute(
         _METRIC_READINGS,
         {"workspace_id": str(workspace_id), "as_of": as_of, "key_pattern": key_pattern, "limit": METRIC_SCAN_REPORTS},
@@ -395,7 +386,7 @@ def require_resolved(
 # ── the source picker ───────────────────────────────────────────────────────
 def _search_deliverables(db: Any, workspace_id: UUID, text: str, limit: int) -> List[ResolvedSource]:
     rows = db.execute(
-        _DELIVERABLE_SEARCH, {"workspace_id": str(workspace_id), "pattern": _contains(text), "limit": limit}
+        _DELIVERABLE_SEARCH, {"workspace_id": str(workspace_id), "pattern": contains_pattern(text), "limit": limit}
     ).fetchall()
     return [
         ResolvedSource(
@@ -408,7 +399,7 @@ def _search_deliverables(db: Any, workspace_id: UUID, text: str, limit: int) -> 
 
 def _search_reports(db: Any, workspace_id: UUID, text: str, limit: int) -> List[ResolvedSource]:
     rows = db.execute(
-        _REPORT_SEARCH, {"workspace_id": str(workspace_id), "pattern": _contains(text), "limit": limit}
+        _REPORT_SEARCH, {"workspace_id": str(workspace_id), "pattern": contains_pattern(text), "limit": limit}
     ).fetchall()
     return [
         ResolvedSource(
@@ -424,7 +415,7 @@ def _search_documents(db: Any, workspace_id: UUID, text: str, limit: int) -> Lis
         Document.id, Document.filename, Document.original_filename, Document.description, Document.upload_date
     ).filter(Document.workspace_id == workspace_id)
     if text:
-        pattern = _contains(text)
+        pattern = contains_pattern(text)
         query = query.filter(
             or_(
                 func.lower(Document.filename).like(pattern, escape=LIKE_ESCAPE),
@@ -440,7 +431,7 @@ def _search_metrics(db: Any, workspace_id: UUID, text: str, limit: int) -> List[
     """Metric names containing ``text``, each with its latest figure and the
     report it was read from: resolving the candidate gives the same figure."""
     rows = db.execute(
-        _METRIC_SEARCH, {"workspace_id": str(workspace_id), "pattern": _contains(text), "limit": METRIC_SCAN_REPORTS}
+        _METRIC_SEARCH, {"workspace_id": str(workspace_id), "pattern": contains_pattern(text), "limit": METRIC_SCAN_REPORTS}
     ).fetchall()
     needle = text.lower()
     seen: set = set()

@@ -11,6 +11,9 @@ the calendar and published through the workspace's own Composio connections.
   their ``sp:`` keys and how a new set replaces the rows.
 - :mod:`modules.socials.sources`: a claim's source resolved in the caller's
   workspace (S1.4), and the source picker's search.
+- :mod:`modules.socials.text_search`: what a person types into a search,
+  matched literally and case-insensitively with LIKE: the source picker's, and
+  the posts list's ``q`` (US-205).
 - :mod:`modules.socials.report_charts`: a chart bound to a report (S1.7): the
   report's top rows filling a chart template (the infographic), and the check
   that a render shows the report's rows as the report has them now.

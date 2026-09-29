@@ -164,7 +164,7 @@ export default function DeliverablesPage() {
             {socialsAvailable && (
               <TabsContent value="socials">
                 <div className="mx-auto max-w-[1600px]">
-                  <SocialsTab />
+                  <SocialsTab postId={searchParams?.get('post') ?? null} />
                 </div>
               </TabsContent>
             )}

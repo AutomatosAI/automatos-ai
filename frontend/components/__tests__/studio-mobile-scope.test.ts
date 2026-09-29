@@ -204,6 +204,22 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     expect(p, 'a compact rule never re-enables shrinking').not.toMatch(/flex-shrink/)
   })
 
+  it('Socials: the board snaps column by column, off the tab\'s own root (PRD-251 US-205)', () => {
+    const p = phone()
+    expect(p).toContain(':is(.studio, .socials-tab) .socials-board { scroll-snap-type: x mandatory; }')
+    expect(p).toMatch(/:is\(\.studio, \.socials-tab\) \.socials-board-col \{[^}]*scroll-snap-align: start/)
+    expect(p, 'the back control and the view toggle are thumb targets').toMatch(
+      /:is\(\.studio, \.socials-tab\) :is\(\.socials-back, \.socials-view-toggle button\) \{ min-height: 44px; \}/,
+    )
+    // The tab renders in both shells, so the root the rules hang off is its own.
+    const list = read('components/deliverables/socials/socials-post-list.tsx')
+    expect(list).toContain('className="socials-tab ')
+    expect(list, 'the list and a post are one view at a time below 1024').toContain('useIsTabletOrBelow')
+    const board = read('components/deliverables/socials/socials-board.tsx')
+    expect(board).toContain('socials-board ')
+    expect(board).toContain('socials-board-col ')
+  })
+
   it('the tab-strip behaviour is one hook, not a copy per surface', () => {
     const hook = read('hooks/use-tab-strip-scroll.ts')
     expect(hook).toContain('useIsTabletOrBelow')

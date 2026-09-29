@@ -77,11 +77,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
+from modules.socials import text_search
 from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
@@ -967,16 +968,21 @@ def list_posts(
     statuses: Optional[Sequence[str]] = None,
     window_from: Optional[datetime] = None,
     window_to: Optional[datetime] = None,
+    q: Optional[str] = None,
     limit: Optional[int] = None,
 ) -> List[SocialPost]:
     """The caller's posts, newest first; the ``limit`` newest when given.
 
     ``window_from`` / ``window_to`` bound a post's date: its slot when it is
-    scheduled, otherwise when it was created (``[from, to)``, UTC).
+    scheduled, otherwise when it was created (``[from, to)``, UTC). ``q`` keeps
+    the posts whose title or brief holds it, case-insensitively and literally.
     """
     query = db.query(SocialPost).filter(SocialPost.workspace_id == workspace_id)
     if statuses:
         query = query.filter(SocialPost.status.in_(list(statuses)))
+    text = (q or "").strip()
+    if text:
+        query = query.filter(or_(text_search.holds(SocialPost.title, text), text_search.holds(SocialPost.brief, text)))
     post_date = func.coalesce(SocialPost.scheduled_for, SocialPost.created_at)
     if window_from is not None:
         query = query.filter(post_date >= _as_utc(window_from))
