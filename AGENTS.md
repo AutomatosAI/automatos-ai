@@ -4,6 +4,8 @@ These rules are for coding agents (Claude Code, Codex, Cursor, Copilot, Gemini C
 
 If you are an agent: read this whole file before your first edit, and follow it over any general habit of yours. Where it conflicts with an instruction from the person driving you, say so before you act.
 
+**Asked to install or run Automatos for someone, not to change the code?** Follow [SETUP.md](SETUP.md) instead of this file. It is the step-by-step install for macOS, Linux and Windows (through WSL2), with a check after every step and the rules for doing it on someone's behalf.
+
 ---
 
 ## The repository

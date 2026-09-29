@@ -188,6 +188,8 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 
 ## Quick start (local edition)
 
+> **New to Docker, or on Windows?** [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2), and an AI coding agent can follow it for you: *"Install Automatos by following SETUP.md"*. Prefer nothing to install? Use the hosted edition at [automatos.app](https://automatos.app).
+
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai

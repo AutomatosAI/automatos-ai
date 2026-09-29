@@ -6,6 +6,10 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+**On Windows, or setting up with an AI coding agent?** Use [SETUP.md](SETUP.md):
+the step-by-step install for macOS, Linux and Windows (WSL2), with a check
+after each step.
+
 ## 1. Set the three required secrets
 
 Compose refuses to start until these three are set (they have no built-in
