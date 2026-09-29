@@ -21,6 +21,7 @@ disagree, the file wins — open an issue.
 | Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
+| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: on a fresh install, `docker compose up -d --build` does what `make up` does. Session mode needs WSL2 (see *Session mode → Before you start*). |
 
 Nothing else. No cloud account, no identity provider, no AWS.
 
@@ -624,6 +625,13 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   (`claude`, then `claude login`). The host never logs in for you.
 - `CLI_RUNTIME_ENABLED=true` in `.env`, then `make up` (or restart the backend).
   The flag is refused outside the local edition.
+- **macOS, Linux or WSL2.** The host drives sessions through a Unix pty and
+  installs as a launchd or `systemd --user` service, so it does not run on
+  native Windows; started there, it exits with a message saying so. On Windows,
+  run the stack and the host inside a WSL2 distro with systemd enabled, and run
+  `loginctl enable-linger <user>` so the host keeps running without a login.
+  A tested recipe, including keeping the distro alive, is in
+  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818).
 
 ### Pair the host, once
 
