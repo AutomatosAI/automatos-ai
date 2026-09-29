@@ -132,3 +132,20 @@ export function usePreviewComposedDraft() {
     },
   })
 }
+
+/** "Submit for approval" (US-209): save the draft and its channels, then submit it
+ * (the existing submit route): it is in Needs approval when this resolves. */
+export function useSubmitComposedDraft() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialPost, Error, SaveDraftInput>({
+    mutationFn: async (draft) => apiClient.submitSocialPost((await saveDraft(draft)).id),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Sent for approval')
+    },
+    onError: async (error) => {
+      await invalidate()
+      toast.error(error.message || 'Could not send the post for approval')
+    },
+  })
+}

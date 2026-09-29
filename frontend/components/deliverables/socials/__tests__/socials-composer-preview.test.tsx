@@ -67,7 +67,7 @@ async function toVariables() {
   await waitFor(() => expect(api.listSocialChannels).toHaveBeenCalled())
   fireEvent.change(screen.getByLabelText('Brief'), { target: { value: 'A countdown for Harvest Club' } })
   fireEvent.click(screen.getByRole('button', { name: /Draft it/ }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Next: variables' }))
+  fireEvent.click(await screen.findByRole('button', { name: /^Next: variables/ }))
   return screen.getByRole('region', { name: 'Variables' })
 }
 

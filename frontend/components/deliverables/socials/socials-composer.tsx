@@ -9,8 +9,12 @@
  *    saves the draft first; a video previews at half resolution, an image renders
  *    for real. An edit after it marks the preview stale.
  *
+ * 4. Formats and channels (US-209): the kinds each channel takes, its options.
+ *
  * "Save draft" creates the post (or updates the one a render saved), then sets
- * its channels. The bare form stays reachable as "Blank draft" (SocialsNewDraft).
+ * its channels; "Submit for approval" does the same, then submits it, and waits
+ * while any channel's copy is over its limit. The bare form stays reachable as
+ * "Blank draft" (SocialsNewDraft).
  */
 import { useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -23,10 +27,18 @@ import {
   usePreviewComposedDraft,
   useSaveComposedDraft,
   useSocialChannels,
+  useSubmitComposedDraft,
 } from '@/hooks/use-socials-composer'
 import { SocialsComposerBrief } from './socials-composer-brief'
-import { ComposerStepBody, ComposerStepNav, type ComposerStep } from './socials-composer-steps'
-import { draftFromProposal, draftTargets, isVideoDraft, postInput, type ComposerDraft } from './socials-composer-model'
+import { COMPOSER_STEPS, ComposerStepBody, ComposerStepNav, type ComposerStep } from './socials-composer-steps'
+import {
+  channelsOverLimit,
+  draftFromProposal,
+  draftTargets,
+  isVideoDraft,
+  postInput,
+  type ComposerDraft,
+} from './socials-composer-model'
 
 interface SocialsComposerProps {
   /** Called with the saved post, or null when the composer is closed. */
@@ -46,6 +58,7 @@ export function SocialsComposer({ onDone }: SocialsComposerProps) {
   const compose = useComposeSocialPost()
   const save = useSaveComposedDraft()
   const preview = usePreviewComposedDraft()
+  const submit = useSubmitComposedDraft()
   const [draft, setDraft] = useState<ComposerDraft | null>(null)
   const [lastBrief, setLastBrief] = useState('')
   const [step, setStep] = useState<ComposerStep>('copy')
@@ -92,6 +105,12 @@ export function SocialsComposer({ onDone }: SocialsComposerProps) {
       },
     )
   const stale = renderedKey !== null && renderedKey !== renderKey(draft)
+  const over = channelsOverLimit(draft, channels)
+  const next = COMPOSER_STEPS[COMPOSER_STEPS.findIndex((s) => s.id === step) + 1]
+  const busy = save.isLoading || submit.isLoading
+  const submitDraft = () => {
+    if (draft.title.trim() && over.length === 0) submit.mutate(saving, { onSuccess: (sent) => onDone(sent) })
+  }
 
   return (
     <section aria-label="Composer" className={SHELL}>
@@ -112,16 +131,27 @@ export function SocialsComposer({ onDone }: SocialsComposerProps) {
             Back to the brief
           </Button>
         )}
-        {step === 'copy' && (
-          <Button type="button" variant="outline" size="sm" onClick={() => setStep('variables')}>
-            Next: variables
+        {next && (
+          <Button type="button" variant="outline" size="sm" onClick={() => setStep(next.id)}>
+            Next: {next.label.toLowerCase()}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={saveDraft} disabled={!draft.title.trim() || save.isLoading}>
+        <Button type="button" variant={next ? 'default' : 'outline'} size="sm" onClick={saveDraft} disabled={!draft.title.trim() || busy}>
           {save.isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
           Save draft
         </Button>
+        {!next && (
+          <Button type="button" size="sm" onClick={submitDraft} disabled={!draft.title.trim() || busy || over.length > 0}>
+            {submit.isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+            Submit for approval
+          </Button>
+        )}
       </div>
+      {over.length > 0 && (
+        <p role="alert" className="text-right text-xs text-destructive">
+          Over the limit: {over.map((t) => channels.find((c) => c.toolkit === t)?.label ?? t).join(', ')}. Shorten the copy to submit.
+        </p>
+      )}
     </section>
   )
 }

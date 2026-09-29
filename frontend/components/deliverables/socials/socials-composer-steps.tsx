@@ -3,20 +3,22 @@
 /**
  * PRD-251 S2.2 (US-207..US-209) — the composer's steps after the brief, and what
  * each shows. Variables and preview (US-208) sit side by side from 1024 px and
- * stack below it.
+ * stack below it; formats and channels (US-209) come last.
  */
 import { cn } from '@/lib/utils'
 import type { SocialChannel, SocialPost } from '@/lib/api-client'
+import { SocialsComposerChannels } from './socials-composer-channels'
 import { SocialsComposerProposal } from './socials-composer-proposal'
 import { SocialsComposerPreview } from './socials-composer-preview'
 import { SocialsVariablesForm } from './socials-variables-form'
 import { isVideoDraft, type ComposerDraft } from './socials-composer-model'
 
-export type ComposerStep = 'copy' | 'variables'
+export type ComposerStep = 'copy' | 'variables' | 'channels'
 
 export const COMPOSER_STEPS: ReadonlyArray<{ id: ComposerStep; label: string }> = [
   { id: 'copy', label: 'Copy' },
   { id: 'variables', label: 'Variables and preview' },
+  { id: 'channels', label: 'Formats and channels' },
 ]
 
 export function ComposerStepNav({ step, onStep }: { step: ComposerStep; onStep: (step: ComposerStep) => void }) {
@@ -53,6 +55,7 @@ interface ComposerStepBodyProps {
 
 export function ComposerStepBody({ step, draft, channels, post, stale, rendering, onChange, onRender }: ComposerStepBodyProps) {
   if (step === 'copy') return <SocialsComposerProposal draft={draft} channels={channels} onChange={onChange} />
+  if (step === 'channels') return <SocialsComposerChannels draft={draft} channels={channels} onChange={onChange} />
   return (
     <div className="socials-composer-grid grid gap-4 lg:grid-cols-2">
       {draft.template ? (

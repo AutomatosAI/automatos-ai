@@ -3,7 +3,8 @@
 /**
  * PRD-251 S2.2a (US-207) — the proposal fills the composer: its title, the base
  * copy and each channel's own text, all editable, with what the server had to
- * correct listed as warnings.
+ * correct listed as warnings. US-209: each chosen channel's text counts against
+ * its limits.
  */
 import { AlertTriangle } from 'lucide-react'
 
@@ -13,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { SocialChannel } from '@/lib/api-client'
 import { SOCIAL_POST_TITLE_MAX_CHARS } from './socials-status'
 import type { ComposerDraft } from './socials-composer-model'
+import { ChannelCopyField } from './socials-channel-copy'
 
 export function ComposerWarnings({ warnings }: { warnings: ReadonlyArray<string> }) {
   if (warnings.length === 0) return null
@@ -35,7 +37,8 @@ interface SocialsComposerProposalProps {
 }
 
 export function SocialsComposerProposal({ draft, channels, onChange }: SocialsComposerProposalProps) {
-  const labelOf = (toolkit: string) => channels.find((c) => c.toolkit === toolkit)?.label ?? toolkit
+  const channelOf = (toolkit: string) => channels.find((c) => c.toolkit === toolkit)
+  const labelOf = (toolkit: string) => channelOf(toolkit)?.label ?? toolkit
   const setChannelText = (toolkit: string, text: string) =>
     onChange({ ...draft, perChannel: { ...draft.perChannel, [toolkit]: text } })
 
@@ -60,16 +63,15 @@ export function SocialsComposerProposal({ draft, channels, onChange }: SocialsCo
           onChange={(event) => onChange({ ...draft, base: event.target.value })}
         />
       </div>
-      {Object.keys(draft.perChannel).map((toolkit) => (
-        <div key={toolkit} className="space-y-1.5">
-          <Label htmlFor={`socials-composer-copy-${toolkit}`}>{labelOf(toolkit)} copy</Label>
-          <Textarea
-            id={`socials-composer-copy-${toolkit}`}
-            value={draft.perChannel[toolkit]}
-            rows={3}
-            onChange={(event) => setChannelText(toolkit, event.target.value)}
-          />
-        </div>
+      {Object.keys(draft.kinds).map((toolkit) => (
+        <ChannelCopyField
+          key={toolkit}
+          toolkit={toolkit}
+          label={labelOf(toolkit)}
+          value={draft.perChannel[toolkit] ?? draft.base}
+          limits={channelOf(toolkit)?.copy_limits}
+          onChange={(text) => setChannelText(toolkit, text)}
+        />
       ))}
     </div>
   )
