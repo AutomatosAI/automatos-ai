@@ -1,5 +1,5 @@
 """
-Main FastAPI Application for Automotas AI
+Main FastAPI Application for Automatos AI
 =========================================
 
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
@@ -586,7 +586,7 @@ async def lifespan(app: FastAPI):
     report = BootstrapReport()
     report.started_at = datetime.now(timezone.utc)
 
-    logger.info("Starting Automotas AI API Server...")
+    logger.info("Starting Automatos AI API Server...")
     app.state.ready = False
 
     # PRD-172 F005 + PRD-186 S3: fail-closed on vector-plane config integrity
@@ -699,7 +699,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down Automotas AI API Server...")
+    logger.info("Shutting down Automatos AI API Server...")
 
     _watchdog = getattr(app.state, "loop_watchdog", None)
     if _watchdog is not None:
@@ -744,7 +744,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="🤖 Automatos AI API",
     description="""
-    ## 🚀 Comprehensive API for Automotas AI Platform
+    ## 🚀 Comprehensive API for Automatos AI Platform
     
     > **World's Most Advanced Multi-Agent AI Orchestration Platform**
     
@@ -846,11 +846,11 @@ app = FastAPI(
     contact={
         "name": "Automatos AI Development Team",
         "url": "https://github.com/AutomatosAI/automatos-ai",
-        "email": "developers@automotas.ai"
+        "email": "support@automatos.ai"
     },
     license_info={
-        "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT"
+        "name": "Apache License 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     servers=[
         {
@@ -1431,7 +1431,7 @@ async def api_endpoint_health():
          response_description="API overview with navigation information")
 async def root():
     """
-    ## 🚀 Welcome to Automotas AI API
+    ## 🚀 Welcome to Automatos AI API
     
     This endpoint provides a comprehensive overview of all available API endpoints,
     documentation links, and system information to help developers get started quickly.

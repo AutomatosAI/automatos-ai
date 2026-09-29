@@ -1,6 +1,6 @@
 
 /**
- * API Configuration for Enhanced Automotas AI Platform
+ * API Configuration for Enhanced Automatos AI Platform
  */
 
 // Environment configuration
