@@ -4,7 +4,7 @@ Enhanced Logging and Performance Monitoring System
 =================================================
 
 This module provides comprehensive logging, performance monitoring, and agent communication
-tracking for the Automotas AI system. It includes:
+tracking for the Automatos AI system. It includes:
 
 - Structured workflow logging with step-by-step visibility
 - Agent communication and handoff tracking
