@@ -110,3 +110,24 @@ def test_main_resumes_an_interrupted_build(monkeypatch, capsys):
 def test_main_leaves_a_finished_database_alone(monkeypatch):
     code, built = _main_with(monkeypatch, (False, True, 154))
     assert code == 0 and built == []
+
+
+def test_a_fresh_build_writes_the_same_index_text_in_every_process():
+    """The CI lane compares a resumed build with a clean one, so the build must
+    be reproducible. ``ix_orchestration_tasks_active``'s predicate was joined
+    from a frozenset, whose order follows each process's hash seed (seeds 1 and
+    2 give different orders)."""
+    import os
+    import subprocess
+    import sys
+
+    probe = ("from core.models.orchestration import OrchestrationTask as T; "
+             "i = next(i for i in T.__table__.indexes if i.name == 'ix_orchestration_tasks_active'); "
+             "print(i.dialect_options['postgresql']['where'])")
+    orchestrator = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    seen = set()
+    for seed in ("1", "2"):
+        out = subprocess.run([sys.executable, "-c", probe], cwd=orchestrator, capture_output=True, text=True,
+                             env={**os.environ, "PYTHONHASHSEED": seed}, timeout=120, check=True)
+        seen.add(out.stdout.strip().splitlines()[-1])
+    assert seen == {"state NOT IN ('failed', 'skipped', 'verified')"}, seen
