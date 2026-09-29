@@ -192,7 +192,7 @@ Session mode runs your Claude Code subscription as agents. It runs on **macOS,
 Linux, or WSL2 on Windows**, not on native Windows.
 
 0. **Windows (WSL2) only, first:** the host installs as a `systemd --user`
-   service, so enable systemd and lingering before step 3 (tested in
+   service, so enable systemd and lingering before step 4 (tested in
    [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)):
    - Add this to `/etc/wsl.conf`, then run `wsl --shutdown` in PowerShell and
      reopen Ubuntu:
@@ -205,15 +205,37 @@ Linux, or WSL2 on Windows**, not on native Windows.
 1. Install Claude Code on this machine (inside Ubuntu on Windows) and log in once:
    `claude`, then `claude login`. On WSL there's no browser, so open the login
    link it prints in your Windows browser.
-2. Add `CLI_RUNTIME_ENABLED=true` to `.env` and run `make up` again.
-3. In the app: **Settings → Session mode → Pair a host**. Copy the code, then:
+2. **Linux and WSL2 only:** install the tools the session sandbox needs (macOS
+   needs nothing). Without them the host won't run Claude sessions, and Settings →
+   Session mode says why.
+   ```bash
+   sudo apt-get install -y bubblewrap socat
+   ```
+   On Ubuntu 24.04 or later, check `sysctl kernel.apparmor_restrict_unprivileged_userns`.
+   If it prints `1`, allow bubblewrap to create its sandbox (this profile applies to
+   `bwrap` itself, not the commands it runs):
+   ```bash
+   sudo tee /etc/apparmor.d/bwrap > /dev/null <<'EOF'
+   abi <abi/4.0>,
+   include <tunables/global>
+
+   profile bwrap /usr/bin/bwrap flags=(unconfined) {
+     userns,
+     include if exists <local/bwrap>
+   }
+   EOF
+   sudo systemctl reload apparmor
+   ```
+   *Check:* `bwrap --ro-bind / / true` exits without an error.
+3. Add `CLI_RUNTIME_ENABLED=true` to `.env` and run `make up` again.
+4. In the app: **Settings → Session mode → Pair a host**. Copy the code, then:
    ```bash
    make cli-host PAIR=XXXX-XXXX     # wait for "paired", then Ctrl-C
    make cli-host-install            # starts the host at login from now on
    make cli-host-status             # check: installed and running
    ```
 
-**Windows (WSL2), after step 3:**
+**Windows (WSL2), after step 4:**
 - WSL stops the distro a few seconds after its last window closes, and the host
   stops with it. To keep it alive, create a Windows **Task Scheduler** task that
   runs at logon with no time limit:
@@ -247,6 +269,7 @@ Day to day: `make up` starts it, `make down` stops it (your data is kept), and
 | Backend stays `unhealthy` | Usually a slow first boot | Wait 2–3 minutes, then `docker compose logs backend --tail 50` |
 | Session files don't appear under their session in Explorer | `AUTOMATOS_WORKSPACE_DIR` is relative (`./workspaces`), or the code is under `/mnt/c` while Docker sees `C:\` | Use an absolute Linux path (step 3) and keep everything inside WSL2 |
 | `Session mode needs macOS, Linux or WSL2` | The host was started on native Windows | Run it inside Ubuntu (WSL2) |
+| Session mode says `claude_sandbox_unavailable` | `bubblewrap` / `socat` missing, or blocked by AppArmor on Ubuntu 24.04+ | Session mode, step 2 |
 | Disk filling up | Old image layers from rebuilds | `make clean`: safe, never touches your data |
 
 Still stuck? Open an issue with the error and your OS:
