@@ -73,6 +73,9 @@ export function linkFor(row: NotificationRow): string | null {
     // PRD-225: an agent question → the Questions tab (answer resumes the work).
     case 'question':
       return '/command-center?tab=questions'
+    // PRD-251 US-206: a social post waiting for approval → that post in the Socials tab.
+    case 'social_post':
+      return link_id ? `/deliverables?tab=socials&post=${link_id}` : '/deliverables?tab=socials'
     default:
       return null
   }

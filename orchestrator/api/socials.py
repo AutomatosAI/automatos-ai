@@ -116,7 +116,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, render, service
+from modules.socials import media_caps, media_store, media_urls, notify, render, service
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -288,7 +288,8 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
     another writer committed first, roll back, write nothing and raise
     :class:`service.StaleContent` with the post's current hash (409). Call it
     straight after the service mutation: a query in between would autoflush the
-    change before the check."""
+    change before the check. A write that moved the post into needs_approval
+    notifies its approvers once committed (US-206)."""
     post_id, workspace_id = post.id, post.workspace_id
     if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
@@ -296,7 +297,9 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
         if current is None:
             raise service.PostNotFound()
         raise service.StaleContent(service.compute_content_hash(current))
-    return _save(db, post)
+    saved = _save(db, post)
+    notify.notify_if_entered(status, post)
+    return saved
 
 
 def _workspace(db: Session, ctx: RequestContext) -> Workspace:

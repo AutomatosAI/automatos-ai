@@ -94,7 +94,7 @@ from core.media_render_quota import (
 )
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
-from modules.socials import service
+from modules.socials import notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -660,4 +660,6 @@ async def _render(job: RenderJob, client: MediaRenderClient, store: MediaStore, 
     # latency: the whole render, from submit to the files in storage. Written
     # inline, off the loop, before the render returns: the quota counts it next.
     await asyncio.to_thread(_book, job, rendered_seconds(media), int((time.monotonic() - started) * 1000))
+    # US-206: the post now needs a person; its approvers hear so (never raises).
+    await notify.dispatch_approval_pending(job.workspace_id, job.post_id, job.title, session_factory=factory)
     return True

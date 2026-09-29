@@ -113,7 +113,7 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
-import { SOCIAL_POST_CHANGED_MESSAGE } from '@/hooks/use-socials-api'
+import { SOCIAL_POST_CHANGED_MESSAGE, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
 
@@ -278,7 +278,7 @@ describe('Socials on', () => {
     expect(within(detail('Launch week teaser')).getByText('Approval voided by an edit')).toBeInTheDocument()
   })
 
-  it('Approve sends the hash of the version on screen; a 409 (changed since) toasts and refetches the posts', async () => {
+  it('Approve sends the hash of the version on screen; a 409 (changed while reviewed) says so and reloads the post', async () => {
     const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' } })
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
@@ -291,7 +291,8 @@ describe('Socials on', () => {
 
     fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE))
+    expect(within(detail('Launch week teaser')).getByRole('alert')).toHaveTextContent(SOCIAL_POST_REVIEW_STALE_MESSAGE)
     expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
     await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
     expect(await within(detail('Launch week teaser')).findByDisplayValue('v2 from another editor')).toBeInTheDocument()
@@ -349,13 +350,16 @@ describe('Socials on', () => {
     expect(within(detail('Needs work')).getByRole('button', { name: 'Submit for approval' })).toBeInTheDocument()
   })
 
-  it('reject archives the post', async () => {
-    seedPost({ title: 'Off brand', status: 'needs_approval' })
+  it('reject takes an optional reason and archives the post', async () => {
+    const post = seedPost({ title: 'Off brand', status: 'needs_approval' })
     renderTab()
 
     fireEvent.click(await screen.findByRole('button', { name: /Off brand/ }))
     fireEvent.click(within(detail('Off brand')).getByRole('button', { name: 'Reject' }))
+    fireEvent.change(within(detail('Off brand')).getByLabelText('Reason (optional)'), { target: { value: 'Not our voice' } })
+    fireEvent.click(within(detail('Off brand')).getByRole('button', { name: 'Reject post' }))
     await screen.findByRole('heading', { name: 'Archived 1' })
+    expect(api.rejectSocialPost).toHaveBeenCalledWith(post.id, 'Not our voice')
     expect(statusOf('Off brand')).toHaveTextContent('Archived')
   })
 

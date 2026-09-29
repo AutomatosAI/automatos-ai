@@ -438,6 +438,13 @@ export interface SocialPostCopy {
   channels?: Record<string, string>
 }
 
+/** D7: where a claim's figure comes from (`sources[claim]`). */
+export interface SocialClaimSource {
+  kind: 'deliverable' | 'report' | 'document' | 'url' | 'metric'
+  ref: string
+  as_of?: string | null
+}
+
 export interface SocialReviewEntry {
   at: string
   by: string
@@ -2700,11 +2707,20 @@ class ApiClient {
   }
 
   /** Approve the version the reviewer saw (D6): `contentHash` is that version's
-   * `content_hash`. A post that changed since answers 409. */
-  async approveSocialPost(postId: string, contentHash: string, comment?: string): Promise<SocialPost> {
+   * `content_hash`. A post that changed since answers 409; one with unsourced claims
+   * answers 422 naming them unless `overrideUnsourced` (D7, the second confirmation). */
+  async approveSocialPost(
+    postId: string,
+    contentHash: string,
+    options: { comment?: string; overrideUnsourced?: boolean } = {},
+  ): Promise<SocialPost> {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ content_hash: contentHash, comment: comment || null }),
+      body: JSON.stringify({
+        content_hash: contentHash,
+        comment: options.comment || null,
+        override_unsourced: !!options.overrideUnsourced,
+      }),
     })
   }
 
