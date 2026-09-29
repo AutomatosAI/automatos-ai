@@ -114,8 +114,10 @@ class SessionRequest(BaseModel):
 
 
 class SessionModeSettingsRequest(BaseModel):
-    """PRD-239 S6c: Settings → Session mode — where tickets run when their agent names no folder."""
-    default_folder: str = Field(..., pattern="^(projects|sessions)$")
+    """PRD-239 S6c: Settings → Session mode — where tickets run when their agent names no
+    folder, and the workspace's default permission mode (either or both)."""
+    default_folder: Optional[str] = Field(None, pattern="^(projects|sessions)$")
+    permission_mode: Optional[str] = Field(None, pattern="^(manual|edits|plan|auto)$")
 
 
 class ResultRequest(BaseModel):
@@ -215,7 +217,9 @@ async def save_session_mode_settings(
     db: Session = Depends(get_db),
 ):
     try:
-        return svc.save_session_mode_settings(db, ctx.workspace_id, default_folder=body.default_folder)
+        return svc.save_session_mode_settings(
+            db, ctx.workspace_id, default_folder=body.default_folder, permission_mode=body.permission_mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except LookupError as exc:

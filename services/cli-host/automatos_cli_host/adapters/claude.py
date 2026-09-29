@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Mapping, Optional
 
+from ..permission_modes import plan_text
 from ..presets import CliPreset
 from ..sandbox import claude_settings, unavailable_reason
 from ..transcript import last_assistant_text, read_usage, transcript_path
@@ -40,6 +41,7 @@ WEB_TOOLS = frozenset({"WebFetch", "WebSearch"})
 # per call. Denying it (night 1, 2026-09-18) meant the bridge's own mcp__automatos__*
 # tools could never be loaded — sessions could not submit_report or update_ticket.
 BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion", "ToolSearch"})
+PLAN_TOOLS = frozenset({"ExitPlanMode"})
 _PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
@@ -322,6 +324,9 @@ class ClaudeAdapter(PresetAdapter):
             return ToolIntent(tool=tool_name, cls=ToolClass.WEB, paths=tuple(str(ti[k]) for k in ("url", "query") if ti.get(k)))
         if tool_name in BENIGN_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.BENIGN)
+        if tool_name in PLAN_TOOLS:
+            # The plan is the call's subject: the card shows its start (plan.md keeps it whole).
+            return ToolIntent(tool=tool_name, cls=ToolClass.PLAN, command=plan_text(ti) or None)
         return ToolIntent(tool=tool_name, cls=ToolClass.UNKNOWN)
 
     def read_usage(self, transcript: Path) -> Dict[str, Any]:

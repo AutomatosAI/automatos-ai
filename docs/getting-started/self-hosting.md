@@ -665,7 +665,7 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
 
 A session runs as **you**, on your machine. The host's gate judges every tool
 call before it runs: file access outside the session's folders is refused, and
-a shell command outside the ticket's allowlist is held for you. But a gate can
+what it asks you about depends on the session's permission mode (below). But a gate can
 only read the command line. An allowed `pytest`, `npm run build`, `python
 script.py` or `git commit` runs code the session itself wrote (a `conftest.py`,
 a `package.json` script, a git hook), and text a session reads (a web page, an
@@ -691,8 +691,35 @@ passed to sessions, so keep cloud and Git tokens out of the host's environment.
 It is not a virtual machine either. For the strongest isolation, run the host as
 a dedicated OS user (or in a VM or container) that holds no cloud, Git or SSH
 credentials. On such a host, `--no-session-sandbox` turns the sandbox off.
-`--unlisted-bash allow` removes most of the gate's remaining protection; use it
-only on a host isolated like that.
+
+### Permission modes
+
+How much a session asks before it acts. The four modes are Claude Code's own,
+applied by the host's gate:
+
+| Mode | Edits in the session's folders | A command off the Bash allowlist |
+|---|---|---|
+| **Manual** | a card for each | a card for each |
+| **Edit automatically** | run | a card for each |
+| **Plan** | refused until you approve the plan | a card for each |
+| **Auto** | run | run |
+
+In **Plan**, Claude Code starts in its own plan mode, explores, and presents a
+plan. The plan comes to you as a card and is saved as `plan.md` in the ticket's
+deliverables. Approve it and the session carries on as Edit automatically.
+
+Set the workspace's default on **Settings → Session mode**; an agent can pick
+its own (Agent → Model → Permission mode). The local edition defaults to
+**Auto**, because the sandbox above already confines what an unlisted command
+can reach. The hosted edition defaults to Edit automatically. Every mode keeps
+the hard lines: `git push`, publishing and `sudo` are refused, the platform's
+secrets stay unreadable, and the explicit ask-list and unresolved paths still
+ask.
+
+To fix one mode for every session on a machine, whatever the workspace says,
+install the host with it: `make cli-host-install CLI_HOST_ARGS="--permission-mode manual"`.
+With `--no-session-sandbox`, prefer Manual or Edit automatically: Auto then runs
+unlisted commands with your full user rights.
 
 ### Pair the host, once
 
@@ -770,7 +797,7 @@ full text of its skills are rendered into the session's system prompt (up to
 that runs agents reaches a session agent through the same ticket — a chat
 message, a playbook step, a mission task, a heartbeat, a schedule, a channel —
 and the lane waits for the ticket inside its own timeout. A permission
-question the session asks (a command outside its allowlist) shows up as an
+question the session asks (a command or an edit its permission mode holds) shows up as an
 approval card in the Canvas and on the ticket; unanswered, it is denied after
 the host's ask timeout and the ticket goes to *Review* with the reason.
 

@@ -82,6 +82,7 @@ class CliPreset:
     initial_prompt_flag: Optional[str] = None
     name_flag: Optional[str] = None           # "--name" — how the session shows in the CLI's own UI
     ungated_stance: Tuple[str, ...] = ()      # "don't prompt, we gate at PreToolUse"
+    plan_stance: Tuple[str, ...] = ()         # Plan mode's start instead; () = this CLI has no plan mode
     required_args: Tuple[str, ...] = ()       # always on the command line (narrowing, hook trust)
 
     # ── hooks ───────────────────────────────────────────────────────────────
@@ -151,6 +152,9 @@ CLAUDE = CliPreset(
     name_flag="--name",
     # acceptEdits: no prompt for edits; everything else reaches PreToolUse, where WE decide.
     ungated_stance=("--permission-mode", "acceptEdits"),
+    # Plan mode: Claude Code's own. It explores, presents the plan with ExitPlanMode
+    # (a card), and leaves plan mode when the gate approves it.
+    plan_stance=("--permission-mode", "plan"),
     # The operator's user-scope settings only, no repo .claude/, no MCP from the folder.
     required_args=("--setting-sources", "user", "--strict-mcp-config"),
     hook_events=BUS_EVENTS,

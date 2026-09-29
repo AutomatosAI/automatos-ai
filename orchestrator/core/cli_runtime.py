@@ -40,6 +40,7 @@ from core.cli_presets import (  # noqa: E402,F401
     BILLING_SUBSCRIPTION, CLI_PRESETS, CLI_PROVIDERS, PROVIDER_CLAUDE, PROVIDER_CODEX,
     USAGE_PROVIDER_LABELS, USAGE_PROVIDER_SLUGS, is_valid_cli_model, registry_public, usage_provider_slug,
 )
+from core.session_permission_modes import PERMISSION_MODE_KEY, validate_permission_mode  # noqa: E402
 
 
 class RuntimeMismatchError(RuntimeError):
@@ -147,6 +148,7 @@ def validate_runtime_configuration(
             f"{provider} model alias or id"
         )
     errors.extend(validate_working_directory(configuration.get(CONFIG_WORKING_DIRECTORY_KEY)))
+    errors.extend(validate_permission_mode(configuration.get(PERMISSION_MODE_KEY)))
     worktree = configuration.get(CONFIG_WORKTREE_KEY)
     if worktree is not None and not isinstance(worktree, bool):
         errors.append(f"configuration.{CONFIG_WORKTREE_KEY} must be true or false, got {worktree!r}")

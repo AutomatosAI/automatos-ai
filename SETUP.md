@@ -235,6 +235,11 @@ Linux, or WSL2 on Windows**, not on native Windows.
    make cli-host-status             # check: installed and running
    ```
 
+Sessions run in **Auto** mode by default: they edit and run commands without
+asking, inside the session sandbox, and only risky actions become a question.
+To be asked more, pick **Manual**, **Edit automatically** or **Plan** under
+**Settings → Session mode**.
+
 **Windows (WSL2), after step 4:**
 - WSL stops the distro a few seconds after its last window closes, and the host
   stops with it. To keep it alive, create a Windows **Task Scheduler** task that

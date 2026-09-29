@@ -53,6 +53,7 @@ from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
+from .permission_modes import MODE_EDITS, MODE_PLAN, plan_text, save_plan, session_mode
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
@@ -401,7 +402,11 @@ class Session:
             decision = decide(intent, self._policy)
         verdict, answer, request_id = decision, None, None
         if decision.behavior == "ask":
+            if intent.cls is ToolClass.PLAN:
+                save_plan(self._plan_dir, plan_text(tool_input))
             verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
+            if intent.cls is ToolClass.PLAN and verdict.allow:
+                self._policy.permission_mode = MODE_EDITS  # the plan is approved: work as Edit automatically
         # F167: what the host decided, and why, is on the ticket — a call that ran
         # with nobody asked never reads as one the operator approved.
         # ``event_id``: a batch re-posted after a lost response counts once on the ticket.
@@ -545,8 +550,12 @@ class Session:
             except OSError as exc:
                 log.warning("deliverables folder %s not created: %s", deliverables, exc)
             extra_dirs = (*extra_dirs, deliverables)
+        self.permission_mode = session_mode(
+            getattr(self.cfg, "permission_mode", None), self.ticket.get("permission_mode"),
+            resuming=bool(self.ticket.get("resume_session_id")), can_plan=bool(preset.plan_stance))
+        self._plan_dir = deliverables or session_dir
         self._policy = PolicyContext(
-            unlisted_bash=getattr(self.cfg, "unlisted_bash", "ask"),
+            permission_mode=self.permission_mode,
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=extra_dirs,
@@ -567,7 +576,7 @@ class Session:
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
-            session_tools=session_tools,
+            session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
         )
         prepared = self.adapter.prepare(ctx)
 

@@ -39,6 +39,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import secret_reach
 from .adapters.base import ToolClass, ToolIntent
+from .permission_modes import (
+    DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED,
+)
 
 # Sessions never publish. The manager (Auto) integrates. Matched on the raw
 # command first, then on every simple command once ``git -C <path>``, the shell
@@ -53,7 +56,7 @@ NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
 )
 
-# Always a card, even under ``--unlisted-bash allow``, and even when the verb
+# Always a card, even in Auto mode, and even when the verb
 # itself is on the allowlist. Night 1 (2026-09-18, F042): an OPS ticket session
 # ran ``cd …/automatos-ai && set -a && . ./.env && set +a`` and then
 # ``PGPASSWORD=… psql -h 127.0.0.1 … -f …/change-applied-task-3.sql`` — an
@@ -70,7 +73,7 @@ ALWAYS_ASK_BASH = (
     (re.compile(r"(^|[;&|(]\s*)PGPASSWORD="), "passes a database password on the command line"),
     (re.compile(r"(^|[;&|(]\s*)(alembic|flask|django-admin)\b"), "runs a database migration tool"),
     # F042 review: a link gives a file a second name — a hard link to a secret has
-    # no secret-shaped name at all. Asked even under ``--unlisted-bash allow``.
+    # no secret-shaped name at all. Asked even in Auto mode.
     (re.compile(r"(^|[;&|(]\s*)ln\b"), "makes a link (a link can give a secrets file a harmless name)"),
 )
 
@@ -231,10 +234,10 @@ _SEVERITY = {"allow": 0, "ask": 1, "deny": 2}
 
 # F167: why a call was ALLOWED, so the ticket says what really happened. A
 # ticket said a command "needed your approval, and it went through" when it had
-# run under ``--unlisted-bash allow`` with nobody asked.
+# run in Auto mode (then ``--unlisted-bash allow``) with nobody asked.
 ALLOWED_BASH = "within this ticket's Bash allowlist"
-ALLOWED_UNLISTED_BASH = ("{command!r} is not on this ticket's Bash allowlist; this host runs such commands "
-                         "without asking (--unlisted-bash allow)")
+ALLOWED_UNLISTED_BASH = ("{command!r} is not on this ticket's Bash allowlist; this session runs such commands "
+                         "without asking (Auto mode)")
 ALLOWED_FILES = "inside the session's folders"
 ALLOWED_SESSION_TOOL = "an Automatos tool this ticket may call"
 ALLOWED_NO_APPROVAL = "a tool that needs no approval"
@@ -253,7 +256,10 @@ class PolicyContext:
     # (never held — the operator has nothing to decide about a name we did not
     # offer). Empty = the bridge is not in this ticket, so no platform tool is.
     session_tools: Sequence[str] = ()
-    unlisted_bash: str = "ask"           # "allow": verbs the allowlist does not name run without a card
+    # manual | edits | plan | auto (permission_modes.py): Auto runs verbs the allowlist
+    # does not name without a card; Manual asks for every edit; Plan refuses edits
+    # until the operator approves the session's plan.
+    permission_mode: str = DEFAULT_MODE
     # F042: the platform's own secrets are out of every session's reach — a hard
     # deny no approval lifts. ``secret_roots``: checkouts whose .env family and
     # credential key no session may read or write (the Automatos checkout this
@@ -1008,8 +1014,8 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         # PRD-235 W2 S3: outside the allowlist is a QUESTION for the operator, not a
         # refusal — the session holds the call while a card is shown on the ticket's
         # Canvas; no answer in time is a deny (the ticket lands in review).
-        if ctx.unlisted_bash == "allow":
-            # ``--unlisted-bash allow`` (2026-09-18): the operator chose to run what the
+        if ctx.permission_mode == MODE_AUTO:
+            # Auto mode (``--unlisted-bash allow`` until 2026-09-29): the operator chose to run what the
             # list does not name. NEVER_ALLOWED_BASH was refused above, the explicit
             # ask-list still asks — and the ARGUMENTS are still judged as paths.
             #
@@ -1017,7 +1023,7 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
             # unlisted verb could read any file on the machine: ``xxd /etc/passwd``,
             # ``od -c ~/.ssh/id_rsa``, ``strings``, ``base64`` — all allowed, while
             # ``cat`` of the same path was refused. The comment here and
-            # test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines both
+            # test_auto_mode_runs_unknown_verbs_but_keeps_the_hard_lines (then test_unlisted_bash_allow_…) both
             # said otherwise; found 2026-09-22 when that test's stand-in verb changed.
             # "Allow what the list does not name" means the VERB, never the path.
             return _worst([Decision("allow", ALLOWED_UNLISTED_BASH.format(command=_first_words(joined))),
@@ -1313,22 +1319,40 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     return _worst([*inside, _judge_command(command, {}, ctx, roots)])
 
 
-def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
+def _decide_files(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     roots = [ctx.cwd, *ctx.extra_dirs]
+    # F042 first: the platform's secrets are refused wherever they sit, and
+    # any other secrets file asks — as the same file read through Bash does.
+    guards = [_guard_secret(str(target), ctx, ctx.cwd) for target in intent.paths]
+    guards.append(_guard_search(intent.tool, getattr(intent, "globs", ()) or (), intent.paths, ctx))
+    guards = [g for g in guards if g is not None]
+    if any(g.behavior == "deny" for g in guards):
+        return _worst(guards)
+    if not intent.paths:
+        return _worst([*guards, _write_in_mode(intent, ctx)])  # a search without a path works in cwd
+    for target in intent.paths:
+        if not _inside(str(target), roots):
+            return Decision("deny", f"{intent.tool} outside the session directory: {target}")
+    return _worst([*guards, _write_in_mode(intent, ctx)])
+
+
+def _write_in_mode(intent: ToolIntent, ctx: PolicyContext) -> Decision:
+    """An edit inside the session's folders, as the session's permission mode has it."""
+    if intent.cls is not ToolClass.FILE_WRITE:
+        return Decision("allow", ALLOWED_FILES)
+    if ctx.permission_mode == MODE_PLAN:
+        return Decision("deny", PLAN_EDIT_REFUSED)
+    if ctx.permission_mode == MODE_MANUAL:
+        return Decision("ask", MANUAL_EDIT)
+    return Decision("allow", ALLOWED_FILES)
+
+
+def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     if intent.cls in (ToolClass.FILE_READ, ToolClass.FILE_WRITE):
-        # F042 first: the platform's secrets are refused wherever they sit, and
-        # any other secrets file asks — as the same file read through Bash does.
-        guards = [_guard_secret(str(target), ctx, ctx.cwd) for target in intent.paths]
-        guards.append(_guard_search(intent.tool, getattr(intent, "globs", ()) or (), intent.paths, ctx))
-        guards = [g for g in guards if g is not None]
-        if any(g.behavior == "deny" for g in guards):
-            return _worst(guards)
-        if not intent.paths:
-            return _worst([*guards, Decision("allow", ALLOWED_FILES)])  # a search without a path works in cwd
-        for target in intent.paths:
-            if not _inside(str(target), roots):
-                return Decision("deny", f"{intent.tool} outside the session directory: {target}")
-        return _worst([*guards, Decision("allow", ALLOWED_FILES)])
+        return _decide_files(intent, ctx)
+    if intent.cls is ToolClass.PLAN:
+        # Only a Plan-mode session has a plan to approve; anywhere else the call is harmless.
+        return Decision("ask", PLAN_CARD) if ctx.permission_mode == MODE_PLAN else Decision("allow", ALLOWED_NO_APPROVAL)
     if intent.cls is ToolClass.SHELL:
         # An unlisted verb's own reason comes first and wins over the allowlist's.
         return _worst([decide_bash(str(intent.command or ""), ctx), Decision("allow", ALLOWED_BASH)])

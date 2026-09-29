@@ -43,6 +43,13 @@ from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
 from services.session_report import APPROVAL_NOT_ON_RECORD
+from core.session_permission_modes import (
+    MODE_EDITS,
+    PERMISSION_MODE_KEY,
+    PERMISSION_MODES,
+    ticket_permission_mode,
+    workspace_permission_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +304,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.8.0"  # 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
+EXPECTED_CLI_HOST_VERSION = "0.9.0"  # 2026-09-29: the claim carries ``permission_mode`` (manual | edits | plan | auto), the agent's or the workspace's — an older host ignores it and runs every session as Edit automatically. 0.8.0: 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py", "core/cli_presets.py")
 
@@ -623,6 +630,8 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
     return {
         "default_folder": choice,
         "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
+        # The workspace's default permission mode for sessions (core/session_permission_modes).
+        "permission_mode": workspace_permission_mode(stored, config.AUTH_EDITION),
         "local_projects_dir": projects_dir,
         "projects_mount": (getattr(config, "LOCAL_PROJECTS_MOUNT", "") or None),
         # The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up`
@@ -637,9 +646,18 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
     }
 
 
-def save_session_mode_settings(db: Session, workspace_id: Any, *, default_folder: str) -> Dict[str, Any]:
-    if default_folder not in DEFAULT_FOLDER_CHOICES:
-        raise ValueError(f"default_folder must be one of {list(DEFAULT_FOLDER_CHOICES)}")
+def save_session_mode_settings(
+    db: Session, workspace_id: Any, *, default_folder: Optional[str] = None, permission_mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Store the choices given (either or both) in the workspace's ``session_mode`` settings."""
+    changes = {"default_folder": default_folder, PERMISSION_MODE_KEY: permission_mode}
+    allowed = {"default_folder": DEFAULT_FOLDER_CHOICES, PERMISSION_MODE_KEY: PERMISSION_MODES}
+    changes = {key: value for key, value in changes.items() if value is not None}
+    if not changes:
+        raise ValueError("nothing to save: give default_folder or permission_mode")
+    for key, value in changes.items():
+        if value not in allowed[key]:
+            raise ValueError(f"{key} must be one of {list(allowed[key])}")
     ws = _workspace_row(db, workspace_id)
     if ws is None:
         raise LookupError("workspace not found")
@@ -647,10 +665,22 @@ def save_session_mode_settings(db: Session, workspace_id: Any, *, default_folder
 
     current = dict(getattr(ws, "settings", None) or {})
     section = dict(current.get(SESSION_MODE_SETTINGS_KEY) or {})
-    ws.settings = {**current, SESSION_MODE_SETTINGS_KEY: {**section, "default_folder": default_folder}}  # rebuild, never mutate (JSONB)
+    ws.settings = {**current, SESSION_MODE_SETTINGS_KEY: {**section, **changes}}  # rebuild, never mutate (JSONB)
     flag_modified(ws, "settings")
     db.commit()
     return session_mode_settings(db, workspace_id)
+
+
+def session_permission_mode(db: Session, workspace_id: Any) -> str:
+    """The workspace's default permission mode for a claim. Unreadable settings never
+    block a claim: they fall back to Edit automatically, today's behaviour."""
+    try:
+        ws = _workspace_row(db, workspace_id)
+        stored = ((getattr(ws, "settings", None) or {}).get(SESSION_MODE_SETTINGS_KEY) or {}) if ws is not None else {}
+        return workspace_permission_mode(stored, config.AUTH_EDITION)
+    except Exception:  # noqa: BLE001 — a settings problem must never block a claim
+        logger.exception("[cli-host] session permission mode unreadable for workspace %s", workspace_id)
+        return MODE_EDITS
 
 
 def default_session_folder(db: Session, workspace_id: Any) -> Optional[str]:
@@ -940,8 +970,6 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
     grant in the reason) so the host can SAY so instead of polling in silence —
     the operator approves them in the Command Centre and they come back.
     """
-    from uuid import uuid4
-
     limit = max(1, min(int(limit or 1), MAX_CLAIM_LIMIT))
     # CLI adapter design §8.2: the claim is filtered by the CLIs this host serves.
     # A host that announced no CLI at all takes nothing — refusing a ticket after
@@ -962,103 +990,126 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
     )
     out: List[Dict[str, Any]] = []
     parked: List[Dict[str, Any]] = []
+    # Settings → Session mode: one default per claim, since a host serves one workspace.
+    workspace_mode = session_permission_mode(db, host.workspace_id)
     for task in claimed:
         if _blocked_pending_approval(db, task):
             db.refresh(task)
             parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
-        from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
-        if task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason):
-            task.blocked_reason = None  # a host that runs this CLI is here now
-        agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-        cfg = (getattr(agent, "configuration", None) if agent else None) or {}
-        prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
-        resume_session_id = _resume_session_for(prior, host)
-        session_id = str(uuid4())
-        provider = cfg.get(CONFIG_PROVIDER_KEY) or PROVIDER_CLAUDE
-        ref = {
-            "runtime": RUNTIME_CLI,
-            "provider": provider,
-            "provider_label": CLI_PRESETS[provider].label if provider in CLI_PRESETS else provider,
-            "model": cfg.get(CONFIG_MODEL_KEY),
-            "host_id": str(host.id),
-            "session_id": session_id,
-            "attempt": _claim_attempt(task, prior),
-            RUN_ID_KEY: prior.get(RUN_ID_KEY),  # F209: the claim's run, stamped by claim_tasks
-            "claimed_at": _iso(_now()),
-            # PRD-239 S6c: an agent without a folder runs where the workspace says
-            # (the projects folder by default), else the host's sessions/<ticket>.
-            "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or default_session_folder(db, task.workspace_id),
-        }
-        if resume_session_id:
-            ref["resume_session_id"] = resume_session_id
-        ref["explorer_root"] = explorer_root_for(
-            task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
-        )
-        # PRD-245 W2: the asks this ticket already made are its record — the
-        # answer to a resumed session is folded into the prompt from them, and
-        # MAX_ASKS_PER_TICKET counts them across the ticket's life. The claim
-        # builds a fresh ``ref``, so they have to be carried, and the prompt has
-        # to be rendered AFTER they are on the row. Building it before (the bug)
-        # read the new empty ref: no answer ever reached the resumed session and
-        # the ceiling reset to zero every claim.
-        ref[SESSION_ASKS_KEY] = session_asks(prior)
-        # F094: the notes on the ticket (the operator's, the session's, the
-        # mission's verdict) are its record too; a claim that resumes the same
-        # run keeps them. A mission step's next run starts with none.
-        prior_notes = prior.get(SESSION_NOTES_KEY)
-        if isinstance(prior_notes, list) and prior_notes:
-            ref[SESSION_NOTES_KEY] = prior_notes
-        # PRD-245 S1.1: the session's own credential for the Automatos tools.
-        # Handed over ONCE, in this payload; only its hash stays on the ticket.
-        session_token = mint_session_token(ref)
-        ref[SESSION_TOOLS_OFFERED_KEY] = True
-        task.runtime_ref = ref
-        prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
-        # Mark the answers just folded in, so a LATER resume of the same ticket
-        # does not render them again.
-        if ref.get(SESSION_ASKS_KEY):
-            ref[SESSION_ASKS_KEY] = _mark_answers_folded(ref[SESSION_ASKS_KEY])
-            task.runtime_ref = ref
-        out.append(
-            {
-                "task_id": task.id,
-                "workspace_id": str(task.workspace_id),
-                "agent_id": task.assigned_agent_id,
-                "agent_name": getattr(agent, "name", None),
-                "title": task.title,
-                "prompt": prompt,
-                "review_mode": task.review_mode or "auto",
-                "attachment_ids": task.attachment_ids or [],
-                "provider": ref["provider"],
-                "model": ref["model"],
-                "allowed_tools": cfg.get(CONFIG_ALLOWED_TOOLS_KEY),
-                "cwd": ref["cwd"],
-                # PRD-239: worktree per ticket is the agent's choice (default on).
-                "worktree": cfg.get(CONFIG_WORKTREE_KEY, True) is not False,
-                "session_id": session_id,
-                "attempt": ref["attempt"],
-                "lease_seconds": config.BOARD_DISPATCH_LEASE_SECONDS,
-                # PRD-239 S1: the agent's soul (description, persona, skills),
-                # stable per agent — the host appends it to the session prompt.
-                "system_prompt": _session_system_prompt(agent),
-                # PRD-239: continue the session a lane asked to resume, on the
-                # host that ran it (``claude --resume``); None starts a fresh one.
-                "resume_session_id": resume_session_id,
-                # PRD-245 W1: the Automatos tools this session may call, and how
-                # to reach them. The host writes them into the session's own MCP
-                # config and allows exactly these names at the gate.
-                "session_tools": list(session_tool_names()),
-                # The PATH, not a URL: the host joins it to the backend address
-                # it was started with. A container cannot know the address the
-                # session on the operator's machine must dial.
-                "session_tools_path": SESSION_TOOLS_PATH,
-                "session_token": session_token,
-            }
-        )
+        out.append(_claim_one(db, host, task, workspace_mode))
     db.commit()
     return {"tasks": out, "parked": parked}
 
+
+def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
+    """The ticket's fresh ``runtime_ref`` for this claim: session, folder and the record it carries."""
+    from uuid import uuid4
+
+    resume_session_id = _resume_session_for(prior, host)
+    session_id = str(uuid4())
+    provider = cfg.get(CONFIG_PROVIDER_KEY) or PROVIDER_CLAUDE
+    ref = {
+        "runtime": RUNTIME_CLI,
+        "provider": provider,
+        "provider_label": CLI_PRESETS[provider].label if provider in CLI_PRESETS else provider,
+        "model": cfg.get(CONFIG_MODEL_KEY),
+        "host_id": str(host.id),
+        "session_id": session_id,
+        "attempt": _claim_attempt(task, prior),
+        RUN_ID_KEY: prior.get(RUN_ID_KEY),  # F209: the claim's run, stamped by claim_tasks
+        "claimed_at": _iso(_now()),
+        # PRD-239 S6c: an agent without a folder runs where the workspace says
+        # (the projects folder by default), else the host's sessions/<ticket>.
+        "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or default_session_folder(db, task.workspace_id),
+    }
+    if resume_session_id:
+        ref["resume_session_id"] = resume_session_id
+    ref["explorer_root"] = explorer_root_for(
+        task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+    )
+    # PRD-245 W2: the asks this ticket already made are its record — the
+    # answer to a resumed session is folded into the prompt from them, and
+    # MAX_ASKS_PER_TICKET counts them across the ticket's life. The claim
+    # builds a fresh ``ref``, so they have to be carried, and the prompt has
+    # to be rendered AFTER they are on the row. Building it before (the bug)
+    # read the new empty ref: no answer ever reached the resumed session and
+    # the ceiling reset to zero every claim.
+    ref[SESSION_ASKS_KEY] = session_asks(prior)
+    # F094: the notes on the ticket (the operator's, the session's, the
+    # mission's verdict) are its record too; a claim that resumes the same
+    # run keeps them. A mission step's next run starts with none.
+    prior_notes = prior.get(SESSION_NOTES_KEY)
+    if isinstance(prior_notes, list) and prior_notes:
+        ref[SESSION_NOTES_KEY] = prior_notes
+    return ref
+
+
+def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str) -> Dict[str, Any]:
+    """Stamp one claimed ticket's ``runtime_ref`` and build what the host runs it from."""
+    from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
+
+    if task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason):
+        task.blocked_reason = None  # a host that runs this CLI is here now
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+    cfg = (getattr(agent, "configuration", None) if agent else None) or {}
+    ref = _claim_ref(db, task, host, cfg, task.runtime_ref if isinstance(task.runtime_ref, dict) else {})
+    # PRD-245 S1.1: the session's own credential for the Automatos tools.
+    # Handed over ONCE, in this payload; only its hash stays on the ticket.
+    session_token = mint_session_token(ref)
+    ref[SESSION_TOOLS_OFFERED_KEY] = True
+    task.runtime_ref = ref
+    prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
+    # Mark the answers just folded in, so a LATER resume of the same ticket
+    # does not render them again.
+    if ref.get(SESSION_ASKS_KEY):
+        ref[SESSION_ASKS_KEY] = _mark_answers_folded(ref[SESSION_ASKS_KEY])
+        task.runtime_ref = ref
+    return _claim_payload(task, agent, cfg, ref, prompt, session_token, ticket_permission_mode(cfg, workspace_mode))
+
+
+def _claim_payload(
+    task: BoardTask, agent: Optional[Agent], cfg: Dict[str, Any], ref: Dict[str, Any], prompt: str,
+    session_token: str, permission_mode: str,
+) -> Dict[str, Any]:
+    """The claim entry the host starts the session from (host contract ``EXPECTED_CLI_HOST_VERSION``)."""
+    return {
+        "task_id": task.id,
+        "workspace_id": str(task.workspace_id),
+        "agent_id": task.assigned_agent_id,
+        "agent_name": getattr(agent, "name", None),
+        "title": task.title,
+        "prompt": prompt,
+        "review_mode": task.review_mode or "auto",
+        "attachment_ids": task.attachment_ids or [],
+        "provider": ref["provider"],
+        "model": ref["model"],
+        "allowed_tools": cfg.get(CONFIG_ALLOWED_TOOLS_KEY),
+        "cwd": ref["cwd"],
+        # PRD-239: worktree per ticket is the agent's choice (default on).
+        "worktree": cfg.get(CONFIG_WORKTREE_KEY, True) is not False,
+        "session_id": ref["session_id"],
+        "attempt": ref["attempt"],
+        "lease_seconds": config.BOARD_DISPATCH_LEASE_SECONDS,
+        # PRD-239 S1: the agent's soul (description, persona, skills),
+        # stable per agent — the host appends it to the session prompt.
+        "system_prompt": _session_system_prompt(agent),
+        # PRD-239: continue the session a lane asked to resume, on the
+        # host that ran it (``claude --resume``); None starts a fresh one.
+        "resume_session_id": ref.get("resume_session_id"),
+        # PRD-245 W1: the Automatos tools this session may call, and how
+        # to reach them. The host writes them into the session's own MCP
+        # config and allows exactly these names at the gate.
+        "session_tools": list(session_tool_names()),
+        # The PATH, not a URL: the host joins it to the backend address
+        # it was started with. A container cannot know the address the
+        # session on the operator's machine must dial.
+        "session_tools_path": SESSION_TOOLS_PATH,
+        "session_token": session_token,
+        # manual | edits | plan | auto: the agent's own mode, else the workspace's
+        # (Settings → Session mode). The host's gate applies it; its hard lines hold in all four.
+        "permission_mode": permission_mode,
+    }
 
 def _session_system_prompt(agent: Optional[Agent], *, ticket_session: bool = True) -> str:
     """Never lets a rendering problem block a claim — the host falls back to

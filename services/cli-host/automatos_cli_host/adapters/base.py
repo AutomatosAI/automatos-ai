@@ -35,6 +35,8 @@ class ToolClass(Enum):
     # by NAME against the ticket's own list — the backend enforces the scope, the
     # gate enforces the surface. Every other MCP tool stays UNKNOWN (denied).
     PLATFORM = "platform"
+    # The session presents its plan and asks to start work (Plan mode, permission_modes.py).
+    PLAN = "plan"
     UNKNOWN = "unknown"
 
 
@@ -99,6 +101,8 @@ class LaunchContext:
     # the claim. ``None`` = the backend offered none (an older backend, or the
     # bridge off), and the session runs exactly as it did before.
     session_tools: Optional[Dict[str, Any]] = None
+    # Plan mode (permission_modes.py): start in the CLI's own plan mode, when it has one.
+    plan_first: bool = False
 
 
 @dataclass(frozen=True)
@@ -203,7 +207,7 @@ class PresetAdapter:
             args += [p.session_id_flag, ctx.session_id]
         if p.cwd_flag:
             args += [p.cwd_flag, str(ctx.cwd)]
-        args += list(p.ungated_stance)
+        args += list(p.plan_stance if ctx.plan_first and p.plan_stance else p.ungated_stance)
         if p.system_prompt_flag:
             args += [p.system_prompt_flag, str(ctx.system_prompt_path)]
         args += list(prepared.args)

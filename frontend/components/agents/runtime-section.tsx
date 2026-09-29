@@ -20,6 +20,7 @@ import { isLocal } from '@/lib/auth-edition'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PermissionModeSelect, WORKSPACE_DEFAULT, isPermissionMode } from '@/components/settings/PermissionModePicker'
 
 export type RuntimeKind = 'api' | 'cli'
 
@@ -30,6 +31,8 @@ export interface RuntimeFields {
   cli_working_directory: string
   /** PRD-239: tickets run in a git worktree of the workspace folder (a single repo), or in the folder itself (a workspace of many repos) */
   cli_worktree: boolean
+  /** Manual, Edit automatically, Plan or Auto; '' = the workspace's default (Settings → Session mode) */
+  cli_permission_mode: string
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -40,6 +43,7 @@ export const DEFAULT_RUNTIME_FIELDS: RuntimeFields = {
   cli_model: '',
   cli_working_directory: '',
   cli_worktree: true,
+  cli_permission_mode: WORKSPACE_DEFAULT,
 }
 
 /** CLI adapter design §8.3: the CLIs the backend's registry knows, and which of them an online host runs now (`GET /api/v1/cli-hosts/health`). */
@@ -121,6 +125,7 @@ export function normalizeRuntimeFields(source: object | null | undefined): Runti
     cli_model: str(src.cli_model),
     cli_working_directory: str(src.cli_working_directory),
     cli_worktree: src.cli_worktree !== false,
+    cli_permission_mode: isPermissionMode(src.cli_permission_mode) ? src.cli_permission_mode : WORKSPACE_DEFAULT,
   }
 }
 
@@ -133,6 +138,7 @@ export function runtimeFieldsFromConfiguration(configuration: object | null | un
     cli_model: cfg.model,
     cli_working_directory: cfg.working_directory,
     cli_worktree: cfg.worktree_per_ticket,
+    cli_permission_mode: cfg.permission_mode,
   })
 }
 
@@ -185,6 +191,7 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
     model: fields.cli_model.trim() || null,
     working_directory: fields.cli_working_directory.trim() || null,
     worktree_per_ticket: fields.cli_worktree,
+    permission_mode: fields.cli_permission_mode || null,
   }
 }
 
@@ -536,6 +543,7 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
                 Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
               </span>
             </label>
+            <PermissionModeSelect value={value.cli_permission_mode} onChange={(mode) => onChange('cli_permission_mode', mode)} />
             {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
             {value.cli_working_directory.trim() && (
               <p className="text-xs" data-testid="workspace-check">

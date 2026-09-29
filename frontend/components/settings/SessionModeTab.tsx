@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PermissionModePicker, permissionModeLabel, type PermissionMode } from './PermissionModePicker'
 
 interface HostRow {
   id: string
@@ -50,6 +51,8 @@ export interface SessionModeSettings {
   /** The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up` exported it), null when unknown. */
   workspace_dir: string | null
   host_allowed_roots: string[]
+  /** The workspace's default permission mode for sessions; an agent may override it. */
+  permission_mode?: PermissionMode
 }
 
 export const PROJECTS_ENV_LINES = (folder: string, deliverables?: string) =>
@@ -148,18 +151,22 @@ export function SessionModeTab() {
   const projectsFolderForEnv = settings.data?.local_projects_dir || '/Users/you/Development'
   const deliverablesForEnv = settings.data?.workspace_dir || suggestedDeliverablesRoot(projectsFolderForEnv)
   const envLines = PROJECTS_ENV_LINES(projectsFolderForEnv, deliverablesForEnv)
-  const saveDefaultFolder = async (choice: 'projects' | 'sessions') => {
+  const saveSetting = async (body: Partial<Pick<SessionModeSettings, 'default_folder' | 'permission_mode'>>, done: string) => {
     setSaving(true)
     try {
-      await apiClient.request('/api/v1/cli-hosts/settings', { method: 'PUT', body: JSON.stringify({ default_folder: choice }) })
+      await apiClient.request('/api/v1/cli-hosts/settings', { method: 'PUT', body: JSON.stringify(body) })
       queryClient.invalidateQueries({ queryKey: ['cli-hosts', 'settings'] })
-      toast.success(choice === 'projects' ? 'New tickets run in your projects folder' : 'New tickets get their own sessions folder')
+      toast.success(done)
     } catch (err) {
       toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setSaving(false)
     }
   }
+  const saveDefaultFolder = (choice: 'projects' | 'sessions') =>
+    saveSetting({ default_folder: choice }, choice === 'projects' ? 'New tickets run in your projects folder' : 'New tickets get their own sessions folder')
+  const savePermissionMode = (mode: PermissionMode) =>
+    saveSetting({ permission_mode: mode }, `New sessions run in ${permissionModeLabel(mode)} mode`)
   const [pairing, setPairing] = useState<PairingCode | null>(null)
   const [minting, setMinting] = useState(false)
 
@@ -316,6 +323,15 @@ export function SessionModeTab() {
                   with no folder of its own. It is mounted as the workspace root, so there is no workspace-id folder on your disk:
                   Deliverables → Explorer, the chat&apos;s Code mode and your sessions all show this one place. Put it beside your
                   projects folder (<span className="font-mono">AUTOMATOS_WORKSPACE_DIR</span> in the <span className="font-mono">.env</span> lines above).
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="permission-mode">
+                <p className="text-sm font-medium text-foreground">How much a session asks before it acts</p>
+                <PermissionModePicker value={settings.data?.permission_mode} disabled={saving || !settings.data} onChange={savePermissionMode} />
+                <p>
+                  The same modes as Claude Code. This is the default for every session agent; an agent can pick its own
+                  (Agent → Model → Permission mode). In every mode sessions never push or publish, the platform&apos;s secrets stay
+                  out of reach, and commands run inside the session sandbox. Questions reach you as cards on the ticket.
                 </p>
               </div>
               <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="default-folder">

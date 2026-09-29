@@ -90,12 +90,14 @@ def test_the_default_is_a_folder_of_its_own_even_with_a_projects_folder_configur
     monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_DIR", "/Users/me/Development", raising=False)
     monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_MOUNT", "rw", raising=False)
     monkeypatch.setattr(svc, "host_allow_dirs", lambda db, ws: ["/Users/me/Development"])
+    monkeypatch.setattr(svc.config, "AUTH_EDITION", "local")
     out = svc.session_mode_settings(_DB(workspace=_ws(None)), WS)
     # PRD-245 W1: the tab now also names the Automatos tools a session gets; the
     # list itself is pinned in test_prd245_session_tools.py.
     assert [t["name"] for t in out.pop("session_tools")] == list(session_tool_names())
     assert out == {
         "default_folder": "sessions", "default_folder_explicit": False,
+        "permission_mode": "auto",  # the local edition's default (test_session_permission_modes.py)
         "local_projects_dir": "/Users/me/Development", "projects_mount": "rw",
         "workspace_dir": None,
         "host_allowed_roots": ["/Users/me/Development"],

@@ -184,7 +184,7 @@ def test_a_hard_link_under_a_harmless_name_is_the_secret(layout):
 
 def test_making_a_link_is_always_the_operators_call(layout):
     assert _bash(layout, "shop", "ln -s notes.md n2").behavior == "ask"
-    assert _bash(layout, "shop", "ln -s notes.md n2", unlisted_bash="allow").behavior == "ask"
+    assert _bash(layout, "shop", "ln -s notes.md n2", permission_mode="auto").behavior == "ask"
 
 
 @pytest.mark.parametrize("line, expected", [
@@ -196,7 +196,7 @@ def test_making_a_link_is_always_the_operators_call(layout):
     ("cp README.md README.bak", "allow"),
 ])
 def test_archivers_and_recursive_copies_read_the_whole_tree(layout, line, expected):
-    assert _bash(layout, "platform", line, unlisted_bash="allow").behavior == expected, line
+    assert _bash(layout, "platform", line, permission_mode="auto").behavior == expected, line
 
 
 # ── the file tools' own searches ────────────────────────────────────────────

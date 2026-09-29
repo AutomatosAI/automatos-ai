@@ -148,7 +148,9 @@ command in it:
   (`main..HEAD`) is not a traversal.
 - **Redirections.** The targets of `>`, `>>`, `<`, `2>`, `&>` follow the same
   rule; `/dev/null`, `/dev/stdout` and `/dev/stderr` are always fine.
-- **Everything else** — a verb outside the allowlist — is **held**: the session
+- **Everything else** — a verb outside the allowlist — is **held** (in Auto
+  mode it runs, with its paths still judged; see *Permission modes* in
+  `docs/getting-started/self-hosting.md`): the session
   waits (`--ask-timeout`, 120 s by default) while the command is shown as a card
   on the ticket's Canvas and, once the PRD-245 backend lane lands, in the
   Questions tab, the bell and on Telegram. No answer in time is a deny.
