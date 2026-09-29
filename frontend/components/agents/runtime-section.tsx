@@ -427,7 +427,11 @@ function WorkspaceFolderField({ value, onChange }: Pick<RuntimeSectionProps, 'va
           Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
         </span>
       </label>
-      <PermissionModeSelect value={value.cli_permission_mode} onChange={(mode) => onChange('cli_permission_mode', mode)} />
+      <PermissionModeSelect
+        value={value.cli_permission_mode}
+        provider={value.cli_provider || DEFAULT_CLI_PROVIDER}
+        onChange={(mode) => onChange('cli_permission_mode', mode)}
+      />
       {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
       {value.cli_working_directory.trim() && (
         <p className="text-xs" data-testid="workspace-check">

@@ -28,3 +28,29 @@ describe('PermissionModePicker', () => {
     expect(onChange).toHaveBeenCalledWith('plan')
   })
 })
+
+describe('Plan on a CLI without a plan mode', () => {
+  it('names exactly the CLIs whose host preset has a plan mode', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const presets = fs.readFileSync(
+      path.resolve(__dirname, '../../../../services/cli-host/automatos_cli_host/presets.py'),
+      'utf8',
+    )
+    const withPlan = presets
+      .split(/\n(?=[A-Z_]+ = CliPreset\()/)
+      .filter((block) => /^[A-Z_]+ = CliPreset\(/.test(block) && /\n\s+plan_stance=\(/.test(block))
+      .map((block) => /\bid="([^"]+)"/.exec(block)?.[1])
+    const { PLAN_MODE_CLIS } = await import('@/components/settings/PermissionModePicker')
+    expect(withPlan).toEqual(PLAN_MODE_CLIS)
+  })
+
+  it('tells a Codex agent that Plan runs as Edit automatically, and says nothing for Claude Code', async () => {
+    const { PermissionModeSelect } = await import('@/components/settings/PermissionModePicker')
+    const { unmount } = render(<PermissionModeSelect value="plan" provider="codex" onChange={vi.fn()} />)
+    expect(screen.getByTestId('plan-mode-fallback').textContent).toContain('Edit automatically')
+    unmount()
+    render(<PermissionModeSelect value="plan" provider="claude" onChange={vi.fn()} />)
+    expect(screen.queryByTestId('plan-mode-fallback')).toBeNull()
+  })
+})

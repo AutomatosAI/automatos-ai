@@ -707,6 +707,9 @@ applied by the host's gate:
 In **Plan**, Claude Code starts in its own plan mode, explores, and presents a
 plan. The plan comes to you as a card and is saved as `plan.md` in the ticket's
 deliverables. Approve it and the session carries on as Edit automatically.
+Plan needs a CLI with a plan mode of its own: today that is Claude Code. An agent
+on Codex runs Plan as Edit automatically; the other three modes work the same on
+both.
 
 Set the workspace's default on **Settings → Session mode**; an agent can pick
 its own (Agent → Model → Permission mode). The local edition defaults to

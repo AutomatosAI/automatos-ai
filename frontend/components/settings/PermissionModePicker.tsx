@@ -29,6 +29,16 @@ export const PERMISSION_MODES: PermissionModeOption[] = [
   { id: 'auto', label: 'Auto', icon: Zap, description: 'Runs what passes the safety checks and pauses for anything risky.' },
 ]
 
+/**
+ * The CLIs with a plan mode of their own (the host's presets with a `plan_stance`).
+ * Any other CLI runs Plan as Edit automatically: it cannot present a plan to approve.
+ */
+export const PLAN_MODE_CLIS = ['claude']
+
+export function runsPlanAsEdits(provider: string): boolean {
+  return !PLAN_MODE_CLIS.includes(provider)
+}
+
 /** The value an agent stores for "use the workspace's default". */
 export const WORKSPACE_DEFAULT = ''
 
@@ -72,11 +82,13 @@ export function PermissionModePicker({ value, disabled, onChange }: PermissionMo
 
 interface PermissionModeSelectProps {
   value: string
+  /** The agent's CLI: one without a plan mode runs Plan as Edit automatically, and the form says so. */
+  provider: string
   onChange: (mode: string) => void
 }
 
 /** An agent's own mode, or the workspace's default (`WORKSPACE_DEFAULT`). */
-export function PermissionModeSelect({ value, onChange }: PermissionModeSelectProps) {
+export function PermissionModeSelect({ value, provider, onChange }: PermissionModeSelectProps) {
   const current = isPermissionMode(value) ? value : 'default'
   return (
     <div className="space-y-1" data-testid="cli-permission-mode">
@@ -90,6 +102,11 @@ export function PermissionModeSelect({ value, onChange }: PermissionModeSelectPr
           ))}
         </SelectContent>
       </Select>
+      {runsPlanAsEdits(provider) && (
+        <p className="text-xs text-muted-foreground" data-testid="plan-mode-fallback">
+          Plan needs Claude Code. This CLI has no plan mode, so Plan (here or as the workspace default) runs as Edit automatically.
+        </p>
+      )}
     </div>
   )
 }

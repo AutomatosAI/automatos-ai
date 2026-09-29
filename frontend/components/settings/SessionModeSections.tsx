@@ -233,6 +233,7 @@ export function PermissionModeCard({ settings, saving, onSave }: SettingCardProp
         The same modes as Claude Code. This is the default for every session agent; an agent can pick its own
         (Agent → Model → Permission mode). In every mode sessions never push or publish, the platform&apos;s secrets stay
         out of reach, and commands run inside the session sandbox. Questions reach you as cards on the ticket.
+        Plan needs Claude Code: an agent on another CLI (Codex) runs Plan as Edit automatically.
       </p>
     </div>
   )

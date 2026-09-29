@@ -155,3 +155,39 @@ def test_the_plan_is_read_from_claude_codes_plan_file_when_only_its_path_arrives
     assert modes.plan_text({"planFilePath": str(tmp_path / "secret.md")}, root) == ""
     assert modes.plan_text({"planFilePath": str(plans / ".." / ".." / "secret.md")}, root) == ""
     assert modes.plan_text({"planFilePath": str(plans / "missing.md")}, root) == ""
+
+
+# ── Codex: the same modes on Codex's own tool names ─────────────────────────
+
+def _codex():
+    from automatos_cli_host.adapters.codex import CodexAdapter
+    return CodexAdapter(CODEX)
+
+
+def _codex_patch(path):
+    return {"input": f"*** Begin Patch\n*** Add File: {path}\n+x\n*** End Patch\n"}
+
+
+@pytest.mark.parametrize("mode, edit, unlisted", [
+    ("manual", "ask", "ask"),
+    ("edits", "allow", "ask"),
+    ("auto", "allow", "allow"),
+])
+def test_codex_sessions_take_the_same_modes(tmp_path, mode, edit, unlisted):
+    codex, ctx = _codex(), _ctx(tmp_path, mode)
+    verdict = lambda tool, tool_input: policy.decide(codex.tool_intent(tool, tool_input), ctx).behavior  # noqa: E731
+    assert verdict("apply_patch", _codex_patch(tmp_path / "index.html")) == edit
+    assert verdict("exec_command", {"cmd": "mkdir -p site/css"}) == unlisted
+    assert verdict("shell", {"command": ["mkdir", "-p", "site"]}) == unlisted
+    # the hard lines hold for Codex too
+    assert verdict("exec_command", {"cmd": "git push origin main"}) == "deny"
+    assert verdict("apply_patch", _codex_patch("/etc/hosts")) == "deny"
+
+
+def test_codex_has_no_plan_mode_so_plan_runs_as_edit_automatically(tmp_path):
+    """Plan needs a CLI that can present a plan; Codex cannot, so it never waits for one."""
+    assert modes.session_mode(None, "plan", resuming=False, can_plan=bool(CODEX.plan_stance)) == "edits"
+    ctx = LaunchContext(cwd=tmp_path, session_dir=tmp_path / "s", ticket_path=tmp_path / "t.md",
+                        system_prompt_path=tmp_path / "sp.md", task_id="1", session_id="sid", plan_first=True)
+    args = _codex().launch_args(ctx, Prepared())
+    assert all(token in args for token in CODEX.ungated_stance)
