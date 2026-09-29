@@ -41,21 +41,24 @@ _POSTGRES_ENV = {
 _DATABASE_URL = "postgresql://u:p@db.internal:5432/app"
 
 # psql logs its arguments and any SQL it reads on stdin (one line), and answers
-# the two queries the script parses; FAKE_HAS_VERSION="" makes the database look
-# empty (no alembic_version), anything else or unset looks migrated.
+# the two queries the script parses; FAKE_DB_STATE is the fresh-path state the
+# script reads (empty | interrupted | existing), unset looks migrated.
 _STUBS = {
     "pg_isready": 'echo "pg_isready $*" >> "$CALL_LOG"',
     "psql": (
         'echo "psql $* $(cat | tr \'\\n\' \' \')" >> "$CALL_LOG"\n'
         'case "$*" in\n'
-        '  *to_regclass*) echo "${FAKE_HAS_VERSION-alembic_version}" ;;\n'
+        '  *automatos_fresh_init_incomplete*) echo "${FAKE_DB_STATE-existing}" ;;\n'
         '  *COUNT*) echo 3 ;;\n'
         "esac"
     ),
     "alembic": 'echo "alembic $*" >> "$CALL_LOG"\nexit "${FAKE_ALEMBIC_RC:-0}"',
     "python": (
         'echo "python $*" >> "$CALL_LOG"\n'
-        'case "$*" in *load_seed_data*) exit "${FAKE_SEED_RC:-0}" ;; esac'
+        'case "$*" in\n'
+        '  *load_seed_data*) exit "${FAKE_SEED_RC:-0}" ;;\n'
+        '  *init_fresh_db*) exit "${FAKE_INIT_RC:-0}" ;;\n'
+        "esac"
     ),
     "fake-app": 'echo "fake-app $*" >> "$CALL_LOG"',
 }
@@ -127,10 +130,34 @@ def test_migrate_on_boot_runs_the_lifecycle_then_the_command(tmp_path):
 
 
 def test_empty_database_is_initialized_before_migrating(tmp_path):
-    env = {**_POSTGRES_ENV, "FAKE_HAS_VERSION": ""}
+    env = {**_POSTGRES_ENV, "FAKE_DB_STATE": "empty"}
     code, calls, out = _run(tmp_path, ["migrate"], env)
     assert code == 0, out
     assert _first(calls, "python -m scripts.init_fresh_db") < _first(calls, "alembic upgrade heads")
+
+
+def test_an_existing_database_never_touches_the_fresh_path(tmp_path):
+    code, calls, out = _run(tmp_path, ["migrate"], dict(_POSTGRES_ENV))
+    assert code == 0, out
+    assert not any(c.startswith("python -m scripts.init_fresh_db") for c in calls), calls
+
+
+def test_an_interrupted_fresh_build_is_resumed_before_migrating(tmp_path):
+    """alembic_version exists from a build's first statement, so it alone must
+    not route a half-built database to `alembic upgrade heads`: the build's
+    marker sends it back to init_fresh_db, which finishes the build."""
+    env = {**_POSTGRES_ENV, "FAKE_DB_STATE": "interrupted"}
+    code, calls, out = _run(tmp_path, ["migrate"], env)
+    assert code == 0, out
+    assert "interrupted" in out
+    assert _first(calls, "python -m scripts.init_fresh_db") < _first(calls, "alembic upgrade heads")
+
+
+def test_a_failed_resume_fails_closed(tmp_path):
+    env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true", "FAKE_DB_STATE": "interrupted", "FAKE_INIT_RC": "1"}
+    code, calls, out = _run(tmp_path, ["fake-app"], env)
+    assert code != 0, out
+    assert not any(c.startswith("alembic upgrade heads") or c.startswith("fake-app") for c in calls), calls
 
 
 def test_failed_migration_fails_closed(tmp_path):

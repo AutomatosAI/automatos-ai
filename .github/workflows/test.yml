@@ -597,6 +597,49 @@ jobs:
           echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
+      # A first boot whose build dies partway (Postgres restarting, the host
+      # stopping) leaves alembic_version behind. The next boot must finish the
+      # build, not serve it: before the incomplete-build marker it skipped the
+      # fresh path, and `upgrade heads` then failed for ever or served without the
+      # columns stages 3-6 add. Proven here against the clean build above.
+      - name: Interrupted fresh build — the next boot resumes it to the same schema
+        env:
+          PGPASSWORD: test
+          DATABASE_URL: postgresql://test:test@127.0.0.1:5432/interrupted_db
+        run: |
+          psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE DATABASE interrupted_db;"
+          echo "First boot: the build dies after stage 2 (alembic_version stamped, repairs not run)..."
+          if python - <<'PY'
+          import scripts.generate_schema_baseline as gsb
+          from sqlalchemy import create_engine
+          from config import config
+          def interrupted(engine, script):
+              raise RuntimeError("simulated interruption before stages 3-6")
+          gsb._repair_passes = interrupted
+          gsb.build_schema(create_engine(config.DATABASE_URL))
+          PY
+          then
+            echo "::error::the simulated interruption did not interrupt the build"; exit 1
+          fi
+          MARK="$(psql -h 127.0.0.1 -U test -d interrupted_db -tAc "SELECT to_regclass('automatos_fresh_init_incomplete');" | tr -d ' ')"
+          if [ -z "${MARK}" ]; then
+            echo "::error::an interrupted build left no incomplete-build marker"; exit 1
+          fi
+          echo "Next boot: init_fresh_db must resume the build..."
+          python -m scripts.init_fresh_db
+          MARK="$(psql -h 127.0.0.1 -U test -d interrupted_db -tAc "SELECT to_regclass('automatos_fresh_init_incomplete');" | tr -d ' ')"
+          if [ -n "${MARK}" ]; then
+            echo "::error::the resumed build left its marker behind"; exit 1
+          fi
+          alembic upgrade heads
+          SCHEMA="SELECT table_name||'.'||column_name||' '||data_type FROM information_schema.columns WHERE table_schema='public' UNION ALL SELECT 'index '||indexname FROM pg_indexes WHERE schemaname='public' UNION ALL SELECT 'view '||table_name FROM information_schema.views WHERE table_schema='public' UNION ALL SELECT 'version '||version_num FROM alembic_version ORDER BY 1"
+          psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "${SCHEMA}" > clean.txt
+          psql -h 127.0.0.1 -U test -d interrupted_db -tAc "${SCHEMA}" > resumed.txt
+          if ! diff clean.txt resumed.txt; then
+            echo "::error::the resumed build differs from a clean one (diff above)"; exit 1
+          fi
+          echo "Interrupted build resumed: $(wc -l < resumed.txt) columns/indexes/views/versions identical to a clean build."
+
   # Prod-image parity (2026-08-30, after #650 shipped the local edition's
   # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
   # three Dockerfiles with NO build args (railway.json: DOCKERFILE, target

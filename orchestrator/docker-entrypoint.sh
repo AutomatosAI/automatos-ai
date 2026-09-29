@@ -116,18 +116,26 @@ check_database() {
 # scripts/init_fresh_db.py for why the migration forest cannot replay from
 # empty). Fails CLOSED: a half-initialized database must never serve. Existing
 # databases (alembic_version present) skip straight to incremental migrations,
-# and init_fresh_db itself refuses a database that already has tables.
+# and init_fresh_db itself refuses a database that already has tables. A build
+# that was interrupted leaves alembic_version behind WITH its incomplete-build
+# marker (scripts/generate_schema_baseline.py); that database is not "existing",
+# so it goes back to init_fresh_db, which finishes the build.
 init_fresh_if_empty() {
-    HAS_VERSION=$(db_psql -tc "SELECT to_regclass('alembic_version');" 2>/dev/null | tr -d ' ')
-    if [ -z "$HAS_VERSION" ]; then
-        echo ""
+    DB_STATE=$(db_psql -tc "SELECT CASE WHEN to_regclass('automatos_fresh_init_incomplete') IS NOT NULL THEN 'interrupted' WHEN to_regclass('alembic_version') IS NULL THEN 'empty' ELSE 'existing' END;" 2>/dev/null | tr -d ' ')
+    if [ "$DB_STATE" = "existing" ]; then
+        return 0
+    fi
+    echo ""
+    if [ "$DB_STATE" = "interrupted" ]; then
+        echo "♻️  A previous fresh-database initialization was interrupted — resuming it..."
+    else
         echo "🆕 No alembic_version — initializing fresh database (CI-proven schema + stamp)..."
-        if python -m scripts.init_fresh_db; then
-            echo "✅ Fresh database initialized"
-        else
-            echo "❌ Fresh-database initialization failed — refusing to start"
-            exit 1
-        fi
+    fi
+    if python -m scripts.init_fresh_db; then
+        echo "✅ Fresh database initialized"
+    else
+        echo "❌ Fresh-database initialization failed — refusing to start"
+        exit 1
     fi
 }
 
