@@ -297,7 +297,7 @@ class Session:
         self.adapter = None
         self._adapter_error: Optional[str] = None
         try:
-            self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None))
+            self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None), getattr(cfg, "session_sandbox", None))
         except (UnknownCli, NotServed) as exc:
             self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
@@ -787,7 +787,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
     import sys
 
     binaries = getattr(cfg, "cli_binaries", None) or {}
-    served = adapters(binaries)
+    served = adapters(binaries, getattr(cfg, "session_sandbox", None))
     clis: Dict[str, Any] = {}
     for cli_id, preset in REGISTRY.items():
         if cli_id in served:

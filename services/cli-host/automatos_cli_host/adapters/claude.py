@@ -3,9 +3,10 @@ real ``--append-system-prompt-file``. Everything Claude-specific that used to si
 in ``session.py`` / ``claude_settings.py`` / ``policy.py`` lives here now,
 moved, not rewritten:
 
-* the per-session ``settings.json`` (hooks only) passed with ``--settings`` —
-  nothing in ``~/.claude`` is edited for hooks; the file is per session and
-  disposable;
+* the per-session ``settings.json`` passed with ``--settings`` — the hooks and,
+  unless the host runs with ``--no-session-sandbox``, Claude Code's own Bash
+  sandbox (``sandbox.py``); nothing in ``~/.claude`` is edited; the file is per
+  session and disposable;
 * the trust decision: ``~/.claude.json`` → ``projects[<cwd>].hasTrustDialogAccepted``
   — registering a directory with the host IS the operator's trust decision; we
   record it where Claude Code reads it (munder ``config.ts:790-822``),
@@ -24,8 +25,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from ..presets import CliPreset
+from ..sandbox import claude_settings, unavailable_reason
 from ..transcript import last_assistant_text, read_usage, transcript_path
-from .base import LaunchContext, Prepared, PresetAdapter, ToolClass, ToolIntent, hook_command
+from .base import LaunchContext, Prepared, PresetAdapter, Refusal, ToolClass, ToolIntent, hook_command
 
 FILE_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 FILE_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
@@ -52,9 +54,10 @@ def subject_of_input(tool_input: Any) -> Optional[str]:
 
 # ── settings + trust (Claude Code's own state) ──────────────────────────────
 
-def build_settings(preset: CliPreset, *, python: Optional[str] = None) -> Dict[str, Any]:
-    """The per-session settings document (hooks only), one command hook per
-    lifecycle event, all pointing at the host's shim."""
+def build_settings(preset: CliPreset, *, python: Optional[str] = None,
+                   sandbox: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The per-session settings document: one command hook per lifecycle event,
+    all pointing at the host's shim, and the ``sandbox`` block when given."""
     cmd = hook_command(python)
     hooks: Dict[str, Any] = {}
     for event in sorted(preset.hook_events):
@@ -62,12 +65,14 @@ def build_settings(preset: CliPreset, *, python: Optional[str] = None) -> Dict[s
         if event in ("PreToolUse", "PostToolUse", "PermissionRequest"):
             entry["matcher"] = "*"
         hooks[event] = [entry]
-    return {"hooks": hooks}
+    return {"hooks": hooks, "sandbox": sandbox} if sandbox else {"hooks": hooks}
 
 
-def write_settings(preset: CliPreset, path: Path, *, python: Optional[str] = None) -> Path:
+def write_settings(preset: CliPreset, path: Path, *, python: Optional[str] = None,
+                   sandbox: Optional[Dict[str, Any]] = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.write_text(json.dumps(build_settings(preset, python=python), indent=2) + "\n", encoding="utf-8")
+    document = build_settings(preset, python=python, sandbox=sandbox)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     os.chmod(path, 0o600)
     return path
 
@@ -220,15 +225,36 @@ class ClaudeAdapter(PresetAdapter):
         out["onboarded"] = has_completed_onboarding() if out["path"] else False
         return out
 
-    def prepare(self, ctx: LaunchContext) -> Prepared:
-        """A hooks-only settings.json in the session dir (``--settings``), the
-        folder-trust decision recorded where Claude reads it, and — when the
-        claim offered Automatos tools — an ``mcp.json`` beside them (PRD-245 W1).
+    def preflight(self) -> Optional[Refusal]:
+        """The base checks, then the sandbox: a host that sandboxes sessions and
+        cannot is not served — said on the ticket and in the fleet view, never a
+        session that starts and dies (``failIfUnavailable``) or runs unsandboxed."""
+        refusal = super().preflight()
+        if refusal is not None:
+            return refusal
+        reason = unavailable_reason(self.sandbox)
+        return Refusal("claude_sandbox_unavailable", reason) if reason else None
 
-        The settings file stays HOOKS ONLY: the MCP server is a separate file, so
+    def _sandbox_settings(self, ctx: LaunchContext) -> Optional[Dict[str, Any]]:
+        """The session's ``sandbox`` block: what the gate refuses to name (F042 —
+        the platform's secrets, this host's state) the sandbox refuses to open."""
+        if self.sandbox is None or not self.sandbox.enabled:
+            return None
+        from ..policy import platform_secret_roots  # policy imports the adapters' base
+        off_limits = (ctx.state_dir,) if ctx.state_dir else ()
+        return claude_settings(self.sandbox, secret_roots=platform_secret_roots(), off_limits=off_limits)
+
+    def prepare(self, ctx: LaunchContext) -> Prepared:
+        """The session's settings.json in the session dir (``--settings``: hooks,
+        and the sandbox unless the host turned it off), the folder-trust decision
+        recorded where Claude reads it, and — when the claim offered Automatos
+        tools — an ``mcp.json`` beside them (PRD-245 W1).
+
+        The settings file never names an MCP server: that is a separate file, so
         ``--strict-mcp-config`` still means "this server and nothing else" and the
         operator's own servers never reach an unattended ticket."""
-        settings_path = write_settings(self.preset, ctx.session_dir / "settings.json")
+        settings_path = write_settings(self.preset, ctx.session_dir / "settings.json",
+                                       sandbox=self._sandbox_settings(ctx))
         record_directory_trust(ctx.cwd)
         args = ["--settings", str(settings_path)]
         mcp_path = write_mcp_config(ctx.session_dir / MCP_CONFIG_FILENAME, ctx.session_tools)

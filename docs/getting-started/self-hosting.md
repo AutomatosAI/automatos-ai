@@ -630,9 +630,44 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   native Windows; started there, it exits with a message saying so. On Windows,
   run the stack and the host inside a WSL2 distro with systemd enabled, and run
   `loginctl enable-linger <user>` so the host keeps running without a login.
-  The step-by-step recipe, including keeping the distro alive, is in
-  [SETUP.md](../../SETUP.md) (tested in
-  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)).
+  A tested recipe, including keeping the distro alive, is in
+  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818).
+- On Linux and WSL2: `bubblewrap` and `socat` (`sudo apt-get install bubblewrap
+  socat`), for the session sandbox below. macOS needs nothing. Without them the
+  host does not run Claude sessions, and Settings → Session mode says why.
+
+### The session sandbox, and what it protects
+
+A session runs as **you**, on your machine. The host's gate judges every tool
+call before it runs: file access outside the session's folders is refused, and
+a shell command outside the ticket's allowlist is held for you. But a gate can
+only read the command line. An allowed `pytest`, `npm run build`, `python
+script.py` or `git commit` runs code the session itself wrote (a `conftest.py`,
+a `package.json` script, a git hook), and text a session reads (a web page, an
+issue, a dependency's README) can steer what it writes.
+
+So every Claude session's shell commands also run in Claude Code's own
+operating-system sandbox (bubblewrap on Linux and WSL2, Seatbelt on macOS),
+which confines those commands and everything they start:
+
+- **Reads:** your credential stores (`~/.aws`, `~/.ssh`, `~/.config/gh`,
+  `~/.git-credentials`, `~/.kube`, `~/.docker/config.json`, …), your Claude
+  login, the host's own state (`~/.automatos/cli-host`) and this checkout's
+  `.env` are unreadable.
+- **Writes:** only the session's folders; `.git/hooks` and `.git/config` stay
+  read-only.
+- **Network:** only the package registries (npm, PyPI). Add a host with
+  `CLI_HOST_ARGS="--session-allow-domain github.com"`. Anything else is refused.
+- **No way around it:** a machine that cannot sandbox does not run the session,
+  and a session cannot retry a command outside the sandbox.
+
+What it does **not** cover: environment variables the host was started with are
+passed to sessions, so keep cloud and Git tokens out of the host's environment.
+It is not a virtual machine either. For the strongest isolation, run the host as
+a dedicated OS user (or in a VM or container) that holds no cloud, Git or SSH
+credentials. On such a host, `--no-session-sandbox` turns the sandbox off.
+`--unlisted-bash allow` removes most of the gate's remaining protection; use it
+only on a host isolated like that.
 
 ### Pair the host, once
 

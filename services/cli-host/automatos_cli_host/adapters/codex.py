@@ -30,6 +30,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ..sandbox import SessionSandbox
 from .base import LaunchContext, Prepared, PresetAdapter, Refusal, ToolClass, ToolIntent, hook_command
 
 MCP_SERVER_NAME = "automatos"
@@ -206,8 +207,9 @@ def find_rollout(home: Path, session_id: str) -> Optional[Path]:
 # ── the adapter ─────────────────────────────────────────────────────────────
 
 class CodexAdapter(PresetAdapter):
-    def __init__(self, preset, binary: Optional[str] = None, home: Optional[Path] = None) -> None:
-        super().__init__(preset, binary)
+    def __init__(self, preset, binary: Optional[str] = None, home: Optional[Path] = None,
+                 sandbox: Optional[SessionSandbox] = None) -> None:
+        super().__init__(preset, binary, sandbox)  # Codex sandboxes itself: -s workspace-write
         self._home = home   # the operator's home (tests give a fake one); None = Path.home()
 
     # ── identity ────────────────────────────────────────────────────────────
