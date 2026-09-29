@@ -652,11 +652,14 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   native Windows; started there, it exits with a message saying so. On Windows,
   run the stack and the host inside a WSL2 distro with systemd enabled, and run
   `loginctl enable-linger <user>` so the host keeps running without a login.
-  A tested recipe, including keeping the distro alive, is in
-  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818).
+  The step-by-step recipe, including keeping the distro alive, is in
+  [SETUP.md](../../SETUP.md) (tested in
+  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)).
 - On Linux and WSL2: `bubblewrap` and `socat` (`sudo apt-get install bubblewrap
   socat`), for the session sandbox below. macOS needs nothing. Without them the
-  host does not run Claude sessions, and Settings → Session mode says why.
+  host does not run Claude sessions, and Settings → Session mode says why. On
+  Ubuntu 24.04 and later, AppArmor also has to allow bubblewrap's user
+  namespaces: [SETUP.md](../../SETUP.md) → session mode, step 2.
 
 ### The session sandbox, and what it protects
 

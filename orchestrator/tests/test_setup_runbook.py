@@ -39,3 +39,14 @@ def test_entry_points_link_to_setup():
     """Agents and people reach SETUP.md from AGENTS.md, README and QUICKSTART."""
     for doc in ("AGENTS.md", "README.md", "QUICKSTART.md"):
         assert "(SETUP.md)" in (REPO / doc).read_text(), f"{doc} must link SETUP.md"
+
+
+def test_setup_installs_what_the_session_sandbox_needs():
+    """The cli-host refuses Claude sessions on Linux/WSL2 without bubblewrap and
+    socat (``sandbox.py``: LINUX_TOOLS / INSTALL_HINT), so session mode in the
+    runbook installs them and covers Ubuntu 24.04's AppArmor userns restriction."""
+    sandbox = (REPO / "services" / "cli-host" / "automatos_cli_host" / "sandbox.py").read_text()
+    assert "apt-get install bubblewrap socat" in sandbox, "sandbox.py's install hint moved: update SETUP.md"
+    runbook = SETUP.read_text()
+    assert "apt-get install -y bubblewrap socat" in runbook
+    assert "apparmor_restrict_unprivileged_userns" in runbook
