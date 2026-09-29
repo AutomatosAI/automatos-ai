@@ -806,7 +806,9 @@ async def document_team_counts(
     }
 
 
-@router.get("/{document_id}", response_model=DocumentResponse)
+# ``:int`` so a static one-segment route registered further down this file
+# (``/reprocess-status``) is not parsed as a document id and refused with 422 (#827).
+@router.get("/{document_id:int}", response_model=DocumentResponse)
 async def get_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
