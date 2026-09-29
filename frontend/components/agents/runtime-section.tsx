@@ -399,11 +399,67 @@ interface RuntimeSectionProps {
   sessionToolGaps?: SessionToolGap[] | null
 }
 
+/** The agent's workspace folder, its worktree choice, its permission mode and what the host says of the folder. */
+function WorkspaceFolderField({ value, onChange }: Pick<RuntimeSectionProps, 'value' | 'onChange'>) {
+  // PRD-239 S6: the verdict on the typed working directory, live.
+  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, isLocal && value.runtime === 'cli')
+  const verdict = check ? describeWorkspaceCheck(check) : null
+  return (
+    <div className="space-y-1">
+      <Label htmlFor="cli-working-directory" className="text-xs">Workspace folder (absolute path on your machine, inside a folder your CLI host allows)</Label>
+      <Input
+        id="cli-working-directory"
+        placeholder="/Users/you/Development/your-workspace"
+        value={value.cli_working_directory}
+        onChange={(e) => onChange('cli_working_directory', e.target.value)}
+      />
+      <p className="text-xs text-muted-foreground">
+        The CLI starts here and loads this folder&apos;s instruction files (CLAUDE.md, AGENTS.md); the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
+      </p>
+      <label className="flex items-start gap-2 text-xs text-muted-foreground" data-testid="cli-worktree">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={value.cli_worktree}
+          onChange={(e) => onChange('cli_worktree', e.target.checked)}
+        />
+        <span>
+          Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
+        </span>
+      </label>
+      <PermissionModeSelect value={value.cli_permission_mode} onChange={(mode) => onChange('cli_permission_mode', mode)} />
+      {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
+      {value.cli_working_directory.trim() && (
+        <p className="text-xs" data-testid="workspace-check">
+          {loading && !verdict ? (
+            <span className="text-muted-foreground">Checking…</span>
+          ) : verdict ? (
+            <span className={VERDICT_CLASS[verdict.tone]}>
+              {verdict.text}
+              {verdict.canvasRoot && (
+                <>
+                  {' '}
+                  <a
+                    href={`/chat?repo=${encodeURIComponent(verdict.canvasRoot)}`}
+                    className="underline underline-offset-2"
+                    data-testid="workspace-open-canvas"
+                  >
+                    Open in the Canvas
+                  </a>
+                </>
+              )}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Could not check this folder right now (is session mode on?).</span>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSectionProps) {
   const sessionMode = isLocal && value.runtime === 'cli'
-  // PRD-239 S6: the verdict on the typed working directory, live.
-  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, sessionMode)
-  const verdict = check ? describeWorkspaceCheck(check) : null
   const avail = useCliAvailability(sessionMode)
   // PRD-245 S1.5: the Automatos tools a ticket session gets, and one line per
   // skill of this agent that calls something a session does not have.
@@ -521,56 +577,7 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
               <p className="text-xs text-muted-foreground">{entry?.model_hint ?? DEFAULT_MODEL_HINT}</p>
             </div>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="cli-working-directory" className="text-xs">Workspace folder (absolute path on your machine, inside a folder your CLI host allows)</Label>
-            <Input
-              id="cli-working-directory"
-              placeholder="/Users/you/Development/your-workspace"
-              value={value.cli_working_directory}
-              onChange={(e) => onChange('cli_working_directory', e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              The CLI starts here and loads this folder&apos;s instruction files (CLAUDE.md, AGENTS.md); the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
-            </p>
-            <label className="flex items-start gap-2 text-xs text-muted-foreground" data-testid="cli-worktree">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={value.cli_worktree}
-                onChange={(e) => onChange('cli_worktree', e.target.checked)}
-              />
-              <span>
-                Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
-              </span>
-            </label>
-            <PermissionModeSelect value={value.cli_permission_mode} onChange={(mode) => onChange('cli_permission_mode', mode)} />
-            {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
-            {value.cli_working_directory.trim() && (
-              <p className="text-xs" data-testid="workspace-check">
-                {loading && !verdict ? (
-                  <span className="text-muted-foreground">Checking…</span>
-                ) : verdict ? (
-                  <span className={VERDICT_CLASS[verdict.tone]}>
-                    {verdict.text}
-                    {verdict.canvasRoot && (
-                      <>
-                        {' '}
-                        <a
-                          href={`/chat?repo=${encodeURIComponent(verdict.canvasRoot)}`}
-                          className="underline underline-offset-2"
-                          data-testid="workspace-open-canvas"
-                        >
-                          Open in the Canvas
-                        </a>
-                      </>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Could not check this folder right now (is session mode on?).</span>
-                )}
-              </p>
-            )}
-          </div>
+          <WorkspaceFolderField value={value} onChange={onChange} />
         </div>
       )}
     </div>
