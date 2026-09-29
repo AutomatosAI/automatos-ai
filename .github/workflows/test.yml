@@ -632,7 +632,11 @@ jobs:
             echo "::error::the resumed build left its marker behind"; exit 1
           fi
           alembic upgrade heads
-          SCHEMA="SELECT table_name||'.'||column_name||' '||data_type FROM information_schema.columns WHERE table_schema='public' UNION ALL SELECT 'index '||indexname FROM pg_indexes WHERE schemaname='public' UNION ALL SELECT 'view '||table_name FROM information_schema.views WHERE table_schema='public' UNION ALL SELECT 'version '||version_num FROM alembic_version ORDER BY 1"
+          # Indexes are compared by DEFINITION, not name: the residual pass re-runs
+          # creator revisions whose unnamed unique constraints Postgres names
+          # users_email_key, _key1, …, so every fresh build already carries
+          # redundant copies, and a build resumed after that pass carries one more.
+          SCHEMA="SELECT table_name||'.'||column_name||' '||data_type FROM information_schema.columns WHERE table_schema='public' UNION SELECT 'index '||regexp_replace(indexdef, 'INDEX \S+ ON', 'INDEX ON') FROM pg_indexes WHERE schemaname='public' UNION SELECT 'view '||table_name FROM information_schema.views WHERE table_schema='public' UNION SELECT 'version '||version_num FROM alembic_version ORDER BY 1"
           psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "${SCHEMA}" > clean.txt
           psql -h 127.0.0.1 -U test -d interrupted_db -tAc "${SCHEMA}" > resumed.txt
           if ! diff clean.txt resumed.txt; then
