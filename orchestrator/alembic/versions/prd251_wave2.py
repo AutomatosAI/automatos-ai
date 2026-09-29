@@ -13,6 +13,11 @@
   written ``campaign_id`` before this wave, so every existing row holds NULL and
   the key validates without touching data.
 
+* S2.2b (US-208): ``social_posts.preview``, the composer's last preview render:
+  ``{"status", "content_hash", "files", "error", "at"}``. Not content: outside the
+  content hash and ``media``, and never a move of the post's status. Nullable
+  JSON (JSONB on Postgres), added only when missing.
+
 ``core/models/socials.py`` declares the same shape, and
 ``tests/test_prd251w2_campaigns.py`` holds the two together.
 
@@ -30,7 +35,8 @@ stays one migration, and every step it adds tolerates what ``create_all`` alread
 built.
 
 The downgrade drops the foreign key, the post index and the table. The posts
-stay, with their ``campaign_id`` values and no key behind them.
+stay, with their ``campaign_id`` values and no key behind them, and lose only
+their ``preview`` (the preview files stay in storage).
 
 Chains single-parent on prd251w1_merge_heads (the single head of main after
 Wave 1 landed through #788).
@@ -64,6 +70,7 @@ POST_CAMPAIGN_INDEX = "ix_social_posts_campaign_id"
 # default it would also reflect every table the keys name (workspaces), which a
 # partial schema need not hold.
 POSTS_BATCH_REFLECT = {"resolve_fks": False}
+POST_PREVIEW_COLUMN = "preview"
 
 
 def _json():
@@ -150,12 +157,35 @@ def unlink_posts_from_campaigns() -> None:
         op.drop_index(POST_CAMPAIGN_INDEX, table_name="social_posts", if_exists=True)
 
 
+def _post_columns() -> List[str]:
+    if not _has_table("social_posts"):
+        return []
+    return [column["name"] for column in sa.inspect(op.get_bind()).get_columns("social_posts")]
+
+
+def add_post_preview_column() -> None:
+    """US-208: ``social_posts.preview``, unless ``create_all`` already built it.
+    A schema without ``social_posts`` (a partial test schema) has no table to add it to."""
+    columns = _post_columns()
+    if not columns or POST_PREVIEW_COLUMN in columns:
+        return
+    op.add_column("social_posts", sa.Column(POST_PREVIEW_COLUMN, _json(), nullable=True))
+
+
+def drop_post_preview_column() -> None:
+    if POST_PREVIEW_COLUMN in _post_columns():
+        with op.batch_alter_table("social_posts", reflect_kwargs=POSTS_BATCH_REFLECT) as batch:
+            batch.drop_column(POST_PREVIEW_COLUMN)
+
+
 def upgrade() -> None:
     create_social_campaigns()
     link_posts_to_campaigns()
+    add_post_preview_column()
 
 
 def downgrade() -> None:
+    drop_post_preview_column()
     unlink_posts_from_campaigns()
     for name, _columns in CAMPAIGN_INDEXES:
         op.drop_index(name, table_name="social_campaigns")

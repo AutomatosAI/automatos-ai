@@ -182,6 +182,8 @@ def test_social_posts_carries_every_d2_column():
         "voice",
         # Wave 1 (S1.8, D12): the footage a post asks its template's slots for.
         "footage",
+        # Wave 2 (US-208): the composer's last preview render, outside the hash.
+        "preview",
     }
 
 

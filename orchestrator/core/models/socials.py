@@ -198,6 +198,12 @@ class SocialPost(Base):
     # setting like voice: outside the content hash, which binds the rendered
     # files. Added by the prd251_wave1 migration.
     footage = Column(_json_type(), nullable=True)
+    # S2.2b (US-208, Wave 2): the composer's last preview render, half resolution:
+    # {"status": "rendering" | "done" | "failed", "content_hash" (the version it
+    # rendered), "files": [{"name", "url", "content_type", "aspect", "duration",
+    # "width", "height"}], "error", "at"}. Not content: outside the content hash
+    # and media, and never a move of the status. Added by the prd251_wave2 migration.
+    preview = Column(_json_type(), nullable=True)
 
     status = Column(String(32), nullable=False, default="draft", server_default="draft")
     content_hash = Column(String(64), nullable=False)
@@ -239,6 +245,7 @@ class SocialPost(Base):
             "media": self.media or {},
             "voice": self.voice or None,
             "footage": self.footage or None,
+            "preview": self.preview or None,
             "status": self.status,
             "content_hash": self.content_hash,
             "approved_hash": self.approved_hash,

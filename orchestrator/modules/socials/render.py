@@ -109,6 +109,8 @@ MAX_REPORTED_FINDINGS = 20
 FINDING_KEYS = ("section", "severity", "code", "message", "selector", "containerSelector", "time", "fixHint", "source", "line")
 FINDING_TEXT_CHARS = 300
 DEFAULT_ASPECT = "original"
+# US-208: a preview's files never share a name with the post's rendered media.
+PREVIEW_FILE_PREFIX = "preview-"
 
 MEDIA_PROFILE_MESSAGE = (
     "Rendering needs the media profile: start the renderer with "
@@ -268,6 +270,9 @@ class RenderJob:
     footage: Optional[footage_recipes.FootagePlan] = None
     # P251W1-RVW-3: the seconds the render holds against the quota, given back when it ends.
     reservation: Optional[RenderReservation] = None
+    # US-208: a preview render (half resolution) is stored as the post's preview:
+    # its files are named ``preview-…`` and registered as no Deliverable.
+    preview: bool = False
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -416,7 +421,8 @@ def stored_file_name(job: RenderJob, output: Mapping[str, Any], *, several: bool
     aspect = str(output.get("aspect") or DEFAULT_ASPECT)
     index = output.get("index")
     number = f"-{index:02d}" if several and isinstance(index, int) and not isinstance(index, bool) else ""
-    return f"{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
+    prefix = PREVIEW_FILE_PREFIX if getattr(job, "preview", False) else ""
+    return f"{prefix}{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
 
 
 def _music_of(job: RenderJob, finished: Mapping[str, Any]) -> Optional[MusicCredit]:
@@ -482,47 +488,61 @@ async def _store_outputs(
     if not outputs:
         raise RenderFailure("no_output", "The renderer finished but returned no file.")
     with tempfile.TemporaryDirectory(prefix="socials-render-") as scratch:
-        fetched = []
-        for output in outputs:
-            file_name = stored_file_name(job, output, several=len(outputs) > 1)
-            try:
-                key = media_key(job.workspace_id, job.post_id, file_name)
-            except MediaNameError as exc:
-                raise RenderFailure("bad_output", f"The renderer returned a file the post cannot store: {exc}") from exc
-            if any(name == file_name for _, name, _, _, _, _ in fetched):
-                raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
-            path = Path(scratch) / file_name
-            try:
-                size, digest = await client.download(str(record["id"]), str(output["name"]), path)
-            except MediaRenderError as exc:
-                raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
-            if size <= 0:
-                raise RenderFailure("empty_output", "The renderer returned an empty file.")
-            fetched.append((output, file_name, key, path, size, digest))
-
+        fetched = [await _fetch(client, job, record, output, Path(scratch), several=len(outputs) > 1) for output in outputs]
+        names = [item[1] for item in fetched]
+        doubled = next((name for name in names if names.count(name) > 1), None)
+        if doubled:
+            raise RenderFailure("bad_output", f"The renderer returned two files for {doubled}.")
         media: Dict[str, List[Dict[str, Any]]] = {}
-        for output, file_name, key, path, size, digest in fetched:
-            aspect = str(output.get("aspect") or DEFAULT_ASPECT)
-            content_type = content_type_for(file_name)
-            try:
-                await asyncio.to_thread(store.put_file, key, path, content_type)
-            except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
-                logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
-                raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
-            entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}
-            deliverable_id = await asyncio.to_thread(_register, session_factory, job, key, file_name, entry, music)
-            file_record: Dict[str, Any] = {
-                "deliverable_id": deliverable_id,
-                "name": file_name,
-                "sha256": digest,
-                "bytes": size,
-                "content_type": content_type,
-            }
-            for fact in ("duration", "width", "height"):
-                if isinstance(output.get(fact), (int, float)) and not isinstance(output.get(fact), bool):
-                    file_record[fact] = output[fact]
+        for item in fetched:
+            aspect, file_record = await _store_one(store, session_factory, job, item, music)
             media.setdefault(aspect, []).append(file_record)
     return media
+
+
+async def _fetch(
+    client: MediaRenderClient, job: RenderJob, record: Mapping[str, Any], output: Mapping[str, Any], scratch: Path,
+    *, several: bool,
+) -> tuple:
+    """One output fetched into ``scratch`` with its sha256: (output, file name, key, path, size, digest)."""
+    file_name = stored_file_name(job, output, several=several)
+    try:
+        key = media_key(job.workspace_id, job.post_id, file_name)
+    except MediaNameError as exc:
+        raise RenderFailure("bad_output", f"The renderer returned a file the post cannot store: {exc}") from exc
+    path = scratch / file_name
+    if path.exists():
+        raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
+    try:
+        size, digest = await client.download(str(record["id"]), str(output["name"]), path)
+    except MediaRenderError as exc:
+        raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
+    if size <= 0:
+        raise RenderFailure("empty_output", "The renderer returned an empty file.")
+    return output, file_name, key, path, size, digest
+
+
+async def _store_one(
+    store: MediaStore, session_factory: Callable[[], Any], job: RenderJob, item: tuple, music: Optional[MusicCredit],
+) -> tuple:
+    """Store one fetched file and register it as a Deliverable (a preview's is not
+    registered): its aspect and its file record."""
+    output, file_name, key, path, size, digest = item
+    aspect = str(output.get("aspect") or DEFAULT_ASPECT)
+    content_type = content_type_for(file_name)
+    try:
+        await asyncio.to_thread(store.put_file, key, path, content_type)
+    except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
+        logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
+        raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
+    file_record: Dict[str, Any] = {"name": file_name, "sha256": digest, "bytes": size, "content_type": content_type}
+    if not job.preview:
+        entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}
+        file_record = {"deliverable_id": await asyncio.to_thread(_register, session_factory, job, key, file_name, entry, music), **file_record}
+    for fact in ("duration", "width", "height"):
+        if isinstance(output.get(fact), (int, float)) and not isinstance(output.get(fact), bool):
+            file_record[fact] = output[fact]
+    return aspect, file_record
 
 
 def rendered_seconds(media: Mapping[str, List[Mapping[str, Any]]]) -> float:

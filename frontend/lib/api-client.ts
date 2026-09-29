@@ -505,6 +505,8 @@ export interface SocialPost {
   timezone: string | null
   /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
   targets?: SocialPostTarget[]
+  /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
+  preview?: SocialPostPreview | null
   created_at: string
   updated_at: string
 }
@@ -538,6 +540,57 @@ export interface SocialPostsResponse {
   total: number
 }
 
+/** One file of a post's preview: `url` is the post's media route (fetched with auth). */
+export interface SocialPreviewFile {
+  name: string
+  url: string
+  aspect?: string
+  content_type?: string
+  duration?: number
+  width?: number
+  height?: number
+}
+
+/** US-208: a post's preview render, for the version `content_hash` names. */
+export interface SocialPostPreview {
+  status: 'rendering' | 'done' | 'failed'
+  content_hash: string
+  files: SocialPreviewFile[]
+  error: string | null
+  at: string
+}
+
+/** A social template's variable (core/social_templates.py variables_schema). */
+export interface SocialTemplateVariable {
+  type: 'text' | 'number' | 'boolean'
+  label?: string
+  description?: string
+  default?: string | number | boolean
+  claim?: boolean
+  max_chars?: number
+  min?: number
+  max?: number
+}
+
+/** The composer's template: what its fields and preview sizes come from. */
+export interface SocialComposeTemplate {
+  id: string
+  name: string
+  format: 'social_image' | 'social_video'
+  sizes: string[]
+  variables_schema: Record<string, SocialTemplateVariable>
+}
+
+/** GET /api/socials/sources: a candidate a claim may be bound to (D7). */
+export interface SocialSourceCandidate {
+  kind: SocialClaimSource['kind']
+  ref: string
+  title: string
+  detail?: string | null
+  as_of?: string | null
+  value?: unknown
+}
+
 /** A variable of the post's template, as the post stores it: its value, and whether it is a claim (D7). */
 export interface SocialPostVariable {
   value: string | number | boolean
@@ -569,6 +622,8 @@ export interface SocialComposeProposal {
   copy: { base: string; per_channel: Record<string, string> }
   format: string | null
   template_id: string | null
+  /** US-208: the chosen template's variables and sizes; null when none fits. */
+  template: SocialComposeTemplate | null
   variables: Record<string, SocialPostVariable>
   sources: Record<string, SocialClaimSource>
   channels: string[]
@@ -583,6 +638,11 @@ export interface UpdateSocialPostInput {
   voice?: SocialPostVoice | { toolkit: 'kokoro' } | null
   /** Slot name → `{ prompt }`; `null` asks for no footage. */
   footage?: Record<string, { prompt: string }> | null
+  /** US-208: what the composer saves again after a first save. */
+  format?: string | null
+  template_id?: string | null
+  variables?: Record<string, SocialPostVariable>
+  sources?: Record<string, SocialClaimSource>
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -2779,8 +2839,26 @@ class ApiClient {
 
   /** Start a render (S1.1c): answers with the post in `rendering`; the render
    * ends it in `needs_approval` or `failed`. 429 = no render minutes left this month. */
-  async renderSocialPost(postId: string): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+  async renderSocialPost(postId: string, options: { preview?: boolean } = {}): Promise<SocialPost> {
+    if (!options.preview) return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+    // US-208: the composer's half-resolution preview; the post keeps its status, media and hash.
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, {
+      method: 'POST',
+      body: JSON.stringify({ preview: true }),
+    })
+  }
+
+  /** GET /api/socials/sources (D7): what a claim can be bound to, from this workspace. */
+  async searchSocialSources(params: { q?: string; kind?: string; limit?: number } = {}): Promise<{
+    candidates: SocialSourceCandidate[]
+    total: number
+  }> {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.kind) query.set('kind', params.kind)
+    if (params.limit) query.set('limit', String(params.limit))
+    const suffix = query.toString() ? `?${query}` : ''
+    return this.request(`/api/socials/sources${suffix}`)
   }
 
   async getSocialsUsage(): Promise<SocialsUsageResponse> {

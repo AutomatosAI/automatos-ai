@@ -7,6 +7,7 @@ import type {
   CreateSocialPostInput,
   SocialChannel,
   SocialComposeProposal,
+  SocialComposeTemplate,
   SocialPostKind,
   SocialPostTargetInput,
 } from '@/lib/api-client'
@@ -20,6 +21,8 @@ export interface ComposerDraft {
   perChannel: Record<string, string>
   format: string | null
   templateId: string | null
+  /** The template's variables and sizes (US-208): what the fields come from. */
+  template: SocialComposeTemplate | null
   variables: SocialComposeProposal['variables']
   sources: SocialComposeProposal['sources']
   /** Channel (toolkit) → the post kind it publishes. */
@@ -62,6 +65,7 @@ export function draftFromProposal(
     perChannel: { ...proposal.copy.per_channel },
     format: proposal.format,
     templateId: proposal.template_id,
+    template: proposal.template ?? null,
     variables: { ...proposal.variables },
     sources: { ...proposal.sources },
     kinds,
@@ -85,4 +89,9 @@ export function postInput(draft: ComposerDraft): CreateSocialPostInput {
 /** Where the draft publishes (PUT /api/socials/posts/{id}/targets): one target per chosen channel. */
 export function draftTargets(draft: ComposerDraft): SocialPostTargetInput[] {
   return Object.entries(draft.kinds).map(([toolkit, post_kind]) => ({ toolkit, post_kind }))
+}
+
+/** Whether the draft renders as a video: a preview render (US-208), else the real one. */
+export function isVideoDraft(draft: Pick<ComposerDraft, 'format' | 'template'>): boolean {
+  return draft.template ? draft.template.format === 'social_video' : draft.format === 'video'
 }

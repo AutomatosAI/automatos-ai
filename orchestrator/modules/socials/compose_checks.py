@@ -141,6 +141,8 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "copy": _copy(raw.get("copy"), ctx, warnings),
         "format": post_format,
         "template_id": str(template["id"]) if template is not None else None,
+        # US-208: the template's variables and sizes, which the composer's fields come from.
+        "template": dict(template) if template is not None else None,
         "variables": variables,
         "sources": _sources(raw.get("sources"), variables, ctx, warnings),
         "channels": [str(c["toolkit"]) for c in ctx.channels],

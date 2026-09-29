@@ -100,6 +100,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.socials_channels import router as channels_router
+from api import socials_preview
 from api.socials_compose import router as compose_router
 from api.socials_targets import router as targets_router
 from config import config
@@ -117,7 +118,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, notify, render, service
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, service
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -209,6 +210,11 @@ class RejectRequest(_Strict):
     reason: Optional[str] = None
 
 
+class RenderRequest(_Strict):
+    # US-208: the composer's half-resolution preview, stored as the post's preview.
+    preview: bool = False
+
+
 class ScheduleRequest(_Strict):
     scheduled_for: datetime
     timezone: str = "UTC"
@@ -239,7 +245,7 @@ def _raise_for(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=409, detail={"message": str(exc), "content_hash": exc.current_hash})
     if isinstance(exc, PublishingUnavailable):
         raise HTTPException(status_code=501, detail=str(exc))
-    if isinstance(exc, (service.IllegalTransition, service.NotPublishable)):
+    if isinstance(exc, (service.IllegalTransition, service.NotPublishable, preview.PreviewInProgress)):
         raise HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, (service.InvalidPost, render.NotRenderable)):
         raise HTTPException(status_code=422, detail=str(exc))
@@ -743,6 +749,7 @@ async def publish_social_post_now(
 @router.post("/posts/{post_id}/render", status_code=202, dependencies=[CAN_UPDATE])
 async def render_social_post(
     post_id: UUID,
+    body: Optional[RenderRequest] = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -758,13 +765,16 @@ async def render_social_post(
     (503). The render ends the post in ``needs_approval`` with the files in
     ``media``, or in ``failed`` with the report in ``review_log``: a render whose
     footage would take the post or the workspace over its media cap submits
-    nothing and fails saying why (D13).
+    nothing and fails saying why (D13). With ``{"preview": true}`` (US-208) it is
+    the composer's half-resolution preview (``api/socials_preview.py``): the post
+    keeps its status, media and hash, and the same quota rule applies.
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
     workspace = _workspace(db, ctx)
+    flow = socials_preview.preview_post if body is not None and body.preview else render_post
     try:
-        return await render_post(db, workspace, post, actor)
+        return await flow(db, workspace, post, actor)
     except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         _raise_for(exc)
 
