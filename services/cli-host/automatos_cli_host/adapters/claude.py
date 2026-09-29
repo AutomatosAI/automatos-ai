@@ -17,12 +17,15 @@ moved, not rewritten:
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Iterator, Mapping, Optional
 
 from ..presets import CliPreset
 from ..sandbox import claude_settings, unavailable_reason
@@ -172,15 +175,51 @@ def is_directory_trusted(cwd: Path, home: Optional[Path] = None) -> bool:
     return bool(isinstance(entry, dict) and entry.get("hasTrustDialogAccepted"))
 
 
+# #838: every session records trust with a read-modify-write of ~/.claude.json,
+# and sessions start on threads of their own. Two starting together both read
+# the old file, the last replace won, and the other folder's trust was gone —
+# its ``claude --worktree`` refused to start ("Workspace trust not yet
+# accepted"). One writer at a time: a lock for this process's threads, and an
+# flock on a file beside it for any other process that follows the protocol.
+_TRUST_LOCK = threading.Lock()
+TRUST_WRITE_ATTEMPTS = 3
+
+
+@contextmanager
+def _trust_write_lock(path: Path) -> Iterator[None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _TRUST_LOCK:
+        fd = os.open(str(path.with_name(path.name + ".automatos-lock")), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)  # closing the descriptor releases the flock
+
+
 def record_directory_trust(cwd: Path, home: Optional[Path] = None) -> bool:
     """Record the operator's registration decision where Claude Code reads it.
 
     Returns True when the file was changed. Backup-first (``.claude.json.automatos-bak``),
     atomic replace, and ONLY the one flag under ``projects[<cwd>]`` is touched.
+    Serialised (#838), and read back after each write: a writer outside the
+    lock (a running ``claude`` saving its own state) can replace the file in
+    between, so the flag is written again, up to ``TRUST_WRITE_ATTEMPTS`` times.
     """
     if is_directory_trusted(cwd, home):
         return False
     path = claude_state_path(home)
+    for _ in range(TRUST_WRITE_ATTEMPTS):
+        with _trust_write_lock(path):
+            if not is_directory_trusted(cwd, home):
+                _write_trust(path, cwd, home)
+        if is_directory_trusted(cwd, home):
+            return True
+    return False
+
+
+def _write_trust(path: Path, cwd: Path, home: Optional[Path]) -> None:
+    """The one read-modify-write, under ``_trust_write_lock``."""
     state = read_claude_state(home)
     projects = state.get("projects")
     if not isinstance(projects, dict):
@@ -211,7 +250,6 @@ def record_directory_trust(cwd: Path, home: Optional[Path] = None) -> bool:
         except OSError:
             pass
         raise
-    return True
 
 
 # ── the adapter ─────────────────────────────────────────────────────────────
