@@ -29,6 +29,7 @@ from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
 from modules.socials.service import footage_generated
 from modules.socials.step_results import ID
+from modules.socials.step_sources import reads_steps
 
 # The media family each post kind publishes (a content type's first part).
 KIND_MEDIA: Mapping[str, Tuple[str, ...]] = MappingProxyType({
@@ -52,7 +53,6 @@ class StalePlan(Exception):
     """A target's stored steps predate publishing (they say nothing of what a step returns)."""
 
 
-STEPS_SOURCE = "$steps."
 STALE_PLAN = (
     "This channel's publish plan was saved before publishing existed: choose the post's "
     "channels again in the composer, then approve it."
@@ -203,13 +203,6 @@ def resolve_value(value: Any, ctx: TargetContext, outputs: Mapping[str, Mapping[
     return None
 
 
-def _reads_steps(source: Any) -> bool:
-    """Whether a param's source reads an earlier step's output (``$steps.``)."""
-    if isinstance(source, (list, tuple)):
-        return any(_reads_steps(item) for item in source)
-    return isinstance(source, str) and any(ref.startswith(STEPS_SOURCE) for ref in source.split("|"))
-
-
 def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
     """The step's params, each from its source; one that resolves to nothing is left
     out, except a file or link param, or one reading what an earlier step returned
@@ -223,7 +216,7 @@ def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, 
             raise SourceMissing(f"{step.action} needs a {wanted} file for {name}, and the post has none")
         if value is None and isinstance(source, Mapping):
             raise SourceMissing(f"{step.action}: none of {', '.join(source['else'])} is allowed for {name} on this account")
-        if value is None and _reads_steps(source):
+        if value is None and reads_steps(source):
             raise SourceMissing(f"{step.action}: {name} reads what an earlier step returned ({source}), and it returned nothing")
         if value is not None:
             params[name] = value

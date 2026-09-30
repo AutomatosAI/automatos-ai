@@ -83,6 +83,7 @@ from core.models.socials import SOCIAL_TARGET_POST_KINDS, SocialPost, SocialPost
 from modules.socials.channel_adapters import CHANNEL_ADAPTERS, GENERIC_ADAPTER
 from modules.socials.settings import SOCIALS_SETTINGS_CATEGORY
 from modules.socials.step_results import ID, parse_permalink, parse_returns, parse_until
+from modules.socials.step_sources import check_source, file_params
 
 logger = logging.getLogger(__name__)
 
@@ -336,17 +337,7 @@ _STEP_KEYS = frozenset(
     {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink", "jpeg"}
 )
 _ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
-_STEP_REF = "$steps."
-_SOURCE = re.compile(
-    r"\$(?:copy|title|thumbnail|idempotency_key|generated|media(?:\[\]|\.content_type|\.bytes)?"
-    r"|option\.[a-z][a-z0-9_]*|steps\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)"
-)
-# A choice (US-304): the ``choose`` source's value when ``among`` holds it, else the
-# first of ``else`` that ``among`` holds (``else``'s first when ``among`` is unknown).
-CHOICE_KEYS = frozenset({"choose", "among", "else"})
 _NOT_A_WORD = re.compile(r"[^A-Z0-9]+")
-# The sources that name a media FILE: a param reading one takes a file or a link.
-_FILE_SOURCES = ("$media", "$media[]", "$thumbnail")
 
 
 @dataclass(frozen=True)
@@ -452,41 +443,6 @@ def _names(value: Any, where: str, prefix: str = "") -> Tuple[str, ...]:
     return tuple(names)
 
 
-def _check_choice(value: Mapping[str, Any], earlier: FrozenSet[str], where: str) -> None:
-    fallback = value.get("else")
-    if set(value) != CHOICE_KEYS or not isinstance(fallback, list) or not all(isinstance(v, str) for v in fallback):
-        raise ValueError(f"{where}: a choice is {sorted(CHOICE_KEYS)}, its else a list of values")
-    _check_source(value["choose"], earlier, where)
-    _check_source(value["among"], earlier, where)
-
-
-def _check_source(value: Any, earlier: FrozenSet[str], where: str) -> None:
-    """A list of sources, a choice, a literal, or ``$`` sources joined by ``|``: each
-    one the grammar knows, and a step source naming an EARLIER step and what it
-    returns (``earlier``: ``<id>`` for a step that returns an id, ``<id>.<name>`` for
-    each name it returns)."""
-    if isinstance(value, list):
-        for item in value:
-            _check_source(item, earlier, where)
-        return
-    if isinstance(value, Mapping):
-        _check_choice(value, earlier, where)
-        return
-    for ref in value.split("|") if isinstance(value, str) and value.startswith("$") else ():
-        if not _SOURCE.fullmatch(ref) or (ref.startswith(_STEP_REF) and ref[len(_STEP_REF):] not in earlier):
-            raise ValueError(f"{where}: {ref!r} is not a source (a step source names an earlier step that returns an id)")
-
-
-def _file_params(params: Mapping[str, Any]) -> FrozenSet[str]:
-    """The params whose source reads a media file (``$media``, ``$media[]``, ``$thumbnail``)."""
-    def reads_file(value: Any) -> bool:
-        if isinstance(value, list):
-            return any(reads_file(item) for item in value)
-        return isinstance(value, str) and any(ref in _FILE_SOURCES for ref in value.split("|"))
-
-    return frozenset(name for name, value in params.items() if reads_file(value))
-
-
 def _parse_step(toolkit: str, where: str, raw: Any, seen: FrozenSet[str], referable: FrozenSet[str]) -> ChannelStep:
     """One step, checked. ``seen``: the earlier steps' ids; ``referable``: those of
     them that return an id, the only ones a ``$steps.<id>`` source may name."""
@@ -499,12 +455,12 @@ def _parse_step(toolkit: str, where: str, raw: Any, seen: FrozenSet[str], refera
     if not isinstance(params, Mapping):
         raise ValueError(f"{where}.{action}: its params are not an object")
     for name, value in params.items():
-        _check_source(value, referable, f"{where}.{action}.{name}")
+        check_source(value, referable, f"{where}.{action}.{name}")
     files = _names(raw.get("files"), f"{where}.{action} files")
     urls = _names(raw.get("urls"), f"{where}.{action} urls")
     if not set(files) | set(urls) <= set(params):
         raise ValueError(f"{where}.{action}: a file or link param is not one of its params")
-    if not _file_params(params) <= set(files) | set(urls):
+    if not file_params(params) <= set(files) | set(urls):
         raise ValueError(f"{where}.{action}: a param reading a media file must be one of its files or urls")
     jpeg = _names(raw.get("jpeg"), f"{where}.{action} jpeg")
     if not set(jpeg) <= set(files):
