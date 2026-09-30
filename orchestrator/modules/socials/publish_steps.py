@@ -55,6 +55,8 @@ _TRANSIENT = re.compile(
     r"rate.?limit|too many requests|service unavailable|bad gateway|gateway time",
     re.IGNORECASE,
 )
+# The platform refused the connection's credentials: the channel's setup note says what to do.
+_AUTH = re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|credential|invalid.?token|expired.?token|authenticat", re.IGNORECASE)
 _CLIENT_ERROR = re.compile(r"\b4(?!29)\d\d\b(?!\s*(?:char|byte|word|item|second|ms\b|px|kb|mb))")
 _NEVER_TRANSIENT = frozenset({ERROR_TYPE_DENIED, ERROR_TYPE_POST_GATE})
 
@@ -123,13 +125,17 @@ def _envelope_error(result: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
-def _failure(step: ChannelStep, result: Mapping[str, Any]) -> StepFailure:
+def _failure(step: ChannelStep, result: Mapping[str, Any], setup_note: Optional[str] = None) -> StepFailure:
+    """The step's failure: the platform's message, transient or not (D8), and the
+    channel's setup note when the platform refused the connection's credentials."""
     message = str(result.get("error") or _envelope_error(result) or "no reason given").strip()
     transient = (
         result.get("error_type") not in _NEVER_TRANSIENT
         and not _CLIENT_ERROR.search(message)
         and bool(_TRANSIENT.search(message))
     )
+    if setup_note and not transient and _AUTH.search(message):
+        message = f"{message[: ERROR_MAX_CHARS // 2]} ({setup_note})"  # the note survives the cut
     return StepFailure(f"{step.action}: {message}", transient=transient)
 
 
@@ -144,7 +150,7 @@ async def _call(step: ChannelStep, params: Dict[str, Any], ctx: TargetContext, r
         way_through=PLATFORM_PUBLISHER,
     )
     if not result.get("success") or _envelope_error(result):
-        raise _failure(step, result)
+        raise _failure(step, result, ctx.setup_note)
     return output_of(result)
 
 

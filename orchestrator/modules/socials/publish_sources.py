@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
-from modules.socials.capabilities import ChannelStep
+from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
 from modules.socials.step_results import ID
 
@@ -69,6 +69,7 @@ class TargetContext:
     idempotency_key: str
     media: Tuple[MediaFile, ...]  # the files of the target's kind, in media order
     thumbnail: Optional[MediaFile]
+    setup_note: Optional[str] = None  # the channel's, named when the platform refuses our credentials
 
 
 def _family(media: MediaFile) -> str:
@@ -96,7 +97,13 @@ def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetCon
         idempotency_key=target.idempotency_key,
         media=tuple(f for f in files if _family(f) in families),
         thumbnail=next((f for f in files if _family(f) == IMAGE), None),
+        setup_note=_setup_note(target.toolkit),
     )
+
+
+def _setup_note(toolkit: str) -> Optional[str]:
+    adapter = SEEDED_CHANNELS.get(toolkit)
+    return adapter.setup_note if adapter is not None else None
 
 
 def steps_of(action_plan: Any) -> Tuple[ChannelStep, ...]:
