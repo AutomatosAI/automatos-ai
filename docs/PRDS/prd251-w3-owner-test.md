@@ -21,6 +21,7 @@ What the Ralph loop can't prove: real posts on real platforms, and the calendar 
 5. **LinkedIn images** need the workspace's own "LinkedIn Community Management OAuth2 API" credential (the platform's credential store): Composio cannot upload LinkedIn images, so the workaround posts them.
 6. **Public storage (for the YouTube thumbnail only):** set `SOCIALS_PUBLIC_MEDIA_BUCKET` in `stack.env` if you want to test the thumbnail; without it the thumbnail step is skipped and the receipt says so.
 7. Wave 2's setup still applies: Socials on, the brand kit set, a few rendered posts.
+8. **Posts made before Wave 3:** choose their channels again in the composer, then approve them again. Their stored publish plans predate publishing (a target with one fails at once, saying so, and nothing is sent), and with channels a post's title and whether its footage is AI-made are now part of what an approval covers, so older approvals no longer match.
 
 ## 1. Publish now, one channel at a time (S3.3)
 
@@ -40,7 +41,8 @@ The result fields each step reads (the post's id and link) could not be checked 
 - [ ] **Partial failure:** post to two channels where one is broken on purpose (for example disconnect X in Composio after approving). The post ends **Partially published**: the good channel's receipt links to its post, the broken one shows the platform's message, and a notification arrives.
 - [ ] **Retry:** reconnect, then **Retry the failed channels**. Only the failed channel is posted; the other is not posted twice.
 - [ ] **Stale content never posts:** approve a post, edit its copy (or, for a post with channels, its title), then try **Publish now**. It refuses (the approval was reset), and nothing reaches the platform.
-- [ ] **No blind second post:** if a channel's publish times out or the platform answers 5xx, the receipt says the platform may have published it and to check the channel before retrying; nothing is sent again on its own. Only a 429 or a refused connection is tried again automatically.
+- [ ] **No blind second post:** if a channel's publish times out or the platform answers 5xx, the receipt says the platform may have published it and to check the channel before retrying; nothing is sent again on its own (not by the publisher, and not by the Composio SDK). Only a 429 or a refused connection is tried again automatically.
+- [ ] **A lost publish is told:** after the restart checks in §5, the post's notification arrives (published, partly published or failed).
 
 ## 3. Scheduling (S3.1)
 
