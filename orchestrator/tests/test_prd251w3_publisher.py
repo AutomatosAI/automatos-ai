@@ -258,7 +258,7 @@ def test_a_transient_error_tries_again_up_to_the_limit_then_fails_the_target(env
     monkeypatch.setattr(config, "SOCIALS_MAX_TARGET_ATTEMPTS", 3)
     monkeypatch.setattr(config, "SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS", 7)
     post_id = _approved_post(env, _target("linkedin", "text"))
-    executor = FakeExecutor({**LINKEDIN, "LINKEDIN_CREATE_LINKED_IN_POST": [refused("LinkedIn answered 503 Service Unavailable")]})
+    executor = FakeExecutor({**LINKEDIN, "LINKEDIN_CREATE_LINKED_IN_POST": [refused("429 Too Many Requests")]})
 
     assert _publish(env, post_id, executor) == "failed"
 
@@ -266,13 +266,13 @@ def test_a_transient_error_tries_again_up_to_the_limit_then_fails_the_target(env
     assert executor.actions == ["LINKEDIN_GET_MY_INFO"] + ["LINKEDIN_CREATE_LINKED_IN_POST"] * 3
     assert env.sleeps == [7, 14]
     target = _targets(env, post_id)["linkedin", "text"]
-    assert target["attempts"] == 3 and target["status"] == "failed" and "503" in target["error"]
+    assert target["attempts"] == 3 and target["status"] == "failed" and "429" in target["error"]
     assert [n["event_type"] for n in env.notices] == ["social_post_failed"]
 
 
 def test_a_transient_error_then_success_publishes(env):
     post_id = _approved_post(env, _target("linkedin", "text"))
-    executor = FakeExecutor({**LINKEDIN, "LINKEDIN_CREATE_LINKED_IN_POST": [refused("Read timed out"), ok({"id": SHARE_URN})]})
+    executor = FakeExecutor({**LINKEDIN, "LINKEDIN_CREATE_LINKED_IN_POST": [refused("Connection refused"), ok({"id": SHARE_URN})]})
     assert _publish(env, post_id, executor) == "published"
     assert _targets(env, post_id)["linkedin", "text"]["attempts"] == 2
 
@@ -343,8 +343,37 @@ def test_a_render_that_failed_is_not_a_publish_to_retry():
 def test_only_a_transient_failure_is_tried_again(message, transient):
     from modules.socials.publish_steps import _failure
 
-    step = SEEDED_CHANNELS["linkedin"].kinds["text"][1]
+    step = SEEDED_CHANNELS["linkedin"].kinds["text"][0]  # the account lookup: a read
+    assert step.step_class != "publish"
     assert _failure(step, refused(message)).transient is transient
+
+
+@pytest.mark.parametrize("message, transient", [
+    ("429 Too Many Requests", True),
+    ("Connection refused", True),
+    ("LinkedIn answered 503 Service Unavailable", False),
+    ("Read timed out", False),
+    ("Connection reset by peer", False),
+])
+def test_a_publish_step_is_tried_again_only_when_nothing_reached_the_platform(message, transient):
+    from modules.socials.publish_steps import MAY_BE_LIVE, _failure
+
+    step = SEEDED_CHANNELS["linkedin"].kinds["text"][1]
+    assert step.step_class == "publish"
+    failure = _failure(step, refused(message))
+    assert failure.transient is transient
+    assert (MAY_BE_LIVE in failure.message) is not transient
+
+
+def test_a_publish_that_timed_out_is_not_sent_again_and_says_it_may_be_live(env):
+    post_id = _approved_post(env, _target("linkedin", "text"))
+    executor = FakeExecutor({**LINKEDIN, "LINKEDIN_CREATE_LINKED_IN_POST": [refused("Read timed out"), ok({"id": SHARE_URN})]})
+
+    assert _publish(env, post_id, executor) == "failed"
+
+    assert executor.actions.count("LINKEDIN_CREATE_LINKED_IN_POST") == 1 and env.sleeps == []
+    target = _targets(env, post_id)["linkedin", "text"]
+    assert target["attempts"] == 1 and "check the channel before you retry" in target["error"]
 
 
 def test_a_refused_step_fails_its_target_and_is_never_retried(env):
@@ -675,3 +704,26 @@ def test_two_concurrent_publishes_of_one_post_issue_one_sequence_on_postgres(pg_
             db.execute(sa.text("DELETE FROM social_posts WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": str(workspace_id)})
             db.execute(sa.text("DELETE FROM workspaces WHERE id = CAST(:ws AS uuid)"), {"ws": str(workspace_id)})
             db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Review (P251W3): the title a channel publishes is approved content
+# ---------------------------------------------------------------------------
+
+
+def test_a_title_change_after_approval_voids_it_when_the_post_has_channels(env):
+    post_id = _approved_post(env, _target("youtube", "video"))
+    with env.factory() as db:
+        post = service.get_post(db, WS, post_id)
+        service.update_post(post, "agent:7", {"title": "A title nobody approved"}, agent="Social Media Director")
+        db.commit()
+        assert post.status == "needs_approval" and post.approved_hash != post.content_hash
+    with pytest.raises(service.NotPublishable):
+        _claim(env, post_id)
+
+
+def test_a_title_is_not_content_for_a_post_with_no_channels():
+    post = service.create_draft(SimpleNamespace(add=lambda obj: None), workspace_id=WS, created_by=AUTHOR, title="One")
+    before = post.content_hash
+    service.update_post(post, AUTHOR, {"title": "Two"})
+    assert post.content_hash == before

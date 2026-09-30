@@ -132,7 +132,9 @@ def test_a_status_that_reports_a_failure_fails_the_target_with_tiktok_s_reason(e
     executor = FakeExecutor(_tiktok(statuses=("FAILED",)))
     assert _publish(env, post_id, executor) == "failed"
     assert executor.actions.count("TIKTOK_UPLOAD_VIDEO") == 1  # a platform's refusal is not retried
-    assert "spam_risk_too_many_posts" in _targets(env, post_id)["tiktok", "video"]["error"]
+    error = _targets(env, post_id)["tiktok", "video"]["error"]
+    assert "spam_risk_too_many_posts" in error
+    assert "check the channel" not in error  # TikTok said it failed: nothing is live
 
 
 def test_a_publish_that_never_finishes_fails_saying_so(env, monkeypatch):
@@ -143,7 +145,10 @@ def test_a_publish_that_never_finishes_fails_saying_so(env, monkeypatch):
     executor = FakeExecutor(_tiktok(statuses=("PROCESSING_UPLOAD",)))
     assert _publish(env, post_id, executor) == "failed"
     assert executor.actions.count("TIKTOK_FETCH_PUBLISH_STATUS") == 4  # t = 0, 10, 20, 30
-    assert "TIKTOK_FETCH_PUBLISH_STATUS did not finish within 30 seconds" in _targets(env, post_id)["tiktok", "video"]["error"]
+    error = _targets(env, post_id)["tiktok", "video"]["error"]
+    assert "TIKTOK_FETCH_PUBLISH_STATUS did not finish within 30 seconds" in error
+    # The upload (the publish step) ran: the post may be live, so a retry is not blind.
+    assert "check the channel before you retry" in error
 
 
 def test_the_url_pull_actions_are_never_in_a_sequence_and_the_gate_still_refuses_them():

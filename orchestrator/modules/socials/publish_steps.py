@@ -16,7 +16,10 @@ upload spec, never the executor's global ``UPLOAD_ACTIONS``.
   ``until`` says done or failed, or ``SOCIALS_PUBLISH_MAX_WAIT_SECONDS`` pass.
 * **Failures** (D8) carry the platform's own message and whether they are transient:
   a timeout, a 5xx, a 429 or a connection error. A 4xx, a refusal by the deny list
-  or the post gate, or a platform's refusal is not.
+  or the post gate, or a platform's refusal is not. A ``publish`` step is tried again
+  only when nothing reached the platform (a 429, a refused connection): after a
+  timeout or a 5xx the post may be live, so its target fails saying so, as it does
+  when a step after the publish fails. A post is never sent twice blindly.
 * **Resuming.** ``outputs`` keeps what each step returned, so a retried attempt
   starts at the step that failed: a file uploaded once is not uploaded again.
 
@@ -56,6 +59,11 @@ _TRANSIENT = re.compile(
     r"rate.?limit|too many requests|service unavailable|bad gateway|gateway time",
     re.IGNORECASE,
 )
+# A publish step's request may have reached the platform when it fails ambiguously (a
+# timeout, a 5xx, a dropped connection): it is tried again only when the platform said
+# nothing was done (a 429) or the request never left (a refused connection).
+_SENT_NOTHING = re.compile(r"\b429\b|too many requests|rate.?limit|connection refused|connecterror", re.IGNORECASE)
+MAY_BE_LIVE = "The platform may have published it: check the channel before you retry."
 # The platform refused the connection's credentials: the channel's setup note says what to do.
 _AUTH = re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|credential|invalid.?token|expired.?token|authenticat", re.IGNORECASE)
 _CLIENT_ERROR = re.compile(r"\b4(?!29)\d\d\b(?!\s*(?:char|byte|word|item|second|ms\b|px|kb|mb))")
@@ -63,11 +71,13 @@ _NEVER_TRANSIENT = frozenset({ERROR_TYPE_DENIED, ERROR_TYPE_POST_GATE})
 
 
 class StepFailure(Exception):
-    """A step did not do its work: the platform's message, and whether to try again."""
+    """A step did not do its work: the platform's message, whether to try again, and
+    whether the platform settled the outcome itself (a status step saying it failed)."""
 
-    def __init__(self, message: str, *, transient: bool) -> None:
+    def __init__(self, message: str, *, transient: bool, settled: bool = False) -> None:
         self.message = message[:ERROR_MAX_CHARS]
         self.transient = transient
+        self.settled = settled
         super().__init__(self.message)
 
 
@@ -156,6 +166,8 @@ def _failure(step: ChannelStep, result: Mapping[str, Any], setup_note: Optional[
     )
     if setup_note and not transient and _AUTH.search(message):
         message = f"{message[: ERROR_MAX_CHARS // 2]} ({setup_note})"  # the note survives the cut
+    if transient and step.step_class == PUBLISH and not _SENT_NOTHING.search(message):
+        return StepFailure(f"{step.action}: {message[: ERROR_MAX_CHARS // 2]} {MAY_BE_LIVE}", transient=False)
     return StepFailure(f"{step.action}: {message}", transient=transient)
 
 
@@ -189,7 +201,7 @@ async def _poll(step: ChannelStep, params: Dict[str, Any], ctx: TargetContext, r
             if state == DONE:
                 return output
             if state == FAILED_STATE:
-                raise StepFailure(f"{step.action} reported a failure: {why}", transient=False)
+                raise StepFailure(f"{step.action} reported a failure: {why}", transient=False, settled=True)
         if rt.clock() >= deadline:
             raise StepFailure(f"{step.action} did not finish within {budget} seconds", transient=False)
         await rt.sleep(config.SOCIALS_PUBLISH_POLL_SECONDS)
@@ -247,6 +259,16 @@ def receipt(steps: Tuple[ChannelStep, ...], outputs: Mapping[str, Mapping[str, A
     return (str(remote) if remote is not None else None), (str(link) if link is not None else None)
 
 
+def _after_publish(failure: StepFailure, steps: Tuple[ChannelStep, ...], progress: TargetProgress) -> StepFailure:
+    """A failure after the target's publish step ran (a status poll that failed or ran
+    out of time) says the post may be live, so a retry is never a blind second post;
+    not when the platform itself said the publish failed."""
+    published = any(step.step_class == PUBLISH and step.id in progress.outputs for step in steps)
+    if not published or failure.settled or MAY_BE_LIVE in failure.message:
+        return failure
+    return StepFailure(f"{failure.message[: ERROR_MAX_CHARS // 2]} {MAY_BE_LIVE}", transient=failure.transient)
+
+
 async def run_steps(
     steps: Tuple[ChannelStep, ...], ctx: TargetContext, rt: Runtime, progress: TargetProgress,
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -259,7 +281,7 @@ async def run_steps(
             await _run_step(step, ctx, rt, progress)
         except StepFailure as failure:
             if not step.optional:
-                raise
+                raise _after_publish(failure, steps, progress) from failure
             logger.info("[Socials] optional step %s of post %s skipped: %s", step.action, ctx.post_id, failure.message)
             progress.notes.append(f"Skipped: {failure.message}")
             progress.outputs[step.id] = {}

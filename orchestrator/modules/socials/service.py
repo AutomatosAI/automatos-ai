@@ -297,13 +297,15 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "media": getattr(post, "media", None) or {},
     }
     # Only a post with targets hashes them: one with none hashes as before (US-204).
+    # With channels, the title is content too: a channel publishes it (YouTube's
+    # video title, $title in channel_adapters.py), so changing it voids the approval.
     targets = post_targets.target_set(post)
-    return {**content, TARGETS: targets} if targets else content
+    return {**content, TARGETS: targets, "title": getattr(post, "title", None) or ""} if targets else content
 
 
 def compute_content_hash(post: Any) -> str:
     """sha256 over canonical JSON of copy, variables, sources, format, template_id
-    and media, and the post's targets when it has any.
+    and media, and the post's targets and title when it has any targets.
 
     Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
     ``ensure_ascii=False``, so key order never changes the hash.
