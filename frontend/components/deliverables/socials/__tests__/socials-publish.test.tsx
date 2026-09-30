@@ -105,7 +105,10 @@ describe('an approved post', () => {
       footage: { hook: { prompt: 'A harvest table', status: 'done' } } as SocialPost['footage'],
     }))
     const receipt = screen.getByTestId('socials-receipt-tiktok-video')
-    expect(receipt.textContent).toContain('Privacy: FOLLOWER_OF_CREATOR')
+    // Publish uses the choice only when the account allows it (US-304's choice form).
+    expect(receipt.textContent).toContain(
+      'Privacy: FOLLOWER_OF_CREATOR if the account allows it, else the most private level the account allows.',
+    )
     expect(receipt.textContent).toContain('AI-generated label: on')
   })
 })

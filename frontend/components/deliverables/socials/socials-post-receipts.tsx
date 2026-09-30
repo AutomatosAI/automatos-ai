@@ -33,9 +33,14 @@ function hasGeneratedFootage(post: SocialPost): boolean {
   return Object.values(post.footage ?? {}).some((slot) => (slot as { status?: string } | null)?.status === 'done')
 }
 
-/** What TikTok's publish will use (US-304): the chosen privacy, or the most private allowed. */
+/**
+ * What TikTok's publish will use (US-304): the chosen privacy when the account
+ * allows it (publish reads the creator's allowed levels), else the most private
+ * level it allows. Never a public default.
+ */
 export function tiktokSettings(post: SocialPost, target: SocialPostTarget): string {
-  const privacy = typeof target.options.privacy_level === 'string' ? target.options.privacy_level : MOST_PRIVATE
+  const chosen = target.options.privacy_level
+  const privacy = typeof chosen === 'string' ? `${chosen} if the account allows it, else ${MOST_PRIVATE}` : MOST_PRIVATE
   const aigc = hasGeneratedFootage(post) || target.options.is_aigc === true
   return `Privacy: ${privacy}. AI-generated label: ${aigc ? 'on' : 'off'}.`
 }
