@@ -124,7 +124,12 @@ class ComposioClient:
     
     @property
     def composio(self):
-        """Lazy-load Composio client."""
+        """Lazy-load Composio client. Inside a Socials publisher call it is the handle
+        with the SDK's re-send off (``_send_once_handle``, PRD-251 D8)."""
+        from core.composio.upload_spec import is_publisher_call
+
+        if is_publisher_call():
+            return self._send_once_handle()
         if self._composio is None and self.api_key:
             with _sdk_init_lock:
                 if self._composio is None:
@@ -1426,10 +1431,7 @@ class ComposioClient:
             # ("'latest' is not supported in manual execution"). We track the
             # latest schema at discovery, so skip the version check here — same
             # pattern the SDK uses internally for agentic tool execution.
-            from core.composio.upload_spec import is_publisher_call
-
-            handle = self._send_once_handle() if is_publisher_call() else self.composio
-            result = handle.tools.execute(
+            result = self.composio.tools.execute(
                 slug=action,
                 user_id=entity_id,
                 arguments=params,
