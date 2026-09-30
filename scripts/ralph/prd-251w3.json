@@ -1,0 +1,135 @@
+{
+ "project": "PRD-251 Socials — Wave 3: schedule and publish",
+ "branchName": "feat/prd-251-w3-publish",
+ "baseBranch": "feat/prd-251-w2-socials-tab (stacked until Wave 2 is on main; then main)",
+ "description": "Wave 3 of PRD-251 (docs/PRDS/PRD-251-SOCIALS.md — D1-D17 binding, plus the 'Waves 2+3 build' block at the top). The publisher and its five channel publishers (S3.3a-e: LinkedIn, X, Instagram, TikTok, YouTube; plus the generic adapter), scheduling with one-shot jobs, reconcile and missed slots (S3.1a), the calendar kind 'social' with drag to reschedule (S3.1b), the publish controls and receipts in the post view (S3.3f), and the end-to-end check of D14's one way out. Wave 2 built what publishing needs: media hosting (S3.4), the channel registry and adapter data (S3.2), channels as approved content (the hash covers the targets) and the post gate's PLATFORM_PUBLISHER way through (D14b). No migration: every status the wave uses already exists in core/models/socials.py (SOCIAL_POST_STATUSES, SOCIAL_TARGET_STATUSES). CI has no Composio connections: every channel is proven against a mocked executor; one live publish per channel is the owner's (docs/PRDS/prd251-w3-owner-test.md).",
+ "userStories": [
+  {
+   "id": "US-301",
+   "title": "S3.3 — The publisher: a post's targets published through Composio, file-first, idempotent, with receipts",
+   "description": "Fill the Wave 0 seam in orchestrator/modules/socials/publisher.py (publish_post, :1-38; PublishingUnavailable goes). ONE engine runs every channel; the channels differ only in the adapter DATA (modules/socials/channel_adapters.py, read through capabilities.py ChannelStep :343). Put the engine in new modules (e.g. modules/socials/publishing.py for the run, publish_sources.py for resolving step params) — service.py (992 lines) and api/socials.py (970 lines) are over 800: do not grow them beyond the few lines a transition or a route needs. The run: (1) assert_publishable (service.py:914) first, always; claim the post with a compare-and-set approved|scheduled → publishing (service.claim_unchanged) so two workers never both publish; (2) for each target not yet published (social_post_targets, targets.py; its action_plan holds the registry's resolved STEPS, targets.py:36,180), run its steps in order through ComposioToolExecutor.execute (core/composio/tool_executor.py:364) with way_through=PLATFORM_PUBLISHER (core/composio/post_gate.py:134) — the ONLY caller that passes it; the deny list still runs first and a denied step fails its target (or is skipped when optional). Resolve each step's params from their sources (channel_adapters.py docstring): $copy (the channel's own copy, else the base), $title, $media / $media[] (the post's rendered files, modules/socials/media_urls.py resolve_post_media :181), $media.content_type, $media.bytes, $thumbnail, $option.<name> (the target's options), $steps.<id> (a value an earlier step returned; define per step which result field it reads, in the adapter data), and a|b fallbacks. FILE-FIRST: a param named in the step's `files` is handed to the executor's file resolver (tool_executor.py:126 resolve_file_uploads) as the adapter's OWN upload spec — add a keyword (e.g. upload_params=) so the resolver converts exactly those params for this call; NEVER add a slug to the global UPLOAD_ACTIONS (:41). A param in `urls` takes a presigned inline link (media_urls presigned_inline_url, D9) and needs public storage: without SOCIALS_PUBLIC_MEDIA_BUCKET the step is skipped when optional, else the target fails saying so. A `status` step polls until done or SOCIALS_PUBLISH_MAX_WAIT_SECONDS (new config, e.g. 600) every SOCIALS_PUBLISH_POLL_SECONDS (new, e.g. 5). Retries (D8): a transient failure (timeout, 5xx, 429, a connection error) retries the target up to SOCIALS_MAX_TARGET_ATTEMPTS (config.py:1911, 3) with backoff SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS (new); a 4xx or a platform refusal does not retry and records the platform's message on the target (error). attempts counts every try. Receipts: on success the target stores remote_id and permalink (from the publish step's result: define the result fields per step in the adapter data), status published, published_at. The post ends published (all targets), partially_published (some) or failed (none), each logged in review_log; a failed or partially published post notifies (new event types social_post_failed, social_post_published in notification_dispatcher VALID_EVENT_TYPES :45; link_type social_post). Idempotency: a published target is never run again (its idempotency_key, targets.py:155, is passed to the platform where the action takes one); a retry runs only the failed targets. Routes: POST /api/socials/posts/{id}/publish-now (api/socials.py:727, CAN_UPDATE) now publishes — it answers 202 with the post in publishing and runs in the background (launch_guarded, as render does) — and POST /api/socials/posts/{id}/retry (new, CAN_UPDATE) re-runs the failed targets of a failed or partially_published post, only while its approval still matches (an assert_retryable beside assert_publishable). Status machine (service.py TRANSITIONS :116): publish {approved, scheduled, failed?, partially_published → publishing}, publish_done {publishing → published | partially_published | failed}; a post stuck in publishing is failed by the boot reaper like a stuck render (core/boot/reaper.py:217 _reap_social_renders is the precedent), leaving its published targets' receipts as they are. This story proves the engine with LinkedIn (S3.3a: text, image through the workspace-scoped image workaround core/composio/linkedin_image_workaround.py, video LINKEDIN_UPLOAD_VIDEO → LINKEDIN_CREATE_VIDEO_POST).",
+   "acceptanceCriteria": [
+    "With a mocked ComposioToolExecutor: a LinkedIn text, image and video post each issue exactly the adapter's documented sequence, with way_through=PLATFORM_PUBLISHER, the files through the resolver's per-call upload spec, and store remote_id and permalink (tests).",
+    "assert_publishable runs first: a stale approval publishes nothing and makes no executor call; two concurrent publishes of one post issue ONE sequence (compare-and-set claim; test on the CI Postgres).",
+    "A transient error retries up to SOCIALS_MAX_TARGET_ATTEMPTS then fails the target; a 4xx does not retry and stores the platform's message; one target failing of two ends partially_published and notifies; retry re-runs only the failed target (tests).",
+    "UPLOAD_ACTIONS is unchanged; the deny list still refuses a denied step; the new settings are in config.py and config-surface.json; the retry route is a plain def, in the committed manifest with its apiClient method (tests + gate).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 1,
+   "passes": false,
+   "notes": "Anchors: publisher.py; service.py:116,914; tool_executor.py:41,126,364; post_gate.py:134,336; channel_adapters.py; capabilities.py:343; targets.py:36,155,180; media_urls.py:124,132,181; notification_dispatcher.py:45; api/socials.py:727; config.py:1909,1911. Precedent for background work + boot reaper: modules/socials/render.py (launch_guarded, the stale-render reaper). Boot reaper: core/boot/reaper.py:217. The adapter data does not yet say which result field a $steps.<id> reads, nor where a publish step's remote id and permalink are: add that to the data (e.g. a step's `returns`), checked when capabilities.py loads it."
+  },
+  {
+   "id": "US-302",
+   "title": "S3.3b — X: text, image and video (chunked), with the customer's own X app",
+   "description": "Run X through the US-301 engine: text → TWITTER_CREATION_OF_A_POST; image → TWITTER_UPLOAD_MEDIA then the post with its media id; video → the chunked path the adapter data carries (TWITTER_UPLOAD_LARGE_MEDIA / TWITTER_FINALIZE_MEDIA_UPLOAD, polling processing where the action reports it). Fix the adapter data only where Composio's docs (docs.composio.dev/toolkits/twitter) show a param or result field is wrong — data, never code branches per channel. X needs the customer's own X API app (setup_note, 'Waves 2+3 build' block): an auth failure surfaces that note in the target's error.",
+   "acceptanceCriteria": [
+    "With the executor mocked: X text, image and video each issue the documented sequence, the media id flows from the upload step into the post ($steps), and the receipt holds the tweet id and its permalink (tests).",
+    "An auth refusal from X is not retried and the target's error names the X setup note (test).",
+    "No stale slug (TWITTER_CREATE_TWEET) is called; the engine has no X-specific branch (gate greps + test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 2,
+   "passes": false,
+   "notes": "Anchors: channel_adapters.py 'twitter' (:103); capabilities.py (setup_note); US-301's engine."
+  },
+  {
+   "id": "US-303",
+   "title": "S3.3c — Instagram: image, Reel and carousel, container then publish",
+   "description": "Run Instagram through the engine: INSTAGRAM_POST_IG_USER_MEDIA with image_file / video_file (file-first, the adapter's upload spec) → wait for the container (the publish action waits for processing; poll where the adapter has a status step) → INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH; carousel: one child container per image, then INSTAGRAM_CREATE_CAROUSEL_CONTAINER, then publish. Instagram needs JPEG images (Traps), and stills render as PNG today. Pillow is NOT an orchestrator dependency and a new dependency needs the owner's OK (AGENTS.md), so convert where the tools already are: ask media-render for a JPEG copy of the still (it has ffmpeg), or refuse the Instagram image target with a clear message; say which in the commit body. Never convert in the orchestrator with a new library. Never the deprecated actions (INSTAGRAM_CREATE_MEDIA_CONTAINER, INSTAGRAM_CREATE_POST, INSTAGRAM_GET_POST_STATUS). Never widen UPLOAD_ACTIONS.",
+   "acceptanceCriteria": [
+    "With the executor mocked: an image, a Reel and a 3-slide carousel each issue the documented sequence, with the container id flowing into the publish step, and store the media id and permalink (tests).",
+    "A container that never finishes processing within SOCIALS_PUBLISH_MAX_WAIT_SECONDS fails the target clearly and publishes nothing (test).",
+    "A PNG still reaches Instagram as JPEG through media-render, or the target is refused with a clear message, as the commit body decides; no deprecated Instagram action is called (tests + gate).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 3,
+   "passes": false,
+   "notes": "Anchors: channel_adapters.py 'instagram' (:162); Traps (JPEG, public fetch); US-301."
+  },
+  {
+   "id": "US-304",
+   "title": "S3.3d — TikTok: upload the file, privacy from the creator info, AI label, poll the publish status",
+   "description": "Run TikTok through the engine: TIKTOK_QUERY_CREATOR_INFO (read: the allowed privacy levels) → TIKTOK_UPLOAD_VIDEO with the file (never TIKTOK_PUBLISH_VIDEO / TIKTOK_POST_PHOTO: they pull from a verified domain Composio owns) → TIKTOK_FETCH_PUBLISH_STATUS until done. privacy_level: the target's option when it is one the creator allows, else the most private allowed level (SELF_ONLY), never a public default the person did not choose; is_aigc: true when the post's footage was generated (post.footage records a done slot) or the target's option says so. The composer left TikTok's privacy and AI label to publish (US-209): the publish controls (US-309) show them.",
+   "acceptanceCriteria": [
+    "With the executor mocked: the sequence is creator info → upload the file → poll status, the privacy level comes from the allowed list as specified, is_aigc is set for generated footage, and the receipt stores the publish id (tests).",
+    "A status that reports a failure fails the target with TikTok's message; a timeout fails it clearly (tests).",
+    "TIKTOK_PUBLISH_VIDEO and TIKTOK_POST_PHOTO are never called (gate grep + test).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 4,
+   "passes": false,
+   "notes": "Anchors: channel_adapters.py 'tiktok' (:227); 'Waves 2+3 build' block (TikTok uploads files); US-209 (options decided at publish)."
+  },
+  {
+   "id": "US-305",
+   "title": "S3.3e — YouTube: the video upload, and the thumbnail that needs public storage",
+   "description": "Run YouTube through the engine: YOUTUBE_UPLOAD_VIDEO with videoFilePath as a file (title from $title, max 100 — the composer fits it; description from $copy; categoryId, privacyStatus, tags from the target's options: US-209 writes privacy_status and category_id) → the optional thumbnail step (YOUTUBE_UPDATE_THUMBNAIL) takes only a public link (D9): with SOCIALS_PUBLIC_MEDIA_BUCKET it gets a presigned inline link to the post's still; without it the step is skipped and the receipt says so. Also finish the generic adapter (D8 'Generic (text + media)'): a generic channel's post runs its one create action with copy and media, and its first success marks the channel verified (capabilities.py :414 verified; the 'unverified channel' label goes).",
+   "acceptanceCriteria": [
+    "With the executor mocked: the upload issues the documented params from the post and the target options, and the receipt stores the video id and its watch URL (tests).",
+    "With no public bucket the thumbnail step is skipped and recorded; with one it receives a presigned inline link (tests).",
+    "A generic channel publishes through its create action and becomes verified after its first published target (tests).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 5,
+   "passes": false,
+   "notes": "Anchors: channel_adapters.py 'youtube' (:259) and GENERIC_ADAPTER; capabilities.py :319,:414; media_urls.py :124,:132; US-209 (options)."
+  },
+  {
+   "id": "US-306",
+   "title": "S3.1a — Scheduling: one-shot jobs, reconcile, and missed slots",
+   "description": "D10. Scheduling a post (service.schedule :771 via POST /posts/{id}/schedule :696) registers an APScheduler DateTrigger job id social-publish-<post_id> on the unified scheduler (services/scheduler.py; one leader holds the fcntl lock, main.py:419), registered with a module-level function and plain args (post_id, workspace_id as strings), never a closure, so the RedisJobStore can pickle it (precedent: services/scheduled_task_service.py:706). Unschedule (:712), an edit that voids approval, reject/archive and a reschedule (POST /schedule on a scheduled post: the slot moves, the approval stands — add the scheduled→scheduled move to TRANSITIONS) remove or move the job. A request usually lands on a worker without the scheduler: add a socials pass to services/schedule_reconcile.py run_reconcile_once (:34) that registers a job for every scheduled post, removes jobs whose post is no longer scheduled, and runs every RECONCILE_INTERVAL_SECONDS (scheduled_task_service.py:41). The job runs the US-301 publisher (its claim makes a double fire publish once). Missed slot: when the job fires (or the reconcile finds a scheduled post whose slot passed) later than SOCIALS_MISFIRE_GRACE_SECONDS (config.py:1909) after the slot, the post goes to missed (service transition scheduled → missed) and the owner is notified (event social_post_missed); within the grace it publishes. A missed post can be rescheduled or published now while its approval still matches (stale content is never posted silently).",
+   "acceptanceCriteria": [
+    "Scheduling registers social-publish-<post_id> with picklable args; unschedule, a voiding edit and reject remove it; a reschedule moves it and keeps the approval (tests with a fake scheduler).",
+    "The reconcile pass registers a missing job and removes an orphan; a job firing twice publishes once (tests; the double fire on the CI Postgres).",
+    "A slot missed by more than the grace ends missed with a notification and publishes nothing; within the grace it publishes; a missed post can be rescheduled (tests).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 6,
+   "passes": false,
+   "notes": "Anchors: services/scheduler.py; main.py:419-460; services/schedule_reconcile.py:34,:54; services/scheduled_task_service.py:41,:706; service.py:116,:771,:792; api/socials.py:696,:712; config.py:1909."
+  },
+  {
+   "id": "US-307",
+   "title": "S3.1b — The calendar: social posts in the Command Center calendar, drag to reschedule",
+   "description": "D10 Calendar. Backend: a sixth source _social_post_items beside the five in services/activity_service.py (:906-912) — the file is 1,327 lines, so the source lives in a NEW module (e.g. services/activity_social_items.py) and activity_service only adds it to the tuple. Each scheduled post in the window becomes an item: id social-<post_id>, type 'social', name the post title, next_run_at its slot (UTC ISO), plus post_id and timezone (social_posts.timezone) so the UI shows the time in the post's own timezone; only while Socials is on for the workspace (settings.socials_state); scoped to the caller's workspace. Frontend: the kind 'social' in the three union files — ScheduleItemType (frontend/hooks/use-activity-api.ts:97), components/command-center/calendar-kinds.ts, components/command-center/calendar-actions.ts (a case 'social'). Clicking an item opens /deliverables?tab=socials&post=<id>. A Reschedule menu item and drag-and-drop (native HTML5 drag events, NO new npm dependency) call POST /api/socials/posts/{id}/schedule with the new slot and the post's timezone: the slot moves, the approval stands. calendar-tab.tsx is 1,019 lines: put the drag and the social item's rendering in new files and add only the hooks it needs.",
+   "acceptanceCriteria": [
+    "Backend: a scheduled post appears as social-<post_id> with its slot and timezone; another workspace's post and a post that is not scheduled never appear; with Socials off there are no social items (tests).",
+    "vitest: the social kind renders with its label and colour, shows the time in the post's timezone, opens the post on click, and Reschedule and a drop call the schedule route with the new slot.",
+    "No new npm dependency; the three union files carry 'social' (gate).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 7,
+   "passes": false,
+   "notes": "Anchors: services/activity_service.py:895-915,:1089 (a source's item shape); frontend/hooks/use-activity-api.ts:97-110; frontend/components/command-center/calendar-kinds.ts, calendar-actions.ts, calendar-tab.tsx; api/socials.py:696."
+  },
+  {
+   "id": "US-308",
+   "title": "S3.3f — Publish controls and receipts in the post view",
+   "description": "Extend the post view (frontend/components/deliverables/socials/socials-post-detail.tsx and the US-206 split files; keep each component ≤150 lines, add new files): for an approved post, Schedule (a date-time picker; the timezone from the browser, Intl.DateTimeFormat().resolvedOptions().timeZone, sent to POST /schedule) and Publish now (a confirmation naming the channels); for a scheduled post, its slot in the post's timezone, Reschedule and Unschedule; for a publishing post, per-target progress while it polls (reuse the list's poll, use-socials-api.ts renderPollInterval pattern); for a published / partially_published / failed post, each target's receipt — status, permalink (opens the live post), the platform's error — and Retry for the failed targets (POST /retry, US-301); for a missed post, 'Missed its slot' with Reschedule and Publish now. TikTok targets show the privacy level and AI label that publish will use (US-304). Every call through apiClient (publishSocialPostNow, retrySocialPost, schedule/unschedule exist) with the backend's verb; a 409 (the approval changed) says so and reloads, as approve does. The board's and the list's status labels already cover publishing/published/partially_published/missed.",
+   "acceptanceCriteria": [
+    "vitest: an approved post schedules with the browser's timezone and publishes now after a confirmation; a scheduled post shows its slot in its own timezone and unschedules.",
+    "vitest: a partially published post shows each target's permalink and error, and Retry calls the retry route for it; a missed post offers Reschedule and Publish now; a 409 shows the changed message and reloads.",
+    "apiClient calls publish-now and retry with POST (gate).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 8,
+   "passes": false,
+   "notes": "Anchors: socials-post-detail.tsx, socials-post-review.tsx, socials-post-evidence.tsx (US-206); socials-status.ts (labels, postActions); hooks/use-socials-api.ts; lib/api-client.ts (publish-now/schedule/unschedule methods); api/socials.py:696-745."
+  },
+  {
+   "id": "US-309",
+   "title": "S3.5-check — One way out, end to end, and the owner's test",
+   "description": "Close the wave: (1) prove D14 end to end now that a way through exists — an agent's direct call to every publish action of every seeded channel is still refused in a Socials-on workspace on every agent path (tool_executor.py :416 and :726), and only the publisher passes PLATFORM_PUBLISHER (a test scans the orchestrator for the name: only publishing code references it); (2) the Socials agent tools stay draft-only (modules/tools/discovery/handlers_socials.py: no tool publishes, schedules or approves); (3) docs: docs/getting-started/self-hosting.md says what publishing needs (COMPOSIO_KEY, the customer's X app, SOCIALS_PUBLIC_MEDIA_BUCKET for the YouTube thumbnail); docs/PRDS/prd251-w3-owner-test.md is the owner's checklist (written with the kit; update it if the build changed a step). Nothing claims a live publish: that is the owner's.",
+   "acceptanceCriteria": [
+    "A test proves every seeded channel's publish actions are refused to an agent in a Socials-on workspace on both executor paths, and that PLATFORM_PUBLISHER is referenced only by the publisher (tests).",
+    "No Socials agent tool publishes, schedules or approves (test over the tool registry).",
+    "self-hosting.md names what publishing needs; the owner test document matches the built controls (gate greps).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+   ],
+   "priority": 9,
+   "passes": false,
+   "notes": "Anchors: core/composio/tool_executor.py:416,:726; core/composio/post_gate.py:131-134,:336; modules/tools/discovery/handlers_socials.py; docs/getting-started/self-hosting.md; docs/PRDS/prd251-w3-owner-test.md."
+  }
+ ]
+}
