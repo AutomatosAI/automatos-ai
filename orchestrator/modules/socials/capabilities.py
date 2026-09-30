@@ -338,9 +338,12 @@ _STEP_KEYS = frozenset(
 _ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
 _STEP_REF = "$steps."
 _SOURCE = re.compile(
-    r"\$(?:copy|title|thumbnail|idempotency_key|media(?:\[\]|\.content_type|\.bytes)?"
-    r"|option\.[a-z][a-z0-9_]*|steps\.[a-z][a-z0-9_]*)"
+    r"\$(?:copy|title|thumbnail|idempotency_key|generated|media(?:\[\]|\.content_type|\.bytes)?"
+    r"|option\.[a-z][a-z0-9_]*|steps\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)"
 )
+# A choice (US-304): the ``choose`` source's value when ``among`` holds it, else the
+# first of ``else`` that ``among`` holds (``else``'s first when ``among`` is unknown).
+CHOICE_KEYS = frozenset({"choose", "among", "else"})
 _NOT_A_WORD = re.compile(r"[^A-Z0-9]+")
 # The sources that name a media FILE: a param reading one takes a file or a link.
 _FILE_SOURCES = ("$media", "$media[]", "$thumbnail")
@@ -449,12 +452,25 @@ def _names(value: Any, where: str, prefix: str = "") -> Tuple[str, ...]:
     return tuple(names)
 
 
+def _check_choice(value: Mapping[str, Any], earlier: FrozenSet[str], where: str) -> None:
+    fallback = value.get("else")
+    if set(value) != CHOICE_KEYS or not isinstance(fallback, list) or not all(isinstance(v, str) for v in fallback):
+        raise ValueError(f"{where}: a choice is {sorted(CHOICE_KEYS)}, its else a list of values")
+    _check_source(value["choose"], earlier, where)
+    _check_source(value["among"], earlier, where)
+
+
 def _check_source(value: Any, earlier: FrozenSet[str], where: str) -> None:
-    """A list of sources, a literal, or ``$`` sources joined by ``|``: each one the
-    grammar knows, and a step source naming an EARLIER step."""
+    """A list of sources, a choice, a literal, or ``$`` sources joined by ``|``: each
+    one the grammar knows, and a step source naming an EARLIER step and what it
+    returns (``earlier``: ``<id>`` for a step that returns an id, ``<id>.<name>`` for
+    each name it returns)."""
     if isinstance(value, list):
         for item in value:
             _check_source(item, earlier, where)
+        return
+    if isinstance(value, Mapping):
+        _check_choice(value, earlier, where)
         return
     for ref in value.split("|") if isinstance(value, str) and value.startswith("$") else ():
         if not _SOURCE.fullmatch(ref) or (ref.startswith(_STEP_REF) and ref[len(_STEP_REF):] not in earlier):
@@ -510,7 +526,9 @@ def _parse_kind(toolkit: str, kind: Any, raw: Any) -> Tuple[ChannelStep, ...]:
     steps: Tuple[ChannelStep, ...] = ()
     for item in raw:
         seen = frozenset(step.id for step in steps)
-        referable = frozenset(step.id for step in steps if ID in step.returns)
+        referable = frozenset(step.id for step in steps if ID in step.returns) | frozenset(
+            f"{step.id}.{name}" for step in steps for name in step.returns
+        )
         steps += (_parse_step(toolkit, where, item, seen, referable),)
     if not any(step.step_class == PUBLISH for step in steps):
         raise ValueError(f"{where}: no step publishes the post")

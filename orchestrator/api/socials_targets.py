@@ -71,9 +71,11 @@ class ReplaceSocialPostTargetsRequest(BaseModel):
 
 def _option_refs(value: Any) -> FrozenSet[str]:
     """The options a step parameter's source reads: ``$option.<name>``, alone, among
-    ``a|b`` alternatives, or in a list."""
+    ``a|b`` alternatives, in a list or in a choice."""
     if isinstance(value, (list, tuple)):
         return frozenset(name for item in value for name in _option_refs(item))
+    if isinstance(value, Mapping):  # a choice (US-304): its sources
+        return frozenset(name for item in value.values() for name in _option_refs(item))
     if not isinstance(value, str):
         return frozenset()
     return frozenset(ref[len(OPTION_SOURCE):] for ref in value.split("|") if ref.startswith(OPTION_SOURCE))
@@ -86,7 +88,7 @@ def kind_options(kind: ChannelKind) -> FrozenSet[str]:
 
 def step_plan(step: ChannelStep) -> Dict[str, Any]:
     """A resolved step as a target's ``action_plan`` keeps it: the adapter data's own keys."""
-    params = {name: list(value) if isinstance(value, (list, tuple)) else value for name, value in step.params.items()}
+    params = {name: _plain(value) for name, value in step.params.items()}
     return {
         "id": step.id,
         "action": step.action,
@@ -101,6 +103,15 @@ def step_plan(step: ChannelStep) -> Dict[str, Any]:
         "permalink": step.permalink,
         "jpeg": list(step.jpeg),
     }
+
+
+def _plain(value: Any) -> Any:
+    """A param's source as JSON keeps it: lists, not tuples; a choice as a dict."""
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    if isinstance(value, Mapping):
+        return {name: _plain(item) for name, item in value.items()}
+    return value
 
 
 def _until_plan(until: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:

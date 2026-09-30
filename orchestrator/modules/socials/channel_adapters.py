@@ -50,8 +50,12 @@ A source is ``$copy`` (the channel's copy), ``$title`` (the post's title),
 ``$media.content_type`` and ``$media.bytes`` (facts of that file), ``$thumbnail``
 (the post's still), ``$option.<name>`` (the target's option, chosen in the composer
 or at publish), ``$steps.<id>`` (the ``id`` an earlier step returned: the
-account, upload, container or publish) or ``$idempotency_key`` (the target's own
-key, for an action that takes one; no seeded action does). ``a|b`` takes the first that resolves, a
+account, upload, container or publish), ``$steps.<id>.<name>`` (another value it
+returned), ``$generated`` (true when a render recorded AI-made footage for the post,
+D12) or ``$idempotency_key`` (the target's own key, for an action that takes one; no
+seeded action does). A choice, ``{"choose", "among", "else"}``, takes ``choose``'s
+value when ``among`` (a list) holds it, else the first of ``else`` that ``among``
+holds. ``a|b`` takes the first that resolves, a
 list is a list parameter, and any other value is passed as it is.
 
 ``GENERIC_ADAPTER``: D8's "Generic (text + media)". A connected toolkit outside
@@ -342,9 +346,14 @@ CHANNEL_ADAPTERS = {
         "setup_note": None,
         "kinds": {
             # The privacy level is one the creator info allows, chosen at publish;
-            # is_aigc labels generated footage.
+            # is_aigc labels generated footage (or the person's own choice).
             "video": [
-                {"id": "creator", "action": "TIKTOK_QUERY_CREATOR_INFO", "class": "read"},
+                {
+                    "id": "creator",
+                    "action": "TIKTOK_QUERY_CREATOR_INFO",
+                    "class": "read",
+                    "returns": {"privacy_levels": "privacy_level_options"},
+                },
                 {
                     "id": "upload",
                     "action": "TIKTOK_UPLOAD_VIDEO",
@@ -352,8 +361,14 @@ CHANNEL_ADAPTERS = {
                     "params": {
                         "file_to_upload": "$media",
                         "caption": "$copy",
-                        "privacy_level": "$option.privacy_level",
-                        "is_aigc": "$option.is_aigc",
+                        # The person's choice when the creator may use it, else the
+                        # most private level allowed: never a public default.
+                        "privacy_level": {
+                            "choose": "$option.privacy_level",
+                            "among": "$steps.creator.privacy_levels",
+                            "else": ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR"],
+                        },
+                        "is_aigc": "$generated|$option.is_aigc",
                         "publish": True,
                     },
                     "files": ["file_to_upload"],
