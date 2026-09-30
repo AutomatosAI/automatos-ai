@@ -73,11 +73,13 @@ def test_the_boot_reaper_ends_a_lost_publish_and_keeps_its_receipts(env):
     with env.factory() as db:
         later = datetime.now(timezone.utc) + timedelta(hours=2)
         cutoff = later - timedelta(minutes=config.BOOT_REAPER_STALE_MINUTES)
-        assert reaper._reap_social_publishes(db, cutoff, later) == 1
-        db.commit()
-    post = _post(env, post_id)
+        assert asyncio.run(reaper._reap_social_publishes(db, cutoff, later)) == 1
+    post = _post(env, post_id)  # committed by the surface itself, before its notice
     targets = _targets(env, post_id)
     assert post.status == "partially_published" and post.review_log[-1]["action"] == "partially_published"
+    # Final review: the workspace is told, as a run's own end tells it.
+    assert [(n["event_type"], n["link_id"]) for n in env.notices] == [("social_post_failed", str(post_id))]
+    assert "partly published" in env.notices[0]["title"]
     assert targets["linkedin", "text"]["remote_id"] == SHARE_URN
     assert targets["linkedin", "video"]["status"] == "failed" and "may have taken it" in targets["linkedin", "video"]["error"]
 
@@ -116,8 +118,10 @@ def test_the_reconcile_tick_ends_a_publish_lost_inside_the_boot_cutoff(env):
     assert post.status == "failed" and post.review_log[-1]["by"] == schedule_jobs.SCHEDULER_ACTOR
     assert "may have taken it" in targets["linkedin", "video"]["error"]
     assert targets["linkedin", "text"]["error"] == publish_lifecycle.NOT_TRIED
+    assert [(n["event_type"], n["link_id"]) for n in env.notices] == [("social_post_failed", str(lost))]
     with env.factory() as db:
         assert schedule_jobs.end_lost_publishes(db, now) == 0  # once
+    assert len(env.notices) == 1
 
 
 def test_a_publish_that_cannot_start_still_ends_the_post_and_retry_publishes_the_untried(env, monkeypatch):

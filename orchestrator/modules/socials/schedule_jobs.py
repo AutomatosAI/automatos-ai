@@ -154,8 +154,8 @@ def reconcile(scheduler: Any, db: Any) -> Dict[str, Any]:
 
 def end_lost_publishes(db: Any, now: datetime) -> int:
     """End each post publishing since before a run's limit plus the margin: its run
-    is gone. A compare-and-set per post, so a run that ends it first wins. How many
-    it ended."""
+    is gone. A compare-and-set per post, so a run that ends it first wins, and the
+    workspace is told how it ended, as a run's own end tells it. How many it ended."""
     cutoff = now - timedelta(seconds=config.SOCIALS_PUBLISH_RUN_MAX_SECONDS + LOST_MARGIN_SECONDS)
     ids = [row.id for row in db.query(SocialPost.id).filter(
         SocialPost.status == service.PUBLISHING, SocialPost.updated_at < cutoff,
@@ -173,6 +173,7 @@ def end_lost_publishes(db: Any, now: datetime) -> int:
         db.commit()
         ended += 1
         logger.warning("[Socials] post %s was still publishing with no run left: it ended %s", post_id, status)
+        notify.notify_publish_outcome(post.workspace_id, post_id, post.title or "", status)
     return ended
 
 

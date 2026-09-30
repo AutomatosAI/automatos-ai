@@ -250,7 +250,20 @@ def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
     return len(stale)
 
 
-def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
+async def _tell_publish_outcomes(ended) -> None:
+    """Tell each workspace how its lost publish ended (US-301), each notice bounded."""
+    from modules.socials import notify
+
+    for workspace_id, post_id, title, status in ended:
+        try:
+            await asyncio.wait_for(
+                notify.dispatch_publish_outcome(workspace_id, post_id, title, status), timeout=ORPHAN_CLOSE_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Boot reaper: the publish notice of post %s timed out", post_id)
+
+
+async def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
     """End ``social_posts`` stuck in ``publishing`` — PRD-251 US-301.
 
     The publish runs as a background task of the process that started it, and lives
@@ -261,6 +274,10 @@ def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
     or failed) through the lifecycle, which logs it in ``review_log``
     (``publish_records.end_lost``). One lost to a restart inside the cutoff is ended
     by the leader's reconcile tick (``schedule_jobs.end_lost_publishes``).
+
+    The workspace is told how each ended, as a run's own end tells it: the ends are
+    committed here first (a notice never announces an end that is not written), then
+    each notice gets ``ORPHAN_CLOSE_SECONDS`` at most.
     """
     from core.models.socials import SocialPost
     from modules.socials import service as socials
@@ -268,16 +285,17 @@ def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
 
     rows = db.query(SocialPost).filter(SocialPost.status == socials.PUBLISHING).all()
     stale = [r for r in rows if r.status == socials.PUBLISHING and _is_stale(r.updated_at, cutoff)]
-    for r in stale:
-        end_lost(r, _ORPHAN_REASON)
-    if stale:
+    ended = [(r.workspace_id, r.id, r.title or "", end_lost(r, _ORPHAN_REASON)) for r in stale]
+    if ended:
+        db.commit()
         record_error(
             subsystem="socials",
             operation="boot_reap",
-            error=OrphanedRunError(f"reaped {len(stale)} orphaned social publish(es)"),
-            extra={"reaped_ids": [str(r.id) for r in stale], "reason": _ORPHAN_REASON},
+            error=OrphanedRunError(f"reaped {len(ended)} orphaned social publish(es)"),
+            extra={"reaped_ids": [str(post_id) for _, post_id, _, _ in ended], "reason": _ORPHAN_REASON},
         )
-    return len(stale)
+        await _tell_publish_outcomes(ended)
+    return len(ended)
 
 
 def _reap_render_reservations(db, cutoff: datetime, now: datetime) -> int:

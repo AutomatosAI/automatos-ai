@@ -113,12 +113,11 @@ async def dispatch_approval_pending(
     await _dispatch(workspace_id, post_id, (EVENT_TYPE, TITLE_PREFIX, STATUS), title, session_factory)
 
 
-def notify_approval_pending(workspace_id: UUID | str, post_id: UUID | str, title: str) -> None:
-    """Send the notification without holding up the caller: on the running loop
-    as a tracked task, or inline when there is none (a threadpool route, a
-    script). Never raises."""
+def _send_soon(coro: Any, post_id: UUID | str, what: str) -> None:
+    """Run a dispatch without holding up the caller: on the running loop as a
+    tracked task, or inline when there is none (a threadpool route, the leader's
+    reconcile tick, a script). Never raises."""
     try:
-        coro = dispatch_approval_pending(workspace_id, post_id, title)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -128,7 +127,19 @@ def notify_approval_pending(workspace_id: UUID | str, post_id: UUID | str, title
         _PENDING.add(task)
         task.add_done_callback(_PENDING.discard)
     except Exception:
-        logger.exception("[Socials] the approval notice of post %s could not be scheduled", post_id)
+        coro.close()
+        logger.exception("[Socials] the %s notice of post %s could not be scheduled", what, post_id)
+
+
+def notify_approval_pending(workspace_id: UUID | str, post_id: UUID | str, title: str) -> None:
+    """Send the ``approval_pending`` notification without holding up the caller. Never raises."""
+    _send_soon(dispatch_approval_pending(workspace_id, post_id, title), post_id, "approval")
+
+
+def notify_publish_outcome(workspace_id: UUID | str, post_id: UUID | str, title: str, status: str) -> None:
+    """:func:`dispatch_publish_outcome` from synchronous code (a publish ended as
+    lost by the leader's reconcile tick), without holding it up. Never raises."""
+    _send_soon(dispatch_publish_outcome(workspace_id, post_id, title, status), post_id, "publish outcome")
 
 
 def notify_if_entered(before: Optional[str], post: Any) -> bool:
