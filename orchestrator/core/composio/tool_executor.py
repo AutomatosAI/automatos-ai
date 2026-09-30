@@ -343,7 +343,7 @@ class ComposioToolExecutor:
     ) -> tuple[Dict[str, Any], list[Path]]:
         """Delegate to the module-level resolve_file_uploads(), unless the call
         carries its own upload spec (execute_with_uploads, PRD-251 D8)."""
-        if upload_spec.has_own_upload_spec():
+        if upload_spec.is_publisher_call():
             return params, []
         return await resolve_file_uploads(action, params, workspace_id)
 

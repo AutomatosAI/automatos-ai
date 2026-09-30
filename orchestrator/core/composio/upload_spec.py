@@ -9,6 +9,11 @@ those are converted to Composio FileUploadables, for that call only
 to such a call at all: its approved copy (a bare link, say) is sent as approved,
 never turned into a file.
 
+Such a call is the publisher's, and it is sent ONCE: the Composio SDK's own
+re-send (on a timeout, a dropped connection, a 408, 409, 429 or 5xx) is off for it
+(``ComposioClient.execute_action``), because a publish re-sent after the platform
+took it posts twice. The publisher decides what is tried again (``publish_steps``).
+
 Only a ``Path`` the platform staged is taken: a string (an agent's or a platform's
 argument) never reads the local disk here.
 """
@@ -31,9 +36,9 @@ logger = logging.getLogger(__name__)
 
 ERROR_TYPE_FILE_UPLOAD = "file_upload_failed"
 
-# Set while a call with its own upload spec runs, so the executor's global
-# UPLOAD_ACTIONS conversion leaves it alone.
-_OWN_SPEC: ContextVar[bool] = ContextVar("composio_own_upload_spec", default=False)
+# Set while a publisher call runs: the executor's global UPLOAD_ACTIONS conversion
+# leaves it alone, and the Composio client sends it once.
+_PUBLISHER_CALL: ContextVar[bool] = ContextVar("composio_publisher_call", default=False)
 
 
 class FileUploadFailed(Exception):
@@ -41,18 +46,18 @@ class FileUploadFailed(Exception):
 
 
 @contextmanager
-def own_upload_spec() -> Iterator[None]:
-    """Mark the calls made inside as carrying their own upload spec."""
-    token = _OWN_SPEC.set(True)
+def publisher_call() -> Iterator[None]:
+    """Mark the calls made inside as the publisher's: their own upload spec, sent once."""
+    token = _PUBLISHER_CALL.set(True)
     try:
         yield
     finally:
-        _OWN_SPEC.reset(token)
+        _PUBLISHER_CALL.reset(token)
 
 
-def has_own_upload_spec() -> bool:
-    """Whether the running call carries its own upload spec (see :func:`own_upload_spec`)."""
-    return _OWN_SPEC.get()
+def is_publisher_call() -> bool:
+    """Whether the running call is the publisher's (see :func:`publisher_call`)."""
+    return _PUBLISHER_CALL.get()
 
 
 def _file_uploadable_class():
@@ -121,8 +126,8 @@ async def execute_with_uploads(
     """Run ``action`` for the platform with the call's own upload spec: the Wave 0
     deny list, then the Socials post gate, then exactly ``upload_params`` as files
     (:func:`resolve_upload_spec`), then ``executor.execute`` on the workspace's own
-    connection, with no global UPLOAD_ACTIONS conversion. A refused call uploads
-    nothing. The LinkedIn image workaround reads the staged files itself (Composio
+    connection, with no global UPLOAD_ACTIONS conversion and sent once (no SDK
+    re-send). A refused call uploads nothing. The LinkedIn image workaround reads the staged files itself (Composio
     cannot upload LinkedIn images), so a call it takes keeps them."""
     from core.composio.linkedin_image_workaround import IMAGE_POST_ACTION, has_image_params
 
@@ -141,7 +146,7 @@ async def execute_with_uploads(
         except FileUploadFailed as exc:
             failure = {"success": False, "data": None, "error": str(exc), "error_type": ERROR_TYPE_FILE_UPLOAD}
             return _result(failure, action_upper, start_time)
-    with own_upload_spec():
+    with publisher_call():
         return await executor.execute(
             action=action_upper, params=params, agent_id=agent_id, workspace_id=workspace_id,
             app_name=app_name, skip_validation=True, way_through=way_through,

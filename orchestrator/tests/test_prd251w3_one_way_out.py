@@ -22,6 +22,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -105,11 +106,15 @@ async def test_the_publishers_call_passes_the_gate_and_the_same_call_without_it_
     _assert_refused(refused, slug)
     agent.assert_nothing_ran()
 
+    once = MagicMock(name="ComposioSendOnce")  # the handle with the SDK's re-send off
+    once.tools.execute.return_value = {"successful": True, "data": {"ok": True}}
+    agent.executor.client._composio_once = once
     passed = await agent.executor.execute_with_uploads(
         slug, {"text": "x"}, agent_id=0, workspace_id=WS_ON, app_name=toolkit.upper(), way_through=PLATFORM_PUBLISHER,
     )
     assert passed["success"] is True
-    agent.sdk.tools.execute.assert_called_once()
+    once.tools.execute.assert_called_once()  # sent once: never through the re-sending handle
+    agent.sdk.tools.execute.assert_not_called()
 
 
 def _source_files():
