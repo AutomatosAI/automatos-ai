@@ -63,8 +63,8 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
         argv.append("--no-terminal")
     if cfg.terminal_port:
         argv += ["--terminal-port", str(cfg.terminal_port)]
-    if getattr(cfg, "unlisted_bash", "ask") != "ask":
-        argv += ["--unlisted-bash", cfg.unlisted_bash]
+    if cfg.permission_mode:
+        argv += ["--permission-mode", cfg.permission_mode]
     argv += _sandbox_argv(cfg.session_sandbox)
     argv += list(passthrough or [])
     return argv

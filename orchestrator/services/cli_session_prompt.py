@@ -228,7 +228,7 @@ def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) 
     if extras:
         bash += " This agent's own allowlist adds " + ", ".join(f"`{e}`" for e in extras) + "."
     bash += (
-        # F167: "may": a host run with ``--unlisted-bash allow`` runs them without asking.
+        # F167: "may": a session in Auto mode runs them without asking; Manual and Plan ask about edits too.
         " Any other command may be HELD until the operator allows or denies it (in the Questions tab, "
         "on the ticket, or by Telegram); no answer in time means denied. Pushing, publishing and escalating never run."
     )

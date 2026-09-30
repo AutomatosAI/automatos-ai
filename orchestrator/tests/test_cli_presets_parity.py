@@ -140,7 +140,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
         f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
     )
     assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
-        "0.8.0",
+        "0.9.0",
         sorted(_EXPECTED_CLAIM_KEYS),
     ), (
         "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
@@ -148,7 +148,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
     )
 
 
-# The claim payload as of host contract 0.8.0.
+# The claim payload as of host contract 0.9.0.
 _EXPECTED_CLAIM_KEYS = {
     "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
     "agent_id", "agent_name", "provider", "model", "allowed_tools",
@@ -156,25 +156,22 @@ _EXPECTED_CLAIM_KEYS = {
     "system_prompt", "resume_session_id",
     # the bridge (0.8.0)
     "session_tools", "session_tools_path", "session_token",
+    # the session's permission mode: the agent's, else the workspace's (0.9.0)
+    "permission_mode",
 }
 
 BACKEND_SERVICE = _ORCH / "services" / "cli_host_service.py"
 
 
 def _claim_payload_keys() -> set:
-    """The literal keys of the dict ``claim_for_host`` appends to its result."""
+    """The literal keys of the dict ``_claim_payload`` returns: each entry of ``claim_for_host``'s result."""
     tree = ast.parse(BACKEND_SERVICE.read_text(encoding="utf-8"))
-    best: set = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "claim_for_host":
-            for call in ast.walk(node):
-                if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "append":
-                    for arg in call.args:
-                        if isinstance(arg, ast.Dict):
-                            keys = {
-                                k.value for k in arg.keys
-                                if isinstance(k, ast.Constant) and isinstance(k.value, str)
-                            }
-                            if len(keys) > len(best):
-                                best = keys
-    return best
+        if isinstance(node, ast.FunctionDef) and node.name == "_claim_payload":
+            for ret in ast.walk(node):
+                if isinstance(ret, ast.Return) and isinstance(ret.value, ast.Dict):
+                    return {
+                        k.value for k in ret.value.keys
+                        if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                    }
+    return set()

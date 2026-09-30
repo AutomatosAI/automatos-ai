@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .permission_modes import PERMISSION_MODES, UNLISTED_BASH_MODES
 from .sandbox import DEFAULT_ALLOWED_DOMAINS, SessionSandbox
 
 DEFAULT_URL = "http://127.0.0.1:8000"
@@ -68,7 +69,9 @@ class HostConfig:
     # enough to come back from lunch and short enough that a session does not
     # hold a slot overnight.
     ask_timeout: float = DEFAULT_ASK_TIMEOUT_SECONDS
-    unlisted_bash: str = "ask"  # ask | allow — what a session may run beyond its Bash allowlist
+    # manual | edits | plan | auto — every session on this host, whatever the ticket says;
+    # None = the agent's or the workspace's mode, carried by the claim (permission_modes.py).
+    permission_mode: Optional[str] = None
     session_sandbox: SessionSandbox = field(default_factory=SessionSandbox)  # sandbox.py
     startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS
     claim_batch: int = DEFAULT_CLAIM_BATCH
@@ -134,11 +137,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-worktrees", action="store_true",
                    help="run sessions in the registered directory itself instead of a git worktree")
     p.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
+    _add_session_args(p)
+    p.add_argument("--verbose", action="store_true")
+    p.add_argument("--no-terminal", action="store_true",
+                   help="do not serve the Canvas terminal (your own shell on 127.0.0.1 for the browser on this machine)")
+    p.add_argument("--terminal-port", type=int, default=0,
+                   help="fixed loopback port for the Canvas terminal (default: an ephemeral port, announced to the backend)")
+    _add_service_args(p)
+    return p
+
+
+def _add_session_args(p: argparse.ArgumentParser) -> None:
+    """What a session may do, and how long the host waits on it."""
     p.add_argument("--session-timeout", type=float, default=DEFAULT_SESSION_TIMEOUT_SECONDS,
                    help="wall-clock cap per session turn, seconds")
-    p.add_argument("--unlisted-bash", choices=("ask", "allow"), default="ask",
-                   help="a Bash verb outside the ticket's allowlist: 'ask' shows the operator a card (default); "
-                        "'allow' runs it — never-allowed commands are still refused and unresolved paths still ask")
+    p.add_argument("--permission-mode", choices=PERMISSION_MODES, default=None,
+                   help="every session on this host runs in this mode, whatever its agent or workspace says "
+                        "(default: theirs, set on Settings → Session mode): manual asks for every edit and "
+                        "unlisted command, edits runs edits, plan approves a plan first, auto runs unlisted "
+                        "commands too. Never-allowed commands are refused in every mode")
+    # Replaced by --permission-mode (allow = auto, ask = edits); parsed until 2026-12-31
+    # so a service installed with it still starts (permission_modes.UNLISTED_BASH_MODES).
+    p.add_argument("--unlisted-bash", choices=tuple(UNLISTED_BASH_MODES), default=None, help=argparse.SUPPRESS)
     p.add_argument("--no-session-sandbox", action="store_true",
                    help="run Claude sessions WITHOUT the OS sandbox: build and test commands then run with "
                         "your full user rights, home directory and network. Only on a host that is already "
@@ -151,11 +171,10 @@ def build_parser() -> argparse.ArgumentParser:
                          f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)})"))
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument("--no-terminal", action="store_true",
-                   help="do not serve the Canvas terminal (your own shell on 127.0.0.1 for the browser on this machine)")
-    p.add_argument("--terminal-port", type=int, default=0,
-                   help="fixed loopback port for the Canvas terminal (default: an ephemeral port, announced to the backend)")
+
+
+def _add_service_args(p: argparse.ArgumentParser) -> None:
+    """Run, stop or restart this host as a login service."""
     svc = p.add_mutually_exclusive_group()
     svc.add_argument("--install", dest="service_action", action="store_const", const="install",
                      help="run this host as a login service (launchd on macOS, systemd --user on Linux) with these arguments")
@@ -167,7 +186,6 @@ def build_parser() -> argparse.ArgumentParser:
                      help="restart the login service now")
     svc.add_argument("--nudge", dest="service_action", action="store_const", const="nudge",
                      help="ask the running host to drain and restart (SIGHUP) — `make up` does this after a rebuild")
-    return p
 
 
 def parse_cli_binaries(flags: List[str], env_value: Optional[str] = None) -> Dict[str, str]:
@@ -199,7 +217,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         poll_seconds=max(1.0, ns.poll_seconds),
         session_timeout_seconds=max(60.0, ns.session_timeout),
         ask_timeout=max(5.0, ns.ask_timeout),
-        unlisted_bash=ns.unlisted_bash,
+        permission_mode=ns.permission_mode or UNLISTED_BASH_MODES.get(ns.unlisted_bash or ""),
         session_sandbox=SessionSandbox(
             enabled=not ns.no_session_sandbox,
             allowed_domains=tuple(dict.fromkeys((*DEFAULT_ALLOWED_DOMAINS, *ns.session_allow_domain))),
