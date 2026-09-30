@@ -27,7 +27,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
-from modules.socials.service import FOOTAGE_DONE
+from modules.socials.service import footage_generated
 from modules.socials.step_results import ID
 
 # The media family each post kind publishes (a content type's first part).
@@ -110,15 +110,9 @@ def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetCon
         idempotency_key=target.idempotency_key,
         media=tuple(f for f in files if _family(f) in families),
         thumbnail=next((f for f in files if _family(f) == IMAGE), None),
-        generated=_generated(post.footage),
+        generated=footage_generated(post.footage),
         setup_note=_setup_note(target.toolkit),
     )
-
-
-def _generated(footage: Any) -> bool:
-    """Whether a render recorded footage an AI toolkit made for one of the post's slots."""
-    slots = footage.values() if isinstance(footage, Mapping) else ()
-    return any(isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE for slot in slots)
 
 
 def _setup_note(toolkit: str) -> Optional[str]:

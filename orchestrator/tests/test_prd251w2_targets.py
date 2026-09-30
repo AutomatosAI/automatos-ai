@@ -162,6 +162,8 @@ def test_the_hash_covers_the_sorted_target_set_and_not_the_action_plan():
         ],
         # Wave 3 (review): with channels, the title is published (YouTube's), so it is content.
         "title": post.title,
+        # Wave 3 (final review): and whether its footage is AI-made (TikTok's AI label).
+        "generated": False,
     })
     assert post.content_hash == service.compute_content_hash(post) == expected
     before = post.content_hash

@@ -51,9 +51,12 @@ def _upload_params(executor):
 
 
 def _generated_footage(env, post_id):
+    """The render made AI footage for the post, then it was approved: whether its
+    footage is AI-made is approved content once the post has channels."""
     with env.factory() as db:
         post = service.get_post(db, WS, post_id)
         post.footage = {"hook": {"prompt": "A harvest table", "status": "done", "toolkit": "fal_ai"}}
+        post.content_hash = post.approved_hash = service.compute_content_hash(post)
         db.commit()
 
 
@@ -112,7 +115,7 @@ def test_a_creator_allowing_only_public_is_refused_unless_the_person_chose_publi
 def test_generated_footage_sets_the_ai_label(env):
     env.media = [VIDEO]
     post_id = _approved_post(env, _target("tiktok", "video", is_aigc=False))
-    _generated_footage(env, post_id)  # a render setting: the approval stands
+    _generated_footage(env, post_id)
     executor = FakeExecutor(_tiktok())
     assert _publish(env, post_id, executor) == "published"
     assert _upload_params(executor)["is_aigc"] is True
@@ -176,3 +179,19 @@ def test_a_choice_must_be_well_formed():
     ]}}}
     with pytest.raises(ValueError, match="names an earlier step"):
         parse_channel_adapters(unknown)
+
+
+def test_editing_the_footage_after_approval_voids_it_so_the_ai_label_never_drops_silently(env):
+    """Final review: TikTok's AI label reads whether the footage is AI-made. An edit
+    that asks the footage again (the approved media still holds the AI footage)
+    changes that, so it voids the approval and nothing publishes without the label."""
+    env.media = [VIDEO]
+    post_id = _approved_post(env, _target("tiktok", "video"))
+    _generated_footage(env, post_id)
+    with env.factory() as db:
+        post = service.get_post(db, WS, post_id)
+        service.update_post(post, "user-author", {"footage": {"hook": {"prompt": "A stormy sea"}}})
+        db.commit()
+        assert post.status == "needs_approval" and post.approved_hash != post.content_hash
+    with pytest.raises(service.NotPublishable):
+        harness._claim(env, post_id)

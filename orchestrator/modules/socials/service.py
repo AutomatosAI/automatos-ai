@@ -298,14 +298,26 @@ def _content_of(post: Any) -> Dict[str, Any]:
     }
     # Only a post with targets hashes them: one with none hashes as before (US-204).
     # With channels, the title is content too: a channel publishes it (YouTube's
-    # video title, $title in channel_adapters.py), so changing it voids the approval.
+    # video title, $title in channel_adapters.py), and so is whether its footage is
+    # AI-made (TikTok's AI label, $generated): changing either voids the approval.
     targets = post_targets.target_set(post)
-    return {**content, TARGETS: targets, "title": getattr(post, "title", None) or ""} if targets else content
+    if not targets:
+        return content
+    generated = footage_generated(getattr(post, "footage", None))
+    return {**content, TARGETS: targets, "title": getattr(post, "title", None) or "", "generated": generated}
+
+
+def footage_generated(footage: Any) -> bool:
+    """Whether a render recorded footage an AI toolkit made for one of the post's
+    slots (D12): what a channel's AI label says (``$generated``)."""
+    slots = footage.values() if isinstance(footage, Mapping) else ()
+    return any(isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE for slot in slots)
 
 
 def compute_content_hash(post: Any) -> str:
     """sha256 over canonical JSON of copy, variables, sources, format, template_id
-    and media, and the post's targets and title when it has any targets.
+    and media, and the post's targets, title and whether its footage is AI-made
+    when it has any targets.
 
     Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
     ``ensure_ascii=False``, so key order never changes the hash.
