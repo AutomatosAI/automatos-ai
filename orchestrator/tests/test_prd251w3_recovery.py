@@ -249,3 +249,36 @@ def test_a_title_is_not_content_for_a_post_with_no_channels():
     before = post.content_hash
     service.update_post(post, AUTHOR, {"title": "Two"})
     assert post.content_hash == before
+
+
+# ---------------------------------------------------------------------------
+# Final review (P251W3): a step output or a plan that is not there fails closed
+# ---------------------------------------------------------------------------
+
+
+def test_a_param_reading_an_earlier_step_that_returned_nothing_stops_the_step():
+    from modules.socials.capabilities import SEEDED_CHANNELS
+    from modules.socials.publish_sources import SourceMissing, TargetContext, resolve_params
+
+    post_step = next(s for s in SEEDED_CHANNELS["twitter"].kinds["image"] if s.step_class == "publish")
+    ctx = TargetContext(workspace_id=WS, post_id="p", toolkit="twitter", post_kind="image", copy="Hello",
+                        title="T", options={}, idempotency_key="k", media=(), thumbnail=None)
+    with pytest.raises(SourceMissing, match="returned nothing"):
+        resolve_params(post_step, ctx, {"media": {}})
+
+
+def test_a_target_whose_plan_predates_publishing_fails_and_calls_nothing(env):
+    post_id = _approved_post(env, _target("linkedin", "text"))
+    with env.factory() as db:  # a Wave 2 plan: its steps say nothing of what they return
+        target = db.get(SocialPost, post_id).targets[0]
+        plan = dict(target.action_plan)
+        plan["steps"] = [{k: v for k, v in step.items() if k not in ("returns", "until", "permalink", "jpeg")} for step in plan["steps"]]
+        target.action_plan = plan
+        db.commit()
+    executor = FakeExecutor(LINKEDIN)
+
+    assert _publish(env, post_id, executor) == "failed"
+
+    assert executor.calls == []
+    target = _targets(env, post_id)["linkedin", "text"]
+    assert "choose the post's channels again" in target["error"] and target["attempts"] == 1

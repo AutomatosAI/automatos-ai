@@ -241,7 +241,12 @@ async def _params(step: ChannelStep, ctx: TargetContext, rt: Runtime, progress: 
 async def _run_step(step: ChannelStep, ctx: TargetContext, rt: Runtime, progress: TargetProgress) -> None:
     params = await _params(step, ctx, rt, progress)
     output = await (_poll if step.until else _call)(step, params, ctx, rt)
-    progress.outputs[step.id] = returned(output, step.returns)
+    got = returned(output, step.returns)
+    if ID in step.returns and ID not in got and step.step_class != PUBLISH:
+        # A later step reads this id: without it nothing is published. (A publish
+        # step's missing id only leaves the receipt without one: the post is live.)
+        raise StepFailure(f"{step.action} returned no id at {step.returns[ID]}", transient=False)
+    progress.outputs[step.id] = got
 
 
 # ---- a target ---------------------------------------------------------------

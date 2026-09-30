@@ -35,7 +35,7 @@ from core.models.socials import SocialPostTarget
 from modules.socials import media_urls, publish_lifecycle, service
 from modules.socials.capabilities import ChannelStep
 from modules.socials.publish_lifecycle import TARGET_FAILED, TARGET_PENDING, TARGET_PUBLISHED, TARGET_UPLOADING
-from modules.socials.publish_sources import TargetContext, context_for, steps_of
+from modules.socials.publish_sources import StalePlan, TargetContext, context_for, steps_of
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class TargetWork:
     target_id: UUID
     steps: Tuple[ChannelStep, ...]
     context: TargetContext
+    error: Optional[str] = None  # why nothing can run for it (a stale plan): it fails at once
 
 
 def _post(db: Any, job: PublishJob) -> Any:
@@ -90,9 +91,17 @@ def load_work(factory: Callable[[], Any], job: PublishJob) -> Optional[List[Targ
             return []
         files = media_urls.resolve_post_media(db, post)
         pending = sorted((t for t in post.targets if t.status != TARGET_PUBLISHED), key=lambda t: (t.toolkit, t.post_kind))
-        return [TargetWork(t.id, steps_of(t.action_plan), context_for(post, t, files)) for t in pending]
+        return [_work(post, t, files) for t in pending]
     finally:
         db.close()
+
+
+def _work(post: Any, target: Any, files: Any) -> TargetWork:
+    context = context_for(post, target, files)
+    try:
+        return TargetWork(target.id, steps_of(target.action_plan), context)
+    except StalePlan as exc:
+        return TargetWork(target.id, (), context, error=str(exc))
 
 
 def begin_attempt(factory: Callable[[], Any], target_id: UUID) -> bool:

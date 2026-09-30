@@ -145,3 +145,18 @@ def test_the_engine_has_no_channel_specific_code():
         code = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.strip().startswith("#"))
         body = code.split('"""', 2)[-1]  # after the module docstring
         assert not channel.search(body), f"{path.name} names a channel"
+
+
+def test_an_x_image_whose_upload_returns_no_media_id_publishes_nothing(env):
+    """Final review: the post step reads the upload's id ($steps.media). An upload
+    whose answer has it nowhere fails the target; the tweet is never sent without
+    its image, and never recorded published."""
+    env.media = [IMAGE, VIDEO]
+    post_id = _approved_post(env, _target("twitter", "image"))
+    executor = FakeExecutor({**X, "TWITTER_UPLOAD_MEDIA": [ok({"data": {"media_key": "3_123"}})]})
+
+    assert _publish(env, post_id, executor) == "failed"
+
+    assert executor.actions == ["TWITTER_UPLOAD_MEDIA"]  # not retried, and no post call
+    target = _targets(env, post_id)["twitter", "image"]
+    assert target["status"] == "failed" and "TWITTER_UPLOAD_MEDIA returned no id" in target["error"]

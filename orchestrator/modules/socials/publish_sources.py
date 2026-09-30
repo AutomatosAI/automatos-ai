@@ -45,7 +45,18 @@ OPTION, STEPS = "$option.", "$steps."
 
 
 class SourceMissing(Exception):
-    """A step needs a file the post does not have."""
+    """A step needs a file the post does not have, or a value an earlier step did not return."""
+
+
+class StalePlan(Exception):
+    """A target's stored steps predate publishing (they say nothing of what a step returns)."""
+
+
+STEPS_SOURCE = "$steps."
+STALE_PLAN = (
+    "This channel's publish plan was saved before publishing existed: choose the post's "
+    "channels again in the composer, then approve it."
+)
 
 
 @dataclass(frozen=True)
@@ -116,8 +127,13 @@ def _setup_note(toolkit: str) -> Optional[str]:
 
 
 def steps_of(action_plan: Any) -> Tuple[ChannelStep, ...]:
-    """The steps a target's ``action_plan`` holds (checked when they were stored)."""
+    """The steps a target's ``action_plan`` holds (checked when they were stored).
+    Raises :class:`StalePlan` for steps stored before publishing existed (Wave 2): they
+    lack ``returns``, so every ``$steps`` source would read nothing and a status step
+    would not wait. Choosing the channels again stores the current plan."""
     raw = action_plan.get("steps") if isinstance(action_plan, Mapping) else None
+    if any(not isinstance(step, Mapping) or "returns" not in step for step in raw or ()):
+        raise StalePlan(STALE_PLAN)
     return tuple(
         ChannelStep(
             id=str(step["id"]),
@@ -193,9 +209,18 @@ def resolve_value(value: Any, ctx: TargetContext, outputs: Mapping[str, Mapping[
     return None
 
 
+def _reads_steps(source: Any) -> bool:
+    """Whether a param's source reads an earlier step's output (``$steps.``)."""
+    if isinstance(source, (list, tuple)):
+        return any(_reads_steps(item) for item in source)
+    return isinstance(source, str) and any(ref.startswith(STEPS_SOURCE) for ref in source.split("|"))
+
+
 def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
     """The step's params, each from its source; one that resolves to nothing is left
-    out, except a file or link param, which raises :class:`SourceMissing`."""
+    out, except a file or link param, or one reading what an earlier step returned
+    (an X post without the media id its upload returned would publish without its
+    image): those raise :class:`SourceMissing`, and the step is never called."""
     params: Dict[str, Any] = {}
     for name, source in step.params.items():
         value = resolve_value(source, ctx, outputs)
@@ -204,6 +229,8 @@ def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, 
             raise SourceMissing(f"{step.action} needs a {wanted} file for {name}, and the post has none")
         if value is None and isinstance(source, Mapping):
             raise SourceMissing(f"{step.action}: none of {', '.join(source['else'])} is allowed for {name} on this account")
+        if value is None and _reads_steps(source):
+            raise SourceMissing(f"{step.action}: {name} reads what an earlier step returned ({source}), and it returned nothing")
         if value is not None:
             params[name] = value
     return params

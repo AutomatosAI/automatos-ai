@@ -62,6 +62,9 @@ async def publish_target(work: TargetWork, rt: Runtime, factory: Callable[[], An
         if not await asyncio.to_thread(begin_attempt, factory, work.target_id):
             return  # published already, or another run holds it
         held.add(work.target_id)
+        if work.error:  # nothing can run for it (a stale plan): it fails, and nothing is called
+            await asyncio.to_thread(fail_attempt, factory, work.target_id, work.error, ())
+            return
         try:
             remote_id, permalink = await run_steps(work.steps, work.context, rt, progress)
         except StepFailure as failure:
