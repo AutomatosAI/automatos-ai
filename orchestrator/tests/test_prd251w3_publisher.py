@@ -115,7 +115,7 @@ class FakeStager:
     def __init__(self, folder):
         self.folder = folder
 
-    async def stage(self, media):
+    async def stage(self, media, *, jpeg=False):
         path = self.folder / media.name
         path.write_bytes(b"x" * (media.bytes or 1))
         return path

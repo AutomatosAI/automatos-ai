@@ -46,6 +46,7 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
 | `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
+| `POST /jpeg` | The image's bytes (a PNG still): the same picture as a JPEG, transparency over white (PRD-251 US-303: Instagram takes JPEG only). 400 `not_an_image` when ffmpeg cannot read it |
 
 **The bundle** is described at the top of `media_render/bundle.py`:
 - the template's HTML and CSS, and the variables that fill its `{{ name }}` placeholders (HTML-escaped text: every word on screen is template text);

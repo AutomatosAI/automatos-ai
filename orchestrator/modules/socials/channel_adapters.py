@@ -198,6 +198,8 @@ CHANNEL_ADAPTERS = {
     "instagram": {
         "label": "Instagram",
         "setup_note": None,
+        # Instagram takes JPEG images only; the stills render as PNG, so the files
+        # named in "jpeg" go through media-render's converter first (US-303).
         "kinds": {
             "image": [
                 {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
@@ -207,14 +209,37 @@ CHANNEL_ADAPTERS = {
                     "class": "upload",
                     "params": {"ig_user_id": "$steps.account", "image_file": "$media", "caption": "$copy"},
                     "files": ["image_file"],
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "jpeg": ["image_file"],
+                    "returns": {"id": "id|creation_id"},
+                },
+                # The container is ready once Instagram has processed it (FINISHED).
+                {
+                    "id": "ready",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "status",
+                    "params": {"ig_media_id": "$steps.container", "fields": "status_code,status"},
+                    "until": {
+                        "path": "status_code",
+                        "done": ["FINISHED", "PUBLISHED"],
+                        "failed": ["ERROR", "EXPIRED"],
+                        "error": "status",
+                    },
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "returns": {"id": "id|media_id"},
+                },
+                # The published media's link, for the receipt.
+                {
+                    "id": "link",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "read",
+                    "params": {"ig_media_id": "$steps.publish", "fields": "permalink"},
+                    "returns": {"permalink": "permalink"},
+                    "optional": True,
                 },
             ],
             "reel": [
@@ -230,17 +255,40 @@ CHANNEL_ADAPTERS = {
                         "caption": "$copy",
                     },
                     "files": ["video_file"],
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "returns": {"id": "id|creation_id"},
+                },
+                # The container is ready once Instagram has processed it (FINISHED).
+                {
+                    "id": "ready",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "status",
+                    "params": {"ig_media_id": "$steps.container", "fields": "status_code,status"},
+                    "until": {
+                        "path": "status_code",
+                        "done": ["FINISHED", "PUBLISHED"],
+                        "failed": ["ERROR", "EXPIRED"],
+                        "error": "status",
+                    },
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "returns": {"id": "id|media_id"},
+                },
+                # The published media's link, for the receipt.
+                {
+                    "id": "link",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "read",
+                    "params": {"ig_media_id": "$steps.publish", "fields": "permalink"},
+                    "returns": {"permalink": "permalink"},
+                    "optional": True,
                 },
             ],
-            # Two to ten images.
+            # Two to ten images: Composio's carousel action makes a child container per
+            # image from child_image_files, then the carousel container.
             "carousel": [
                 {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
                 {
@@ -253,14 +301,37 @@ CHANNEL_ADAPTERS = {
                         "child_image_files": "$media[]",
                     },
                     "files": ["child_image_files"],
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "jpeg": ["child_image_files"],
+                    "returns": {"id": "id|creation_id"},
+                },
+                # The container is ready once Instagram has processed it (FINISHED).
+                {
+                    "id": "ready",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "status",
+                    "params": {"ig_media_id": "$steps.container", "fields": "status_code,status"},
+                    "until": {
+                        "path": "status_code",
+                        "done": ["FINISHED", "PUBLISHED"],
+                        "failed": ["ERROR", "EXPIRED"],
+                        "error": "status",
+                    },
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
-                    "returns": {"id": "id|creation_id|media_id"},
+                    "returns": {"id": "id|media_id"},
+                },
+                # The published media's link, for the receipt.
+                {
+                    "id": "link",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "read",
+                    "params": {"ig_media_id": "$steps.publish", "fields": "permalink"},
+                    "returns": {"permalink": "permalink"},
+                    "optional": True,
                 },
             ],
         },

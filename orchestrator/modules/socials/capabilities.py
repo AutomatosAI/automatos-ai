@@ -333,7 +333,7 @@ NEEDS_PUBLIC_LINK = (
 )
 
 _STEP_KEYS = frozenset(
-    {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink"}
+    {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink", "jpeg"}
 )
 _ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
 _STEP_REF = "$steps."
@@ -360,6 +360,7 @@ class ChannelStep:
     returns: Mapping[str, str] = dataclass_field(default_factory=lambda: MappingProxyType({}))  # name → where the output holds it (step_results)
     until: Optional[Mapping[str, Any]] = None  # a status step's end condition
     permalink: Optional[str] = None  # a link template built from the returned id
+    jpeg: Tuple[str, ...] = ()  # the files the platform takes only as JPEG (media-render converts them)
 
 
 @dataclass(frozen=True)
@@ -489,12 +490,16 @@ def _parse_step(toolkit: str, where: str, raw: Any, seen: FrozenSet[str], refera
         raise ValueError(f"{where}.{action}: a file or link param is not one of its params")
     if not _file_params(params) <= set(files) | set(urls):
         raise ValueError(f"{where}.{action}: a param reading a media file must be one of its files or urls")
+    jpeg = _names(raw.get("jpeg"), f"{where}.{action} jpeg")
+    if not set(jpeg) <= set(files):
+        raise ValueError(f"{where}.{action}: a jpeg param is not one of its files")
     returns = parse_returns(raw.get("returns"), f"{where}.{action}")
     return ChannelStep(
         step_id, action, step_class, MappingProxyType(dict(params)), files, urls, raw.get("optional") is True,
         returns=returns,
         until=parse_until(raw.get("until"), f"{where}.{action}", step_class, STATUS),
         permalink=parse_permalink(raw.get("permalink"), f"{where}.{action}", returns),
+        jpeg=jpeg,
     )
 
 

@@ -210,6 +210,16 @@ class MediaRenderClient:
             raise _error_for(resp, "render")
         return resp.json()
 
+    async def to_jpeg(self, image: bytes) -> bytes:
+        """``POST /jpeg`` (PRD-251 US-303): ``image`` as a JPEG, made by the
+        renderer's ffmpeg. Instagram takes JPEG only, and the stills are PNG."""
+        resp = await self._send(
+            "POST", "/jpeg", "jpeg", content=image, headers={"Content-Type": "application/octet-stream"}
+        )
+        if resp.status_code != 200:
+            raise _error_for(resp, "jpeg")
+        return resp.content
+
     async def job(self, job_id: str) -> Dict[str, Any]:
         """``GET /render/{id}``: status, check report, timings and outputs."""
         resp = await self._send("GET", f"/render/{quote(job_id, safe='')}", "job status")

@@ -121,6 +121,7 @@ def steps_of(action_plan: Any) -> Tuple[ChannelStep, ...]:
             returns=MappingProxyType(dict(step.get("returns") or {})),
             until=MappingProxyType(dict(step["until"])) if step.get("until") else None,
             permalink=step.get("permalink"),
+            jpeg=tuple(step.get("jpeg") or ()),
         )
         for step in raw or ()
     )

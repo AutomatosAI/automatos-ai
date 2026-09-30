@@ -42,6 +42,7 @@ from aiohttp import web
 from .bundle import parse_bundle
 from .config import Settings
 from .hyperframes import LOG_TAIL_CHARS
+from .jpeg import JPEG_CONTENT_TYPE, JpegError, to_jpeg
 from .jobs import DONE, FAILED, QUEUED, REJECTED, RENDERING, Job, JobStore, delete_files, job_json, remove_working_files, reset_work_dir
 from .lanes import Lane
 from .music import Track, load_library
@@ -283,6 +284,20 @@ async def post_tts(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
+async def post_jpeg(request: web.Request) -> web.Response:
+    """``POST /jpeg``: the image in the body, answered as a JPEG (US-303: Instagram
+    takes JPEG only, and the stills are PNG)."""
+    settings = request.app[STATE].settings
+    image = await request.read()
+    try:
+        jpeg = await asyncio.to_thread(
+            to_jpeg, image, ffmpeg_bin=settings.ffmpeg_bin, timeout_seconds=settings.probe_timeout_seconds
+        )
+    except JpegError as exc:
+        return _error(400, "not_an_image", str(exc))
+    return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE)
+
+
 async def _sweep(state: ServiceState) -> None:
     while True:
         await asyncio.sleep(state.settings.sweep_interval_seconds)
@@ -349,6 +364,7 @@ def create_app(
     app.router.add_get("/render/{job_id}", get_render)
     app.router.add_get("/render/{job_id}/output/{name}", get_output)
     app.router.add_post("/tts", post_tts)
+    app.router.add_post("/jpeg", post_jpeg)
     app.cleanup_ctx.append(_lifecycle(real_pipeline))
     return app
 

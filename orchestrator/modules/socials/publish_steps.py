@@ -46,6 +46,7 @@ from modules.socials.step_results import DONE, ID, PERMALINK, poll_state, return
 logger = logging.getLogger(__name__)
 
 ERROR_MAX_CHARS = 1000
+JPEG, IMAGE_TYPE = "image/jpeg", "image/"
 FAILED_STATE = "failed"
 # Transient (D8): worth another attempt. Anything else is the platform's answer: a
 # message that carries a 4xx status (429 aside) never is, whatever else it says.
@@ -71,12 +72,14 @@ class StepFailure(Exception):
 
 
 class Stager:
-    """Stages a post's stored file as a local file the executor uploads."""
+    """Stages a post's stored file as a local file the executor uploads; as a JPEG
+    when the platform takes nothing else (media-render converts it, US-303)."""
 
-    def __init__(self, workdir: Path, client: Any = None) -> None:
+    def __init__(self, workdir: Path, client: Any = None, converter: Optional[Callable[[bytes], Awaitable[bytes]]] = None) -> None:
         self.workdir = workdir
         self._client = client
-        self._staged: Dict[str, Path] = {}
+        self._converter = converter
+        self._staged: Dict[Tuple[str, bool], Path] = {}
 
     def _download(self, media: MediaFile) -> Path:
         from core.storage import get_s3_client
@@ -89,10 +92,27 @@ class Stager:
         (self._client or get_s3_client()).download_file(config.S3_DOCUMENTS_BUCKET, media.key, str(path))
         return path
 
-    async def stage(self, media: MediaFile) -> Path:
-        if media.deliverable_id not in self._staged:
-            self._staged[media.deliverable_id] = await asyncio.to_thread(self._download, media)
-        return self._staged[media.deliverable_id]
+    async def _as_jpeg(self, media: MediaFile, path: Path) -> Path:
+        if (media.content_type or "") == JPEG or not (media.content_type or "").startswith(IMAGE_TYPE):
+            return path
+        from core.media_render_client import MediaRenderClient, MediaRenderError
+
+        convert = self._converter or MediaRenderClient().to_jpeg
+        try:
+            jpeg = await convert(await asyncio.to_thread(path.read_bytes))
+        except MediaRenderError as exc:
+            raise StepFailure(f"{media.name} must reach the platform as a JPEG, and media-render could not convert it: {exc}", transient=False) from exc
+        target = path.with_suffix(".jpg")
+        await asyncio.to_thread(target.write_bytes, jpeg)
+        return target
+
+    async def stage(self, media: MediaFile, *, jpeg: bool = False) -> Path:
+        """The file, downloaded once per run; as a JPEG when ``jpeg`` and it is another image."""
+        key = (media.deliverable_id, jpeg)
+        if key not in self._staged:
+            path = await asyncio.to_thread(self._download, media)
+            self._staged[key] = await self._as_jpeg(media, path) if jpeg else path
+        return self._staged[key]
 
 
 @dataclass
@@ -180,7 +200,7 @@ async def _poll(step: ChannelStep, params: Dict[str, Any], ctx: TargetContext, r
 
 async def _materialize(name: str, value: MediaParam, step: ChannelStep, ctx: TargetContext, rt: Runtime) -> Any:
     if name in step.files:
-        items = [await rt.stager.stage(media) for media in value.files]
+        items = [await rt.stager.stage(media, jpeg=name in step.jpeg) for media in value.files]
     else:
         post = _PostRef(ctx.post_id, ctx.workspace_id)
         items = [await asyncio.to_thread(rt.public_link, post, media) for media in value.files]

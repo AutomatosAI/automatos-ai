@@ -99,6 +99,7 @@ def step_plan(step: ChannelStep) -> Dict[str, Any]:
         "returns": dict(step.returns),
         "until": _until_plan(step.until),
         "permalink": step.permalink,
+        "jpeg": list(step.jpeg),
     }
 
 
