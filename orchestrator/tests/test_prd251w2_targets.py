@@ -75,7 +75,7 @@ ROUTE = "/api/socials/posts/{post_id}/targets"
 # A kind's resolved sequence as the api hands it to the service (the registry's shape).
 STEPS = [{"id": "post", "action": "EXAMPLE_CREATE_POST", "class": "publish", "params": {"text": "$copy"}}]
 OTHER_STEPS = [{"id": "post", "action": "EXAMPLE_CREATE_POST_V2", "class": "publish", "params": {"body": "$copy"}}]
-TARGET_FIELDS = {"id", "toolkit", "post_kind", "options", "status", "attempts", "remote_id", "permalink", "error", "published_at"}
+TARGET_FIELDS = {"id", "toolkit", "post_kind", "options", "status", "attempts", "remote_id", "permalink", "error", "published_at", "notes"}
 
 
 def _t(toolkit, post_kind, steps=STEPS, **options):
@@ -485,7 +485,11 @@ def test_the_options_a_kind_takes_are_the_ones_its_steps_read():
     assert takes("twitter", "text") == takes("instagram", "reel") == frozenset()
 
 
-def test_put_on_an_approved_post_voids_the_approval_and_the_new_channels_can_be_approved(api):
+def test_put_on_an_approved_post_voids_the_approval_and_the_new_channels_can_be_approved(api, monkeypatch):
+    from modules.socials import publisher
+
+    launched = []
+    monkeypatch.setattr(publisher, "launch", launched.append)
     _linkedin_and_x(api)
     approved = _approved(api, [{"toolkit": "linkedin", "post_kind": "text"}])
     assert approved["status"] == "approved" and approved["approved_hash"] == approved["content_hash"]
@@ -502,8 +506,9 @@ def test_put_on_an_approved_post_voids_the_approval_and_the_new_channels_can_be_
 
     again = api.client.post(f"/api/socials/posts/{approved['id']}/approve", json={"content_hash": body["content_hash"]})
     assert again.status_code == 200 and again.json()["approved_hash"] == body["content_hash"]
-    # Approved with its channels, it reaches the Wave 3 seam, which still answers 501.
-    assert api.client.post(f"/api/socials/posts/{approved['id']}/publish-now").status_code == 501
+    # Approved with its channels, it publishes (Wave 3): 202, and one publish is launched.
+    assert api.client.post(f"/api/socials/posts/{approved['id']}/publish-now").status_code == 202
+    assert [job.post_id for job in launched] == [uuid.UUID(approved["id"])]
 
 
 def test_put_on_a_scheduled_post_voids_it_and_the_same_set_again_keeps_an_approval(api):
@@ -634,11 +639,11 @@ def test_to_dict_carries_each_targets_options_status_and_receipt(api):
         "id": str(linkedin.id), "toolkit": "linkedin", "post_kind": "text", "options": {"author": "urn:li:organization:42"},
         "status": "published", "attempts": 1, "remote_id": "urn:li:share:7",
         "permalink": "https://www.linkedin.com/feed/update/urn:li:share:7", "error": None,
-        "published_at": got[0]["published_at"],
+        "published_at": got[0]["published_at"], "notes": [],
     }
     assert got[0]["published_at"].startswith("2026-11-09T09:30")
     assert got[1] == {
         "id": str(twitter.id), "toolkit": "twitter", "post_kind": "text", "options": {},
         "status": "failed", "attempts": 3, "remote_id": None, "permalink": None,
-        "error": "X answered 429: rate limited", "published_at": None,
+        "error": "X answered 429: rate limited", "published_at": None, "notes": [],
     }

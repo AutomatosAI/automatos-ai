@@ -28,8 +28,19 @@ empty, so the documented parameters are carried here.
   - ``urls``: the params that take nothing but a link the platform fetches (D9:
     needs public storage);
   - ``optional``: skipped at publish when it cannot run (refused by the deny list,
-    missing from the action cache, or a link with no public storage); it never
-    makes its post kind unavailable.
+    missing from the action cache, a link with no public storage, or refused by the
+    platform), and the target's receipt notes why; it never makes its post kind
+    unavailable;
+  - ``returns``: what the publisher reads back from the call, ``{name: path}``
+    (``modules/socials/step_results.py``). ``$steps.<id>`` reads the step's ``id``;
+    a ``publish`` step's ``id`` is the target's remote id, and a ``permalink`` any
+    step returns is the receipt's link. Composio's docs could not be reached from the
+    build (2026-09-30), so a path lists the documented field and the likely
+    alternatives, ``a|b``; the owner's live publish confirms them;
+  - ``permalink``: a link with ``{id}`` in it, built from the returned id when no
+    step returns a link;
+  - ``until`` (a ``status`` step): polled until the state at ``path`` is ``done``,
+    or ``failed`` (the target fails with the platform's ``error``).
 - ``never_offered``: publish actions the registry never offers (stale, deprecated,
   or pulling media from a URL on a domain the app owner verified, and Composio owns
   the app). The post gate refuses them all the same.
@@ -38,8 +49,9 @@ A source is ``$copy`` (the channel's copy), ``$title`` (the post's title),
 ``$media`` (the post's media file), ``$media[]`` (all its media files),
 ``$media.content_type`` and ``$media.bytes`` (facts of that file), ``$thumbnail``
 (the post's still), ``$option.<name>`` (the target's option, chosen in the composer
-or at publish) or ``$steps.<id>`` (what an earlier step returned: the id of the
-account, upload, container or publish). ``a|b`` takes the first that resolves, a
+or at publish), ``$steps.<id>`` (the ``id`` an earlier step returned: the
+account, upload, container or publish) or ``$idempotency_key`` (the target's own
+key, for an action that takes one; no seeded action does). ``a|b`` takes the first that resolves, a
 list is a list parameter, and any other value is passed as it is.
 
 ``GENERIC_ADAPTER``: D8's "Generic (text + media)". A connected toolkit outside
@@ -49,7 +61,8 @@ of ``post_words`` and none of ``skip_words`` among the words of its slug. A medi
 field is a name in ``media_fields`` (mapped to the post kinds it carries), or a
 schema property flagged ``file_marker`` (a file of any kind). A name ending in one
 of ``url_suffixes`` takes a link; any other takes a file. Offered channels are
-labelled "unverified channel" until one of their targets has published.
+labelled "unverified channel" until one of their targets has published. ``returns``
+is what the post action answers (its id, and a link when it gives one).
 """
 
 CHANNEL_ADAPTERS = {
@@ -58,19 +71,21 @@ CHANNEL_ADAPTERS = {
         "setup_note": None,
         "kinds": {
             "text": [
-                {"id": "me", "action": "LINKEDIN_GET_MY_INFO", "class": "read"},
+                {"id": "me", "action": "LINKEDIN_GET_MY_INFO", "class": "read", "returns": {"id": "author_id|response_dict.author_id"}},
                 {
                     "id": "post",
                     "action": "LINKEDIN_CREATE_LINKED_IN_POST",
                     "class": "publish",
                     "params": {"author": "$option.author|$steps.me", "commentary": "$copy"},
+                    "returns": {"id": "id|post_id|share_id|x_restli_id|urn"},
+                    "permalink": "https://www.linkedin.com/feed/update/{id}/",
                 },
             ],
             # Composio's own LinkedIn image upload is broken (its issues #3094, #3113,
             # #3231): the executor hands this call to the workspace-scoped image
             # workaround (core/composio/linkedin_image_workaround.py).
             "image": [
-                {"id": "me", "action": "LINKEDIN_GET_MY_INFO", "class": "read"},
+                {"id": "me", "action": "LINKEDIN_GET_MY_INFO", "class": "read", "returns": {"id": "author_id|response_dict.author_id"}},
                 {
                     "id": "post",
                     "action": "LINKEDIN_CREATE_LINKED_IN_POST",
@@ -81,6 +96,8 @@ CHANNEL_ADAPTERS = {
                         "images": "$media[]",
                     },
                     "files": ["images"],
+                    "returns": {"id": "id|post_id|share_id|x_restli_id|urn"},
+                    "permalink": "https://www.linkedin.com/feed/update/{id}/",
                 },
             ],
             "video": [
@@ -90,12 +107,15 @@ CHANNEL_ADAPTERS = {
                     "class": "upload",
                     "params": {"file": "$media"},
                     "files": ["file"],
+                    "returns": {"id": "video_urn|video|asset|value.video|id"},
                 },
                 {
                     "id": "post",
                     "action": "LINKEDIN_CREATE_VIDEO_POST",
                     "class": "publish",
                     "params": {"video_urn": "$steps.upload", "commentary": "$copy"},
+                    "returns": {"id": "id|post_id|share_id|x_restli_id|urn"},
+                    "permalink": "https://www.linkedin.com/feed/update/{id}/",
                 },
             ],
         },
@@ -113,6 +133,8 @@ CHANNEL_ADAPTERS = {
                     "action": "TWITTER_CREATION_OF_A_POST",
                     "class": "publish",
                     "params": {"text": "$copy"},
+                    "returns": {"id": "id|data.id|tweet_id"},
+                    "permalink": "https://x.com/i/web/status/{id}",
                 },
             ],
             "image": [
@@ -122,12 +144,15 @@ CHANNEL_ADAPTERS = {
                     "class": "upload",
                     "params": {"media": "$media", "media_type": "$media.content_type"},
                     "files": ["media"],
+                    "returns": {"id": "media_id_string|media_id|id"},
                 },
                 {
                     "id": "post",
                     "action": "TWITTER_CREATION_OF_A_POST",
                     "class": "publish",
                     "params": {"text": "$copy", "media_media_ids": ["$steps.media"]},
+                    "returns": {"id": "id|data.id|tweet_id"},
+                    "permalink": "https://x.com/i/web/status/{id}",
                 },
             ],
             # Video takes X's chunked upload, which Composio runs as one action.
@@ -142,18 +167,29 @@ CHANNEL_ADAPTERS = {
                         "total_bytes": "$media.bytes",
                     },
                     "files": ["media"],
+                    "returns": {"id": "media_id_string|media_id|id"},
                 },
                 {
                     "id": "processed",
                     "action": "TWITTER_GET_MEDIA_UPLOAD_STATUS",
                     "class": "status",
                     "params": {"media_id": "$steps.media"},
+                    # No processing_info: X has nothing left to process.
+                    "until": {
+                        "path": "processing_info.state",
+                        "done": ["succeeded"],
+                        "failed": ["failed"],
+                        "error": "processing_info.error.message|processing_info.error.name",
+                        "absent": "done",
+                    },
                 },
                 {
                     "id": "post",
                     "action": "TWITTER_CREATION_OF_A_POST",
                     "class": "publish",
                     "params": {"text": "$copy", "media_media_ids": ["$steps.media"]},
+                    "returns": {"id": "id|data.id|tweet_id"},
+                    "permalink": "https://x.com/i/web/status/{id}",
                 },
             ],
         },
@@ -164,23 +200,25 @@ CHANNEL_ADAPTERS = {
         "setup_note": None,
         "kinds": {
             "image": [
-                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read"},
+                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
                 {
                     "id": "container",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA",
                     "class": "upload",
                     "params": {"ig_user_id": "$steps.account", "image_file": "$media", "caption": "$copy"},
                     "files": ["image_file"],
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
             ],
             "reel": [
-                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read"},
+                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
                 {
                     "id": "container",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA",
@@ -192,17 +230,19 @@ CHANNEL_ADAPTERS = {
                         "caption": "$copy",
                     },
                     "files": ["video_file"],
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
             ],
             # Two to ten images.
             "carousel": [
-                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read"},
+                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
                 {
                     "id": "container",
                     "action": "INSTAGRAM_CREATE_CAROUSEL_CONTAINER",
@@ -213,12 +253,14 @@ CHANNEL_ADAPTERS = {
                         "child_image_files": "$media[]",
                     },
                     "files": ["child_image_files"],
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
                 {
                     "id": "publish",
                     "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
                     "class": "publish",
                     "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
+                    "returns": {"id": "id|creation_id|media_id"},
                 },
             ],
         },
@@ -244,12 +286,19 @@ CHANNEL_ADAPTERS = {
                         "publish": True,
                     },
                     "files": ["file_to_upload"],
+                    "returns": {"id": "publish_id"},
                 },
                 {
                     "id": "published",
                     "action": "TIKTOK_FETCH_PUBLISH_STATUS",
                     "class": "status",
                     "params": {"publish_id": "$steps.upload"},
+                    "until": {
+                        "path": "status",
+                        "done": ["PUBLISH_COMPLETE"],
+                        "failed": ["FAILED"],
+                        "error": "fail_reason",
+                    },
                 },
             ],
         },
@@ -274,6 +323,8 @@ CHANNEL_ADAPTERS = {
                         "videoFilePath": "$media",
                     },
                     "files": ["videoFilePath"],
+                    "returns": {"id": "id|videoId|video_id"},
+                    "permalink": "https://www.youtube.com/watch?v={id}",
                 },
                 # The custom thumbnail takes only a public link (D9).
                 {
@@ -320,4 +371,6 @@ GENERIC_ADAPTER = {
     },
     "url_suffixes": ["_url", "_urls"],
     "file_marker": "file_uploadable",
+    # What a generic post action returns: its id, and a link when it gives one.
+    "returns": {"id": "id|post_id|data.id", "permalink": "permalink|url|link"},
 }

@@ -13,8 +13,7 @@ post is a 404. Review actions (approve, request changes, reject) need
 The lifecycle lives in ``modules/socials/service.py``; this module maps its
 errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 ``content_hash``), UnsourcedClaims → 422 (naming the claims), SourcesNotFound →
-422 (naming each claim and why), NotPublishable → 409, PublishingUnavailable →
-501, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
+422 (naming each claim and why), NotPublishable → 409, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
 RendererUnavailable → 503, ReportNotFound → 404, ChartNotBindable → 422,
 ReportUnreadable → 503, PostNotFound → 404.
 
@@ -23,7 +22,8 @@ unless it resolves in the caller's workspace (``modules/socials/sources.py``);
 an approval resolves every source again, and a claim whose source is gone counts
 as unsourced. ``GET /sources`` searches candidates per kind for the composer.
 Included below: ``api/socials_channels.py`` (D8, S3.2), ``api/socials_targets.py``
-(US-204) and ``api/socials_campaigns.py``, campaigns and series approval (S2.4).
+(US-204), ``api/socials_campaigns.py``, campaigns and series approval (S2.4), and
+``api/socials_publish.py``, publish now and retry (Wave 3, US-301).
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
 the month's render minutes, counting those renders in progress hold (refused
@@ -82,7 +82,7 @@ and rendering a post are the flows ``create_post``, ``edit_post``,
 ``submit_post`` and ``render_post``, which the routes and the platform tools
 (``modules/tools/discovery/handlers_socials.py``) both call. There is no flow
 that approves, schedules or publishes for a tool to reach: a person approves in
-the Socials tab (D6), and the platform publishes (Wave 3).
+the Socials tab (D6), and the platform publishes it (``api/socials_publish.py``).
 """
 
 from __future__ import annotations
@@ -101,6 +101,7 @@ from sqlalchemy.orm import Session
 from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
 from api import socials_preview
+from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_targets import router as targets_router
 from config import config
@@ -123,7 +124,6 @@ from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
-from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
 from modules.socials.settings import require_socials_enabled
@@ -135,7 +135,7 @@ router = APIRouter(
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
-for sub_router in (channels_router, targets_router, compose_router, campaigns_router):
+for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
@@ -242,8 +242,6 @@ def _raise_for(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=422, detail={"message": str(exc), "unresolved": exc.unresolved})
     if isinstance(exc, service.StaleContent):
         raise HTTPException(status_code=409, detail={"message": str(exc), "content_hash": exc.current_hash})
-    if isinstance(exc, PublishingUnavailable):
-        raise HTTPException(status_code=501, detail=str(exc))
     if isinstance(exc, (service.IllegalTransition, service.NotPublishable, preview.PreviewInProgress)):
         raise HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, (service.InvalidPost, render.NotRenderable)):
@@ -722,22 +720,6 @@ async def unschedule_social_post(
         return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
-
-
-@router.post("/posts/{post_id}/publish-now", dependencies=[CAN_UPDATE])
-async def publish_social_post_now(
-    post_id: UUID,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """The approval guard runs first (409 on a stale approval). Wave 0 has no
-    channel publishers, so a valid post answers 501."""
-    post = _load(db, ctx, post_id)
-    try:
-        publish_post(db, post)
-    except service.SocialsError as exc:
-        _raise_for(exc)
-    return _save(db, post)
 
 
 # ---------------------------------------------------------------------------

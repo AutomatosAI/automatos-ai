@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional, Set
+from typing import Any, Callable, Optional, Set, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,56 @@ def _dispatcher(db: Any, workspace_id: str) -> Any:
     return NotificationDispatcher(db, workspace_id)
 
 
+# Wave 3 (US-301): how a publish ended, told to the workspace.
+PUBLISHED_EVENT = "social_post_published"
+FAILED_EVENT = "social_post_failed"
+_OUTCOMES = {
+    # post status → (event type, title prefix, notification status)
+    "published": (PUBLISHED_EVENT, "Social post published: ", "ok"),
+    "partially_published": (FAILED_EVENT, "Social post partly published: ", "error"),
+    "failed": (FAILED_EVENT, "Social post failed to publish: ", "error"),
+}
+
+
+async def _dispatch(
+    workspace_id: UUID | str,
+    post_id: UUID | str,
+    event: Tuple[str, str, str],
+    title: str,
+    session_factory: Optional[Callable[[], Any]],
+) -> None:
+    """Send one notification linked to the post, on its own session. Never raises."""
+    event_type, prefix, status = event
+    try:
+        db = (session_factory or _default_session_factory())()
+    except Exception:
+        logger.exception("[Socials] no session for the %s notice of post %s", event_type, post_id)
+        return
+    try:
+        await _dispatcher(db, str(workspace_id)).dispatch(
+            event_type=event_type, title=f"{prefix}{title}", link_type=LINK_TYPE, link_id=str(post_id), status=status,
+        )
+    except Exception:
+        logger.exception("[Socials] the %s notice of post %s was not sent", event_type, post_id)
+    finally:
+        db.close()
+
+
+async def dispatch_publish_outcome(
+    workspace_id: UUID | str,
+    post_id: UUID | str,
+    title: str,
+    status: str,
+    *,
+    session_factory: Optional[Callable[[], Any]] = None,
+) -> None:
+    """Tell the workspace how the post's publish ended (``status``: published,
+    partially_published or failed). Never raises."""
+    event = _OUTCOMES.get(status)
+    if event is not None:
+        await _dispatch(workspace_id, post_id, event, title, session_factory)
+
+
 async def dispatch_approval_pending(
     workspace_id: UUID | str,
     post_id: UUID | str,
@@ -57,23 +107,7 @@ async def dispatch_approval_pending(
 ) -> None:
     """Send the ``approval_pending`` notification for one post, on its own session.
     Never raises: a failure is logged."""
-    try:
-        db = (session_factory or _default_session_factory())()
-    except Exception:
-        logger.exception("[Socials] no session for the approval notice of post %s", post_id)
-        return
-    try:
-        await _dispatcher(db, str(workspace_id)).dispatch(
-            event_type=EVENT_TYPE,
-            title=f"{TITLE_PREFIX}{title}",
-            link_type=LINK_TYPE,
-            link_id=str(post_id),
-            status=STATUS,
-        )
-    except Exception:
-        logger.exception("[Socials] the approval notice of post %s was not sent", post_id)
-    finally:
-        db.close()
+    await _dispatch(workspace_id, post_id, (EVENT_TYPE, TITLE_PREFIX, STATUS), title, session_factory)
 
 
 def notify_approval_pending(workspace_id: UUID | str, post_id: UUID | str, title: str) -> None:

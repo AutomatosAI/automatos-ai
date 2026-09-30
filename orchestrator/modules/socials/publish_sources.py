@@ -1,0 +1,169 @@
+"""PRD-251 D8 (US-301): a channel step's params, resolved from the post.
+
+A target's ``action_plan`` holds its kind's steps as the channel registry resolved
+them (``modules/socials/targets.py``), each param mapped to a source
+(``channel_adapters.py``). This module turns those sources into values for one call:
+
+* ``$copy``: the channel's own copy, else the post's base copy; ``$title``: the post's
+  title; ``$option.<name>``: the target's option; ``$idempotency_key``: the target's
+  key; ``$steps.<id>``: the ``id`` an earlier step returned (``step_results.py``).
+* ``$media`` / ``$media[]``: the post's rendered file(s) of the target's kind (a
+  video for a video, reel or short, an image for an image or carousel), in media
+  order; ``$media.content_type`` and ``$media.bytes`` are facts of the first;
+  ``$thumbnail``: the post's first image. A media source becomes a
+  :class:`MediaParam`: the publisher stages it as a file, or links it, by the step's
+  ``files`` and ``urls`` (``publish_steps.py``).
+* ``a|b`` takes the first that resolves; a list resolves each item; anything else
+  is passed as it is. A source that resolves to nothing leaves the param out, except
+  a media param, which fails the step (:class:`SourceMissing`).
+
+Pure: no database, no storage, no Composio.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+
+from modules.socials.capabilities import ChannelStep
+from modules.socials.media_urls import MediaFile
+from modules.socials.step_results import ID
+
+# The media family each post kind publishes (a content type's first part).
+KIND_MEDIA: Mapping[str, Tuple[str, ...]] = MappingProxyType({
+    "text": (),
+    "image": ("image",),
+    "carousel": ("image",),
+    "video": ("video",),
+    "reel": ("video",),
+    "short": ("video",),
+    "story": ("image", "video"),
+})
+IMAGE = "image"
+OPTION, STEPS = "$option.", "$steps."
+
+
+class SourceMissing(Exception):
+    """A step needs a file the post does not have."""
+
+
+@dataclass(frozen=True)
+class MediaParam:
+    """The post's file(s) a param takes: staged as a file or linked, by the step."""
+
+    files: Tuple[MediaFile, ...]
+    many: bool
+
+
+@dataclass(frozen=True)
+class TargetContext:
+    """What a target's sources read."""
+
+    workspace_id: Any
+    post_id: Any
+    toolkit: str
+    post_kind: str
+    copy: str
+    title: str
+    options: Mapping[str, Any]
+    idempotency_key: str
+    media: Tuple[MediaFile, ...]  # the files of the target's kind, in media order
+    thumbnail: Optional[MediaFile]
+
+
+def _family(media: MediaFile) -> str:
+    return (media.content_type or "").split("/", 1)[0]
+
+
+def copy_for(copy: Any, toolkit: str) -> str:
+    """The channel's own copy, else the base copy."""
+    copy = copy if isinstance(copy, Mapping) else {}
+    channels = copy.get("channels") if isinstance(copy.get("channels"), Mapping) else {}
+    return str(channels.get(toolkit) or copy.get("base") or "")
+
+
+def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetContext:
+    """A target's context: ``files`` are the post's media (``media_urls.resolve_post_media``)."""
+    families = KIND_MEDIA.get(target.post_kind, ())
+    return TargetContext(
+        workspace_id=post.workspace_id,
+        post_id=post.id,
+        toolkit=target.toolkit,
+        post_kind=target.post_kind,
+        copy=copy_for(post.copy, target.toolkit),
+        title=post.title or "",
+        options=MappingProxyType(dict(target.options)),
+        idempotency_key=target.idempotency_key,
+        media=tuple(f for f in files if _family(f) in families),
+        thumbnail=next((f for f in files if _family(f) == IMAGE), None),
+    )
+
+
+def steps_of(action_plan: Any) -> Tuple[ChannelStep, ...]:
+    """The steps a target's ``action_plan`` holds (checked when they were stored)."""
+    raw = action_plan.get("steps") if isinstance(action_plan, Mapping) else None
+    return tuple(
+        ChannelStep(
+            id=str(step["id"]),
+            action=str(step["action"]),
+            step_class=str(step["class"]),
+            params=MappingProxyType(dict(step.get("params") or {})),
+            files=tuple(step.get("files") or ()),
+            urls=tuple(step.get("urls") or ()),
+            optional=step.get("optional") is True,
+            returns=MappingProxyType(dict(step.get("returns") or {})),
+            until=MappingProxyType(dict(step["until"])) if step.get("until") else None,
+            permalink=step.get("permalink"),
+        )
+        for step in raw or ()
+    )
+
+
+def _media(ctx: TargetContext, ref: str) -> Any:
+    first = ctx.media[0] if ctx.media else None
+    if ref == "$thumbnail":
+        return MediaParam((ctx.thumbnail,), many=False) if ctx.thumbnail else None
+    if ref == "$media[]":
+        return MediaParam(ctx.media, many=True) if ctx.media else None
+    if first is None:
+        return None
+    facts = {"$media": MediaParam((first,), many=False), "$media.content_type": first.content_type, "$media.bytes": first.bytes}
+    return facts.get(ref)
+
+
+def _one(ref: str, ctx: TargetContext, outputs: Mapping[str, Mapping[str, Any]]) -> Any:
+    if ref.startswith(OPTION):
+        return ctx.options.get(ref[len(OPTION):])
+    if ref.startswith(STEPS):
+        return (outputs.get(ref[len(STEPS):]) or {}).get(ID)
+    named = {"$copy": ctx.copy or None, "$title": ctx.title or None, "$idempotency_key": ctx.idempotency_key}
+    return named[ref] if ref in named else _media(ctx, ref)
+
+
+def resolve_value(value: Any, ctx: TargetContext, outputs: Mapping[str, Mapping[str, Any]]) -> Any:
+    """One param's value from its source; ``None`` when nothing resolves."""
+    if isinstance(value, (list, tuple)):
+        items = [resolve_value(item, ctx, outputs) for item in value]
+        items = [item for item in items if item is not None]
+        return items or None
+    if not isinstance(value, str) or not value.startswith("$"):
+        return value
+    for ref in value.split("|"):
+        found = _one(ref, ctx, outputs)
+        if found is not None:
+            return found
+    return None
+
+
+def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
+    """The step's params, each from its source; one that resolves to nothing is left
+    out, except a file or link param, which raises :class:`SourceMissing`."""
+    params: Dict[str, Any] = {}
+    for name, source in step.params.items():
+        value = resolve_value(source, ctx, outputs)
+        if value is None and name in step.files + step.urls:
+            wanted = " or ".join(KIND_MEDIA.get(ctx.post_kind, ())) or "media"
+            raise SourceMissing(f"{step.action} needs a {wanted} file for {name}, and the post has none")
+        if value is not None:
+            params[name] = value
+    return params

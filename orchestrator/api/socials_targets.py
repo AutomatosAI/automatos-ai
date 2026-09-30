@@ -16,7 +16,7 @@ The channels are approved content (D6): the write goes through
 ``service.update_post``, so adding, removing or changing a target of an approved or
 scheduled post voids its approval like any edit, and it commits by the same
 compare-and-set as a PATCH (409 with the current ``content_hash`` when another writer
-committed first). Nothing publishes here: publish-now answers 501 until Wave 3.
+committed first). Nothing publishes here: ``api/socials_publish.py`` does (Wave 3).
 
 This router has no prefix and no gate of its own: ``api/socials.py`` includes it in the
 Socials router, whose ``require_socials_enabled`` answers 404 unless both switches are
@@ -95,7 +95,18 @@ def step_plan(step: ChannelStep) -> Dict[str, Any]:
         "files": list(step.files),
         "urls": list(step.urls),
         "optional": step.optional,
+        # US-301: what the publisher reads back from the call.
+        "returns": dict(step.returns),
+        "until": _until_plan(step.until),
+        "permalink": step.permalink,
     }
+
+
+def _until_plan(until: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """A status step's end condition as JSON keeps it (lists, not tuples)."""
+    if until is None:
+        return None
+    return {name: list(value) if isinstance(value, (list, tuple)) else value for name, value in until.items()}
 
 
 def _channel_kind(channels: Mapping[str, SocialChannel], toolkit: str, post_kind: str) -> Tuple[SocialChannel, ChannelKind]:

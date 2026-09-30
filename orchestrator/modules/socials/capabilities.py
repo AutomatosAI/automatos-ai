@@ -67,6 +67,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Tuple
 from uuid import UUID
@@ -81,6 +82,7 @@ from core.models.composio_cache import ComposioActionCache
 from core.models.socials import SOCIAL_TARGET_POST_KINDS, SocialPost, SocialPostTarget
 from modules.socials.channel_adapters import CHANNEL_ADAPTERS, GENERIC_ADAPTER
 from modules.socials.settings import SOCIALS_SETTINGS_CATEGORY
+from modules.socials.step_results import ID, parse_permalink, parse_returns, parse_until
 
 logger = logging.getLogger(__name__)
 
@@ -330,14 +332,18 @@ NEEDS_PUBLIC_LINK = (
     "storage is private. Set SOCIALS_PUBLIC_MEDIA_BUCKET to a bucket the platform can reach."
 )
 
-_STEP_KEYS = frozenset({"id", "action", "class", "params", "files", "urls", "optional"})
+_STEP_KEYS = frozenset(
+    {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink"}
+)
 _ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
 _STEP_REF = "$steps."
 _SOURCE = re.compile(
-    r"\$(?:copy|title|thumbnail|media(?:\[\]|\.content_type|\.bytes)?"
+    r"\$(?:copy|title|thumbnail|idempotency_key|media(?:\[\]|\.content_type|\.bytes)?"
     r"|option\.[a-z][a-z0-9_]*|steps\.[a-z][a-z0-9_]*)"
 )
 _NOT_A_WORD = re.compile(r"[^A-Z0-9]+")
+# The sources that name a media FILE: a param reading one takes a file or a link.
+_FILE_SOURCES = ("$media", "$media[]", "$thumbnail")
 
 
 @dataclass(frozen=True)
@@ -351,6 +357,9 @@ class ChannelStep:
     files: Tuple[str, ...] = ()  # the params that take a file: the adapter's upload spec
     urls: Tuple[str, ...] = ()  # the params that take nothing but a link (D9)
     optional: bool = False  # skipped at publish when it cannot run
+    returns: Mapping[str, str] = dataclass_field(default_factory=lambda: MappingProxyType({}))  # name → where the output holds it (step_results)
+    until: Optional[Mapping[str, Any]] = None  # a status step's end condition
+    permalink: Optional[str] = None  # a link template built from the returned id
 
 
 @dataclass(frozen=True)
@@ -382,6 +391,7 @@ class GenericRules:
     media_fields: Mapping[str, Tuple[str, ...]]  # field name → the post kinds it carries
     url_suffixes: Tuple[str, ...]
     file_marker: str
+    returns: Mapping[str, str]  # what the post action returns (step_results)
 
 
 @dataclass(frozen=True)
@@ -447,26 +457,45 @@ def _check_source(value: Any, earlier: FrozenSet[str], where: str) -> None:
         return
     for ref in value.split("|") if isinstance(value, str) and value.startswith("$") else ():
         if not _SOURCE.fullmatch(ref) or (ref.startswith(_STEP_REF) and ref[len(_STEP_REF):] not in earlier):
-            raise ValueError(f"{where}: {ref!r} is not a source (a step source names an earlier step)")
+            raise ValueError(f"{where}: {ref!r} is not a source (a step source names an earlier step that returns an id)")
 
 
-def _parse_step(toolkit: str, where: str, raw: Any, earlier: FrozenSet[str]) -> ChannelStep:
+def _file_params(params: Mapping[str, Any]) -> FrozenSet[str]:
+    """The params whose source reads a media file (``$media``, ``$media[]``, ``$thumbnail``)."""
+    def reads_file(value: Any) -> bool:
+        if isinstance(value, list):
+            return any(reads_file(item) for item in value)
+        return isinstance(value, str) and any(ref in _FILE_SOURCES for ref in value.split("|"))
+
+    return frozenset(name for name, value in params.items() if reads_file(value))
+
+
+def _parse_step(toolkit: str, where: str, raw: Any, seen: FrozenSet[str], referable: FrozenSet[str]) -> ChannelStep:
+    """One step, checked. ``seen``: the earlier steps' ids; ``referable``: those of
+    them that return an id, the only ones a ``$steps.<id>`` source may name."""
     if not isinstance(raw, Mapping) or set(raw) - _STEP_KEYS or not isinstance(raw.get("action"), str):
         raise ValueError(f"{where}: a step is an object of {sorted(_STEP_KEYS)} naming its action")
     (action,) = _names([raw["action"]], where, f"{toolkit.upper()}_")
     step_id, step_class, params = raw.get("id"), raw.get("class"), raw.get("params") or {}
-    if not isinstance(step_id, str) or not step_id or step_id in earlier or step_class not in STEP_CLASSES:
+    if not isinstance(step_id, str) or not step_id or step_id in seen or step_class not in STEP_CLASSES:
         raise ValueError(f"{where}.{action}: a step needs an id of its own and a class in {STEP_CLASSES}")
     if not isinstance(params, Mapping):
         raise ValueError(f"{where}.{action}: its params are not an object")
     for name, value in params.items():
-        _check_source(value, earlier, f"{where}.{action}.{name}")
+        _check_source(value, referable, f"{where}.{action}.{name}")
     files = _names(raw.get("files"), f"{where}.{action} files")
     urls = _names(raw.get("urls"), f"{where}.{action} urls")
     if not set(files) | set(urls) <= set(params):
         raise ValueError(f"{where}.{action}: a file or link param is not one of its params")
-    optional = raw.get("optional") is True
-    return ChannelStep(step_id, action, step_class, MappingProxyType(dict(params)), files, urls, optional)
+    if not _file_params(params) <= set(files) | set(urls):
+        raise ValueError(f"{where}.{action}: a param reading a media file must be one of its files or urls")
+    returns = parse_returns(raw.get("returns"), f"{where}.{action}")
+    return ChannelStep(
+        step_id, action, step_class, MappingProxyType(dict(params)), files, urls, raw.get("optional") is True,
+        returns=returns,
+        until=parse_until(raw.get("until"), f"{where}.{action}", step_class, STATUS),
+        permalink=parse_permalink(raw.get("permalink"), f"{where}.{action}", returns),
+    )
 
 
 def _parse_kind(toolkit: str, kind: Any, raw: Any) -> Tuple[ChannelStep, ...]:
@@ -475,7 +504,9 @@ def _parse_kind(toolkit: str, kind: Any, raw: Any) -> Tuple[ChannelStep, ...]:
         raise ValueError(f"{where}: a post kind is one of {SOCIAL_TARGET_POST_KINDS}, with a list of steps")
     steps: Tuple[ChannelStep, ...] = ()
     for item in raw:
-        steps += (_parse_step(toolkit, where, item, frozenset(step.id for step in steps)),)
+        seen = frozenset(step.id for step in steps)
+        referable = frozenset(step.id for step in steps if ID in step.returns)
+        steps += (_parse_step(toolkit, where, item, seen, referable),)
     if not any(step.step_class == PUBLISH for step in steps):
         raise ValueError(f"{where}: no step publishes the post")
     return steps
@@ -524,6 +555,7 @@ def parse_generic_adapter(raw: Any) -> GenericRules:
         media_fields=MappingProxyType(kinds),
         url_suffixes=_names(raw.get("url_suffixes"), "generic url_suffixes"),
         file_marker=marker,
+        returns=parse_returns(raw.get("returns"), "generic"),
     )
 
 
@@ -683,7 +715,7 @@ def _generic_kind(
     if media is not None:
         params[media.name] = MEDIA_LIST_SOURCE if media.many else MEDIA_SOURCE
         links, files = ((media.name,), ()) if media.link else ((), (media.name,))
-    step = ChannelStep(GENERIC_STEP_ID, slug, PUBLISH, MappingProxyType(params), files, links)
+    step = ChannelStep(GENERIC_STEP_ID, slug, PUBLISH, MappingProxyType(params), files, links, returns=GENERIC_RULES.returns)
     needs_public = bool(links) and not storage.public
     reason = NEEDS_PUBLIC_LINK.format(needs=storage.needs, slug=slug) if needs_public else None
     return ChannelKind(kind, not needs_public, reason, needs_public, (step,))

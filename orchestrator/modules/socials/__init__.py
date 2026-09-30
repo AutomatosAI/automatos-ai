@@ -35,6 +35,8 @@ the calendar and published through the workspace's own Composio connections.
 - :mod:`modules.socials.media_urls`: presigned inline links to a post's media
   (D9, S3.4): the approval view's, and a link a platform fetches, which needs
   public storage.
-- :mod:`modules.socials.publisher`: ``publish_post``, the one way a post leaves
-  Automatos (the guard first; channel publishers arrive in Wave 3).
+- :mod:`modules.socials.publisher`: ``begin_publish`` / ``begin_retry``, the one
+  way a post leaves Automatos (the approval guard first, then a compare-and-set
+  claim), and :mod:`modules.socials.publishing`, the one engine that publishes
+  every channel's targets through Composio from the adapter data (Wave 3, US-301).
 """

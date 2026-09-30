@@ -44,10 +44,10 @@ not on the list, in a workspace whose switches are not both read as off, costs o
 read in a worker thread (the workspace's connections, and for the generic adapter
 the action's cached schema). A read that cannot complete refuses (logged at ERROR).
 
-The way through: the platform's own publisher (Wave 3,
-``modules/socials/publisher.py``) publishes a post a person approved, so it will
-pass ``way_through=PLATFORM_PUBLISHER`` and the gate lets it by. Nothing passes it
-yet. The Wave 0 deny list applies to it all the same.
+The way through: the platform's own publisher (Wave 3, US-301) publishes a post a
+person approved, so its step runner (``modules/socials/publish_steps.py``) passes
+``way_through=PLATFORM_PUBLISHER`` and the gate lets it by. Nothing else passes it.
+The Wave 0 deny list applies to it all the same.
 
 Fails closed for a Socials-on workspace (the Wave 0 RVW-1 lesson: a gate that
 can't decide must deny):
@@ -129,8 +129,8 @@ class _WayThrough:
         return f"<Socials post gate way through: {self.holder}>"
 
 
-# Only the platform's own publisher passes it (Wave 3), for a post a person
-# approved. Anything else — True, a string, another object — is no way through.
+# Only the platform's own publisher passes it (Wave 3, publish_steps.py), for a
+# post a person approved. Anything else — True, a string, another object — is no way through.
 PLATFORM_PUBLISHER = _WayThrough("the platform publisher (PRD-251 Wave 3)")
 
 

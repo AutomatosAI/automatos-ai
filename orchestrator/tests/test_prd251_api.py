@@ -75,7 +75,7 @@ WS_B = uuid.uuid4()
 WS_OFF = uuid.uuid4()
 NOW = datetime(2026, 9, 23, 12, 0)
 MANIFEST = _ORCH / "reports" / "route-manifest.json"
-ACTION_PATHS = ("submit", "approve", "request-changes", "reject", "schedule", "unschedule", "publish-now")
+ACTION_PATHS = ("submit", "approve", "request-changes", "reject", "schedule", "unschedule", "publish-now", "retry")
 FUTURE_SLOT = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
 
@@ -136,7 +136,7 @@ def api(monkeypatch):
         )
     session.commit()
 
-    state = SimpleNamespace(session=session, ctx=_ctx(WS_A), role="owner", master="true")
+    state = SimpleNamespace(session=session, ctx=_ctx(WS_A), role="owner", master="true", launched=[])
 
     def fake_read_system_setting(category, key):
         assert (category, key) == ("socials", "enabled")
@@ -144,6 +144,8 @@ def api(monkeypatch):
 
     monkeypatch.setattr(socials_settings, "read_system_setting", fake_read_system_setting)
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: state.role)
+    # Wave 3 (US-301): a publish is launched in the background; here it is only recorded.
+    monkeypatch.setattr(publisher, "launch", state.launched.append)
 
     app = FastAPI()
     app.include_router(socials_api.router)
@@ -415,8 +417,6 @@ def test_publish_now_on_a_stale_approval_is_409_and_never_reaches_composio(api, 
 
     composio = MagicMock(name="ComposioToolExecutor.execute", side_effect=AssertionError("must not run"))
     monkeypatch.setattr(ComposioToolExecutor, "execute", composio)
-    seam = MagicMock(name="_publish_targets")
-    monkeypatch.setattr(publisher, "_publish_targets", seam)
 
     approved = _approved(api)
     row = api.session.get(SocialPost, uuid.UUID(approved["id"]))
@@ -427,7 +427,7 @@ def test_publish_now_on_a_stale_approval_is_409_and_never_reaches_composio(api, 
 
     assert resp.status_code == 409
     composio.assert_not_called()
-    seam.assert_not_called()
+    assert api.launched == []
 
 
 def test_publish_now_after_an_edit_is_409_and_never_reaches_composio(api, monkeypatch):
@@ -442,18 +442,46 @@ def test_publish_now_after_an_edit_is_409_and_never_reaches_composio(api, monkey
     composio.assert_not_called()
 
 
-def test_publish_now_on_a_valid_approval_answers_501_in_wave_0(api, monkeypatch):
+_LINKEDIN_TEXT = {
+    "toolkit": "linkedin", "post_kind": "text", "options": {},
+    "steps": [{"id": "post", "action": "LINKEDIN_CREATE_LINKED_IN_POST", "class": "publish", "params": {"commentary": "$copy"}}],
+}
+
+
+def _approved_with_a_channel(api):
+    approved = _approved(api)
+    row = api.session.get(SocialPost, uuid.UUID(approved["id"]))
+    socials_service.update_post(row, "user-author", {"targets": [_LINKEDIN_TEXT]})  # voids the approval
+    api.session.commit()
+    again = _post(api, approved["id"], "approve", {"content_hash": row.content_hash})
+    assert again.status_code == 200, again.text
+    return again.json()
+
+
+def test_publish_now_with_no_channel_is_409_and_launches_nothing(api):
+    approved = _approved(api)
+    resp = _post(api, approved["id"], "publish-now")
+    assert resp.status_code == 409 and "no channels" in resp.json()["detail"]
+    assert api.launched == []
+
+
+def test_publish_now_on_a_valid_approval_answers_202_and_launches_one_publish(api, monkeypatch):
     from core.composio.tool_executor import ComposioToolExecutor
 
     composio = MagicMock(name="ComposioToolExecutor.execute")
     monkeypatch.setattr(ComposioToolExecutor, "execute", composio)
-    approved = _approved(api)
+    approved = _approved_with_a_channel(api)
 
     resp = _post(api, approved["id"], "publish-now")
 
-    assert resp.status_code == 501
-    assert resp.json()["detail"] == "Channel publishing arrives in Wave 3"
-    composio.assert_not_called()
+    assert resp.status_code == 202 and resp.json()["status"] == "publishing"
+    assert resp.json()["review_log"][-1]["action"] == "publish"
+    assert [job.post_id for job in api.launched] == [uuid.UUID(approved["id"])]
+    assert api.launched[0].content_hash == approved["content_hash"]
+    composio.assert_not_called()  # the request only claims; the background task publishes
+    # A second click finds the post publishing: 409, and nothing more is launched.
+    assert _post(api, approved["id"], "publish-now").status_code == 409
+    assert len(api.launched) == 1
 
 
 def test_an_illegal_transition_is_409(api):

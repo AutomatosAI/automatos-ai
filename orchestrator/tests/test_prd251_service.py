@@ -15,7 +15,7 @@ Pure tests of ``modules/socials/service.py`` and ``modules/socials/publisher.py`
 * D6 — ``approve`` binds to the version the approver saw: a post whose content
   changed since refuses it (``StaleContent``, with the current hash) and is left
   unchanged; ``claim_unchanged`` is a compare-and-set on status and hash;
-* ``publish_post`` runs ``assert_publishable`` before anything else.
+* ``publisher.begin_publish`` runs ``assert_publishable`` before anything else.
 """
 from __future__ import annotations
 
@@ -158,9 +158,21 @@ ALLOWED = {
 }
 
 
-def test_the_table_is_exactly_the_wave_0_and_wave_1_machine():
+# Wave 3 (US-301): the publish moves, each exercised in tests/test_prd251w3_publisher.py.
+PUBLISH_MOVES = {
+    (APPROVED, service.PUBLISHING),
+    (SCHEDULED, service.PUBLISHING),
+    (FAILED, service.PUBLISHING),
+    (service.PARTIALLY_PUBLISHED, service.PUBLISHING),
+    (service.PUBLISHING, service.PUBLISHED),
+    (service.PUBLISHING, service.PARTIALLY_PUBLISHED),
+    (service.PUBLISHING, FAILED),
+}
+
+
+def test_the_table_is_exactly_the_machine_through_wave_3():
     table = {(src, dst) for src, dsts in service.ALLOWED_TRANSITIONS.items() for dst in dsts}
-    assert table == set(ALLOWED)
+    assert table == set(ALLOWED) | PUBLISH_MOVES
     assert service.TRANSITIONS == {
         "submit": {DRAFT: NEEDS_APPROVAL, CHANGES_REQUESTED: NEEDS_APPROVAL},
         "approve": {NEEDS_APPROVAL: APPROVED},
@@ -172,6 +184,11 @@ def test_the_table_is_exactly_the_wave_0_and_wave_1_machine():
         "render": {DRAFT: RENDERING, CHANGES_REQUESTED: RENDERING, NEEDS_APPROVAL: RENDERING, FAILED: RENDERING},
         "render_done": {RENDERING: NEEDS_APPROVAL},
         "render_failed": {RENDERING: FAILED},
+        "publish": {APPROVED: "publishing", SCHEDULED: "publishing"},
+        "retry": {FAILED: "publishing", "partially_published": "publishing"},
+        "published": {"publishing": "published"},
+        "partially_published": {"publishing": "partially_published"},
+        "publish_failed": {"publishing": FAILED},
     }
 
 
@@ -634,45 +651,28 @@ def test_update_post_refuses_unknown_fields():
 
 
 # ---------------------------------------------------------------------------
-# publish_post — the guard runs first
+# the publish seam (Wave 3, US-301) — the guard runs first
 # ---------------------------------------------------------------------------
 
 
-def test_publish_post_refuses_a_stale_approval_before_anything_else(monkeypatch):
-    downstream = MagicMock(name="_publish_targets")
-    monkeypatch.setattr(publisher, "_publish_targets", downstream)
+def test_publish_refuses_a_stale_approval_before_anything_else():
+    db = MagicMock(name="db")
     post = _post_in(APPROVED)
     post.approved_hash = "f" * 64  # approved_hash != content_hash
 
     with pytest.raises(NotPublishable):
-        publisher.publish_post(MagicMock(name="db"), post)
-    downstream.assert_not_called()
+        publisher.begin_publish(db, post, REVIEWER)
+    assert post.status == APPROVED and db.method_calls == []  # nothing claimed, nothing written
 
 
-def test_publish_post_refuses_an_edited_post_before_anything_else(monkeypatch):
-    downstream = MagicMock(name="_publish_targets")
-    monkeypatch.setattr(publisher, "_publish_targets", downstream)
+def test_publish_refuses_an_edited_post_before_anything_else():
+    db = MagicMock(name="db")
     post = _post_in(SCHEDULED)
     _edit_copy(post)
 
     with pytest.raises(NotPublishable):
-        publisher.publish_post(MagicMock(name="db"), post)
-    downstream.assert_not_called()
-
-
-def test_publish_post_reaches_the_seam_only_for_a_valid_approval(monkeypatch):
-    downstream = MagicMock(name="_publish_targets", return_value="published")
-    monkeypatch.setattr(publisher, "_publish_targets", downstream)
-    db, post = MagicMock(name="db"), _post_in(APPROVED)
-
-    assert publisher.publish_post(db, post) == "published"
-    downstream.assert_called_once_with(db, post)
-
-
-def test_wave_0_has_no_channel_publishers():
-    with pytest.raises(publisher.PublishingUnavailable) as exc:
-        publisher.publish_post(MagicMock(name="db"), _post_in(APPROVED))
-    assert str(exc.value) == "Channel publishing arrives in Wave 3"
+        publisher.begin_publish(db, post, REVIEWER)
+    assert db.method_calls == []
 
 
 def test_the_service_and_the_publisher_import_no_fastapi_and_no_composio():

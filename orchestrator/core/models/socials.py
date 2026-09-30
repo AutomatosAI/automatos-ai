@@ -24,7 +24,7 @@ and links ``social_posts.campaign_id`` to it, and
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -319,4 +319,13 @@ class SocialPostTarget(Base):
             "permalink": self.permalink,
             "error": self.error,
             "published_at": _iso(self.published_at),
+            "notes": self.notes,
         }
+
+    @property
+    def notes(self) -> List[str]:
+        """What the receipt says beside the id and link (Wave 3, US-301): an optional
+        step the publish skipped, and why. Kept in ``action_plan``."""
+        plan = self.action_plan if isinstance(self.action_plan, dict) else {}
+        notes = plan.get("notes")
+        return [str(note) for note in notes] if isinstance(notes, list) else []

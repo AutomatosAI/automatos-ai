@@ -684,9 +684,9 @@ async def test_only_the_platform_publisher_passes_a_listed_action(env, monkeypat
     agent.sdk.tools.execute.assert_called_once()
 
 
-def test_nothing_passes_the_way_through_yet():
-    """The platform publisher (Wave 3) will. Until then the one use is the executor
-    handing its own parameter to the gate."""
+def test_only_the_platform_publisher_passes_the_way_through():
+    """Wave 3 (US-301): the publisher's step runner is the one caller that passes it;
+    everywhere else it is only forwarded (the executor handing its own parameter on)."""
     offenders = []
     for path in _source_files():
         source = path.read_text(encoding="utf-8")
@@ -702,9 +702,9 @@ def test_nothing_passes_the_way_through_yet():
                 forwarded = isinstance(keyword.value, ast.Name) and keyword.value.id == "way_through"
                 if keyword.arg == "way_through" and not forwarded:
                     offenders.append((path.relative_to(_ORCH).as_posix(), node.lineno))
-    assert offenders == []
+    assert {path for path, _ in offenders} == {"modules/socials/publish_steps.py"} and len(offenders) == 1
     holders = [p.relative_to(_ORCH).as_posix() for p in _source_files() if "PLATFORM_PUBLISHER" in p.read_text(encoding="utf-8")]
-    assert holders == ["core/composio/post_gate.py"]
+    assert sorted(holders) == ["core/composio/post_gate.py", "modules/socials/publish_steps.py"]
 
 
 # ---------------------------------------------------------------------------

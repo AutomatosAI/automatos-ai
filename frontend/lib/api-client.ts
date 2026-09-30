@@ -533,6 +533,8 @@ export interface SocialPostTarget {
   permalink: string | null
   error: string | null
   published_at: string | null
+  /** What the receipt says beside the id and link: an optional step skipped, and why (Wave 3). */
+  notes?: string[]
 }
 
 export interface SocialPostsResponse {
@@ -2897,6 +2899,18 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ reason: reason || null }),
     })
+  }
+
+  /** Publish an approved or scheduled post now (Wave 3, US-301): answers 202 with
+   * the post in `publishing`; the publish ends it `published`, `partially_published`
+   * or `failed`, each target with its receipt. 409 = its approval no longer matches. */
+  async publishSocialPostNow(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/publish-now`, { method: 'POST' })
+  }
+
+  /** Publish again the failed targets of a failed or partially published post (US-301). */
+  async retrySocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retry`, { method: 'POST' })
   }
 
   /** Start a render (S1.1c): answers with the post in `rendering`; the render

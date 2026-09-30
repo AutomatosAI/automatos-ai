@@ -54,7 +54,8 @@ import base64
 import hashlib
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
 import httpx
@@ -274,14 +275,17 @@ def has_image_params(params: Dict[str, Any]) -> bool:
     return False
 
 
-def _normalize_path(v) -> str:
-    """Extract a usable file path from a string or dict (workspace file ref)."""
+def _normalize_path(v) -> Union[str, Path]:
+    """Extract a usable file path from a string or dict (workspace file ref). A
+    ``Path`` is a file the platform's publisher staged (PRD-251 US-301) and stays one."""
+    if isinstance(v, Path):
+        return v
     if isinstance(v, dict):
         return v.get("s3key") or v.get("path") or v.get("name") or ""
     return str(v)
 
 
-def _extract_image_paths(params: Dict[str, Any]) -> List[str]:
+def _extract_image_paths(params: Dict[str, Any]) -> List[Union[str, Path]]:
     """Pull image paths/URLs from whichever param name the agent used."""
     for key in ("media_urls", "images", "media", "media_files", "image_urls"):
         val = params.get(key)
@@ -329,11 +333,14 @@ async def _fetch_image_url(url: str, http: httpx.AsyncClient) -> Tuple[Optional[
 
 
 async def _download_image(
-    img_path: str,
+    img_path: Union[str, Path],
     ws_client: WorkspaceClient,
     http: httpx.AsyncClient,
 ) -> Tuple[Optional[bytes], Optional[str]]:
-    """Image bytes from a URL or a workspace path, or ``(None, why not)``."""
+    """Image bytes from a URL, a workspace path or a file the platform's publisher
+    staged (a ``Path``: never an agent's string), or ``(None, why not)``."""
+    if isinstance(img_path, Path):
+        return await asyncio.to_thread(img_path.read_bytes), None
     if img_path.startswith(("http://", "https://")):
         return await _fetch_image_url(img_path, http)
 

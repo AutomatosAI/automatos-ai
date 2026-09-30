@@ -1909,6 +1909,14 @@ class Config:
     SOCIALS_MISFIRE_GRACE_SECONDS: int = int(os.getenv("SOCIALS_MISFIRE_GRACE_SECONDS", "1800"))
     # D8: transient-error retries per channel target.
     SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
+    # D8 (US-301): the publisher. A transient failure tries again after this many
+    # seconds times the attempt; a status step (an upload processing, a publish
+    # finishing) is called every POLL seconds for at most MAX_WAIT; one post's whole
+    # publish lives at most RUN_MAX, under BOOT_REAPER_STALE_MINUTES.
+    SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS", "5"))
+    SOCIALS_PUBLISH_POLL_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_POLL_SECONDS", "5"))
+    SOCIALS_PUBLISH_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_MAX_WAIT_SECONDS", "600"))
+    SOCIALS_PUBLISH_RUN_MAX_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_RUN_MAX_SECONDS", "1500"))
     # D3: the media-render service (Wave 1). Empty = no renderer configured.
     SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
     # S1.1c: the client (core/media_render_client.py). The token is sent as

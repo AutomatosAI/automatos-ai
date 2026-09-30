@@ -7,7 +7,9 @@
   renders (S1.1c): ``render`` moves a post that holds no approval to
   rendering, and the render ends in needs_approval with the rendered files in
   ``media``, or in failed with the report in ``review_log``. A failed post can
-  be edited and rendered again. Publishing and missed arrive with Wave 3.
+  be edited and rendered again. Wave 3 publishes (US-301): ``publish`` moves an
+  approved or scheduled post to publishing, and the publish ends it published,
+  partially_published or failed (``modules/socials/publish_lifecycle.py``).
 * **The content hash (D6).** ``compute_content_hash`` is sha256 over canonical
   JSON of what is published: copy, variables, sources, format, template_id and
   media, and where: the post's targets (Wave 2, US-204: a channel is approved
@@ -92,6 +94,9 @@ NEEDS_APPROVAL = "needs_approval"
 CHANGES_REQUESTED = "changes_requested"
 APPROVED = "approved"
 SCHEDULED = "scheduled"
+PUBLISHING = "publishing"
+PUBLISHED = "published"
+PARTIALLY_PUBLISHED = "partially_published"
 FAILED = "failed"
 ARCHIVED = "archived"
 
@@ -108,6 +113,13 @@ ACTION_APPROVAL_VOIDED = "approval_voided"
 ACTION_RENDER = "render"
 ACTION_RENDER_DONE = "render_done"
 ACTION_RENDER_FAILED = "render_failed"
+# Wave 3 (US-301): a publish or a retry starts, then ends one of three ways
+# (modules/socials/publish_lifecycle.py).
+ACTION_PUBLISH = "publish"
+ACTION_RETRY = "retry"
+ACTION_PUBLISHED = "published"
+ACTION_PARTIALLY_PUBLISHED = "partially_published"
+ACTION_PUBLISH_FAILED = "publish_failed"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
 
@@ -132,6 +144,13 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     },
     ACTION_RENDER_DONE: {RENDERING: NEEDS_APPROVAL},
     ACTION_RENDER_FAILED: {RENDERING: FAILED},
+    # Wave 3 (US-301): an approved or scheduled post publishes; a retry re-runs the
+    # failed targets of a publish that failed or published partly.
+    ACTION_PUBLISH: {APPROVED: PUBLISHING, SCHEDULED: PUBLISHING},
+    ACTION_RETRY: {FAILED: PUBLISHING, PARTIALLY_PUBLISHED: PUBLISHING},
+    ACTION_PUBLISHED: {PUBLISHING: PUBLISHED},
+    ACTION_PARTIALLY_PUBLISHED: {PUBLISHING: PARTIALLY_PUBLISHED},
+    ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
