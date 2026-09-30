@@ -52,7 +52,7 @@ import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from api import socials_publish  # noqa: E402
 from api.socials_targets import step_plan  # noqa: E402
 from config import config  # noqa: E402
-from core.composio import tool_executor  # noqa: E402
+from core.composio import tool_executor, upload_spec  # noqa: E402
 from core.composio.post_gate import PLATFORM_PUBLISHER  # noqa: E402
 from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
 from modules.socials import notify, publish_lifecycle, publish_records, publisher, service  # noqa: E402
@@ -437,9 +437,9 @@ def _executor_harness(monkeypatch, *, denial=None, refusal=None):
         seen.executed.append(kwargs)
         return ok({"id": "1"})
 
-    monkeypatch.setattr(tool_executor, "composio_action_denial_async", deny)
-    monkeypatch.setattr(tool_executor, "post_action_refusal", gate)
-    monkeypatch.setattr(tool_executor, "resolve_upload_spec", spec)
+    monkeypatch.setattr(upload_spec, "composio_action_denial_async", deny)
+    monkeypatch.setattr(upload_spec, "post_action_refusal", gate)
+    monkeypatch.setattr(upload_spec, "resolve_upload_spec", spec)
     monkeypatch.setattr(tool_executor.ComposioToolExecutor, "execute", execute)
     return seen
 
@@ -476,11 +476,38 @@ def test_a_file_the_spec_cannot_upload_fails_the_call_before_it_executes(monkeyp
     seen = _executor_harness(monkeypatch)
 
     def failing(action, params, upload_params, toolkit):
-        raise tool_executor.FileUploadFailed("media could not be uploaded to Composio: 500")
+        raise upload_spec.FileUploadFailed("media could not be uploaded to Composio: 500")
 
-    monkeypatch.setattr(tool_executor, "resolve_upload_spec", failing)
+    monkeypatch.setattr(upload_spec, "resolve_upload_spec", failing)
     result = _upload({"media": Path("/tmp/a.png")})
-    assert result["error_type"] == tool_executor.ERROR_TYPE_FILE_UPLOAD and seen.executed == []
+    assert result["error_type"] == upload_spec.ERROR_TYPE_FILE_UPLOAD and seen.executed == []
+
+
+def test_a_call_with_its_own_upload_spec_gets_no_global_upload_conversion(monkeypatch):
+    """A LinkedIn text post whose approved copy is a bare link is an UPLOAD_ACTIONS
+    action: the executor's global conversion would fetch the link as a file. The
+    publisher's call is sent as approved; an agent's call still gets the conversion."""
+    _executor_harness(monkeypatch)
+    converted = []
+
+    async def global_conversion(action, params, workspace_id):
+        converted.append(action)
+        return params, []
+
+    async def execute(self, **kwargs):
+        return {"params": (await self._resolve_file_uploads(kwargs["action"], kwargs["params"], kwargs["workspace_id"]))[0]}
+
+    monkeypatch.setattr(tool_executor, "resolve_file_uploads", global_conversion)
+    monkeypatch.setattr(tool_executor.ComposioToolExecutor, "execute", execute)
+    copy = {"commentary": "https://harvest.example/club"}
+    assert "LINKEDIN_CREATE_LINKED_IN_POST" in tool_executor.UPLOAD_ACTIONS
+
+    result = _upload(copy, (), "LINKEDIN_CREATE_LINKED_IN_POST")
+    assert result["params"] == copy and converted == []
+
+    agent_call = tool_executor.ComposioToolExecutor(db=None)
+    asyncio.run(agent_call.execute(action="LINKEDIN_CREATE_LINKED_IN_POST", params=copy, workspace_id=WS))
+    assert converted == ["LINKEDIN_CREATE_LINKED_IN_POST"]  # the flag does not outlive the call
 
 
 def test_the_linkedin_image_workaround_takes_the_staged_files_itself(monkeypatch):
@@ -498,18 +525,18 @@ def test_resolve_upload_spec_takes_only_staged_files(monkeypatch, tmp_path):
             uploaded.append(kwargs)
             return SimpleNamespace(model_dump=lambda: {"s3key": kwargs["file"].name})
 
-    monkeypatch.setattr(tool_executor, "_file_uploadable_class", lambda: Uploadable)
-    monkeypatch.setattr(tool_executor, "get_composio_client", lambda: SimpleNamespace(composio=SimpleNamespace(client="http")))
+    monkeypatch.setattr(upload_spec, "_file_uploadable_class", lambda: Uploadable)
+    monkeypatch.setattr(upload_spec, "get_composio_client", lambda: SimpleNamespace(composio=SimpleNamespace(client="http")))
     staged = tmp_path / "v.mp4"
     staged.write_bytes(b"v")
 
-    params = tool_executor.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": staged, "note": "/etc/passwd"}, ["file"], "linkedin")
+    params = upload_spec.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": staged, "note": "/etc/passwd"}, ["file"], "linkedin")
     assert params == {"file": {"s3key": "v.mp4"}, "note": "/etc/passwd"}
     assert uploaded[0]["toolkit"] == "linkedin" and uploaded[0]["tool"] == "linkedin-upload-video"
-    with pytest.raises(tool_executor.FileUploadFailed):  # a string never reads the local disk
-        tool_executor.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": "/etc/passwd"}, ["file"], "linkedin")
-    with pytest.raises(tool_executor.FileUploadFailed):
-        tool_executor.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {}, ["file"], "linkedin")
+    with pytest.raises(upload_spec.FileUploadFailed):  # a string never reads the local disk
+        upload_spec.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": "/etc/passwd"}, ["file"], "linkedin")
+    with pytest.raises(upload_spec.FileUploadFailed):
+        upload_spec.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {}, ["file"], "linkedin")
 
 
 def test_the_linkedin_workaround_reads_a_staged_file_and_never_a_string_path(tmp_path):

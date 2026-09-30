@@ -28,6 +28,7 @@ from sqlalchemy import func
 from core.composio.client import ComposioClient, get_composio_client
 from core.composio.deny_list import composio_action_denial_async, denied_result
 from core.composio.post_gate import post_action_refusal, refused_result
+from core.composio import upload_spec
 
 logger = logging.getLogger(__name__)
 
@@ -221,68 +222,6 @@ async def resolve_file_uploads(
     return params, temp_files
 
 
-# ---------------------------------------------------------------------------
-# PRD-251 D8 (US-301): a call's OWN upload spec. The Socials publisher names the
-# params of a channel step that take a file; exactly those are converted, for
-# that call only, and UPLOAD_ACTIONS above is neither consulted nor widened.
-# ---------------------------------------------------------------------------
-
-ERROR_TYPE_FILE_UPLOAD = "file_upload_failed"
-
-
-class FileUploadFailed(Exception):
-    """A file the call's upload spec names could not be handed to Composio."""
-
-
-def _file_uploadable_class():
-    try:
-        from composio.core.models._files import FileUploadable
-    except ImportError:
-        from composio.client.files import FileUploadable
-    return FileUploadable
-
-
-def _uploaded(path: Any, param_name: str, action_upper: str, toolkit: str, http_client: Any) -> Dict[str, Any]:
-    """One staged file as Composio's FileUploadable. Only a ``Path`` the platform
-    staged is taken: a string (an agent's or a platform's argument) never reads the
-    local disk here."""
-    if not isinstance(path, Path) or not path.is_file():
-        raise FileUploadFailed(f"{param_name} is not a file the platform staged for {action_upper}")
-    try:
-        uploadable = _file_uploadable_class().from_path(
-            client=http_client,
-            file=path,
-            tool=action_upper.lower().replace("_", "-"),
-            toolkit=toolkit,
-            sensitive_file_upload_protection=False,
-        )
-    except Exception as exc:
-        logger.exception("[FileUpload] %s: %s could not be uploaded to Composio", action_upper, param_name)
-        raise FileUploadFailed(f"{param_name} could not be uploaded to Composio: {exc}") from exc
-    return uploadable.model_dump()
-
-
-def resolve_upload_spec(
-    action: str, params: Dict[str, Any], upload_params: Sequence[str], toolkit: str,
-) -> Dict[str, Any]:
-    """``params`` with each of ``upload_params`` (a staged local file, or a list of
-    them) converted to a Composio FileUploadable, and nothing else touched. Strict:
-    a named param that is missing, not a staged file, or refused by Composio raises
-    :class:`FileUploadFailed`. Blocking (the SDK uploads): run it in a thread."""
-    action_upper = str(action).upper()
-    http_client = get_composio_client().composio.client
-    converted = dict(params)
-    for name in upload_params:
-        value = params.get(name)
-        if value is None or value == []:
-            raise FileUploadFailed(f"{action_upper} needs a file for {name}, and none was given")
-        if isinstance(value, (list, tuple)):
-            converted[name] = [_uploaded(item, f"{name}[{i}]", action_upper, toolkit, http_client) for i, item in enumerate(value)]
-        else:
-            converted[name] = _uploaded(value, name, action_upper, toolkit, http_client)
-    return converted
-
-
 class ComposioToolExecutor:
     """
     Executes Composio tools with access validation.
@@ -402,7 +341,10 @@ class ComposioToolExecutor:
         params: Dict[str, Any],
         workspace_id: UUID,
     ) -> tuple[Dict[str, Any], list[Path]]:
-        """Delegate to the module-level resolve_file_uploads()."""
+        """Delegate to the module-level resolve_file_uploads(), unless the call
+        carries its own upload spec (execute_with_uploads, PRD-251 D8)."""
+        if upload_spec.has_own_upload_spec():
+            return params, []
         return await resolve_file_uploads(action, params, workspace_id)
 
     @staticmethod
@@ -434,43 +376,12 @@ class ComposioToolExecutor:
         upload_params: Sequence[str] = (),
         way_through: Optional[object] = None,
     ) -> Dict[str, Any]:
-        """Run ``action`` for the platform (PRD-251 D8, US-301) with the call's own
-        upload spec: the Wave 0 deny list, then the Socials post gate, then exactly
-        ``upload_params`` as files (:func:`resolve_upload_spec`), then
-        :meth:`execute` on the workspace's own connection. A refused call uploads
-        nothing. The LinkedIn image workaround reads the staged files itself
-        (Composio cannot upload LinkedIn images), so a call it takes keeps them."""
-        from core.composio.linkedin_image_workaround import IMAGE_POST_ACTION, has_image_params
-
-        start_time = time.time()
-        action_upper = str(action or "").strip().upper()
-        denial = await composio_action_denial_async(action_upper)
-        if denial:
-            return self._refused(denial, action_upper, start_time)
-        refusal = await post_action_refusal(action_upper, workspace_id, way_through=way_through)
-        if refusal:
-            return self._post_refused(refusal, action_upper, start_time)
-        workaround = action_upper == IMAGE_POST_ACTION and has_image_params(params)
-        if upload_params and not workaround:
-            try:
-                params = await asyncio.to_thread(resolve_upload_spec, action_upper, params, upload_params, app_name.lower())
-            except FileUploadFailed as exc:
-                return {
-                    "success": False,
-                    "data": None,
-                    "error": str(exc),
-                    "error_type": ERROR_TYPE_FILE_UPLOAD,
-                    "action": action_upper,
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                }
-        return await self.execute(
-            action=action_upper,
-            params=params,
-            agent_id=agent_id,
-            workspace_id=workspace_id,
-            app_name=app_name,
-            skip_validation=True,
-            way_through=way_through,
+        """Run ``action`` for the platform with the call's own upload spec (PRD-251
+        D8): the deny list, the post gate, the files, then :meth:`execute`
+        (``core/composio/upload_spec.py``, :func:`~core.composio.upload_spec.execute_with_uploads`)."""
+        return await upload_spec.execute_with_uploads(
+            self, action, params, agent_id=agent_id, workspace_id=workspace_id,
+            app_name=app_name, upload_params=upload_params, way_through=way_through,
         )
 
     async def execute(
