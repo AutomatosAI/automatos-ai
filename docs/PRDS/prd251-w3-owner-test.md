@@ -39,7 +39,8 @@ The result fields each step reads (the post's id and link) could not be checked 
 
 - [ ] **Partial failure:** post to two channels where one is broken on purpose (for example disconnect X in Composio after approving). The post ends **Partially published**: the good channel's receipt links to its post, the broken one shows the platform's message, and a notification arrives.
 - [ ] **Retry:** reconnect, then **Retry the failed channels**. Only the failed channel is posted; the other is not posted twice.
-- [ ] **Stale content never posts:** approve a post, edit its copy, then try **Publish now**. It refuses (the approval was reset), and nothing reaches the platform.
+- [ ] **Stale content never posts:** approve a post, edit its copy (or, for a post with channels, its title), then try **Publish now**. It refuses (the approval was reset), and nothing reaches the platform.
+- [ ] **No blind second post:** if a channel's publish times out or the platform answers 5xx, the receipt says the platform may have published it and to check the channel before retrying; nothing is sent again on its own. Only a 429 or a refused connection is tried again automatically.
 
 ## 3. Scheduling (S3.1)
 
@@ -60,6 +61,7 @@ The result fields each step reads (the post's id and link) could not be checked 
 ## 5. A restart mid-publish
 
 - [ ] **Stop the backend while a post is publishing** (a long video upload), and start it again more than `BOOT_REAPER_STALE_MINUTES` later. The post ends **Failed** or **Partially published** by its channels; a channel that was uploading says the platform may have taken it (check it before you retry), and a published channel keeps its link.
+- [ ] **A quick restart mid-publish:** the same, but start the backend again at once. The post stays **Publishing** until `SOCIALS_PUBLISH_RUN_MAX_SECONDS` plus 5 minutes after it started, then the leader's reconcile tick ends it the same way. A channel never tried says so, and **Retry the failed channels** publishes it.
 
 ## 6. One way out (D14)
 
