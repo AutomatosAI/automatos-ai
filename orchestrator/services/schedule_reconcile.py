@@ -15,6 +15,8 @@ DB against the registered jobs for both sources:
 * cron playbooks (``workflow_recipes.schedule_config``) ↔ ``playbook_cron_<id>``
   jobs (F132: Auto's schedules reached no scheduler and fired only if a restart
   re-read them)
+* scheduled social posts (``social_posts``, PRD-251 D10) ↔ ``social-publish-<id>``
+  one-shot jobs at each post's slot (``modules/socials/schedule_jobs.py``)
 
 Both reconcilers are idempotent, so a request-worker edit that DID land on the
 leader is simply confirmed.
@@ -33,6 +35,7 @@ RECONCILE_JOB_ID = "schedule_reconcile"
 
 def run_reconcile_once(scheduler: Any, db: Optional[Any] = None) -> Dict[str, Any]:
     """One pass over every source. Opens (and closes) its own session unless given one."""
+    from modules.socials import schedule_jobs
     from services.heartbeat_service import get_heartbeat_service
     from services.playbook_scheduler import get_playbook_scheduler
 
@@ -45,10 +48,11 @@ def run_reconcile_once(scheduler: Any, db: Optional[Any] = None) -> Dict[str, An
         tasks = ScheduledTaskService(db, workspace_id=None).reconcile_with_scheduler(scheduler)
         heartbeats = get_heartbeat_service().reconcile_agent_heartbeats(db)
         playbooks = get_playbook_scheduler().reconcile_with_db(db)
+        socials = schedule_jobs.reconcile(scheduler, db)
     finally:
         if owns_db:
             db.close()
-    return {"tasks": tasks, "heartbeats": heartbeats, "playbooks": playbooks}
+    return {"tasks": tasks, "heartbeats": heartbeats, "playbooks": playbooks, "socials": socials}
 
 
 def _tick(scheduler: Any = None) -> None:

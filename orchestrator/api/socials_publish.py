@@ -2,8 +2,8 @@
 Socials publishing (PRD-251 US-301, S3.3)
 =========================================
 
-``POST /api/socials/posts/{post_id}/publish-now`` publishes an approved or scheduled
-post, and ``POST /api/socials/posts/{post_id}/retry`` publishes again the targets that
+``POST /api/socials/posts/{post_id}/publish-now`` publishes an approved, scheduled or
+missed post, and ``POST /api/socials/posts/{post_id}/retry`` publishes again the targets that
 failed of a failed or partially published post. Each answers 202 with the post in
 ``publishing``; the publish runs in the background (``modules/socials/publishing.py``)
 and ends the post ``published``, ``partially_published`` or ``failed``, each target
@@ -34,7 +34,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.socials import publisher, service
+from modules.socials import publisher, schedule_jobs, service
 
 router = APIRouter()
 
@@ -56,6 +56,7 @@ def _start(db: Session, ctx: RequestContext, post_id: UUID, begin: Callable[...,
         job = begin(db, post, actor)
     except service.SocialsError as exc:
         posts_api._raise_for(exc)
+    schedule_jobs.sync_job(post)  # a scheduled post published now has no slot left
     anyio.from_thread.run_sync(publisher.launch, job)
     return post.to_dict()
 

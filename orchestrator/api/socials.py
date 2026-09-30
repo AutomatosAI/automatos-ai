@@ -119,7 +119,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, notify, preview, render, service
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -294,7 +294,9 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
     :class:`service.StaleContent` with the post's current hash (409). Call it
     straight after the service mutation: a query in between would autoflush the
     change before the check. A write that moved the post into needs_approval
-    notifies its approvers once committed (US-206)."""
+    notifies its approvers once committed (US-206), and the post's scheduled job
+    follows its status and slot (US-306: scheduled, rescheduled, unscheduled, or
+    an edit that voided the approval)."""
     post_id, workspace_id = post.id, post.workspace_id
     if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
@@ -304,6 +306,8 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
         raise service.StaleContent(service.compute_content_hash(current))
     saved = _save(db, post)
     notify.notify_if_entered(status, post)
+    # D10 (US-306): the post's one-shot job follows its status and slot.
+    schedule_jobs.sync_job(post)
     return saved
 
 

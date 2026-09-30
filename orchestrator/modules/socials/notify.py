@@ -51,11 +51,14 @@ def _dispatcher(db: Any, workspace_id: str) -> Any:
 # Wave 3 (US-301): how a publish ended, told to the workspace.
 PUBLISHED_EVENT = "social_post_published"
 FAILED_EVENT = "social_post_failed"
+MISSED_EVENT = "social_post_missed"
 _OUTCOMES = {
     # post status → (event type, title prefix, notification status)
     "published": (PUBLISHED_EVENT, "Social post published: ", "ok"),
     "partially_published": (FAILED_EVENT, "Social post partly published: ", "error"),
     "failed": (FAILED_EVENT, "Social post failed to publish: ", "error"),
+    # US-306: its slot passed and nothing was published (D10).
+    "missed": (MISSED_EVENT, "Social post missed its slot: ", "error"),
 }
 
 
@@ -92,7 +95,7 @@ async def dispatch_publish_outcome(
     session_factory: Optional[Callable[[], Any]] = None,
 ) -> None:
     """Tell the workspace how the post's publish ended (``status``: published,
-    partially_published or failed). Never raises."""
+    partially_published, failed, or missed: its slot passed). Never raises."""
     event = _OUTCOMES.get(status)
     if event is not None:
         await _dispatch(workspace_id, post_id, event, title, session_factory)

@@ -9,6 +9,7 @@ records, so ``service.py`` (over 800 lines) only gains its table rows:
 * ``start_retry``: failed or partially_published → publishing, re-running the failed
   targets, under the same approval check (``assert_retryable``). A post that failed
   its render, or whose content changed since its approval, is not retried.
+* ``miss``: scheduled → missed, a slot that passed with nothing published (D10).
 * ``finish_publish``: publishing → published (every target published),
   partially_published (some) or failed (none), with each target's outcome in
   ``review_log``.
@@ -74,6 +75,16 @@ def start_retry(post: SocialPost, actor: str) -> SocialPost:
     failed = [_name(t) for t in _targets(post) if t.status == TARGET_FAILED]
     post.status = target
     service._log(post, actor, service.ACTION_RETRY, None, channels=failed)
+    return post
+
+
+def miss(post: SocialPost, actor: str, reason: str) -> SocialPost:
+    """scheduled → missed (D10): its slot passed and nothing was published. The
+    approval stands, so it can be rescheduled or published now."""
+    target = service._target(post, service.ACTION_MISSED)
+    slot = post.scheduled_for.isoformat() if post.scheduled_for else None
+    post.status = target
+    service._log(post, actor, service.ACTION_MISSED, reason[: service.COMMENT_MAX_CHARS], scheduled_for=slot)
     return post
 
 

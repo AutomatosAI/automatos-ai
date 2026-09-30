@@ -97,6 +97,7 @@ SCHEDULED = "scheduled"
 PUBLISHING = "publishing"
 PUBLISHED = "published"
 PARTIALLY_PUBLISHED = "partially_published"
+MISSED = "missed"
 FAILED = "failed"
 ARCHIVED = "archived"
 
@@ -120,6 +121,8 @@ ACTION_RETRY = "retry"
 ACTION_PUBLISHED = "published"
 ACTION_PARTIALLY_PUBLISHED = "partially_published"
 ACTION_PUBLISH_FAILED = "publish_failed"
+# Wave 3 (US-306): a scheduled post whose slot passed beyond the grace (D10).
+ACTION_MISSED = "missed"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
 
@@ -130,10 +133,12 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_APPROVE: {NEEDS_APPROVAL: APPROVED},
     ACTION_REQUEST_CHANGES: {NEEDS_APPROVAL: CHANGES_REQUESTED},
     ACTION_REJECT: {NEEDS_APPROVAL: ARCHIVED},
-    ACTION_SCHEDULE: {APPROVED: SCHEDULED},
+    # Wave 3 (US-306): a scheduled post is rescheduled (the slot moves, the approval
+    # stands), and a missed one can be given a new slot.
+    ACTION_SCHEDULE: {APPROVED: SCHEDULED, SCHEDULED: SCHEDULED, MISSED: SCHEDULED},
     ACTION_UNSCHEDULE: {SCHEDULED: APPROVED},
     # A content edit voids the approval of an approved or scheduled post.
-    ACTION_EDIT: {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL},
+    ACTION_EDIT: {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL, MISSED: NEEDS_APPROVAL},
     # Wave 1 (S1.1c): only a post that holds no approval renders. An approved
     # or scheduled post is edited first, which voids its approval.
     ACTION_RENDER: {
@@ -146,11 +151,12 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_RENDER_FAILED: {RENDERING: FAILED},
     # Wave 3 (US-301): an approved or scheduled post publishes; a retry re-runs the
     # failed targets of a publish that failed or published partly.
-    ACTION_PUBLISH: {APPROVED: PUBLISHING, SCHEDULED: PUBLISHING},
+    ACTION_PUBLISH: {APPROVED: PUBLISHING, SCHEDULED: PUBLISHING, MISSED: PUBLISHING},
     ACTION_RETRY: {FAILED: PUBLISHING, PARTIALLY_PUBLISHED: PUBLISHING},
     ACTION_PUBLISHED: {PUBLISHING: PUBLISHED},
     ACTION_PARTIALLY_PUBLISHED: {PUBLISHING: PARTIALLY_PUBLISHED},
     ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
+    ACTION_MISSED: {SCHEDULED: MISSED},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
@@ -163,8 +169,8 @@ ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
 # scheduled post voids its approval; in the others the post keeps its status.
 # A failed render is fixed by an edit and rendered again. A rendering post is
 # not edited: the render is working from its content.
-EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, FAILED})
-PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
+EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, MISSED, FAILED})
+PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 
 # What the hash covers (D6), and what a post edit may change. The voice (D11)
 # and the footage (D12) are render settings: editable, never hashed.
@@ -788,7 +794,8 @@ def reject(post: SocialPost, actor: str, reason: Optional[str] = None) -> Social
 
 
 def schedule(post: SocialPost, actor: str, scheduled_for: datetime, tz_name: str) -> SocialPost:
-    """approved → scheduled at ``scheduled_for`` (stored in UTC; ``tz_name`` is for display)."""
+    """approved, scheduled (a reschedule) or missed → scheduled at ``scheduled_for``
+    (stored in UTC; ``tz_name`` is for display). The approval stands."""
     target = _target(post, ACTION_SCHEDULE)
     assert_publishable(post)
     if not isinstance(scheduled_for, datetime):

@@ -167,6 +167,13 @@ PUBLISH_MOVES = {
     (service.PUBLISHING, service.PUBLISHED),
     (service.PUBLISHING, service.PARTIALLY_PUBLISHED),
     (service.PUBLISHING, FAILED),
+    # US-306: a reschedule keeps the approval; a slot that passed is missed, and a
+    # missed post is rescheduled, published now or edited.
+    (SCHEDULED, SCHEDULED),
+    (SCHEDULED, service.MISSED),
+    (service.MISSED, SCHEDULED),
+    (service.MISSED, service.PUBLISHING),
+    (service.MISSED, NEEDS_APPROVAL),
 }
 
 
@@ -178,17 +185,18 @@ def test_the_table_is_exactly_the_machine_through_wave_3():
         "approve": {NEEDS_APPROVAL: APPROVED},
         "request_changes": {NEEDS_APPROVAL: CHANGES_REQUESTED},
         "reject": {NEEDS_APPROVAL: ARCHIVED},
-        "schedule": {APPROVED: SCHEDULED},
+        "schedule": {APPROVED: SCHEDULED, SCHEDULED: SCHEDULED, "missed": SCHEDULED},
         "unschedule": {SCHEDULED: APPROVED},
-        "edit": {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL},
+        "edit": {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL, "missed": NEEDS_APPROVAL},
         "render": {DRAFT: RENDERING, CHANGES_REQUESTED: RENDERING, NEEDS_APPROVAL: RENDERING, FAILED: RENDERING},
         "render_done": {RENDERING: NEEDS_APPROVAL},
         "render_failed": {RENDERING: FAILED},
-        "publish": {APPROVED: "publishing", SCHEDULED: "publishing"},
+        "publish": {APPROVED: "publishing", SCHEDULED: "publishing", "missed": "publishing"},
         "retry": {FAILED: "publishing", "partially_published": "publishing"},
         "published": {"publishing": "published"},
         "partially_published": {"publishing": "partially_published"},
         "publish_failed": {"publishing": FAILED},
+        "missed": {SCHEDULED: "missed"},
     }
 
 
@@ -228,7 +236,6 @@ ILLEGAL = [
     (APPROVED, "unschedule"),
     (SCHEDULED, "submit"),
     (SCHEDULED, "approve"),
-    (SCHEDULED, "schedule"),
     (SCHEDULED, "reject"),
     (ARCHIVED, "submit"),
     (ARCHIVED, "approve"),
@@ -251,7 +258,9 @@ def test_illegal_transitions_raise_and_change_nothing(status, action):
 # ``failed`` left this list in Wave 1: a failed render is edited and rendered
 # again (S1.1c). Its every other Wave 0 move stays illegal, pinned in
 # test_prd251w1_render_lifecycle.py::test_a_failed_post_is_edited_and_rendered_again_and_nothing_else.
-@pytest.mark.parametrize("later_status", ["rendering", "publishing", "published", "partially_published", "missed"])
+# ``missed`` left it in Wave 3 (US-306): a missed post is rescheduled or edited
+# (tests/test_prd251w3_schedule.py).
+@pytest.mark.parametrize("later_status", ["rendering", "publishing", "published", "partially_published"])
 @pytest.mark.parametrize("action", ["submit", "approve", "edit", "schedule"])
 def test_statuses_of_later_waves_have_no_wave_0_moves(later_status, action):
     post = _post_in(APPROVED)

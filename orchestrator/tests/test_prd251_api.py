@@ -781,7 +781,11 @@ def test_schedule_and_unschedule(api):
     resp = _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT, "timezone": "Europe/Lisbon"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "scheduled" and resp.json()["timezone"] == "Europe/Lisbon"
-    assert _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT}).status_code == 409
+    # Wave 3 (US-306): scheduling a scheduled post reschedules it; the approval stands.
+    later = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+    moved = _post(api, approved["id"], "schedule", {"scheduled_for": later, "timezone": "Europe/Lisbon"})
+    assert moved.status_code == 200 and moved.json()["status"] == "scheduled"
+    assert moved.json()["approved_hash"] == approved["approved_hash"] == moved.json()["content_hash"]
     resp = _post(api, approved["id"], "unschedule")
     assert resp.status_code == 200 and resp.json()["status"] == "approved"
     assert resp.json()["scheduled_for"] is None
