@@ -716,6 +716,43 @@ def test_a_publish_that_cannot_start_still_ends_the_post_and_retry_publishes_the
     assert _publish(env, post_id, FakeExecutor(LINKEDIN), begin=publisher.begin_retry) == "published"
 
 
+
+def test_the_default_executor_opens_a_session_per_call_and_closes_it(env, monkeypatch):
+    """No session, or open transaction, is held across a publish that talks to the
+    platforms for minutes: each Composio call has its own, closed when it ends."""
+    post_id = _approved_post(env, _target("linkedin", "text"))
+    script = FakeExecutor(LINKEDIN)
+    sessions = []
+
+    class Executor:
+        def __init__(self, db):
+            self.db = db
+            sessions.append(SimpleNamespace(db=db, closed=False))
+
+        async def execute_with_uploads(self, action, params, **kwargs):
+            assert not sessions[-1].closed
+            return await script.execute_with_uploads(action, params, **kwargs)
+
+    def tracked():
+        db = env.factory()
+        close = db.close
+
+        def closing():
+            for s in sessions:
+                if s.db is db:
+                    s.closed = True
+            close()
+
+        db.close = closing
+        return db
+
+    monkeypatch.setattr(tool_executor, "ComposioToolExecutor", Executor)
+    job = _claim(env, post_id)
+    ended = asyncio.run(run_publish(job, session_factory=tracked, runtime=_runtime(env)))
+
+    assert ended == "published" and script.actions == ["LINKEDIN_GET_MY_INFO", "LINKEDIN_CREATE_LINKED_IN_POST"]
+    assert len(sessions) == 2 and all(s.closed for s in sessions)
+
 # ---------------------------------------------------------------------------
 # @integration: one claim, one sequence, on the CI Postgres
 # ---------------------------------------------------------------------------

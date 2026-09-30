@@ -86,10 +86,22 @@ def _default_session_factory() -> Callable[[], Any]:
     return SessionLocal
 
 
-def _default_executor(db: Any) -> Any:
-    from core.composio.tool_executor import ComposioToolExecutor
+class _SessionPerCall:
+    """The Composio executor with its own session for each call, closed when the call
+    ends: a publish talks to the platforms for minutes, and no session (or open
+    transaction) is held across the whole run."""
 
-    return ComposioToolExecutor(db)
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        self._factory = factory
+
+    async def execute_with_uploads(self, action: str, params: Any, **kwargs: Any) -> Any:
+        from core.composio.tool_executor import ComposioToolExecutor
+
+        db = self._factory()
+        try:
+            return await ComposioToolExecutor(db).execute_with_uploads(action, params, **kwargs)
+        finally:
+            db.close()
 
 
 async def _run(job: PublishJob, work: List[TargetWork], rt: Runtime, factory: Callable[[], Any]) -> Optional[str]:
@@ -124,16 +136,11 @@ async def run_publish(
         work = []
     if work is None:
         return None
-    db = factory() if executor is None else None
-    try:
-        with tempfile.TemporaryDirectory(prefix="socials-publish-") as workdir:
-            stager = Stager(Path(workdir))
-            chosen = executor or _default_executor(db)
-            rt = runtime(chosen, stager) if runtime else Runtime(executor=chosen, stager=stager)
-            ended = await _run(job, work, rt, factory)
-    finally:
-        if db is not None:
-            db.close()
+    with tempfile.TemporaryDirectory(prefix="socials-publish-") as workdir:
+        stager = Stager(Path(workdir))
+        chosen = executor or _SessionPerCall(factory)
+        rt = runtime(chosen, stager) if runtime else Runtime(executor=chosen, stager=stager)
+        ended = await _run(job, work, rt, factory)
     if ended is not None:
         await notify.dispatch_publish_outcome(job.workspace_id, job.post_id, job.title, ended, session_factory=factory)
     return ended
