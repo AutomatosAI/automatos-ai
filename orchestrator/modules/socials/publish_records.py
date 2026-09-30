@@ -15,6 +15,10 @@ opens a session, commits and closes:
 * :func:`finish`: a target left uploading (a timeout, an unexpected error) fails
   with the reason, and the post ends by its targets (``publish_lifecycle``), a
   compare-and-set on ``publishing`` and the hash the publish started from.
+* :func:`end_lost`: a post whose run is gone (the process restarted, or the run
+  was lost) ends the same way, its uploading targets failing with
+  :data:`LOST_UPLOADING`: the boot reaper and the leader's reconcile tick
+  (``schedule_jobs.end_lost_publishes``) call it.
 """
 from __future__ import annotations
 
@@ -37,6 +41,10 @@ logger = logging.getLogger(__name__)
 NOTES = "notes"  # a target's action_plan key: what its receipt says beside the id and link
 REMOTE_ID_MAX_CHARS = 255
 PERMALINK_MAX_CHARS = 1000
+LOST_UPLOADING = (
+    "The publish was lost (the server restarted, or the run stopped) while this channel was uploading. "
+    "The platform may have taken it: check the channel before you retry."
+)
 
 
 @dataclass(frozen=True)
@@ -71,9 +79,14 @@ def load_work(factory: Callable[[], Any], job: PublishJob) -> Optional[List[Targ
     db = factory()
     try:
         post = _post(db, job)
-        if post is None or not publish_lifecycle.approval_matches(post):
-            logger.warning("[Socials] post %s is not publishing its approved version; nothing is published", job.post_id)
+        if post is None:
+            logger.warning("[Socials] post %s is no longer publishing; nothing is published", job.post_id)
             return None
+        if not publish_lifecycle.approval_matches(post):
+            # Nothing is published, and the run ends the post (finish) rather than
+            # leaving it publishing.
+            logger.warning("[Socials] post %s is not publishing its approved version; nothing is published", job.post_id)
+            return []
         files = media_urls.resolve_post_media(db, post)
         pending = sorted((t for t in post.targets if t.status != TARGET_PUBLISHED), key=lambda t: (t.toolkit, t.post_kind))
         return [TargetWork(t.id, steps_of(t.action_plan), context_for(post, t, files)) for t in pending]
@@ -143,6 +156,14 @@ def fail_unfinished(post: Any, reason: str, held: Optional[Collection[UUID]] = N
         if target.status == TARGET_UPLOADING and (held is None or target.id in held):
             target.status = TARGET_FAILED
             target.error = reason
+
+
+def end_lost(post: Any, actor: str) -> str:
+    """End a post whose publish run is gone: a target it left uploading fails with
+    :data:`LOST_UPLOADING`, a published one keeps its receipt, and the post ends by
+    its targets. The status it ended in; the caller commits."""
+    fail_unfinished(post, LOST_UPLOADING)
+    return publish_lifecycle.finish_publish(post, actor)
 
 
 def finish(factory: Callable[[], Any], job: PublishJob, unfinished: str, held: Collection[UUID]) -> Optional[str]:

@@ -48,10 +48,6 @@ logger = logging.getLogger(__name__)
 
 _ORPHAN_REASON = "orphaned_on_restart"
 # PRD-251 US-301: a social post's channel still uploading when its publish was lost.
-_PUBLISH_LOST = (
-    "The publish was lost when the server restarted while this channel was uploading. "
-    "The platform may have taken it: check the channel before you retry."
-)
 # Boot waits on each orphan's close: its task_failed notice can reach Telegram or
 # Slack. The status is committed before the notice, so a slow channel only cuts
 # the notice short (review MEDIUM on adc84365e). The bound cuts awaits, not the
@@ -262,17 +258,18 @@ def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
     publishing post older than the cutoff has no task left to finish it. A target it
     left uploading fails, saying the platform may have taken it; a published target
     keeps its receipt; the post ends by its targets (published, partially published
-    or failed) through the lifecycle, which logs it in ``review_log``.
+    or failed) through the lifecycle, which logs it in ``review_log``
+    (``publish_records.end_lost``). One lost to a restart inside the cutoff is ended
+    by the leader's reconcile tick (``schedule_jobs.end_lost_publishes``).
     """
     from core.models.socials import SocialPost
-    from modules.socials import publish_lifecycle, service as socials
-    from modules.socials.publish_records import fail_unfinished
+    from modules.socials import service as socials
+    from modules.socials.publish_records import end_lost
 
     rows = db.query(SocialPost).filter(SocialPost.status == socials.PUBLISHING).all()
     stale = [r for r in rows if r.status == socials.PUBLISHING and _is_stale(r.updated_at, cutoff)]
     for r in stale:
-        fail_unfinished(r, _PUBLISH_LOST)
-        publish_lifecycle.finish_publish(r, _ORPHAN_REASON)
+        end_lost(r, _ORPHAN_REASON)
     if stale:
         record_error(
             subsystem="socials",

@@ -18,8 +18,10 @@ compare-and-set approved | scheduled → publishing), and this runs in the backg
    (``social_post_published`` / ``social_post_failed``).
 
 The whole run lives at most ``SOCIALS_PUBLISH_RUN_MAX_SECONDS``, under the boot
-reaper's stale cutoff: a target still running then fails saying so. A post whose
-process died mid-publish is ended by the boot reaper (``core/boot/reaper.py``).
+reaper's stale cutoff: a target still running then fails saying so, and one never
+tried fails saying that. A run that cannot start still ends the post. A post whose
+process died mid-publish is ended by the boot reaper (``core/boot/reaper.py``) or,
+sooner, by the leader's reconcile tick (``schedule_jobs.end_lost_publishes``).
 The channels differ only in the adapter DATA (``channel_adapters.py``): the engine
 never branches on a channel.
 """
@@ -114,7 +116,12 @@ async def run_publish(
     """Publish the post's targets in the background: the status the post ended in,
     or ``None`` when it was not publishing its approved version (nothing ran)."""
     factory = session_factory or _default_session_factory()
-    work = await asyncio.to_thread(load_work, factory, job)
+    try:
+        work = await asyncio.to_thread(load_work, factory, job)
+    except Exception:
+        # Nothing ran: the run still ends the post, each untried target failing.
+        logger.exception("[Socials] the publish of post %s could not start", job.post_id)
+        work = []
     if work is None:
         return None
     db = factory() if executor is None else None

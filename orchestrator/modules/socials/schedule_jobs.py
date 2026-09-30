@@ -22,6 +22,11 @@ with plain string args (the post and its workspace), never a closure: the
   that no longer matches, the post goes to ``missed`` and the workspace is told
   (``social_post_missed``). Stale content is never posted silently. A missed post can
   be rescheduled or published now while its approval still matches.
+* **A lost publish.** The same pass ends a post still publishing well past a run's
+  own limit (``SOCIALS_PUBLISH_RUN_MAX_SECONDS`` plus :data:`LOST_MARGIN_SECONDS`),
+  whose run died with its process or never ended it: no run can still hold it
+  (:func:`end_lost_publishes`, ``publish_records.end_lost``). The boot reaper does
+  the same for the posts it finds at boot.
 """
 from __future__ import annotations
 
@@ -35,7 +40,7 @@ from config import config
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
 from modules.socials import notify, publish_lifecycle, publisher, service
-from modules.socials.publish_records import PublishJob
+from modules.socials.publish_records import PublishJob, end_lost
 from modules.socials.publishing import run_publish
 from modules.socials.settings import socials_off_reason
 
@@ -50,6 +55,8 @@ MISSED_LATE = (
     "nothing was published. Reschedule it or publish it now."
 )
 MISSED_OFF = "Socials was off for this workspace at its slot ({why}): nothing was published."
+# Past a run's own limit, before a publishing post counts as lost: its end is written.
+LOST_MARGIN_SECONDS = 300
 MISSED_STALE = "Its approval no longer matched its content at its slot ({why}): nothing was published."
 
 
@@ -139,7 +146,32 @@ def reconcile(scheduler: Any, db: Any) -> Dict[str, Any]:
     for key in set(jobs) - set(wanted):
         scheduler.remove_job(key)
         removed += 1
-    return {"added": added, "moved": moved, "removed": removed}
+    ended = end_lost_publishes(db, datetime.now(timezone.utc))
+    return {"added": added, "moved": moved, "removed": removed, "ended": ended}
+
+
+def end_lost_publishes(db: Any, now: datetime) -> int:
+    """End each post publishing since before a run's limit plus the margin: its run
+    is gone. A compare-and-set per post, so a run that ends it first wins. How many
+    it ended."""
+    cutoff = now - timedelta(seconds=config.SOCIALS_PUBLISH_RUN_MAX_SECONDS + LOST_MARGIN_SECONDS)
+    ids = [row.id for row in db.query(SocialPost.id).filter(
+        SocialPost.status == service.PUBLISHING, SocialPost.updated_at < cutoff,
+    ).all()]
+    ended = 0
+    for post_id in ids:
+        post = db.get(SocialPost, post_id)
+        if post is None or post.status != service.PUBLISHING:
+            continue
+        content_hash = post.content_hash
+        status = end_lost(post, SCHEDULER_ACTOR)
+        if not service.claim_unchanged(db, post, status=service.PUBLISHING, content_hash=content_hash):
+            db.rollback()
+            continue
+        db.commit()
+        ended += 1
+        logger.warning("[Socials] post %s was still publishing with no run left: it ended %s", post_id, status)
+    return ended
 
 
 # ---- the fire -------------------------------------------------------------------

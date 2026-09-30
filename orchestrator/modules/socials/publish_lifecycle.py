@@ -12,7 +12,8 @@ records, so ``service.py`` (over 800 lines) only gains its table rows:
 * ``miss``: scheduled → missed, a slot that passed with nothing published (D10).
 * ``finish_publish``: publishing → published (every target published),
   partially_published (some) or failed (none), with each target's outcome in
-  ``review_log``.
+  ``review_log``. A target the publish never tried (it ran out of time, or was
+  lost) fails saying so, so Retry publishes it.
 
 Targets move pending → uploading → published | failed (``social_post_targets``); the
 publisher writes them (``modules/socials/publish_records.py``). No FastAPI and no
@@ -33,6 +34,7 @@ TARGET_FAILED = "failed"
 RETRYABLE_STATUSES = frozenset({service.FAILED, service.PARTIALLY_PUBLISHED})
 NO_CHANNELS = "the post has no channels to publish to: choose them in the composer first"
 NOTHING_TO_RETRY = "the post has no failed channel to retry"
+NOT_TRIED = "The publish ended before this channel was tried: retry to publish it."
 
 
 def approval_matches(post: Any) -> bool:
@@ -125,8 +127,12 @@ def _summary(action: str, targets: List[Any]) -> str:
 
 def finish_publish(post: SocialPost, actor: str) -> str:
     """publishing → published, partially_published or failed, by its targets'
-    statuses, each target's outcome in ``review_log``. The status it ended in."""
+    statuses, each target's outcome in ``review_log``. The status it ended in. A
+    target still pending was never tried: it fails, so a retry publishes it."""
     targets = sorted(_targets(post), key=lambda t: (t.toolkit, t.post_kind))
+    for target in targets:
+        if target.status == TARGET_PENDING:
+            target.status, target.error = TARGET_FAILED, NOT_TRIED
     action = outcome_action(targets)
     post.status = service._target(post, action)
     summary = _summary(action, targets)[: service.COMMENT_MAX_CHARS]

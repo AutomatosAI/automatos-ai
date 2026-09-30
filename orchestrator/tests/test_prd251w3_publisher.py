@@ -220,8 +220,10 @@ def test_a_run_whose_post_lost_its_approval_publishes_nothing(env):
         db.get(SocialPost, post_id).approved_hash = "f" * 64
         db.commit()
     executor = FakeExecutor(LINKEDIN)
-    assert asyncio.run(run_publish(job, executor=executor, session_factory=env.factory, runtime=_runtime(env))) is None
+    # Nothing is published, and the post is ended rather than left publishing (review).
+    assert asyncio.run(run_publish(job, executor=executor, session_factory=env.factory, runtime=_runtime(env))) == "failed"
     assert executor.calls == []
+    assert _post(env, post_id).status == "failed"
 
 
 def test_a_post_claimed_once_publishes_once(env):
@@ -654,6 +656,64 @@ def test_the_boot_reaper_ends_a_lost_publish_and_keeps_its_receipts(env):
     assert post.status == "partially_published" and post.review_log[-1]["action"] == "partially_published"
     assert targets["linkedin", "text"]["remote_id"] == SHARE_URN
     assert targets["linkedin", "video"]["status"] == "failed" and "may have taken it" in targets["linkedin", "video"]["error"]
+
+
+
+def _publishing_since(env, post_id, since):
+    with env.factory() as db:
+        db.get(SocialPost, post_id).updated_at = since
+        db.commit()
+
+
+def test_the_reconcile_tick_ends_a_publish_lost_inside_the_boot_cutoff(env):
+    """A restart inside BOOT_REAPER_STALE_MINUTES leaves a post the boot reaper does
+    not touch: the leader's pass ends it once no run can still hold it."""
+    from modules.socials import schedule_jobs
+
+    env.media = [VIDEO]
+    lost = _approved_post(env, _target("linkedin", "text"), _target("linkedin", "video"))
+    live = _approved_post(env, _target("linkedin", "text"))
+    _claim(env, lost)
+    _claim(env, live)
+    now = datetime.now(timezone.utc)
+    limit = config.SOCIALS_PUBLISH_RUN_MAX_SECONDS + schedule_jobs.LOST_MARGIN_SECONDS
+    _publishing_since(env, lost, now - timedelta(seconds=limit + 60))
+    _publishing_since(env, live, now - timedelta(seconds=limit - 60))  # its run may still be going
+    with env.factory() as db:
+        post = db.get(SocialPost, lost)
+        {t.post_kind: t for t in post.targets}["video"].status = "uploading"
+        db.commit()
+
+    with env.factory() as db:
+        assert schedule_jobs.end_lost_publishes(db, now) == 1
+
+    assert _post(env, live).status == "publishing"
+    post, targets = _post(env, lost), _targets(env, lost)
+    assert post.status == "failed" and post.review_log[-1]["by"] == schedule_jobs.SCHEDULER_ACTOR
+    assert "may have taken it" in targets["linkedin", "video"]["error"]
+    assert targets["linkedin", "text"]["error"] == publish_lifecycle.NOT_TRIED
+    with env.factory() as db:
+        assert schedule_jobs.end_lost_publishes(db, now) == 0  # once
+
+
+def test_a_publish_that_cannot_start_still_ends_the_post_and_retry_publishes_the_untried(env, monkeypatch):
+    from modules.socials import publishing
+
+    post_id = _approved_post(env, _target("linkedin", "text"))
+
+    def broken(factory, job):
+        raise RuntimeError("storage is down")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(publishing, "load_work", broken)
+        executor = FakeExecutor(LINKEDIN)
+        assert _publish(env, post_id, executor) == "failed"
+    assert executor.actions == []
+    target = _targets(env, post_id)["linkedin", "text"]
+    assert target["status"] == "failed" and target["error"] == publish_lifecycle.NOT_TRIED and target["attempts"] == 0
+    assert [n["event_type"] for n in env.notices] == ["social_post_failed"]
+
+    assert _publish(env, post_id, FakeExecutor(LINKEDIN), begin=publisher.begin_retry) == "published"
 
 
 # ---------------------------------------------------------------------------
