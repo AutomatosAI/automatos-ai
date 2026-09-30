@@ -36,6 +36,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import update
+
 from config import config
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
@@ -197,10 +199,31 @@ def _miss(db: Any, post: SocialPost, reason: str) -> bool:
     return True
 
 
+def _hold_slot(db: Any, post: SocialPost) -> bool:
+    """Lock the post's row, but only while it is still scheduled for the slot this
+    fire read: a reschedule that committed first wins (its job fires at the new slot),
+    and one that comes after waits for this fire's claim, then finds the post moved on."""
+    table = SocialPost.__table__
+    with db.no_autoflush:
+        result = db.execute(
+            update(table)
+            .where(
+                table.c.id == post.id,
+                table.c.status == service.SCHEDULED,
+                table.c.scheduled_for == post.scheduled_for,
+            )
+            .values(status=table.c.status)
+        )
+    return result.rowcount == 1
+
+
 def _claim(db: Any, post: SocialPost, now: datetime) -> Tuple[Optional[PublishJob], bool]:
     slot = _utc(post.scheduled_for)
     if slot > now + timedelta(seconds=EARLY_TOLERANCE_SECONDS):
         return None, False  # moved later since this job was registered
+    if not _hold_slot(db, post):
+        db.rollback()
+        return None, False  # rescheduled (or unscheduled) since this fire read it
     reason = _missed_reason(db, post, slot, now)
     if reason is None and not publish_lifecycle.approval_matches(post):
         reason = MISSED_STALE.format(why="the content changed after it was approved")

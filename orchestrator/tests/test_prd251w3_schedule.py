@@ -291,6 +291,31 @@ def test_a_job_fired_twice_publishes_once(env, fire):
     assert fire.executor.actions.count("LINKEDIN_CREATE_LINKED_IN_POST") == 1
 
 
+def test_a_reschedule_that_lands_while_the_job_fires_wins(env, fire, monkeypatch):
+    """The fire read the post at its old slot; a person moved it before the fire
+    claimed it. Nothing publishes at the old slot: the post stays scheduled at the new one."""
+    slot = _slot(1)
+    later = slot + timedelta(days=2)
+    post_id = _scheduled_post(env, slot)
+
+    read = service.get_post
+
+    def read_then_reschedule(db, workspace_id, pid):
+        post = read(db, workspace_id, pid)  # the fire has read the old slot
+        monkeypatch.setattr(service, "get_post", read)
+        with env.factory() as other:
+            service.schedule(read(other, WS, post_id), "user-author", later, "Europe/Lisbon")
+            other.commit()
+        return post
+
+    monkeypatch.setattr(service, "get_post", read_then_reschedule)
+    assert fire.run(post_id, slot) is None
+
+    assert fire.executor.calls == []
+    post = _post(env, post_id)
+    assert post.status == "scheduled" and post.approved_hash == post.content_hash
+    assert datetime.fromisoformat(post.scheduled_for).replace(tzinfo=timezone.utc) == later
+
 def test_a_missed_post_can_be_rescheduled_or_published_now(env, fire, monkeypatch):
     monkeypatch.setattr(config, "SOCIALS_MISFIRE_GRACE_SECONDS", 60)
     slot = _slot(1)
