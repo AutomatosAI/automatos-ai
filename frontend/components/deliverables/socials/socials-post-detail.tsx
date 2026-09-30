@@ -11,6 +11,8 @@
  * S2.3 (US-206): the approval view — each channel's copy, the exact rendered
  * media, every claim's source (SocialsPostEvidence) — and the approver's
  * actions (SocialsPostReview).
+ * Wave 3 (US-308): scheduling and publishing (SocialsPublishControls) and each
+ * channel's receipt, with Retry for the ones that failed (SocialsPostReceipts).
  */
 import { useEffect, useState } from 'react'
 
@@ -26,6 +28,8 @@ import { SocialsVoicePicker } from './socials-voice-picker'
 import { SocialsPostEvidence } from './socials-post-evidence'
 import { SocialsApprovalResetBanner, SocialsPostHistory } from './socials-post-history'
 import { SocialsPostReview } from './socials-post-review'
+import { SocialsPostReceipts } from './socials-post-receipts'
+import { SocialsPublishControls } from './socials-publish-controls'
 
 interface SocialsPostDetailProps {
   post: SocialPost
@@ -65,7 +69,7 @@ interface CopyFieldProps {
 }
 
 function CopyField({ post, editable, value, onChange }: CopyFieldProps) {
-  const approvalAtStake = post.status === 'approved' || post.status === 'scheduled'
+  const approvalAtStake = post.status === 'approved' || post.status === 'scheduled' || post.status === 'missed'
   if (!editable) {
     return (
       <div className="space-y-1.5">
@@ -139,6 +143,8 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
         )}
       </div>
       {actions.review && <SocialsPostReview post={post} dirty={dirty} />}
+      <SocialsPostReceipts post={post} role={role} />
+      <SocialsPublishControls post={post} role={role} />
 
       {!canAuthorPosts(role) && (
         <p className="text-xs text-muted-foreground">Your role can read posts but not change them.</p>

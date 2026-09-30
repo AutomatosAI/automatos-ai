@@ -39,7 +39,7 @@ import type {
   SocialSeriesShownPost,
 } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
-import { anyRendering } from '@/components/deliverables/socials/socials-status'
+import { anyInFlight } from '@/components/deliverables/socials/socials-status'
 import { unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
 
 // ============= QUERY KEYS =============
@@ -58,9 +58,9 @@ export const socialsQueryKeys = {
 /** How often the list refetches while a post renders. */
 export const SOCIALS_RENDER_POLL_MS = 5_000
 
-/** The list's refetch interval: poll while any post renders, otherwise not at all. */
+/** The list's refetch interval: poll while any post renders or publishes (US-308), otherwise not at all. */
 export function renderPollInterval(data: SocialPostsResponse | undefined): number | false {
-  return data && anyRendering(data.posts) ? SOCIALS_RENDER_POLL_MS : false
+  return data && anyInFlight(data.posts) ? SOCIALS_RENDER_POLL_MS : false
 }
 
 function useWorkspaceId(): string | null {
@@ -92,7 +92,7 @@ export function useInvalidateSocials() {
 
 /** onError for a post write: a 409 says the post changed and refetches the
  * posts; anything else shows the server's message, or `fallback`. */
-function usePostWriteErrorHandler(fallback: string) {
+export function usePostWriteErrorHandler(fallback: string) {
   const invalidate = useInvalidateSocials()
   return async (error: Error) => {
     if (httpStatusOf(error) === HTTP_CONFLICT) {

@@ -30,6 +30,13 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   render: 'Render started',
   render_done: 'Rendered',
   render_failed: 'Render failed',
+  // Wave 3 (US-301, US-306): publishing, and a slot that passed.
+  publish: 'Publishing started',
+  retry: 'Retry started',
+  published: 'Published',
+  partially_published: 'Partially published',
+  publish_failed: 'Publish failed',
+  missed: 'Missed its slot',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
@@ -45,6 +52,21 @@ export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
   failed: 'Failed',
   missed: 'Missed',
   archived: 'Archived',
+}
+
+// The seeded channels' names (modules/socials/channel_adapters.py labels); any other
+// toolkit is named from its own slug.
+const CHANNEL_LABELS: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  twitter: 'X',
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+}
+
+/** A channel's name from its Composio toolkit: "LinkedIn", "X", "Blue Sky". */
+export function channelLabel(toolkit: string): string {
+  return CHANNEL_LABELS[toolkit] ?? toolkit.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 /** Group order: what needs a person first, finished and archived work last. */
@@ -74,7 +96,7 @@ const REVIEW_ROLES: ReadonlySet<WorkspaceRole> = new Set<WorkspaceRole>(['owner'
 const SUBMITTABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['draft', 'changes_requested'])
 const REVIEWABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['needs_approval'])
 const EDITABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
-  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'failed',
+  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'missed', 'failed',
 ])
 // S1.1c: the statuses a render starts from (modules/socials/service.py TRANSITIONS['render']).
 const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
@@ -125,9 +147,14 @@ export function speaksAScript(post: Pick<SocialPost, 'template_id' | 'format'>):
   return !!post.template_id && !(post.format && STILL_FORMATS.has(post.format))
 }
 
-/** Whether any post is rendering: the list polls until none is. */
+/** Whether any post is rendering. */
 export function anyRendering(posts: ReadonlyArray<SocialPost>): boolean {
   return posts.some((post) => post.status === 'rendering')
+}
+
+/** Whether any post is rendering or publishing: the list polls until none is (US-308). */
+export function anyInFlight(posts: ReadonlyArray<SocialPost>): boolean {
+  return posts.some((post) => post.status === 'rendering' || post.status === 'publishing')
 }
 
 /** "3.5 / 10" (or "3.5" with no quota), minutes to one decimal place. */
