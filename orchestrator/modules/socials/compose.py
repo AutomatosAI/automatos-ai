@@ -113,6 +113,19 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
     ]
 
 
+# ── the model ───────────────────────────────────────────────────────────────
+def llm_factory(workspace_id: Any) -> Callable[[], Any]:
+    """The workspace's model, through the platform's LLM manager: usage is tracked
+    as ``socials_compose`` for the workspace."""
+
+    def build() -> Any:
+        from core.llm import create_llm_manager
+
+        return create_llm_manager(service_name=SERVICE_NAME, workspace_id=workspace_id, request_type=REQUEST_TYPE)
+
+    return build
+
+
 # ── the answer ──────────────────────────────────────────────────────────────
 def parse_answer(text: Any) -> Optional[Dict[str, Any]]:
     """The JSON object in the model's answer (bare, or in a code fence), or ``None``."""

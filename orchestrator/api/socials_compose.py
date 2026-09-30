@@ -131,19 +131,6 @@ def brand_voice(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("voice") or {})
 
 
-def llm_factory(workspace_id: UUID):
-    """The workspace's model, through the platform's manager: usage is tracked as socials_compose."""
-
-    def build():
-        from core.llm import create_llm_manager
-
-        return create_llm_manager(
-            service_name=compose.SERVICE_NAME, workspace_id=workspace_id, request_type=compose.REQUEST_TYPE
-        )
-
-    return build
-
-
 def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> compose.ComposeContext:
     """Everything the composer is given, from the caller's workspace only."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
@@ -180,7 +167,7 @@ def compose_social_post(
     context = compose_context(db, ctx.workspace_id, body)
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
     try:
-        return anyio.from_thread.run(compose.propose, context, llm_factory(ctx.workspace_id), timeout)
+        return anyio.from_thread.run(compose.propose, context, compose.llm_factory(ctx.workspace_id), timeout)
     except compose.ComposeTimedOut as exc:
         raise HTTPException(status_code=504, detail=str(exc)) from exc
     except compose.ComposeFailed as exc:
