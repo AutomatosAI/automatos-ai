@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import type { ScheduleItem } from '@/hooks/use-activity-api'
 import { apiClient } from '@/lib/api-client'
-import { SOCIAL_DRAG_TYPE, isSocialItem, slotFromDrop, wallInZone, zonedWallToIso } from './calendar-social'
+import { SOCIAL_DRAG_TYPE, isSocialItem, slotFromDrop, slotOnDay, wallInZone, zonedWallToIso } from './calendar-social'
 
 const DEFAULT_TZ = 'UTC'
 const HTTP_CONFLICT = 409
@@ -67,14 +67,6 @@ function readPayload(raw: string): DragPayload | null {
   } catch {
     return null
   }
-}
-
-/** `day` at the local time of day `slot` had (midday when it had none). */
-function sameTimeOn(day: Date, slot: string | null): Date {
-  const from = slot ? new Date(slot) : null
-  const moved = new Date(day)
-  moved.setHours(from ? from.getHours() : 12, from ? from.getMinutes() : 0, 0, 0)
-  return moved
 }
 
 function RescheduleDialog({ item, onClose, reschedule }: { item: ScheduleItem | null; onClose: () => void; reschedule: Reschedule }) {
@@ -143,7 +135,7 @@ export function useSocialReschedule(onChanged: () => void): SocialReschedule {
   })
   const dropProps = (day: Date, startHour: number, hourPx: number) =>
     dropTarget((e) => slotFromDrop(day, (e.clientY || 0) - e.currentTarget.getBoundingClientRect().top, startHour, hourPx))
-  const dropOnDayProps = (day: Date) => dropTarget((_e, payload) => sameTimeOn(day, payload.slot))
+  const dropOnDayProps = (day: Date) => dropTarget((_e, payload) => slotOnDay(day, payload.slot, payload.timezone))
 
   return {
     open: setEditing,

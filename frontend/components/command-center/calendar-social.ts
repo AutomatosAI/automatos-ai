@@ -9,7 +9,7 @@
  * the approval stands.
  */
 import type { ScheduleItem } from '@/hooks/use-activity-api'
-import { slotTimeLabel } from '@/lib/social-time'
+import { slotTimeLabel, wallInZone, zonedWallToIso } from '@/lib/social-time'
 
 export { wallInZone, zonedWallToIso } from '@/lib/social-time'
 
@@ -29,6 +29,20 @@ export function slotFromDrop(day: Date, offsetY: number, startHour: number, hour
   slot.setHours(startHour, 0, 0, 0)
   slot.setMinutes(slot.getMinutes() + minutes)
   return slot
+}
+
+const NO_SLOT_TIME = '12:00'
+
+/**
+ * A Month-view drop: the post's slot moved to `day` (the calendar date the viewer
+ * dropped on), at the time of day it had IN THE POST'S TIMEZONE (midday when it had
+ * none), so the post keeps its own time, wherever the viewer is.
+ */
+export function slotOnDay(day: Date, slot: string | null, tz: string): Date {
+  const time = slot ? wallInZone(slot, tz).slice(11, 16) : NO_SLOT_TIME
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const date = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`
+  return new Date(zonedWallToIso(`${date}T${time}`, tz))
 }
 
 export function isSocialItem(item: Pick<ScheduleItem, 'type' | 'post_id'>): boolean {

@@ -30,7 +30,7 @@ vi.mock('@/hooks/use-scheduled-tasks-api', () => ({ useUpdateScheduledTaskStatus
 import { CalendarTab } from '../calendar-tab'
 import { KIND_META, KIND_ORDER, kindTone } from '../calendar-kinds'
 import { buildEventActions, socialPostHref } from '../calendar-actions'
-import { SOCIAL_DRAG_TYPE, slotFromDrop, socialTimeLabel, wallInZone, zonedWallToIso } from '../calendar-social'
+import { SOCIAL_DRAG_TYPE, slotFromDrop, slotOnDay, socialTimeLabel, wallInZone, zonedWallToIso } from '../calendar-social'
 
 /** Today at 10:00 local: inside the visible week, far from a day boundary. */
 function todayAt(hours: number): Date {
@@ -160,6 +160,14 @@ describe('time zones without a library', () => {
     expect(zonedWallToIso('2026-07-01T09:00', 'Europe/Lisbon')).toBe('2026-07-01T08:00:00.000Z') // summer: UTC+1
     expect(zonedWallToIso('2026-11-09T18:00', 'Asia/Tokyo')).toBe('2026-11-09T09:00:00.000Z')
     expect(wallInZone('2026-11-09T09:00:00.000Z', 'Asia/Tokyo')).toBe('2026-11-09T18:00')
+  })
+
+  it('a Month-view drop keeps the post\'s own time of day, in its timezone, on the new date', () => {
+    // 20:00 UTC on 9 Nov is 05:00 on 10 Nov in Tokyo: the post's time is 05:00, Tokyo.
+    const moved = slotOnDay(new Date(2026, 10, 20), '2026-11-09T20:00:00Z', 'Asia/Tokyo')
+    expect(wallInZone(moved.toISOString(), 'Asia/Tokyo')).toBe('2026-11-20T05:00')
+    const noSlot = slotOnDay(new Date(2026, 10, 20), null, 'Europe/Lisbon')
+    expect(wallInZone(noSlot.toISOString(), 'Europe/Lisbon')).toBe('2026-11-20T12:00')
   })
 
   it('snaps a drop to the quarter hour', () => {
