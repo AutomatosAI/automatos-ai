@@ -2913,6 +2913,21 @@ class ApiClient {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/retry`, { method: 'POST' })
   }
 
+  /** Schedule an approved post, or move a scheduled or missed one (PRD-251 D10, US-306):
+   * `scheduledFor` is the slot (an ISO instant), `timezone` the IANA zone it is shown in.
+   * The approval stands; 409 = the post changed, 422 = a slot in the past. */
+  async scheduleSocialPost(postId: string, scheduledFor: string, timezone: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/schedule`, {
+      method: 'POST',
+      body: JSON.stringify({ scheduled_for: scheduledFor, timezone }),
+    })
+  }
+
+  /** Take a scheduled post off its slot; it stays approved (US-306). */
+  async unscheduleSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/unschedule`, { method: 'POST' })
+  }
+
   /** Start a render (S1.1c): answers with the post in `rendering`; the render
    * ends it in `needs_approval` or `failed`. 429 = no render minutes left this month. */
   async renderSocialPost(postId: string, options: { preview?: boolean } = {}): Promise<SocialPost> {

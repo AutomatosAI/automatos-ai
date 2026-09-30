@@ -9,7 +9,7 @@ import type { ScheduleItem } from '@/hooks/use-activity-api'
 import { buildEventActions, isDeadlineItem, type EventActionDeps } from '../calendar-actions'
 
 function deps(): EventActionDeps & { navigate: ReturnType<typeof vi.fn> } {
-  return { navigate: vi.fn(), pauseRoutine: vi.fn(), setScheduledTaskStatus: vi.fn() }
+  return { navigate: vi.fn(), pauseRoutine: vi.fn(), setScheduledTaskStatus: vi.fn(), rescheduleSocialPost: vi.fn() }
 }
 
 function item(over: Partial<ScheduleItem>): ScheduleItem {

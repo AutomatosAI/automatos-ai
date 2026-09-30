@@ -3,7 +3,7 @@ import { KIND_META, KIND_ORDER, collapseCrowded, kindTone, layoutLanes } from '.
 
 describe('calendar kinds', () => {
   it('every feed kind has a legend entry and a distinct colour', () => {
-    expect([...KIND_ORDER]).toEqual(['routine', 'recipe', 'task', 'mission', 'task_due'])
+    expect([...KIND_ORDER]).toEqual(['routine', 'recipe', 'task', 'mission', 'social', 'task_due'])
     const tones = KIND_ORDER.map((k) => KIND_META[k].tone)
     expect(new Set(tones).size).toBe(tones.length)
     expect(kindTone('recipe')).toBe(KIND_META.recipe.tone)

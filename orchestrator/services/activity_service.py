@@ -27,6 +27,7 @@ from core.models.core import (
     RecipeExecution,
     WorkflowTemplate,
 )
+from services.activity_social_items import social_post_items
 from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
 # Board tasks in these states are closed: their SLA deadline is history, not a
@@ -909,6 +910,7 @@ class ActivityService:
             self._scheduled_task_items,
             self._mission_sla_items,
             self._board_task_sla_items,
+            self._social_post_items,
         ):
             try:
                 items.extend(source(now, horizon))
@@ -1132,6 +1134,10 @@ class ActivityService:
                 },
             })
         return items
+
+    def _social_post_items(self, now: datetime, horizon: datetime) -> List[Dict[str, Any]]:
+        """PRD-251 D10 (US-307): scheduled social posts (services/activity_social_items.py)."""
+        return social_post_items(self.db, self.workspace_id, now, horizon)
 
     def _board_task_sla_items(
         self, now: datetime, horizon: datetime
