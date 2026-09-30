@@ -830,6 +830,51 @@ def test_two_concurrent_publishes_of_one_post_issue_one_sequence_on_postgres(pg_
             db.commit()
 
 
+
+@pytest.mark.integration
+def test_an_attempt_ending_while_its_post_is_ended_as_lost_does_not_overwrite_the_end(pg_engine, monkeypatch):
+    """The sweep ends a post whose run looked gone, failing its uploading target; the
+    run, still alive, then records the target published. The target row is locked on
+    both sides, so the recorded end stands and the late attempt is not written over it."""
+    from core.models.socials import SocialPostTarget
+    from core.models.workspaces import Workspace
+
+    monkeypatch.setattr(publish_records.media_urls, "resolve_post_media", lambda db, post: [])
+    factory = sessionmaker(bind=pg_engine)
+    workspace_id = uuid.uuid4()
+    with factory() as db:
+        db.add(Workspace(id=workspace_id, name="w3-lost-race", plan="basic", plan_limits={}, settings={}))
+        db.commit()
+        post = service.create_draft(db, workspace_id=workspace_id, created_by=AUTHOR, title="Race", copy={"base": "Race."})
+        db.flush()
+        service.update_post(post, AUTHOR, {"targets": [_target("linkedin", "text")]})
+        service.submit(post, AUTHOR)
+        service.approve(post, REVIEWER, content_hash=post.content_hash)
+        db.commit()
+        publisher.begin_publish(db, post, REVIEWER)
+        post_id, target_id = post.id, post.targets[0].id
+    try:
+        assert publish_records.begin_attempt(factory, target_id)
+        ending = factory()
+        post = service.get_post(ending, workspace_id, post_id)
+        publish_records.end_lost(post, "scheduler")  # locks the target rows until commit
+        late = threading.Thread(target=publish_records.record_published, args=(factory, target_id, "urn:li:share:1", None, []))
+        late.start()
+        late.join(1)
+        assert late.is_alive()  # it waits for the end to commit
+        ending.commit()
+        ending.close()
+        late.join(10)
+        with factory() as db:
+            target = db.get(SocialPostTarget, target_id)
+            assert target.status == "failed" and target.remote_id is None
+            assert service.get_post(db, workspace_id, post_id).status == "failed"
+    finally:
+        with factory() as db:
+            db.execute(sa.text("DELETE FROM social_posts WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": str(workspace_id)})
+            db.execute(sa.text("DELETE FROM workspaces WHERE id = CAST(:ws AS uuid)"), {"ws": str(workspace_id)})
+            db.commit()
+
 # ---------------------------------------------------------------------------
 # Review (P251W3): the title a channel publishes is approved content
 # ---------------------------------------------------------------------------

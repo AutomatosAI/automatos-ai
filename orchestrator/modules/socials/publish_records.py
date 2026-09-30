@@ -29,6 +29,7 @@ from typing import Any, Callable, Collection, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from sqlalchemy import update
+from sqlalchemy.orm import object_session
 
 from core.models.socials import SocialPostTarget
 from modules.socials import media_urls, publish_lifecycle, service
@@ -112,10 +113,12 @@ def begin_attempt(factory: Callable[[], Any], target_id: UUID) -> bool:
 
 
 def _write(factory: Callable[[], Any], target_id: UUID, notes: Sequence[str], **values: Any) -> None:
-    """Write the end of an attempt onto a target this run holds (uploading)."""
+    """Write the end of an attempt onto a target this run holds (uploading). The row
+    is locked first: a post ended meanwhile as lost (``end_lost``) keeps its end,
+    and this attempt is not written over it."""
     db = factory()
     try:
-        target = db.get(SocialPostTarget, target_id)
+        target = db.query(SocialPostTarget).filter(SocialPostTarget.id == target_id).with_for_update().one_or_none()
         if target is None or target.status != TARGET_UPLOADING:
             db.rollback()
             logger.warning("[Socials] target %s is no longer uploading; its attempt is not recorded", target_id)
@@ -161,7 +164,12 @@ def fail_unfinished(post: Any, reason: str, held: Optional[Collection[UUID]] = N
 def end_lost(post: Any, actor: str) -> str:
     """End a post whose publish run is gone: a target it left uploading fails with
     :data:`LOST_UPLOADING`, a published one keeps its receipt, and the post ends by
-    its targets. The status it ended in; the caller commits."""
+    its targets. The status it ended in; the caller commits. The target rows are
+    locked first, so an attempt that ends meanwhile is either read here or not
+    written (``_write``)."""
+    db = object_session(post)
+    if db is not None:
+        db.query(SocialPostTarget).filter(SocialPostTarget.post_id == post.id).with_for_update().populate_existing().all()
     fail_unfinished(post, LOST_UPLOADING)
     return publish_lifecycle.finish_publish(post, actor)
 
