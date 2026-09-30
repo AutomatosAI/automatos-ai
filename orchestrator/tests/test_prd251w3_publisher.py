@@ -3,9 +3,8 @@
 Composio is mocked everywhere: a fake executor records every call (the action, its
 params, its upload spec, the way through) and answers from a script. Pinned here:
 
-* a LinkedIn text, image and video post each issue exactly the adapter's sequence,
-  through ``execute_with_uploads`` with ``way_through=PLATFORM_PUBLISHER`` and the
-  step's files as the call's own upload spec, and store the remote id and permalink;
+* the LinkedIn sequences (the engine proven with LinkedIn) are in
+  ``tests/test_prd251w3_linkedin.py``, on this file's harness;
 * the approval guard runs first: a stale approval publishes nothing and makes no
   call; a post claimed once publishes once (two concurrent claims and a double run on
   the CI Postgres);
@@ -196,78 +195,6 @@ LINKEDIN = {
     "LINKEDIN_UPLOAD_VIDEO": [ok({"video_urn": VIDEO_URN})],
     "LINKEDIN_CREATE_VIDEO_POST": [ok({"id": SHARE_URN})],
 }
-
-
-# ---------------------------------------------------------------------------
-# LinkedIn: the documented sequences, through the one way out
-# ---------------------------------------------------------------------------
-
-
-def test_a_linkedin_text_post_runs_the_adapter_sequence_and_stores_its_receipt(env):
-    post_id = _approved_post(env, _target("linkedin", "text"), copy={"base": "Base copy", "channels": {"linkedin": "LinkedIn copy"}})
-    executor = FakeExecutor(LINKEDIN)
-
-    assert _publish(env, post_id, executor) == "published"
-
-    assert executor.actions == ["LINKEDIN_GET_MY_INFO", "LINKEDIN_CREATE_LINKED_IN_POST"]
-    assert all(call.way_through is PLATFORM_PUBLISHER and call.app_name == "LINKEDIN" for call in executor.calls)
-    assert executor.calls[1].params == {"author": ME_URN, "commentary": "LinkedIn copy"}  # the channel's own copy
-    assert executor.calls[1].upload_params == ()
-    target = _targets(env, post_id)["linkedin", "text"]
-    assert target["status"] == "published" and target["attempts"] == 1 and target["published_at"]
-    assert target["remote_id"] == SHARE_URN
-    assert target["permalink"] == f"https://www.linkedin.com/feed/update/{SHARE_URN}/"
-    post = _post(env, post_id)
-    assert post.status == "published" and post.review_log[-1]["action"] == "published"
-    assert [n["event_type"] for n in env.notices] == ["social_post_published"]
-
-
-def test_a_chosen_author_option_wins_over_the_account_lookup(env):
-    post_id = _approved_post(env, _target("linkedin", "text", author="urn:li:organization:42"))
-    executor = FakeExecutor(LINKEDIN)
-    assert _publish(env, post_id, executor) == "published"
-    assert executor.calls[-1].params["author"] == "urn:li:organization:42"
-
-
-def test_a_linkedin_image_post_hands_its_files_to_the_upload_spec(env):
-    env.media = [IMAGE, VIDEO]
-    post_id = _approved_post(env, _target("linkedin", "image"))
-    executor = FakeExecutor(LINKEDIN)
-
-    assert _publish(env, post_id, executor) == "published"
-
-    assert executor.actions == ["LINKEDIN_GET_MY_INFO", "LINKEDIN_CREATE_LINKED_IN_POST"]
-    post_call = executor.calls[1]
-    assert post_call.upload_params == ("images",)
-    assert [p.name for p in post_call.params["images"]] == ["card.png"]  # only the image, as a staged file
-    assert all(isinstance(p, Path) for p in post_call.params["images"])
-    assert _targets(env, post_id)["linkedin", "image"]["remote_id"] == SHARE_URN
-
-
-def test_a_linkedin_video_uploads_then_posts_with_the_returned_video_urn(env):
-    env.media = [IMAGE, VIDEO]
-    post_id = _approved_post(env, _target("linkedin", "video"))
-    executor = FakeExecutor(LINKEDIN)
-
-    assert _publish(env, post_id, executor) == "published"
-
-    assert executor.actions == ["LINKEDIN_UPLOAD_VIDEO", "LINKEDIN_CREATE_VIDEO_POST"]
-    upload, post = executor.calls
-    assert upload.upload_params == ("file",) and upload.params["file"].name == "video.mp4"
-    assert post.params == {"video_urn": VIDEO_URN, "commentary": "Harvest Club opens Friday."}
-    target = _targets(env, post_id)["linkedin", "video"]
-    assert (target["remote_id"], target["permalink"]) == (SHARE_URN, f"https://www.linkedin.com/feed/update/{SHARE_URN}/")
-
-
-def test_a_video_target_with_no_video_fails_saying_so_and_calls_nothing_for_it(env):
-    env.media = [IMAGE]
-    post_id = _approved_post(env, _target("linkedin", "video"))
-    executor = FakeExecutor(LINKEDIN)
-
-    assert _publish(env, post_id, executor) == "failed"
-
-    assert executor.calls == []
-    assert "needs a video file for file" in _targets(env, post_id)["linkedin", "video"]["error"]
 
 
 # ---------------------------------------------------------------------------
