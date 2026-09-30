@@ -72,8 +72,8 @@ export function ChannelRow({ channel, kind, options, onToggle, onKind, onOptions
     <li className="space-y-2 rounded-lg border border-border/60 p-3" data-testid={`socials-channel-${channel.toolkit}`}>
       <label className="flex items-center gap-2 text-sm font-medium text-foreground">
         <input type="checkbox" checked={kind !== null} disabled={!anyAvailable} onChange={(e) => onToggle(e.target.checked)} />
+        {/* The label says "(unverified channel)" itself until the channel has published (US-305). */}
         {channel.label}
-        {!channel.verified && <span className="text-xs font-normal text-muted-foreground">(unverified channel)</span>}
       </label>
       {channel.setup_note && <p className="text-xs text-muted-foreground">{channel.setup_note}</p>}
       <div role="radiogroup" aria-label={`${channel.label} post kind`} className="flex flex-wrap gap-3">
