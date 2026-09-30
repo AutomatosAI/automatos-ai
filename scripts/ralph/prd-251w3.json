@@ -24,13 +24,13 @@
    "title": "S3.3b — X: text, image and video (chunked), with the customer's own X app",
    "description": "Run X through the US-301 engine: text → TWITTER_CREATION_OF_A_POST; image → TWITTER_UPLOAD_MEDIA then the post with its media id; video → the chunked path the adapter data carries (TWITTER_UPLOAD_LARGE_MEDIA / TWITTER_FINALIZE_MEDIA_UPLOAD, polling processing where the action reports it). Fix the adapter data only where Composio's docs (docs.composio.dev/toolkits/twitter) show a param or result field is wrong — data, never code branches per channel. X needs the customer's own X API app (setup_note, 'Waves 2+3 build' block): an auth failure surfaces that note in the target's error.",
    "acceptanceCriteria": [
-    "With the executor mocked: X text, image and video each issue the documented sequence, the media id flows from the upload step into the post ($steps), and the receipt holds the tweet id and its permalink (tests).",
-    "An auth refusal from X is not retried and the target's error names the X setup note (test).",
-    "No stale slug (TWITTER_CREATE_TWEET) is called; the engine has no X-specific branch (gate greps + test).",
-    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id."
+    "With the executor mocked: X text, image and video each issue the documented sequence, the media id flows from the upload step into the post ($steps), and the receipt holds the tweet id and its permalink (tests). → DONE — CI run 36702158476 on 043dd4f: orchestrator-tests green, running tests/test_prd251w3_x.py — test_an_x_text_post_is_one_post_call_and_its_receipt_is_the_tweet, test_an_x_image_uploads_the_file_then_posts_with_its_media_id (media_media_ids from $steps.media) and test_an_x_video_is_chunked_polled_until_processed_then_posted assert each sequence and the receipt (tweet id, https://x.com/i/web/status/<id>).",
+    "An auth refusal from X is not retried and the target's error names the X setup note (test). → DONE — CI run 36702158476 on 043dd4f: test_an_auth_refusal_is_not_retried_and_names_the_x_setup_note (one attempt, no backoff, the adapter setup note in the target error) passed.",
+    "No stale slug (TWITTER_CREATE_TWEET) is called; the engine has no X-specific branch (gate greps + test). → DONE — CI run 36702158476 on 043dd4f: test_no_x_sequence_calls_the_stale_create_tweet and test_the_engine_has_no_channel_specific_code (no channel name in the publishing modules) passed; test_prd251w2_channels.py::test_no_channel_slug_literal_outside_the_adapter_data still green.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36702158476 on 043dd4f (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
    ],
    "priority": 2,
-   "passes": false,
+   "passes": true,
    "notes": "Anchors: channel_adapters.py 'twitter' (:103); capabilities.py (setup_note); US-301's engine."
   },
   {
