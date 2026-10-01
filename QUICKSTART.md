@@ -115,7 +115,7 @@ make up-images` pins one build. Everything else is the same as `make up`: your
 `.env`, the database, the workspace folder and session mode. Your checkout's
 source code isn't used. The published web app calls the API at
 `http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
-8000. Needs Docker Compose 2.24 or newer. To update, run `make up-images` again.
+8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
 
 First run builds the images, builds the database schema, runs the seeds and
 then serves. `http://localhost:8000/health` answers as soon as the API process
