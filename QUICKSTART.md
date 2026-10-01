@@ -101,6 +101,22 @@ is running and what it costs; `make down` stops it; `make clean` reclaims space
 at any time (it never touches your data). Plain `docker compose up` still works
 if you prefer it.
 
+### Or: run the published images (no build)
+
+```bash
+make up-images
+```
+
+This pulls the images CI publishes from `main` to GHCR
+(`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
+multi-arch and signed) instead of building them: about a minute instead of ten.
+The default tag is `edge`, the latest `main`; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07
+make up-images` pins one build. Everything else is the same as `make up`: your
+`.env`, the database, the workspace folder and session mode. Your checkout's
+source code isn't used. The published web app calls the API at
+`http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
+8000. Needs Docker Compose 2.24 or newer. To update, run `make up-images` again.
+
 First run builds the images, builds the database schema, runs the seeds and
 then serves. `http://localhost:8000/health` answers as soon as the API process
 is up; `http://localhost:8000/health/ready` returns 503 until the full boot has

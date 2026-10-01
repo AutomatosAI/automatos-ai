@@ -6,6 +6,8 @@
 # 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
 #
 #   make up      build (if needed), start, tidy up
+#   make up-images  start the PUBLISHED images instead of building (no source
+#                build; AUTOMATOS_IMAGE_TAG=sha-xxxxxxx pins one, default edge)
 #   make dev     the same with hot reload (source-mounted dev images)
 #   make down    stop the stack, keep your data
 #   make clean   reclaim dangling images + unused build cache (never your data)
@@ -17,8 +19,9 @@
 
 COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
+IMAGES_COMPOSE ?= docker compose -f docker-compose.yml -f docker-compose.images.yml
 
-.PHONY: up dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+.PHONY: up up-images dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
 
 # PRD-234 S2: LOCAL_PROJECTS_DIR (root .env) is the owner's projects folder; the
 # default bind source ./workspaces/projects must exist before compose mounts it.
@@ -57,6 +60,17 @@ up:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	$(COMPOSE) up -d --build --remove-orphans
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory status
+	@$(MAKE) --no-print-directory cli-host-nudge
+
+# The published images (docker-compose.images.yml): pull, never build. `clean`
+# afterwards drops the previous :edge left untagged by the pull.
+up-images:
+	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
+	$(migrate_workspace_layout)
+	$(IMAGES_COMPOSE) pull backend frontend workspace-worker
+	$(IMAGES_COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
 	@$(MAKE) --no-print-directory cli-host-nudge

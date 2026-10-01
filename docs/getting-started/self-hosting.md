@@ -478,6 +478,13 @@ the new migrations run. Migrations are written to survive that
 order they expect: migrations first, then the code that uses them.
 
 `--build` rebuilds the images when dependencies or Dockerfiles changed.
+
+**Running the published images** (`make up-images`, see
+[QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
+with `make up-images` again: it pulls the newer `edge` (or the
+`AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
+bind-mounted from your checkout, so there's no reload-mode ordering to worry
+about; migrations run as the new backend boots.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
