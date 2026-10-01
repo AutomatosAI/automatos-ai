@@ -1,0 +1,43 @@
+# =============================================================================
+# Automatos AI — run the PUBLISHED images instead of building from source
+# =============================================================================
+#   make up-images                                   # :edge, the latest main
+#   AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images   # a pinned build
+#
+# By hand:
+#   docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
+#   docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build
+#
+# The images are what .github/workflows/images.yml publishes from main: multi-arch,
+# signed (cosign keyless; see charts/automatos/README.md for `cosign verify`).
+# They are the local edition, and the web app calls the API at
+# http://localhost:8000, fixed when the image was built — so keep API_PORT at 8000.
+#
+# Everything else comes from docker-compose.yml unchanged: the datastores, .env,
+# envs/*.defaults (AUTOMATOS_MIGRATE_ON_BOOT=true runs the image's own
+# wait-migrate-seed entrypoint), and the workspace folder AUTOMATOS_WORKSPACE_DIR,
+# which stays a real folder on this machine. Session mode (make cli-host) works
+# exactly as with a source build.
+#
+# Needs Docker Compose 2.24.4 or newer (the !reset and !override tags).
+# =============================================================================
+
+services:
+  backend:
+    image: ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}
+    build: !reset null
+    # The image carries the code and its entrypoint. Mounting the checkout over
+    # /app (as docker-compose.yml does for hot reload) would run your local
+    # source instead of the published build.
+    volumes: !override
+      - backend_data:/app/data
+      - backend_logs:/app/logs
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}:ro
+
+  frontend:
+    image: ghcr.io/automatosai/automatos-frontend:${AUTOMATOS_IMAGE_TAG:-edge}
+    build: !reset null
+
+  workspace-worker:
+    image: ghcr.io/automatosai/automatos-workspace-worker:${AUTOMATOS_IMAGE_TAG:-edge}
+    build: !reset null
