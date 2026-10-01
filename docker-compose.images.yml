@@ -19,7 +19,7 @@
 # which stays a real folder on this machine. Session mode (make cli-host) works
 # exactly as with a source build.
 #
-# Needs Docker Compose 2.24 or newer (the !reset and !override tags).
+# Needs Docker Compose 2.24.4 or newer (the !reset and !override tags).
 # =============================================================================
 
 services:
