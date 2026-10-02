@@ -559,7 +559,8 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
       (``details.cli_ask``): a question the session itself asked. The answer is
       written onto the ticket and the ticket goes ``blocked`` → ``assigned``, so
       the host claims it and RESUMES the same session with the answer in its
-      prompt. True iff the work actually moved.
+      prompt. True iff the work actually moved. PRD-253's Plan card
+      (``details.cli_plan``) resumes the same way; Reject sends it to review.
     - a ``board_task`` question carrying PRD-245's session-hold marker
       (``details.cli_permission``): the ticket is RUNNING, not parked — the
       answer is the operator's allow/deny for the held command, recorded on the
@@ -598,6 +599,7 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         answer_session_ask, answer_session_hold, session_ask_marker, session_hold_marker,
     )
     from services.playbook_owner_ask import ask_marker, rerun_after_answer
+    from services.session_plans import answer_session_plan, plan_marker
 
     # F140: a playbook run stopped to ask the owner. The answer runs the playbook
     # again from step 1 on the same card; its card is never dispatched as a task.
@@ -605,8 +607,11 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         return rerun_after_answer(db, grant)
     if session_hold_marker(grant) is not None:
         return answer_session_hold(db, grant)
-    # PRD-245 W2: a question the SESSION asked. The answer goes onto the ticket
-    # and re-queues it, so the host resumes that same Claude Code session.
+    # PRD-245 W2: a question the SESSION asked — and PRD-253 Wave P: the Plan card
+    # of a session in Plan mode. The answer goes onto the ticket and re-queues it,
+    # so the host resumes that same session (a rejected plan goes to review).
+    if plan_marker(grant) is not None:
+        return answer_session_plan(db, grant)
     if session_ask_marker(grant) is not None:
         return answer_session_ask(db, grant)
     return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)

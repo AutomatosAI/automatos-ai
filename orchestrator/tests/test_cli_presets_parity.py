@@ -140,7 +140,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
         f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
     )
     assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
-        "0.9.0",
+        "0.10.0",
         sorted(_EXPECTED_CLAIM_KEYS),
     ), (
         "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
@@ -148,7 +148,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
     )
 
 
-# The claim payload as of host contract 0.9.0.
+# The claim payload as of host contract 0.10.0.
 _EXPECTED_CLAIM_KEYS = {
     "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
     "agent_id", "agent_name", "provider", "model", "allowed_tools",
@@ -158,6 +158,8 @@ _EXPECTED_CLAIM_KEYS = {
     "session_tools", "session_tools_path", "session_token",
     # the session's permission mode: the agent's, else the workspace's (0.9.0)
     "permission_mode",
+    # Plan on every CLI: this turn's mode follows the ticket's plan (0.10.0)
+    "plan_approved",
 }
 
 BACKEND_SERVICE = _ORCH / "services" / "cli_host_service.py"
@@ -175,3 +177,25 @@ def _claim_payload_keys() -> set:
                         if isinstance(k, ast.Constant) and isinstance(k.value, str)
                     }
     return set()
+
+
+# ── PRD-253 Wave P: the event that carries a plan from the host to the backend ──
+
+HOST_PERMISSION_MODES = _ORCH.parent / "services" / "cli-host" / "automatos_cli_host" / "permission_modes.py"
+
+
+def _host_constant(path: Path, name: str):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        targets = [getattr(t, "id", None) for t in getattr(node, "targets", [])]
+        if isinstance(node, ast.Assign) and name in targets and isinstance(node.value, ast.Constant):
+            return node.value.value
+    return None
+
+
+def test_the_plan_event_is_spelled_the_same_on_both_sides():
+    """A drift here is silent: the host sends its plan, the backend files no card,
+    and the ticket finishes with a plan nobody was asked about."""
+    from services import session_plans
+
+    assert _host_constant(HOST_PERMISSION_MODES, "PLAN_EVENT") == session_plans.PLAN_EVENT
