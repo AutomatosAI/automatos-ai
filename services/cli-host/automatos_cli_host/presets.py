@@ -90,6 +90,10 @@ class CliPreset:
     hook_timeouts: Mapping[str, Any] = field(default_factory=dict)  # {"*": literal, "<Event>": literal} — the CLI's own unit
     allow_is_silence: bool = False            # agy: any stdout object is a decision; allow = write nothing
     event_name_source: str = EVENT_NAME_PAYLOAD
+    # How long a gated session may take to prove its gate loaded (its SessionStart
+    # hook); None = the host's --startup-timeout. A print-mode CLI shows no login
+    # screen or dialog, so its window can be short (turn_end.py, PRD-253 S0.2).
+    startup_timeout_seconds: Optional[float] = None
 
     # ── environment ─────────────────────────────────────────────────────────
     config_home_env: Optional[str] = None     # "CODEX_HOME", "GROK_HOME", "OPENCODE_CONFIG_DIR", …
