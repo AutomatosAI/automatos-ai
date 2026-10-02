@@ -87,6 +87,13 @@ KEY_SERIES_APPROVAL = "series_approval"
 WORKSPACE_SOCIALS_SWITCHES = (KEY_ENABLED, KEY_SERIES_APPROVAL)
 WORKSPACE_SOCIALS_KEYS = (KEY_ENABLED, KEY_MEDIA_MONTHLY_CAP, KEY_SERIES_APPROVAL)
 
+# PRD-251B US-B106 (B3, off means invisible): the category Auto's Socials actions are
+# registered under (modules/tools/discovery/actions_socials.py) and the Socials marketplace
+# package's slug (core/seeds/seed_socials_package.py). Both are left out of what a workspace
+# is shown while Socials is off for it (``socials_actions_hidden``).
+SOCIALS_ACTION_CATEGORY = "socials"
+SOCIALS_PACKAGE_SLUG = "socials"
+
 
 def socials_master_default() -> str:
     """The master switch's default as the system-settings string."""
@@ -214,6 +221,16 @@ def socials_off_reason(workspace: Optional[Workspace]) -> Optional[str]:
     if workspace is None or not parse_workspace_socials(workspace.settings).enabled:
         return SOCIALS_OFF_FOR_WORKSPACE
     return None
+
+
+def socials_actions_hidden(workspace: Optional[Workspace]) -> bool:
+    """PRD-251B US-B106 (B3): whether Auto's Socials actions, the Socials marketplace
+    package and the brand kit's social handles are left out of what ``workspace`` is
+    shown — the route gate's two switches again, through ``socials_off_reason``.
+    Fail-closed like ``parse_workspace_socials``: a missing workspace, a malformed
+    setting or a master switch that cannot be read hides them. Turning Socials on is
+    read on the next request: nothing is cached and nothing needs a boot."""
+    return socials_off_reason(workspace) is not None
 
 
 def socials_state(settings: Optional[Dict[str, Any]]) -> Dict[str, bool]:

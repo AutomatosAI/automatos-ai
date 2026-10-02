@@ -12,7 +12,7 @@ test. Scores are deterministic (ties break on the action name).
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, List, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -60,14 +60,26 @@ def score_action(query_tokens: set[str], action: Any) -> float:
     return float(overlap) + NAME_HIT_BONUS * name_hits
 
 
-def lexical_rank(query: str, actions: Iterable[Any], *, top_k: int = 15) -> List[Tuple[str, float]]:
-    """Rank ``actions`` for ``query`` by lexical overlap; only scored matches, best first."""
+def lexical_rank(
+    query: str,
+    actions: Iterable[Any],
+    *,
+    top_k: int = 15,
+    exclude_categories: Optional[Iterable[str]] = None,
+) -> List[Tuple[str, float]]:
+    """Rank ``actions`` for ``query`` by lexical overlap; only scored matches, best first.
+
+    ``exclude_categories`` (PRD-251B US-B106) leaves out every action in a hidden category,
+    so a feature switched off for the workspace never fills a shortlist slot.
+    """
     query_tokens = tokens(query)
     if not query_tokens or top_k <= 0:
         return []
+    hidden = set(exclude_categories or ())
     scored = [
         (str(getattr(a, "name", "")), score_action(query_tokens, a))
         for a in actions
+        if str(getattr(a, "category", "") or "") not in hidden
     ]
     kept: Sequence[Tuple[str, float]] = [(n, s) for n, s in scored if s > 0 and n]
     return sorted(kept, key=lambda pair: (-pair[1], pair[0]))[:top_k]

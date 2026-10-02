@@ -47,6 +47,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["document-generation"])
 
 _MANAGE = Depends(require_workspace_permission("workspace:manage"))
+SOCIAL_HANDLES_FIELD = "social_handles"
+
+
+def _handles_hidden(workspace) -> bool:
+    """PRD-251B US-B106 (B3, off means invisible): while Socials is off for the workspace
+    the kit is answered without its social handles, and a PUT leaves the stored handles
+    exactly as they are, whether the payload lacks them or carries them: the route never
+    erases, or changes, what the UI could not show."""
+    from modules.socials.settings import socials_actions_hidden
+
+    return socials_actions_hidden(workspace)
+
+
+def _shown(workspace, kit: Dict[str, Any]) -> Dict[str, Any]:
+    """``kit`` as the workspace sees it: without the social handles while they are hidden."""
+    if not _handles_hidden(workspace):
+        return kit
+    return {key: value for key, value in kit.items() if key != SOCIAL_HANDLES_FIELD}
 
 
 def _workspace_or_404(db: Session, workspace_id):
@@ -64,31 +82,38 @@ def _workspace_or_404(db: Session, workspace_id):
 
 
 @router.get("/brand-kit")
-async def get_brand_kit_endpoint(
+def get_brand_kit_endpoint(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Return the workspace brand kit (defaults merged in)."""
+    """Return the workspace brand kit (defaults merged in; no social handles while Socials is off)."""
     from modules.documents.brand_kit import get_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    return get_brand_kit(ws.settings)
+    return _shown(ws, get_brand_kit(ws.settings))
 
 
 @router.put("/brand-kit", dependencies=[_MANAGE])
-async def update_brand_kit_endpoint(
+def update_brand_kit_endpoint(
     body: BrandKitPatch,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Update the workspace brand kit (validated, persisted on workspace.settings)."""
+    """Update the workspace brand kit (validated, persisted on workspace.settings).
+
+    While Socials is off for the workspace the social handles are not part of the
+    change (PRD-251B US-B106): the stored ones stay, and the answer leaves them out.
+    """
     from pydantic import ValidationError
 
     from modules.documents.brand_kit import brand_kit_errors, update_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
+    patch = body.model_dump()
+    if _handles_hidden(ws):
+        patch = {key: value for key, value in patch.items() if key != SOCIAL_HANDLES_FIELD}
     try:
-        return update_brand_kit(db, ws, body.model_dump())
+        return _shown(ws, update_brand_kit(db, ws, patch))
     except ValidationError as e:
         raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": brand_kit_errors(e)})
 

@@ -3,10 +3,10 @@
  *
  * local → only what exists locally: Profile (S6), Session mode (PRD-234 S4),
  *         System Settings, Orchestrator, API Keys, Credentials, Channels (Telegram polls — no
- *         public URL needed), Notifications. Webhooks / Widget SDK
+ *         public URL needed), Notifications, Socials (PRD-251B US-B106: the workspace switch). Webhooks / Widget SDK
  *         (hosted-edition surfaces) are hidden by the explicit allowlist, not by
  *         role — the local operator is super_admin.
- * saas  → the eight tabs exactly as before; no Profile tab (Clerk owns it).
+ * saas  → the eight tabs as before plus Socials; no Profile tab (Clerk owns it).
  *
  * Tab bodies are stubbed — this is about WHICH tabs exist, not their content.
  */
@@ -48,6 +48,7 @@ vi.mock('../ApiKeyManager', () => ({ ApiKeyManager: () => null }))
 vi.mock('../WidgetSdkTab', () => ({ WidgetSdkTab: () => null }))
 vi.mock('../NotificationsSettingsTab', () => ({ NotificationsSettingsTab: () => null }))
 vi.mock('../SessionModeTab', () => ({ SessionModeTab: () => null }))  // PRD-234 S4 (local only)
+vi.mock('../WorkspaceSocialsCard', () => ({ WorkspaceSocialsCard: () => null }))  // PRD-251B US-B106
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({
@@ -82,6 +83,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Credentials',
       'Channels',
       'Notifications',
+      'Socials',
     ])
     expect(screen.getByRole('link', { name: /your profile/i })).toHaveAttribute('href', '/settings/profile')
     for (const hidden of ['webhooks', 'widget-sdk']) {
@@ -91,9 +93,11 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
     expect(LOCAL_EDITION_SETTINGS_TABS.has('channels')).toBe(true)
     // PRD-234 S4: session mode is a local-only surface (the CLI host lane)
     expect(LOCAL_EDITION_SETTINGS_TABS.has('session-mode')).toBe(true)
+    // PRD-251B US-B106: the workspace's Socials switch exists in both editions
+    expect(LOCAL_EDITION_SETTINGS_TABS.has('socials')).toBe(true)
   })
 
-  it('saas: the eight tabs render exactly as before and there is no Profile tab', async () => {
+  it('saas: the eight tabs render as before, plus Socials, and there is no Profile tab', async () => {
     const { SettingsPanel } = await loadPanel('saas')
     render(<SettingsPanel />)
 
@@ -105,6 +109,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Credentials',
       'Channels',
       'Notifications',
+      'Socials',
       'Widget SDK',
     ])
     expect(screen.queryByRole('link', { name: /your profile/i })).not.toBeInTheDocument()

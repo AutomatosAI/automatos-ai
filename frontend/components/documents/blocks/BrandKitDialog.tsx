@@ -29,7 +29,9 @@ const SOURCE_LABEL: Record<string, string> = {
 const NO_FONTS: BrandKit['font_files'] = []
 
 // The PRD-251 D5 fields, filled when the kit comes from a backend that predates them
-// (the frontend can deploy before the API).
+// (the frontend can deploy before the API). `social_handles` is left as the server sent
+// it: absent while Socials is off for the workspace (PRD-251B US-B106), when the dialog
+// shows no handles editor and the save carries none, so the stored handles stay.
 function withD5Fields(kit: BrandKit): BrandKit {
   return {
     ...kit,
@@ -37,7 +39,6 @@ function withD5Fields(kit: BrandKit): BrandKit {
     font_files: kit.font_files ?? [],
     logo_mark_url: kit.logo_mark_url ?? '',
     logo_mark_path: kit.logo_mark_path ?? '',
-    social_handles: kit.social_handles ?? {},
     voice: { tone: kit.voice?.tone ?? [], banned_phrases: kit.voice?.banned_phrases ?? [] },
   }
 }

@@ -54,6 +54,21 @@ def _keyword_matches(actions: List[Any], query: str, limit: int) -> List[Any]:
     return [a for _, a in scored[:limit]]
 
 
+def _discoverable(hidden: Any) -> List[Any]:
+    """Fail-closed advertisement: never surface admin/su actions via discovery, nor a
+    hidden category (PRD-251B US-B106), nor what cannot run here (F078)."""
+    from modules.tools.discovery.action_registry import action_is_available, get_action_registry
+    from modules.tools.discovery.hidden_categories import without_hidden
+
+    eligible = [
+        a for a in get_action_registry().get_all()
+        if not getattr(a, "admin_only", False)
+        and not getattr(a, "super_admin_only", False)
+        and action_is_available(a)
+    ]
+    return without_hidden(eligible, hidden)
+
+
 async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Search the full platform action catalog by natural-language intent."""
     query = str(params.get("query") or "").strip()
@@ -66,16 +81,12 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     limit = max(1, limit)
     include_params = params.get("include_params", True) is not False
 
-    from modules.tools.discovery.action_registry import action_is_available, get_action_registry
+    from modules.tools.discovery.hidden_categories import exclude_kwargs, hidden_categories_for_workspace
 
-    registry = get_action_registry()
-    # Fail-closed advertisement: never surface admin/su actions via discovery.
-    eligible = [
-        a for a in registry.get_all()
-        if not getattr(a, "admin_only", False)
-        and not getattr(a, "super_admin_only", False)
-        and action_is_available(a)
-    ]
+    # PRD-251B US-B106 (B3): a category the workspace is not shown (Socials while it is
+    # off for the workspace) is not discoverable either; the handlers' own refusal stays.
+    hidden = hidden_categories_for_workspace(workspace_id, db)
+    eligible = _discoverable(hidden)
     # F155: a widget turn discovers only what its key's scopes grant.
     from core.security.surface import widget_scopes, widget_turn
 
@@ -99,6 +110,7 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
             exclude_admin=True,
             exclude_promoted=False,  # discovery spans the WHOLE catalog
             include_super_admin=False,
+            **exclude_kwargs(hidden),
         )
         matched = [by_name[n] for n, _ in ranked if n in by_name]
     except Exception:

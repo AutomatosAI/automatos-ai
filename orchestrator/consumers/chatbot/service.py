@@ -2844,18 +2844,24 @@ class StreamingChatService:
                 # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
+                    from modules.tools.discovery.hidden_categories import exclude_kwargs, hidden_categories_for_workspace
                     from modules.tools.tool_router import _narrow_dispatcher_actions_async
+                    # PRD-251B US-B106 (B3): what this workspace is not shown (Socials
+                    # while it is off for it) leaves the ATOM enum too.
+                    _hidden = hidden_categories_for_workspace(self.workspace_id, self.db)
                     # Shared narrowing contract (PR-B): same ranking + fallback
                     # posture as the full path, so ATOM turns honor closed-pins
                     # instead of failing open to the full enum.
                     _allowed, _nreason, _from_pins = await _narrow_dispatcher_actions_async(
-                        latest_text, is_admin=False, is_super_admin=is_super_admin
+                        latest_text, is_admin=False, is_super_admin=is_super_admin,
+                        workspace_id=str(self.workspace_id) if self.workspace_id else None, **exclude_kwargs(_hidden)
                     )
                     _dispatcher = get_action_registry().to_dispatcher_schema(
                         exclude_admin=True,
                         allowed_names=_allowed,
                         include_super_admin=is_super_admin,
                         allow_promoted_in_allowlist=_from_pins,
+                        **exclude_kwargs(_hidden),
                     )
                     # PRD-007 v0.5: proactive openers get zero tools — directive
                     # is self-contained (page context + graph related products).

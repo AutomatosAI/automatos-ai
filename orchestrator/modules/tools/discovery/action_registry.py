@@ -15,7 +15,7 @@ Usage:
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +210,7 @@ class ActionRegistry:
         include_super_admin: bool = False,
         allow_promoted_in_allowlist: bool = False,
         exclude_names: Optional[Set[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
@@ -244,10 +245,14 @@ class ActionRegistry:
                 surface). Applied AFTER the role/su filters, alongside
                 ``exclude_promoted=False`` so the remaining (non-first-class)
                 promoted actions stay reachable in the enum like any action.
+            exclude_categories: PRD-251B US-B106 — whole categories kept out of the
+                enum and of every fallback below, with the role filters: a feature
+                switched off for the workspace (Socials) is not offered at all.
         """
         self._ensure_initialized()
 
         exclude_set = set(exclude_names or ())
+        hidden = set(exclude_categories or ())
 
         # Build enum of valid action names AFTER admin/su/promoted filters.
         # The su filter applies here, BEFORE the allow-list, so the
@@ -260,6 +265,7 @@ class ActionRegistry:
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
             and a.name not in exclude_set
+            and a.category not in hidden
             and action_is_available(a)
         )
 
@@ -284,6 +290,7 @@ class ActionRegistry:
                     if (not exclude_admin or not a.admin_only)
                     and (include_super_admin or not a.super_admin_only)
                     and a.name not in exclude_set
+                    and a.category not in hidden
                     and action_is_available(a)
                 )
             narrowed_actions = [n for n in intersect_pool if n in allow_set]
@@ -350,6 +357,7 @@ class ActionRegistry:
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Build a markdown summary of all platform actions for injection
@@ -365,6 +373,8 @@ class ActionRegistry:
                 excluded unless this is explicitly True.
             exclude_names: PRD-229 — action names to omit entirely (mode-scoped
                 admission, e.g. ask_orchestrator outside execution lanes).
+            exclude_categories: PRD-251B US-B106 — categories to omit entirely: a
+                feature switched off for the workspace (Socials) is not described.
         """
         self._ensure_initialized()
         return self._format_actions_summary(
@@ -373,6 +383,7 @@ class ActionRegistry:
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
             exclude_names=exclude_names,
+            exclude_categories=exclude_categories,
         )
 
     def build_filtered_prompt_summary(
@@ -382,6 +393,7 @@ class ActionRegistry:
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Build a markdown summary of only the named subset of platform actions,
@@ -414,6 +426,7 @@ class ActionRegistry:
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
             exclude_names=exclude_names,
+            exclude_categories=exclude_categories,
         )
 
     @staticmethod
@@ -428,12 +441,38 @@ class ActionRegistry:
         return f"- `{action.name}`: {action.description}{param_str}"
 
     @staticmethod
+    def _summarised(
+        actions: List[ActionDefinition],
+        exclude_admin: bool,
+        exclude_promoted: bool,
+        include_super_admin: bool,
+        exclude_names: Optional[List[str]],
+        exclude_categories: Optional[Iterable[str]],
+    ) -> List[ActionDefinition]:
+        """The actions a summary describes: those that can run here (F121/F078), less
+        the names blocked (PRD-229), the categories hidden (PRD-251B US-B106: a feature
+        switched off for the workspace, such as Socials), the su tier unless asked for
+        (PRD-143), and the admin or promoted ones when excluded."""
+        blocked, hidden = set(exclude_names or ()), set(exclude_categories or ())
+        return [
+            action
+            for action in actions
+            if action.name not in blocked
+            and action.category not in hidden
+            and action_is_available(action)
+            and (include_super_admin or not action.super_admin_only)
+            and not (exclude_admin and action.admin_only)
+            and not (exclude_promoted and action.promoted)
+        ]
+
+    @staticmethod
     def _format_actions_summary(
         actions: List[ActionDefinition],
         exclude_admin: bool,
         exclude_promoted: bool,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Render a list of ActionDefinitions as the canonical markdown summary
@@ -449,23 +488,15 @@ class ActionRegistry:
         instructions.
 
         PRD-229: ``exclude_names`` drops actions by name entirely (mode-scoped
-        admission), mirroring the callable-surface gate.
+        admission), mirroring the callable-surface gate. PRD-251B US-B106:
+        ``exclude_categories`` drops whole categories the same way.
         """
-        blocked = set(exclude_names or ())
         promoted_by_cat: Dict[str, List[ActionDefinition]] = {}
         dispatcher_by_cat: Dict[str, List[ActionDefinition]] = {}
 
-        for action in actions:
-            if action.name in blocked:
-                continue
-            if not action_is_available(action):
-                continue  # F121: the prompt never describes what cannot run here (F078)
-            if action.super_admin_only and not include_super_admin:
-                continue
-            if exclude_admin and action.admin_only:
-                continue
-            if exclude_promoted and action.promoted:
-                continue
+        for action in ActionRegistry._summarised(
+            actions, exclude_admin, exclude_promoted, include_super_admin, exclude_names, exclude_categories
+        ):
             bucket = promoted_by_cat if action.promoted else dispatcher_by_cat
             bucket.setdefault(action.category, []).append(action)
 

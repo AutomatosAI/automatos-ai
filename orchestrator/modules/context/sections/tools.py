@@ -89,7 +89,7 @@ class ToolsSection(BaseSection):
                 return [], "none"
 
             if strategy == ToolLoadingStrategy.DISPATCHER_ONLY:
-                return await self._load_dispatcher_only(query=query)
+                return await self._load_dispatcher_only(query=query, workspace_id=workspace_id, db_session=db_session)
 
             if strategy == ToolLoadingStrategy.FULL:
                 return await self._load_full(
@@ -129,6 +129,8 @@ class ToolsSection(BaseSection):
     async def _load_dispatcher_only(
         self,
         query: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        db_session: Any = None,
     ) -> tuple[list[dict[str, Any]], str]:
         """Return only the platform_execute dispatcher schema.
 
@@ -143,12 +145,17 @@ class ToolsSection(BaseSection):
             _narrow_dispatcher_actions_async,
         )
 
+        from modules.tools.discovery.hidden_categories import exclude_kwargs, hidden_categories_for_workspace
+
         registry = get_action_registry()
+        # PRD-251B US-B106 (B3): the categories this workspace is not shown (Socials
+        # while it is off for it) leave the ranking and the enum alike.
+        hidden = hidden_categories_for_workspace(workspace_id, db_session)
         # Shared narrowing contract (PR-B): ranking when possible, and the
         # configured fallback posture (open-full / closed-pins) when not —
         # this lane (heartbeat et al.) previously always failed open wide.
         allowed_names, _reason, from_pins = await _narrow_dispatcher_actions_async(
-            query, is_admin=False, is_super_admin=False
+            query, is_admin=False, is_super_admin=False, workspace_id=workspace_id, **exclude_kwargs(hidden)
         )
         # P228-RVW-4: on a real heartbeat tick the enum is the ranked semantic
         # top-K (SEMANTIC_TOOL_ROUTING on), where platform_fleet_status has no
@@ -161,6 +168,7 @@ class ToolsSection(BaseSection):
             exclude_admin=True,
             allowed_names=allowed_names,
             allow_promoted_in_allowlist=from_pins,
+            **exclude_kwargs(hidden),
         )
         return [schema], "auto"
 

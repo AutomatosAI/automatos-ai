@@ -21,7 +21,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
+from typing import Any, Coroutine, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import UUID, uuid4
 
 # Import from submodules directly to avoid circular import
@@ -254,6 +254,7 @@ async def _rank_actions_for_dispatcher_async(
     exclude_promoted: bool,
     include_super_admin: bool = False,
     workspace_id: Optional[str] = None,
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Optional[List[str]]:
     """Return the top-K action names for ``query`` from ActionSemanticIndex,
     or None on any failure (caller falls back to the full enum).
@@ -277,7 +278,11 @@ async def _rank_actions_for_dispatcher_async(
         from modules.tools.discovery.action_semantic_index import (
             get_action_semantic_index,
         )
+        from modules.tools.discovery.hidden_categories import exclude_kwargs
+
         index = get_action_semantic_index()
+        # PRD-251B US-B106: a hidden category (Socials while it is off for the
+        # workspace) is out of the ranking and of the lexical shortlist alike.
         ranked = await index.rank_actions(
             query,
             top_k=top_k,
@@ -285,13 +290,16 @@ async def _rank_actions_for_dispatcher_async(
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
             workspace_id=workspace_id,
+            **exclude_kwargs(exclude_categories),
         )
         if ranked:
             return [name for name, _score in ranked]
         # PRD-238 S11: the embed timed out or matched nothing above the floor.
         # A lexical shortlist keeps the enum small; only when even that is
         # empty does the caller fall back to the full enum.
-        return _lexical_shortlist(index, query, top_k, exclude_admin, exclude_promoted, include_super_admin)
+        return _lexical_shortlist(
+            index, query, top_k, exclude_admin, exclude_promoted, include_super_admin, exclude_categories
+        )
     except Exception as exc:
         logger.warning(
             "_rank_actions_for_dispatcher failed (query=%r): %s — "
@@ -303,7 +311,8 @@ async def _rank_actions_for_dispatcher_async(
             from modules.tools.discovery.action_semantic_index import get_action_semantic_index
 
             return _lexical_shortlist(
-                get_action_semantic_index(), query, top_k, exclude_admin, exclude_promoted, include_super_admin
+                get_action_semantic_index(), query, top_k, exclude_admin, exclude_promoted, include_super_admin,
+                exclude_categories,
             )
         except Exception:  # noqa: BLE001 — full-enum fallback stays the last resort
             return None
@@ -316,6 +325,7 @@ def _lexical_shortlist(
     exclude_admin: bool,
     exclude_promoted: bool,
     include_super_admin: bool,
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Optional[List[str]]:
     """PRD-238 S11: names from the index's lexical ranking, or None when empty.
 
@@ -323,6 +333,8 @@ def _lexical_shortlist(
     lexical ranking (or one answering anything else) leaves the caller on its
     full-enum fallback exactly as before.
     """
+    from modules.tools.discovery.hidden_categories import exclude_kwargs
+
     ranker = getattr(index, "lexical_rank", None)
     if not callable(ranker):
         return None
@@ -332,6 +344,7 @@ def _lexical_shortlist(
         exclude_admin=exclude_admin,
         exclude_promoted=exclude_promoted,
         include_super_admin=include_super_admin,
+        **exclude_kwargs(exclude_categories),
     )
     if not isinstance(names, (list, tuple)):
         return None
@@ -352,6 +365,7 @@ def _rank_actions_for_dispatcher(
     exclude_promoted: bool,
     include_super_admin: bool = False,
     workspace_id: Optional[str] = None,
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Optional[List[str]]:
     """Sync compatibility entry — bridges to the async core.
 
@@ -368,6 +382,7 @@ def _rank_actions_for_dispatcher(
                 exclude_promoted=exclude_promoted,
                 include_super_admin=include_super_admin,
                 workspace_id=workspace_id,
+                exclude_categories=exclude_categories,
             )
         )
     except Exception as exc:
@@ -450,6 +465,21 @@ def _first_class_names(
     return pins | ranked_promoted
 
 
+def _hidden_categories(workspace_id: Any, session_used: Any) -> Tuple[str, ...]:
+    """PRD-251B US-B106 (B3, off means invisible): the categories this workspace is not
+    shown — Socials while it is off for it — resolved once per tool load."""
+    from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace
+
+    return hidden_categories_for_workspace(workspace_id, session_used)
+
+
+def _exclude_kwargs(hidden: Tuple[str, ...]) -> Dict[str, Tuple[str, ...]]:
+    """The registry's / index's ``exclude_categories`` keyword, only while anything is hidden."""
+    from modules.tools.discovery.hidden_categories import exclude_kwargs
+
+    return exclude_kwargs(hidden)
+
+
 def _fallback_mode_closed() -> bool:
     """True when TOOL_FALLBACK_MODE=closed-pins (PR-B; default open-full)."""
     try:
@@ -479,6 +509,7 @@ async def _narrow_dispatcher_actions_async(
     is_admin: bool,
     is_super_admin: bool,
     workspace_id: Optional[str] = None,
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Resolve (allowed_names, narrow_reason, from_pins) for the dispatcher
     enum — async-native (awaits ranking on the caller's loop).
@@ -489,6 +520,8 @@ async def _narrow_dispatcher_actions_async(
 
     ``workspace_id`` scopes the shared per-turn rank_actions memo (PRD-232
     US-003) so this narrowing and the prompt catalog reuse one cosine ranking.
+    ``exclude_categories`` (PRD-251B US-B106) keeps a hidden category — Socials
+    while it is off for the workspace — out of the allow-list.
     """
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
     if skip_reason is not None:
@@ -505,13 +538,14 @@ async def _narrow_dispatcher_actions_async(
         exclude_promoted=False,
         include_super_admin=is_super_admin,
         workspace_id=workspace_id,
+        exclude_categories=exclude_categories,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
     # PRD-248 S4: the decision engine may rerank the ranked allow-list — shadow
     # logs its cut beside this one and changes nothing; live replaces it above
     # the floor and falls open to it on any miss. Off is byte-identical.
-    allowed = await _apply_decision_rerank(query, allowed, is_admin, is_super_admin, workspace_id)
+    allowed = await _apply_decision_rerank(query, allowed, is_admin, is_super_admin, workspace_id, exclude_categories)
     return allowed, None, False
 
 
@@ -521,6 +555,7 @@ async def _apply_decision_rerank(
     is_admin: bool,
     is_super_admin: bool,
     workspace_id: Optional[str],
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Optional[List[str]]:
     """PRD-248 S4: run ``decision_rerank.narrow_with_decisions`` over the
     production index, registry and engine. Lazy and fail-open — any error
@@ -536,6 +571,7 @@ async def _apply_decision_rerank(
             return allowed
         from modules.tools.discovery import get_action_registry
         from modules.tools.discovery.action_semantic_index import get_action_semantic_index
+        from modules.tools.discovery.hidden_categories import exclude_kwargs
 
         index = get_action_semantic_index()
         registry = get_action_registry()
@@ -548,13 +584,14 @@ async def _apply_decision_rerank(
                 exclude_promoted=False,
                 include_super_admin=is_super_admin,
                 workspace_id=workspace_id,
+                **exclude_kwargs(exclude_categories),
             )
             if ranked:
                 return ranked
             # The embedding timed out or matched nothing: judge the lexical
             # shortlist the narrowing itself falls back to (a None score marks
             # the source) — the embedding-outage turn is where a judge helps most.
-            names = _lexical_shortlist(index, query, n, not is_admin, False, is_super_admin) or []
+            names = _lexical_shortlist(index, query, n, not is_admin, False, is_super_admin, exclude_categories) or []
             return [(name, None) for name in names]
 
         def describe(name: str) -> str:
@@ -746,6 +783,7 @@ def _narrow_dispatcher_actions_sync(
     is_admin: bool,
     is_super_admin: bool,
     workspace_id: Optional[str] = None,
+    exclude_categories: Optional[Iterable[str]] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Sync twin of _narrow_dispatcher_actions_async (thread bridge)."""
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
@@ -761,6 +799,7 @@ def _narrow_dispatcher_actions_sync(
         exclude_promoted=False,
         include_super_admin=is_super_admin,
         workspace_id=workspace_id,
+        exclude_categories=exclude_categories,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
@@ -884,8 +923,12 @@ def _get_tools_for_agent_core(
     narrowing: Tuple[Optional[List[str]], Optional[str]],
     trace_id: str,
     start_time: float,
+    hidden: Tuple[str, ...] = (),
 ) -> List[Dict[str, Any]]:
     """Shared body for get_tools_for_agent / get_tools_for_agent_async.
+
+    ``hidden`` (PRD-251B US-B106) names the categories the workspace is not shown;
+    they leave the dispatcher enum whatever the narrowing decided.
 
     Callers resolve workspace_id / is_admin and compute ``narrowing`` =
     (allowed_names, narrow_reason) FIRST — sync callers via the thread
@@ -1054,6 +1097,7 @@ def _get_tools_for_agent_core(
                 allow_promoted_in_allowlist=from_pins,
                 # first-class actions are attached directly, not duplicated in the enum
                 exclude_names=enum_exclude_names,
+                **_exclude_kwargs(hidden),
             )
             openai_tools.append(dispatcher_schema)
             dispatcher_count = len([a for a in all_actions if a.name not in first_class_names])
@@ -1159,9 +1203,11 @@ def get_tools_for_agent(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
+        hidden = _hidden_categories(workspace_id, session_used)
         narrowing = _narrow_dispatcher_actions_sync(
             query, is_admin, is_super_admin,
             workspace_id=str(workspace_id) if workspace_id is not None else None,
+            **_exclude_kwargs(hidden),
         )
         # PARITY WITH THE ASYNC TWIN (live-test 2026-08-29). The async entry
         # applies the page prior (PRD-221 S4) and the onboarding prior
@@ -1188,6 +1234,7 @@ def get_tools_for_agent(
             narrowing=narrowing,
             trace_id=trace_id,
             start_time=start_time,
+            hidden=hidden,
         )
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
@@ -1265,13 +1312,14 @@ async def get_tools_for_agent_async(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
+        hidden = _hidden_categories(workspace_id, session_used)
         ws_key = str(workspace_id) if workspace_id is not None else None
         # A turn that does not narrow must not inherit the last one's line.
         from modules.tools.turn_narrowing import clear_narrowed_actions
 
         clear_narrowed_actions()
         narrowing = await _narrow_dispatcher_actions_async(
-            query, is_admin, is_super_admin, workspace_id=ws_key
+            query, is_admin, is_super_admin, workspace_id=ws_key, **_exclude_kwargs(hidden)
         )
         # PRD-221 S4: fold the current page's manifest actions into the narrowed
         # enum so page-relevant tools survive even when the query ranks them out.
@@ -1293,6 +1341,7 @@ async def get_tools_for_agent_async(
             narrowing=narrowing,
             trace_id=trace_id,
             start_time=start_time,
+            hidden=hidden,
         )
         tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
         await _maybe_log_shadow_surface(

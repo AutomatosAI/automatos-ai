@@ -20,11 +20,33 @@ Replaces inline injection in:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Iterable, Optional
 
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
+
+
+def _hidden_kwargs(hidden: Optional[Iterable[str]]) -> dict:
+    """PRD-251B US-B106: the registry's / index's ``exclude_categories`` keyword, only while
+    anything is hidden. Imported lazily, like the registry itself (the registrar cycle)."""
+    from modules.tools.discovery.hidden_categories import exclude_kwargs
+
+    return exclude_kwargs(hidden)
+
+
+def _visible_chains(chains: list, registry: Any, hidden: Optional[Iterable[str]]) -> list:
+    """PRD-251B US-B106: the chains with no action in a hidden category — a chain that
+    steps through Socials is not one this workspace can run."""
+    blocked = set(hidden or ())
+    if not blocked:
+        return chains
+
+    def shown(name: str) -> bool:
+        action = registry.get(name)
+        return action is None or action.category not in blocked
+
+    return [(primary, score, actions) for primary, score, actions in chains if all(shown(a) for a in actions)]
 
 
 class PlatformActionsSection(BaseSection):
@@ -63,10 +85,16 @@ class PlatformActionsSection(BaseSection):
             from modules.context.modes import excluded_tool_names
             exclude_names = list(excluded_tool_names(ctx.context_mode))
 
+            # PRD-251B US-B106 (B3, off means invisible): the categories this workspace
+            # is not shown — Socials while it is off for it — leave every catalog below.
+            from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace
+
+            hidden = hidden_categories_for_workspace(ctx.workspace_id, ctx.db_session)
+
             from core.security.surface import widget_turn
 
             if widget_turn():
-                return self._build_widget(exclude_names=exclude_names)
+                return self._build_widget(exclude_names=exclude_names, hidden=hidden)
 
             query = ""
             if ctx.kwargs:
@@ -79,7 +107,7 @@ class PlatformActionsSection(BaseSection):
                 if self._graph_routing_enabled():
                     try:
                         graph_result = await self._build_graph_filtered(
-                            query, ctx, exclude_names=exclude_names
+                            query, ctx, exclude_names=exclude_names, hidden=hidden
                         )
                         if graph_result:
                             return graph_result
@@ -90,7 +118,7 @@ class PlatformActionsSection(BaseSection):
                         # Fall through to existing embedding path
 
                 filtered = await self._build_filtered(
-                    query, exclude_names=exclude_names, workspace_id=ctx.workspace_id
+                    query, exclude_names=exclude_names, workspace_id=ctx.workspace_id, hidden=hidden
                 )
                 if filtered:
                     return filtered
@@ -100,11 +128,11 @@ class PlatformActionsSection(BaseSection):
             # instead of the ~4k-token full catalog. Flag-off keeps the full
             # dump (operator explicitly chose the wide surface).
             if self._semantic_routing_enabled() and self._fallback_mode_closed():
-                pins_text = self._build_pins_text(exclude_names=exclude_names)
+                pins_text = self._build_pins_text(exclude_names=exclude_names, hidden=hidden)
                 if pins_text:
                     return pins_text
 
-            return self._build(exclude_names=exclude_names)
+            return self._build(exclude_names=exclude_names, hidden=hidden)
         except Exception:
             logger.exception(
                 "PlatformActionsSection.render failed — skipping action catalog"
@@ -146,7 +174,8 @@ class PlatformActionsSection(BaseSection):
         return bool(getattr(config, "TOOL_ROUTING_GRAPH", False))
 
     async def _build_graph_filtered(
-        self, query: str, ctx: SectionContext, exclude_names: Optional[list] = None
+        self, query: str, ctx: SectionContext, exclude_names: Optional[list] = None,
+        hidden: Optional[Iterable[str]] = None,
     ) -> Optional[str]:
         """Render actions via graph-based chain ranking.
 
@@ -172,6 +201,9 @@ class PlatformActionsSection(BaseSection):
 
         if not chains:
             return None
+        chains = _visible_chains(chains, get_action_registry(), hidden)
+        if not chains:
+            return None
 
         # Collect unique action names from all chains (preserving rank order)
         action_names = list(dict.fromkeys(
@@ -191,6 +223,7 @@ class PlatformActionsSection(BaseSection):
             exclude_promoted=True,
             include_super_admin=False,
             exclude_names=exclude_names,
+            **_hidden_kwargs(hidden),
         )
 
         if not catalog:
@@ -244,7 +277,7 @@ class PlatformActionsSection(BaseSection):
         "— do not guess or fabricate results.\n\n"
     )
 
-    def _build_widget(self, exclude_names: Optional[list] = None) -> str:
+    def _build_widget(self, exclude_names: Optional[list] = None, hidden: Optional[Iterable[str]] = None) -> str:
         """F155: a widget turn's catalog — only the actions its key's scopes
         grant (core.security.widget_scopes), the same set the executor allows."""
         from core.security.surface import widget_scopes
@@ -258,10 +291,11 @@ class PlatformActionsSection(BaseSection):
             exclude_promoted=False,
             include_super_admin=False,
             exclude_names=exclude_names,
+            **_hidden_kwargs(hidden),
         )
         return self._WIDGET_PREAMBLE + catalog if catalog else ""
 
-    def _build_pins_text(self, exclude_names: Optional[list] = None) -> str:
+    def _build_pins_text(self, exclude_names: Optional[list] = None, hidden: Optional[Iterable[str]] = None) -> str:
         """The closed-pins fallback card: pins + the discovery pointer.
 
         ~10 lines instead of the ~4k-token catalog. The model keeps a way
@@ -281,6 +315,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_promoted=False,  # pins are largely promoted by design
                 include_super_admin=False,
                 exclude_names=exclude_names,
+                **_hidden_kwargs(hidden),
             )
             if not catalog:
                 return ""
@@ -299,7 +334,7 @@ class PlatformActionsSection(BaseSection):
             )
             return ""
 
-    def _build(self, exclude_names: Optional[list] = None) -> str:
+    def _build(self, exclude_names: Optional[list] = None, hidden: Optional[Iterable[str]] = None) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
         from modules.tools.tool_router import _promotion_pins
 
@@ -318,6 +353,7 @@ class PlatformActionsSection(BaseSection):
             exclude_admin=True,
             include_super_admin=False,
             exclude_names=catalog_excludes,
+            **_hidden_kwargs(hidden),
         )
 
         if not catalog:
@@ -335,7 +371,7 @@ class PlatformActionsSection(BaseSection):
 
     async def _build_filtered(
         self, query: str, exclude_names: Optional[list] = None,
-        workspace_id: Optional[str] = None,
+        workspace_id: Optional[str] = None, hidden: Optional[Iterable[str]] = None,
     ) -> Optional[str]:
         """Render only the top-K actions ranked against ``query``.
 
@@ -364,6 +400,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_promoted=True,
                 include_super_admin=False,
                 workspace_id=workspace_id,
+                **_hidden_kwargs(hidden),
             )
             if not ranked:
                 logger.debug(
@@ -380,6 +417,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_promoted=True,
                 include_super_admin=False,
                 exclude_names=exclude_names,
+                **_hidden_kwargs(hidden),
             )
             if not catalog:
                 return None
