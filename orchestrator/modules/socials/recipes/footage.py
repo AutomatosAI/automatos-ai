@@ -385,10 +385,9 @@ def _record_costs(session_factory: Callable[[], Any], workspace_id: UUID, post_i
         db.close()
 
 
-async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Shot, route: Route, estimate_usd: float,
-                returned: ReturnedFile, *, workspace_id: UUID, post_id: UUID, title: str) -> Made:
-    """Fetch the shot now (its link expires), check it, store it, register it, then mark it done."""
-    label = route.recipe.label
+async def _fetched(returned: ReturnedFile, shot: Shot, label: str) -> Tuple[bytes, str, str]:
+    """The shot's bytes (fetched now: its link expires), checked to be the slot's kind and
+    within the size limit; with its extension and content type."""
     try:
         data = returned.data or await fetch(
             returned.url,
@@ -403,6 +402,33 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
     if found is None or found[0] != shot.kind:
         raise FootageError(f"{label} returned something that is not {KIND_WORDS[shot.kind]}")
     _, extension, content_type = found
+    return data, extension, content_type
+
+
+def _footage_record(shot: Shot, route: Route, made: Made, content_type: str) -> Dict[str, Any]:
+    """What the post records for a slot made: its file, the toolkit and model, and the spend."""
+    record = {
+        "prompt": shot.prompt,
+        "toolkit": route.recipe.toolkit,
+        "model": route.model,
+        "deliverable_id": made.deliverable_id,
+        "name": made.name,
+        "sha256": made.sha256,
+        "bytes": made.bytes,
+        "content_type": content_type,
+        "estimate_usd": made.estimate_usd,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if not route.recipe.credit_billed:
+        record["cost_usd"] = made.estimate_usd
+    return record
+
+
+async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Shot, route: Route, estimate_usd: float,
+                returned: ReturnedFile, *, workspace_id: UUID, post_id: UUID, title: str) -> Made:
+    """Fetch the shot now (its link expires), check it, store it, register it, then mark it done."""
+    label = route.recipe.label
+    data, extension, content_type = await _fetched(returned, shot, label)
     digest = hashlib.sha256(data).hexdigest()
     name = footage_file_name(shot.slot, digest, extension)
     try:
@@ -418,26 +444,14 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
         _register, session_factory, workspace_id=workspace_id, post_id=post_id, title=title, shot=shot,
         route=route, key=key, name=name, size=len(data), digest=digest, estimate_usd=estimate_usd,
     )
-    record = {
-        "prompt": shot.prompt,
-        "toolkit": route.recipe.toolkit,
-        "model": route.model,
-        "deliverable_id": deliverable_id,
-        "name": name,
-        "sha256": digest,
-        "bytes": len(data),
-        "content_type": content_type,
-        "estimate_usd": estimate_usd,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if not route.recipe.credit_billed:
-        record["cost_usd"] = estimate_usd
-    if not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
-        logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
-    return Made(
+    made = Made(
         slot=shot.slot, path=shot.path, key=key, name=name, toolkit=route.recipe.toolkit, model=route.model,
         bytes=len(data), sha256=digest, estimate_usd=estimate_usd, deliverable_id=deliverable_id,
     )
+    record = _footage_record(shot, route, made, content_type)
+    if not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
+        logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
+    return made
 
 
 # ── calling the toolkit ─────────────────────────────────────────────────────
