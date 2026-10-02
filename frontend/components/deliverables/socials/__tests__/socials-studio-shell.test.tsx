@@ -46,6 +46,9 @@ vi.mock('@/components/deliverables/socials/socials-campaigns-view', () => ({
 vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({
   SocialsPostPage: ({ postId }: { postId: string }) => <div data-testid="post-page">{postId}</div>,
 }))
+vi.mock('@/components/deliverables/socials/studio/queue-pane', () => ({
+  QueuePane: ({ post }: { post: any }) => <article aria-label={`Post to approve: ${post.title}`} />,
+}))
 vi.mock('@/components/deliverables/socials/socials-post-detail', () => ({
   SocialsPostDetail: ({ post }: { post: any }) => <article aria-label={`Post: ${post.title}`} />,
 }))
@@ -94,7 +97,9 @@ describe('the Socials Studio shell', () => {
     state.search = 'tab=socials&view=queue'
     renderStudio()
     expect(current()).toHaveTextContent(/^Queue/)
-    expect(await screen.findByRole('heading', { name: '2 posts need you' })).toBeInTheDocument()
+    // US-B111: no slot is today, so nothing needs you today; both wait under No slot.
+    expect(await screen.findByRole('heading', { name: 'All caught up for today' })).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Waiting for approval' })).getAllByRole('button')).toHaveLength(2)
     cleanup()
 
     state.search = 'tab=socials&view=somewhere'

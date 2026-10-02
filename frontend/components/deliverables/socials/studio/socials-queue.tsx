@@ -1,33 +1,30 @@
 'use client'
 
 /**
- * PRD-251B US-B107 — the Queue view: the posts waiting for approval, and the selected one
- * in the PRD-251 approval view (SocialsPostDetail: the exact media, each channel's copy, the
- * sources, and the approver's actions). US-B111 adds the day grouping, the slot line and
- * another take.
+ * PRD-251B US-B111 — the Queue (Queue.dc.html): the posts waiting for approval, by the day of
+ * their slot, today first; the heading says how many need you today. The selected post shows
+ * in the pane exactly as it will go out, with the approver's actions. "Approve all shown"
+ * approves each shown post by the hash on screen, offered only while the workspace's series
+ * approval is on (PRD-251 D6); nothing is approved implicitly.
  */
 import { useMemo } from 'react'
-import { Inbox } from 'lucide-react'
+import { Inbox, Loader2 } from 'lucide-react'
 
-import { cn } from '@/lib/utils'
-import type { Workspace } from '@/components/workspace-provider'
+import { Button } from '@/components/ui/button'
+import { useWorkspace, type Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
+import { useSocialCampaigns } from '@/hooks/use-socials-api'
+import { useApproveShown } from '@/hooks/use-socials-queue'
+import { postActions } from '../socials-status'
+import { QueueList } from './queue-list'
+import { QueuePane } from './queue-pane'
+import { queueGroups, queueHeading } from './queue-model'
 import { SocialsPostDetail } from '../socials-post-detail'
 
-export const QUEUE_STATUS = 'needs_approval'
+export { queuedPosts } from './queue-model'
 
-/** The posts waiting for approval, the earliest slot first, then the oldest. */
-export function queuedPosts(posts: ReadonlyArray<SocialPost>): SocialPost[] {
-  const slot = (post: SocialPost) => post.planned_for ?? post.scheduled_for ?? '9999'
-  return posts
-    .filter((post) => post.status === QUEUE_STATUS)
-    .sort((a, b) => slot(a).localeCompare(slot(b)) || a.created_at.localeCompare(b.created_at))
-}
-
-export function queueHeading(count: number): string {
-  if (count === 0) return 'All caught up'
-  return count === 1 ? '1 post needs you' : `${count} posts need you`
-}
+export const QUEUE_HINT = 'Approve each one before its slot. Anything not approved by then is skipped and nothing posts.'
+export const APPROVE_ALL = 'Approve all shown'
 
 interface SocialsQueueProps {
   role: Workspace['role']
@@ -37,40 +34,47 @@ interface SocialsQueueProps {
 }
 
 export function SocialsQueue({ role, posts, selectedId, onSelect }: SocialsQueueProps) {
-  const queued = useMemo(() => queuedPosts(posts), [posts])
-  const selected = queued.find((post) => post.id === selectedId) ?? queued[0] ?? null
+  const { workspace } = useWorkspace()
+  const { data: campaignData } = useSocialCampaigns()
+  const campaigns = useMemo(() => campaignData?.campaigns ?? [], [campaignData])
+  const approveAll = useApproveShown(campaigns)
+  const now = new Date()
+  const groups = useMemo(() => queueGroups(posts, new Date()), [posts])
+  const shown = groups.flatMap((group) => group.posts)
+  const selected = shown.find((post) => post.id === selectedId) ?? shown[0] ?? null
+  const today = groups.find((group) => group.today)?.posts.length ?? 0
+  const seriesOn = workspace?.socials?.series_approval === true
+  const campaignName = campaigns.find((c) => c.id === selected?.campaign_id)?.name ?? null
+  // Who may approve (socials:approve): the others read the post as it is.
+  const reviewer = postActions(role, 'needs_approval').review
 
   return (
-    <section aria-label="Queue" className="space-y-4">
-      <h2 className="font-serif text-[26px] font-normal leading-[1.1] tracking-[-0.01em] text-foreground">
-        {queueHeading(queued.length)}
-      </h2>
-      {queued.length === 0 ? (
+    <section aria-label="Queue" className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-serif text-[32px] font-normal leading-[1.1] tracking-[-0.01em] text-foreground max-md:text-[26px]">
+            {queueHeading(today)}
+          </h1>
+          <p className="m-0 max-w-[760px] text-[12.5px] text-muted-foreground">{QUEUE_HINT}</p>
+        </div>
+        {seriesOn && reviewer && shown.length > 1 && (
+          <Button type="button" variant="secondary" onClick={() => approveAll.mutate(shown)} disabled={approveAll.isLoading}>
+            {approveAll.isLoading && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />}
+            {APPROVE_ALL}
+          </Button>
+        )}
+      </div>
+      {shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
           <Inbox className="h-7 w-7 text-muted-foreground" aria-hidden />
           <p className="text-sm text-muted-foreground">Nothing is waiting for your approval.</p>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <ul aria-label="Waiting for approval" className="space-y-2">
-            {queued.map((post) => (
-              <li key={post.id}>
-                <button
-                  type="button"
-                  aria-pressed={post.id === selected?.id}
-                  onClick={() => onSelect(post.id)}
-                  className={cn(
-                    'flex w-full flex-col items-start gap-0.5 rounded-xl border bg-card px-3 py-2.5 text-left',
-                    post.id === selected?.id ? 'border-accent ring-1 ring-accent' : 'border-border',
-                  )}
-                >
-                  <span className="max-w-full truncate text-sm font-medium text-foreground">{post.title}</span>
-                  <span className="font-mono text-[10.5px] text-muted-foreground">{post.format ?? 'No format yet'}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {selected && <SocialsPostDetail post={selected} role={role} />}
+        <div className="grid items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <QueueList groups={groups} selectedId={selected?.id ?? null} onSelect={onSelect} />
+          {selected && (reviewer
+            ? <QueuePane post={selected} campaignName={campaignName} now={now} />
+            : <SocialsPostDetail post={selected} role={role} />)}
         </div>
       )}
     </section>

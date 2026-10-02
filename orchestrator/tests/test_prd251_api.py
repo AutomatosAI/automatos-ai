@@ -268,6 +268,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/templates"),
             ("PUT", "/api/socials/posts/{post_id}/slot"),
             ("POST", "/api/socials/posts/{post_id}/media"),
+            # PRD-251B US-B111: another take of a post in the Queue (api/socials_retake.py).
+            ("POST", "/api/socials/posts/{post_id}/retake"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

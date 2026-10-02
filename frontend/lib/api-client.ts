@@ -507,6 +507,8 @@ export interface SocialPost {
   planned_for: string | null
   /** PRD-251B (B5): the chosen video length in seconds, one the template declares. */
   length_seconds: number | null
+  /** US-210: the campaign (a plan, B6) the post belongs to, if any. */
+  campaign_id?: string | null
   /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
   targets?: SocialPostTarget[]
   /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
@@ -2897,6 +2899,14 @@ class ApiClient {
   }
 
   // ===== PRD-251 Socials: the workspace switch and the post lifecycle =====
+  /** PRD-251B US-B111: Auto makes another take of a post in the Queue (the reviewer's guidance, if any). */
+  async retakeSocialPost(postId: string, guidance?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retake`, {
+      method: 'POST',
+      body: JSON.stringify(guidance ? { guidance } : {}),
+    })
+  }
+
   /** PRD-251B US-B109: the post's visual becomes an uploaded file (PNG, JPEG, WebP or MP4; the server sniffs it). */
   async uploadSocialPostMedia(postId: string, file: File): Promise<SocialPost> {
     const form = new FormData()

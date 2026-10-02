@@ -1,5 +1,5 @@
 {
-  "route_count": 855,
+  "route_count": 856,
   "routes": [
     {
       "method": "GET",
@@ -2152,6 +2152,10 @@
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/request-changes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/retake"
     },
     {
       "method": "POST",
