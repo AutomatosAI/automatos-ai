@@ -142,7 +142,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
         f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
     )
     assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
-        "0.10.0",
+        "0.11.0",
         sorted(_EXPECTED_CLAIM_KEYS),
     ), (
         "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
@@ -150,7 +150,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
     )
 
 
-# The claim payload as of host contract 0.10.0.
+# The claim payload as of host contract 0.11.0 (0.11.0 moved no claim key: Copilot is a new CLI).
 _EXPECTED_CLAIM_KEYS = {
     "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
     "agent_id", "agent_name", "provider", "model", "allowed_tools",
