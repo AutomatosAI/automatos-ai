@@ -146,7 +146,7 @@ actions:
   - text: latest incident report from the monitoring agent
     source: authored
   platform_link_report_to_task:
-  - text: link this report to task 42
+  - text: link this report to ticket #0042
     source: example
   - text: tie the audit findings to the new ticket
     source: example
