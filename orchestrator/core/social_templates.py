@@ -75,7 +75,12 @@ from core.social_brand_rule import brand_literals
 SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
 SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data")
+BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data", "durations")
+# PRD-251B (B5, US-B104): the lengths a video template offers, in whole seconds, each a
+# complete timeline the composition selects from the root's data-duration. An image
+# template declares none; a video without the list offers its root duration alone.
+MAX_DECLARED_LENGTHS = 8
+MAX_DECLARED_LENGTH_SECONDS = 600
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
 # The music cue (S1.6): a track of media-render's music library by id, and the
@@ -164,6 +169,23 @@ def parse_size(value: Any) -> Tuple[int, int]:
     if not (MIN_DIMENSION <= width <= MAX_DIMENSION and MIN_DIMENSION <= height <= MAX_DIMENSION):
         raise ValueError(f"{value!r}: each side must be {MIN_DIMENSION}-{MAX_DIMENSION} px")
     return width, height
+
+
+def _duration_errors(durations: Any, fmt: str) -> List[Dict[str, str]]:
+    """``durations``: for a video, a strictly ascending list of whole seconds (PRD-251B B5)."""
+    if fmt != SOCIAL_VIDEO:
+        return [_error("durations", "an image template declares no durations")]
+    if not isinstance(durations, list) or not durations:
+        return [_error("durations", "must be a non-empty list of whole seconds, e.g. [15, 30, 40]")]
+    if len(durations) > MAX_DECLARED_LENGTHS:
+        return [_error("durations", f"at most {MAX_DECLARED_LENGTHS} lengths")]
+    errors = []
+    for i, value in enumerate(durations):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > MAX_DECLARED_LENGTH_SECONDS:
+            errors.append(_error(f"durations[{i}]", f"must be a whole number of seconds from 1 to {MAX_DECLARED_LENGTH_SECONDS}"))
+    if not errors and any(b <= a for a, b in zip(durations, durations[1:])):
+        errors.append(_error("durations", "must be strictly ascending, each length once"))
+    return errors
 
 
 def _size_errors(sizes: Any) -> List[Dict[str, str]]:
@@ -607,6 +629,8 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         errors += _schema_errors(blocks["variables_schema"])
     if "sizes" in blocks:
         errors += _size_errors(blocks["sizes"])
+    if "durations" in blocks:
+        errors += _duration_errors(blocks["durations"], fmt)
     errors += _audio_errors(blocks.get("audio_plan"), fmt)
     if not errors:
         schema = blocks["variables_schema"]
@@ -645,5 +669,6 @@ __all__ = [
     "still_moments",
     "validate_social_blocks",
     "voice_lines",
+    "with_root_duration",
     "without_slots",
 ]

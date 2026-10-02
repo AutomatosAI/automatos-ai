@@ -77,6 +77,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.chart_binding import chart_values, chip_text, max_chars_of, shown_rows, spec_of
 from core.media_render_bundle import build_bundle
+from core.social_templates import root_duration, with_root_duration
 from core.report_tables import Series, first_table, parse_figure, table_series
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables
 from modules.documents.social_starters import social_starters
@@ -316,17 +317,66 @@ def _sample_values(starter: Mapping[str, Any], overlay: Optional[Mapping[str, st
     return resolved.values
 
 
-def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float]) -> Dict[str, Any]:
-    """A video's preview bundle: its sample data under its reference's own copy, snapshotted at ``at``."""
+def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float], length: Optional[int] = None) -> Dict[str, Any]:
+    """A video's preview bundle: its sample data under its reference's own copy, snapshotted at ``at``.
+    With ``length`` (PRD-251B US-B104, one of the template's declared lengths), the root's
+    data-duration is that length, as a post that chose it renders."""
+    blocks = starter["blocks"]
+    if length:
+        blocks = {**blocks, "html": with_root_duration(blocks["html"], length)}
     bundle = build_bundle(
         workspace_id="ci-social-templates",
-        reference=f"seeded template: {starter['name']}",
-        blocks=starter["blocks"],
+        reference=f"seeded template: {starter['name']}" + (f" at {length} s" if length else ""),
+        blocks=blocks,
         values=_sample_values(starter, REFERENCE_COPY.get(starter["slug"])),
         brand_kit=kit,
     )
     bundle["preview"] = {"at": at}
     return bundle
+
+
+def declared_lengths(starter: Mapping[str, Any]) -> List[int]:
+    """The lengths the video declares (``blocks.durations``), else its root duration rounded."""
+    declared = starter["blocks"].get("durations")
+    if isinstance(declared, list) and declared:
+        return [int(d) for d in declared]
+    root = root_duration(starter["blocks"]["html"]) or 0
+    return [int(round(root))] if root else []
+
+
+def _reported_duration(report: Mapping[str, Any]) -> Optional[float]:
+    """The composition duration media-render reports, when it does (several report shapes)."""
+    for path in (("composition", "duration"), ("duration",), ("timings", "composition_seconds"), ("check", "duration")):
+        node: Any = report
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, (int, float)) and not isinstance(node, bool):
+            return float(node)
+    return None
+
+
+def run_video_lengths(renderer: Renderer, starter: Mapping[str, Any], kit: Mapping[str, Any], folder: Path, report: Dict[str, Any]) -> None:
+    """PRD-251B US-B104: every declared length of the video renders with 0 check errors, its
+    stills taken at the preview moments within that length. One line per render, which the
+    Wave 1 acceptance gate reads: ``length=<n>s template=<slug>``."""
+    moments = [float(m) for m in starter["preview"]["at"]]
+    lengths = declared_lengths(starter)
+    report.setdefault("lengths", {})
+    for length in lengths:
+        at = [m for m in moments if m <= length] or [min(1.0, length / 2)]
+        bundle = bundle_for(starter, kit, at, length)
+        job = renderer.render(bundle)
+        errors = (job["report"].get("check") or {}).get("errors")
+        reported = _reported_duration(job["report"])
+        print(f"    length={length}s template={starter['slug']}: {_check_summary(job['report'])}"
+              + (f"; reported duration {reported} s" if reported is not None else ""))
+        if errors:
+            raise PreviewFailure(f"the {length} s cut passed the job with errors")
+        if reported is not None and abs(reported - length) > 0.5:
+            raise PreviewFailure(f"the {length} s cut reports a duration of {reported} s")
+        for output in job["outputs"]:
+            (folder / f"len{length}-{output['name']}").write_bytes(output.pop("data"))
+        report["lengths"][str(length)] = {"check": job["report"].get("check"), "outputs": job["outputs"]}
 
 
 def image_bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], size: str) -> Dict[str, Any]:
@@ -592,6 +642,7 @@ def run_videos(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
             probe = preview.get("probe")
             if probe:
                 report[starter["slug"]]["probe"] = probe_primary(renderer, starter, kit, bundle, job, probe, folder)
+            run_video_lengths(renderer, starter, kit, folder, report[starter["slug"]])
         except PreviewFailure as exc:
             print(f"    FAIL: {exc}")
             failures.append(f"{name}: {exc}")

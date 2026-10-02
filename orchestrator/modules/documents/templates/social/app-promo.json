@@ -6,6 +6,9 @@
   "sizes": [
     "1080x1920"
   ],
+  "durations": [
+    38
+  ],
   "variables_schema": {
     "hook_line": {
       "type": "text",
