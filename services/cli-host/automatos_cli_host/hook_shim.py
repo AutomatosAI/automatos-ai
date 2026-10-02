@@ -53,7 +53,21 @@ def _deny(event: str, reason: str) -> str:
     return json.dumps(render(event, reason))
 
 
-def main() -> int:
+def _argv_event(argv) -> str:
+    """The event a hook entry names on its own command line (``--event <Name>``).
+
+    Design §5 ``event_name_source: argv``: some CLIs send a payload with no event
+    name in it — Copilot's ``permissionRequest`` and ``notification`` hooks exist
+    only in its camelCase format (PRD-253 S0.4) — so the entry the adapter writes
+    says which event it is. A name in the payload always wins."""
+    if "--event" in argv:
+        i = argv.index("--event")
+        return argv[i + 1] if i + 1 < len(argv) else ""
+    return ""
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     raw = sys.stdin.read()
     try:
         payload = json.loads(raw) if raw.strip() else {}
@@ -61,7 +75,9 @@ def main() -> int:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    event = payload.get("hook_event_name") or ""
+    event = payload.get("hook_event_name") or _argv_event(argv)
+    if event and not payload.get("hook_event_name"):
+        payload["hook_event_name"] = event
     payload.setdefault("automatos_task_id", os.environ.get("AUTOMATOS_TASK_ID"))
     sock_path = os.environ.get("AUTOMATOS_HOST_SOCK")
     if not sock_path:
