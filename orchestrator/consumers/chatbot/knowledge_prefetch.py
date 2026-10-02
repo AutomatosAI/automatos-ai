@@ -61,8 +61,9 @@ MULTI_HEADER = (
 )
 QUESTION_HEADING = "Question {number}: {question}"
 NOTHING_FOR_QUESTION = "No passage cleared the relevance floor: search for it yourself before you answer it."
-_ITEM = re.compile(r"^\s*(?:\(?\d{1,2}[.)]|\(?[a-h][.)]|[-*\u2022\u2013])\s+(?P<text>\S.*?)\s*$", re.IGNORECASE)
-_ASKED = re.compile(r"[^?.!\n]+\?")
+# Linear on any input (no lazy run before a trailing \s*, no unanchored scan for "?").
+_ITEM = re.compile(r"^\s*(?:\(?\d{1,2}[.)]|\(?[a-h][.)]|[-*\u2022\u2013])\s+(?P<text>\S.*)", re.IGNORECASE)
+_SENTENCE_BREAK = re.compile(r"(?<=[?.!])\s+|\n")
 
 # An instruction, even one phrased as a question ("Can you create an agent?").
 _INSTRUCTION = re.compile(
@@ -100,9 +101,10 @@ def split_questions(message: Optional[str]) -> List[str]:
     """The separate questions of a message that asks several: a numbered or
     bulleted list, else the sentences ending in "?". [] for a single question."""
     lines = [line for line in (message or "").splitlines() if line.strip()]
-    items = [m.group("text") for m in (_ITEM.match(line) for line in lines) if m]
+    items = [m.group("text").strip() for m in (_ITEM.match(line) for line in lines) if m]
     if len(items) < 2:
-        items = [sentence.strip() for sentence in _ASKED.findall(message or "")]
+        sentences = (sentence.strip() for sentence in _SENTENCE_BREAK.split(message or ""))
+        items = [sentence for sentence in sentences if sentence.endswith("?")]
     items = [item for item in items if len(item) >= MIN_QUESTION_CHARS]
     return items[:MAX_QUESTIONS] if len(items) >= 2 else []
 
@@ -210,7 +212,9 @@ async def prefetch(
     except Exception:  # noqa: BLE001 — cannot tell: the turn runs as it did
         logger.warning("[F085] retrieval first skipped: could not count documents", exc_info=True)
         return None
-    questions = split_questions(message)
+    # The owner's own questions, each searched; a brief (F201's draft guides) is
+    # searched whole: its questions are a customer's, and its query asks for the rules.
+    questions = split_questions(message) if question_only else []
     queries = questions or [message or ""]
     each = max(PER_QUESTION_MIN, limit // len(queries)) if questions else limit
     started = time.monotonic()

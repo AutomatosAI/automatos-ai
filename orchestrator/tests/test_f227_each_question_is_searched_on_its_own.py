@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from types import SimpleNamespace as NS
 from uuid import uuid4
 
@@ -99,6 +100,22 @@ def test_a_single_question_is_searched_as_before(db):
                                   enabled=True, limit=5, min_score=0.3))
     assert search.calls == [{"query": ask, "limit": 5}] and got.searches == search.calls
     assert got.message["content"].startswith(kp.PREFETCH_HEADER)
+
+
+def test_a_brief_is_searched_whole(db):
+    """F201's draft guides search a customer's brief: its questions are the customer's."""
+    search = _Search()
+    got = asyncio.run(kp.prefetch(db, _workspace_with_documents(db), QUICK_ONES, search=search, enabled=True,
+                                  limit=5, min_score=0.3, question_only=False))
+    assert search.calls == [{"query": QUICK_ONES, "limit": 5}] and got.searches == search.calls
+
+
+def test_a_long_run_of_spaces_is_split_in_linear_time():
+    """CodeQL py/polynomial-redos on the first patterns: quadratic on these."""
+    started = time.monotonic()
+    for message in ("* !" + " " * 50_000 + "\x00", "a" + " " * 50_000 + "b"):
+        assert kp.split_questions(message) == []
+    assert time.monotonic() - started < 1.0
 
 
 def test_the_graph_is_filtered_and_scored_off_the_event_loop(monkeypatch):
