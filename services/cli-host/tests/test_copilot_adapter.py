@@ -359,24 +359,49 @@ def test_a_sandboxed_host_seeds_copilots_sandbox_in_the_agents_settings(tmp_path
     assert block["enabled"] is True and block["allowBypass"] is False and block["auth"] == {"git": False, "gh": False}
     files = block["userPolicy"]["filesystem"]
     assert str(ctx.session_dir) in files["readwritePaths"]
-    assert os.path.expanduser("~/.ssh") in files["deniedPaths"] and str(ctx.state_dir) in files["deniedPaths"]
+    assert os.path.expanduser("~/.ssh") in files["deniedPaths"]
+    assert str(ctx.state_dir) not in files["deniedPaths"]          # never whole: it would beat the session's grants
     network = block["userPolicy"]["network"]
     assert network["allowLocalNetwork"] is False and {"registry.npmjs.org"} <= set(network["allowedHosts"])
     assert block["userPolicy"]["seatbelt"] == {"keychainAccess": False}
 
 
-def test_the_hooks_can_reach_the_host_from_inside_copilots_sandbox(tmp_path, operator):
-    """F234 (build 5, tickets 1266-1268): Copilot runs its hooks inside its sandbox,
-    whose profile lets a process reach a Unix socket only at a read-write path, so
-    every call was denied "host is unreachable". The socket itself is granted —
-    nothing else of the host's state — and the session dir is listed once."""
+def _host_state(tmp_path):
+    """The host's state dir as a host leaves it: its token, agent homes, a log, the
+    hook socket, this session's folder and another session's."""
+    state = tmp_path / "state"
+    for folder in ("agents/58/.copilot", "sessions/6", "sessions/7"):
+        (state / folder).mkdir(parents=True, exist_ok=True)
+    for name in ("state.json", "host.log", "hooks.sock", "sessions/6/mcp.json", "sessions/7/ticket.md"):
+        (state / name).write_text("x")
+    return state
+
+
+def test_the_hooks_and_the_ticket_are_reachable_inside_copilots_sandbox(tmp_path, operator):
+    """F234 (build 5, tickets 1266-1271): Copilot runs its hooks inside its sandbox,
+    whose profile lets a process reach a Unix socket only at a read-write path —
+    and writes its denials after its grants, so the denied state dir beat both the
+    socket's grant and the session dir's (ticket.md). The state is denied entry by
+    entry around them; the session dir is listed once."""
+    state = _host_state(tmp_path)
     a = _adapter(tmp_path, operator, sandbox=SessionSandbox())
-    socket_path = tmp_path / "state" / "hooks.sock"
-    ctx = _ctx(tmp_path, hook_socket=socket_path, extra_dirs=(tmp_path / "state" / "sessions" / "7",))
+    socket_path = state / "hooks.sock"
+    ctx = _ctx(tmp_path, hook_socket=socket_path, extra_dirs=(state / "sessions" / "7",))
     settings = json.loads((Path(a.prepare(ctx).env["COPILOT_HOME"]) / "settings.json").read_text())
     files = settings["sandbox"]["userPolicy"]["filesystem"]
     assert files["readwritePaths"] == [str(ctx.session_dir), str(socket_path)]       # old: no socket, the dir twice
-    assert str(ctx.state_dir) in files["deniedPaths"]                                # the rest of the state stays out
+    denied = set(files["deniedPaths"])
+    assert {str(state / n) for n in ("state.json", "host.log", "agents", "sessions/6")} <= denied
+    assert not {str(state), str(state / "sessions"), str(ctx.session_dir), str(socket_path)} & denied
+
+
+def test_deny_all_but_covers_everything_else_under_the_root(tmp_path):
+    from automatos_cli_host.adapters.copilot_sandbox import deny_all_but
+
+    state = _host_state(tmp_path)
+    assert deny_all_but(state, [state / "sessions" / "7", state / "hooks.sock"]) == [
+        state / "agents", state / "host.log", state / "sessions" / "6", state / "state.json"]
+    assert deny_all_but(tmp_path / "nowhere", [state]) == []                     # nothing there to protect
 
 
 def test_no_session_sandbox_drops_the_block(tmp_path, operator):

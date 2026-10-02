@@ -38,7 +38,7 @@ from .copilot_home import (
     write_private,
 )
 from .copilot_record import events_path, last_message, mcp_server_blocked, read_events_usage
-from .copilot_sandbox import sandbox_settings, unavailable_reason
+from .copilot_sandbox import deny_all_but, sandbox_settings, unavailable_reason
 
 MCP_SERVER_NAME = "automatos"
 MCP_CONFIG_FILENAME = "mcp.json"          # the session dir's credential file, shredded at turn end
@@ -234,10 +234,12 @@ class CopilotAdapter(PresetAdapter):
         if self.sandbox is None or not self.sandbox.enabled:
             return None
         from ..policy import platform_secret_roots  # policy imports the adapters' base
+        sockets = (ctx.hook_socket,) if ctx.hook_socket else ()
+        own = (ctx.session_dir, *sockets)
         return sandbox_settings(self.sandbox, writable=(ctx.session_dir, *ctx.extra_dirs),
                                 secret_roots=platform_secret_roots(),
-                                off_limits=(ctx.state_dir,) if ctx.state_dir else (),
-                                sockets=(ctx.hook_socket,) if ctx.hook_socket else ())
+                                off_limits=deny_all_but(ctx.state_dir, own) if ctx.state_dir else (),
+                                sockets=sockets)
 
     # ── the bus ─────────────────────────────────────────────────────────────
     def render_response(self, event: str, reply: Reply) -> Optional[Dict[str, Any]]:

@@ -12,7 +12,9 @@ agent home's ``settings.json`` (``copilot_home.seeded_settings``). The block:
   read-write path (F234). The shim talks to the host's PID only, so a socket a
   sandboxed command put in its place is refused (``hook_shim``);
 * reads: everywhere Copilot grants by default except the credential stores, the
-  platform's secrets and this host's own state (``deniedPaths``);
+  platform's secrets and this host's own state (``deniedPaths``). The state is
+  denied entry by entry around this session's folder and the socket, never as one
+  folder: Copilot's denials beat any grant beneath them (``deny_all_but``);
 * no escape hatch (``allowBypass`` false), no git/gh credentials injected, no OS
   credential store;
 * network: outbound only to the allowed hosts (the package registries plus
@@ -68,12 +70,38 @@ def unavailable_reason(sandbox: Optional[SessionSandbox], system: Optional[str] 
             "--no-session-sandbox on a machine that is already isolated.")
 
 
+def deny_all_but(root: Path, granted: Sequence[Path]) -> List[Path]:
+    """Paths that cover everything under ``root`` except ``granted`` (and the folders
+    leading to them). Copilot's profile writes its denials after its grants
+    ("override broader allow rules"), so a denied folder beats every grant beneath
+    it (F234: the session dir and the hook socket under the host's state).
+    Nothing to deny when ``root`` is missing; all of it when it cannot be listed."""
+    keep = [Path(p) for p in granted]
+    denied: List[Path] = []
+
+    def walk(folder: Path) -> None:
+        for child in sorted(folder.iterdir()):
+            if child in keep:
+                continue
+            if any(child in path.parents for path in keep):
+                walk(child)
+            else:
+                denied.append(child)
+
+    try:
+        walk(Path(root))
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return [Path(root)]
+    return denied
+
+
 def sandbox_settings(sandbox: SessionSandbox, *, writable: Sequence[Path], secret_roots: Sequence[Path] = (),
                      off_limits: Sequence[Path] = (), sockets: Sequence[Path] = ()) -> Dict[str, Any]:
     """The ``sandbox`` block of the agent home's ``settings.json`` (1.0.91 schema).
-    Every path absolute: the policy names absolute paths only. A grant under a
-    denied path (the session dir and the hook socket under the host's state)
-    holds: the profile writes the denials first and the grants after them."""
+    Every path absolute: the policy names absolute paths only. No denied path may
+    contain a granted one (``deny_all_but``): the denial would win."""
     granted = dict.fromkeys(str(Path(p).expanduser()) for p in (*writable, *sockets))
     return {
         "enabled": True,
@@ -93,4 +121,5 @@ def sandbox_settings(sandbox: SessionSandbox, *, writable: Sequence[Path], secre
     }
 
 
-__all__ = ["LINUX_TOOLS", "MACOS_TOOLS", "PREREQUISITES", "missing", "sandbox_settings", "unavailable_reason"]
+__all__ = ["LINUX_TOOLS", "MACOS_TOOLS", "PREREQUISITES", "deny_all_but", "missing", "sandbox_settings",
+           "unavailable_reason"]
