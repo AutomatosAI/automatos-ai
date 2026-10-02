@@ -178,19 +178,36 @@ def _ticket(db, ws, agent, source_type, source_id, status="in_progress"):
     return ticket
 
 
-@pytest.mark.parametrize("status", ["cancelled", "paused"])
-def test_a_routine_switched_off_stops_the_firing_in_flight(db_session, seed_workspace, quiet, status):
+@pytest.fixture
+def routines(db_session):
+    """agent_scheduled_tasks is raw DDL (alembic prd77), which the test schema's
+    create_all never builds: a temp table with the columns the service touches."""
     from sqlalchemy import text
 
+    db_session.execute(text("DROP TABLE IF EXISTS pg_temp.agent_scheduled_tasks"))
+    db_session.execute(text(
+        "CREATE TEMP TABLE agent_scheduled_tasks (id serial PRIMARY KEY, workspace_id uuid NOT NULL, "
+        "created_by_agent_id int, target_agent_id int, task_type varchar(20) NOT NULL DEFAULT 'one_shot', "
+        "description text NOT NULL, schedule varchar(100) NOT NULL, status varchar(20) NOT NULL DEFAULT 'active', "
+        "updated_at timestamptz NOT NULL DEFAULT now())"))
+
+    def _routine(ws, agent):
+        return db_session.execute(text(
+            "INSERT INTO agent_scheduled_tasks (workspace_id, created_by_agent_id, target_agent_id, description, "
+            "schedule) VALUES (CAST(:ws AS uuid), :agent, :agent, 'Morning numbers', '0 7 * * *') RETURNING id"),
+            {"ws": str(ws), "agent": agent.id}).scalar()
+
+    return _routine
+
+
+@pytest.mark.parametrize("status", ["cancelled", "paused"])
+def test_a_routine_switched_off_stops_the_firing_in_flight(db_session, seed_workspace, quiet, routines, status):
     from services.board_cancel import ROUTINE_OFF_REASONS
     from services.scheduled_task_service import ScheduledTaskService
 
     ws = UUID(seed_workspace())
     agent = _agent(db_session, ws)
-    routine = db_session.execute(text(
-        "INSERT INTO agent_scheduled_tasks (workspace_id, created_by_agent_id, target_agent_id, description, schedule) "
-        "VALUES (CAST(:ws AS uuid), :agent, :agent, 'Morning numbers', '0 7 * * *') RETURNING id"),
-        {"ws": str(ws), "agent": agent.id}).scalar()
+    routine = routines(ws, agent)
     firing = _ticket(db_session, ws, agent, "scheduled_task", f"task:{routine}:20261002T0700")
     earlier = _ticket(db_session, ws, agent, "scheduled_task", f"task:{routine}:20261001T0700", status="done")
     another = _ticket(db_session, ws, agent, "scheduled_task", f"task:{routine}0:20261002T0700")
@@ -208,17 +225,12 @@ def test_a_routine_switched_off_stops_the_firing_in_flight(db_session, seed_work
     assert (earlier.status, another.status) == ("done", "in_progress")   # its past runs, and another routine
 
 
-def test_a_routine_switched_back_on_touches_nothing(db_session, seed_workspace, quiet):
-    from sqlalchemy import text
-
+def test_a_routine_switched_back_on_touches_nothing(db_session, seed_workspace, quiet, routines):
     from services.scheduled_task_service import ScheduledTaskService
 
     ws = UUID(seed_workspace())
     agent = _agent(db_session, ws)
-    routine = db_session.execute(text(
-        "INSERT INTO agent_scheduled_tasks (workspace_id, created_by_agent_id, target_agent_id, description, schedule) "
-        "VALUES (CAST(:ws AS uuid), :agent, :agent, 'Morning numbers', '0 7 * * *') RETURNING id"),
-        {"ws": str(ws), "agent": agent.id}).scalar()
+    routine = routines(ws, agent)
     firing = _ticket(db_session, ws, agent, "scheduled_task", f"task:{routine}:20261002T0700")
     db_session.commit()
 

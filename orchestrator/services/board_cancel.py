@@ -123,6 +123,19 @@ def cancel_run_step_tickets(db: Any, execution_id: str, *, by: str) -> List[int]
     return cancelled
 
 
+def cancel_playbook_run_board(db: Any, execution_id: str, *, by: str, error_message: str) -> List[int]:
+    """A playbook run its owner cancelled, on the board: its step tickets are
+    cancelled with it, each naming ``by`` (F116), and then its card is failed.
+    In that order: failing the card stops any step still live as a run that
+    failed (F224), and a cancelled run's steps say who cancelled them. Commits.
+    Returns the step tickets cancelled."""
+    from services.board_task_bridge import complete_recipe_board_task
+
+    cancelled = cancel_run_step_tickets(db, execution_id, by=by)
+    complete_recipe_board_task(db, execution_id, success=False, error_message=error_message)
+    return cancelled
+
+
 def live_mission_step_cards(db: Any, run_id: Any) -> List[Any]:
     """The cards of ``run_id``'s steps that the session lane runs (a Claude Code
     session works them, or will once claimed) and that have not finished."""
@@ -215,7 +228,7 @@ def stop_heartbeat_sessions(db: Any, workspace_id: Any, agent_id: int) -> List[i
 __all__ = [
     "CANCEL_REQUESTED_KEY", "FINISHED", "HEARTBEAT_OFF_REASON", "MISSION_STOP_REASONS", "PLAYBOOK_RUN_BY",
     "ROUTINE_OFF_REASONS", "RUN_DIED_REASON", "RUN_FAILED_REASON", "RUN_STEP_LIVE", "cancel_board_ticket",
-    "cancel_run_step_tickets", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
+    "cancel_playbook_run_board", "cancel_run_step_tickets", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
     "stop_mission_sessions", "stop_routine_sessions", "stop_run_step_tickets", "stop_scheduled_task_sessions",
     "stop_ticket_run",
 ]
