@@ -24,92 +24,7 @@ def _register_submit_report(registry: ActionRegistry) -> None:
             "after finishing significant work. For ephemeral notes, use write_file instead."
         ),
         category="reports",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Short title for the report (e.g. 'Platform Health Check', 'Weekly Newsletter Draft').",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Full report content in markdown format.",
-                },
-                "report_type": {
-                    "type": "string",
-                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "onboarding"],
-                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance), onboarding (Mission Zero founding-document summary).",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["ok", "warning", "critical", "info"],
-                    "description": "Overall status. ok=nothing to worry about, warning/critical=needs attention, info=informational.",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "One-line summary shown in activity feed cards (auto-generated from content if omitted).",
-                },
-                "metrics": {
-                    "type": "object",
-                    "description": "Structured metrics relevant to this report (e.g. { errors_found: 2, services_checked: 5, cost: 0.003 }).",
-                },
-                "attachments": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "file_path": {"type": "string", "description": "Relative workspace path to the attachment file."},
-                            "file_type": {"type": "string"},
-                        },
-                    },
-                    "description": "Additional files produced alongside this report (images, data files, etc.).",
-                },
-                "required_sections": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional list of section headings the report must contain (e.g. ['Summary', 'Metrics', 'Next Steps']). Submission fails if any are missing from the markdown content.",
-                },
-                "recommendations": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "rationale": {"type": "string"},
-                            "impact": {"type": "string", "description": "Expected outcome if adopted."},
-                        },
-                    },
-                    "description": "Structured recommendations Auto can route or surface as decisions. Prefer these over burying recommendations in markdown — they make the report machine-readable.",
-                },
-                "action_items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "owner": {"type": "string", "description": "Agent or person who owns this action."},
-                            "due": {"type": "string", "description": "ISO timestamp or natural deadline."},
-                            "priority": {"type": "string", "enum": ["urgent", "high", "medium", "low"]},
-                        },
-                    },
-                    "description": "Concrete next steps. Auto can promote these into board tasks automatically.",
-                },
-                "linked_task_ids": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Board task IDs this report references (origin task, follow-up tasks, etc.).",
-                },
-                "requires_approval": {
-                    "type": "boolean",
-                    "description": "Set to true when the report's recommendations need a human decision before any action. Surfaces in the 'Decisions Needed' queue.",
-                },
-            },
-            # report_type defaults to 'standup' and status to 'ok' in the
-            # handler (handlers_reports.submit_report) — a caller can omit both,
-            # so neither belongs in required[]. See the tool-schema walker guard.
-            "required": ["title", "content"],
-        },
+        parameters=_submit_report_parameters(),
         permission_level="write",
         requires_confirmation=False,
         tags=["reports", "write", "heartbeat", "standup"],
@@ -134,48 +49,7 @@ def _register_browse_reports(registry: ActionRegistry) -> None:
             "use platform_get_latest_report instead."
         ),
         category="reports",
-        parameters={
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "integer",
-                    "description": "Optional agent filter.",
-                },
-                "agent_name": {
-                    "type": "string",
-                    "description": "Optional agent name filter (substring match).",
-                },
-                "report_type": {
-                    "type": "string",
-                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "task"],
-                    "description": "Optional report type filter.",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["ok", "warning", "critical", "info"],
-                    "description": "Optional status filter.",
-                },
-                "trigger": {
-                    "type": "string",
-                    "enum": ["heartbeat", "task", "playbook"],
-                    "description": "Optional trigger filter — matches metrics.trigger field.",
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Optional model filter — matches metrics.model field (e.g. 'openai/gpt-5').",
-                },
-                "period": {
-                    "type": "string",
-                    "enum": ["1d", "7d", "30d", "90d", "all"],
-                    "description": "Time window. Default 7d.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max rows to return (default 50, max 200).",
-                },
-            },
-            "required": [],
-        },
+        parameters=_browse_reports_parameters(),
         permission_level="read",
         tags=["reports", "read", "analytics", "monitoring"],
         examples=[
@@ -289,3 +163,137 @@ def _register_get_latest_report(registry: ActionRegistry) -> None:
             "get the most recent standup from the monitoring agent",
         ],
     ))
+
+
+def _submit_report_parameters() -> dict:
+    return {
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string",
+            "description": "Short title for the report (e.g. 'Platform Health Check', 'Weekly Newsletter Draft').",
+        },
+        "content": {
+            "type": "string",
+            "description": "Full report content in markdown format.",
+        },
+        "report_type": {
+            "type": "string",
+            "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "onboarding"],
+            "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance), onboarding (Mission Zero founding-document summary).",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["ok", "warning", "critical", "info"],
+            "description": "Overall status. ok=nothing to worry about, warning/critical=needs attention, info=informational.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "One-line summary shown in activity feed cards (auto-generated from content if omitted).",
+        },
+        "metrics": {
+            "type": "object",
+            "description": "Structured metrics relevant to this report (e.g. { errors_found: 2, services_checked: 5, cost: 0.003 }).",
+        },
+        "attachments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "file_path": {"type": "string", "description": "Relative workspace path to the attachment file."},
+                    "file_type": {"type": "string"},
+                },
+            },
+            "description": "Additional files produced alongside this report (images, data files, etc.).",
+        },
+        "required_sections": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional list of section headings the report must contain (e.g. ['Summary', 'Metrics', 'Next Steps']). Submission fails if any are missing from the markdown content.",
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "impact": {"type": "string", "description": "Expected outcome if adopted."},
+                },
+            },
+            "description": "Structured recommendations Auto can route or surface as decisions. Prefer these over burying recommendations in markdown — they make the report machine-readable.",
+        },
+        "action_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "owner": {"type": "string", "description": "Agent or person who owns this action."},
+                    "due": {"type": "string", "description": "ISO timestamp or natural deadline."},
+                    "priority": {"type": "string", "enum": ["urgent", "high", "medium", "low"]},
+                },
+            },
+            "description": "Concrete next steps. Auto can promote these into board tasks automatically.",
+        },
+        "linked_task_ids": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Board task IDs this report references (origin task, follow-up tasks, etc.).",
+        },
+        "requires_approval": {
+            "type": "boolean",
+            "description": "Set to true when the report's recommendations need a human decision before any action. Surfaces in the 'Decisions Needed' queue.",
+        },
+    },
+    # report_type defaults to 'standup' and status to 'ok' in the
+    # handler (handlers_reports.submit_report) — a caller can omit both,
+    # so neither belongs in required[]. See the tool-schema walker guard.
+    "required": ["title", "content"],
+}
+
+
+def _browse_reports_parameters() -> dict:
+    return {
+    "type": "object",
+    "properties": {
+        "agent_id": {
+            "type": "integer",
+            "description": "Optional agent filter.",
+        },
+        "agent_name": {
+            "type": "string",
+            "description": "Optional agent name filter (substring match).",
+        },
+        "report_type": {
+            "type": "string",
+            "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "task"],
+            "description": "Optional report type filter.",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["ok", "warning", "critical", "info"],
+            "description": "Optional status filter.",
+        },
+        "trigger": {
+            "type": "string",
+            "enum": ["heartbeat", "task", "playbook"],
+            "description": "Optional trigger filter — matches metrics.trigger field.",
+        },
+        "model": {
+            "type": "string",
+            "description": "Optional model filter — matches metrics.model field (e.g. 'openai/gpt-5').",
+        },
+        "period": {
+            "type": "string",
+            "enum": ["1d", "7d", "30d", "90d", "all"],
+            "description": "Time window. Default 7d.",
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Max rows to return (default 50, max 200).",
+        },
+    },
+    "required": [],
+}

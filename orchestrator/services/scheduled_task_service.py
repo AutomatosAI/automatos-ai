@@ -118,12 +118,9 @@ class ScheduledTaskService:
                 or the human driving a chat turn); the consent actor at fire time.
         """
         payload = dict(payload or {})
-        error = request_error(task_type, deliver_as, created_by_agent_id, created_by_user_id, target_agent_id, payload)
-        error = error or schedule_error(task_type, schedule)
-        if error:
-            return {"success": False, "error": error}
-        names, error = self._agent_names(created_by_agent_id, target_agent_id)
-        error = error or self._limit_error(created_by_agent_id, task_type)
+        names, error = self._refusal(
+            task_type, deliver_as, created_by_agent_id, created_by_user_id, target_agent_id, payload, schedule,
+        )
         if error:
             return {"success": False, "error": error}
 
@@ -166,6 +163,19 @@ class ScheduledTaskService:
             "next_run_at": next_run_at.isoformat() if next_run_at else None,
             "message": message,
         }
+
+    def _refusal(
+        self, task_type: str, deliver_as: str, created_by_agent_id: Optional[int], created_by_user_id: Optional[str],
+        target_agent_id: Optional[int], payload: Dict[str, Any], schedule: str,
+    ):
+        """``({agent id: name}, why the request is refused or None)``, checked in the
+        order it always was: the request, its schedule, its agents, the limits."""
+        error = request_error(task_type, deliver_as, created_by_agent_id, created_by_user_id, target_agent_id, payload)
+        error = error or schedule_error(task_type, schedule)
+        if error:
+            return {}, error
+        names, error = self._agent_names(created_by_agent_id, target_agent_id)
+        return names, error or self._limit_error(created_by_agent_id, task_type)
 
     def _agent_names(self, created_by_agent_id: Optional[int], target_agent_id: Optional[int]):
         """``({agent id: name}, error)``: both agents must be this workspace's."""

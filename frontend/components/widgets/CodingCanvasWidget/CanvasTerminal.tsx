@@ -9,7 +9,7 @@
  * on its next heartbeat, so the connect retries for a few seconds.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -75,23 +75,12 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false,
           ...(shell ? { shell: true } : {}),
         }),
       })
-      let term = termRef.current
-      if (!term) {
-        term = new Terminal({ cursorBlink: true, fontSize: 13, scrollback: 5000, theme: { background: '#0b0f14' } })
-        const fit = new FitAddon()
-        term.loadAddon(fit)
-        term.open(containerRef.current)
-        termRef.current = term
-        fitRef.current = fit
-      } else {
-        term.reset()
-      }
-      fitRef.current?.fit()
+      const term = readyTerminal(containerRef.current, termRef, fitRef)
       const ws = await connectWithRetry(grant.ws_url, CONNECT_BUDGET_MS)
       wsRef.current = ws
       ws.onmessage = (event: MessageEvent) => {
-        if (event.data instanceof ArrayBuffer) term!.write(new Uint8Array(event.data))
-        else if (typeof event.data === 'string') term!.write(event.data)
+        if (event.data instanceof ArrayBuffer) term.write(new Uint8Array(event.data))
+        else if (typeof event.data === 'string') term.write(event.data)
       }
       ws.onclose = () => {
         if (wsRef.current === ws) wsRef.current = null
@@ -176,4 +165,25 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false,
       <div ref={containerRef} className="min-h-0 flex-1 px-1 py-1" />
     </div>
   )
+}
+
+/** The terminal the widget writes to: the open one, reset, or a new one in ``container``; fitted. */
+function readyTerminal(
+  container: HTMLDivElement | null,
+  termRef: MutableRefObject<Terminal | null>,
+  fitRef: MutableRefObject<FitAddon | null>,
+): Terminal {
+  let term = termRef.current
+  if (!term) {
+    term = new Terminal({ cursorBlink: true, fontSize: 13, scrollback: 5000, theme: { background: '#0b0f14' } })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(container as HTMLDivElement)
+    termRef.current = term
+    fitRef.current = fit
+  } else {
+    term.reset()
+  }
+  fitRef.current?.fit()
+  return term
 }
