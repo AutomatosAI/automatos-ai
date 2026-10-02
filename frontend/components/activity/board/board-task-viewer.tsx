@@ -10,6 +10,7 @@ import { TicketQuestions } from './ticket-questions'
 import { TicketApprovals } from './ticket-approvals'
 import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
 import { stageReason } from './ticket-stage'
+import { runsInSession, ticketKind } from './ticket-kind'
 import { isMissionTicket } from './ticket-actions'
 import { missionHref } from '@/lib/ticket-links'
 import Link from 'next/link'
@@ -693,6 +694,8 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
           <div className="flex items-start justify-between gap-4 pr-8">
             <div className="space-y-2 min-w-0 flex-1">
               <DialogTitle className="text-lg font-semibold leading-tight">
+                {/* PRD-252 R4: number, type and title, so two same-titled tickets differ */}
+                {task.number && <span className="mr-2 font-mono text-sm text-muted-foreground tabular-nums">{task.number}</span>}
                 {task.name}
               </DialogTitle>
               <DialogDescription className="flex items-center gap-2 flex-wrap">
@@ -715,13 +718,12 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
                   <span className="capitalize">{task.priority}</span>
                 </span>
 
-                {/* Playbook badge */}
-                {task.type === 'playbook' && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
-                    <Workflow className="w-3 h-3" />
-                    Playbook
-                  </span>
-                )}
+                {/* PRD-252 R4: the type, from what filed it, and a session mark */}
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
+                  <Workflow className="w-3 h-3" />
+                  {ticketKind(task.source_type)}
+                  {runsInSession(task) && <span className="text-[hsl(var(--info))]">· &gt;_ session</span>}
+                </span>
 
                 {/* Agent */}
                 {task.assignee && (

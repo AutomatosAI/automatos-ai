@@ -26,13 +26,14 @@ import {
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import { BookMarked, CheckSquare } from 'lucide-react'
+import { BookMarked, CheckSquare, RefreshCw, Target } from 'lucide-react'
 import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
 import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-menu'
 import { stageReason } from '@/components/activity/board/ticket-stage'
+import { runsInSession, ticketKind } from '@/components/activity/board/ticket-kind'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
@@ -166,8 +167,8 @@ function KanbanCard({
 }) {
   const tone = toneFor(task.assignee?.agent_name)
   const isCompact = density === 'compact'
-  const isPlaybook = task.type === 'playbook'
-  const Icon = isPlaybook ? BookMarked : CheckSquare
+  const kind = ticketKind(task.source_type)  // PRD-252 R4: the type a person reads
+  const Icon = kind === 'Playbook' ? BookMarked : kind === 'Mission' ? Target : kind === 'Routine' ? RefreshCw : CheckSquare
   const reason = stageReason(task)
   return (
     <Draggable draggableId={task.id} index={index}>
@@ -191,8 +192,10 @@ function KanbanCard({
           style={provided.draggableProps.style}
         >
           <div className="kind">
+            {task.number && <span className="num">{task.number}</span>}
             <Icon style={{ width: 11, height: 11 }} />
-            {(task.type ?? 'task').toUpperCase()}
+            {kind.toUpperCase()}
+            {runsInSession(task) && <span className="session" title="A Claude Code session runs this ticket">· &gt;_ SESSION</span>}
             {(task.priority === 'urgent' || task.priority === 'high') && (
               <span className="high">· {task.priority.toUpperCase()}</span>
             )}

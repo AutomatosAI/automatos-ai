@@ -39,6 +39,7 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
 import { ExecutionDetail } from './execution-detail'
 import { boardStatusWord } from './board-status-word'
+import { numberedTitle } from './board/ticket-kind'
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedItem, ActivityFeedFilters } from '@/hooks/use-activity-api'
 import { cn } from '@/lib/utils'
@@ -300,7 +301,7 @@ function HistoryRow({ item, onOpen }: { item: ActivityFeedItem; onOpen: (item: A
         {SOURCE_LABEL[item.type] ?? item.type}
       </TableCell>
       <TableCell className="font-medium text-sm truncate max-w-[200px]">
-        {item.name}
+        {numberedTitle(item.number, item.name)}
       </TableCell>
       <TableCell className="hidden md:table-cell text-xs text-muted-foreground truncate max-w-[160px]">
         {agentNames(item)}

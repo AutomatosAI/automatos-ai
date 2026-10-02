@@ -22,6 +22,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { feedItemHref } from '@/lib/ticket-links'
 import { boardStatusWord } from '@/components/activity/board-status-word'
+import { numberedTitle } from '@/components/activity/board/ticket-kind'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
 
@@ -269,7 +270,7 @@ function CardsView({
           >
             <span className={`pip ${kind}`}>{pip}</span>
             <div style={{ minWidth: 0, textAlign: 'left' }}>
-              <div className="nm">{it.name}</div>
+              <div className="nm">{numberedTitle(it.number, it.name)}</div>
               {it.summary && <div className="det">{it.summary}</div>}
               {it.error_message && (
                 <div
@@ -350,7 +351,7 @@ function TableView({
                 {it.type}
               </td>
               <td>
-                <div className="nm">{it.name}</div>
+                <div className="nm">{numberedTitle(it.number, it.name)}</div>
                 {it.summary && (
                   <div
                     style={{
