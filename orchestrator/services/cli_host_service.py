@@ -732,6 +732,9 @@ def _terminal_launch_for(db: Session, task: BoardTask, ref: Dict[str, Any], host
         "system_prompt": _session_system_prompt(agent, ticket_session=False),
         "model": ref.get("model"),
         "agent_name": getattr(agent, "name", None),
+        # PRD-253: a CLI whose home is per agent (Codex, GitHub Copilot) keeps the
+        # agent's sessions in that home — the host opens the session there.
+        "agent_id": task.assigned_agent_id,
     }
 
 

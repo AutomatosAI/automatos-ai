@@ -87,7 +87,11 @@ def main(argv=None) -> int:
     event = payload.get("hook_event_name") or ""
     sock_path = os.environ.get("AUTOMATOS_HOST_SOCK")
     if not sock_path:
-        if event in _GATED_EVENTS:
+        # The operator's own terminal (the Runtime Canvas, AUTOMATOS_TERMINAL) opens an
+        # agent's session in the agent's home, where these hooks are installed: someone
+        # is at the keyboard, so the CLI's own prompts apply. Anywhere else a missing
+        # socket is a misconfigured session: deny.
+        if event in _GATED_EVENTS and not os.environ.get("AUTOMATOS_TERMINAL"):
             sys.stdout.write(_deny(event, "Automatos CLI host socket is not configured"))
         return 0
 

@@ -211,6 +211,7 @@ class CodexAdapter(PresetAdapter):
                  sandbox: Optional[SessionSandbox] = None) -> None:
         super().__init__(preset, binary, sandbox)  # Codex sandboxes itself: -s workspace-write
         self._home = home   # the operator's home (tests give a fake one); None = Path.home()
+        self._agent_home: Optional[Path] = None   # the Canvas terminal's: the agent's own home
 
     # ── identity ────────────────────────────────────────────────────────────
     def operator_home(self) -> Path:
@@ -254,8 +255,13 @@ class CodexAdapter(PresetAdapter):
 
     # ── the config home ─────────────────────────────────────────────────────
     def agent_home(self, ctx: LaunchContext) -> Path:
-        root = ctx.state_dir or ctx.session_dir.parent.parent
-        return root / "agents" / (ctx.agent_id or "shared") / ".codex"
+        return self.config_home_for(ctx.state_dir or ctx.session_dir.parent.parent, ctx.agent_id)
+
+    def config_home_for(self, state_dir: Path, agent_id: Any) -> Path:
+        return state_dir / "agents" / (str(agent_id) if agent_id not in (None, "") else "shared") / ".codex"
+
+    def use_config_home(self, home: Path) -> None:
+        self._agent_home = home
 
     def _link(self, src: Path, dest: Path) -> None:
         if dest.exists() or dest.is_symlink():
@@ -359,7 +365,7 @@ class CodexAdapter(PresetAdapter):
     def transcript_path(self, cwd: str, session_id: str, home: Optional[Path] = None) -> Optional[Path]:
         """Without an agent home in hand (the Canvas terminal), the operator's own
         sessions are the only place to look."""
-        root = (home / ".codex") if home is not None else self.operator_home()
+        root = self._agent_home or ((home / ".codex") if home is not None else self.operator_home())
         return find_rollout(root, session_id)
 
 

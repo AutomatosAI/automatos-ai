@@ -327,6 +327,15 @@ class PresetAdapter:
         p = self.transcript_path(str(cwd), session_id, home)
         return bool(p and p.exists())
 
+    def config_home_for(self, state_dir: Path, agent_id: Any) -> Optional[Path]:
+        """The agent's own config home on this host, for a CLI whose home is per
+        agent (Codex, GitHub Copilot); None for a CLI that keeps the operator's."""
+        return None
+
+    def use_config_home(self, home: Path) -> None:
+        """Read this session's record from ``home`` — the Canvas terminal resumes the
+        agent's session in its own home. The base keeps no home."""
+
     def record_trust(self, cwd: Path, home: Optional[Path] = None) -> bool:
         """Record the operator's registration decision where the CLI reads it, if
         the CLI has such a dialog. Backup-first, minimal. False = nothing to do."""

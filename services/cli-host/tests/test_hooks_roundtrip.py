@@ -87,3 +87,16 @@ def test_an_event_named_on_the_command_line_reaches_the_host(short_tmp):
     gone = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TASK_ID": "1"}
     out = json.loads(_run_shim({"toolName": "bash"}, gone, ("--event", "PermissionRequest")))
     assert out["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
+def test_the_operators_own_terminal_is_not_gated_by_the_shim(short_tmp):
+    """PRD-253: the Canvas terminal opens a per-agent CLI (Codex, Copilot) in the
+    agent's own home, where these hooks are installed. Someone is at the keyboard
+    there, so with no host socket the shim stands aside and the CLI's own prompts
+    apply; a supervised session whose host is unreachable still fails closed."""
+    terminal = {"AUTOMATOS_HOST_SOCK": "", "AUTOMATOS_TERMINAL": "1"}
+    assert _run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, terminal) == ""
+    assert _run_shim({"hook_event_name": "PermissionRequest"}, terminal) == ""
+    gone = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TERMINAL": "1"}
+    out = json.loads(_run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, gone))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"

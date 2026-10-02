@@ -51,7 +51,7 @@ from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
-from .env import build_session_env
+from .env import build_session_env, hook_pythonpath
 from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
 from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, request_of
@@ -549,16 +549,12 @@ class Session:
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
-        package_root = str(Path(__file__).resolve().parents[1])
-        inherited_pp = os.environ.get("PYTHONPATH", "")
         env = build_session_env(preset, extra={
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,
             "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),
-            # Hooks run from the session's directory: the shim (`python -m
-            # automatos_cli_host.hook_shim`) must find this package from there.
-            "PYTHONPATH": package_root + (os.pathsep + inherited_pp if inherited_pp else ""),
+            "PYTHONPATH": hook_pythonpath(),
             **prepared.env,
         })
         master, slave = pty.openpty()

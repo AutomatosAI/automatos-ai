@@ -46,14 +46,19 @@ from urllib.parse import parse_qs, urlparse
 
 from .adapters import NotServed, UnknownCli, adapter_for
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed
-from .env import build_session_env, build_shell_env
+from .env import build_session_env, build_shell_env, hook_pythonpath
 from .session import assert_args_honour_invariant
 from .transcript import empty_usage, usage_delta
 
 
 def _public(launched: Dict[str, Any]) -> Dict[str, Any]:
-    """The launch facts an event carries — the usage snapshot stays host-side."""
-    return {k: v for k, v in launched.items() if k != "usage_before"}
+    """The launch facts an event carries — the usage snapshot and the agent's home stay host-side."""
+    return {k: v for k, v in launched.items() if k not in ("usage_before", "config_home")}
+
+
+# How the Canvas terminal starts a CLI in the agent's own home: the variable on its
+# command line (the PTY bridge builds one environment for every launch).
+ENV_BINARY = "/usr/bin/env"
 
 log = logging.getLogger("automatos.cli_host.terminal")
 
@@ -448,6 +453,7 @@ class TerminalServer:
             session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             system_prompt_path = session_dir / "system_prompt.md"
             system_prompt_path.write_text(soul, encoding="utf-8")
+        agent_home = self._agent_home(adapter, launch)
         resumed = adapter.transcript_exists(cwd, session_id, self._home)
         args = adapter.terminal_args(
             binary,
@@ -458,6 +464,8 @@ class TerminalServer:
             task_id=grant.task_id,
         )
         assert_args_honour_invariant(args, preset.forbidden_args)
+        if agent_home is not None:   # the agent's own home: its session, its record — and our hooks, which stand aside here
+            args = [ENV_BINARY, f"{preset.config_home_env}={agent_home}", f"PYTHONPATH={hook_pythonpath()}", *args]
         try:
             adapter.record_trust(cwd, self._home)
         except OSError as exc:
@@ -467,12 +475,28 @@ class TerminalServer:
         own_transcript = adapter.transcript_path(str(cwd), session_id, self._home)
         usage_before = adapter.read_usage(own_transcript) if resumed and own_transcript and own_transcript.exists() else empty_usage()
         return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name"),
-                      "cli": preset.id, "usage_before": usage_before}
+                      "cli": preset.id, "usage_before": usage_before,
+                      **({"config_home": str(agent_home)} if agent_home is not None else {})}
+
+    def _agent_home(self, adapter: Any, launch: Dict[str, Any]) -> Optional[Path]:
+        """PRD-253: a CLI whose home is per agent (Codex, GitHub Copilot) keeps the
+        agent's sessions in that home, not the operator's — the terminal opens the
+        session there, or it would start a fresh one. None for any other CLI, and
+        when the launch names no agent or the agent has never run on this host."""
+        if self._sessions_dir is None or launch.get("agent_id") in (None, "") or not adapter.preset.config_home_env:
+            return None
+        home = adapter.config_home_for(self._sessions_dir.parent, launch["agent_id"])
+        if home is None or not home.is_dir():
+            return None
+        adapter.use_config_home(home)
+        return home
 
     def _turn_usage(self, cwd: Path, launched: Dict[str, Any]) -> Dict[str, Any]:
         """Tokens THIS terminal session added to the transcript (never the history)."""
         try:
             adapter = adapter_for(launched.get("cli"), self._cli_binaries)
+            if launched.get("config_home"):
+                adapter.use_config_home(Path(launched["config_home"]))
             own = adapter.transcript_path(str(cwd), str(launched.get("session_id") or ""), self._home)
             after = adapter.read_usage(own) if own and own.exists() else empty_usage()
             return usage_delta(after, launched.get("usage_before"))
