@@ -303,7 +303,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # F228 (2 Oct): a boot with migrations and seeds took 147 s, past the old
+      # 40 s + 3 x 30 s budget, so the backend was marked unhealthy and the
+      # frontend never started. A probe that passes inside start_period marks it
+      # healthy at once, so a fast boot waits for nothing more.
+      start_period: 300s
     networks:
       - automatos
 
