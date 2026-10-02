@@ -1895,7 +1895,8 @@ async def cancel_mission(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Cancel a mission. Running tasks continue to completion; no new dispatches."""
+    """Cancel a mission. Nothing new is dispatched, and a step run by a Claude Code
+    session stops with it (F224); an in-process step finishes its current call."""
     try:
         run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
 
