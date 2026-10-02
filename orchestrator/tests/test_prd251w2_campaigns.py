@@ -269,7 +269,10 @@ def test_the_one_wave_revision_chains_onto_the_base_head_and_alone_builds_the_ta
         for p in VERSIONS.glob("*.py")
         if re.search(rf"^down_revision\s*=\s*['\"]{BASE_HEAD}['\"]", p.read_text(encoding="utf-8"), re.M)
     )
-    assert chained == ["prd251_wave2.py"]
+    # Wave 2 is one PRD-251 revision on that base. document_chunks_ingestion_columns
+    # branched from the same base on main; prd252_ticket_numbers merges the two
+    # heads, and test_prd209 checks there is one head.
+    assert [name for name in chained if name.startswith("prd251")] == ["prd251_wave2.py"]
     creators = sorted(
         p.name
         for p in VERSIONS.glob("*.py")
