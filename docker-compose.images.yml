@@ -32,6 +32,7 @@ services:
     volumes: !override
       - backend_data:/app/data
       - backend_logs:/app/logs
+      - workspaces_data:/workspaces:ro
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}:ro
 
   frontend:
