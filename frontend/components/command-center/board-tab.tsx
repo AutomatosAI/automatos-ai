@@ -31,6 +31,7 @@ import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
+import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-menu'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
@@ -48,8 +49,9 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   // Tidied away without a claim about the work (night 1, 2026-09-18).
   closed:      { label: 'Closed',      color: 'hsl(30 8% 30%)' },
 }
+// PRD-252 R7 (D1): Closed tickets sit in the Cancelled column.
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled', 'closed',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -218,6 +220,8 @@ function KanbanCard({
                   · OVERDUE
                 </span>
               )}
+            {/* PRD-252 R7: assign and cancel from the card */}
+            <TicketActionsMenu task={task} />
           </div>
           <div className="ttl">{task.name}</div>
           {!isCompact && task.description && (

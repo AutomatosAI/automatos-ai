@@ -7,6 +7,7 @@ import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary 
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { ReviewVerdict } from './review-verdict'
 import { TicketQuestions } from './ticket-questions'
+import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -576,6 +577,32 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
   )
 }
 
+// PRD-252 R7: a cancelled or closed ticket opened to an empty viewer.
+function CancelledContent({ task }: { task: BoardTask }) {
+  return (
+    <div className="space-y-6">
+      <CancelledBanner task={task} />
+      {task.description && (
+        <div>
+          <SectionLabel>Task Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {task.description}
+          </div>
+        </div>
+      )}
+      {task.result && (
+        <div>
+          <SectionLabel icon={<FileText className="w-3 h-3" />}>Last result</SectionLabel>
+          <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto leading-relaxed">
+            {String(task.result)}
+          </div>
+        </div>
+      )}
+      <NotesSection task={task} />
+    </div>
+  )
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
@@ -688,6 +715,8 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
                   </span>
                 )}
               </DialogDescription>
+              {/* PRD-252 R7: assign and cancel without leaving the board */}
+              <TicketActionsBar task={task} />
             </div>
           </div>
         </div>
@@ -700,6 +729,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onDecided={() => onOpenChange(false)} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+          {(task.status === 'cancelled' || task.status === 'closed') && <CancelledContent task={task} />}
 
           {/* PRD-161 S5: failed tasks surface the error + a re-run affordance. */}
           {task.status === 'failed' && task.error_message && (

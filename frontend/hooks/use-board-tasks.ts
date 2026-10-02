@@ -110,6 +110,9 @@ export function useBoardTasks(filters?: BoardFilters) {
       if (col.status === 'in_progress') {
         return t.status === 'in_progress' || t.status === ('running' as any)
       }
+      if (col.status === 'cancelled') {
+        return t.status === 'cancelled' || t.status === 'closed'   // PRD-252 R7: one stage
+      }
       return t.status === col.status
     })
     return { ...col, count: tasks.length, tasks }
@@ -254,6 +257,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     priority: item.priority ?? 'medium',
     tags: tags.filter((t: string) => !t.startsWith('mission:')),
     mission_name: missionName,
+    mission_id: item.orchestration_run_id ? String(item.orchestration_run_id) : undefined,
     assignee: item.agent
       ? {
           agent_id: item.agent.id,

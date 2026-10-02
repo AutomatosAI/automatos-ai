@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG } from '@/types/board'
 import { cn } from '@/lib/utils'
+import { TicketActionsMenu } from './ticket-actions-menu'
 
 interface BoardCardProps {
   task: BoardTask
@@ -85,34 +86,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
         >
           {/* Type badge + delete button */}
           <div className="flex items-center justify-between mb-1">
-            {task.type === 'mission' ? (
-              <div className="flex items-center gap-1 min-w-0">
-                <Target className="w-3 h-3 text-primary shrink-0" />
-                <span className="text-[10px] font-medium text-primary uppercase tracking-wider shrink-0">Mission</span>
-                {task.mission_name && (
-                  <span className="text-[10px] text-primary/60 truncate" title={task.mission_name}>
-                    · {task.mission_name}
-                  </span>
-                )}
-              </div>
-            ) : task.type === 'playbook' ? (
-              <div className="flex items-center gap-1">
-                <Workflow className="w-3 h-3 text-[hsl(var(--warning))]" />
-                <span className="text-[10px] font-medium text-[hsl(var(--warning))] uppercase tracking-wider">Playbook</span>
-              </div>
-            ) : (task.type as string) === 'project' ? (
-              <div className="flex items-center gap-1">
-                <FolderKanban className="w-3 h-3 text-[hsl(var(--info))]" />
-                <span className="text-[10px] font-medium text-[hsl(var(--info))] uppercase tracking-wider">
-                  Project{task.project_id ? ` ${task.project_id}` : ''}
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <ClipboardList className="w-3 h-3 text-muted-foreground" />
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Task</span>
-              </div>
-            )}
+            <CardKindBadge task={task} />
 
             <div className="flex items-center gap-1">
               {/* Child count badge */}
@@ -123,6 +97,11 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
                 </span>
               )}
 
+              {/* PRD-252 R7: assign and cancel from the card */}
+              <TicketActionsMenu
+                task={task}
+                className="opacity-60 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-secondary/60"
+              />
               {onDelete && (
                 <button
                   onClick={(e) => {
@@ -228,5 +207,39 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
         </div>
       )}
     </Draggable>
+  )
+}
+
+/** The card's kind: Mission (and its name), Playbook, Project or Task. */
+function CardKindBadge({ task }: { task: BoardTask }) {
+  return (
+    task.type === 'mission' ? (
+      <div className="flex items-center gap-1 min-w-0">
+        <Target className="w-3 h-3 text-primary shrink-0" />
+        <span className="text-[10px] font-medium text-primary uppercase tracking-wider shrink-0">Mission</span>
+        {task.mission_name && (
+          <span className="text-[10px] text-primary/60 truncate" title={task.mission_name}>
+            · {task.mission_name}
+          </span>
+        )}
+      </div>
+    ) : task.type === 'playbook' ? (
+      <div className="flex items-center gap-1">
+        <Workflow className="w-3 h-3 text-[hsl(var(--warning))]" />
+        <span className="text-[10px] font-medium text-[hsl(var(--warning))] uppercase tracking-wider">Playbook</span>
+      </div>
+    ) : (task.type as string) === 'project' ? (
+      <div className="flex items-center gap-1">
+        <FolderKanban className="w-3 h-3 text-[hsl(var(--info))]" />
+        <span className="text-[10px] font-medium text-[hsl(var(--info))] uppercase tracking-wider">
+          Project{task.project_id ? ` ${task.project_id}` : ''}
+        </span>
+      </div>
+    ) : (
+      <div className="flex items-center gap-1">
+        <ClipboardList className="w-3 h-3 text-muted-foreground" />
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Task</span>
+      </div>
+    )
   )
 }
