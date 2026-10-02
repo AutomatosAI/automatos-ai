@@ -353,7 +353,7 @@ def test_a_sandboxed_host_seeds_copilots_sandbox_in_the_agents_settings(tmp_path
     assert str(ctx.session_dir) in files["readwritePaths"]
     assert os.path.expanduser("~/.ssh") in files["deniedPaths"] and str(ctx.state_dir) in files["deniedPaths"]
     network = block["userPolicy"]["network"]
-    assert network["allowLocalNetwork"] is False and "registry.npmjs.org" in network["allowedHosts"]
+    assert network["allowLocalNetwork"] is False and {"registry.npmjs.org"} <= set(network["allowedHosts"])
     assert block["userPolicy"]["seatbelt"] == {"keychainAccess": False}
 
 
