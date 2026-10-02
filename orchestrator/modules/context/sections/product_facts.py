@@ -82,8 +82,9 @@ def helpers_sentence(names: List[str]) -> str:
     shown = names[:HELPERS_SHOWN]
     hidden = len(names) - len(shown)
     more = f", +{hidden} more (platform_list_agents lists them all)" if hidden else ""
+    listed = "platform_list_agents doesn't list" if hidden else "isn't listed here"
     return (f"The helpers in this workspace (its Agents page): {', '.join(shown)}{more}. There is no other "
-            "helper: give work only to one of these, by its name, and never name another.")
+            f"helper: work goes to one of these, by its name, or to you, never to a name that {listed}.")
 
 
 def product_facts(db: Any, workspace_id: Any) -> str:

@@ -85,7 +85,7 @@ def test_the_helpers_are_the_agents_page_and_nobody_else(shop):
     assert names == ["Analyst", "Content Creator"]          # not Auto, the clone, or next door's ATLAS
     sentence = helpers_sentence(names)
     assert "The helpers in this workspace (its Agents page): Analyst, Content Creator." in sentence
-    assert "There is no other helper" in sentence and "never name another" in sentence    # #89
+    assert "There is no other helper" in sentence and "or to you, never to a name that isn't listed here" in sentence  # #89
 
 
 def test_past_forty_helpers_the_rest_are_counted():
@@ -93,6 +93,7 @@ def test_past_forty_helpers_the_rest_are_counted():
 
     sentence = helpers_sentence([f"Helper {n}" for n in range(45)])
     assert "Helper 39, +5 more (platform_list_agents lists them all)." in sentence and "Helper 40" not in sentence
+    assert sentence.endswith("never to a name that platform_list_agents doesn't list.")
     assert helpers_sentence([]) == "This workspace has no helpers yet: its Agents page is empty."
 
 
@@ -103,7 +104,7 @@ def test_autos_chat_prompt_carries_the_facts(shop, edition):
     rendered = asyncio.run(ProductFactsSection().render(NS(db_session=shop.db, workspace_id=shop.ws)))
     assert rendered.startswith("## Automatos itself\nThis is the local edition of Automatos.")
     assert UNSURE in rendered and "say you don't know and offer to check" in rendered       # #99
-    assert rendered.endswith("never name another.")
+    assert rendered.endswith("never to a name that isn't listed here.")
 
 
 def test_a_widget_turn_gets_none_of_it(shop):
