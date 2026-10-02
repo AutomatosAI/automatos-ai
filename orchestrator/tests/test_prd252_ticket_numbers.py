@@ -93,18 +93,22 @@ def test_each_workspace_counts_on_its_own(workspaces, new_session):
     assert _file(new_session, b, "One").workspace_seq == 1 and _file(new_session, a, "Two").workspace_seq == 2
 
 
-def test_a_mission_step_shows_its_cards_number_and_its_step(workspaces, new_session):
+def test_a_mission_step_shows_its_cards_number_and_its_place(workspaces, new_session):
+    """Steps that run side by side share the plan's sequence number (night 6: two
+    order emails both read #0787.1), so a step is numbered by its place among its
+    card's steps in the order they were filed."""
     from services.ticket_numbers import ticket_numbers
 
     ws = workspaces()
     _file(new_session, ws, "Earlier ticket")
-    card = _file(new_session, ws, "Launch the autumn blend", source_type="orchestration")
-    step = _file(new_session, ws, "Write the menu post", source_type="orchestration_task",
-                 parent_task_id=card.id, planning_data={"sequence_number": 3})
+    card = _file(new_session, ws, "Order the green coffee", source_type="orchestration")
+    guji, brazil = (_file(new_session, ws, title, source_type="orchestration_task", parent_task_id=card.id,
+                          planning_data={"sequence_number": 1})
+                    for title in ("Draft the Guji order email", "Draft the Brazil order email"))
 
-    assert step.workspace_seq is None                       # D5: a step takes no number of its own
-    numbers = ticket_numbers(new_session(), ws, [card, step])
-    assert (numbers[card.id], numbers[step.id]) == ("#0002", "#0002.3")
+    assert guji.workspace_seq is None and brazil.workspace_seq is None   # D5: no number of their own
+    numbers = ticket_numbers(new_session(), ws, [card, guji, brazil])
+    assert (numbers[card.id], numbers[guji.id], numbers[brazil.id]) == ("#0002", "#0002.1", "#0002.2")
 
 
 def test_auto_can_name_a_ticket_by_its_number(workspaces, new_session):
@@ -115,10 +119,13 @@ def test_auto_can_name_a_ticket_by_its_number(workspaces, new_session):
     card = _file(new_session, ws, "Winter menu", source_type="orchestration")
     step = _file(new_session, ws, "Draft it", source_type="orchestration_task", parent_task_id=card.id,
                  planning_data={"sequence_number": 1})
+    second = _file(new_session, ws, "Check it", source_type="orchestration_task", parent_task_id=card.id,
+                   planning_data={"sequence_number": 1})
     db = new_session()
 
     assert resolve_ticket_ref(db, ws, "#0001") == resolve_ticket_ref(db, ws, "#1") == first.id
-    assert resolve_ticket_ref(db, ws, "#0002.1") == step.id
+    assert resolve_ticket_ref(db, ws, "#0002.1") == step.id and resolve_ticket_ref(db, ws, "#0002.2") == second.id
+    assert resolve_ticket_ref(db, ws, "#0002.3") is None
     assert resolve_ticket_ref(db, ws, "#0099") is None
     assert not is_number_ref("42") and not is_number_ref(42)    # an id stays an id
 

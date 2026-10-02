@@ -10,7 +10,7 @@ replies) formats it here, and Auto's ticket tools take it back here
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -30,24 +30,37 @@ def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[st
     return f"{number}.{step}" if step is not None else number
 
 
-def step_of(task: Any) -> Optional[int]:
-    """A mission step's place in its mission (1, 2, …), from its planning data."""
-    value = (getattr(task, "planning_data", None) or {}).get("sequence_number")
-    return int(value) if isinstance(value, int) or str(value).isdigit() else None
+def _steps_in_order(db: Session, workspace_id: Any, card_ids: Iterable[Any]) -> Dict[Any, List[int]]:
+    """Each mission card's step ids, in the order they were filed."""
+    rows = db.query(BoardTask.id, BoardTask.parent_task_id).filter(
+        BoardTask.parent_task_id.in_(set(card_ids)), BoardTask.workspace_id == workspace_id,
+        BoardTask.source_type == STEP_SOURCE,
+    ).order_by(BoardTask.id).all()
+    ordered: Dict[Any, List[int]] = {}
+    for step_id, card_id in rows:
+        ordered.setdefault(card_id, []).append(step_id)
+    return ordered
 
 
 def ticket_numbers(db: Session, workspace_id: Any, tasks: Iterable[Any]) -> Dict[int, Optional[str]]:
-    """Each ticket's number, by id. A mission step's comes from its mission card's."""
+    """Each ticket's number, by id. A mission step's is its card's number and its
+    place among the card's steps in the order they were filed (#0051.3): unique,
+    where the plan's sequence number is shared by steps that run side by side,
+    and fixed, because a mission only ever adds steps."""
     tasks = list(tasks)
     steps = [t for t in tasks if getattr(t, "source_type", None) == STEP_SOURCE]
-    parent_ids = {t.parent_task_id for t in steps if getattr(t, "parent_task_id", None)}
-    parents = dict(
+    card_ids = {t.parent_task_id for t in steps if getattr(t, "parent_task_id", None)}
+    cards = dict(
         db.query(BoardTask.id, BoardTask.workspace_seq)
-        .filter(BoardTask.id.in_(parent_ids), BoardTask.workspace_id == workspace_id).all()
-    ) if parent_ids else {}
+        .filter(BoardTask.id.in_(card_ids), BoardTask.workspace_id == workspace_id).all()
+    ) if card_ids else {}
+    order = _steps_in_order(db, workspace_id, card_ids) if card_ids else {}
     numbers = {t.id: format_number(getattr(t, "workspace_seq", None)) for t in tasks}
-    return {**numbers, **{t.id: format_number(parents.get(getattr(t, "parent_task_id", None)), step_of(t))
-                          for t in steps}}
+    for t in steps:
+        siblings = order.get(getattr(t, "parent_task_id", None), [])
+        place = siblings.index(t.id) + 1 if t.id in siblings else None
+        numbers[t.id] = format_number(cards.get(getattr(t, "parent_task_id", None)), place) if place else None
+    return numbers
 
 
 def ticket_number(db: Session, task: Any) -> Optional[str]:
@@ -94,9 +107,6 @@ def resolve_ticket_ref(db: Session, workspace_id: Any, ref: Any) -> Optional[int
     ).first()
     if numbered is None or step is None:
         return numbered.id if numbered else None
-    # A retried step can share its place; the newest is the one in play.
-    steps = db.query(BoardTask).filter(
-        BoardTask.workspace_id == workspace_id, BoardTask.parent_task_id == numbered.id,
-        BoardTask.source_type == STEP_SOURCE,
-    ).order_by(BoardTask.id.desc()).all()
-    return next((t.id for t in steps if step_of(t) == int(step)), None)
+    siblings = _steps_in_order(db, workspace_id, [numbered.id]).get(numbered.id, [])
+    place = int(step)
+    return siblings[place - 1] if 0 < place <= len(siblings) else None
