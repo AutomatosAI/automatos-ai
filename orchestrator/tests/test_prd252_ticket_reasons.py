@@ -30,6 +30,8 @@ def _ticket(status="review", **over):
 
 @pytest.mark.parametrize("over, code", [
     (dict(source_type="orchestration_task"), tr.MISSION_CHECKING),
+    # review of #857: a mission's card waiting for its plan read "Did nothing"
+    (dict(source_type="orchestration", result=None), tr.MISSION_PLAN),
     (dict(result=f"Done.\n\n{tr.FILE_MISSING_NOTE_PREFIX} `pack.md` — the result names it, ..."), tr.FILE_MISSING),
     (dict(runtime_ref={"denials": 2}), tr.HELD_COMMAND),
     (dict(review_feedback="Finished, worker never reported — its deliverables are on the ticket."), tr.RETRIES_USED_UP),

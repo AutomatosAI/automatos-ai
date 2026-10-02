@@ -29,9 +29,12 @@ from sqlalchemy.orm import Session
 
 PERIOD_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
 DEFAULT_PERIOD = "1d"
-# Rows listed per kind; a kind with more says how many more (the count is exact).
-ROWS_PER_KIND = 25
+# Rows listed per kind: every one, in practice (F225: 25 listed 35 rows for 43). A
+# kind with more says how many more; the count is always exact.
+ROWS_PER_KIND = 200
 KINDS = ("review", "question", "approval", "failed")
+# A mission's own card on the board (orchestration_board_bridge).
+MISSION_CARD = "orchestration"
 
 # Each kind's count, scoped to the workspace. A pending grant stays open until it
 # is answered, exactly as the Questions tab lists it.
@@ -54,16 +57,16 @@ _COUNTS = text("""
 """)
 
 _REVIEW_ROWS = text("""
-    SELECT bt.id, bt.title, bt.workspace_seq, bt.orchestration_run_id, a.name AS agent_name,
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.orchestration_run_id, a.name AS agent_name,
            COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
        AND bt.source_type NOT IN ('orchestration_task', 'orchestration')
   ORDER BY at DESC NULLS LAST LIMIT :limit
 """)
-# A failed mission card opens its mission: the run id rides along.
+# A failed mission card opens its mission: its run id rides along.
 _FAILED_ROWS = text("""
-    SELECT bt.id, bt.title, bt.workspace_seq, bt.orchestration_run_id, a.name AS agent_name,
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.orchestration_run_id, a.name AS agent_name,
            COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'failed' AND bt.source_type <> 'orchestration_task'
@@ -180,8 +183,10 @@ def _iso(value: Any) -> Any:
 
 
 def _ticket_row(r: Any) -> Dict[str, Any]:
+    """A ticket opens in the board's viewer; only a mission's own card opens its
+    mission. A session-run mission step also carries the run id, and opens itself."""
     from services.ticket_numbers import format_number
 
-    mission = str(r.orchestration_run_id) if r.orchestration_run_id else None
+    mission = str(r.orchestration_run_id) if r.source_type == MISSION_CARD and r.orchestration_run_id else None
     return {"ticket_id": r.id, "number": format_number(r.workspace_seq), "title": r.title,
             "agent_name": r.agent_name, "mission_id": mission, "at": _iso(r.at)}

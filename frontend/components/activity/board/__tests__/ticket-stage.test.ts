@@ -8,7 +8,7 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { stageReason } from '../ticket-stage'
 
-const REVIEW_CODES = ['file_missing', 'nothing_done', 'held_command', 'retries_used_up', 'approval_action',
+const REVIEW_CODES = ['mission_plan', 'file_missing', 'nothing_done', 'held_command', 'retries_used_up', 'approval_action',
   'stopped_with_work', 'moved_by_you', 'asked', 'unexplained']
 const BLOCKED_CODES = ['question', 'approval', 'spend_ceiling', 'mission_paused', 'step_failed', 'stopped_by_you', 'waiting']
 const read = (rel: string) => readFileSync(path.resolve(__dirname, '..', '..', '..', '..', rel), 'utf8')
@@ -40,6 +40,14 @@ describe('stageReason', () => {
   it('both boards show it on the card', () => {
     expect(read('components/command-center/board-tab.tsx')).toContain('stageReason(task)')
     expect(read('components/activity/board/board-card.tsx')).toContain('stageReason(task)')
+  })
+
+  it("a mission's card is approved on its mission, never by ticket verdict (D6)", () => {
+    // Review of #857: ticket Approve marked the card done and the mission never started.
+    expect(stageReason({ status: 'review', review_reason: 'mission_plan', blocked_code: null })!.stage).toBe('Plan to approve')
+    const viewer = read('components/activity/board/board-task-viewer.tsx')
+    expect(viewer).toContain('const missionDecides = isMissionTicket(task)')
+    expect(viewer).toContain('data-testid="review-on-mission"')
   })
 
   it('offers no LLM review mode when creating a ticket', () => {

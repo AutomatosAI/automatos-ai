@@ -125,3 +125,21 @@ def test_a_ticket_dragged_into_review_says_who_put_it_there(board):
     board.drag(task, "review")
 
     assert task.status == "review" and review_reason(task) == MOVED_BY_YOU
+
+
+@pytest.mark.parametrize("verdict", ["approve_task", "reject_task"])
+def test_a_missions_card_is_decided_on_its_mission(verdict):
+    """D6 (review of #857): ticket Approve marked a mission's card done and left
+    its run waiting for approval, never started."""
+    from api import board_tasks as bt
+    from tests.test_board_task_handlers import _FakeSession
+
+    card = _ticket("review", source_type="orchestration", result=None, review_mode="auto")
+
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(getattr(bt, verdict)(card.id, _Req({"note": "Looks right", "feedback": "No"}), ctx=CTX,
+                                          db=_FakeSession(agent=NS(id=5), task=card)))
+
+    assert refused.value.status_code == 409 and "mission's page" in refused.value.detail
+    assert card.status == "review"
+

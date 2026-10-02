@@ -37,6 +37,7 @@ ATTEMPTS_STOPPED_PREFIX = "Stopped after"
 
 # Review
 MISSION_CHECKING = "mission_checking"   # a mission step its mission is checking
+MISSION_PLAN = "mission_plan"           # a mission's own card: its plan waits for the owner's OK
 FILE_MISSING = "file_missing"
 NOTHING_DONE = "nothing_done"
 HELD_COMMAND = "held_command"           # a session's held tool call was refused
@@ -68,8 +69,11 @@ def review_reason(task: Any) -> Optional[str]:
     """Why a ticket in review is there; None for a ticket that is not."""
     if getattr(task, "status", None) != "review":
         return None
-    if getattr(task, "source_type", None) == "orchestration_task":
+    source = getattr(task, "source_type", None)
+    if source == "orchestration_task":
         return MISSION_CHECKING
+    if source == "orchestration":  # the card mirrors its run: in review = awaiting the plan's approval
+        return MISSION_PLAN
     ref = _ref(task)
     return _recorded(task, ref) or _from_result(task, ref) or _from_ticket(task)
 

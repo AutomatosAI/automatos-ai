@@ -17,6 +17,7 @@ export interface StageReason {
 
 const REVIEW: Record<string, StageReason> = {
   mission_checking: { stage: 'Mission checking', chip: 'Mission checking', says: 'Its mission is checking this step. Nothing here needs you.' },
+  mission_plan: { stage: 'Plan to approve', chip: 'Plan to approve', says: "Its mission waits for you to approve its plan. Approve or change it on the mission's page." },
   file_missing: { chip: 'File missing', says: 'The file it named is not in the workspace. Check the result before you approve it.' },
   nothing_done: { chip: 'Did nothing', says: 'It finished without doing anything: its tool calls were skipped, or the result is empty.' },
   held_command: { chip: 'Command refused', says: 'A held command was refused, so the result was not checked end to end.' },
