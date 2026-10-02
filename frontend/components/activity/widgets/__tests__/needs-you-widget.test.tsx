@@ -10,13 +10,15 @@ const query = vi.hoisted(() => ({ data: undefined as any, isLoading: false, isEr
 vi.mock('@/hooks/use-needs-you', () => ({ useNeedsYou: () => query }))
 
 import { NeedsYouWidget } from '@/components/activity/widgets/needs-you-widget'
+import type { NeedsYou } from '@/hooks/use-needs-you'
 
-const EMPTY = { review: [], question: [], approval: [], failed: [] }
+type Rows = NeedsYou['rows']
+const EMPTY: Rows = { review: [], question: [], approval: [], failed: [] }
 
-function waiting(rows: Partial<typeof EMPTY>, counts?: Record<string, number>) {
-  const all = { ...EMPTY, ...rows } as any
+function waiting(rows: Partial<Rows>, counts?: Partial<NeedsYou['counts']>): NeedsYou {
+  const all: Rows = { ...EMPTY, ...rows }
   const c = { review: all.review.length, question: all.question.length, approval: all.approval.length, failed: all.failed.length, ...counts }
-  return { period: '1d', total: Object.values(c).reduce((a: number, b) => a + (b as number), 0), counts: c, rows: all }
+  return { period: '1d', total: c.review + c.question + c.approval + c.failed, counts: c, rows: all }
 }
 
 beforeEach(() => {

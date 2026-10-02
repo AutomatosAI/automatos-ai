@@ -31,13 +31,24 @@ describe('Message (PRD-239)', () => {
       content: '',
       parts: [
         { type: 'text', text: "Bob runs as a Claude Code session on your CLI host, so I've filed ticket #118 for this message." },
-        { type: 'task_card', card: { id: 118, title: 'Chat with Bob: Hey Bob', status: 'assigned', assigned_agent: 'Bob' } },
+        { type: 'task_card', card: { id: 118, number: '#0042', title: 'Chat with Bob: Hey Bob', status: 'assigned', assigned_agent: 'Bob' } },
       ],
     } as unknown as ChatMessage
     render(<Message {...base} message={message} />)
     expect(screen.getByTestId('task-card')).toBeInTheDocument()
-    expect(screen.getByText('Ticket #118')).toBeInTheDocument()
+    expect(screen.getByText('Ticket #0042')).toBeInTheDocument()   // PRD-252 R4: its number, not its id
     expect(screen.getByText(/filed ticket #118/)).toBeInTheDocument()
+  })
+
+  it('names a card saved before ticket numbers by its id, without a #', () => {
+    const message = {
+      id: 'm0',
+      role: 'assistant',
+      content: '',
+      parts: [{ type: 'task_card', card: { id: 118, title: 'Chat with Bob: Hey Bob', status: 'assigned', assigned_agent: 'Bob' } }],
+    } as unknown as ChatMessage
+    render(<Message {...base} message={message} />)
+    expect(screen.getByText('Ticket 118')).toBeInTheDocument()     // a '#' now means a number
   })
 
   it('shows the failure sentence in the bubble instead of silence', () => {
