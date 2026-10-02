@@ -63,3 +63,23 @@ def test_refused_calls_are_grouped_by_what_they_mean_holds_first():
         < text.index("**Reads outside the session directory") < text.index("**Tools a session does not have")
     assert "- Bash: 'pip --version'" in text and "- Read: Read outside" in text and "- Bash: an older summary" in text
     assert "- ToolSearch: tool 'ToolSearch'" in text
+
+
+def test_the_section_speaks_the_tickets_own_cli():
+    """PRD-253 S0.5: the title and the take-over line come from the registry. A
+    Codex session resumes with ``codex resume <id>`` from the agent's own home —
+    every Codex report used to print a ``claude --resume`` line."""
+    session = {"session_id": "s1", "cwd": "/w/repo"}
+
+    def text(provider):
+        return "\n".join(session_report_lines({"runtime": "cli", "session": {**session, "provider": provider}}))
+
+    codex = text("codex")
+    assert codex.startswith("## Codex session")
+    assert "cd /w/repo && codex resume s1" in codex and "claude --resume" not in codex
+    assert "Runtime Canvas terminal" in codex
+    claude = text("claude")
+    assert claude.startswith("## Claude Code session") and "cd /w/repo && claude --resume s1" in claude
+    assert "Runtime Canvas terminal" not in claude
+    unknown = text("grok")
+    assert unknown.startswith("## CLI session") and "Take over in your terminal" not in unknown
