@@ -912,7 +912,7 @@ def _refreshed(db: Session, task: BoardTask, task_id: int) -> None:
     try:
         db.refresh(task)
     except InvalidRequestError:
-        raise HTTPException(status_code=404, detail="The ticket was deleted as it was decided.")
+        raise HTTPException(status_code=404, detail="The ticket was deleted as it was decided.") from None
 
 
 def already_decided(task: BoardTask) -> HTTPException:
