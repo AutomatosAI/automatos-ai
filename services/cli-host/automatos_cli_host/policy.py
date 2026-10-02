@@ -40,7 +40,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from . import secret_reach, shell_words
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
-    DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED,
+    DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED, PLAN_EDIT_REFUSED_TURN,
 )
 
 # Sessions never publish. The manager (Auto) integrates. Matched on the raw
@@ -126,6 +126,21 @@ DEFAULT_BASH_ALLOW = (
     "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
     "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
 )
+
+# PRD-253 Wave P: Plan is read-only on every CLI, and a CLI with no plan mode of its
+# own has nothing but this gate holding it there. In Plan the allowlist is the
+# read-only part of the default one — no git write, no test runner, no ``npm run``
+# (each can change the tree) and no agent extras; anything else is a card.
+PLAN_BASH_ALLOW = tuple(v for v in DEFAULT_BASH_ALLOW if v not in {
+    "git add", "git commit", "git stash", "git restore", "git checkout -b", "git switch -c",
+    "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run", "pnpm test",
+    "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
+    "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
+})
+# ...and a read-only verb can still write: ``sed -i`` edits in place, a
+# redirection creates the file it names.
+_IN_PLACE_FLAG_RE = re.compile(r"^(?:-i\S*|--in-place(?:=.*)?|-[A-Za-z]*i[A-Za-z]*)$")
+PLAN_SHELL_WRITE = "Plan mode: {what} writes to {target} — the plan comes first, so the operator decides"
 
 # Verbs that shape text and never open a path: a path-shaped word among their
 # arguments is a string, not a file (``echo /etc/passwd`` prints a path, it does
@@ -273,6 +288,10 @@ class PolicyContext:
     # host's own state — its token). Empty = no such guard (tests, other hosts).
     secret_roots: Sequence[Path] = ()
     off_limits: Sequence[Path] = ()
+    # PRD-253 Wave P: the CLI presents its plan with a tool the gate holds in the
+    # turn (Claude Code's ExitPlanMode). Without one, the plan is the turn's final
+    # message — and Plan's refusals say so.
+    plan_tool: bool = False
 
 
 @dataclass
@@ -854,6 +873,36 @@ def _judge_targets(targets: Sequence[str], bindings: Bindings, roots: Sequence[P
     return _worst(verdicts)
 
 
+# PRD-253 Wave P — what a read-only verb can still write while the session plans.
+IN_PLACE_EDITORS = frozenset({"sed", "gsed", "awk", "gawk", "perl"})
+
+
+def _plan_output_target(tokens: Sequence[str]) -> Optional[str]:
+    """The first file an OUTPUT redirection writes (``>``, ``>>``, ``&>``); an input
+    redirection reads, a file descriptor or a device is no file."""
+    for i, token in enumerate(tokens[:-1]):
+        if ">" in token and _is_redirection(token):
+            target = tokens[i + 1]
+            if target not in ALWAYS_WRITABLE and not _FD_TARGET_RE.match(target):
+                return target
+    return None
+
+
+def _plan_writes(tokens: Sequence[str], words: Sequence[str], ctx: "PolicyContext") -> Decision:
+    """In Plan, a command that writes is a card for the operator — a redirection
+    into a file, an in-place edit. Outside Plan it says nothing (a reasonless allow)."""
+    if ctx.permission_mode != MODE_PLAN:
+        return Decision("allow")
+    target = _plan_output_target(tokens)
+    if target is not None:
+        return Decision("ask", PLAN_SHELL_WRITE.format(what="a redirection", target=target))
+    inner = _unwrapped(words) if words and words[0] in COMMAND_WRAPPERS else list(words)
+    head = Path(inner[0]).name if inner else ""
+    if head in IN_PLACE_EDITORS and any(_IN_PLACE_FLAG_RE.match(word) for word in inner[1:]):
+        return Decision("ask", PLAN_SHELL_WRITE.format(what=f"{head} -i", target="the files it names"))
+    return Decision("allow")
+
+
 # ── one simple command ───────────────────────────────────────────────────────
 
 def _runs_own_code(words: Sequence[str]) -> bool:
@@ -1099,7 +1148,8 @@ def _judge_segment(tokens: Sequence[str], bindings: Bindings, ctx: PolicyContext
         verdict, bound = _bind_loop(words, bindings, roots)
         return _worst([*nested, verdict]), bound
     words, bound = _bind_assignments(words, bindings)
-    return _worst([*nested, _judge_simple(words, targets, bound, ctx, roots, depth)]), bound
+    plan_writes = _plan_writes(tokens, words, ctx)          # PRD-253 Wave P: Plan is read-only
+    return _worst([*nested, plan_writes, _judge_simple(words, targets, bound, ctx, roots, depth)]), bound
 
 
 def _judge_command(command: str, bindings: Bindings, ctx: PolicyContext,
@@ -1369,7 +1419,7 @@ def _write_in_mode(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     if intent.cls is not ToolClass.FILE_WRITE:
         return Decision("allow", ALLOWED_FILES)
     if ctx.permission_mode == MODE_PLAN:
-        return Decision("deny", PLAN_EDIT_REFUSED)
+        return Decision("deny", PLAN_EDIT_REFUSED if ctx.plan_tool else PLAN_EDIT_REFUSED_TURN)
     if ctx.permission_mode == MODE_MANUAL:
         return Decision("ask", MANUAL_EDIT)
     return Decision("allow", ALLOWED_FILES)

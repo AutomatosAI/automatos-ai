@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from automatos_cli_host import allowlist, env, policy, session, transcript
+from automatos_cli_host import allowlist, env, policy, session, session_prompt, transcript
 from automatos_cli_host.adapters import claude as claude_adapter
 from automatos_cli_host.adapters.base import LaunchContext, Prepared
 from automatos_cli_host.host import HostRefused, check_backend
@@ -213,8 +213,8 @@ def test_build_args_is_interactive_and_honours_the_terms_invariant(tmp_path):
 
 
 def test_system_prompt_is_stable_per_agent():
-    a = session.build_system_prompt({"agent_name": "Dwight", "task_id": 1, "title": "x"})
-    b = session.build_system_prompt({"agent_name": "Dwight", "task_id": 2, "title": "y"})
+    a = session_prompt.build_system_prompt({"agent_name": "Dwight", "task_id": 1, "title": "x"})
+    b = session_prompt.build_system_prompt({"agent_name": "Dwight", "task_id": 2, "title": "y"})
     assert a == b and "never push" in a
     # PRD-245 S0.6: the session is told what it can reach and how to ask — in words
     # that never change per ticket.
@@ -235,11 +235,11 @@ def test_ticket_file_names_the_deliverables_folder_when_the_host_has_a_root(tmp_
     """PRD-245 S0.7: the ticket says where deliverables go — under the host's
     default root, never invented when the host has none."""
     ticket = {"task_id": 121, "title": "Note", "prompt": "OBJECTIVE: write a note"}
-    with_root = session.build_ticket_file(ticket, str(tmp_path / "deliverables"))
+    with_root = session_prompt.build_ticket_file(ticket, str(tmp_path / "deliverables"))
     assert with_root.startswith("# Ticket #121 — Note\n\nOBJECTIVE: write a note\n")
     assert f"Deliverables: save any file you produce under {tmp_path / 'deliverables' / 'sessions' / '121'}/" in with_root
-    assert "Deliverables:" not in session.build_ticket_file(ticket)
-    assert session.build_ticket_file(ticket, None) == session.build_ticket_file(ticket)
+    assert "Deliverables:" not in session_prompt.build_ticket_file(ticket)
+    assert session_prompt.build_ticket_file(ticket, None) == session_prompt.build_ticket_file(ticket)
 
 
 def test_session_deliverables_are_the_sessions_own_files_landed_beside_the_ticket(tmp_path):
@@ -302,14 +302,14 @@ def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
     """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
     between "You are …" and the session rules; without it the prompt is unchanged."""
     soul = "## Persona & Communication Style\nBlunt and precise.\n\n## Skills\n### automatos-platform\nKnows the platform."
-    with_soul = session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
+    with_soul = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
     assert with_soul.startswith("You are Bob, working as a supervised Claude Code session")
     assert with_soul.index("Blunt and precise") < with_soul.index("never push")
     assert "### automatos-platform" in with_soul
-    again = session.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
+    again = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
     assert again == with_soul  # stable per agent — ids never leak in
-    plain = session.build_system_prompt({"agent_name": "Bob", "task_id": 1})
-    assert plain == session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
+    plain = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1})
+    assert plain == session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
     assert "Persona" not in plain and "never push" in plain
 
 
