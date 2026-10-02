@@ -297,8 +297,9 @@ async def ingest_agent_output(
     """Route one agent output through the existing ingestion manager.
 
     Returns the ingested document id, or ``None`` when the workspace has
-    opted out (Q58) or ingestion failed (fail-soft: producing the output
-    must never be broken by the knowledge loop).
+    opted out (Q58), the output is a report still waiting for its approval
+    (F235), or ingestion failed (fail-soft: producing the output must never
+    be broken by the knowledge loop).
 
     Args:
         content: The output text (markdown preferred — it chunks well).
@@ -323,12 +324,42 @@ async def ingest_agent_output(
             "[Flywheel] Workspace %s opted out — skipping %s ingest", workspace_id, source
         )
         return None
+    # F235: only approved work becomes knowledge — a job report waits for its approval.
+    if source == SOURCE_REPORT and _report_waits(db, workspace_id, source_id, content):
+        return None
 
     title = title or filename
     tags = [AGENT_OUTPUT_SOURCE_TYPE, source]
     if extra_tags:
         tags.extend(t for t in extra_tags if t)
+    return await _upload_output(
+        db, workspace_id, content=content, filename=filename, source=source, source_id=source_id,
+        title=title, description=description, agent_name=agent_name, created_by=created_by, tags=tags,
+        report_type=report_type,
+    )
 
+
+def _report_waits(db: Session, workspace_id: UUID | str, report_id: Optional[str], content: str) -> bool:
+    """F235 (Gerard, 2 Oct: approved work only): a job report becomes a Document
+    only once its work is approved (``services.report_knowledge``). Read-only. A
+    wait that cannot be read holds the report: it stays on the Reports page."""
+    from services.report_knowledge import held_for_approval
+
+    try:
+        held = held_for_approval(db, workspace_id, report_id, content)
+    except Exception:
+        logger.exception("[Flywheel] Could not tell whether report %s waits for its approval", report_id)
+        return True
+    if held:
+        logger.info("[Flywheel] Report %s waits for its approval before it becomes a Document", report_id)
+    return held
+
+
+async def _upload_output(db: Session, workspace_id: UUID | str, *, content: str, filename: str, source: str,
+                         source_id: Optional[str], title: str, description: str, agent_name: Optional[str],
+                         created_by: str, tags: List[str], report_type: Optional[str]) -> Optional[int]:
+    """The ingestion manager's upload, then the Knowledge-Graph pending when the
+    output's kind earns an extraction pass. Fail-soft; the temp file always goes."""
     suffix = os.path.splitext(filename)[1] or ".md"
     tmp_path: Optional[str] = None
     try:
@@ -336,52 +367,27 @@ async def ingest_agent_output(
         # (same accessor the coordinator already uses).
         from api.documents import get_document_manager
 
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=suffix, delete=False, encoding="utf-8"
-        ) as fh:
+        with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False, encoding="utf-8") as fh:
             fh.write(content)
             tmp_path = fh.name
-
-        manager = get_document_manager(str(workspace_id))
-        document_id = await manager.upload_document(
-            file_path=tmp_path,
-            filename=filename,
-            tags=tags,
+        document_id = await get_document_manager(str(workspace_id)).upload_document(
+            file_path=tmp_path, filename=filename, tags=tags, created_by=created_by,
             description=description or f"Agent output ({source}): {title}"[:500],
-            created_by=created_by,
             source_type=AGENT_OUTPUT_SOURCE_TYPE,
         )
-
         # The report is now retrievable either way. Whether it also gets an
         # entity-extraction pass is a separate, narrower question.
         if _kg_extraction_allowed(db, workspace_id, source, report_type, title):
-            _schedule_kg_pending(
-                workspace_id,
-                _build_kg_pending(
-                    source=source,
-                    source_id=str(source_id) if source_id is not None else None,
-                    document_id=document_id,
-                    title=title,
-                    content=content,
-                    agent_name=agent_name,
-                ),
-            )
-
-        logger.info(
-            "[Flywheel] Ingested %s '%s' as document %s (workspace %s)",
-            source,
-            title,
-            document_id,
-            workspace_id,
-        )
+            _schedule_kg_pending(workspace_id, _build_kg_pending(
+                source=source, source_id=str(source_id) if source_id is not None else None,
+                document_id=document_id, title=title, content=content, agent_name=agent_name,
+            ))
+        logger.info("[Flywheel] Ingested %s '%s' as document %s (workspace %s)", source, title, document_id,
+                    workspace_id)
         return document_id
     except Exception:
-        logger.error(
-            "[Flywheel] %s ingest failed for workspace %s (output flow unaffected)",
-            source,
-            workspace_id,
-            exc_info=True,
-        )
+        logger.exception("[Flywheel] %s ingest failed for workspace %s (output flow unaffected)", source,
+                         workspace_id)
         return None
     finally:
         if tmp_path and os.path.exists(tmp_path):

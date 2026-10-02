@@ -147,8 +147,8 @@ from modules.tools.discovery.handlers_board_tasks import (
     get_board_task,
     assign_board_task,
     update_board_task,
-    update_board_task_status,
 )
+from modules.tools.discovery.handlers_board_task_done import update_board_task_status  # F235: done files its report
 from modules.tools.discovery.handlers_scheduling import (
     schedule_task,
     list_scheduled_tasks,

@@ -135,6 +135,10 @@ async def acknowledge_report(
         if result is None:
             return {"success": False, "error": "report not found in this workspace"}
         db.commit()
+        # F235: an acknowledged report is approved work: it becomes a Document.
+        from services.report_knowledge import file_owner_approved
+
+        await file_owner_approved(db, workspace_id, str(result[0]))
         return {"success": True, "data": {"report_id": str(result[0])}}
     except Exception as exc:
         logger.error("[acknowledge_report] failed: %s", exc, exc_info=True)
