@@ -68,6 +68,9 @@ VERSIONS = _ORCH / "alembic" / "versions"
 WAVE0 = VERSIONS / "prd251_socials.py"
 WAVE1 = VERSIONS / "prd251_wave1.py"
 WAVE2 = VERSIONS / "prd251_wave2.py"
+# PRD-251B Wave 1 (US-B101): the columns, CHECK and index it adds to social_posts are
+# in the model now, so the migration path runs it after Wave 2.
+WAVE1B = VERSIONS / "prd251b_wave1.py"
 BASE_HEAD = "prd251w1_merge_heads"
 CAMPAIGN_FK = "social_posts_campaign_id_fkey"
 CAMPAIGN_INDEX = "ix_social_posts_campaign_id"
@@ -132,10 +135,11 @@ def _wave1_engine():
 
 
 def _migrated_engine():
-    """The migration path: Waves 0 and 1, then this wave's upgrade."""
+    """The migration path: Waves 0 and 1, this wave's upgrade, then PRD-251B Wave 1's."""
     engine = _wave1_engine()
     with engine.begin() as conn:
         _run(conn, WAVE2, "upgrade")
+        _run(conn, WAVE1B, "upgrade")
     return engine
 
 
@@ -323,6 +327,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
         with engine.begin() as conn:
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE2, "upgrade")
+            _run(conn, WAVE1B, "upgrade")  # the model carries PRD-251B Wave 1's columns too
         _assert_same_schema(_schema(engine), _schema(model_engine), f"create_all first, from {start}")
         assert _campaign_keys(engine) == [CAMPAIGN_FK]
     finally:

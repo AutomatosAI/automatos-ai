@@ -174,7 +174,8 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 
 # What the hash covers (D6), and what a post edit may change. The voice (D11)
 # and the footage (D12) are render settings: editable, never hashed.
-CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", TARGETS)
+# PRD-251B (US-B101): the chosen video length is content too; the planned slot is not.
+CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", "length_seconds", TARGETS)
 LABEL_FIELDS = ("title", "brief")
 RENDER_FIELDS = ("voice", "footage")
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
@@ -296,6 +297,11 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
+    # PRD-251B (B5): a chosen length is content; a post without one hashes as before,
+    # so no existing approval moves when the field arrives.
+    length = getattr(post, "length_seconds", None)
+    if length is not None:
+        content["length_seconds"] = int(length)
     # Only a post with targets hashes them: one with none hashes as before (US-204).
     # With channels, the title is content too: a channel publishes it (YouTube's
     # video title, $title in channel_adapters.py), and so is whether its footage is
@@ -323,6 +329,8 @@ def compute_content_hash(post: Any) -> str:
     ``ensure_ascii=False``, so key order never changes the hash.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
     also binds to the exact rendered bytes; Wave 2 adds where the post goes.
+    PRD-251B adds ``length_seconds`` when the post has one (B5) and never
+    ``planned_for`` (B11): a slot move is not a content change.
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -376,6 +384,18 @@ def _validate_format(value: Any) -> Optional[str]:
         return None
     if value not in SOCIAL_POST_FORMATS:
         raise InvalidPost(f"format must be one of {list(SOCIAL_POST_FORMATS)}")
+    return value
+
+
+def _validate_length_seconds(value: Any) -> Optional[int]:
+    """PRD-251B (B5): a positive whole number of seconds, or None. Whether the
+    template declares it is the composer's check (US-B103)."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidPost("length_seconds must be a whole number of seconds")
+    if value <= 0:
+        raise InvalidPost("length_seconds must be at least 1")
     return value
 
 
@@ -545,6 +565,7 @@ _VALIDATORS = {
     "copy": _validate_copy,
     "format": _validate_format,
     "template_id": _validate_template_id,
+    "length_seconds": _validate_length_seconds,
     "variables": _validate_variables,
     "sources": validate_sources,
     "media": _validate_media,
@@ -648,6 +669,7 @@ def create_draft(
     media: Optional[Mapping[str, Any]] = None,
     voice: Optional[Mapping[str, Any]] = None,
     footage: Optional[Mapping[str, Any]] = None,
+    length_seconds: Optional[int] = None,
     agent: Optional[str] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
@@ -667,6 +689,7 @@ def create_draft(
         "media": media,
         "voice": voice,
         "footage": footage,
+        "length_seconds": length_seconds,
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
@@ -682,6 +705,29 @@ def create_draft(
     if agent:
         _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent)
     db.add(post)
+    return post
+
+
+def set_planned_for(
+    post: SocialPost, planned_for: Optional[datetime], tz_name: Optional[str] = None
+) -> SocialPost:
+    """PRD-251B (B11, US-B101/US-B105): the slot the post is planned for, stored UTC,
+    with the zone it was chosen in. Not content: the hash, the status and the
+    approval fields are untouched, so moving a slot never voids an approval.
+    ``None`` clears it. ``tz_name`` must be an IANA zone when given."""
+    if tz_name is not None:
+        try:
+            ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            raise InvalidPost(f"unknown timezone {tz_name!r}") from None
+    if planned_for is None:
+        post.planned_for = None
+        return post
+    if not isinstance(planned_for, datetime):
+        raise InvalidPost("planned_for must be a datetime")
+    post.planned_for = _as_utc(planned_for)
+    if tz_name is not None:
+        post.timezone = tz_name
     return post
 
 

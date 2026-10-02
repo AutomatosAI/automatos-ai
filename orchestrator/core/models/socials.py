@@ -65,7 +65,10 @@ SOCIAL_POST_STATUSES = (
     "missed",
     "archived",
 )
-SOCIAL_POST_FORMATS = ("video", "image", "carousel", "fact_card", "infographic")
+SOCIAL_POST_FORMATS = ("video", "image", "carousel", "fact_card", "infographic", "text")
+# PRD-251B (US-B101, B5): a video length the editor chose. NULL until chosen; a
+# chosen one is a positive number of seconds the template declares.
+POST_LENGTH_SECONDS_CHECK = "length_seconds IS NULL OR length_seconds > 0"
 SOCIAL_TARGET_POST_KINDS = ("text", "image", "carousel", "video", "reel", "short", "story")
 SOCIAL_TARGET_STATUSES = ("pending", "uploading", "published", "failed")
 # D6 (Wave 2, S2.4): per_post approves each post on its own; series approves
@@ -149,6 +152,8 @@ class SocialPost(Base):
         Index("ix_social_posts_workspace_status", "workspace_id", "status"),
         Index("ix_social_posts_workspace_scheduled_for", "workspace_id", "scheduled_for"),
         Index("ix_social_posts_campaign_id", "campaign_id"),
+        CheckConstraint(POST_LENGTH_SECONDS_CHECK, name="ck_social_posts_length_seconds"),
+        Index("ix_social_posts_workspace_planned_for", "workspace_id", "planned_for"),
         {"extend_existing": True},
     )
 
@@ -216,6 +221,15 @@ class SocialPost(Base):
 
     scheduled_for = Column(DateTime(timezone=True), nullable=True)  # UTC
     timezone = Column(String(64), nullable=True)  # IANA name, for display
+    # PRD-251B (US-B101, B11): the slot the post is planned for, UTC, set from the
+    # editor's When or by a plan, before approval. Not content: outside the hash,
+    # so moving a slot never voids an approval; approving a post with a future slot
+    # schedules it there (US-B105). Added by the prd251b_wave1 migration.
+    planned_for = Column(DateTime(timezone=True), nullable=True)
+    # PRD-251B (US-B101, B5): the video length the editor chose, in seconds, one the
+    # template declares (US-B104). Content: the hash covers it once set. Added by
+    # the prd251b_wave1 migration.
+    length_seconds = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -255,6 +269,8 @@ class SocialPost(Base):
             "review_log": self.review_log or [],
             "scheduled_for": _iso(self.scheduled_for),
             "timezone": self.timezone,
+            "planned_for": _iso(self.planned_for),
+            "length_seconds": self.length_seconds,
             "targets": [
                 target.to_dict()
                 for target in sorted(self.targets or [], key=lambda t: (t.toolkit, t.post_kind))
