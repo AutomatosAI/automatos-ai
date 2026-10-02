@@ -38,6 +38,7 @@ import {
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
 import { ExecutionDetail } from './execution-detail'
+import { boardStatusWord } from './board-status-word'
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedItem, ActivityFeedFilters } from '@/hooks/use-activity-api'
 import { cn } from '@/lib/utils'
@@ -255,79 +256,14 @@ export function CommandCenterHistory({ period = '30d' }: CommandCenterHistoryPro
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((item) => {
-                  const sv = STATUS_VARIANT_MAP[item.status] ?? {
-                    label: item.status,
-                    variant: 'neutral' as StatusVariant,
-                  }
-                  return (
-                    <TableRow
-                      key={item.id}
-                      className="cursor-pointer"
-                      onClick={() => handleRowClick(item)}
-                    >
-                      <TableCell className="text-xs text-muted-foreground">
-                        <div>{formatWhen(item.started_at ?? item.completed_at)}</div>
-                        <div className="text-[10px] opacity-70">
-                          {formatWhenRelative(item.started_at ?? item.completed_at)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {SOURCE_LABEL[item.type] ?? item.type}
-                      </TableCell>
-                      <TableCell className="font-medium text-sm truncate max-w-[200px]">
-                        {item.name}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground truncate max-w-[160px]">
-                        {agentNames(item)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={sv.variant} size="sm">
-                          {sv.label}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
-                        {formatDuration(item)}
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
-                        {formatCost(item)}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                {items.map((item) => (
+                  <HistoryRow key={item.id} item={item} onOpen={handleRowClick} />
+                ))}
               </TableBody>
             </Table>
           </div>
 
-          {/* Pagination */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {total} {total === 1 ? 'run' : 'runs'} total
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                className="h-7 w-7 p-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <span>
-                Page {page + 1} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page + 1 >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="h-7 w-7 p-0"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
+          <HistoryPager page={page} totalPages={totalPages} total={total} onPage={setPage} />
         </>
       )}
 
@@ -343,6 +279,83 @@ export function CommandCenterHistory({ period = '30d' }: CommandCenterHistoryPro
           )}
         </SheetContent>
       </Sheet>
+    </div>
+  )
+}
+
+// ─── Row and pager ──────────────────────────────────────
+
+/** One run. PRD-252 R5: a ticket's status reads in the board's words. */
+function HistoryRow({ item, onOpen }: { item: ActivityFeedItem; onOpen: (item: ActivityFeedItem) => void }) {
+  const sv = STATUS_VARIANT_MAP[item.status] ?? { label: item.status, variant: 'neutral' as StatusVariant }
+  return (
+    <TableRow className="cursor-pointer" onClick={() => onOpen(item)}>
+      <TableCell className="text-xs text-muted-foreground">
+        <div>{formatWhen(item.started_at ?? item.completed_at)}</div>
+        <div className="text-[10px] opacity-70">
+          {formatWhenRelative(item.started_at ?? item.completed_at)}
+        </div>
+      </TableCell>
+      <TableCell className="text-xs">
+        {SOURCE_LABEL[item.type] ?? item.type}
+      </TableCell>
+      <TableCell className="font-medium text-sm truncate max-w-[200px]">
+        {item.name}
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-xs text-muted-foreground truncate max-w-[160px]">
+        {agentNames(item)}
+      </TableCell>
+      <TableCell>
+        <StatusBadge status={sv.variant} size="sm">
+          {boardStatusWord(item) ?? sv.label}
+        </StatusBadge>
+      </TableCell>
+      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+        {formatDuration(item)}
+      </TableCell>
+      <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
+        {formatCost(item)}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+interface HistoryPagerProps {
+  page: number
+  totalPages: number
+  total: number
+  onPage: (update: (page: number) => number) => void
+}
+
+function HistoryPager({ page, totalPages, total, onPage }: HistoryPagerProps) {
+  return (
+    <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <span>
+        {total} {total === 1 ? 'run' : 'runs'} total
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page === 0}
+          onClick={() => onPage((p) => Math.max(0, p - 1))}
+          className="h-7 w-7 p-0"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </Button>
+        <span>
+          Page {page + 1} of {totalPages}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page + 1 >= totalPages}
+          onClick={() => onPage((p) => p + 1)}
+          className="h-7 w-7 p-0"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </Button>
+      </div>
     </div>
   )
 }

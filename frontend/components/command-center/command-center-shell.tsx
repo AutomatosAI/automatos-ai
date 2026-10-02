@@ -17,7 +17,8 @@
  *
  * The active tab is driven by `?tab=` in the URL. Counts on tabs come from
  * the same data hooks that the tabs use, so they stay in sync as backend
- * state changes.
+ * state changes. PRD-252 R5: the Board tab's badge and the lede's "need your
+ * eyes" are the Needs-you number, the one the Needs you widget lists.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -26,10 +27,9 @@ import { RotateCw } from 'lucide-react'
 
 import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
-import { useBoardTasks } from '@/hooks/use-board-tasks'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
-import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
+import { useNeedsYou } from '@/hooks/use-needs-you'
 import { useWatches } from '@/hooks/use-watches-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
 
@@ -100,12 +100,11 @@ export function CommandCenterShell() {
   // the stats, the Summary tab's read and the Activity stream.
   const [period, setPeriod] = useState<Period>('1d')
   const { data: stats } = useActivityStats(period)
-  const { columns } = useBoardTasks()
+  const { data: needsYou } = useNeedsYou(period)
   const { data: schedule } = useActivitySchedule('7d')
   // The backend caps `limit` at 100 (api/activity.py) — 200 was a 422 and an
   // empty Activity count; PR #397 found the same on the tab (harvested here).
   const { data: feed } = useActivityFeed({ limit: 100 })
-  const { data: decisions } = useDecisionsNeeded(10)
   // PRD-204 S11: live watches only (the default list) -- the tab badge is
   // "how many things is Auto supervising right now".
   const { data: watchlist } = useWatches()
@@ -127,11 +126,9 @@ export function CommandCenterShell() {
 
   const tabCounts: Record<TabKey, number> = useMemo(
     () => ({
-      summary: decisions?.total ?? 0,
-      board: columns.reduce(
-        (sum, c) => (c.status === 'done' ? sum : sum + c.tasks.length),
-        0,
-      ),
+      // PRD-252 R5: the one Needs-you number sits on Board; it counted every open ticket.
+      summary: 0,
+      board: needsYou?.total ?? 0,
       calendar: schedule?.scheduled?.length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
       watchlist: watchlist?.total ?? 0,
@@ -142,11 +139,11 @@ export function CommandCenterShell() {
       // the ws-admin-gated pane, not fetched for every member on the shell.
       governance: 0,
     }),
-    [decisions, columns, schedule, feed, watchlist, questions],
+    [needsYou, schedule, feed, watchlist, questions],
   )
 
   const working = stats?.working_now ?? 0
-  const attn = stats?.needs_attention ?? 0
+  const attn = needsYou?.total ?? 0
   const isQuiet = working === 0 && attn === 0
 
   const lede = isQuiet ? (
@@ -204,7 +201,7 @@ export function CommandCenterShell() {
         </div>
       </div>
 
-      <StatsStrip />
+      <StatsStrip period={period} />
       <IsItWorkingStrip />
 
       {/* PRD-222 US-020: the post-setup checklist, dual-surfaced here from the

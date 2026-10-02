@@ -20,7 +20,7 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 vi.mock('@/hooks/use-auto-now', () => ({
   AUTO_NOW_RAIL_MIN_WIDTH: 1280,
-  useAutoNow: () => ({ questionCount: 0, decisionsTotal: 0 }),
+  useAutoNow: () => ({ questionCount: 0, needsYouTotal: 0 }),
 }))
 vi.mock('../auto-now-rail', () => ({
   AutoNowRail: () => <div data-testid="auto-now-rail" />,

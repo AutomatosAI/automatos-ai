@@ -1,11 +1,13 @@
 'use client'
 
 /**
- * PRD-244 D5 — the small-width face of "Auto now": the two counts that need a
- * human (open questions, decisions) on the control that opens the rail.
+ * PRD-244 D5 — the small-width face of "Auto now": what needs a human, on the
+ * control that opens the rail. PRD-252 R5: that is the one Needs-you number,
+ * the one the Board tab, ATTENTION and the Needs you widget show.
  */
 import { PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useAutoNow } from '@/hooks/use-auto-now'
+import { needsYouBreakdown } from '@/lib/needs-you-breakdown'
 import { cn } from '@/lib/utils'
 
 interface AutoNowPillProps {
@@ -16,8 +18,7 @@ interface AutoNowPillProps {
 }
 
 export function AutoNowPill({ open, onToggle, className, style }: AutoNowPillProps) {
-  const { questionCount, decisionsTotal } = useAutoNow()
-  const needsYou = questionCount + decisionsTotal
+  const { needsYou, needsYouTotal } = useAutoNow()
   const Icon = open ? PanelRightClose : PanelRightOpen
   return (
     <button
@@ -25,13 +26,13 @@ export function AutoNowPill({ open, onToggle, className, style }: AutoNowPillPro
       onClick={onToggle}
       aria-pressed={open}
       aria-label={open ? 'Hide Auto now rail' : 'Show Auto now rail'}
-      title={`Auto now · ${questionCount} question${questionCount === 1 ? '' : 's'} · ${decisionsTotal} decision${decisionsTotal === 1 ? '' : 's'}`}
+      title={needsYouTotal > 0 ? `Auto now · needs you: ${needsYouBreakdown(needsYou?.counts)}` : 'Auto now · nothing needs you'}
       className={cn('inline-flex items-center gap-1.5', className)}
       style={style}
     >
       <Icon style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
       <span>Auto now</span>
-      {needsYou > 0 && <span className="auto-now-count">{needsYou}</span>}
+      {needsYouTotal > 0 && <span className="auto-now-count">{needsYouTotal}</span>}
     </button>
   )
 }

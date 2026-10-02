@@ -7,6 +7,7 @@ import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary 
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { ReviewVerdict } from './review-verdict'
 import { TicketQuestions } from './ticket-questions'
+import { TicketApprovals } from './ticket-approvals'
 import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
 import { stageReason } from './ticket-stage'
 import Link from 'next/link'
@@ -732,6 +733,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
+          <TicketApprovals taskId={task.id} focusGrantId={focusQuestionId} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}

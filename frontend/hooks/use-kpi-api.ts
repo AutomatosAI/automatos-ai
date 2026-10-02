@@ -1,6 +1,7 @@
 /**
  * KPI API hooks — Command Centre Dashboard Widgets
- * React Query integration for cost tracker, agent performance, playbook metrics, approval gates.
+ * React Query integration for cost tracker, agent performance and playbook metrics.
+ * PRD-252 R5: approvals and decisions are part of the one Needs-you number (use-needs-you.ts).
  */
 
 import { useQuery } from '@tanstack/react-query'
@@ -40,40 +41,6 @@ export interface PlaybookMetricsData {
   period: string
 }
 
-export interface ApprovalGatesData {
-  pending_count: number
-  pending_missions: Array<{
-    id: string
-    goal: string
-    created_at: string | null
-    waiting_since: string | null
-  }>
-  avg_approval_seconds: number
-  recent_count: number
-  period: string
-}
-
-export interface DecisionsNeededItem {
-  kind: 'report' | 'mission'
-  id: string
-  title: string
-  summary: string | null
-  status: string | null
-  escalation_level: number | null
-  agent_name?: string | null
-  created_at: string | null
-  updated_at?: string | null
-}
-
-export interface DecisionsNeededData {
-  total: number
-  reports_count: number
-  missions_count: number
-  items: DecisionsNeededItem[]
-  /** F207: set when the list could not be loaded (never a silent 0). */
-  error?: string
-}
-
 // ============= QUERY KEYS =============
 
 export const kpiQueryKeys = {
@@ -81,8 +48,6 @@ export const kpiQueryKeys = {
   costTracker: (period: string) => ['kpi', 'cost-tracker', period] as const,
   agentPerformance: (period: string) => ['kpi', 'agent-performance', period] as const,
   playbookMetrics: (period: string) => ['kpi', 'playbook-metrics', period] as const,
-  approvalGates: (period: string) => ['kpi', 'approval-gates', period] as const,
-  decisionsNeeded: (limit: number) => ['kpi', 'decisions-needed', limit] as const,
 }
 
 // ============= HOOKS =============
@@ -111,23 +76,5 @@ export function usePlaybookMetrics(period: string = '30d') {
     queryFn: () => apiClient.request<PlaybookMetricsData>(`/api/kpi/playbook-metrics?period=${period}`),
     staleTime: 30_000,
     refetchInterval: 60_000,
-  })
-}
-
-export function useApprovalGates(period: string = '30d') {
-  return useQuery<ApprovalGatesData>({
-    queryKey: kpiQueryKeys.approvalGates(period),
-    queryFn: () => apiClient.request<ApprovalGatesData>(`/api/kpi/approval-gates?period=${period}`),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-  })
-}
-
-export function useDecisionsNeeded(limit: number = 10) {
-  return useQuery<DecisionsNeededData>({
-    queryKey: kpiQueryKeys.decisionsNeeded(limit),
-    queryFn: () => apiClient.request<DecisionsNeededData>(`/api/kpi/decisions-needed?limit=${limit}`),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
   })
 }

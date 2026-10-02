@@ -21,6 +21,7 @@ import { Rows, Table2 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { feedItemHref } from '@/lib/ticket-links'
+import { boardStatusWord } from '@/components/activity/board-status-word'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
 
@@ -287,6 +288,7 @@ function CardsView({
             </div>
             <span className="ts">
               {fmtClock(it.started_at)} · {it.type}
+              {boardStatusWord(it) && ` · ${boardStatusWord(it)}`}
             </span>
             <span className="dur">{fmtDuration(it.duration_seconds)}</span>
             <span className="cost">
@@ -378,8 +380,9 @@ function TableView({
                 <span className="ag">{agName}</span>
               </td>
               <td>
+                {/* PRD-252 R5: a ticket's stage in the board's words */}
                 <span className={`cc-status-pill ${kind}`}>
-                  ● {kind.toUpperCase()}
+                  ● {(boardStatusWord(it) ?? kind).toUpperCase()}
                 </span>
               </td>
               <td className="mono" style={{ textAlign: 'right' }}>

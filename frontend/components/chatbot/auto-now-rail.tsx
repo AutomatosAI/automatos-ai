@@ -17,11 +17,13 @@ import { Input } from '@/components/ui/input'
 import { useAnswerQuestion } from '@/hooks/use-approval-grants'
 import { useAutoNow, AUTO_NOW_ROWS } from '@/hooks/use-auto-now'
 import { formatRelative } from '@/lib/format-relative'
+import { needsYouBreakdown } from '@/lib/needs-you-breakdown'
 import type { ApprovalGrant, FleetAgentRow } from '@/lib/api-client'
 import { questionHref, ticketHref } from '@/lib/ticket-links'
 import { cn } from '@/lib/utils'
 
 export const AUTO_NOW_LINKS = {
+  summary: '/command-center?tab=summary',
   board: '/command-center?tab=board',
   questions: '/command-center?tab=questions',
   watchlist: '/command-center?tab=watchlist',
@@ -147,7 +149,7 @@ export function AutoNowRail({ className }: { className?: string }) {
               ['Working', stats?.working_now],
               ['Agents', stats?.agents_active],
               ['Queue', stats?.tasks_in_queue],
-              ['Attention', stats?.needs_attention],
+              ['Attention', now.needsYou?.total],
             ] as const
           ).map(([label, value]) => (
             <div key={label} className="rounded-md border border-border bg-card/60 px-1 py-1">
@@ -187,12 +189,13 @@ export function AutoNowRail({ className }: { className?: string }) {
         )}
       </section>
 
+      {/* PRD-252 R5: the one Needs-you number; its widget on Summary lists every row. */}
       <section className="flex flex-col gap-1.5">
-        <Eyebrow count={now.decisionsTotal} href={AUTO_NOW_LINKS.governance}>Decisions</Eyebrow>
-        {now.decisionsTotal === 0 ? (
-          <EmptyLine>No decisions waiting.</EmptyLine>
+        <Eyebrow count={now.needsYouTotal} href={AUTO_NOW_LINKS.summary}>Needs you</Eyebrow>
+        {now.needsYouTotal === 0 ? (
+          <EmptyLine>Nothing needs you.</EmptyLine>
         ) : (
-          <Row href={AUTO_NOW_LINKS.governance} primary={`${now.decisionsTotal} waiting for a decision`} secondary="Open Governance" />
+          <Row href={AUTO_NOW_LINKS.summary} primary={`${now.needsYouTotal} waiting for you`} secondary={needsYouBreakdown(now.needsYou?.counts)} />
         )}
       </section>
     </div>
