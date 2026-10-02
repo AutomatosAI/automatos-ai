@@ -111,6 +111,17 @@ command in it:
   and `sudo` are never on it. `git push`, `git remote add`, `gh pr create`,
   `sudo`, `rm -rf /` and `curl … | sh` are denied on sight, in every spelling
   the gate can read (`git -C x push`, a newline, `$(git push)`, a subshell).
+- **`gh` reads, and only reads.** Sessions never publish, so every `gh`
+  subcommand not known to be a read is refused — an issue, a pull request, a
+  release, a workflow run, an SSH key, an extension, an alias — and so is `gh api`
+  with a body or any method but `GET`/`HEAD` (PRD-253 S0.3).
+- **What the gate cannot read is a card, even in Auto.** A shell's `-c` or an
+  `eval` is judged as the command line it runs (`bash -c 'git push'` is denied).
+  A command whose name is decided only when it runs (`$CMD`, `git${IFS}push`),
+  code an interpreter takes inline (`python3 -c`, `node -e`) and a shell reading
+  its commands from input (`echo … | sh`, `bash -s`, `source /dev/stdin`) are held
+  for you — in Auto mode too, where an unlisted verb otherwise runs. A write tool
+  that names no file is refused in every mode.
 - **Every global option is peeled first.** `git -c k=v push`,
   `git --git-dir=… push` and a repeated `-C` all reach the never-allowed list as
   `git push`; `gh -R owner/name pr create` likewise. A path a global names is
