@@ -474,9 +474,14 @@ def _hidden_categories(workspace_id: Any, session_used: Any) -> Tuple[str, ...]:
 
 
 def _hidden_scope(hidden: Tuple[str, ...]):
-    """The registry's turn scope for the hidden categories (PRD-251B US-B106)."""
-    from modules.tools.discovery.action_registry import hidden_scope
+    """The registry's turn scope for the hidden categories (PRD-251B US-B106); none with a
+    stand-in registry that has no scope."""
+    from contextlib import nullcontext
 
+    try:
+        from modules.tools.discovery.action_registry import hidden_scope
+    except ImportError:
+        return nullcontext()
     return hidden_scope(hidden)
 
 

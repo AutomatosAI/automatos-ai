@@ -40,9 +40,8 @@ def hidden_categories_for_workspace(workspace_id: Any, db: Any = None) -> Tuple[
     ``hidden_scope`` (the chat turn sets one) the turn's answer is used: one read a turn.
     """
     from modules.socials.settings import SOCIALS_ACTION_CATEGORY
-    from modules.tools.discovery.action_registry import turn_hidden
 
-    scoped = turn_hidden()
+    scoped = _turn_answer()
     if scoped is not None:
         return scoped
     if workspace_id in (None, ""):
@@ -65,6 +64,16 @@ def hidden_categories_for_workspace(workspace_id: Any, db: Any = None) -> Tuple[
     except Exception:  # noqa: BLE001 — a gate that cannot decide must deny
         logger.exception(READ_FAILED_LOG, workspace_id)
         return (SOCIALS_ACTION_CATEGORY,)
+
+
+def _turn_answer() -> Optional[Tuple[str, ...]]:
+    """The current turn's hidden categories, or None outside a turn scope (and with a
+    stand-in registry that has none)."""
+    try:
+        from modules.tools.discovery.action_registry import turn_hidden
+    except ImportError:
+        return None
+    return turn_hidden()
 
 
 def _workspace(db: Any, key: uuid.UUID) -> Any:

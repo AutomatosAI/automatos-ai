@@ -103,25 +103,9 @@ class PlatformActionsSection(BaseSection):
                     query = raw.strip()
 
             if query and self._semantic_routing_enabled():
-                # Graph path (flag-gated, additive over embedding path)
-                if self._graph_routing_enabled():
-                    try:
-                        graph_result = await self._build_graph_filtered(
-                            query, ctx, exclude_names=exclude_names, hidden=hidden
-                        )
-                        if graph_result:
-                            return graph_result
-                    except Exception as e:
-                        logger.warning(
-                            "Graph routing failed, falling back to embedding: %s", e
-                        )
-                        # Fall through to existing embedding path
-
-                filtered = await self._build_filtered(
-                    query, exclude_names=exclude_names, workspace_id=ctx.workspace_id, hidden=hidden
-                )
-                if filtered:
-                    return filtered
+                routed = await self._routed(query, ctx, exclude_names, hidden)
+                if routed:
+                    return routed
 
             # PR-B (tool-surface review): when narrowing couldn't decide and
             # the operator chose closed-pins, render the tiny pins card
@@ -142,6 +126,23 @@ class PlatformActionsSection(BaseSection):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _routed(
+        self, query: str, ctx: SectionContext, exclude_names: list, hidden: Optional[Iterable[str]],
+    ) -> Optional[str]:
+        """The narrowed catalog for ``query``: the graph's chains first (flag-gated, additive
+        over the embedding path; a failure falls through to it), then the embedding's
+        top-K. None when neither decides."""
+        if self._graph_routing_enabled():
+            try:
+                graph_result = await self._build_graph_filtered(query, ctx, exclude_names=exclude_names, hidden=hidden)
+                if graph_result:
+                    return graph_result
+            except Exception as e:  # noqa: BLE001 — the embedding path answers instead
+                logger.warning("Graph routing failed, falling back to embedding: %s", e)
+        return await self._build_filtered(
+            query, exclude_names=exclude_names, workspace_id=ctx.workspace_id, hidden=hidden
+        )
 
     _PREAMBLE = (
         "## Platform Actions\n\n"
