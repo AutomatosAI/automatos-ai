@@ -8,7 +8,7 @@
 # code. Iterations continue from the diary until the stop time.
 #
 # Usage: ./scripts/ralph/overnight-customer.sh            (launch is human-only)
-# Env:   RALPH_MODEL=claude-opus-5 · RALPH_MAX_ITERS=10 · RALPH_STOP_AT=06:30
+# Env:   RALPH_MODEL=claude-opus-5 · RALPH_MAX_ITERS=10 · RALPH_STOP_AT=06:30 · RALPH_START_ITER=1 (resume at N)
 #        CUSTOMER_PERSONA=harbourline · SIM_WORKSPACE_ID=<local workspace>
 # Night: ~/.automatos-sim/customer-night/<date>/{DIARY.md,MORNING-REPORT.md,logs/}
 
@@ -31,6 +31,7 @@ mkdir -p "$LOG_DIR"
 RALPH_MODEL="${RALPH_MODEL:-claude-opus-5}"
 # 10 ended night 1 on the cap, 2.5 h before STOP_AT.
 MAX_ITERS="${RALPH_MAX_ITERS:-14}"
+START_ITER="${RALPH_START_ITER:-1}"   # resume a stopped night in its own CUSTOMER_NIGHT_DIR: the first iteration to run
 STOP_AT="${RALPH_STOP_AT:-06:30}"
 THEME="${RALPH_THEME:-general}"   # nights/<theme>.md fills {{AGENDA}} in the brief
 # 4 of night 1's 10 iterations were killed at 50m mid-work.
@@ -116,7 +117,7 @@ NIGHT_START="$(grep '^STARTED=' "$STATUS" 2>/dev/null | head -1 | cut -d= -f2)"
 
 # --- the night ----------------------------------------------------------------------
 consecutive_failures=0
-for ((iter = 1; iter <= MAX_ITERS; iter++)); do
+for ((iter = START_ITER; iter <= MAX_ITERS; iter++)); do
   if past_stop; then say "${YELLOW}stop time $STOP_AT reached before iteration $iter${NC}"; break; fi
   prompt="$NIGHT_DIR/prompt-iter$iter.md"; logfile="$LOG_DIR/iter$iter.log"
   # The night's theme (nights/<theme>.md) fills {{AGENDA}}. It is rendered FIRST with the same values,
