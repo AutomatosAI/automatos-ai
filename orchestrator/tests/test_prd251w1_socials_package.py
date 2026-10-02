@@ -177,6 +177,7 @@ def test_every_tool_a_persona_or_a_step_names_is_one_the_platform_has():
 def test_the_four_playbooks_pass_the_create_routes_validators():
     assert [spec["name"] for spec in SOCIALS_PLAYBOOKS] == [
         "Brand kit from your website", "Launch video", "Weekly social posts", "Image carousel",
+        "Content bank research",  # PRD-251B (US-B204): a plan's weekly research
     ]
     for spec in SOCIALS_PLAYBOOKS:
         row = _row(spec)

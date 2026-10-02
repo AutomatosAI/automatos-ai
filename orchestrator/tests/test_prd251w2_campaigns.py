@@ -71,6 +71,9 @@ WAVE2 = VERSIONS / "prd251_wave2.py"
 # PRD-251B Wave 1 (US-B101): the columns, CHECK and index it adds to social_posts are
 # in the model now, so the migration path runs it after Wave 2.
 WAVE1B = VERSIONS / "prd251b_wave1.py"
+# PRD-251B Wave 2 (US-B201): the plan columns on social_campaigns, slot_key and music on
+# social_posts, and social_topics are in the models too, so the path runs it last.
+WAVE2B = VERSIONS / "prd251b_wave2.py"
 BASE_HEAD = "prd251w1_merge_heads"
 CAMPAIGN_FK = "social_posts_campaign_id_fkey"
 CAMPAIGN_INDEX = "ix_social_posts_campaign_id"
@@ -81,11 +84,23 @@ STARTS = ("fresh", "backend_first", "migration_path")
 CAMPAIGN_COLUMNS = {
     "id", "workspace_id", "name", "approval_mode", "approved_hash_set", "approved_by",
     "approved_at", "created_by", "created_at", "updated_at",
+    # PRD-251B Wave 2 (B6, US-B201): a plan is a campaign.
+    "kind", "status", "goal", "audience", "starts_on", "ends_on", "timezone", "cadence",
+    "sources", "make", "late_policy", "research", "slot_overrides",
+}
+PLAN_NULLABLE = {
+    "goal", "audience", "starts_on", "ends_on", "timezone", "cadence", "sources", "make",
+    "research", "slot_overrides",
+}
+CAMPAIGN_CHECKS = {
+    "ck_social_campaigns_approval_mode", "ck_social_campaigns_kind", "ck_social_campaigns_status",
+    "ck_social_campaigns_late_policy",
 }
 # The workspaces table the keys name, as a stand-in: the real model is Postgres-first.
 WORKSPACES_STANDIN = "CREATE TABLE workspaces (id CHAR(32) PRIMARY KEY)"
 # Where Wave 1 left a database: no key, no post index, no campaigns table.
 WAVE1_STATE_DDL = (
+    "DROP TABLE IF EXISTS social_topics",  # PRD-251B Wave 2's bank keys onto social_campaigns
     f"ALTER TABLE social_posts DROP CONSTRAINT IF EXISTS {CAMPAIGN_FK}",
     f"DROP INDEX IF EXISTS {CAMPAIGN_INDEX}",
     "DROP TABLE IF EXISTS social_campaigns",
@@ -140,6 +155,7 @@ def _migrated_engine():
     with engine.begin() as conn:
         _run(conn, WAVE2, "upgrade")
         _run(conn, WAVE1B, "upgrade")
+        _run(conn, WAVE2B, "upgrade")
     return engine
 
 
@@ -204,13 +220,15 @@ def test_social_campaigns_carries_every_d2_column():
     columns = SocialCampaign.__table__.columns
     assert set(columns.keys()) == CAMPAIGN_COLUMNS
     assert SOCIAL_CAMPAIGN_APPROVAL_MODES == ("per_post", "series")
-    assert {name for name, column in columns.items() if column.nullable} == {"approved_by", "approved_at"}
+    assert {name for name, column in columns.items() if column.nullable} == {"approved_by", "approved_at"} | PLAN_NULLABLE
     assert (columns["name"].type.length, columns["approval_mode"].type.length) == (200, 16)
     assert columns["approval_mode"].server_default.arg == "per_post"
     hash_set = columns["approved_hash_set"].type
     assert isinstance(hash_set.dialect_impl(postgresql.dialect()), postgresql.JSONB)
     assert not isinstance(hash_set.dialect_impl(sqlite.dialect()), postgresql.JSONB)
-    (check,) = [c for c in SocialCampaign.__table__.constraints if isinstance(c, sa.CheckConstraint)]
+    checks = [c for c in SocialCampaign.__table__.constraints if isinstance(c, sa.CheckConstraint)]
+    assert {c.name for c in checks} == CAMPAIGN_CHECKS
+    (check,) = [c for c in checks if c.name == "ck_social_campaigns_approval_mode"]
     assert (check.name, str(check.sqltext)) == (
         "ck_social_campaigns_approval_mode", "approval_mode IN ('per_post', 'series')",
     )
@@ -305,7 +323,7 @@ def test_the_migration_builds_exactly_the_model_schema():
 
     # Non-vacuous: the reflected facets carry what D2 declares.
     campaigns, posts = model["social_campaigns"], model["social_posts"]
-    assert {name for name, _sql in campaigns["checks"]} == {"ck_social_campaigns_approval_mode"}
+    assert {name for name, _sql in campaigns["checks"]} == CAMPAIGN_CHECKS
     assert (("workspace_id",), "workspaces", ("id",), "CASCADE") in campaigns["fks"]
     assert (
         "ix_social_campaigns_workspace_created", ("workspace_id", "created_at"), False
@@ -328,6 +346,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE1B, "upgrade")  # the model carries PRD-251B Wave 1's columns too
+            _run(conn, WAVE2B, "upgrade")  # and Wave 2's
         _assert_same_schema(_schema(engine), _schema(model_engine), f"create_all first, from {start}")
         assert _campaign_keys(engine) == [CAMPAIGN_FK]
     finally:
@@ -512,6 +531,8 @@ def test_create_all_first_then_the_upgrade_twice_on_postgres(pg_engine, start):
             _start_from(conn, start)
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE2, "upgrade")
+            _run(conn, WAVE1B, "upgrade")
+            _run(conn, WAVE2B, "upgrade")  # PRD-251B: the models carry both waves' columns
 
             for table in (SocialCampaign.__table__, SocialPost.__table__):
                 assert _reflected(conn, table.name) == _declared(table), f"{table.name}, from {start}"

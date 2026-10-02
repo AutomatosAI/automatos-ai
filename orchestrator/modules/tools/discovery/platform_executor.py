@@ -282,11 +282,13 @@ from modules.tools.discovery.handlers_web import (  # PRD-240
     web_fetch,
     web_search,
 )
-from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116
+from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116; PRD-251B US-B204
+    add_social_topics,
     create_social_post,
     update_social_post,
     submit_social_post,
     get_social_post,
+    get_social_plan,
     list_social_posts,
 )
 
@@ -601,254 +603,7 @@ class PlatformActionExecutor:
     def __init__(self, db: Session, workspace_id: UUID):
         self.db = db
         self.workspace_id = workspace_id
-        self._handlers: Dict[str, Callable] = {
-            # Read actions
-            "platform_list_agents": list_agents,
-            "platform_recommend_agent": recommend_agent,  # PRD-234 S3
-            "platform_get_agent": get_agent,
-            "platform_list_playbooks": list_playbooks,
-            "platform_get_playbook": get_playbook,
-            "platform_get_llm_usage": get_llm_usage,
-            "platform_get_cost_breakdown": get_cost_breakdown,
-            "platform_list_documents": list_documents,
-            "platform_read_document": read_document,
-            "platform_grep_documents": grep_documents,
-            "platform_search_documents": search_documents,
-            "platform_list_templates": list_templates,
-            "platform_get_template_schema": get_template_schema,
-            # PRD-251 US-115: the brand kit (the REST routes' functions)
-            "platform_get_brand_kit": get_brand_kit_tool,
-            "platform_update_brand_kit": update_brand_kit_tool,
-            # PRD-251 US-116 (S4.1): Socials drafts. No tool approves, schedules or publishes.
-            "platform_create_social_post": create_social_post,
-            "platform_update_social_post": update_social_post,
-            "platform_submit_social_post": submit_social_post,
-            "platform_get_social_post": get_social_post,
-            "platform_list_social_posts": list_social_posts,
-            "platform_get_workspace_info": get_workspace_info,
-            "platform_get_memory_stats": get_memory_stats,
-            "platform_list_connected_apps": list_connected_apps,
-            # Write actions
-            "platform_create_agent": create_agent,
-            "platform_update_agent": update_agent,
-            "platform_create_playbook": create_playbook,
-            "platform_update_playbook": update_playbook,
-            "platform_add_playbook_step": add_playbook_step,
-            "platform_update_playbook_step": update_playbook_step,
-            "platform_delete_playbook_step": delete_playbook_step,
-            "platform_schedule_playbook": schedule_playbook,
-            "platform_store_memory": store_memory,
-            "platform_checkpoint_thread": checkpoint_thread,  # PRD-206 S2
-            "platform_resume_context": resume_context,  # PRD-206 S3
-            "platform_delete_agent": delete_agent,
-            # Infrastructure / observability
-            "platform_get_logs": get_logs,
-            "platform_list_services": list_services,
-            # Chat & memory search
-            "platform_search_chat_history": search_chat_history,
-            "platform_search_memory": search_memory,
-            # PRD-73: Monitoring (Loki, Prometheus, Alerts)
-            "platform_query_loki_logs": query_loki_logs,
-            "platform_query_prometheus": query_prometheus,
-            "platform_get_alerts": get_alerts,
-            # Visibility / discovery
-            "platform_find_tools": find_tools,  # PR-B: search the action catalog itself
-            "platform_list_tools": list_tools,
-            "platform_list_llms": list_llms,
-            "platform_list_datasources": list_datasources,
-            "platform_workspace_stats": workspace_stats,
-            # Self-management
-            "platform_execute_playbook": execute_playbook,
-            "platform_get_playbook_execution": get_playbook_execution,
-            "platform_get_system_health": get_system_health,
-            "platform_delete_document": delete_document,
-            "platform_reprocess_document": reprocess_document,
-            "platform_delete_playbook": delete_playbook,
-            "platform_get_activity_feed": get_activity_feed,
-            # Marketplace discovery & workspace inventory (PRD-71)
-            "platform_browse_marketplace_agents": browse_marketplace_agents,
-            "platform_browse_marketplace_plugins": browse_marketplace_plugins,
-            "platform_browse_marketplace_skills": browse_marketplace_skills,
-            "platform_list_workspace_plugins": list_workspace_plugins,
-            "platform_list_workspace_skills": list_workspace_skills,
-            "platform_list_workspace_models": list_workspace_models,
-            "platform_install_plugin": install_plugin,
-            "platform_install_skill": install_skill,
-            "platform_install_model": install_model,
-            # PRD-230 US-006: package search/install (full-closure, workspace-owned)
-            "platform_search_packages": search_packages,
-            "platform_install_package": install_package_tool,
-            "platform_install_marketplace_agent": install_marketplace_agent_tool,
-            # Skill editing (read / create / update / delete)
-            "platform_get_skill_content": get_skill_content,
-            "platform_create_workspace_skill": create_workspace_skill,
-            "platform_update_skill": update_skill,
-            "platform_delete_workspace_skill": delete_workspace_skill,
-            # Skill runtime (PRD-202): L2 trigger-load / L3 worker exec / L3 enablement
-            "platform_load_skill": load_skill,
-            "platform_run_skill_script": run_skill_script,
-            "platform_set_skill_script_execution": set_skill_script_execution,
-            # Agent assignment (PRD-71)
-            "platform_assign_tool_to_agent": assign_tool_to_agent,
-            "platform_assign_skill_to_agent": assign_skill_to_agent,
-            "platform_assign_plugin_to_agent": assign_plugin_to_agent,
-            "platform_configure_agent_heartbeat": configure_agent_heartbeat,
-            "platform_get_agent_heartbeat": get_agent_heartbeat,
-            "platform_unassign_skill_from_agent": unassign_skill_from_agent,
-            "platform_unassign_tool_from_agent": unassign_tool_from_agent,
-            # Owner escalation channel
-            "platform_notify_owner": notify_owner,
-            # Full-autonomy dial (per-workspace setting)
-            "platform_get_autonomy_level": handle_get_autonomy_level,
-            "platform_set_autonomy_level": handle_set_autonomy_level,
-            # PRD-222 W1S3: Auto-led onboarding spine (the ONLY state writer)
-            "platform_update_onboarding": update_onboarding,
-            # PRD-222 W1S8: business-intake pipeline as Auto tools
-            "platform_scan_business_site": scan_business_site,
-            "platform_get_intake_status": get_intake_status,
-            # PRD-240: the web as a platform capability (no app, no assignment)
-            "platform_web_fetch": web_fetch,
-            "platform_web_search": web_search,
-            # PRD-76: Agent Reports
-            "platform_submit_report": submit_report,
-            "platform_get_latest_report": get_latest_report,
-            "platform_browse_reports": browse_reports,
-            # PRD-164 S3: Deliverables (agent outputs) discovery
-            "platform_list_deliverables": handle_list_deliverables,
-            "platform_get_deliverable": handle_get_deliverable,
-            # Wave 3 — operating-signal lifecycle
-            "platform_acknowledge_report": acknowledge_report,
-            "platform_link_report_to_task": link_report_to_task,
-            # PRD-72: Board Tasks
-            "platform_create_task": create_board_task,
-            "platform_list_tasks": list_board_tasks,
-            "platform_board_snapshot": board_snapshot,
-            "platform_board_summary": board_summary,
-            "platform_get_task": get_board_task,
-            "platform_wait_for_task": wait_for_board_task,  # PRD-238 S4
-            "platform_assign_task": assign_board_task,
-            "platform_update_task": update_board_task,
-            "platform_update_task_status": update_board_task_status,
-            # PRD-77: Agent Self-Scheduling
-            "platform_schedule_task": schedule_task,
-            "platform_list_scheduled_tasks": list_scheduled_tasks,
-            "platform_cancel_scheduled_task": cancel_scheduled_task,
-            "platform_get_schedule": get_schedule,
-            # PRD-79: NL2SQL
-            "platform_query_data": query_data,
-            # PRD-77: Memory Browsing
-            "platform_browse_memories": browse_memories,
-            "platform_delete_memory": delete_memory,
-            # PRD-108: Shared Mission Field
-            "platform_field_query": field_query,
-            "platform_field_inject": field_inject,
-            "platform_field_stability": field_stability,
-            # Blog Widget
-            "platform_publish_blog_post": publish_blog_post,
-            "platform_list_blog_posts": list_blog_posts,
-            "platform_get_blog_post": get_blog_post,
-            "platform_update_blog_post": update_blog_post,
-            "platform_create_blog_post": create_blog_post_from_topic,
-            "platform_generate_cover_image": generate_cover_image,
-            # PRD-82A: Missions
-            "platform_create_mission": create_mission,
-            "platform_list_missions": list_missions,
-            "platform_get_mission": get_mission,
-            # PRD-204 S9: Watches (supervision to a verdict)
-            "platform_create_watch": create_watch,
-            "platform_list_watches": list_watches,
-            "platform_get_watch": get_watch,
-            "platform_cancel_watch": cancel_watch,
-            # PRD-228: live floor read-model in one call
-            "platform_fleet_status": fleet_status,
-            # PRD-163 S1: mission lifecycle control
-            "platform_approve_mission": approve_mission,
-            "platform_reject_mission": reject_mission,
-            "platform_pause_mission": pause_mission,
-            "platform_resume_mission": resume_mission,
-            "platform_cancel_mission": cancel_mission,
-            "platform_replan_mission": replan_mission,
-            "platform_update_mission_plan": update_mission_plan,
-            # Governance & Blueprints
-            "platform_list_blueprints": list_blueprints,
-            "platform_get_blueprint": get_blueprint,
-            "platform_create_blueprint": create_blueprint,
-            "platform_update_blueprint": update_blueprint,
-            "platform_validate_agent": validate_agent_handler,
-            "platform_check_budget": check_budget_handler,
-            # PRD-225: agent → human question (park, notify, return)
-            "platform_ask_human": ask_human,
-            # PRD-229: agent → orchestrator clarification (answer inline / escalate).
-            # Dispatch key carries the platform_ prefix (namespace invariant); the
-            # handler function keeps its bare name.
-            "platform_ask_orchestrator": ask_orchestrator,
-            # Enhanced Analytics (dashboard + performance)
-            "platform_get_success_rate": get_success_rate,
-            "platform_get_completion_time": get_completion_time,
-            "platform_get_error_rates": get_error_rates,
-            "platform_get_queue_depth": get_queue_depth,
-            "platform_get_efficiency_score": get_efficiency_score,
-            "platform_get_cost_per_execution": get_cost_per_execution,
-            "platform_get_peak_hours": get_peak_hours,
-            "platform_get_bottlenecks": get_bottlenecks,
-            "platform_get_predictive_alerts": get_predictive_alerts,
-            "platform_get_agent_ranking": get_agent_ranking,
-            "platform_get_sla_compliance": get_sla_compliance,
-            # PRD-121: HARNESS Self-Optimizing Loop
-            "platform_harness_status": harness_status,
-            "platform_harness_trigger": harness_trigger,
-            "platform_harness_history": harness_history,
-            # PRD-142 Wave 4 (W4-S6): routing-rule creation
-            "platform_create_routing_rule": create_routing_rule,
-            # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
-            "platform_set_power_mode": set_power_mode,
-            # PRD-143 S10: setup-surface gap-fill (operator tier)
-            "platform_get_power_mode": get_power_mode,
-            "platform_list_channels": list_channels,
-            "platform_connect_channel": connect_channel,
-            "platform_configure_channel": configure_channel,
-            "platform_start_channel": start_channel,
-            "platform_stop_channel": stop_channel,
-            "platform_get_widget_config": get_widget_config,
-            "platform_update_widget_config": update_widget_config,
-            "platform_upload_document": upload_document,
-            # PRD-143 S11: administration surface (operator tier by design)
-            "platform_list_members": list_members,
-            "platform_invite_member": invite_member,
-            "platform_set_member_role": set_member_role,
-            "platform_remove_member": remove_member,
-            "platform_update_workspace_settings": update_workspace_settings,
-            "platform_list_system_settings": list_system_settings,
-            "platform_update_system_setting": update_system_setting,
-            "platform_list_api_keys": list_api_keys,
-            "platform_revoke_api_key": revoke_api_key,
-            "platform_uninstall_plugin": uninstall_plugin,
-            # Wave 2: Auto reporting preferences + send-notification wrapper
-            "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
-            "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
-            "platform_send_notification": send_notification,
-            # PRD-126: Knowledge Graph
-            "platform_query_graph": handle_query_graph,
-            "platform_graph_neighbors": handle_graph_neighbors,
-            "platform_graph_communities": handle_graph_communities,
-            "platform_graph_impact": handle_graph_impact,
-            "platform_graph_stats": handle_graph_stats,
-            "platform_graph_path": handle_graph_path,
-            # PRD-183 S3 (F088): Shopify sync + freshness as tools
-            "platform_shopify_sync_catalog": shopify_sync_catalog,
-            "platform_shopify_sync_status": shopify_sync_status,
-            # PRD-165 S4: CodeGraph as an agent capability
-            "platform_codegraph_list_projects": codegraph_list_projects,
-            "platform_codegraph_search": codegraph_search,
-            "platform_codegraph_get_symbol": codegraph_get_symbol,
-            "platform_codegraph_call_graph": codegraph_call_graph,
-            "platform_codegraph_dependencies": codegraph_dependencies,
-            "platform_codegraph_architecture": codegraph_architecture,
-            # PRD-183 S4: codegraph write tools (index / reindex / auto-reindex)
-            "platform_codegraph_index": codegraph_index,
-            "platform_codegraph_reindex": codegraph_reindex,
-            "platform_codegraph_set_auto_reindex": codegraph_set_auto_reindex,
-        }
+        self._handlers: Dict[str, Callable] = dict(PLATFORM_HANDLERS)  # a copy: a test or a caller may swap one
 
     def _workspace_has_admin_owner(self) -> bool:
         """Check if the workspace owner has an admin/owner role.
@@ -1572,3 +1327,258 @@ class PlatformActionExecutor:
             except Exception:
                 pass
             return {"success": False, "error": f"Action '{action_name}' failed"}
+
+
+# Every platform action's handler, by action name. PlatformActionExecutor copies it per
+# instance. Kept at module level so a new tool adds one entry here.
+PLATFORM_HANDLERS: Dict[str, Callable] = {
+    # Read actions
+    "platform_list_agents": list_agents,
+    "platform_recommend_agent": recommend_agent,  # PRD-234 S3
+    "platform_get_agent": get_agent,
+    "platform_list_playbooks": list_playbooks,
+    "platform_get_playbook": get_playbook,
+    "platform_get_llm_usage": get_llm_usage,
+    "platform_get_cost_breakdown": get_cost_breakdown,
+    "platform_list_documents": list_documents,
+    "platform_read_document": read_document,
+    "platform_grep_documents": grep_documents,
+    "platform_search_documents": search_documents,
+    "platform_list_templates": list_templates,
+    "platform_get_template_schema": get_template_schema,
+    # PRD-251 US-115: the brand kit (the REST routes' functions)
+    "platform_get_brand_kit": get_brand_kit_tool,
+    "platform_update_brand_kit": update_brand_kit_tool,
+    # PRD-251 US-116 (S4.1): Socials drafts. No tool approves, schedules or publishes.
+    "platform_create_social_post": create_social_post,
+    "platform_update_social_post": update_social_post,
+    "platform_submit_social_post": submit_social_post,
+    "platform_get_social_post": get_social_post,
+    "platform_list_social_posts": list_social_posts,
+    # PRD-251B (US-B204): a plan's content bank, for the research playbook. Draft-only.
+    "platform_get_social_plan": get_social_plan,
+    "platform_add_social_topics": add_social_topics,
+    "platform_get_workspace_info": get_workspace_info,
+    "platform_get_memory_stats": get_memory_stats,
+    "platform_list_connected_apps": list_connected_apps,
+    # Write actions
+    "platform_create_agent": create_agent,
+    "platform_update_agent": update_agent,
+    "platform_create_playbook": create_playbook,
+    "platform_update_playbook": update_playbook,
+    "platform_add_playbook_step": add_playbook_step,
+    "platform_update_playbook_step": update_playbook_step,
+    "platform_delete_playbook_step": delete_playbook_step,
+    "platform_schedule_playbook": schedule_playbook,
+    "platform_store_memory": store_memory,
+    "platform_checkpoint_thread": checkpoint_thread,  # PRD-206 S2
+    "platform_resume_context": resume_context,  # PRD-206 S3
+    "platform_delete_agent": delete_agent,
+    # Infrastructure / observability
+    "platform_get_logs": get_logs,
+    "platform_list_services": list_services,
+    # Chat & memory search
+    "platform_search_chat_history": search_chat_history,
+    "platform_search_memory": search_memory,
+    # PRD-73: Monitoring (Loki, Prometheus, Alerts)
+    "platform_query_loki_logs": query_loki_logs,
+    "platform_query_prometheus": query_prometheus,
+    "platform_get_alerts": get_alerts,
+    # Visibility / discovery
+    "platform_find_tools": find_tools,  # PR-B: search the action catalog itself
+    "platform_list_tools": list_tools,
+    "platform_list_llms": list_llms,
+    "platform_list_datasources": list_datasources,
+    "platform_workspace_stats": workspace_stats,
+    # Self-management
+    "platform_execute_playbook": execute_playbook,
+    "platform_get_playbook_execution": get_playbook_execution,
+    "platform_get_system_health": get_system_health,
+    "platform_delete_document": delete_document,
+    "platform_reprocess_document": reprocess_document,
+    "platform_delete_playbook": delete_playbook,
+    "platform_get_activity_feed": get_activity_feed,
+    # Marketplace discovery & workspace inventory (PRD-71)
+    "platform_browse_marketplace_agents": browse_marketplace_agents,
+    "platform_browse_marketplace_plugins": browse_marketplace_plugins,
+    "platform_browse_marketplace_skills": browse_marketplace_skills,
+    "platform_list_workspace_plugins": list_workspace_plugins,
+    "platform_list_workspace_skills": list_workspace_skills,
+    "platform_list_workspace_models": list_workspace_models,
+    "platform_install_plugin": install_plugin,
+    "platform_install_skill": install_skill,
+    "platform_install_model": install_model,
+    # PRD-230 US-006: package search/install (full-closure, workspace-owned)
+    "platform_search_packages": search_packages,
+    "platform_install_package": install_package_tool,
+    "platform_install_marketplace_agent": install_marketplace_agent_tool,
+    # Skill editing (read / create / update / delete)
+    "platform_get_skill_content": get_skill_content,
+    "platform_create_workspace_skill": create_workspace_skill,
+    "platform_update_skill": update_skill,
+    "platform_delete_workspace_skill": delete_workspace_skill,
+    # Skill runtime (PRD-202): L2 trigger-load / L3 worker exec / L3 enablement
+    "platform_load_skill": load_skill,
+    "platform_run_skill_script": run_skill_script,
+    "platform_set_skill_script_execution": set_skill_script_execution,
+    # Agent assignment (PRD-71)
+    "platform_assign_tool_to_agent": assign_tool_to_agent,
+    "platform_assign_skill_to_agent": assign_skill_to_agent,
+    "platform_assign_plugin_to_agent": assign_plugin_to_agent,
+    "platform_configure_agent_heartbeat": configure_agent_heartbeat,
+    "platform_get_agent_heartbeat": get_agent_heartbeat,
+    "platform_unassign_skill_from_agent": unassign_skill_from_agent,
+    "platform_unassign_tool_from_agent": unassign_tool_from_agent,
+    # Owner escalation channel
+    "platform_notify_owner": notify_owner,
+    # Full-autonomy dial (per-workspace setting)
+    "platform_get_autonomy_level": handle_get_autonomy_level,
+    "platform_set_autonomy_level": handle_set_autonomy_level,
+    # PRD-222 W1S3: Auto-led onboarding spine (the ONLY state writer)
+    "platform_update_onboarding": update_onboarding,
+    # PRD-222 W1S8: business-intake pipeline as Auto tools
+    "platform_scan_business_site": scan_business_site,
+    "platform_get_intake_status": get_intake_status,
+    # PRD-240: the web as a platform capability (no app, no assignment)
+    "platform_web_fetch": web_fetch,
+    "platform_web_search": web_search,
+    # PRD-76: Agent Reports
+    "platform_submit_report": submit_report,
+    "platform_get_latest_report": get_latest_report,
+    "platform_browse_reports": browse_reports,
+    # PRD-164 S3: Deliverables (agent outputs) discovery
+    "platform_list_deliverables": handle_list_deliverables,
+    "platform_get_deliverable": handle_get_deliverable,
+    # Wave 3 — operating-signal lifecycle
+    "platform_acknowledge_report": acknowledge_report,
+    "platform_link_report_to_task": link_report_to_task,
+    # PRD-72: Board Tasks
+    "platform_create_task": create_board_task,
+    "platform_list_tasks": list_board_tasks,
+    "platform_board_snapshot": board_snapshot,
+    "platform_board_summary": board_summary,
+    "platform_get_task": get_board_task,
+    "platform_wait_for_task": wait_for_board_task,  # PRD-238 S4
+    "platform_assign_task": assign_board_task,
+    "platform_update_task": update_board_task,
+    "platform_update_task_status": update_board_task_status,
+    # PRD-77: Agent Self-Scheduling
+    "platform_schedule_task": schedule_task,
+    "platform_list_scheduled_tasks": list_scheduled_tasks,
+    "platform_cancel_scheduled_task": cancel_scheduled_task,
+    "platform_get_schedule": get_schedule,
+    # PRD-79: NL2SQL
+    "platform_query_data": query_data,
+    # PRD-77: Memory Browsing
+    "platform_browse_memories": browse_memories,
+    "platform_delete_memory": delete_memory,
+    # PRD-108: Shared Mission Field
+    "platform_field_query": field_query,
+    "platform_field_inject": field_inject,
+    "platform_field_stability": field_stability,
+    # Blog Widget
+    "platform_publish_blog_post": publish_blog_post,
+    "platform_list_blog_posts": list_blog_posts,
+    "platform_get_blog_post": get_blog_post,
+    "platform_update_blog_post": update_blog_post,
+    "platform_create_blog_post": create_blog_post_from_topic,
+    "platform_generate_cover_image": generate_cover_image,
+    # PRD-82A: Missions
+    "platform_create_mission": create_mission,
+    "platform_list_missions": list_missions,
+    "platform_get_mission": get_mission,
+    # PRD-204 S9: Watches (supervision to a verdict)
+    "platform_create_watch": create_watch,
+    "platform_list_watches": list_watches,
+    "platform_get_watch": get_watch,
+    "platform_cancel_watch": cancel_watch,
+    # PRD-228: live floor read-model in one call
+    "platform_fleet_status": fleet_status,
+    # PRD-163 S1: mission lifecycle control
+    "platform_approve_mission": approve_mission,
+    "platform_reject_mission": reject_mission,
+    "platform_pause_mission": pause_mission,
+    "platform_resume_mission": resume_mission,
+    "platform_cancel_mission": cancel_mission,
+    "platform_replan_mission": replan_mission,
+    "platform_update_mission_plan": update_mission_plan,
+    # Governance & Blueprints
+    "platform_list_blueprints": list_blueprints,
+    "platform_get_blueprint": get_blueprint,
+    "platform_create_blueprint": create_blueprint,
+    "platform_update_blueprint": update_blueprint,
+    "platform_validate_agent": validate_agent_handler,
+    "platform_check_budget": check_budget_handler,
+    # PRD-225: agent → human question (park, notify, return)
+    "platform_ask_human": ask_human,
+    # PRD-229: agent → orchestrator clarification (answer inline / escalate).
+    # Dispatch key carries the platform_ prefix (namespace invariant); the
+    # handler function keeps its bare name.
+    "platform_ask_orchestrator": ask_orchestrator,
+    # Enhanced Analytics (dashboard + performance)
+    "platform_get_success_rate": get_success_rate,
+    "platform_get_completion_time": get_completion_time,
+    "platform_get_error_rates": get_error_rates,
+    "platform_get_queue_depth": get_queue_depth,
+    "platform_get_efficiency_score": get_efficiency_score,
+    "platform_get_cost_per_execution": get_cost_per_execution,
+    "platform_get_peak_hours": get_peak_hours,
+    "platform_get_bottlenecks": get_bottlenecks,
+    "platform_get_predictive_alerts": get_predictive_alerts,
+    "platform_get_agent_ranking": get_agent_ranking,
+    "platform_get_sla_compliance": get_sla_compliance,
+    # PRD-121: HARNESS Self-Optimizing Loop
+    "platform_harness_status": harness_status,
+    "platform_harness_trigger": harness_trigger,
+    "platform_harness_history": harness_history,
+    # PRD-142 Wave 4 (W4-S6): routing-rule creation
+    "platform_create_routing_rule": create_routing_rule,
+    # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
+    "platform_set_power_mode": set_power_mode,
+    # PRD-143 S10: setup-surface gap-fill (operator tier)
+    "platform_get_power_mode": get_power_mode,
+    "platform_list_channels": list_channels,
+    "platform_connect_channel": connect_channel,
+    "platform_configure_channel": configure_channel,
+    "platform_start_channel": start_channel,
+    "platform_stop_channel": stop_channel,
+    "platform_get_widget_config": get_widget_config,
+    "platform_update_widget_config": update_widget_config,
+    "platform_upload_document": upload_document,
+    # PRD-143 S11: administration surface (operator tier by design)
+    "platform_list_members": list_members,
+    "platform_invite_member": invite_member,
+    "platform_set_member_role": set_member_role,
+    "platform_remove_member": remove_member,
+    "platform_update_workspace_settings": update_workspace_settings,
+    "platform_list_system_settings": list_system_settings,
+    "platform_update_system_setting": update_system_setting,
+    "platform_list_api_keys": list_api_keys,
+    "platform_revoke_api_key": revoke_api_key,
+    "platform_uninstall_plugin": uninstall_plugin,
+    # Wave 2: Auto reporting preferences + send-notification wrapper
+    "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
+    "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
+    "platform_send_notification": send_notification,
+    # PRD-126: Knowledge Graph
+    "platform_query_graph": handle_query_graph,
+    "platform_graph_neighbors": handle_graph_neighbors,
+    "platform_graph_communities": handle_graph_communities,
+    "platform_graph_impact": handle_graph_impact,
+    "platform_graph_stats": handle_graph_stats,
+    "platform_graph_path": handle_graph_path,
+    # PRD-183 S3 (F088): Shopify sync + freshness as tools
+    "platform_shopify_sync_catalog": shopify_sync_catalog,
+    "platform_shopify_sync_status": shopify_sync_status,
+    # PRD-165 S4: CodeGraph as an agent capability
+    "platform_codegraph_list_projects": codegraph_list_projects,
+    "platform_codegraph_search": codegraph_search,
+    "platform_codegraph_get_symbol": codegraph_get_symbol,
+    "platform_codegraph_call_graph": codegraph_call_graph,
+    "platform_codegraph_dependencies": codegraph_dependencies,
+    "platform_codegraph_architecture": codegraph_architecture,
+    # PRD-183 S4: codegraph write tools (index / reindex / auto-reindex)
+    "platform_codegraph_index": codegraph_index,
+    "platform_codegraph_reindex": codegraph_reindex,
+    "platform_codegraph_set_auto_reindex": codegraph_set_auto_reindex,
+}

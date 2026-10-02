@@ -46,6 +46,8 @@ from tests.test_prd251w2_campaigns import (  # noqa: E402
 )
 
 WAVE1B = VERSIONS / "prd251b_wave1.py"
+# The models also carry PRD-251B Wave 2's post columns: a comparison with them runs it after.
+WAVE2B = VERSIONS / "prd251b_wave2.py"
 BASE_HEAD = "prd252_ticket_numbers"
 POSTS = ("social_posts",)
 
@@ -96,6 +98,7 @@ def test_the_migration_builds_exactly_the_model_schema():
     try:
         with engine.begin() as conn:
             _run(conn, WAVE1B, "upgrade")
+            _run(conn, WAVE2B, "upgrade")
         migrated, model = _schema(engine, POSTS), _schema(model_engine, POSTS)
         _assert_same_schema(migrated, model, "the migration path through prd251b_wave1")
         posts = migrated["social_posts"]
@@ -116,6 +119,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
         with engine.begin() as conn:
             _run(conn, WAVE1B, "upgrade")
             _run(conn, WAVE1B, "upgrade")
+            _run(conn, WAVE2B, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(model_engine, POSTS), f"create_all first, from {start}")
         checks = [name for name, _sql in _schema(engine, POSTS)["social_posts"]["checks"]]
         assert checks.count("ck_social_posts_format") == 1 and checks.count("ck_social_posts_length_seconds") == 1
@@ -152,6 +156,7 @@ def test_the_downgrade_restores_the_old_check_and_drops_the_columns_and_the_upgr
         assert formats == [None]  # the text post keeps its row, without a format the old CHECK refuses
         with engine.begin() as conn:
             _run(conn, WAVE1B, "upgrade")
+            _run(conn, WAVE2B, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(_model_engine(), POSTS), "upgraded again")
     finally:
         engine.dispose()

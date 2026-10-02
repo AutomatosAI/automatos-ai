@@ -41,7 +41,7 @@ from sqlalchemy import update
 from config import config
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
-from modules.socials import notify, publish_lifecycle, publisher, service
+from modules.socials import notify, plan_late, publish_lifecycle, publisher, service
 from modules.socials.publish_records import PublishJob, end_lost
 from modules.socials.publishing import run_publish
 from modules.socials.settings import socials_off_reason
@@ -157,7 +157,8 @@ def reconcile(scheduler: Any, db: Any) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     ended = end_lost_publishes(db, now)
     passed = pass_planned_slots(db, now)
-    return {"added": added, "moved": moved, "removed": removed, "ended": ended, "passed": passed}
+    late = plan_late.schedule_late_approvals(db, now)  # PRD-251B (US-B206): approved after the slot passed
+    return {"added": added, "moved": moved, "removed": removed, "ended": ended, "passed": passed, "late": late}
 
 
 def pass_planned_slots(db: Any, now: datetime) -> int:
@@ -173,6 +174,8 @@ def pass_planned_slots(db: Any, now: datetime) -> int:
     for post_id in ids:
         post = db.get(SocialPost, post_id)
         if post is None or post.status not in PLANNED_PASS_STATUSES or post.planned_for is None:
+            continue
+        if plan_late.moved_on(db, post, now):  # PRD-251B (US-B206): the plan's next_slot policy
             continue
         status, content_hash = post.status, post.content_hash
         slot = _utc(post.planned_for).isoformat(timespec="minutes")

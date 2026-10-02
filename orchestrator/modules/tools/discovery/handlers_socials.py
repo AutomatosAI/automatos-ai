@@ -528,3 +528,61 @@ async def list_social_posts(db: Session, workspace_id: UUID, params: Dict[str, A
         return _refused(str(exc))
     posts = service.list_posts(db, workspace_id, statuses=statuses, limit=limit)
     return {"success": True, "posts": [post.to_dict() for post in posts], "count": len(posts), "limit": limit}
+
+
+# ---- PRD-251B (B8, US-B204): a plan's content bank, for the research playbook ----
+
+
+def _plan(db: Session, workspace_id: UUID, plan_id: Any) -> Any:
+    from modules.socials import plan_store
+
+    try:
+        key = UUID(str(plan_id))
+    except (TypeError, ValueError, AttributeError):
+        raise _Refused(f"plan_id {plan_id!r} is not a plan's id: the research playbook's plan_id input names it.") from None
+    plan = plan_store.get_plan(db, workspace_id, key)
+    if plan is None:
+        raise _Refused("Plan not found in this workspace.")
+    return plan
+
+
+async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The plan as its research needs it: goal, audience, dates, cadence, sources and the bank's topics."""
+    from modules.socials import topics
+
+    _, refusal = _open(db, workspace_id)
+    if refusal:
+        return refusal
+    try:
+        plan = _plan(db, workspace_id, params.get("plan_id"))
+    except _Refused as exc:
+        return _refused(str(exc))
+    keys = ("id", "name", "goal", "audience", "starts_on", "ends_on", "timezone", "cadence", "sources", "status")
+    bank = [{"title": t.title, "formats": list(t.formats or []), "used": t.used_at is not None} for t in topics.list_topics(db, plan)]
+    return {"success": True, "plan": {key: plan.to_dict()[key] for key in keys}, "bank": bank}
+
+
+async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Researched topics into the plan's bank: each added, or refused with why (no source, a
+    title the bank holds, a never-say phrase). Draft-only: no post is made here."""
+    from modules.socials import topics
+
+    _, refusal = _open(db, workspace_id)
+    if refusal:
+        return refusal
+    actor, _name = _agent(params)
+    try:
+        plan = _plan(db, workspace_id, params.get("plan_id"))
+        added, refused = topics.add_topics(db, plan, params.get("topics"), created_by=actor, origin=topics.RESEARCH)
+    except _Refused as exc:
+        return _refused(str(exc))
+    except topics.InvalidTopic as exc:
+        db.rollback()
+        return _refused(str(exc))
+    db.commit()
+    return {
+        "success": True,
+        "added": [{"id": str(t.id), "title": t.title} for t in added],
+        "refused": refused,
+        "message": f"{len(added)} added to the bank, {len(refused)} refused.",
+    }

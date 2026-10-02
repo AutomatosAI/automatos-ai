@@ -1,10 +1,11 @@
 """Socials ActionDefinitions (PRD-251 US-116, S4.1): agents draft posts; people approve them.
 
 Five tools over the Socials post lifecycle: create, update, submit, get and
-list. Their handlers (``handlers_socials.py``) run the flows the /api/socials
-routes run. None of them approves, schedules or publishes, and no parameter
-does (D6, D14): a person approves in the Socials tab, and the platform
-publishes (Wave 3).
+list; and two over a plan's content bank (PRD-251B B8, US-B204): read a plan,
+and add researched topics to its bank. Their handlers (``handlers_socials.py``)
+run the flows the /api/socials routes run. None of them approves, schedules or
+publishes, and no parameter does (D6, D14): a person approves in the Socials
+tab, and the platform publishes (Wave 3).
 
 The enums are the lifecycle's own vocabulary, spelled out here so the registry
 build stays stdlib-light (the utterance-corpus linter leaf-loads this module);
@@ -34,6 +35,11 @@ POST_STATUSES = [
 # core/chart_binding.py CHART_KINDS and core/report_tables.py PARTS
 CHART_KINDS = ["bar", "line", "grid"]
 CHART_PARTS = ["table", "metrics"]
+
+# modules/socials/topics.py FACT_SOURCE_KINDS and its limits (PRD-251B B8).
+FACT_SOURCE_KINDS = ["knowledge", "deliverable", "web", "github", "note"]
+TOPICS_MAX_PER_CALL = 30
+FACTS_MAX_PER_TOPIC = 12
 
 # platform_list_social_posts: how many posts one call returns.
 LIST_DEFAULT_LIMIT = 25
@@ -183,8 +189,16 @@ def _post_fields() -> dict:
 
 
 def register_socials_actions(registry: ActionRegistry) -> None:
-    """Register the Socials draft tools (PRD-251 US-116)."""
+    """Register the Socials draft tools (PRD-251 US-116) and the plan research tools (PRD-251B US-B204)."""
+    _register_create_social_post(registry)
+    _register_update_social_post(registry)
+    _register_submit_social_post(registry)
+    _register_get_social_post(registry)
+    _register_list_social_posts(registry)
+    _register_plan_actions(registry)
 
+
+def _register_create_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_social_post",
         description=(
@@ -222,6 +236,8 @@ def register_socials_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_update_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_social_post",
         description=(
@@ -254,6 +270,8 @@ def register_socials_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_submit_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_submit_social_post",
         description=(
@@ -283,6 +301,8 @@ def register_socials_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_get_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_social_post",
         description=(
@@ -305,6 +325,8 @@ def register_socials_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_list_social_posts(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_social_posts",
         description=(
@@ -337,4 +359,73 @@ def register_socials_actions(registry: ActionRegistry) -> None:
             "list our social media drafts",
             "show the social posts a reviewer sent back",
         ],
+    ))
+
+
+def _topic_schema() -> dict:
+    fact = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The fact, in one sentence."},
+            "source": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": FACT_SOURCE_KINDS},
+                    "ref": {"type": "string", "description": "The document's or Deliverable's id, or the page's address."},
+                    "label": {"type": "string", "description": "A short name for the source."},
+                },
+                "required": ["kind", "ref", "label"],
+            },
+        },
+        "required": ["text", "source"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "The idea, as a post's title."},
+            "angle": {"type": "string", "description": "Why it matters to the plan's audience."},
+            "facts": {"type": "array", "items": fact, "maxItems": FACTS_MAX_PER_TOPIC},
+            "formats": {"type": "array", "items": {"type": "string", "enum": POST_FORMATS}},
+        },
+        "required": ["title", "facts"],
+    }
+
+
+def _register_plan_actions(registry: ActionRegistry) -> None:
+    """PRD-251B (B8, US-B204): the Content bank research playbook's read and its one write."""
+    plan_id = {"type": "string", "description": "The Socials plan's id (the research playbook's plan_id input)."}
+    registry.register(ActionDefinition(
+        name="platform_get_social_plan",
+        description=(
+            "Read a Socials plan: its goal, audience and dates, its cadence (channels, formats and "
+            "times), what to research (sources, notes and the never-say list) and its content bank "
+            "(each topic's title, formats and whether a post used it)."
+        ),
+        category="socials",
+        parameters={"type": "object", "properties": {"plan_id": plan_id}, "required": ["plan_id"]},
+        permission_level="read",
+        tags=["socials", "plan", "content bank", "research", "cadence"],
+        examples=["read the Socials plan", "what's in our content bank?", "show the social media plan's cadence"],
+    ))
+    registry.register(ActionDefinition(
+        name="platform_add_social_topics",
+        description=(
+            "Add researched topics to a Socials plan's content bank, each with the facts it rests on and "
+            "every fact's source (knowledge, deliverable, web, github or note; a reference and a label). "
+            "The bank refuses a fact without a source, a title it already holds, and anything on the "
+            "plan's never-say list; the answer lists what was added and what was refused, with why. It "
+            "only adds topics: posts are made from them on their day."
+        ),
+        category="socials",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plan_id": plan_id,
+                "topics": {"type": "array", "items": _topic_schema(), "minItems": 1, "maxItems": TOPICS_MAX_PER_CALL},
+            },
+            "required": ["plan_id", "topics"],
+        },
+        permission_level="write",
+        tags=["socials", "plan", "content bank", "research", "topics"],
+        examples=["add these topics to the content bank", "save the researched ideas to the Socials plan"],
     ))

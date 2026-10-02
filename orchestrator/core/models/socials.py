@@ -32,6 +32,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -75,6 +76,14 @@ SOCIAL_TARGET_STATUSES = ("pending", "uploading", "published", "failed")
 # every post of the campaign whose content hash is in the approved set when the
 # approval is given. A post added or edited later still needs its own approval.
 SOCIAL_CAMPAIGN_APPROVAL_MODES = ("per_post", "series")
+# PRD-251B (B6, B7, B11; US-B201): a plan is a campaign of kind "plan": dates, a
+# cadence, sources to research, how and when posts are made, and what a passed
+# slot does. Its posts are made on their day (B7), never ahead.
+SOCIAL_CAMPAIGN_KINDS = ("campaign", "plan")
+SOCIAL_PLAN_STATUSES = ("active", "paused", "ended")
+SOCIAL_LATE_POLICIES = ("skip", "next_slot")
+# B8: a content-bank topic comes from the research run or from a person.
+SOCIAL_TOPIC_ORIGINS = ("research", "person")
 
 
 def _in_list(column: str, values: tuple) -> str:
@@ -105,6 +114,9 @@ class SocialCampaign(Base):
             name="ck_social_campaigns_approval_mode",
         ),
         Index("ix_social_campaigns_workspace_created", "workspace_id", "created_at"),
+        CheckConstraint(_in_list("kind", SOCIAL_CAMPAIGN_KINDS), name="ck_social_campaigns_kind"),
+        CheckConstraint(_in_list("status", SOCIAL_PLAN_STATUSES), name="ck_social_campaigns_status"),
+        CheckConstraint(_in_list("late_policy", SOCIAL_LATE_POLICIES), name="ck_social_campaigns_late_policy"),
         {"extend_existing": True},
     )
 
@@ -124,6 +136,27 @@ class SocialCampaign(Base):
     # The user or agent that made the campaign.
     created_by = Column(String(255), nullable=False)
 
+    # PRD-251B (B6, US-B201): the plan fields, added by the prd251b_wave2 migration.
+    # Server defaults only, so a database a step behind still takes the inserts.
+    kind = Column(String(16), nullable=False, server_default="campaign")
+    status = Column(String(16), nullable=False, server_default="active")
+    goal = Column(Text, nullable=True)
+    audience = Column(Text, nullable=True)
+    starts_on = Column(Date, nullable=True)
+    ends_on = Column(Date, nullable=True)
+    timezone = Column(String(64), nullable=True)  # IANA name: the plan's days and times are local to it
+    # [{"id", "channels": [toolkit], "format", "length_seconds", "template_id", "days": ["mon", ...], "time": "HH:MM"}]
+    cadence = Column(_json_type(), nullable=True)
+    # {"knowledge", "deliverables", "website", "github": bool, "notes": text, "never_say": [phrase]}
+    sources = Column(_json_type(), nullable=True)
+    # {"time": "HH:MM", "video_days_early": int, "visual_mix": {...}, "max_per_day": int}
+    make = Column(_json_type(), nullable=True)
+    late_policy = Column(String(16), nullable=False, server_default="skip")
+    # {"day": "mon", "time": "HH:MM", "last_run_at", "last_run_id"}: the weekly research run
+    research = Column(_json_type(), nullable=True)
+    # {slot_key: {"skip": true} | {"to": ISO datetime}}: planned slots moved or skipped
+    slot_overrides = Column(_json_type(), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -139,6 +172,19 @@ class SocialCampaign(Base):
             "approved_by": self.approved_by,
             "approved_at": _iso(self.approved_at),
             "created_by": self.created_by,
+            "kind": self.kind or "campaign",
+            "status": self.status or "active",
+            "goal": self.goal,
+            "audience": self.audience,
+            "starts_on": _iso(self.starts_on),
+            "ends_on": _iso(self.ends_on),
+            "timezone": self.timezone,
+            "cadence": list(self.cadence or []),
+            "sources": dict(self.sources or {}),
+            "make": dict(self.make or {}),
+            "late_policy": self.late_policy or "skip",
+            "research": dict(self.research or {}),
+            "slot_overrides": dict(self.slot_overrides or {}),
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
         }
@@ -154,6 +200,8 @@ class SocialPost(Base):
         Index("ix_social_posts_campaign_id", "campaign_id"),
         CheckConstraint(POST_LENGTH_SECONDS_CHECK, name="ck_social_posts_length_seconds"),
         Index("ix_social_posts_workspace_planned_for", "workspace_id", "planned_for"),
+        # PRD-251B (B7): one post per planned slot of a plan; a NULL key never collides.
+        Index("uq_social_posts_campaign_slot_key", "campaign_id", "slot_key", unique=True),
         {"extend_existing": True},
     )
 
@@ -230,6 +278,13 @@ class SocialPost(Base):
     # template declares (US-B104). Content: the hash covers it once set. Added by
     # the prd251b_wave1 migration.
     length_seconds = Column(Integer, nullable=True)
+    # PRD-251B (B7, US-B205): the plan's slot the post was made for
+    # ("<row id>|<YYYY-MM-DD>|<HH:MM>", unique with campaign_id). Not content.
+    slot_key = Column(String(160), nullable=True)
+    # The editor's music (US-B109): NULL plays the template's own track; {"track": id}
+    # a track of media-render's library; {"track": null} no music. A render setting
+    # like voice: outside the content hash. Both added by the prd251b_wave2 migration.
+    music = Column(_json_type(), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -271,10 +326,65 @@ class SocialPost(Base):
             "timezone": self.timezone,
             "planned_for": _iso(self.planned_for),
             "length_seconds": self.length_seconds,
+            "slot_key": self.slot_key,
+            "music": self.music or None,
             "targets": [
                 target.to_dict()
                 for target in sorted(self.targets or [], key=lambda t: (t.toolkit, t.post_kind))
             ],
+            "created_at": _iso(self.created_at),
+            "updated_at": _iso(self.updated_at),
+        }
+
+
+class SocialTopic(Base):
+    """A plan's content-bank topic (PRD-251B B8, US-B201/B203).
+
+    Research or a person adds it; every fact carries its source. The make tick
+    (US-B205) takes the next unused topic that suits a slot's format, and records
+    the post that used it. Deleting the plan deletes its bank.
+    """
+
+    __tablename__ = "social_topics"
+    __table_args__ = (
+        CheckConstraint(_in_list("origin", SOCIAL_TOPIC_ORIGINS), name="ck_social_topics_origin"),
+        Index("ix_social_topics_campaign_used", "campaign_id", "used_at"),
+        Index("ix_social_topics_workspace_id", "workspace_id"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    campaign_id = Column(Uuid(as_uuid=True), ForeignKey("social_campaigns.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(200), nullable=False)
+    angle = Column(Text, nullable=True)
+    # [{"text", "source": {"kind": knowledge|deliverable|web|github|note, "ref", "label"}}]
+    facts = Column(_json_type(), nullable=False, default=list)
+    # The post formats it suits (SOCIAL_POST_FORMATS); empty suits any.
+    formats = Column(_json_type(), nullable=False, default=list)
+    # A pinned topic is used on this day first.
+    pinned_on = Column(Date, nullable=True)
+    used_post_id = Column(Uuid(as_uuid=True), ForeignKey("social_posts.id", ondelete="SET NULL"), nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    origin = Column(String(16), nullable=False, server_default="person")
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "workspace_id": str(self.workspace_id),
+            "plan_id": str(self.campaign_id),
+            "title": self.title,
+            "angle": self.angle,
+            "facts": list(self.facts or []),
+            "formats": list(self.formats or []),
+            "pinned_on": _iso(self.pinned_on),
+            "used_post_id": str(self.used_post_id) if self.used_post_id else None,
+            "used_at": _iso(self.used_at),
+            "origin": self.origin or "person",
+            "created_by": self.created_by,
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
         }

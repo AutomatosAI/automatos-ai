@@ -270,6 +270,23 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/posts/{post_id}/media"),
             # PRD-251B US-B111: another take of a post in the Queue (api/socials_retake.py).
             ("POST", "/api/socials/posts/{post_id}/retake"),
+            # PRD-251B Wave 2: plans (US-B202, US-B204, US-B208; api/socials_plans.py) and their
+            # content bank (US-B203; api/socials_topics.py).
+            ("GET", "/api/socials/plans"),
+            ("POST", "/api/socials/plans"),
+            ("GET", "/api/socials/plans/{plan_id}"),
+            ("PUT", "/api/socials/plans/{plan_id}"),
+            ("POST", "/api/socials/plans/{plan_id}/pause"),
+            ("POST", "/api/socials/plans/{plan_id}/resume"),
+            ("POST", "/api/socials/plans/{plan_id}/end"),
+            ("POST", "/api/socials/plans/{plan_id}/research"),
+            ("GET", "/api/socials/plans/{plan_id}/slots"),
+            ("PUT", "/api/socials/plans/{plan_id}/slots/{slot_key:path}"),
+            ("GET", "/api/socials/plans/{plan_id}/topics"),
+            ("POST", "/api/socials/plans/{plan_id}/topics"),
+            ("PUT", "/api/socials/plans/{plan_id}/topics/{topic_id}"),
+            ("DELETE", "/api/socials/plans/{plan_id}/topics/{topic_id}"),
+            ("PUT", "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

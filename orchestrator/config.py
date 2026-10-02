@@ -1950,6 +1950,10 @@ class Config:
     # at most this many bytes: a PNG, JPEG or WebP image, or an MP4 video.
     SOCIALS_UPLOAD_IMAGE_MAX_BYTES: int = int(os.getenv("SOCIALS_UPLOAD_IMAGE_MAX_BYTES", "10485760"))
     SOCIALS_UPLOAD_VIDEO_MAX_BYTES: int = int(os.getenv("SOCIALS_UPLOAD_VIDEO_MAX_BYTES", "209715200"))
+    # PRD-251B US-B205: the leader's plan tick makes each plan's due posts this often, at
+    # most this many slots a tick (the rest wait for the next).
+    SOCIALS_PLAN_TICK_SECONDS: int = int(os.getenv("SOCIALS_PLAN_TICK_SECONDS", "300"))
+    SOCIALS_PLAN_MAX_SLOTS_PER_TICK: int = int(os.getenv("SOCIALS_PLAN_MAX_SLOTS_PER_TICK", "12"))
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation

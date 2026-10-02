@@ -83,7 +83,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # merges them and adds the per-workspace ticket number (PRD-252 R4).
 # 2026-10-02 (PRD-251B Wave 1): prd251b_wave1 chains onto that — the ONE migration
 # of the Studio wave (social_posts.planned_for, length_seconds, the text format).
-EXPECTED_HEAD = "prd251b_wave1"
+# 2026-10-03 (PRD-251B Wave 2): prd251b_wave2 chains onto prd251b_wave1 — the ONE
+# migration of the plans wave (the plan columns, slot_key, music, social_topics).
+EXPECTED_HEAD = "prd251b_wave2"
 
 
 def _literal(node: ast.AST):

@@ -1,5 +1,5 @@
 {
-  "route_count": 856,
+  "route_count": 871,
   "routes": [
     {
       "method": "GET",
@@ -2104,6 +2104,66 @@
     {
       "method": "GET",
       "path": "/api/socials/footage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/end"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/research"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/resume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/slots"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/slots/{slot_key:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/topics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/topics"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"
     },
     {
       "method": "GET",

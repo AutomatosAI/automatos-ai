@@ -104,6 +104,7 @@ from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_media_upload import router as media_upload_router
+from api.socials_plans import router as plans_router
 from api.socials_retake import router as retake_router
 from api.socials_slots import router as slots_router
 from api.socials_targets import router as targets_router
@@ -144,7 +145,7 @@ router = APIRouter(
 for sub_router in (
     channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router,
     slots_router, media_upload_router,  # PRD-251B: planned slots (US-B105), an uploaded visual (US-B109)
-    retake_router,  # PRD-251B: another take from the Queue (US-B111)
+    retake_router, plans_router,  # PRD-251B: another take (US-B111); plans and their bank (US-B202, US-B203)
 ):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
