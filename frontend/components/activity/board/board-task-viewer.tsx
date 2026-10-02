@@ -3,6 +3,7 @@
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { sessionNotes, type SessionNote } from './session-notes'
+import { SessionPlanPanel } from './session-plan'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
@@ -146,6 +147,7 @@ function SessionBlock({ task }: { task: BoardTask }) {
             )}
           </div>
         )}
+        <SessionPlanPanel runtimeRef={ref} />
         {notes.length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Notes</p>

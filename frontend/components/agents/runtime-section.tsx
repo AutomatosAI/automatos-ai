@@ -429,7 +429,6 @@ function WorkspaceFolderField({ value, onChange }: Pick<RuntimeSectionProps, 'va
       </label>
       <PermissionModeSelect
         value={value.cli_permission_mode}
-        provider={value.cli_provider || DEFAULT_CLI_PROVIDER}
         onChange={(mode) => onChange('cli_permission_mode', mode)}
       />
       {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
