@@ -118,6 +118,7 @@ class TestSectionRegistry:
         "onboarding", "mission_context", "agent_roster",
         "planning_knowledge", "planning_history",
         "documents_inventory",   # F085-B
+        "product_facts",         # F232
     }
 
     def test_all_expected_sections_registered(self):
