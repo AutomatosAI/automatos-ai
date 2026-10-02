@@ -44,6 +44,7 @@ def _deny_claude_shaped(event: str, reason: str) -> dict:
 _OFFLINE_DENY = {
     "claude": _deny_claude_shaped,
     "codex": _deny_claude_shaped,
+    "copilot": _deny_claude_shaped,   # Copilot reads Claude-format hook output (PRD-253)
 }
 
 

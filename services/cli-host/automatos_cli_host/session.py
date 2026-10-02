@@ -54,6 +54,8 @@ from .config import HostConfig
 from .env import build_session_env
 from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
 from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
+from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, request_of
+from .permission_request import answer as permission_answer
 from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
 from .session_prompt import build_system_prompt, build_ticket_file
 from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
@@ -189,6 +191,7 @@ class Session:
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        self._allowed_calls = AllowedCalls()            # what the gate allowed: a CLI's own re-ask is answered alike
         # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
         self._pending_asks: Dict[str, threading.Event] = {}
         self._ask_answers: Dict[str, bool] = {}
@@ -247,10 +250,7 @@ class Session:
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
-            tool = payload.get("tool_name") or "?"
-            reason = "a permission prompt reached the TUI — sessions are policy-gated, not prompted"
-            self.denials.append({"tool": tool, "reason": reason, "stage": "PermissionRequest"})
-            return Reply.deny(reason)
+            return self._permission_request(payload)
         if event == "PostToolUse":
             self._track_file(payload)
             return Reply.none()
@@ -288,11 +288,26 @@ class Session:
                          "decision": decision.behavior, "reason": decision.reason[:DECISION_REASON_CHARS],
                          **({"answer": answer, "request_id": request_id} if answer else {})})
         if verdict.allow:
+            self._allowed_calls.add(tool, tool_input)
             return Reply.allow()
         if verdict.reason != PLAN_WITH_OPERATOR:    # a plan handed to the operator is not a refusal
             self.denials.append({"tool": tool, "reason": verdict.reason, "stage": "PreToolUse",
                                  "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
         return Reply.deny(verdict.reason)
+
+    def _permission_request(self, payload: Dict[str, Any]) -> Reply:
+        """The CLI asked its own permission (``permission_request.py``): denied, or —
+        for a preset that rejudges — the gate's verdict on the same call."""
+        tool, tool_input = request_of(payload)
+        mode = self.adapter.preset.permission_request
+        now = decide(self.adapter.tool_intent(tool, dict(tool_input)), self._policy) if (
+            mode == PERMISSION_REQUEST_REJUDGE and self._policy is not None) else None
+        allow, reason = permission_answer(mode, allowed_before=self._allowed_calls.holds(tool, dict(tool_input)),
+                                          behavior=now.behavior if now else None, reason=now.reason if now else "")
+        if allow:
+            return Reply.allow()
+        self.denials.append({"tool": tool or "?", "reason": reason, "stage": "PermissionRequest"})
+        return Reply.deny(reason)
 
     def _plan_card(self, tool: str, intent: Any, decision: Decision, text: str) -> Tuple[Decision, Optional[str], Optional[str]]:
         """The plan a CLI presents in its turn (Claude Code's ExitPlanMode) is a card
@@ -397,7 +412,7 @@ class Session:
         cwd = self._working_dir()
         if isinstance(cwd, SessionOutcome):
             return cwd
-        refused = self._preflight()
+        refused = self._preflight() or self._refused_here(cwd)
         if refused is not None:
             return refused
         preset = self.adapter.preset
@@ -441,6 +456,11 @@ class Session:
         if refusal is not None:
             return self._outcome("error", error=refusal.message, exit_reason=refusal.code)
         return None
+
+    def _refused_here(self, cwd: Path) -> Optional[SessionOutcome]:
+        """2b. what the CLI can tell about THIS folder before spawn (PRD-253 S1.6)."""
+        refusal = self.adapter.refuse_here(cwd)
+        return self._outcome("error", error=refusal.message, exit_reason=refusal.code) if refusal else None
 
     def _choose_mode(self, preset: Any) -> None:
         """The session's permission mode — before the ticket file, which names a Plan
@@ -508,6 +528,7 @@ class Session:
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
             session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
+            extra_dirs=tuple(self._policy.extra_dirs),
         )
         return ctx, worktree
 
@@ -646,6 +667,8 @@ class Session:
         ungated = exit_reason == turn_end.UNGATED_EXIT
         if ungated:
             text = ""                       # PRD-253 S0.2: nothing a run without the gate produced is reported
+        elif transcript and transcript.exists():
+            text += "".join(f"\n\n[{note}]" for note in self.adapter.record_notes(transcript))
         status, error = turn_end.describe(
             exit_reason, cli=os.path.basename(binary), returncode=self.proc.returncode if self.proc else None,
             tail=bytes(self.output_tail).decode("utf-8", "replace")[-1500:],

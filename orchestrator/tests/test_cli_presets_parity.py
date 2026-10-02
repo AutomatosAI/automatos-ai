@@ -50,9 +50,11 @@ def test_backend_registry_matches_the_hosts_preset_rows():
 
 def test_runtime_module_still_exports_the_registry_names():
     """Every importer of core.cli_runtime keeps its names; the rules are the registry's."""
-    assert cli_runtime.CLI_PROVIDERS == cli_presets.CLI_PROVIDERS == ("claude", "codex")
+    assert cli_runtime.CLI_PROVIDERS == cli_presets.CLI_PROVIDERS == ("claude", "codex", "copilot")
     assert cli_runtime.usage_provider_slug("claude") == "claude_code" and cli_runtime.usage_provider_slug("codex") == "codex"
-    assert cli_runtime.USAGE_PROVIDER_LABELS == {"claude_code": "Claude Code", "codex": "Codex"}
+    assert cli_runtime.USAGE_PROVIDER_LABELS == {"claude_code": "Claude Code", "codex": "Codex",
+                                                 "copilot_cli": "GitHub Copilot"}
+    assert cli_runtime.usage_provider_slug("copilot") == "copilot_cli"
     assert cli_runtime.is_valid_cli_model("claude", "opus") and cli_runtime.is_valid_cli_model("claude", "claude-opus-5[1m]")
     assert not cli_runtime.is_valid_cli_model("claude", "gpt-5.5") and cli_runtime.is_valid_cli_model("codex", "gpt-5.5")
     assert cli_runtime.is_valid_cli_model("codex", None) and not cli_runtime.is_valid_cli_model("grok", "x")

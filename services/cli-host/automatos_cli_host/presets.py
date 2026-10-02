@@ -17,11 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Tuple
 
+from .permission_request import PERMISSION_REQUEST_MODES
+
 # ── vocabularies ─────────────────────────────────────────────────────────────
 TIER_NATIVE = "native"      # the CLI's own hooks + a real system-prompt flag (claude)
 TIER_HOOKS = "hooks"        # a config-file hook shim in a per-agent config home (codex, gemini, grok, …)
 TIER_PROXY = "proxy"        # no hook surface: a loopback proxy synthesizes the events (qwen, crush)
-TIER_SEED = "seed"          # no lifecycle at all: spawn, seed a prompt, read the end (copilot, cursor)
+TIER_SEED = "seed"          # no lifecycle at all: spawn, seed a prompt, read the end (cursor)
 TIERS = (TIER_NATIVE, TIER_HOOKS, TIER_PROXY, TIER_SEED)
 
 TURN_END_STOP_HOOK = "stop_hook"        # the turn ends on the Stop hook (tiers 1–3)
@@ -108,6 +110,10 @@ class CliPreset:
     hook_timeouts: Mapping[str, Any] = field(default_factory=dict)  # {"*": literal, "<Event>": literal} — the CLI's own unit
     allow_is_silence: bool = False            # agy: any stdout object is a decision; allow = write nothing
     event_name_source: str = EVENT_NAME_PAYLOAD
+    # A PermissionRequest hook: "deny" (a prompt reached the TUI, nobody watches it) or
+    # "rejudge" (the CLI re-asks after the gate allowed — the gate's verdict on the same
+    # call, never a card; permission_request.py, PRD-253 S1.4).
+    permission_request: str = "deny"
     # How long a gated session may take to prove its gate loaded (its SessionStart
     # hook); None = the host's --startup-timeout. A print-mode CLI shows no login
     # screen or dialog, so its window can be short (turn_end.py, PRD-253 S0.2).
@@ -141,6 +147,8 @@ class CliPreset:
             raise ValueError(f"{self.id}: hook_events not on the bus: {sorted(unknown)}")
         if self.initial_prompt == PROMPT_FLAG and not self.initial_prompt_flag:
             raise ValueError(f"{self.id}: initial_prompt=flag needs initial_prompt_flag")
+        if self.permission_request not in PERMISSION_REQUEST_MODES:
+            raise ValueError(f"{self.id}: permission_request must be one of {PERMISSION_REQUEST_MODES}")
 
     @property
     def hold_events(self) -> Tuple[str, ...]:
@@ -244,7 +252,68 @@ CODEX = CliPreset(
     docs_url="https://github.com/openai/codex",
 )
 
-REGISTRY: Dict[str, CliPreset] = {p.id: p for p in (CLAUDE, CODEX)}
+# GitHub Copilot CLI (PRD-253): the hooks tier — the design doc's "seed" row was read
+# from munder's code, not the binary. ``copilot -p``: hooks fire in print mode, the
+# turn is the process, and with no allow flag a call the gate did not allow is
+# refused by Copilot itself (D1, D3). Facts from the 1.0.91 bundle; what only a
+# live run proves is listed under the PRD's "Verify at build".
+COPILOT = CliPreset(
+    id="copilot",
+    label="GitHub Copilot",
+    binary="copilot",
+    tier=TIER_HOOKS,
+    turn_end=TURN_END_PROCESS_EXIT,
+    startup_timeout_seconds=30,                # no login screen or dialog in -p (turn_end.py)
+    model_flag="--model",
+    session_id_flag="--session-id",            # a new session with the backend's pre-assigned uuid
+    resume_flag="--resume",                    # an unknown id fails; --session-id would silently start fresh
+    add_dir_flag="--add-dir",
+    mcp_config_flag="--additional-mcp-config", # value: "@<session>/mcp.json"
+    worktree_args=("--worktree",),
+    worktree_takes_name=True,
+    system_prompt_flag=None,                   # the soul rides UserPromptSubmit → additionalContext (§6.9)
+    initial_prompt=PROMPT_FLAG,
+    initial_prompt_flag="-p",
+    name_flag="--name",
+    ungated_stance=(),                         # nothing: the gate's allow is the only lift (D3)
+    plan_stance=(),                            # Plan is the plan turn (Wave P); Copilot's own --plan is not used
+    permission_request="rejudge",              # its own path/URL checks may re-ask after the gate allowed (S1.4)
+    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update", "--no-auto-login"),
+    hook_events=BUS_EVENTS - {"PostCompact"},
+    # SECONDS (``timeoutSec``). A timed-out Copilot hook FAILS OPEN, so a held call
+    # must be answered by the shim first (D4).
+    hook_timeouts={"*": 60, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
+    config_home_env="COPILOT_HOME",
+    config_home_scope=SCOPE_PER_AGENT,         # the session index lives in the home (§6.1)
+    strip_env=frozenset({
+        "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",          # a session never carries a token (D6)
+        "COPILOT_ALLOW_ALL", "COPILOT_ASSISTED_APPROVAL",            # allow flags by another name (D3)
+        "COPILOT_MODEL", "COPILOT_OFFLINE", "COPILOT_HOOK_ALLOW_LOCALHOST",
+        "GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS", "GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP",
+        "GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS",                    # repo hooks, workspace MCP, extensions in -p
+        "COPILOT_CLI",
+    }),
+    strip_env_prefixes=("COPILOT_PROVIDER_",), # BYOK never reaches a session
+    keep_env=frozenset({"GH_HOST", "COPILOT_GH_HOST", "COPILOT_PROXY_KERBEROS_SPN"}),   # GHE.com data residency, proxy
+    extra_env={"COPILOT_AUTO_UPDATE": "false"},
+    forbidden_args=(
+        "--allow-all-tools", "--allow-all", "--yolo", "--allow-all-paths", "--allow-all-urls", "--allow-tool",
+        "--assisted-approval", "--enable-memory", "--config-dir", "--share-gist", "--remote", "--remote-export",
+        "--cloud", "--connect", "--acp", "--server", "--headless", "-i", "--interactive", "--continue",
+        "--mcp-github-auth",
+    ),
+    auth_probe=AuthProbe(
+        kind="copilot_login",
+        code="copilot_not_logged_in",
+        refusal="GitHub Copilot is not logged in on this machine. Run `copilot login` (or `gh auth login` with an "
+                "account that has a Copilot seat), then retry.",
+    ),
+    install_hint="GitHub Copilot CLI is not installed on this machine (no `copilot` on your PATH). Install it "
+                 "(`brew install copilot-cli`, or `npm install -g @github/copilot`) and run `copilot login`.",
+    docs_url="https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
+)
+
+REGISTRY: Dict[str, CliPreset] = {p.id: p for p in (CLAUDE, CODEX, COPILOT)}
 DEFAULT_CLI = CLAUDE.id
 
 

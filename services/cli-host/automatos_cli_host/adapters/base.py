@@ -103,6 +103,10 @@ class LaunchContext:
     session_tools: Optional[Dict[str, Any]] = None
     # Plan mode (permission_modes.py): start in the CLI's own plan mode, when it has one.
     plan_first: bool = False
+    # The folders the gate grants besides the working folder — the session dir and,
+    # when it is elsewhere, the ticket's deliverables folder (PRD-253: a CLI with a
+    # path check of its own is told the same folders).
+    extra_dirs: Tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,6 +175,12 @@ class PresetAdapter:
             return Refusal(f"{self.preset.id}_missing",
                            self.preset.install_hint or f"{self.preset.label} is not installed on this machine")
         return self.logged_in()
+
+    def refuse_here(self, cwd: Path) -> Optional[Refusal]:
+        """Why THIS ticket's folder cannot run a gated session, when the CLI can tell
+        before spawn (PRD-253: a repository whose own settings switch every hook
+        off). The base knows no such setting."""
+        return None
 
     def detect(self) -> Dict[str, Any]:
         """What the host announces for this CLI: present, version, served (= preflight
@@ -304,6 +314,11 @@ class PresetAdapter:
 
     def last_text(self, transcript: Path) -> Optional[str]:
         return None
+
+    def record_notes(self, transcript: Path) -> List[str]:
+        """What the record says the operator should know about this turn (PRD-253
+        S2.1: Copilot's Automatos tools refused by an organisation's MCP policy)."""
+        return []
 
     def transcript_path(self, cwd: str, session_id: str, home: Optional[Path] = None) -> Optional[Path]:
         return None

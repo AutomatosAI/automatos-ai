@@ -37,7 +37,11 @@ def test_every_preset_is_internally_consistent(preset, tmp_path):
     session.assert_args_honour_invariant(args, preset.forbidden_args)      # never intersects
     for required in preset.required_args:
         assert required in args, f"{preset.id}: {required} must always be on the command line"
-    assert preset.ungated_stance and all(tok in args for tok in preset.ungated_stance)
+    # How the CLI stops prompting: a stance (Claude's acceptEdits, Codex's approvals
+    # off) — or, for a print-mode CLI (Copilot ``-p``), none at all: with no allow
+    # flag it refuses what it would have asked, so the gate's allow is the only lift (D3).
+    assert preset.ungated_stance or preset.turn_end == presets.TURN_END_PROCESS_EXIT
+    assert all(tok in args for tok in preset.ungated_stance)
 
 
 @pytest.mark.parametrize("preset", list(REGISTRY.values()), ids=list(REGISTRY))
@@ -82,13 +86,13 @@ def test_a_known_but_unserved_cli_is_honest_not_a_fallback(monkeypatch):
     """A CLI in the registry without an adapter (the picker and the claim filter
     know it) is never run as another CLI."""
     import automatos_cli_host.adapters as reg
-    assert has_adapter("claude") and has_adapter("codex")
+    assert has_adapter("claude") and has_adapter("codex") and has_adapter("copilot")
     monkeypatch.delitem(reg._ADAPTERS, "codex")
     with pytest.raises(NotServed):
         adapter_for("codex")
     with pytest.raises(UnknownCli):
         adapter_for("grok")
-    assert list(adapters()) == ["claude"]
+    assert list(adapters()) == ["claude", "copilot"]
 
 
 def test_a_ticket_for_an_unserved_cli_errors_before_any_process(tmp_path):
