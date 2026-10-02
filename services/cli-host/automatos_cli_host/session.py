@@ -246,7 +246,7 @@ class Session:
             if self._contract_injected:
                 return Reply.none()
             self._contract_injected = True
-            return Reply.with_context(build_ticket_file(self.ticket, self.default_root, self.plan_turn))
+            return Reply.with_context(self._turn_context())
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
@@ -265,6 +265,17 @@ class Session:
             self.ended.set()
             return Reply.none()
         return Reply.none()
+
+    def _turn_context(self) -> str:
+        """What the session is told with its first prompt: the ticket — and, for a CLI
+        with no system-prompt flag (Codex, GitHub Copilot), the agent's system prompt
+        ahead of it. Design §6.9: there the soul rides this hook, not argv; before,
+        only the ticket did, and such a session never saw its rules or its tools."""
+        ticket = build_ticket_file(self.ticket, self.default_root, self.plan_turn)
+        preset = self.adapter.preset
+        if preset.system_prompt_flag:
+            return ticket
+        return f"{build_system_prompt(self.ticket, preset.label)}\n{ticket}"
 
     def _pre_tool_use(self, payload: Dict[str, Any]) -> Reply:
         tool = str(payload.get("tool_name") or "")
