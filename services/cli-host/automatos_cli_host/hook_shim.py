@@ -66,19 +66,24 @@ def _argv_event(argv) -> str:
     return ""
 
 
-def main(argv=None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    raw = sys.stdin.read()
+def _payload(raw: str, argv) -> dict:
+    """The hook payload from stdin — the event named on the command line when the
+    payload carries none — tagged with this session's ticket."""
     try:
         payload = json.loads(raw) if raw.strip() else {}
     except ValueError:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    event = payload.get("hook_event_name") or _argv_event(argv)
-    if event and not payload.get("hook_event_name"):
-        payload["hook_event_name"] = event
+    if not payload.get("hook_event_name") and _argv_event(argv):
+        payload["hook_event_name"] = _argv_event(argv)
     payload.setdefault("automatos_task_id", os.environ.get("AUTOMATOS_TASK_ID"))
+    return payload
+
+
+def main(argv=None) -> int:
+    payload = _payload(sys.stdin.read(), sys.argv[1:] if argv is None else argv)
+    event = payload.get("hook_event_name") or ""
     sock_path = os.environ.get("AUTOMATOS_HOST_SOCK")
     if not sock_path:
         if event in _GATED_EVENTS:
