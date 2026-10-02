@@ -1,0 +1,33 @@
+suite: Ingress
+templates:
+  - templates/ingress.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: is off by default
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: routes /api and /ws to the API and everything else to the web app
+    release:
+      name: demo
+    set:
+      ingress:
+        enabled: true
+        host: automatos.example.com
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: automatos.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /api
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: demo-automatos-api
+      - equal:
+          path: spec.rules[0].http.paths[1].path
+          value: /ws
+      - equal:
+          path: spec.rules[0].http.paths[2].backend.service.name
+          value: demo-automatos-frontend

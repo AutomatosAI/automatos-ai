@@ -143,6 +143,6 @@ def test_the_watchdog_ends_quietly_when_its_loop_closes(caplog):
 def test_the_app_watches_its_loop_once_ready_and_stops_at_shutdown():
     source = MAIN_PY.read_text()
     ready, started = source.index("app.state.ready = True"), source.index("start_loop_watchdog()")
-    shutdown, stopped = source.index("Shutting down Automotas AI API Server"), source.index("_watchdog.stop()")
+    shutdown, stopped = source.index("Shutting down Automatos AI API Server"), source.index("_watchdog.stop()")
 
     assert ready < started < shutdown < stopped

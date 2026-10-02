@@ -1051,31 +1051,31 @@ def test_a_substitution_inside_a_loop_keeps_the_loops_bindings(tmp_path):
     assert verdict('for d in a b; do echo `cat <OUTSIDE>/host.json`; done') == "deny"
 
 
-def test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines(tmp_path):
-    """--unlisted-bash allow: ``xxd`` (not on the list) runs; never-allowed still denied; paths still judged.
+def test_auto_mode_runs_unknown_verbs_but_keeps_the_hard_lines(tmp_path):
+    """Auto mode (``--unlisted-bash allow`` until 2026-09-29): ``xxd`` (not on the list) runs; never-allowed still denied; paths still judged.
 
     The stand-in verb was ``comm`` until 2026-09-19, when comm joined the read-only
     allowlist — it was the one word that held an otherwise-allowed CSS diff all of
     night 1. Any benign, file-reading verb the list does not name serves the test.
     """
-    permissive = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow")
+    permissive = policy.PolicyContext(cwd=tmp_path, permission_mode="auto")
     strict = policy.PolicyContext(cwd=tmp_path)
     assert "xxd" not in policy.DEFAULT_BASH_ALLOW, "the stand-in must stay unlisted"
     assert policy.decide_bash("xxd a.txt", strict).behavior == "ask"
     assert policy.decide_bash("xxd a.txt", permissive).behavior == "allow"
     assert policy.decide_bash("git push --force origin main", permissive).behavior == "deny"
     assert policy.decide_bash("xxd /etc/passwd", permissive).behavior != "allow"
-    asks = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow", ask_bash=("docker compose",))
+    asks = policy.PolicyContext(cwd=tmp_path, permission_mode="auto", ask_bash=("docker compose",))
     assert policy.decide_bash("docker compose up", asks).behavior == "ask"
 
 
-def test_service_argv_carries_the_unlisted_bash_choice(tmp_path):
+def test_service_argv_carries_the_hosts_permission_mode(tmp_path):
     from automatos_cli_host import service
     from automatos_cli_host.config import HostConfig
-    strict = service.service_argv(HostConfig(state_dir=tmp_path))
-    permissive = service.service_argv(HostConfig(state_dir=tmp_path, unlisted_bash="allow"))
-    assert "--unlisted-bash" not in strict
-    assert permissive[permissive.index("--unlisted-bash") + 1] == "allow"
+    follows = service.service_argv(HostConfig(state_dir=tmp_path))
+    pinned = service.service_argv(HostConfig(state_dir=tmp_path, permission_mode="auto"))
+    assert "--permission-mode" not in follows and "--unlisted-bash" not in follows
+    assert pinned[pinned.index("--permission-mode") + 1] == "auto" and "--unlisted-bash" not in pinned
 
 
 def test_toolsearch_is_benign_so_deferred_mcp_tools_can_load(tmp_path):

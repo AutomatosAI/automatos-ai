@@ -1,6 +1,6 @@
 
 """
-Database Models for Automotas AI System
+Database Models for Automatos AI System
 =======================================
 
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.

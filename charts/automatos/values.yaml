@@ -1,0 +1,130 @@
+# Automatos AI — production-shaped defaults.
+#
+# PostgreSQL (with the pgvector extension) and Redis are external: point the chart
+# at managed services through the Secret below. For a throwaway kind cluster with
+# dev datastores, see deploy/kind/.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Every secret comes from ONE Secret you create (kubectl, ExternalSecrets, the Key
+# Vault CSI driver...). The chart never generates or stores secrets. Keys:
+#   DATABASE_URL               postgresql://USER:PASSWORD@HOST:5432/DB
+#   REDIS_URL                  redis://:PASSWORD@HOST:6379/0
+#   API_KEY                    the platform API key
+#   CREDENTIAL_ENCRYPTION_KEY  a Fernet key; every pod must share it, or credentials
+#                              saved by one pod can't be read by another
+#   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker
+existingSecret: ""
+
+edition:
+  # local: one workspace, one operator, NO LOGIN — anyone who can reach the web app
+  # is the admin. Put it behind a VPN or an authenticating ingress. The published
+  # frontend image is the local edition, so keep this at local for now.
+  authEdition: local
+  defaultWorkspaceId: "00000000-0000-0000-0000-0000000000c1"
+  localOperatorEmail: local@automatos.local
+
+# Extra non-secret settings for the API and the migration Job: any name config.py
+# reads. The chart already sets the edition, the worker URL and the workspace path.
+config:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  # The log relay targets Railway's internal Loki by default.
+  LOG_RELAY_ENABLED: "false"
+  # Optional services are OFF unless you point at one. Unset, config.py
+  # defaults them to localhost addresses that don't exist in a pod, and the
+  # API logs connection errors (the same choice envs/api.defaults makes).
+  QDRANT_URL: ""            # durable memory (Qdrant)
+  AGENT_OPT_WORKER_URL: ""  # the agent-optimisation worker
+  LOKI_URL: ""              # log search
+  PROMETHEUS_URL: ""        # metrics queries
+
+api:
+  image:
+    repository: ghcr.io/automatosai/automatos-api
+    tag: ""            # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # Keep ONE replica for now: the in-process schedulers (heartbeats, Playbook
+  # schedules, the reconciler) use a per-container lock, so a second replica would
+  # run every scheduled job twice.
+  replicas: 1
+  # uvicorn worker processes per pod. Prefer more pods over more workers once the
+  # schedulers can run on several replicas.
+  uvicornWorkers: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# The schema lifecycle runs once per install and upgrade, in a Job, before the
+# API pods start: `docker-entrypoint.sh migrate` waits for PostgreSQL, builds an
+# empty database, migrates, seeds, and (local edition) creates the workspace and
+# operator. API pods start uvicorn directly and never migrate.
+migrations:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+
+frontend:
+  enabled: true
+  image:
+    repository: ghcr.io/automatosai/automatos-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+worker:
+  enabled: true
+  image:
+    repository: ghcr.io/automatosai/automatos-workspace-worker
+    tag: ""
+    pullPolicy: IfNotPresent
+  concurrency: 3
+  defaultQuotaGb: 5
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+# Agent files, shared by the worker (read-write) and the API (read-only). Pods on
+# different nodes need ReadWriteMany storage (Azure Files, EFS, NFS); a single-node
+# cluster can use ReadWriteOnce.
+workspaces:
+  size: 10Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteMany
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Path routing on one host: /api and /ws to the API, everything else to the web
+# app. Needs a frontend that reads its API address at runtime; the published
+# image still has http://localhost:8000 fixed at build time.
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []

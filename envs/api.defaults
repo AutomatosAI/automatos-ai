@@ -33,6 +33,11 @@ REDIS_PORT=6379
 ENVIRONMENT=development
 LOG_LEVEL=INFO
 
+# Run the wait-migrate-seed lifecycle (orchestrator/docker-entrypoint.sh)
+# before the app starts. The image default is off, so Railway and Kubernetes
+# app pods start the app directly; Kubernetes migrates in a separate Job.
+AUTOMATOS_MIGRATE_ON_BOOT=true
+
 # Document conversion sidecar (compose profile: all) [ACTIVE]
 GOTENBERG_URL=http://gotenberg:3000
 

@@ -18,7 +18,10 @@ generator IS the fresh path, so nothing can rot.
 
 Existing databases (anything with an ``alembic_version`` row — prod, upgraded
 locals) never come near this script; the entrypoint routes them straight to
-``alembic upgrade heads``.
+``alembic upgrade heads``. The one exception is a database whose own fresh
+build was interrupted: it still carries ``build_schema``'s incomplete-build
+marker, never served, and is resumed here — re-running the build finishes it
+with the same schema a clean build produces.
 
 Usage: python -m scripts.init_fresh_db   (from /app; exits non-zero on failure)
 """
@@ -28,36 +31,51 @@ import sys
 from sqlalchemy import create_engine, text
 
 from config import config
-from scripts.generate_schema_baseline import build_schema
+from scripts.generate_schema_baseline import INCOMPLETE_MARKER, build_schema
 
+BUILD, RESUME, NOTHING, REFUSE = "build", "resume", "nothing", "refuse"
+
+
+def fresh_db_action(has_marker: bool, has_version: bool, table_count: int) -> str:
+    """What to do with this database. The marker wins: alembic_version exists
+    from a build's first statement, so it proves nothing on its own."""
+    if has_marker:
+        return RESUME
+    if has_version:
+        return NOTHING
+    return REFUSE if table_count > 0 else BUILD
+
+
+def _inspect(engine) -> tuple[bool, bool, int]:
+    with engine.connect() as conn:
+        has_marker = conn.execute(text(f"SELECT to_regclass('{INCOMPLETE_MARKER}')")).scalar()
+        has_version = conn.execute(text("SELECT to_regclass('alembic_version')")).scalar()
+        table_count = conn.execute(
+            text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
+        ).scalar()
+    return bool(has_marker), bool(has_version), int(table_count or 0)
 
 
 def main() -> int:
-    url = config.DATABASE_URL
-    engine = create_engine(url)
-    with engine.connect() as conn:
-        has_version = conn.execute(
-            text("SELECT to_regclass('alembic_version')")
-        ).scalar()
-        table_count = conn.execute(
-            text(
-                "SELECT count(*) FROM information_schema.tables "
-                "WHERE table_schema='public'"
-            )
-        ).scalar()
+    engine = create_engine(config.DATABASE_URL)
+    has_marker, has_version, table_count = _inspect(engine)
+    action = fresh_db_action(has_marker, has_version, table_count)
 
-    if has_version:
+    if action == NOTHING:
         print("init_fresh_db: alembic_version exists — not a fresh database, nothing to do.")
         return 0
-    if table_count and int(table_count) > 0:
+    if action == REFUSE:
         print(
             f"init_fresh_db: REFUSING — no alembic_version but {table_count} tables exist. "
             "This database is in an unknown state; initialize an empty database instead.",
             file=sys.stderr,
         )
         return 1
-
-    print("init_fresh_db: empty database — building the full schema (models + tolerant migration replay)…")
+    if action == RESUME:
+        print(f"init_fresh_db: a previous fresh build was interrupted ({table_count} tables, "
+              f"{INCOMPLETE_MARKER} present) — resuming it…")
+    else:
+        print("init_fresh_db: empty database — building the full schema (models + tolerant migration replay)…")
     total = build_schema(engine)
     print(f"init_fresh_db: done — {total} tables, alembic at heads.")
     return 0

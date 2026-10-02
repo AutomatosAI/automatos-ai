@@ -806,7 +806,9 @@ async def document_team_counts(
     }
 
 
-@router.get("/{document_id}", response_model=DocumentResponse)
+# ``:int`` so a static one-segment route registered further down this file
+# (``/reprocess-status``) is not parsed as a document id and refused with 422 (#827).
+@router.get("/{document_id:int}", response_model=DocumentResponse)
 async def get_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1010,84 +1012,119 @@ async def reprocess_document(
         document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check if file exists
         if not document.file_path:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Document has no file path - cannot reprocess. Upload a new file instead."
             )
-        
-        if not os.path.exists(document.file_path):
-            # The source file is gone (uploads live in a container-local temp dir
-            # that does not survive a restart — night 1, finding 17). The chunk
-            # text is still in Postgres, so re-embed from that rather than making
-            # the owner re-upload. Only valid in pgvector mode, where the vectors
-            # live beside the chunks; in S3 Vectors mode the source is still needed.
-            logger.warning(f"Document {document_id} file not found at {document.file_path}")
-            if not config.S3_VECTORS_ENABLED:
-                reembedded = await _reembed_document_from_chunks(db, document, str(ctx.workspace_id))
-                if reembedded > 0:
-                    document.status = "processed"
-                    document.chunk_count = reembedded
-                    db.commit()
-                    return {
-                        "message": (
-                            "Document re-embedded from its stored chunks "
-                            "(the uploaded source file is no longer on disk)."
-                        ),
-                        "document_id": document_id,
-                        "chunk_count": reembedded,
-                        "status": "processed",
-                        "source": "chunks",
-                    }
-            raise HTTPException(
-                status_code=400,
-                detail=f"Document file not found at: {document.file_path}, and it has no "
-                       f"stored chunks to rebuild from. Please re-upload the document."
-            )
-        
-        # Update status
+
+        previous_status = document.status
         document.status = "processing"
         db.commit()
-        
-        # Reprocess document
         try:
-            # Get workspace-specific DocumentManager
-            doc_manager = get_document_manager(str(ctx.workspace_id))
-
-            result = await doc_manager.upload_document(
-                file_path=document.file_path,
-                filename=document.filename,
-                file_type=document.file_type,
-                description=document.description or "",
-                tags=document.tags or [],
-                created_by=document.created_by or "system"
+            # #835: rebuild THIS document's chunks from its stored source (local or
+            # s3://), the way reprocess-all does — upload_document() would have
+            # made a second document, and never accepted file_type anyway.
+            rebuilt = await _reprocess_from_source(
+                get_document_manager(str(ctx.workspace_id)), document.id, document.file_path, document.filename
             )
-            
-            # Update document with processing results
-            document.status = "processed"
-            document.chunk_count = result.get("chunk_count", 0)
-            db.commit()
-            
-            return {
-                "message": "Document reprocessed successfully",
-                "document_id": document_id,
-                "chunk_count": document.chunk_count,
-                "status": "processed"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error reprocessing document {document_id}: {e}")
+        except Exception:
+            logger.exception(f"Error reprocessing document {document_id}")
             document.status = "failed"
             db.commit()
             raise HTTPException(status_code=500, detail="Internal server error")
-        
+        if not rebuilt:
+            return await _reembed_or_refuse(db, document, str(ctx.workspace_id), previous_status)
+
+        db.refresh(document)  # the pipeline wrote status and chunk_count to the row itself
+        return {
+            "message": "Document reprocessed successfully",
+            "document_id": document_id,
+            "chunk_count": document.chunk_count,
+            "status": document.status,
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error reprocessing document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _local_source(file_path: str, filename: Optional[str]) -> tuple[str, Optional[str]]:
+    """A document's stored source as a local path. An ``s3://`` source is
+    downloaded to a temp file, returned second for the caller to delete; a
+    source that cannot be fetched comes back as an empty path."""
+    if not file_path.startswith("s3://"):
+        return file_path, None
+    from core.storage import get_s3_client
+
+    bucket, _, key = file_path[len("s3://"):].partition("/")
+    suffix = os.path.splitext(filename)[1] if filename else ""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.close()
+    try:
+        get_s3_client().download_file(bucket, key, tmp.name)
+    except Exception:
+        logger.exception(f"Could not fetch {file_path} to reprocess it")
+        os.unlink(tmp.name)
+        return "", None
+    return tmp.name, tmp.name
+
+
+async def _reprocess_from_source(doc_manager, doc_id: int, file_path: Optional[str], filename: Optional[str]) -> bool:
+    """Rebuild one document's chunks from its stored source, on the SAME
+    document row: drop its chunks, then run the ingestion pipeline, which writes
+    the row's status and chunk_count. False, with nothing touched, when there
+    is no source to rebuild from. Shared by the single and the batch reprocess."""
+    if not file_path:
+        return False
+    local_path, tmp_path = _local_source(file_path, filename)
+    try:
+        if not local_path or not os.path.exists(local_path):
+            return False
+        import psycopg2
+
+        conn = psycopg2.connect(**db_config)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (doc_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        await doc_manager._process_document(doc_id, local_path, doc_manager.processor.detect_file_type(local_path))
+        return True
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+async def _reembed_or_refuse(db: Session, document: Document, workspace_id: str, previous_status: str) -> Dict[str, Any]:
+    """The source file is gone (uploads live in a container-local temp dir that
+    does not survive a restart — night 1, finding 17). The chunk text is still in
+    Postgres, so re-embed from that rather than making the owner re-upload. Only
+    valid in pgvector mode, where the vectors live beside the chunks; in S3
+    Vectors mode the source is still needed."""
+    logger.warning(f"Document {document.id} has no source to reprocess at {document.file_path}")
+    if not config.S3_VECTORS_ENABLED:
+        reembedded = await _reembed_document_from_chunks(db, document, workspace_id)
+        if reembedded > 0:
+            document.status = "processed"
+            document.chunk_count = reembedded
+            db.commit()
+            return {
+                "message": "Document re-embedded from its stored chunks (the uploaded source file is no longer on disk).",
+                "document_id": document.id,
+                "chunk_count": reembedded,
+                "status": "processed",
+                "source": "chunks",
+            }
+    document.status = previous_status
+    db.commit()
+    raise HTTPException(
+        status_code=400,
+        detail=f"Document file not found at: {document.file_path}, and it has no "
+               f"stored chunks to rebuild from. Please re-upload the document."
+    )
 
 @router.get("/{document_id}/content")
 async def get_document_content_by_id(
@@ -2029,7 +2066,38 @@ async def get_usage_analytics(
 # =============================================================================
 # DOCUMENT RE-PROCESSING ENDPOINTS (Phase 4 - Better RAG)
 # =============================================================================
-# Note: Single document reprocessing is already defined above (line 571)
+async def _reprocess_workspace(workspace_id: str) -> None:
+    """Reprocess every document in the workspace from its stored source, one at
+    a time through ``_reprocess_from_source`` (the single reprocess's path)."""
+    import psycopg2
+
+    doc_manager = get_document_manager(workspace_id)
+    succeeded = failed = 0
+    try:
+        conn = psycopg2.connect(**db_config)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, file_path, filename FROM documents WHERE workspace_id = %s ORDER BY id",
+                    (workspace_id,)
+                )
+                docs = cursor.fetchall()
+        finally:
+            conn.close()
+        for doc_id, file_path, filename in docs:
+            try:
+                if await _reprocess_from_source(doc_manager, doc_id, file_path, filename):
+                    succeeded += 1
+                    logger.info(f"Reprocessed document {doc_id}/{len(docs)}: {filename}")
+                else:
+                    logger.warning(f"Document {doc_id} has no source file to reprocess ({file_path}), skipping")
+                    failed += 1
+            except Exception as e:
+                logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+                failed += 1
+        logger.info(f"Batch reprocessing complete: {succeeded} succeeded, {failed} failed out of {len(docs)} total")
+    except Exception as e:
+        logger.error(f"Batch reprocessing error: {e}", exc_info=True)
 
 
 @router.post("/reprocess-all", dependencies=[Depends(require_workspace_permission("documents:update"))])
@@ -2062,92 +2130,7 @@ async def reprocess_all_documents(
         # Run in background — iterate documents and reprocess each one
         import asyncio
 
-        async def run_reprocessing():
-            """Reprocess all documents using DocumentManager."""
-            from sqlalchemy import text as sql_text
-
-            doc_manager = get_document_manager(workspace_id)
-            conn = None
-            succeeded = 0
-            failed = 0
-
-            try:
-                import psycopg2
-                conn = psycopg2.connect(**db_config)
-                cursor = conn.cursor()
-
-                # Get all documents for this workspace
-                cursor.execute(
-                    "SELECT id, file_path, filename, file_type FROM documents "
-                    "WHERE workspace_id = %s ORDER BY id",
-                    (workspace_id,)
-                )
-                docs = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                conn = None
-
-                for doc_id, file_path, filename, file_type in docs:
-                    try:
-                        if not file_path:
-                            logger.warning(f"Document {doc_id} has no file_path, skipping")
-                            failed += 1
-                            continue
-
-                        # For S3-stored files, download to temp
-                        local_path = file_path
-                        tmp_path = None
-                        if file_path.startswith("s3://"):
-                            from core.storage import get_s3_client
-                            s3_client = get_s3_client()
-                            # Parse s3://bucket/key
-                            parts = file_path.replace("s3://", "").split("/", 1)
-                            bucket, key = parts[0], parts[1]
-                            import tempfile
-                            suffix = os.path.splitext(filename)[1] if filename else ""
-                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                            tmp.close()
-                            tmp_path = tmp.name
-                            s3_client.download_file(bucket, key, tmp_path)
-                            local_path = tmp_path
-
-                        if not os.path.exists(local_path):
-                            logger.warning(f"Document {doc_id} file not found: {local_path}")
-                            failed += 1
-                            continue
-
-                        # Delete existing chunks (DB + S3 vectors)
-                        conn2 = psycopg2.connect(**db_config)
-                        c2 = conn2.cursor()
-                        c2.execute("DELETE FROM document_chunks WHERE document_id = %s", (doc_id,))
-                        conn2.commit()
-                        c2.close()
-                        conn2.close()
-
-                        # Reprocess
-                        from modules.rag.ingestion.manager import DocumentType
-                        ft = doc_manager.processor.detect_file_type(local_path)
-                        await doc_manager._process_document(doc_id, local_path, ft)
-                        succeeded += 1
-                        logger.info(f"Reprocessed document {doc_id}/{len(docs)}: {filename}")
-
-                        # Clean up temp file
-                        if tmp_path and os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
-
-                    except Exception as e:
-                        logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
-                        failed += 1
-
-                logger.info(
-                    f"Batch reprocessing complete: {succeeded} succeeded, "
-                    f"{failed} failed out of {len(docs)} total"
-                )
-
-            except Exception as e:
-                logger.error(f"Batch reprocessing error: {e}", exc_info=True)
-
-        background_tasks.add_task(lambda: asyncio.run(run_reprocessing()))
+        background_tasks.add_task(lambda: asyncio.run(_reprocess_workspace(workspace_id)))
 
         return {
             "status": "started",

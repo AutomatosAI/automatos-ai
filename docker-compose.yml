@@ -96,10 +96,17 @@ services:
   # Prod is unchanged (real AWS S3, S3_ENDPOINT_URL unset).
   # ===========================================================================
   minio:
-    # Pinned: `latest` had resolved to a year-old image on this machine.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # MinIO no longer publishes free images: quay.io/minio/minio and Docker Hub's
+    # minio/minio both refuse anonymous pulls (401) since 2026-09, which broke
+    # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
+    # maintained build; its free tier offers only `latest`. Docker keeps a cached
+    # `latest` forever, so refresh it with `docker compose pull minio`.
+    image: cgr.dev/chainguard/minio:latest
     container_name: automatos_minio
     restart: unless-stopped
+    # Root, like the official image: Chainguard's runs as uid 65532, which can't
+    # read a minio_data volume the official image already wrote as root.
+    user: "0:0"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -281,7 +288,7 @@ services:
     volumes:
       # Mount source for hot-reload in development
       - ./orchestrator:/app
-      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs

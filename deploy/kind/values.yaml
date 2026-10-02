@@ -1,0 +1,45 @@
+# Values for the kind end-to-end test (deploy/kind/e2e.sh). The Secret and the
+# dev datastores are created by the script; the API image is built from this
+# checkout and loaded into the cluster, so it is never pulled.
+existingSecret: automatos-secrets
+
+config:
+  ENVIRONMENT: development
+  LOG_LEVEL: INFO
+  LOG_RELAY_ENABLED: "false"
+  QDRANT_URL: ""
+  AGENT_OPT_WORKER_URL: ""
+  LOKI_URL: ""
+  PROMETHEUS_URL: ""
+
+api:
+  image:
+    repository: automatos-api
+    tag: e2e
+    pullPolicy: Never
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+
+migrations:
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+
+frontend:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+
+worker:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+
+# kind's local-path storage is ReadWriteOnce; a single node shares it fine.
+workspaces:
+  size: 1Gi
+  accessModes:
+    - ReadWriteOnce

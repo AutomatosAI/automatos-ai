@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import HostConfig
+from .sandbox import DEFAULT_ALLOWED_DOMAINS, SessionSandbox
 
 LAUNCHD_LABEL = "app.automatos.cli-host"
 SYSTEMD_UNIT = "automatos-cli-host.service"
@@ -35,6 +36,14 @@ def _package_root() -> Path:
 
 def _log_path(cfg: HostConfig) -> Path:
     return cfg.state_dir / "host.log"
+
+
+def _sandbox_argv(sandbox: SessionSandbox) -> List[str]:
+    """The session-sandbox flags that reproduce ``sandbox`` (``sandbox.py``)."""
+    if not sandbox.enabled:
+        return ["--no-session-sandbox"]
+    extra = [d for d in sandbox.allowed_domains if d not in DEFAULT_ALLOWED_DOMAINS]
+    return [arg for domain in extra for arg in ("--session-allow-domain", domain)]
 
 
 def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> List[str]:
@@ -54,8 +63,9 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
         argv.append("--no-terminal")
     if cfg.terminal_port:
         argv += ["--terminal-port", str(cfg.terminal_port)]
-    if getattr(cfg, "unlisted_bash", "ask") != "ask":
-        argv += ["--unlisted-bash", cfg.unlisted_bash]
+    if cfg.permission_mode:
+        argv += ["--permission-mode", cfg.permission_mode]
+    argv += _sandbox_argv(cfg.session_sandbox)
     argv += list(passthrough or [])
     return argv
 

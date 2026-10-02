@@ -21,6 +21,7 @@ disagree, the file wins — open an issue.
 | Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
+| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: on a fresh install, `docker compose up -d --build` does what `make up` does. The smooth path is everything inside WSL2: [SETUP.md](../../SETUP.md) walks through it. Session mode needs WSL2 (see *Session mode → Before you start*). |
 
 Nothing else. No cloud account, no identity provider, no AWS.
 
@@ -138,7 +139,11 @@ You should not need to open the last three for a standard install.
    - **empty database?** run `python -m scripts.init_fresh_db` — builds the
      CI-proven schema (the SQLAlchemy models plus a tolerant replay of the
      migration history) and stamps Alembic at heads. Nothing is restored from
-     a committed SQL snapshot; the generator is the fresh path;
+     a committed SQL snapshot; the generator is the fresh path. If that build
+     is interrupted (Postgres restarts, the machine sleeps or shuts down), the
+     boot stops, and the next boot runs the build again to finish it
+     (`♻️ A previous fresh-database initialization was interrupted — resuming
+     it`) — no reset needed;
    - `alembic upgrade heads` — a no-op on a fresh database, incremental on an
      existing one;
    - `python -m core.database.load_seed_data` — idempotent seeds: credential
@@ -521,15 +526,33 @@ Deliverable feature that exists in the code runs locally.
 ## 10. Updating
 
 ```bash
+docker compose stop backend                  # 1. stop the API before the code changes
 git pull
-docker compose up -d --build
+docker compose up -d --build                 # 2. rebuild; migrations run as the backend boots
+docker compose exec backend alembic current  # 3. one revision, marked (head)
 ```
 
-Source directories are bind-mounted, so most code changes are picked up by
-the running containers; `--build` matters when dependencies or Dockerfiles
-changed. Database migrations run on every backend boot
-(`alembic upgrade heads`, fail-closed — a failing migration stops the backend
-rather than serving a half-built schema), and the seeds are idempotent.
+**Stop the backend before you pull.** The backend runs in reload mode with
+`./orchestrator` bind-mounted, so a pull under a running backend loads the
+new code at once, and its startup `create_all` builds any new tables before
+the new migrations run. Migrations are written to survive that
+([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first keeps the
+order they expect: migrations first, then the code that uses them.
+
+`--build` rebuilds the images when dependencies or Dockerfiles changed.
+
+**Running the published images** (`make up-images`, see
+[QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
+with `make up-images` again: it pulls the newer `edge` (or the
+`AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
+bind-mounted from your checkout, so there's no reload-mode ordering to worry
+about; migrations run as the new backend boots.
+Database migrations run on every backend boot (`alembic upgrade heads`,
+fail-closed — a failing migration stops the backend rather than serving a
+half-built schema), and the seeds are idempotent. If you use media
+rendering, rebuild that service as well:
+`docker compose --profile media up -d --build media-render` (§7b).
+Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
 
@@ -578,6 +601,13 @@ builds the schema, replays migrations and seeds the catalogue before serving;
 `Starting Backend Application` banner; a red `❌` line names the step that
 failed (a bad migration or a missing local workspace stops the boot on
 purpose).
+
+**Backend stops on boot with `DuplicateTable` or "already exists" after an
+update.** New code ran before its migration (usually a pull under a running
+backend, §10), and the migration named in the backend log does not tolerate a
+table that `create_all` had already built. That is a bug in the migration
+([AGENTS.md](../../AGENTS.md) → Migrations): open an issue with the log. Don't
+edit `alembic_version` or stamp revisions by hand.
 
 **Chat answers nothing; banner "Add an LLM key to bring Auto to life".** No
 model key is stored. Settings → API Keys, or one of the keys in §2.
@@ -686,6 +716,82 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   (`claude`, then `claude login`). The host never logs in for you.
 - `CLI_RUNTIME_ENABLED=true` in `.env`, then `make up` (or restart the backend).
   The flag is refused outside the local edition.
+- **macOS, Linux or WSL2.** The host drives sessions through a Unix pty and
+  installs as a launchd or `systemd --user` service, so it does not run on
+  native Windows; started there, it exits with a message saying so. On Windows,
+  run the stack and the host inside a WSL2 distro with systemd enabled, and run
+  `loginctl enable-linger <user>` so the host keeps running without a login.
+  The step-by-step recipe, including keeping the distro alive, is in
+  [SETUP.md](../../SETUP.md) (tested in
+  [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)).
+- On Linux and WSL2: `bubblewrap` and `socat` (`sudo apt-get install bubblewrap
+  socat`), for the session sandbox below. macOS needs nothing. Without them the
+  host does not run Claude sessions, and Settings → Session mode says why. On
+  Ubuntu 24.04 and later, AppArmor also has to allow bubblewrap's user
+  namespaces: [SETUP.md](../../SETUP.md) → session mode, step 2.
+
+### The session sandbox, and what it protects
+
+A session runs as **you**, on your machine. The host's gate judges every tool
+call before it runs: file access outside the session's folders is refused, and
+what it asks you about depends on the session's permission mode (below). But a gate can
+only read the command line. An allowed `pytest`, `npm run build`, `python
+script.py` or `git commit` runs code the session itself wrote (a `conftest.py`,
+a `package.json` script, a git hook), and text a session reads (a web page, an
+issue, a dependency's README) can steer what it writes.
+
+So every Claude session's shell commands also run in Claude Code's own
+operating-system sandbox (bubblewrap on Linux and WSL2, Seatbelt on macOS),
+which confines those commands and everything they start:
+
+- **Reads:** your credential stores (`~/.aws`, `~/.ssh`, `~/.config/gh`,
+  `~/.git-credentials`, `~/.kube`, `~/.docker/config.json`, …), your Claude
+  login, the host's own state (`~/.automatos/cli-host`) and this checkout's
+  `.env` are unreadable.
+- **Writes:** only the session's folders; `.git/hooks` and `.git/config` stay
+  read-only.
+- **Network:** only the package registries (npm, PyPI). Add a host with
+  `CLI_HOST_ARGS="--session-allow-domain github.com"`. Anything else is refused.
+- **No way around it:** a machine that cannot sandbox does not run the session,
+  and a session cannot retry a command outside the sandbox.
+
+What it does **not** cover: environment variables the host was started with are
+passed to sessions, so keep cloud and Git tokens out of the host's environment.
+It is not a virtual machine either. For the strongest isolation, run the host as
+a dedicated OS user (or in a VM or container) that holds no cloud, Git or SSH
+credentials. On such a host, `--no-session-sandbox` turns the sandbox off.
+
+### Permission modes
+
+How much a session asks before it acts. The four modes are Claude Code's own,
+applied by the host's gate:
+
+| Mode | Edits in the session's folders | A command off the Bash allowlist |
+|---|---|---|
+| **Manual** | a card for each | a card for each |
+| **Edit automatically** | run | a card for each |
+| **Plan** | refused until you approve the plan | a card for each |
+| **Auto** | run | run |
+
+In **Plan**, Claude Code starts in its own plan mode, explores, and presents a
+plan. The plan comes to you as a card and is saved as `plan.md` in the ticket's
+deliverables. Approve it and the session carries on as Edit automatically.
+Plan needs a CLI with a plan mode of its own: today that is Claude Code. An agent
+on Codex runs Plan as Edit automatically; the other three modes work the same on
+both.
+
+Set the workspace's default on **Settings → Session mode**; an agent can pick
+its own (Agent → Model → Permission mode). The local edition defaults to
+**Auto**, because the sandbox above already confines what an unlisted command
+can reach. The hosted edition defaults to Edit automatically. Every mode keeps
+the hard lines: `git push`, publishing and `sudo` are refused, the platform's
+secrets stay unreadable, and the explicit ask-list and unresolved paths still
+ask.
+
+To fix one mode for every session on a machine, whatever the workspace says,
+install the host with it: `make cli-host-install CLI_HOST_ARGS="--permission-mode manual"`.
+With `--no-session-sandbox`, prefer Manual or Edit automatically: Auto then runs
+unlisted commands with your full user rights.
 
 ### Pair the host, once
 
@@ -763,7 +869,7 @@ full text of its skills are rendered into the session's system prompt (up to
 that runs agents reaches a session agent through the same ticket — a chat
 message, a playbook step, a mission task, a heartbeat, a schedule, a channel —
 and the lane waits for the ticket inside its own timeout. A permission
-question the session asks (a command outside its allowlist) shows up as an
+question the session asks (a command or an edit its permission mode holds) shows up as an
 approval card in the Canvas and on the ticket; unanswered, it is denied after
 the host's ask timeout and the ticket goes to *Review* with the reason.
 

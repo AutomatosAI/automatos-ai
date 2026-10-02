@@ -27,11 +27,11 @@ def _decide(tool_name, tool_input, ctx):
 
 
 def test_an_unlisted_command_the_host_ran_says_nobody_was_asked(tmp_path):
-    permissive = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow")
+    permissive = policy.PolicyContext(cwd=tmp_path, permission_mode="auto")
     ran = _decide("Bash", {"command": CHROME_PRINT}, permissive)
     assert ran.behavior == "allow"
     assert ran.reason == policy.ALLOWED_UNLISTED_BASH.format(command=policy._first_words(CHROME_PRINT))
-    assert "--unlisted-bash allow" in ran.reason
+    assert "Auto mode" in ran.reason
     # the unlisted verb's reason wins over an allowlisted verb on the same line
     assert _decide("Bash", {"command": f"ls && {CHROME_PRINT}"}, permissive).reason == ran.reason
 
@@ -49,13 +49,13 @@ def test_every_allow_says_why(tmp_path):
 
 def test_a_hold_or_a_refusal_keeps_its_own_reason(tmp_path):
     strict = policy.PolicyContext(cwd=tmp_path)
-    permissive = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow")
+    permissive = policy.PolicyContext(cwd=tmp_path, permission_mode="auto")
     held = _decide("Bash", {"command": CHROME_PRINT}, strict)
     assert held.behavior == "ask" and "outside this ticket's Bash allowlist" in held.reason
     pushed = _decide("Bash", {"command": "git push origin main"}, permissive)
     assert pushed.behavior == "deny" and "never allowed in a session" in pushed.reason
     outside = _decide("Bash", {"command": "xxd /etc/passwd"}, permissive)
-    assert outside.behavior != "allow" and "--unlisted-bash" not in outside.reason
+    assert outside.behavior != "allow" and "Auto mode" not in outside.reason
     assert _decide("Read", {"file_path": "/etc/passwd"}, strict).behavior == "deny"
 
 
@@ -94,12 +94,12 @@ def _answer_holds(s, approve):
 
 
 def test_a_call_that_ran_with_nobody_asked_is_reported_as_such(tmp_path):
-    s = _session(tmp_path, unlisted_bash="allow")
+    s = _session(tmp_path, permission_mode="auto")
     assert _call(s, CHROME_PRINT)["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert _call(s, "git push origin main")["hookSpecificOutput"]["permissionDecision"] == "deny"
     ran, refused = [e for e in _events(s) if e["event"] == "PreToolUse"]
     assert (ran["decision"], ran["tool_name"], ran["subject"]) == ("allow", "Bash", CHROME_PRINT)
-    assert "--unlisted-bash allow" in ran["reason"] and "answer" not in ran
+    assert "Auto mode" in ran["reason"] and "answer" not in ran
     assert refused["decision"] == "deny" and "never allowed in a session" in refused["reason"]
     assert ran["event_id"] and refused["event_id"] and ran["event_id"] != refused["event_id"]  # one id per call
 
@@ -124,7 +124,7 @@ def test_a_held_call_is_reported_with_the_operators_answer(tmp_path):
 
 
 def test_a_reason_is_bounded(tmp_path):
-    s = _session(tmp_path, unlisted_bash="allow")
+    s = _session(tmp_path, permission_mode="auto")
     _call(s, "google-chrome " + "--flag " * 200)
     event = _events(s)[-1]
     assert len(event["reason"]) <= 300

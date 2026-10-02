@@ -1,0 +1,15 @@
+apiVersion: v2
+name: automatos
+description: >-
+  Automatos AI on Kubernetes: the API, its database migration Job, the web app and
+  the workspace worker. PostgreSQL (with pgvector) and Redis are external.
+type: application
+version: 0.1.0
+# The image tag used when a component's image.tag is empty.
+appVersion: "edge"
+home: https://github.com/AutomatosAI/automatos-ai
+sources:
+  - https://github.com/AutomatosAI/automatos-ai
+keywords:
+  - ai
+  - agents

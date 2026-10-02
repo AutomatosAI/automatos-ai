@@ -16,6 +16,10 @@ cleanly from empty. So the baseline is GENERATED:
                                  logged — the model layer already carries its intent.
   3. alembic_version ends at heads (every revision applied or stamped past).
 
+A marker table (INCOMPLETE_MARKER) exists from the build's first statement to its
+last, so an interrupted build is told apart from a finished one and resumed
+(scripts/init_fresh_db.py) instead of being served half-built.
+
 There is deliberately NO committed schema dump: this generator IS the fresh path —
 scripts/init_fresh_db.py (boot) and the CI from-zero gate both run build_schema(), so
 there is no snapshot artifact that can rot. First boot pays ~2-3 minutes once.
@@ -268,24 +272,42 @@ def _replay_idempotent_raw_sql(engine, script: ScriptDirectory) -> int:
     return applied_total
 
 
-def build_schema(engine) -> int:
-    """Build the complete fresh schema on an EMPTY database and leave alembic at
-    heads. Returns the table count. Used by scripts/init_fresh_db.py (the boot
-    path) and by this module's CLI (the CI gate)."""
+# --------------------------------------------------------------------------- #
+# An interrupted build must never pass for a finished one. alembic_version
+# exists from the first statement below and stage 2 stamps as it goes, so once a
+# build dies partway (Postgres restarting, the host stopping) the database looks
+# "existing" to the entrypoint: the next boot skips the fresh path, and either
+# `alembic upgrade heads` fails on the model-built tables for ever, or it
+# succeeds and the app serves without the columns stages 3-6 would have added.
+# The marker is created in the SAME transaction as alembic_version and dropped
+# as the build's very last statement, so "alembic_version without the marker"
+# means finished. A database carrying the marker never served (the first boot
+# refused to start), and every stage is idempotent, so the fix is to run the
+# build again: init_fresh_db resumes it.
+# --------------------------------------------------------------------------- #
+INCOMPLETE_MARKER = "automatos_fresh_init_incomplete"
+
+
+def _begin_build(engine) -> None:
+    """Extensions, the incomplete-build marker and a wide alembic_version, atomically."""
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))  # prd008a_sites uses uuid_generate_v4()
+        conn.execute(text(f"CREATE TABLE IF NOT EXISTS {INCOMPLETE_MARKER} (started_at TIMESTAMPTZ DEFAULT now())"))
         # Alembic's default version table is VARCHAR(32); this repo has revision ids
         # up to 35 chars (dedupe_skills_unique_workspace_name). Prod's table is wider;
         # pre-create it wide so stamps never truncate.
         conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(255) NOT NULL PRIMARY KEY)"))
 
-    print("== 1/2 model layer: create_all + raw-DDL extras")
-    init_db()
 
-    print("== 2/2 tolerant replay of the migration forest (topological, one revision per step)")
-    cfg = AlembicConfig("alembic.ini")
-    script = ScriptDirectory.from_config(cfg)
+def _finish_build(engine) -> None:
+    """The build's last statement: from here on the database counts as initialised."""
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS {INCOMPLETE_MARKER}"))
+
+
+def _replay_forest(cfg, script: ScriptDirectory) -> tuple[int, int]:
+    """Stage 2: every revision in topological order; a failing one is stamped past."""
     _install_tolerant_ops()
     order = [r.revision for r in reversed(list(script.walk_revisions("base", "heads")))]
     applied = skipped = 0
@@ -298,9 +320,36 @@ def build_schema(engine) -> int:
             print(f"   skip {rev}: {str(exc).strip().splitlines()[0][:150]}")
             command.stamp(cfg, rev)
     print(f"   ({len(SKIPPED_OPS)} individual ops tolerated inside applied revisions)")
+    return applied, skipped
 
-    # Residual pass: tables a migration creates but that lost an ordering/FK race.
+
+def build_schema(engine) -> int:
+    """Build the complete fresh schema on an EMPTY database — or finish one an
+    interrupted build left behind — and leave alembic at heads. Returns the table
+    count. Used by scripts/init_fresh_db.py (the boot path) and by this module's
+    CLI (the CI gate)."""
+    _begin_build(engine)
+
+    print("== 1/2 model layer: create_all + raw-DDL extras")
+    init_db()
+
+    print("== 2/2 tolerant replay of the migration forest (topological, one revision per step)")
+    cfg = AlembicConfig("alembic.ini")
+    script = ScriptDirectory.from_config(cfg)
+    applied, skipped = _replay_forest(cfg, script)
     creators = _created_by(script)
+    _residual_passes(engine, script, creators)
+    _repair_passes(engine, script)
+    _finish_build(engine)
+    with engine.begin() as conn:
+        total = conn.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")).scalar()
+    print(f"== done: {applied} revisions applied, {skipped} stamped past; {total} tables")
+    print(f"== still-missing migration-created tables: {sorted(_missing_tables(engine, set(creators)))}")
+    return int(total or 0)
+
+
+def _residual_passes(engine, script: ScriptDirectory, creators: dict) -> None:
+    """Tables a migration creates but that lost an ordering/FK race: re-run their creators."""
     for rnd in range(1, 4):
         missing = _missing_tables(engine, set(creators))
         if not missing:
@@ -319,6 +368,10 @@ def build_schema(engine) -> int:
         if still == missing:
             print(f"   no progress; still missing: {sorted(still)}")
             break
+
+
+def _repair_passes(engine, script: ScriptDirectory) -> None:
+    """Stages 3-6, the repairs only the END of a build can make."""
     # Re-assert the model layer + raw-DDL extras: a migration's raw
     # `conn.execute(text("DROP ..."))` bypasses alembic ops and can remove an extra;
     # create_all is checkfirst and the extras are IF NOT EXISTS, so this is idempotent.
@@ -330,11 +383,6 @@ def build_schema(engine) -> int:
     print(f"== 5/6 idempotent raw-SQL re-run (indexes, column adds, views last): {raw} statement(s) applied")
     relics = _drop_relics(engine, script)
     print(f"== 6/6 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
-    with engine.begin() as conn:
-        total = conn.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")).scalar()
-    print(f"== done: {applied} revisions applied, {skipped} stamped past; {total} tables")
-    print(f"== still-missing migration-created tables: {sorted(_missing_tables(engine, set(creators)))}")
-    return int(total or 0)
 
 
 def main() -> int:

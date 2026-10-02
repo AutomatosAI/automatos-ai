@@ -148,14 +148,36 @@ command in it:
   (`main..HEAD`) is not a traversal.
 - **Redirections.** The targets of `>`, `>>`, `<`, `2>`, `&>` follow the same
   rule; `/dev/null`, `/dev/stdout` and `/dev/stderr` are always fine.
-- **Everything else** — a verb outside the allowlist — is **held**: the session
+- **Everything else** — a verb outside the allowlist — is **held** (in Auto
+  mode it runs, with its paths still judged; see *Permission modes* in
+  `docs/getting-started/self-hosting.md`): the session
   waits (`--ask-timeout`, 120 s by default) while the command is shown as a card
   on the ticket's Canvas and, once the PRD-245 backend lane lands, in the
   Questions tab, the bell and on Telegram. No answer in time is a deny.
 
 A guardrail against accidents on your own machine, not a sandbox: what a
 command reads through data it fetched at run time (`$(cat list)`, a `for` over
-the output of a command) is beyond a static gate.
+the output of a command) is beyond a static gate, and so is what an allowed
+command RUNS — `python x.py`, `npm run x`, `pytest` (a `conftest.py`) and
+`git commit` (a hook) execute code the session wrote.
+
+## The session sandbox (`sandbox.py`)
+
+That is the operating system's job. Every Claude session's `--settings` file
+also switches on Claude Code's own Bash sandbox (bubblewrap on Linux and WSL2,
+Seatbelt on macOS), which confines every shell command and every process it
+starts. Credential stores (`~/.aws`, `~/.ssh`, `~/.config/gh`,
+`~/.git-credentials`, …), the Claude login, the host's state dir and the
+platform checkout's `.env` family are unreadable; writes stay in the session's
+folders (`.git/hooks` and `.git/config` stay read-only); the network is the
+package registries plus `--session-allow-domain HOST`, and any other host is
+refused, never asked. `failIfUnavailable` and `allowUnsandboxedCommands: false`
+leave no unsandboxed path, and `autoAllowBashIfSandboxed: false` keeps the gate
+deciding every call first. On Linux the host checks for `bwrap` and `socat` and,
+without them, does not serve Claude (`claude_sandbox_unavailable`, with the
+install command). `--no-session-sandbox` turns it off for a host that is
+already isolated (a VM, a container, a dedicated user with no credentials).
+Codex sandboxes itself (`-s workspace-write`).
 
 ## Review, and where held commands appear
 

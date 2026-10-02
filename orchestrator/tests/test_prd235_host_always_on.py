@@ -22,7 +22,7 @@ def test_contract_fields_are_stable_and_versioned():
     # 0.5.0: session results and TerminalClosed carry the turn's token usage (analytics).
     # 0.7.0: the CLI is a parameter — capabilities.clis per CLI, providers = the served ids.
     # 0.8.0: the claim carries the ticket's Automatos tools + its session token (PRD-245).
-    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.8.0"
+    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.9.0"
     assert svc.contract_fields() == f
 
 

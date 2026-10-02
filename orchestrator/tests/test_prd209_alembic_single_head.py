@@ -36,7 +36,7 @@ _ORCH = pathlib.Path(__file__).resolve().parents[1]
 _REPO = _ORCH.parent
 _VERSIONS = _ORCH / "alembic" / "versions"
 _INIT_FRESH = _ORCH / "scripts" / "init_fresh_db.py"
-_ENTRYPOINT = _REPO / "docker-entrypoint.sh"
+_ENTRYPOINT = _ORCH / "docker-entrypoint.sh"
 _COMPOSE = _REPO / "docker-compose.yml"
 
 # The single head on this branch. Changing the head (a new terminal revision) is a
@@ -77,10 +77,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # social_image / social_video).
 # 2026-09-26: prd251w1_merge_heads joins llm_usage_execution_index and
 # prd251_wave1 into the single head (a merge revision, no operations).
-# 2026-09-28 (PRD-251 Wave 2): prd251_wave2 chains onto that head — the ONE
-# migration of the Socials tab wave (social_campaigns, and the key from
-# social_posts.campaign_id to it).
-EXPECTED_HEAD = "prd251_wave2"
+# 2026-09-29: document_chunks_ingestion_columns chains onto that — the columns
+# document ingestion writes, which fresh-built databases lacked (#825).
+EXPECTED_HEAD = "document_chunks_ingestion_columns"
 
 
 def _literal(node: ast.AST):

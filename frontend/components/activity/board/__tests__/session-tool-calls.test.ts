@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from '../session-tool-calls'
 
-const UNLISTED = "'google-chrome --headless' is not on this ticket's Bash allowlist; this host runs such commands without asking (--unlisted-bash allow)"
+const UNLISTED = "'google-chrome --headless' is not on this ticket's Bash allowlist; this session runs such commands without asking (Auto mode)"
 
 describe('what the host decided, on the ticket', () => {
   it('says a call that ran with nobody asked was not approved by anyone', () => {

@@ -219,11 +219,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # 2026-09-26: prd251w1_merge_heads joins the two into one head; the guard follows it.
     joined_w1 = (versions / "prd251w1_merge_heads.py").read_text()
     assert '"llm_usage_execution_index"' in joined_w1 and '"prd251_wave1"' in joined_w1
-    # 2026-09-28: prd251_wave2 chains onto that head (PRD-251 Wave 2's one migration,
-    # social_campaigns); the guard follows it.
-    wave2 = (versions / "prd251_wave2.py").read_text()
-    assert 'down_revision = "prd251w1_merge_heads"' in wave2
-    assert 'EXPECTED_HEAD = "prd251_wave2"' in guard
+    # 2026-09-29: document_chunks_ingestion_columns chains onto that (#825 — the
+    # columns document ingestion writes); the guard follows it.
+    chunks = (versions / "document_chunks_ingestion_columns.py").read_text()
+    assert 'down_revision = "prd251w1_merge_heads"' in chunks
+    assert 'EXPECTED_HEAD = "document_chunks_ingestion_columns"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

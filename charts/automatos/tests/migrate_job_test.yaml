@@ -1,0 +1,59 @@
+suite: Migration Job
+templates:
+  - templates/migrate-job.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: runs `docker-entrypoint.sh migrate` as a pre-install/pre-upgrade hook
+    asserts:
+      - isKind:
+          of: Job
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: pre-install,pre-upgrade
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: ["migrate"]
+      - equal:
+          path: spec.template.spec.restartPolicy
+          value: Never
+  - it: gets the same edition settings as the API, or the local workspace is skipped
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_EDITION
+            value: local
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEFAULT_WORKSPACE_ID
+            value: 00000000-0000-0000-0000-0000000000c1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: LOCAL_OPERATOR_EMAIL
+            value: local@automatos.local
+  - it: does not use the chart's ServiceAccount, which doesn't exist yet at pre-install
+    asserts:
+      - notExists:
+          path: spec.template.spec.serviceAccountName
+  - it: uses a pre-existing ServiceAccount when one is named
+    set:
+      serviceAccount:
+        create: false
+        name: automatos-identity
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: automatos-identity
+  - it: omits the local-edition settings in the hosted edition
+    set:
+      edition:
+        authEdition: saas
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEFAULT_WORKSPACE_ID
+            value: 00000000-0000-0000-0000-0000000000c1

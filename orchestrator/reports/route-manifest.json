@@ -1170,11 +1170,11 @@
       "path": "/api/documents/variables"
     },
     {
-      "method": "DELETE",
-      "path": "/api/documents/{document_id}"
+      "method": "GET",
+      "path": "/api/documents/{document_id:int}"
     },
     {
-      "method": "GET",
+      "method": "DELETE",
       "path": "/api/documents/{document_id}"
     },
     {

@@ -1,28 +1,52 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Automatos_AI-Multi--Agent_Platform-FF4500?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0wIDE4Yy00LjQyIDAtOC0zLjU4LTgtOHMzLjU4LTggOC04IDggMy41OCA4IDgtMy41OCA4LTggOHoiLz48L3N2Zz4=" alt="Automatos AI">
-
 # Automatos AI
 
-**Build, deploy, and orchestrate autonomous AI agent teams.**
+### The open-source AI Operating System
 
+**Run a workforce of AI agents on your own machine — any model, 1,000+ tools, one Knowledge Graph, and Auto to run it all.**
+
+[![GitHub stars](https://img.shields.io/github/stars/AutomatosAI/automatos-ai?style=flat&logo=github)](https://github.com/AutomatosAI/automatos-ai/stargazers)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Discussions](https://img.shields.io/github/discussions/AutomatosAI/automatos-ai?logo=github)](https://github.com/AutomatosAI/automatos-ai/discussions)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/AutomatosAI/automatos-ai?label=CodeRabbit&link=https://coderabbit.ai)](https://coderabbit.ai)
+
+[Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted edition](https://automatos.app)
 
 </div>
 
+https://github.com/user-attachments/assets/bd9b5b3e-31a1-4ab4-a59f-8d069a19699d
+
 ---
 
-Automatos AI is an open-source (Apache-2.0) platform for running teams of AI agents. You create agents, give them skills, tools and knowledge, run them through Playbooks and Missions, and read what they produced as Deliverables — with Auto, the assistant, as the front door and a Command Center for oversight. Agents run on the model routes you choose: paid APIs, free hosted open models, or — in the local edition — your own Claude Code subscription, managed by the platform.
+Automatos is an operating system for AI work. You command a workforce of specialised agents — equipped with skills, tools and knowledge — through one voice, **Auto**, and they produce real **Deliverables**: reports, code, content, analysis. Self-host it with `docker compose up`, bring any model (paid APIs, free hosted open models, or your own Claude Code subscription), and keep your agents, data and Deliverables on infrastructure you control.
 
-## One codebase, three editions
+```bash
+git clone https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
+cp .env.example .env   # set POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+make up                # → http://localhost:3000, no login
+```
 
-| Edition | What it is | Status |
-|---|---|---|
-| **Local edition** | Clone the repo, set three secrets, `docker compose up`. No login, one workspace, one operator; Postgres + pgvector, Redis and MinIO in the stack; agents can act on files on your own machine through the workspace-worker, and your own Claude Code sessions can be agents. Bring your own keys — paid (OpenRouter, OpenAI, Anthropic, DeepSeek, …), free (NVIDIA's hosted open models) — and, optionally, your own Composio key. | Available — [QUICKSTART.md](QUICKSTART.md) · [self-hosting guide](docs/getting-started/self-hosting.md) |
-| **Hosted edition** | The same code run as a service at [automatos.app](https://automatos.app): accounts, workspaces, teams and plans on top of it. | Available |
-| **Enterprise** | Parked. No separate directory, no license keys, nothing built. | Not started |
+## Why an operating system?
+
+Most agent frameworks give you a library. Automatos gives you the whole machine:
+
+| An OS has… | Automatos has… |
+|---|---|
+| A shell | **Auto** — one chat that routes your request to the right agent, tool or Playbook |
+| Processes | **Agents** — each with its own model route, persona, skills and metrics |
+| Programs | **Playbooks** — reusable multi-step automations; **Missions** coordinate agents on a goal |
+| A task manager | **Command Center** — the board, the calendar, live agent status and reports |
+| A file system | **Deliverables** and **Knowledge** — RAG over your documents plus a Knowledge Graph |
+| Drivers | **1,000+ tool integrations** through Composio and **400+ models** through one provider registry |
+| An app store | **Marketplace** — 100+ agents, 150+ skills and one-click workspace templates |
+
+## One codebase, two editions
+
+| Edition | What it is |
+|---|---|
+| **Local edition** | Clone the repo, set three secrets, `docker compose up`. No login, one workspace, one operator; Postgres + pgvector, Redis and MinIO in the stack; agents can act on files on your own machine through the workspace-worker, and your own Claude Code sessions can be agents. Bring your own keys — paid (OpenRouter, OpenAI, Anthropic, DeepSeek, …), free (NVIDIA's hosted open models) — and, optionally, your own Composio key. [QUICKSTART.md](QUICKSTART.md) · [self-hosting guide](docs/getting-started/self-hosting.md) |
+| **Hosted edition** | The same code run as a service at [automatos.app](https://automatos.app): accounts, workspaces, teams and plans on top of it. |
 
 The edition is a runtime flag (`AUTH_EDITION=local|saas`). Product capability is not gated: every agent, tool, Playbook, Mission and Deliverable feature in the code runs in the local edition. Session mode (your own Claude Code as an agent runtime) is local-only by design.
 
@@ -110,16 +134,16 @@ Mix cheap models for heartbeat work with frontier models for reasoning, and see 
 
 <br>
 
-## Command centre
+## Command Center
 
 See your entire AI workforce at a glance: live agent status, the board as a queue (Inbox → Assigned → In Progress → Review → Done), scheduled routines, and agent reports. Dragging a ticket to In Progress or pressing Run Now is the approval. The calendar shows heartbeats and schedules, board deadlines on the grid, and lets you or Auto schedule a board task for later — it is filed on the board when it fires.
 
 <p align="center">
-  <img src="docs/assets/04-Command-Center.png" alt="Command Centre" width="800">
+  <img src="docs/assets/04-Command-Center.png" alt="Command Center" width="800">
 </p>
 
 <p align="center">
-  <img src="docs/assets/10-Calendar.png" alt="Command Centre — calendar" width="800">
+  <img src="docs/assets/10-Calendar.png" alt="Command Center — calendar" width="800">
 </p>
 
 <br>
@@ -164,6 +188,8 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 
 ## Quick start (local edition)
 
+> **New to Docker, or on Windows?** [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2), and an AI coding agent can follow it for you: *"Install Automatos by following SETUP.md"*. Prefer nothing to install? Use the hosted edition at [automatos.app](https://automatos.app).
+
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
@@ -172,6 +198,7 @@ make up                 # first run builds the images and the database schema
 ```
 
 Then open http://localhost:3000 (API reference at http://localhost:8000/docs).
+To update later: stop the backend, pull, and rebuild ([Updating](docs/getting-started/self-hosting.md#10-updating)).
 No login. Add one model key and run the seeded *Two-minute brief* Playbook:
 
 - `OPENROUTER_API_KEY` (400+ models), or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`;
@@ -203,9 +230,17 @@ Platform documentation lives in [`/docs`](docs/README.md) — architecture, APIs
 
 ---
 
+## Community
+
+- **Questions, ideas and show-and-tell:** [GitHub Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)
+- **Bugs:** [open an issue](https://github.com/AutomatosAI/automatos-ai/issues/new/choose) — include your edition and what `make up` printed
+- **Security reports:** privately, as [SECURITY.md](SECURITY.md) describes — never in a public issue
+
+If Automatos is useful to you, a ⭐ helps other people find it.
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Two things to know before the first PR:
+New here? Look for issues labelled [`good first issue`](https://github.com/AutomatosAI/automatos-ai/labels/good%20first%20issue). See [CONTRIBUTING.md](CONTRIBUTING.md). Two things to know before the first PR:
 
 - **Sign off every commit** (`git commit -s`). The `Signed-off-by:` trailer is your [Developer Certificate of Origin](https://developercertificate.org) attestation and the `dco` check verifies it on each pull request. There is no CLA; contributions are Apache-2.0 and ship in every edition.
 - **Capability first, core second.** Skills, tools, MCP integrations, Playbooks and agent packages reach both editions unchanged and never conflict with core. Open an issue first for anything touching auth, storage, the tool router or a migration.
@@ -214,7 +249,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Two things to know before the first PR:
 
 <div align="center">
 
-**[Star on GitHub](https://github.com/AutomatosAI/automatos-ai)** &middot; **[Read the Docs](docs/README.md)** &middot; **[DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)**
+**[Star on GitHub](https://github.com/AutomatosAI/automatos-ai)** &middot; **[Read the Docs](docs/README.md)** &middot; **[Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)** &middot; **[DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)**
 
 *Apache 2.0 &middot; Built by the Automatos AI team*
 

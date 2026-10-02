@@ -1,0 +1,98 @@
+{{- if .Values.worker.enabled }}
+{{- $secret := include "automatos.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "automatos.fullname" . }}-worker
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  # One pod owns the workspace volume at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "automatos.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
+      # volume's ownership, then drops to the `worker` user (uid 1000) with gosu.
+      containers:
+        - name: worker
+          image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: WORKSPACE_VOLUME_PATH
+              value: /workspaces
+            - name: WORKSPACE_DEFAULT_QUOTA_GB
+              value: {{ .Values.worker.defaultQuotaGb | quote }}
+            - name: WORKER_CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            - name: WORKER_HEALTH_PORT
+              value: "8081"
+            - name: SERVICE_NAME
+              value: workspace-worker
+            - name: LOG_RELAY_ENABLED
+              value: "false"
+            {{- range $key := list "DATABASE_URL" "REDIS_URL" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+            {{- end }}
+            {{- range $key := list "WORKER_INTERNAL_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+                  optional: true
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: {{ include "automatos.workspacesClaim" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "automatos.fullname" . }}-worker
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+{{- end }}

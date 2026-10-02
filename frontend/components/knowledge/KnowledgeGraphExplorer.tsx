@@ -13,7 +13,9 @@ import BusinessGraphVisualization, {
 import { GraphView, useGraphPrefs } from '../graph'
 import {
   Layers, Search, X, FileText, Loader2,
-  GitBranch, Crosshair, Route, Pencil, Check,
+  GitBranch, Crosshair, Pencil, Check,
+  // lucide-react 0.279.0 has no Route icon; importing it rendered undefined and crashed (#818).
+  Spline as Route,
 } from 'lucide-react'
 
 /**

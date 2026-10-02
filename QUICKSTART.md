@@ -6,6 +6,10 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+**On Windows, or setting up with an AI coding agent?** Use [SETUP.md](SETUP.md):
+the step-by-step install for macOS, Linux and Windows (WSL2), with a check
+after each step.
+
 ## 1. Set the three required secrets
 
 Compose refuses to start until these three are set (they have no built-in
@@ -96,6 +100,22 @@ what quietly turns a 3.7 GB stack into 12 GB of disk. `make status` shows what
 is running and what it costs; `make down` stops it; `make clean` reclaims space
 at any time (it never touches your data). Plain `docker compose up` still works
 if you prefer it.
+
+### Or: run the published images (no build)
+
+```bash
+make up-images
+```
+
+This pulls the images CI publishes from `main` to GHCR
+(`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
+multi-arch and signed) instead of building them: about a minute instead of ten.
+The default tag is `edge`, the latest `main`; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07
+make up-images` pins one build. Everything else is the same as `make up`: your
+`.env`, the database, the workspace folder and session mode. Your checkout's
+source code isn't used. The published web app calls the API at
+`http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
+8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
 
 First run builds the images, builds the database schema, runs the seeds and
 then serves. `http://localhost:8000/health` answers as soon as the API process

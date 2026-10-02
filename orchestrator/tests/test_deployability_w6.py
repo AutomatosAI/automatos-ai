@@ -28,7 +28,7 @@ import yaml
 _ORCH_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _ORCH_ROOT.parent
 _COMPOSE = _REPO_ROOT / "docker-compose.yml"
-_ENTRYPOINT = _REPO_ROOT / "docker-entrypoint.sh"
+_ENTRYPOINT = _ORCH_ROOT / "docker-entrypoint.sh"
 
 
 @pytest.fixture(autouse=True)

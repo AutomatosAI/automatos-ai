@@ -311,4 +311,4 @@ def test_host_contract_version_moved_with_the_claim_shape():
     # session_tools_path and a per-ticket session_token.
     # 0.7.0 (2026-09-11, CLI adapter design): capabilities carry every CLI under
     # ``clis`` with served/reason; ``providers`` = the served ids.
-    assert svc.EXPECTED_CLI_HOST_VERSION == "0.8.0"
+    assert svc.EXPECTED_CLI_HOST_VERSION == "0.9.0"

@@ -43,7 +43,7 @@ def test_entrypoint_inserts_the_default_workspace_at_not_started():
     seed fix alone) — its INSERT must carry the stage too."""
     import pathlib
 
-    src = (pathlib.Path(__file__).resolve().parents[2] / "docker-entrypoint.sh").read_text()
+    src = (pathlib.Path(__file__).resolve().parents[1] / "docker-entrypoint.sh").read_text()
     insert = next(line for line in src.splitlines() if "INSERT INTO workspaces" in line)
     assert "onboarding" in insert and "not_started" in insert
 

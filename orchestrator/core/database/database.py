@@ -2,7 +2,7 @@
 Database Configuration and Session Management
 ============================================
 
-Database setup, connection management, and session handling for Automotas AI.
+Database setup, connection management, and session handling for Automatos AI.
 
 (PRD-142 W3-S5 / G7) The redundant ``load_dotenv()`` that used to live at the
 top of this module is gone — importing ``config`` loads ``.env`` exactly once,

@@ -16,7 +16,7 @@ _REPO = _ORCH.parent
 
 
 def test_entrypoint_seeds_the_local_operator_fail_closed():
-    entry = (_REPO / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    entry = (_ORCH / "docker-entrypoint.sh").read_text(encoding="utf-8")
     assert "INSERT INTO users (id, username, email, name, is_active) VALUES (1," in entry
     assert "LOCAL_OPERATOR_EMAIL" in entry
     assert "ON CONFLICT (id) DO NOTHING" in entry

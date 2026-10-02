@@ -71,11 +71,11 @@ describe('runtime configuration helpers', () => {
   it('a cli agent saves provider/model/working_directory with blanks as null, trimmed', async () => {
     const { runtimeConfiguration } = await load('local')
     expect(
-      runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '  ', cli_working_directory: '', cli_worktree: true }),
-    ).toEqual({ runtime: 'cli', provider: 'claude', model: null, working_directory: null, worktree_per_ticket: true })
+      runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '  ', cli_working_directory: '', cli_worktree: true, cli_permission_mode: '' }),
+    ).toEqual({ runtime: 'cli', provider: 'claude', model: null, working_directory: null, worktree_per_ticket: true, permission_mode: null })
     expect(
-      runtimeConfiguration({ runtime: 'cli', cli_provider: '', cli_model: ' fable ', cli_working_directory: ' /w/repo ', cli_worktree: true }),
-    ).toEqual({ runtime: 'cli', provider: 'claude', model: 'fable', working_directory: '/w/repo', worktree_per_ticket: true })
+      runtimeConfiguration({ runtime: 'cli', cli_provider: '', cli_model: ' fable ', cli_working_directory: ' /w/repo ', cli_worktree: true, cli_permission_mode: 'plan' }),
+    ).toEqual({ runtime: 'cli', provider: 'claude', model: 'fable', working_directory: '/w/repo', worktree_per_ticket: true, permission_mode: 'plan' })
   })
 
   it('reads the fields back from an agent configuration, defaulting anything missing', async () => {
@@ -88,7 +88,7 @@ describe('runtime configuration helpers', () => {
     })
     expect(
       runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', model: 'opus', working_directory: '/w' }),
-    ).toEqual({ runtime: 'cli', cli_provider: 'claude', cli_model: 'opus', cli_working_directory: '/w', cli_worktree: true })
+    ).toEqual({ runtime: 'cli', cli_provider: 'claude', cli_model: 'opus', cli_working_directory: '/w', cli_worktree: true, cli_permission_mode: '' })
   })
 })
 
@@ -176,10 +176,22 @@ describe('describeWorkspaceCheck', () => {
   })
 })
 
+describe('permission mode per agent', () => {
+  it('overrides the workspace default, and an unknown value reads as the default', async () => {
+    const { runtimeConfiguration, runtimeFieldsFromConfiguration } = await import('@/components/agents/runtime-section')
+    const agent = { runtime: 'cli', provider: 'claude', working_directory: '/w' }
+    expect(runtimeFieldsFromConfiguration({ ...agent, permission_mode: 'manual' }).cli_permission_mode).toBe('manual')
+    expect(runtimeFieldsFromConfiguration({ ...agent, permission_mode: 'bypassPermissions' }).cli_permission_mode).toBe('')
+    const fields = runtimeFieldsFromConfiguration({ ...agent, permission_mode: 'auto' })
+    expect(runtimeConfiguration(fields).permission_mode).toBe('auto')
+    expect(runtimeConfiguration({ ...fields, cli_permission_mode: '' }).permission_mode).toBeNull()
+  })
+})
+
 describe('worktree per ticket (PRD-239)', () => {
   it('round-trips the agent choice and defaults to on', async () => {
     const { runtimeConfiguration, runtimeFieldsFromConfiguration } = await import('@/components/agents/runtime-section')
-    const off = runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '', cli_working_directory: '/Users/me/Development', cli_worktree: false })
+    const off = runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '', cli_working_directory: '/Users/me/Development', cli_worktree: false, cli_permission_mode: '' })
     expect(off.worktree_per_ticket).toBe(false)
     expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w', worktree_per_ticket: false }).cli_worktree).toBe(false)
     expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w' }).cli_worktree).toBe(true)
@@ -280,6 +292,7 @@ describe('RuntimeSection session tool gaps', () => {
     cli_model: '',
     cli_working_directory: '',
     cli_worktree: true,
+    cli_permission_mode: '',
   }
 
   it('reads one line per skill that calls tools a session works differently on', async () => {

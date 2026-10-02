@@ -53,6 +53,7 @@ from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
+from .permission_modes import MODE_EDITS, MODE_PLAN, plan_text, save_plan, session_mode
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
@@ -297,7 +298,7 @@ class Session:
         self.adapter = None
         self._adapter_error: Optional[str] = None
         try:
-            self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None))
+            self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None), getattr(cfg, "session_sandbox", None))
         except (UnknownCli, NotServed) as exc:
             self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
@@ -401,7 +402,11 @@ class Session:
             decision = decide(intent, self._policy)
         verdict, answer, request_id = decision, None, None
         if decision.behavior == "ask":
+            if intent.cls is ToolClass.PLAN:
+                save_plan(self._plan_dir, plan_text(tool_input))
             verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
+            if intent.cls is ToolClass.PLAN and verdict.allow:
+                self._policy.permission_mode = MODE_EDITS  # the plan is approved: work as Edit automatically
         # F167: what the host decided, and why, is on the ticket — a call that ran
         # with nobody asked never reads as one the operator approved.
         # ``event_id``: a batch re-posted after a lost response counts once on the ticket.
@@ -495,7 +500,26 @@ class Session:
         return {"names": [str(n) for n in names], "url": f"{base}{path}", "token": token}
 
     def _run(self) -> SessionOutcome:
-        # 1. where
+        cwd = self._working_dir()
+        if isinstance(cwd, SessionOutcome):
+            return cwd
+        refused = self._preflight()
+        if refused is not None:
+            return refused
+        preset = self.adapter.preset
+        binary = self.adapter.resolve_binary()
+        ticket_path, system_prompt_path = self._write_session_files(preset.label)
+        session_tools = self._session_tools()
+        self._set_policy(cwd, preset, session_tools)
+        ctx, worktree = self._launch_context(cwd, ticket_path, system_prompt_path, session_tools)
+        prepared = self.adapter.prepare(ctx)
+        self._spawn(preset, ctx, prepared, session_tools, cwd, worktree)
+        exit_reason = self._wait_for_turn(preset)
+        self._terminate()
+        return self._collect(exit_reason, cwd, binary or preset.binary)
+
+    def _working_dir(self) -> "Path | SessionOutcome":
+        """1. where the session runs, or why it cannot."""
         try:
             cwd_hint = str(self.ticket.get("cwd") or "").strip()
             if not cwd_hint and self.default_root:
@@ -508,8 +532,10 @@ class Session:
             return self._outcome("error", error=str(exc), exit_reason="cwd_not_allowed")
         if not cwd.is_dir():
             return self._outcome("error", error=f"working directory does not exist: {cwd}", exit_reason="cwd_missing")
+        return cwd
 
-        # 2. preflight — which CLI, the user's own binary and login
+    def _preflight(self) -> Optional[SessionOutcome]:
+        """2. which CLI, the user's own binary and login."""
         if self.adapter is None:
             return self._outcome("error", error=self._adapter_error or "no CLI adapter", exit_reason="cli_not_served")
         preset = self.adapter.preset
@@ -519,19 +545,23 @@ class Session:
         refusal = self.adapter.preflight()
         if refusal is not None:
             return self._outcome("error", error=refusal.message, exit_reason=refusal.code)
-        binary = self.adapter.resolve_binary()
+        return None
 
-        # 3. files + what the adapter prepares (settings/config home + trust)
+    def _write_session_files(self, cli_label: str) -> Tuple[Path, Path]:
+        """3. the ticket, the system prompt and the terminal log beside the session."""
         session_dir = self.cfg.sessions_dir / self.task_id
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
         ticket_path.write_text(build_ticket_file(self.ticket, self.default_root), encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
-        system_prompt_path.write_text(build_system_prompt(self.ticket, preset.label), encoding="utf-8")
+        system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
+        return ticket_path, system_prompt_path
 
-        session_tools = self._session_tools()
+    def _set_policy(self, cwd: Path, preset: Any, session_tools: Optional[Dict[str, Any]]) -> None:
+        """The gate for this session: its folders, its allowlist and its permission mode."""
+        session_dir = self.session_dir
         # The ticket file NAMES a deliverables folder, so the session has to be
         # able to write there. For a folder-less ticket that folder IS the cwd,
         # but a ticket with its own working directory runs somewhere else — and
@@ -545,8 +575,12 @@ class Session:
             except OSError as exc:
                 log.warning("deliverables folder %s not created: %s", deliverables, exc)
             extra_dirs = (*extra_dirs, deliverables)
+        self.permission_mode = session_mode(
+            getattr(self.cfg, "permission_mode", None), self.ticket.get("permission_mode"),
+            resuming=bool(self.ticket.get("resume_session_id")), can_plan=bool(preset.plan_stance))
+        self._plan_dir = deliverables or session_dir
         self._policy = PolicyContext(
-            unlisted_bash=getattr(self.cfg, "unlisted_bash", "ask"),
+            permission_mode=self.permission_mode,
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=extra_dirs,
@@ -557,6 +591,10 @@ class Session:
             off_limits=(Path(self.cfg.state_dir).expanduser(),),
         )
 
+    def _launch_context(self, cwd: Path, ticket_path: Path, system_prompt_path: Path,
+                        session_tools: Optional[Dict[str, Any]]) -> Tuple[LaunchContext, Optional[str]]:
+        """What the adapter launches from, and the worktree the session gets (if any)."""
+        session_dir = self.session_dir
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
         # (the checkout stays untouched); a workspace of many repos, whose own
         # git tracks next to nothing, must not (the worktree would be empty).
@@ -567,11 +605,13 @@ class Session:
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
-            session_tools=session_tools,
+            session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
         )
-        prepared = self.adapter.prepare(ctx)
+        return ctx, worktree
 
-        # 4. spawn
+    def _spawn(self, preset: Any, ctx: LaunchContext, prepared: Any, session_tools: Optional[Dict[str, Any]],
+               cwd: Path, worktree: Optional[str]) -> None:
+        """4. spawn the CLI on a pty, with the environment its hooks need."""
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
@@ -609,7 +649,8 @@ class Session:
         log.info("task %s: %s session %s started (pid %s) in %s%s", self.task_id, preset.id, self.session_id, self.proc.pid, cwd,
                  f" worktree={worktree}" if worktree else "")
 
-        # 5. wait for the turn's end / exit / cancel / timeout — the preset says how a turn ends
+    def _wait_for_turn(self, preset: Any) -> str:
+        """5. wait for the turn's end / exit / cancel / timeout — the preset says how a turn ends."""
         deadline = self.started_at + self.cfg.session_timeout_seconds
         exit_reason = "completed"
         hook_driven = preset.turn_end == TURN_END_STOP_HOOK
@@ -630,8 +671,7 @@ class Session:
                 exit_reason = "no_session_start"
                 break
             time.sleep(0.25)
-        self._terminate()
-        return self._collect(exit_reason, cwd, binary or preset.binary)
+        return exit_reason
 
     def _drain(self, master: int) -> None:
         try:
@@ -787,7 +827,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
     import sys
 
     binaries = getattr(cfg, "cli_binaries", None) or {}
-    served = adapters(binaries)
+    served = adapters(binaries, getattr(cfg, "session_sandbox", None))
     clis: Dict[str, Any] = {}
     for cli_id, preset in REGISTRY.items():
         if cli_id in served:

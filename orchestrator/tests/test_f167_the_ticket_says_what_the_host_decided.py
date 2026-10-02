@@ -24,8 +24,8 @@ from services import cli_host_service as svc
 from services.session_report import session_report_lines
 
 CHROME = "google-chrome --headless --print-to-pdf=report.pdf report.html"
-UNLISTED = ("'google-chrome --headless' is not on this ticket's Bash allowlist; this host runs such "
-            "commands without asking (--unlisted-bash allow)")
+UNLISTED = ("'google-chrome --headless' is not on this ticket's Bash allowlist; this session runs such "
+            "commands without asking (Auto mode)")
 TICKET_999 = [  # the shape of #999's session, as a host with F167 reports it
     {"event": "PreToolUse", "tool_name": "Bash", "subject": CHROME, "decision": "allow", "reason": UNLISTED,
      "event_id": "e-chrome"},

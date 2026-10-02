@@ -25,5 +25,4 @@ services:
       target: development
     volumes:
       - ./orchestrator:/app
-      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - backend_data:/app/data
