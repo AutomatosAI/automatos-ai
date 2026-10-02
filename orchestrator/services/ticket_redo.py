@@ -19,6 +19,7 @@ the last line of a list under the draft.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
@@ -62,9 +63,28 @@ def with_new_brief(planning_data: Any, old_description: Optional[str], *, by: st
 
 
 def times_sent_back(task: Any) -> int:
-    """How many times the owner sent this ticket back with Reject."""
-    runs = (getattr(task, "planning_data", None) or {}).get("previous_runs") or []
-    return sum(1 for run in runs if isinstance(run, dict) and run.get("why") == SENT_BACK)
+    """How many times the owner sent this ticket back with Reject since its brief
+    was last agreed in Discuss. From DISCUSS_AFTER_REJECTS on, the review panel
+    suggests Discuss (D3)."""
+    data = getattr(task, "planning_data", None) or {}
+    briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
+    since = _parsed(briefs[-1].get("at")) if briefs else None
+    return sum(1 for run in data.get("previous_runs") or []
+               if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since))
+
+
+def _parsed(at: Any) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(at) if isinstance(at, str) else None
+    except ValueError:
+        return None
+
+
+def _after(at: Any, since: Optional[datetime]) -> bool:
+    if since is None:
+        return True
+    when = _parsed(at)
+    return when is not None and when > since
 
 
 def redo_block(task: Any) -> Optional[str]:

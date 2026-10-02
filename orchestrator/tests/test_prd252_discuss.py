@@ -126,17 +126,26 @@ def test_a_running_ticket_is_not_rebriefed_under_its_run(ticket):
     assert refused.value.status_code == 409 and "running" in refused.value.detail
 
 
-def test_the_board_counts_how_often_a_ticket_was_sent_back(ticket):
+def _sent_back(ticket, draft):
     import api.board_tasks as bt
+
+    s = ticket.new()
+    s.execute(text("UPDATE board_tasks SET status = 'review', result = :r WHERE id = :i"), {"r": draft, "i": ticket.id})
+    s.commit()
+    asyncio.run(bt.reject_task(ticket.id, _Req({"feedback": f"Not yet: {draft}"}), ctx=ticket.ctx, db=ticket.new()))
+
+
+def test_the_board_counts_the_send_backs_since_the_brief_was_agreed(ticket):
     from services.board_task_view import board_dict
 
     for draft in ("Draft 1", "Draft 2", "Draft 3"):
-        s = ticket.new()
-        s.execute(text("UPDATE board_tasks SET status = 'review', result = :r WHERE id = :i"), {"r": draft, "i": ticket.id})
-        s.commit()
-        asyncio.run(bt.reject_task(ticket.id, _Req({"feedback": f"Not yet: {draft}"}), ctx=ticket.ctx, db=ticket.new()))
-
+        _sent_back(ticket, draft)
     assert board_dict(_row(ticket))["times_sent_back"] == 3                # the panel now suggests Discuss
+
+    _rebrief(ticket)
+    assert board_dict(_row(ticket))["times_sent_back"] == 0                # a new brief starts the count again
+    _sent_back(ticket, "Draft 4")
+    assert board_dict(_row(ticket))["times_sent_back"] == 1
 
 
 def test_a_chat_opened_from_a_ticket_or_a_mission_tells_auto_to_read_it_first():
