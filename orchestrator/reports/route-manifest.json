@@ -1,5 +1,5 @@
 {
-  "route_count": 872,
+  "route_count": 883,
   "routes": [
     {
       "method": "GET",
@@ -1079,6 +1079,34 @@
     },
     {
       "method": "GET",
+      "path": "/api/documents/brand-kit/references"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/references"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/brand-kit/references/{ref_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/brand-kit/references/{ref_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/references/{ref_id}/image"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/brand-kit/style"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/style/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/documents/brand-kit/suggestions"
     },
     {
@@ -2107,6 +2135,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/media-tools"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/media-tools"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/music"
     },
     {
@@ -2184,6 +2220,14 @@
     {
       "method": "PATCH",
       "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/posts/{post_id}/ai-options"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/ai-options/{slot}"
     },
     {
       "method": "POST",

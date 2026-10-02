@@ -82,6 +82,8 @@ SOCIALS_OFF_FOR_WORKSPACE = (
 # The workspace settings key, and the only keys its object may carry.
 WORKSPACE_SOCIALS_SETTINGS_KEY = "socials"
 KEY_MEDIA_MONTHLY_CAP = "media_monthly_cap_usd"
+# PRD-251B (B10, US-B304): the workspace's own per-post media cap, over SOCIALS_MEDIA_POST_CAP_USD.
+KEY_MEDIA_POST_CAP = "media_post_cap_usd"
 KEY_SERIES_APPROVAL = "series_approval"
 # The keys a write sets to a real boolean.
 WORKSPACE_SOCIALS_SWITCHES = (KEY_ENABLED, KEY_SERIES_APPROVAL)
@@ -209,6 +211,21 @@ def media_monthly_cap_usd(settings: Optional[Dict[str, Any]]) -> Tuple[float, Op
         logger.error("[Socials] %s", why)
         return 0.0, why
     return cap, None
+
+
+def media_post_cap_usd(settings: Optional[Dict[str, Any]]) -> float:
+    """The workspace's per-post media cap in dollars (PRD-251B US-B304): its own when it set
+    one, else ``config.SOCIALS_MEDIA_POST_CAP_USD``; a stored value that is not a number of
+    dollars spends nothing (fail closed, logged)."""
+    raw = (settings or {}).get(WORKSPACE_SOCIALS_SETTINGS_KEY)
+    raw = raw if isinstance(raw, dict) else {}
+    if raw.get(KEY_MEDIA_POST_CAP) is None:
+        return float(config.SOCIALS_MEDIA_POST_CAP_USD)
+    cap = _dollars(raw[KEY_MEDIA_POST_CAP])
+    if cap is None:
+        logger.error("[Socials] the workspace's per-post media cap (%r) is not a number of dollars", raw[KEY_MEDIA_POST_CAP])
+        return 0.0
+    return cap
 
 
 def socials_off_reason(workspace: Optional[Workspace]) -> Optional[str]:

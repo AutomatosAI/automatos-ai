@@ -212,6 +212,9 @@ _VALID_BODY = {
     ("PUT", "/api/socials/posts/{post_id}/targets"): {"targets": []},
     # PRD-251B US-B105: a slot (the upload, US-B109, loads the post before it reads its file).
     ("PUT", "/api/socials/posts/{post_id}/slot"): {"planned_for": FUTURE_SLOT},
+    # PRD-251B US-B305: AI options for an image slot, and the one picked.
+    ("POST", "/api/socials/posts/{post_id}/ai-options"): {"slot": "hero", "prompt": "A sunrise over the bay"},
+    ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"): {"name": "hero_option_1.png"},
     # US-210: putting a post in a campaign and taking it out take no body.
     ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
     ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
@@ -289,6 +292,12 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("PUT", "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"),
             # The music library a post may pick from (api/socials_templates.py).
             ("GET", "/api/socials/music"),
+            # PRD-251B Wave 3: the AI tools and their defaults (US-B304) and AI-made options for
+            # an image slot (US-B305; api/socials_media_tools.py).
+            ("GET", "/api/socials/media-tools"),
+            ("PUT", "/api/socials/media-tools"),
+            ("POST", "/api/socials/posts/{post_id}/ai-options"),
+            ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

@@ -21,8 +21,13 @@ a tick:
 5. Once per plan and day: "Today's posts are ready".
 
 A slot's work runs in a worker thread on its own session; the composer and the render
-start run on the event loop from there, as the routes do (F105). AI-made visuals (the
-plan's visual mix beyond templates) arrive with US-B305: every post here is a template's.
+start run on the event loop from there, as the routes do (F105).
+
+The plan's visual mix (US-B305, ``modules/socials/plan_visuals.py``): each slot draws its
+visual from the mix. AI images or AI footage ask the template's slots for it, each with the
+composer's prompt (the render makes them through the workspace's default toolkit, capped and
+booked); the library makes a fitting image or video Deliverable the post's media, as the
+editor's Library does, and the post goes for approval with no render.
 """
 from __future__ import annotations
 
@@ -34,6 +39,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 import anyio
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from config import config
@@ -42,7 +48,7 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SocialCampaign, SocialPost, SocialTopic
 from core.models.workspaces import Workspace
 from core.social_cuts import cut_to_length
-from modules.socials import compose, plan_notify, plan_store, plans, service, topics
+from modules.socials import compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
 
@@ -64,6 +70,15 @@ FORMAT_KINDS: Mapping[str, Tuple[str, ...]] = {
 # A fact's source kind (B8) → the post source kind a claim binds to (D7). A note backs no claim.
 FACT_SOURCE_KINDS = {"knowledge": "document", "deliverable": "deliverable", "web": "url", "github": "url"}
 STILL_FORMATS = ("image", "carousel", "fact_card", "infographic")
+# The library's newest Deliverables of the kind a post needs, which a library visual picks from.
+LIBRARY_CANDIDATES = 50
+_LIBRARY = sa.text(
+    """
+    SELECT id, title, summary FROM deliverables
+     WHERE workspace_id = :workspace_id AND deleted_at IS NULL AND artifact_type = :kind
+     ORDER BY created_at DESC LIMIT :limit
+    """
+)
 
 
 def _session() -> Any:
@@ -209,7 +224,8 @@ def claim(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, n
     return post
 
 
-def _propose(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, now: datetime) -> Dict[str, Any]:
+def _propose(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, now: datetime,
+             visual_slots: List[Dict[str, str]]) -> Dict[str, Any]:
     from api import socials_compose as compose_api
 
     request = compose_api.ComposeRequest(
@@ -217,7 +233,7 @@ def _propose(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic
         template_id=UUID(slot.template_id) if slot.template_id else None, length_seconds=slot.length_seconds,
     )
     context = compose_api.compose_context(db, plan.workspace_id, request)
-    context = replace(context, candidates=[*fact_candidates(topic, now), *context.candidates])
+    context = replace(context, candidates=[*fact_candidates(topic, now), *context.candidates], visual_slots=tuple(visual_slots))
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
     return anyio.from_thread.run(compose.propose, context, compose.llm_factory(plan.workspace_id), timeout)
 
@@ -235,13 +251,48 @@ def _changes(proposal: Mapping[str, Any], slot: plans.Slot) -> Dict[str, Any]:
     return {key: value for key, value in changes.items() if value is not None}
 
 
+def template_blocks(db: Any, workspace_id: UUID, template_id: Any) -> Optional[Mapping[str, Any]]:
+    """The composition of the workspace's template ``template_id``; ``None`` for anything else."""
+    template = db.get(DocumentTemplate, UUID(str(template_id))) if template_id else None
+    return render.composition_of(template) if template is not None and template.workspace_id == workspace_id else None
+
+
+def library_media(db: Any, workspace_id: UUID, post_format: str, topic: SocialTopic) -> Optional[Dict[str, Any]]:
+    """The edit that makes a library Deliverable fitting the topic the post's media, as the
+    editor's Library does; ``None`` when nothing in the library fits."""
+    kind = "video" if post_format == "video" else "image"
+    rows = db.execute(_LIBRARY, {"workspace_id": workspace_id, "kind": kind, "limit": LIBRARY_CANDIDATES}).mappings().all()
+    found = plan_visuals.best_fit(rows, topic.title, topic.angle)
+    if found is None:
+        return None
+    return {"media": {"original": [str(found["id"])]}, "template_id": None, "length_seconds": None, "format": kind}
+
+
+def _visual_changes(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, proposal: Mapping[str, Any],
+                    visual: str) -> Dict[str, Any]:
+    """The edit the slot's visual adds to the composer's: AI-made slots, or a library file."""
+    if visual == plan_visuals.TEMPLATES:
+        return {}
+    if visual == plan_visuals.LIBRARY:
+        return library_media(db, plan.workspace_id, slot.format, topic) or {}
+    asked = plan_visuals.ai_slots(template_blocks(db, plan.workspace_id, proposal.get("template_id")), visual)
+    if not asked:
+        return {}
+    fallback = plan_visuals.topic_prompt(topic.title, topic.angle)
+    return {"footage": plan_visuals.footage_asks(asked, proposal.get("visual_prompts") or {}, fallback)}
+
+
 def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, post: SocialPost, now: datetime) -> None:
-    """The claimed draft written by the composer, given its channels, then rendered or submitted."""
+    """The claimed draft written by the composer with the slot's visual, given its channels,
+    then rendered or submitted."""
     from api import socials_targets
 
     posts_api, actor = _posts_api(), plan.created_by
-    proposal = _propose(db, plan, slot, topic, now)
-    anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, _changes(proposal, slot), agent=PLAN_AGENT))
+    visual = plan_visuals.visual_for(plans.make_settings(plan)["visual_mix"], slot.key)
+    known = plan_visuals.ai_slots(template_blocks(db, plan.workspace_id, slot.template_id), visual) if visual in plan_visuals.SLOT_KIND else []
+    proposal = _propose(db, plan, slot, topic, now, known)
+    changes = {**_changes(proposal, slot), **_visual_changes(db, plan, slot, topic, proposal, visual)}
+    anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, changes, agent=PLAN_AGENT))
     socials_targets.set_post_targets(db, post, actor, slot_targets(db, plan.workspace_id, slot), agent=PLAN_AGENT)
     if post.template_id is not None:
         anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)

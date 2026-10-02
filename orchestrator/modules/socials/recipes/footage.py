@@ -154,12 +154,14 @@ def preferred_toolkits() -> Tuple[str, ...]:
     return tuple(dict.fromkeys(name for name in names if name in RECIPES))
 
 
-def route_for(kind: str, caps: MediaCapabilities) -> Union[Route, str]:
-    """The first toolkit route that makes ``kind`` here; else why none does."""
+def route_for(kind: str, caps: MediaCapabilities, prefer: Optional[str] = None) -> Union[Route, str]:
+    """The first toolkit route that makes ``kind`` here, the workspace's default for it
+    first (``prefer``, PRD-251B US-B304); else why none does."""
     if caps.problem:
         return caps.problem
     reasons = []
-    for toolkit in preferred_toolkits():
+    order = preferred_toolkits()
+    for toolkit in dict.fromkeys((prefer, *order) if prefer in order else order):
         if toolkit not in caps.connected:
             continue
         route, why = RECIPES[toolkit].route(kind, caps)
@@ -173,7 +175,22 @@ def route_for(kind: str, caps: MediaCapabilities) -> Union[Route, str]:
     return f"no generation toolkit that makes {KIND_WORDS[kind]} is connected{hint}"
 
 
-def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, height: int) -> Optional[FootagePlan]:
+def _skip_reason(slot: str, spec: Any, record: Any) -> Optional[str]:
+    """Why this render plays the slot's own motion graphics instead of making it, or ``None``."""
+    if not isinstance(spec, Mapping):
+        return "the template has no such slot"
+    label = str(spec.get("label") or slot)
+    if not slot_generatable(spec):
+        return f"{label} takes the workspace's own file, never generated footage"
+    if not isinstance(record, Mapping) or not isinstance(record.get("prompt"), str):
+        return "it asks for no prompt"
+    if record.get("options_state"):  # PRD-251B US-B305: AI options made, none picked yet
+        return f"{label}: pick one of its AI options first"
+    return None
+
+
+def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, height: int, style: str = "",
+             prefer: Optional[Mapping[str, str]] = None, references: Tuple[str, ...] = ()) -> Optional[FootagePlan]:
     """The plan for the post's ``footage`` over its template's ``slots``; ``None`` when it asks for none."""
     asked = footage if isinstance(footage, Mapping) else {}
     if not asked:
@@ -186,27 +203,24 @@ def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, h
     routes: Dict[str, Union[Route, str]] = {}
     for slot, record in asked.items():
         spec = specs.get(slot)
-        if not isinstance(spec, Mapping):
-            fallback[slot] = "the template has no such slot"
+        why = _skip_reason(slot, spec, record)
+        if why:
+            fallback[slot] = why
             continue
         label = str(spec.get("label") or slot)
-        if not slot_generatable(spec):
-            fallback[slot] = f"{label} takes the workspace's own file, never generated footage"
-            continue
-        if not isinstance(record, Mapping) or not isinstance(record.get("prompt"), str):
-            fallback[slot] = "it asks for no prompt"
-            continue
         if record.get("status") == service.FOOTAGE_DONE and valid_file_name(record.get("name")):
             kept.append(Kept(slot=slot, path=spec["path"], name=record["name"]))
             continue
         kind = spec["kind"]
         if kind not in routes:
-            routes[kind] = route_for(kind, caps)
+            routes[kind] = route_for(kind, caps, (prefer or {}).get(kind))
         route = routes[kind]
         if isinstance(route, str):
             fallback[slot] = route
             continue
-        shots.append((Shot(slot=slot, kind=kind, path=spec["path"], label=label, prompt=record["prompt"], aspect_ratio=ratio), route))
+        shot = Shot(slot=slot, kind=kind, path=spec["path"], label=label, prompt=record["prompt"], aspect_ratio=ratio, style=style,
+                    references=references)
+        shots.append((shot, route))
     return FootagePlan(shots=tuple(shots), kept=tuple(kept), fallback=dict(fallback))
 
 
@@ -277,6 +291,7 @@ class Made:
     bytes: int
     sha256: str
     estimate_usd: float
+    deliverable_id: Optional[str] = None  # PRD-251B US-B305: an AI option's own Deliverable
 
 
 def _store(store: MediaStore, key: str, data: bytes, content_type: str) -> None:
@@ -421,7 +436,7 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
         logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
     return Made(
         slot=shot.slot, path=shot.path, key=key, name=name, toolkit=route.recipe.toolkit, model=route.model,
-        bytes=len(data), sha256=digest, estimate_usd=estimate_usd,
+        bytes=len(data), sha256=digest, estimate_usd=estimate_usd, deliverable_id=deliverable_id,
     )
 
 

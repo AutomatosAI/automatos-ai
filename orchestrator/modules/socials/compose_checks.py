@@ -11,6 +11,8 @@
   claim stays unsourced, and the approval UI shows it so.
 * **Copy**: every selected channel gets its own text (the base when the model
   left one out), fitted to the channel's limits at a word boundary.
+* **Visual prompts** (PRD-251B US-B305): only for the slots the composer was asked
+  about, each one line of at most VISUAL_PROMPT_MAX_CHARS.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from modules.socials.copy_limits import fit_copy, fit_title
 VIDEO_FORMAT = "video"
 TEXT_FORMAT = "text"
 TITLE_FALLBACK_CHARS = 80
+VISUAL_PROMPT_MAX_CHARS = 600
 
 
 def template_kind(post_format: Optional[str]) -> Optional[str]:
@@ -132,6 +135,18 @@ def _title(raw: Any, ctx: Any, warnings: List[str]) -> str:
     return fitted
 
 
+def _visual_prompts(value: Any, ctx: Any) -> Dict[str, str]:
+    """The model's prompt per slot it was asked about (``ctx.visual_slots``); nothing else."""
+    wanted = {str(slot.get("slot")) for slot in getattr(ctx, "visual_slots", ())}
+    if not wanted or not isinstance(value, Mapping):
+        return {}
+    return {
+        slot: " ".join(text.split())[:VISUAL_PROMPT_MAX_CHARS]
+        for slot, text in value.items()
+        if slot in wanted and isinstance(text, str) and text.strip()
+    }
+
+
 def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
     """The proposal as the composer shows it, every field checked against ``ctx``."""
     warnings: List[str] = list(ctx.warnings)
@@ -156,5 +171,6 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "channels": [str(c["toolkit"]) for c in ctx.channels],
         # PRD-251B (B5): the chosen length rides along to the saved post.
         "length_seconds": getattr(ctx, "length_seconds", None),
+        "visual_prompts": _visual_prompts(raw.get("visual_prompts"), ctx),
         "warnings": warnings,
     }

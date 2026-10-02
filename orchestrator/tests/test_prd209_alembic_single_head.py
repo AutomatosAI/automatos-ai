@@ -85,7 +85,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # of the Studio wave (social_posts.planned_for, length_seconds, the text format).
 # 2026-10-03 (PRD-251B Wave 2): prd251b_wave2 chains onto prd251b_wave1 — the ONE
 # migration of the plans wave (the plan columns, slot_key, music, social_topics).
-EXPECTED_HEAD = "prd251b_wave2"
+# 2026-10-03 (PRD-251B Wave 3): prd251b_wave3 chains onto prd251b_wave2 — the ONE
+# migration of the brand kit wave (the reference_image flag in the media allowlist).
+EXPECTED_HEAD = "prd251b_wave3"
 
 
 def _literal(node: ast.AST):

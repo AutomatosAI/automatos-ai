@@ -68,7 +68,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 from config import config
@@ -94,6 +94,7 @@ from core.media_render_quota import (
 )
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_cuts import cut_to_length, slots_cut_out
+from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
 from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import notify, service
@@ -204,8 +205,8 @@ def bundle_for(
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
     blocks = at_chosen_length(blocks, post)
-    if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music, a render setting
-        blocks = with_music(blocks, getattr(post, "music", None))
+    if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
+        blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
     supplied = {
         name: spec.get("value")
         for name, spec in (getattr(post, "variables", None) or {}).items()
@@ -251,9 +252,15 @@ async def reserve_seconds(db: Any, workspace: Any, post: Any, template: Any) -> 
     )
 
 
-def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_recipes.FootagePlan]:
+def footage_plan_for(
+    post: Any, template: Any, caps: Any, *, style: str = "", prefer: Optional[Mapping[str, str]] = None,
+    references: Tuple[str, ...] = (),
+) -> Optional[footage_recipes.FootagePlan]:
     """The footage the post asks for (US-114), planned over its template's slots
-    with the workspace's media capabilities ``caps``; ``None`` when it asks for none."""
+    with the workspace's media capabilities ``caps``; ``None`` when it asks for none.
+    ``style`` (the brand kit's style profile, US-B303) follows every shot's prompt; ``prefer``
+    names the workspace's default toolkit per slot kind (US-B304), tried first; ``references``
+    links the kit's liked style references (US-B305)."""
     if not getattr(post, "footage", None):
         return None
     blocks = composition_of(template)
@@ -269,7 +276,8 @@ def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_re
     hidden = slots_cut_out(blocks, length) if isinstance(length, int) and not isinstance(length, bool) and length > 0 else set()
     footage = post.footage if isinstance(post.footage, Mapping) else {}
     asked = {slot: record for slot, record in footage.items() if slot not in hidden}
-    return footage_recipes.plan_for(asked, blocks.get("slots"), caps, width=width, height=height)
+    return footage_recipes.plan_for(asked, blocks.get("slots"), caps, width=width, height=height, style=style, prefer=prefer,
+                                    references=references)
 
 
 @dataclass(frozen=True)

@@ -465,6 +465,9 @@ async def _image_deliverable(
         "Style: modern and clean, no embedded text or lettering (any words are set "
         "by the template or the post). Output the image only."
     )
+    style = _brand_style(db, workspace_id)  # PRD-251B US-B303: the brand kit's style profile
+    if style:
+        full_prompt = f"{full_prompt} {style}"
     mime, b64 = await _image_from_model(workspace_id, full_prompt, context=f"aspect={aspect}")
     image_id = await _saved_image(workspace_id, mime, b64)
     image_url = _image_url(image_id)
@@ -487,6 +490,15 @@ async def _image_deliverable(
         "aspect_ratio": aspect,
         "message": f"Image '{title}' ({aspect}) saved to Deliverables.",
     }
+
+
+def _brand_style(db: Session, workspace_id: UUID) -> str:
+    """The brand kit's style profile as one paragraph (PRD-251B US-B303); empty without one."""
+    from core.models.workspaces import Workspace
+    from modules.documents.brand_style import style_prompt
+
+    workspace = db.get(Workspace, workspace_id)
+    return style_prompt(workspace.settings if workspace is not None else None)
 
 
 def _register_image(db: Session, workspace_id: UUID, params: Dict[str, Any], *, image_id: str, mime: str,

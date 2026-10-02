@@ -550,7 +550,9 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
     """The plan as its research needs it: goal, audience, dates, cadence, sources and the bank's topics."""
     from modules.socials import topics
 
-    _, refusal = _open(db, workspace_id)
+    from modules.documents.brand_style import style_prompt
+
+    workspace, refusal = _open(db, workspace_id)
     if refusal:
         return refusal
     try:
@@ -559,7 +561,8 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
         return _refused(str(exc))
     keys = ("id", "name", "goal", "audience", "starts_on", "ends_on", "timezone", "cadence", "sources", "status")
     bank = [{"title": t.title, "formats": list(t.formats or []), "used": t.used_at is not None} for t in topics.list_topics(db, plan)]
-    return {"success": True, "plan": {key: plan.to_dict()[key] for key in keys}, "bank": bank}
+    plan_view = {key: plan.to_dict()[key] for key in keys}
+    return {"success": True, "plan": plan_view, "bank": bank, "brand_style": style_prompt(workspace.settings)}
 
 
 async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

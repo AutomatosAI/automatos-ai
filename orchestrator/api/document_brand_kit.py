@@ -346,4 +346,9 @@ async def delete_brand_font(
     return new_kit
 
 
+# PRD-251B (US-B302, US-B303): the style references and the style profile, under the same prefix.
+from api.document_brand_references import router as references_router  # noqa: E402
+
+router.include_router(references_router)
+
 __all__ = ["router"]

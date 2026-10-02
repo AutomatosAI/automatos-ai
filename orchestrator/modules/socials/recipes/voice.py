@@ -66,6 +66,7 @@ from config import config
 from core.composio.tool_executor import ComposioToolExecutor
 from modules.socials import media_ledger, service
 from modules.socials.capabilities import BALANCE, TTS, VOICES, MediaCapabilities, OfferedAction
+from modules.socials.kokoro_voices import kokoro_listing
 from modules.socials.media_caps import MediaCapExceeded, check_spend
 from modules.socials.media_ledger import Settlement
 from modules.socials.media_store import MediaNameError, MediaStore, media_key
@@ -257,7 +258,7 @@ def voice_sources(caps: MediaCapabilities) -> Dict[str, Any]:
     the workspace can speak with; each allowlisted one it has not connected,
     with a link to the Composio connect flow; a connected one it cannot use, and why."""
     sources: List[Dict[str, Any]] = [
-        {"toolkit": service.KOKORO, "label": KOKORO_LABEL, "status": AVAILABLE, "builtin": True, "lists_voices": False}
+        {"toolkit": service.KOKORO, "label": KOKORO_LABEL, "status": AVAILABLE, "builtin": True, "lists_voices": True}
     ]
     connectable = set(caps.connectable(TTS))
     for toolkit, recipe in sorted(RECIPES.items()):
@@ -368,7 +369,10 @@ async def list_voices(
     query: Optional[str] = None,
     executor: Any = None,
 ) -> List[Dict[str, str]]:
-    """The voices ``toolkit`` offers the workspace, through its ``voices`` action."""
+    """The voices ``toolkit`` offers the workspace, through its ``voices`` action; Kokoro's
+    catalogue for Kokoro (PRD-251B US-B306), with no toolkit called."""
+    if toolkit == service.KOKORO:
+        return kokoro_listing(query, limit)
     recipe = RECIPES.get(toolkit)
     if recipe is None:
         raise VoiceUnavailable(f"{toolkit} is not a voice Socials can speak with.")

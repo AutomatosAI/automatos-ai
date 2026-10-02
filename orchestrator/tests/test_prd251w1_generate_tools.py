@@ -37,7 +37,7 @@ import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -588,8 +588,9 @@ def test_without_a_post_the_image_is_an_image_deliverable_and_no_blog_post_is_to
         "image_url": f"{BACKEND}/api/generated-images/{IMAGE_ID}", "title": "Launch still", "aspect_ratio": "4:5",
         "message": "Image 'Launch still' (4:5) saved to Deliverables.",
     }
-    # No blog post was opened, read or written; nothing else touched the session.
-    assert image_env.blog == [] and db.method_calls == []
+    # No blog post was opened, read or written; the session only read the workspace, for
+    # its brand kit's style profile (PRD-251B US-B303).
+    assert image_env.blog == [] and db.method_calls == [call.get(Workspace, WS)]
     assert image_env.saved == [(IMAGE_B64, "image/png", str(WS))]
     (registered,) = image_env.registered
     assert registered == {
@@ -610,6 +611,18 @@ def test_without_a_post_the_image_is_an_image_deliverable_and_no_blog_post_is_to
     (prompt,) = image_env.model.prompts
     assert prompt.startswith("Generate a 4:5 image. Image direction: a lighthouse at dusk.")
     assert "no embedded text" in prompt and "blog" not in prompt
+
+
+def test_a_still_follows_the_brand_kits_style_profile(image_env):
+    """PRD-251B US-B303: Template Studio's and Socials' stills carry the style read from the references."""
+    profile = {"palette": ["#112233"], "mood": ["calm"], "composition": "Wide shots.", "avoid": "Clutter."}
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(settings={"brand_style": {"references": [], "profile": profile}})
+    assert _image(db, {"prompt": "a lighthouse at dusk", "aspect_ratio": "1:1"})["success"] is True
+    (prompt,) = image_env.model.prompts
+    assert prompt.endswith(
+        "Brand style (from the brand kit's references): palette #112233; mood: calm; composition: Wide shots; avoid: Clutter."
+    )
 
 
 def test_an_image_without_a_title_is_named_by_its_prompt(image_env):

@@ -37,7 +37,7 @@ from core.llm.usage_context import LANE_MEDIA
 from core.models.core import LLMUsage
 from core.models.workspaces import Workspace
 from core.utils.timestamps import month_window_utc
-from modules.socials.settings import media_monthly_cap_usd
+from modules.socials.settings import media_monthly_cap_usd, media_post_cap_usd
 
 # The post's execution id on the media lane: every booking a post's render makes.
 POST_EXECUTION_PREFIX = "social_post:"
@@ -142,7 +142,7 @@ def media_spend(db: Any, workspace: Any, post_id: Any = None, now: Optional[date
     return MediaSpend(
         post_usd=post_spend_usd(db, workspace.id, post_id) if post_id is not None else 0.0,
         month_usd=month_spend_usd(db, workspace.id, start, end),
-        post_cap_usd=float(config.SOCIALS_MEDIA_POST_CAP_USD),
+        post_cap_usd=media_post_cap_usd(getattr(workspace, "settings", None)),  # PRD-251B US-B304
         monthly_cap_usd=cap,
         period_end=end,
         problem=problem,

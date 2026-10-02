@@ -58,6 +58,8 @@ MAX_LOGO_MARK_ASPECT = 1.2
 
 # The stored names under <workspace_id>/brand/.
 LOGO_STEM = "logo"
+# The bucket brand files are mirrored to when no documents bucket is configured.
+DEFAULT_BRAND_BUCKET = "automatos-ai"
 LOGO_MARK_STEM = "logo-mark"
 
 # Accepted image types, keyed by the magic bytes we sniff (never trust the
@@ -150,6 +152,11 @@ def s3_brand_file_key(path: str) -> str:
     return f"workspaces/{path}"
 
 
+def brand_files_bucket() -> str:
+    """The bucket a brand file is mirrored to: the documents bucket."""
+    return config.S3_DOCUMENTS_BUCKET or DEFAULT_BRAND_BUCKET
+
+
 def logo_storage_path(workspace_id: UUID, ext: str, stem: str = LOGO_STEM) -> str:
     return f"{workspace_id}/brand/{stem}{ext}"
 
@@ -175,7 +182,7 @@ def store_brand_file(path: str, data: bytes, mime: str) -> None:
 def _mirror_to_s3(path: str, data: bytes, mime: str) -> bool:
     if not is_storage_configured():
         return False
-    bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
+    bucket = brand_files_bucket()
     try:
         ensure_bucket(bucket)
         get_s3_client().put_object(Bucket=bucket, Key=s3_brand_file_key(path), Body=data, ContentType=mime)
@@ -200,7 +207,7 @@ def load_brand_file(path: str, max_bytes: int) -> Optional[bytes]:
             logger.warning("[BrandLogo] unreadable local brand file %s", local)
     if not is_storage_configured():
         return None
-    bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
+    bucket = brand_files_bucket()
     try:
         body = get_s3_client().get_object(Bucket=bucket, Key=s3_brand_file_key(path))["Body"].read()
     except Exception:  # noqa: BLE001 — missing object / storage hiccup → no file
@@ -226,7 +233,7 @@ def delete_brand_file(path: str) -> None:
             logger.warning("[BrandLogo] could not delete local brand file %s", local)
     if is_storage_configured():
         try:
-            bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
+            bucket = brand_files_bucket()
             get_s3_client().delete_object(Bucket=bucket, Key=s3_brand_file_key(path))
         except Exception:  # noqa: BLE001
             logger.info("[BrandLogo] S3 delete skipped for %s", path)

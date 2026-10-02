@@ -21,7 +21,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from modules.socials import compose_checks
 from modules.socials.copy_limits import limits_for
@@ -35,6 +35,11 @@ SKILL_NAMES = ("social-brand-voice", "social-template-payloads")
 SKILL_MAX_CHARS = 6000
 TEXT_FORMAT = "text"
 WORDS_PER_SECOND = 2.5  # the editor's rule of thumb for a spoken line (PRD-251B mockup)
+VISUAL_PROMPTS_NOTE = (
+    'Also answer "visual_prompts": {"<slot>": "..."}, one for each slot in visual_slots: what its image '
+    "or footage shows, in one or two sentences, following brand_style when it is given. No words, letters, "
+    "numbers or logos in it: every word on screen is template text."
+)
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
 
 RETRY_NOTE = (
@@ -68,6 +73,11 @@ class ComposeContext:
     # declares, and the model gets its spoken-word budget. A text post has no template.
     template_id: Optional[str] = None
     length_seconds: Optional[int] = None
+    # PRD-251B (B9, US-B303): the brand kit's style profile, as a paragraph; empty without one.
+    style: str = ""
+    # PRD-251B (US-B305): the template slots an AI tool fills for this post ({slot, kind, label}),
+    # each needing a prompt from the model (``visual_prompts``); none for most posts.
+    visual_slots: Tuple[Mapping[str, str], ...] = ()
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
@@ -108,6 +118,8 @@ def _system(ctx: ComposeContext) -> str:
         )
     if ctx.format == TEXT_FORMAT:
         parts.append("This is a text-only post: no template, no variables and no image; write the copy only.")
+    if ctx.visual_slots:
+        parts.append(VISUAL_PROMPTS_NOTE)
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -128,6 +140,10 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
     if ctx.length_seconds:
         material["length_seconds"] = ctx.length_seconds
         material["spoken_words_budget"] = int(round(ctx.length_seconds * WORDS_PER_SECOND))
+    if ctx.style:
+        material["brand_style"] = ctx.style  # every image and footage prompt follows it (US-B303)
+    if ctx.visual_slots:
+        material["visual_slots"] = [dict(slot) for slot in ctx.visual_slots]
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},

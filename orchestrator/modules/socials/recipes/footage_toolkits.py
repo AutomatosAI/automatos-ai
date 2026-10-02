@@ -37,6 +37,7 @@ from modules.socials.capabilities import (
     ESTIMATE,
     GENERATE_IMAGE,
     GENERATE_VIDEO,
+    REFERENCE_IMAGE,
     STATUS,
     MediaCapabilities,
     OfferedAction,
@@ -93,6 +94,12 @@ class Shot:
     label: str
     prompt: str  # as the post asks it
     aspect_ratio: str
+    # PRD-251B (US-B303): the brand kit's style profile, sent after the prompt and never
+    # recorded with it, so a slot asked for again with the same prompt keeps its file.
+    style: str = ""
+    # PRD-251B (US-B305): links to the brand kit's liked style references, newest first; sent
+    # only by a recipe whose generate action the registry flags as taking one.
+    references: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -190,14 +197,14 @@ def aspect_ratio(width: int, height: int) -> str:
     return min(COMMON_RATIOS, key=distance)
 
 
-def prompt_for(prompt: str) -> str:
+def prompt_for(prompt: str, style: str = "") -> str:
     """The prompt as submitted: it ends with the guard words (no readable text, no
-    logos), since every word on screen is template text (D12)."""
+    logos), since every word on screen is template text (D12), then the brand kit's
+    style profile when there is one (PRD-251B US-B303)."""
     guard = config.SOCIALS_FOOTAGE_PROMPT_GUARD
     text = prompt.strip()
-    if not guard or guard.lower() in text.lower():
-        return text
-    return f"{text.rstrip('.').rstrip()}, {guard}"
+    guarded = text if not guard or guard.lower() in text.lower() else f"{text.rstrip('.').rstrip()}, {guard}"
+    return f"{guarded} {style.strip()}" if style.strip() else guarded
 
 
 # ── the recipes ─────────────────────────────────────────────────────────────
@@ -219,6 +226,19 @@ class FootageRecipe:
 
     def model(self, kind: str) -> str:
         raise NotImplementedError
+
+    def reference_field(self, kind: str) -> Optional[str]:
+        """The submit parameter that takes a reference image link for ``kind``, if any."""
+        return None
+
+    def with_reference(self, request: Dict[str, Any], shot: Shot, route: Route) -> Dict[str, Any]:
+        """``request`` with the shot's first liked reference (US-B305), when the registry flags the
+        submit action as taking a reference image and this recipe knows its parameter."""
+        field_name = self.reference_field(shot.kind)
+        submit = route.actions.get(SUBMIT)
+        if not shot.references or not field_name or submit is None or REFERENCE_IMAGE not in submit.capabilities:
+            return request
+        return {**request, field_name: shot.references[0]}
 
     def usd_per_credit(self) -> float:
         return 0.0
@@ -265,6 +285,8 @@ FAL_COMPLETED = "COMPLETED"
 # (per second, per video, per image), one call is one shot.
 FAL_ESTIMATE_TYPE = "historical_api_price"
 FAL_CURRENCY = "USD"
+# The input a still model takes a reference image under (FLUX1.1 [pro] ultra's image prompt).
+FAL_REFERENCE_FIELD = "image_url"
 
 
 class FalRecipe(FootageRecipe):
@@ -283,6 +305,9 @@ class FalRecipe(FootageRecipe):
     def model(self, kind: str) -> str:
         return config.SOCIALS_FOOTAGE_FAL_VIDEO_MODEL if kind == VIDEO_SLOT else config.SOCIALS_FOOTAGE_FAL_IMAGE_MODEL
 
+    def reference_field(self, kind: str) -> Optional[str]:
+        return FAL_REFERENCE_FIELD if kind == IMAGE_SLOT else None  # the still model's image prompt
+
     async def estimate(self, ask: Ask, model: str, count: int) -> float:
         answer = await ask(
             PRICE,
@@ -300,9 +325,10 @@ class FalRecipe(FootageRecipe):
         return float(total)
 
     async def submit(self, ask: Ask, shot: Shot, route: Route) -> Any:
-        request: Dict[str, Any] = {"prompt": prompt_for(shot.prompt), "aspect_ratio": shot.aspect_ratio}
+        request: Dict[str, Any] = {"prompt": prompt_for(shot.prompt, shot.style), "aspect_ratio": shot.aspect_ratio}
         if shot.kind == VIDEO_SLOT:
             request["duration"] = str(config.SOCIALS_FOOTAGE_CLIP_SECONDS)
+        request = self.with_reference(request, shot, route)
         answer = await ask(SUBMIT, {"model_id": route.model, "input": request}, ("model_id", "input"))
         request_id = find_text(answer, ("request_id", "requestId"))
         if not request_id:
@@ -332,6 +358,8 @@ KIE_FLUX_DETAILS = "KIEAI_GET_FLUX_KONTEXT_IMAGE_DETAILS"
 KIE_CREDITS = "KIEAI_GET_ACCOUNT_CREDITS"
 KIE_GENERATING, KIE_DONE = 0, 1
 KIE_IMAGE_FORMAT = "png"
+# Flux Kontext's reference image (docs.composio.dev kieai, checked 2026-10-03).
+KIE_REFERENCE_FIELD = "input_image"
 
 
 class KieRecipe(FootageRecipe):
@@ -348,14 +376,17 @@ class KieRecipe(FootageRecipe):
     def model(self, kind: str) -> str:
         return config.SOCIALS_FOOTAGE_KIEAI_VIDEO_MODEL if kind == VIDEO_SLOT else config.SOCIALS_FOOTAGE_KIEAI_IMAGE_MODEL
 
+    def reference_field(self, kind: str) -> Optional[str]:
+        return KIE_REFERENCE_FIELD if kind == IMAGE_SLOT else None
+
     def usd_per_credit(self) -> float:
         return float(config.SOCIALS_KIEAI_USD_PER_CREDIT)
 
     async def submit(self, ask: Ask, shot: Shot, route: Route) -> Any:
-        wanted: Dict[str, Any] = {"prompt": prompt_for(shot.prompt), "model": route.model, "aspect_ratio": shot.aspect_ratio}
+        wanted: Dict[str, Any] = {"prompt": prompt_for(shot.prompt, shot.style), "model": route.model, "aspect_ratio": shot.aspect_ratio}
         if shot.kind == IMAGE_SLOT:
             wanted["output_format"] = KIE_IMAGE_FORMAT
-        answer = await ask(SUBMIT, wanted, ("prompt",))
+        answer = await ask(SUBMIT, self.with_reference(wanted, shot, route), ("prompt",))
         task = find_text(answer, ("taskId", "task_id"))
         if not task:
             why = find_text(answer, ("msg", "message", "error")) or "no task id in its answer"
@@ -433,7 +464,7 @@ class HiggsfieldRecipe(FootageRecipe):
         return float(config.SOCIALS_HIGGSFIELD_USD_PER_CREDIT)
 
     async def submit(self, ask: Ask, shot: Shot, route: Route) -> Any:
-        spec: Dict[str, Any] = {"model": route.model, "prompt": prompt_for(shot.prompt), "aspect_ratio": shot.aspect_ratio}
+        spec: Dict[str, Any] = {"model": route.model, "prompt": prompt_for(shot.prompt, shot.style), "aspect_ratio": shot.aspect_ratio}
         if shot.kind == VIDEO_SLOT:
             spec["duration"] = config.SOCIALS_FOOTAGE_CLIP_SECONDS
         answer = await ask(SUBMIT, {"params": json.dumps(spec)}, ("params",))

@@ -202,6 +202,14 @@ def brand_voice(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("voice") or {})
 
 
+def brand_style_text(db: Session, workspace_id: UUID) -> str:
+    """The brand kit's style profile as one paragraph (PRD-251B US-B303); empty without one."""
+    from modules.documents.brand_style import style_prompt
+
+    workspace = db.get(Workspace, workspace_id)
+    return style_prompt(workspace.settings if workspace is not None else None)
+
+
 def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> compose.ComposeContext:
     """Everything the composer is given, from the caller's workspace only."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
@@ -220,6 +228,7 @@ def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> co
         warnings=warnings,
         template_id=str(body.template_id) if body.template_id is not None else None,
         length_seconds=body.length_seconds,
+        style=brand_style_text(db, workspace_id),
     )
 
 

@@ -85,6 +85,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
 from modules.socials import text_search
+from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
 from modules.socials.targets import TARGETS
 
@@ -476,8 +477,9 @@ def _voice_text(value: Any, where: str, *, required: bool) -> Optional[str]:
 
 def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
     """The post's voice (D11): ``None`` (or ``{}``, or ``{"toolkit": "kokoro"}``)
-    is Kokoro, stored as ``None``; a voice toolkit is ``{"toolkit", "voice_id",
-    "name"?}``. The shape only: whether the workspace can speak with the
+    is Kokoro with the template's own voice, stored as ``None``; one of Kokoro's voices
+    is ``{"toolkit": "kokoro", "voice_id"}`` (PRD-251B US-B306); a voice toolkit is
+    ``{"toolkit", "voice_id", "name"?}``. The shape only: whether the workspace can speak with the
     toolkit now is ``modules/socials/recipes/voice.py``'s to say."""
     if value is None:
         return None
@@ -491,10 +493,8 @@ def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
     toolkit = toolkit.strip().lower() if isinstance(toolkit, str) else ""
     if not VOICE_TOOLKIT.match(toolkit):
         raise InvalidPost("voice.toolkit must name a voice, such as kokoro or fish_audio")
-    if toolkit == KOKORO:
-        if set(voice) - {"toolkit"}:
-            raise InvalidPost("Kokoro speaks with the template's own voice: set only voice.toolkit")
-        return None
+    if toolkit == KOKORO:  # PRD-251B (US-B306): the template's own voice, or one of Kokoro's
+        return validate_kokoro(voice)
     clean = {"toolkit": toolkit, "voice_id": _voice_text(voice.get("voice_id"), "voice.voice_id", required=True)}
     name = _voice_text(voice.get("name"), "voice.name", required=False)
     if name:

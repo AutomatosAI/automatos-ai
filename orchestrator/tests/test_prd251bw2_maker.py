@@ -24,7 +24,7 @@ from __future__ import annotations
 import functools
 import sys
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,7 +78,7 @@ def maker(api, monkeypatch):
     monkeypatch.setattr(socials_targets, "social_channels", lambda db, ws: CHANNELS)
     proposals = []
 
-    def propose(db, plan, slot, topic, now):
+    def propose(db, plan, slot, topic, now, visual_slots=()):
         proposals.append((slot.key, topic.title, maker_mod.fact_candidates(topic, now)))
         return {"title": f"Post: {topic.title}", "copy": {"base": f"About {topic.title}.", "per_channel": {}}, "variables": {}, "sources": {}}
 

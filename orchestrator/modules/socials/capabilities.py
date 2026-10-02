@@ -28,6 +28,9 @@ recipe picks from), ``estimate`` (a price before any spend, D13), ``status`` (a
 job's state or result: always submit, then poll), ``upload`` (a file the
 provider reads) and ``balance`` (credits read before and after a job, D13). One
 action can serve several: fal's queue submit runs video and image models alike.
+``reference_image`` (PRD-251B US-B305) is a flag rather than a call: a generate action
+listed under it takes a reference image, so a brand kit's liked style references go with
+its stills when the workspace allows it.
 
 Fails closed, like every guard on real money: no row offers nothing, and so does
 a value that is not the shape above or a read that cannot complete. Those two say
@@ -99,7 +102,8 @@ ESTIMATE = "estimate"
 STATUS = "status"
 UPLOAD = "upload"
 BALANCE = "balance"
-CAPABILITIES = (GENERATE_VIDEO, GENERATE_IMAGE, TTS, VOICES, ESTIMATE, STATUS, UPLOAD, BALANCE)
+REFERENCE_IMAGE = "reference_image"
+CAPABILITIES = (GENERATE_VIDEO, GENERATE_IMAGE, TTS, VOICES, ESTIMATE, STATUS, UPLOAD, BALANCE, REFERENCE_IMAGE)
 
 _SETTING = f"{SOCIALS_SETTINGS_CATEGORY}.{KEY_MEDIA_ACTIONS}"
 READ_FAILED_PROBLEM = (

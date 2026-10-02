@@ -103,6 +103,7 @@ from api.socials_channels import router as channels_router
 from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
+from api import socials_brand
 from api.socials_media_upload import router as media_upload_router
 from api.socials_plans import router as plans_router
 from api.socials_retake import router as retake_router
@@ -394,7 +395,7 @@ async def _capabilities(db: Session, workspace_id: UUID):
 async def _check_voice(db: Session, workspace_id: UUID, voice: Any) -> None:
     """A voice toolkit a save names must be one the workspace can speak with now (D11)."""
     clean = service.validate_voice(voice)
-    if clean is not None:
+    if clean is not None and clean["toolkit"] != service.KOKORO:  # PRD-251B US-B306: Kokoro is built in
         voice_recipes.plan_for(clean, await _capabilities(db, workspace_id))
 
 
@@ -549,7 +550,9 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # D12: the footage the post asks for, planned now over the template's slots;
     # a slot no connected toolkit can make plays the template's motion graphics.
     caps = await _capabilities(db, workspace.id) if post.footage else None
-    footage_plan = render.footage_plan_for(post, template, caps) if caps is not None else None
+    # PRD-251B (US-B303..B305): the brand kit's style and liked references, the default toolkits.
+    brand = await asyncio.to_thread(socials_brand.generation_inputs, db, workspace) if caps is not None else {}
+    footage_plan = render.footage_plan_for(post, template, caps, **brand) if caps is not None else None
     bundle = render.bundle_for(
         post, template, brand_kit, fallback_name=workspace.name or "",
         footage_slots=footage_plan.shown if footage_plan is not None else (),
@@ -561,7 +564,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # D11: a voice toolkit speaks the script before the render; resolved now,
     # so a toolkit the workspace cannot use is refused with nothing changed.
     voice_plan = None
-    if voice and voice_script(bundle):
+    if voice and voice.get("toolkit") != service.KOKORO and voice_script(bundle):  # Kokoro: media-render speaks
         voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, workspace.id))
     reservation = await render.reserve_seconds(db, workspace, post, template)
     try:

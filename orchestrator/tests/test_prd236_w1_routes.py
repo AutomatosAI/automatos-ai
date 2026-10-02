@@ -235,7 +235,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the plans wave (the plan columns, slot_key, music, social_topics); the guard follows it.
     plans = (versions / "prd251b_wave2.py").read_text()
     assert 'down_revision = "prd251b_wave1"' in plans
-    assert 'EXPECTED_HEAD = "prd251b_wave2"' in guard
+    # 2026-10-03 (PRD-251B Wave 3): prd251b_wave3 chains onto it — the ONE migration of the
+    # brand kit wave (the reference_image flag in the media allowlist); the guard follows it.
+    brand = (versions / "prd251b_wave3.py").read_text()
+    assert 'down_revision = "prd251b_wave2"' in brand
+    assert 'EXPECTED_HEAD = "prd251b_wave3"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
