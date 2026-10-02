@@ -77,7 +77,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.chart_binding import chart_values, chip_text, max_chars_of, shown_rows, spec_of
 from core.media_render_bundle import build_bundle
-from core.social_templates import root_duration, with_root_duration
+from core.social_cuts import cut_moments, cut_to_length
+from core.social_templates import root_duration
 from core.report_tables import Series, first_table, parse_figure, table_series
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables
 from modules.documents.social_starters import social_starters
@@ -319,11 +320,9 @@ def _sample_values(starter: Mapping[str, Any], overlay: Optional[Mapping[str, st
 
 def bundle_for(starter: Mapping[str, Any], kit: Mapping[str, Any], at: List[float], length: Optional[int] = None) -> Dict[str, Any]:
     """A video's preview bundle: its sample data under its reference's own copy, snapshotted at ``at``.
-    With ``length`` (PRD-251B US-B104, one of the template's declared lengths), the root's
-    data-duration is that length, as a post that chose it renders."""
-    blocks = starter["blocks"]
-    if length:
-        blocks = {**blocks, "html": with_root_duration(blocks["html"], length)}
+    With ``length`` (PRD-251B US-B104, one of the template's declared lengths), it renders
+    that length's cut (``core/social_cuts.py``), as a post that chose it does."""
+    blocks = cut_to_length(starter["blocks"], length) if length else starter["blocks"]
     bundle = build_bundle(
         workspace_id="ci-social-templates",
         reference=f"seeded template: {starter['name']}" + (f" at {length} s" if length else ""),
@@ -357,13 +356,13 @@ def _reported_duration(report: Mapping[str, Any]) -> Optional[float]:
 
 def run_video_lengths(renderer: Renderer, starter: Mapping[str, Any], kit: Mapping[str, Any], folder: Path, report: Dict[str, Any]) -> None:
     """PRD-251B US-B104: every declared length of the video renders with 0 check errors, its
-    stills taken at the preview moments within that length. One line per render, which the
+    stills taken at the preview moments its cut keeps. One line per render, which the
     Wave 1 acceptance gate reads: ``length=<n>s template=<slug>``."""
     moments = [float(m) for m in starter["preview"]["at"]]
     lengths = declared_lengths(starter)
     report.setdefault("lengths", {})
     for length in lengths:
-        at = [m for m in moments if m <= length] or [min(1.0, length / 2)]
+        at = cut_moments(starter["blocks"], length, moments) or [min(1.0, length / 2)]
         bundle = bundle_for(starter, kit, at, length)
         job = renderer.render(bundle)
         errors = (job["report"].get("check") or {}).get("errors")

@@ -8,8 +8,8 @@ Pinned:
 * the starter loader carries ``durations`` into the seeded row (the RVW-7 rule: no key
   of the contract is dropped unread);
 * every seeded video starter declares a valid list that holds its root length; no image
-  starter declares any. The 15 s and 30 s cuts of UI story promo and App promo join the
-  lists with their timelines (US-B104's second half).
+  starter declares any. The 15 s and 30 s cuts of UI story promo and App promo, and the
+  ``cuts`` a shorter length needs, are pinned in test_prd251bw1_cuts.py.
 """
 from __future__ import annotations
 
@@ -52,8 +52,9 @@ def _errors(blocks, fmt):
 def test_durations_is_part_of_the_contract_and_optional():
     assert "durations" in BLOCK_KEYS
     assert "durations" not in validate_social_blocks(VIDEO, SOCIAL_VIDEO)
-    checked = validate_social_blocks({**VIDEO, "durations": [15, 30, 40]}, SOCIAL_VIDEO)
-    assert checked["durations"] == [15, 30, 40]
+    cuts = {"15": [[0, 15]], "30": [[0, 30]]}  # shorter than the 39.5 s timeline: each needs its cut
+    checked = validate_social_blocks({**VIDEO, "durations": [15, 30, 40], "cuts": cuts}, SOCIAL_VIDEO)
+    assert checked["durations"] == [15, 30, 40] and checked["cuts"] == cuts
     assert durations_of(VIDEO, SOCIAL_VIDEO) == [40] and durations_of(checked, SOCIAL_VIDEO) == [15, 30, 40]
 
 
@@ -76,7 +77,7 @@ def test_the_starter_loader_carries_durations_into_the_row(tmp_path, monkeypatch
     (tmp_path / "cut.json").write_text(json.dumps({
         "name": "Cut", "description": "", "format": SOCIAL_VIDEO, "category": "social",
         "variables_schema": {"headline": {"type": "text"}}, "sizes": ["1080x1920"], "durations": [15, 30],
-        "sample_data": {"headline": "Hello"},
+        "cuts": {"15": [[0, 15]], "30": [[0, 30]]}, "sample_data": {"headline": "Hello"},
     }), encoding="utf-8")
     monkeypatch.setattr(social_starters, "STARTERS_DIR", tmp_path)
     social_starters._starters.cache_clear()
@@ -84,7 +85,7 @@ def test_the_starter_loader_carries_durations_into_the_row(tmp_path, monkeypatch
         starter = social_starters._load("cut")
     finally:
         social_starters._starters.cache_clear()
-    assert starter["blocks"]["durations"] == [15, 30]
+    assert starter["blocks"]["durations"] == [15, 30] and starter["blocks"]["cuts"] == {"15": [[0, 15]], "30": [[0, 30]]}
 
 
 def test_every_seeded_video_starter_declares_its_lengths_and_no_image_does():

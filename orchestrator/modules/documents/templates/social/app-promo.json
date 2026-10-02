@@ -1,14 +1,42 @@
 {
   "name": "App promo",
-  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the app promo reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit.",
+  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the app promo reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit. Also cut to 15 s (the hook, today's plan on the phone, the end card) and 30 s (without the tracks).",
   "format": "social_video",
   "category": "social",
   "sizes": [
     "1080x1920"
   ],
   "durations": [
+    15,
+    30,
     38
   ],
+  "cuts": {
+    "15": [
+      [
+        0,
+        4.95
+      ],
+      [
+        8.85,
+        12.9
+      ],
+      [
+        29.5,
+        35.5
+      ]
+    ],
+    "30": [
+      [
+        0,
+        23.35
+      ],
+      [
+        29.5,
+        36.15
+      ]
+    ]
+  },
   "variables_schema": {
     "hook_line": {
       "type": "text",

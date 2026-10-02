@@ -50,7 +50,8 @@ ROOT_HTML = (
     '<!doctype html><html><head></head><body><div id="root" data-composition-id="main" data-width="1080" '
     'data-height="1920" data-duration="39.5"><h1>{{ headline }}</h1></div></body></html>'
 )
-VIDEO_BLOCKS = {"html": ROOT_HTML, "css": "", "variables_schema": SCHEMA, "sizes": ["1080x1920"], "durations": [15, 30]}
+VIDEO_BLOCKS = {"html": ROOT_HTML, "css": "", "variables_schema": SCHEMA, "sizes": ["1080x1920"], "durations": [15, 30],
+                "cuts": {"15": [[0, 15]], "30": [[0, 30]]}}  # shorter than the 39.5 s timeline: each is a cut (US-B104)
 TEXT_KIND = SimpleNamespace(kind="text", available=True)
 IMAGE_KIND = SimpleNamespace(kind="image", available=True)
 

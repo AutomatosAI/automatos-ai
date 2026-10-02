@@ -2,7 +2,7 @@
 
 Wave 1 was written directly on `feat/prd-251b-w1-studio` (no Ralph loop) and tested on the local stack. Run this on the socials stack before merging Wave 1 and before Wave 2 starts. Record what failed in the PR.
 
-**Not in this build:** the 15 s and 30 s cuts of UI story promo and App promo (US-B104 part 2: the length mechanism is there, the two templates still declare only their original length), and the CI screenshot lane (US-B112, skipped on the owner's "less CI" call). Section 0a and the 0:15 / 0:30 checks below are skipped until then.
+**Not in this build:** the CI screenshot lane (US-B112, skipped on the owner's "less CI" call), so section 0a is skipped.
 
 The mockup is the visual spec (PRD-251B B1): `docs/PRDS/prd251b-reference/` (`Main.dc.html` the calendar, `Editor.dc.html` the post editor, `Queue.dc.html` the Queue, `Nav.dc.html` the sub-navigation). Compare layout, hierarchy, controls and copy. Plans (`Plan.dc.html`) and the Brand kit tab (`Brand.dc.html`) are Waves 2 and 3: in Wave 1, **Plans** lists today's campaigns and **Brand kit** opens the existing brand-kit dialog.
 
@@ -54,7 +54,7 @@ When built, every push on this branch runs the **socials-studio-screens** workfl
 - [ ] **New post** opens the editor matching `Editor.dc.html`: Brief (with **Redraft with Auto**), Format, Channels and sizes, Look, Claims and sources, When, and the base Copy and the Preview beside them. Header: **Back to calendar**, the title (editable), its status, **Save draft**, **Render preview**, **Submit for approval**. The first **Save draft** creates the post and the URL becomes its `?post=<id>`.
 - [ ] **"Blank draft" is gone:** the editor is the only way to start a post. A post that is rendering, publishing, posted or archived opens in its read view (receipts, history), as does any post for a viewer.
 - [ ] **Format Image:** every connected channel row shows its post kind and size (e.g. `1600×900 · 16:9`); the "Renders …" line lists the distinct ratios; unticking a channel removes its ratio.
-- [ ] **Format Video:** the **Length** chips are exactly the lengths the chosen template declares (in this build every template declares one length; 0:15 and 0:30 arrive with US-B104 part 2). Changing the template changes the chips. The voice picker shows once the post is saved; Music is a note (the template's own track: there is no per-post music choice in the API yet); the AI footage switch names the connected toolkit, or says why it is off.
+- [ ] **Format Video:** the **Length** chips are exactly the lengths the chosen template declares (UI story promo: 0:15, 0:30, 0:40; App promo: 0:15, 0:30, 0:38; the other videos their one length). Changing the template changes the chips. The voice picker shows once the post is saved; Music is a note (the template's own track: there is no per-post music choice in the API yet); the AI footage switch names the connected toolkit, or says why it is off.
 - [ ] **Format Carousel:** the Slides stepper runs 2–10.
 - [ ] **Format Text only:** only X and LinkedIn stay enabled, the others say "Needs an image or video"; the Look section is hidden; the preview says "Text only: nothing to render."
 - [ ] **Look → Template:** a thumbnail gallery of the workspace's social templates of that format, **Let Auto pick** first. Each card shows a rendered thumbnail (not a blank). Edit a template in Deliverables → Templates, come back: its thumbnail has been re-rendered.
@@ -66,7 +66,8 @@ When built, every push on this branch runs the **socials-studio-screens** workfl
 ## 4. The preview (US-B110)
 
 - [ ] **One tab per chosen channel.** Each shows that channel's copy with a counter against its limit (X 280, LinkedIn 3000, Instagram 2200, TikTok 2200, YouTube 100) and the media at that channel's aspect.
-- [ ] **Render times:** an image renders within **90 s**; a video at its template's own length: write the time down (the 0:15 and 0:30 targets apply once US-B104 part 2 lands).
+- [ ] **Render times:** an image renders within **90 s**; a video: write the time down for each length you render.
+- [ ] **The cuts (US-B104):** render UI story promo and App promo at 0:15 and 0:30 and watch each one through. 0:15 is the hook, the product at work (the board taking the work; today's plan on the phone) and the end card; 0:30 drops the outputs and the team (UI story promo) or the tracks (App promo). Every line is spoken whole, the end card's line finishes before the video ends, and no scene flashes in for a frame at a cut.
 - [ ] **Stale:** editing the brief or a variable after a render marks the preview "Preview out of date".
 - [ ] **The note:** images say they use no render minutes; a video estimates `length × sizes` render minutes; text says nothing to render.
 

@@ -75,12 +75,18 @@ from core.social_brand_rule import brand_literals
 SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
 SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data", "durations")
+BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data", "durations", "cuts")
 # PRD-251B (B5, US-B104): the lengths a video template offers, in whole seconds, each a
 # complete timeline the composition selects from the root's data-duration. An image
 # template declares none; a video without the list offers its root duration alone.
 MAX_DECLARED_LENGTHS = 8
 MAX_DECLARED_LENGTH_SECONDS = 600
+# A shorter length is a cut (``core/social_cuts.py``): ``cuts`` maps it to the stretches of
+# the authored timeline it keeps, in order, adding up to the length. A declared length more
+# than UNCUT_SHORTFALL_SECONDS shorter than the timeline needs one.
+MAX_CUT_STRETCHES = 12
+CUT_SUM_TOLERANCE_SECONDS = 0.01
+UNCUT_SHORTFALL_SECONDS = 1.0
 REQUIRED_BLOCK_KEYS = ("html", "variables_schema", "sizes")
 AUDIO_PLAN_KEYS = ("voice", "music", "sfx")
 # The music cue (S1.6): a track of media-render's music library by id, and the
@@ -169,6 +175,49 @@ def parse_size(value: Any) -> Tuple[int, int]:
     if not (MIN_DIMENSION <= width <= MAX_DIMENSION and MIN_DIMENSION <= height <= MAX_DIMENSION):
         raise ValueError(f"{value!r}: each side must be {MIN_DIMENSION}-{MAX_DIMENSION} px")
     return width, height
+
+
+def _is_seconds(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _stretch_errors(where: str, stretches: Any, root: float, length: int) -> List[Dict[str, str]]:
+    """One cut's stretches: ``[start, end]`` pairs in order, inside the authored timeline."""
+    if not isinstance(stretches, list) or not 0 < len(stretches) <= MAX_CUT_STRETCHES:
+        return [_error(where, f"must list 1 to {MAX_CUT_STRETCHES} stretches of the timeline, e.g. [[0, 4], [12.5, 23.5]]")]
+    errors: List[Dict[str, str]] = []
+    previous_end = 0.0
+    for i, pair in enumerate(stretches):
+        if not (isinstance(pair, list) and len(pair) == 2 and all(_is_seconds(v) for v in pair)):
+            errors.append(_error(f"{where}[{i}]", "must be [start, end] in seconds"))
+            continue
+        start, end = float(pair[0]), float(pair[1])
+        if start < previous_end or end <= start or end > root:
+            errors.append(_error(f"{where}[{i}]", f"must start where the stretch before it ended or later, and end after its start, by {root:g} s"))
+        previous_end = max(previous_end, end)
+    if not errors and abs(sum(end - start for start, end in stretches) - length) > CUT_SUM_TOLERANCE_SECONDS:
+        errors.append(_error(where, "its stretches must add up to the length"))
+    return errors
+
+
+def _cut_errors(blocks: Mapping[str, Any], fmt: str) -> List[Dict[str, str]]:
+    """``cuts`` (PRD-251B US-B104): a shorter declared length keeps stretches of the authored timeline."""
+    cuts = blocks.get("cuts")
+    if cuts is not None and fmt != SOCIAL_VIDEO:
+        return [_error("cuts", "an image template has no cuts")]
+    if cuts is not None and not isinstance(cuts, dict):
+        return [_error("cuts", 'must map a declared length to the stretches it keeps, e.g. {"15": [[0, 4], [12.5, 23.5]]}')]
+    root = root_duration(blocks.get("html") or "")
+    if fmt != SOCIAL_VIDEO or root is None:
+        return []
+    cuts, lengths = cuts or {}, [int(d) for d in blocks.get("durations") or []]
+    errors = [_error(f"cuts.{key}", "is not a length in durations") for key in cuts if key not in {str(d) for d in lengths}]
+    for length in lengths:
+        if str(length) in cuts:
+            errors += _stretch_errors(f"cuts.{length}", cuts[str(length)], root, length)
+        elif length < root - UNCUT_SHORTFALL_SECONDS:
+            errors.append(_error("cuts", f"the {length} s length is shorter than the {root:g} s timeline: declare the stretches it keeps"))
+    return errors
 
 
 def _duration_errors(durations: Any, fmt: str) -> List[Dict[str, str]]:
@@ -447,20 +496,25 @@ def _slot_errors(slots: Any, html: str, css: str) -> List[Dict[str, str]]:
 
 
 # ── stills ──────────────────────────────────────────────────────────────────
-def with_root_duration(html: str, seconds: float) -> str:
-    """``html`` with the root's ``data-duration`` set to ``seconds`` (PRD-251B B5):
-    a post that chose a length renders that timeline. Without a root tag the html
-    is returned as it is (the validator reports that on its own)."""
+def with_root_attribute(html: str, name: str, value: str) -> str:
+    """``html`` with the root's ``name`` attribute set to ``value``, added when the root has
+    none. Without a root tag the html is returned as it is (the validator reports that)."""
     root = _ROOT_TAG.search(html or "")
     if not root:
         return html
-    value = f"{seconds:g}"
     tag = root.group(0)
-    if _DURATION.search(tag):
-        new_tag = _DURATION.sub(lambda m: m.group(0)[: m.start(1) - m.start(0)] + value + m.group(0)[m.end(1) - m.start(0):], tag, count=1)
+    found = re.search(rf"""(?<![\w-]){re.escape(name)}\s*=\s*["']([^"']*)["']""", tag, re.IGNORECASE)
+    if found:
+        new_tag = tag[: found.start(1)] + value + tag[found.end(1):]
     else:
-        new_tag = tag[:-1].rstrip() + f' data-duration="{value}">'
+        new_tag = tag[:-1].rstrip() + f' {name}="{value}">'
     return html[: root.start()] + new_tag + html[root.end():]
+
+
+def with_root_duration(html: str, seconds: float) -> str:
+    """``html`` with the root's ``data-duration`` set to ``seconds`` (PRD-251B B5): a post
+    that chose a length renders that timeline (its cut, ``core/social_cuts.py``)."""
+    return with_root_attribute(html, "data-duration", f"{seconds:g}")
 
 
 def root_duration(html: str) -> Optional[float]:
@@ -640,6 +694,7 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         errors += _slot_errors(blocks.get("slots"), html, css or "")
         errors += _still_errors(blocks.get("stills"), fmt, schema, html)
         errors += data_errors(blocks["data"], schema) if "data" in blocks else []
+        errors += _cut_errors(blocks, fmt)
         errors += [_error(field, message) for field, message in brand_literals(html, css or "")]
     if errors:
         raise SocialTemplateError(errors)
@@ -669,6 +724,7 @@ __all__ = [
     "still_moments",
     "validate_social_blocks",
     "voice_lines",
+    "with_root_attribute",
     "with_root_duration",
     "without_slots",
 ]
