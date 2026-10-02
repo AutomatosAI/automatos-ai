@@ -1,6 +1,6 @@
 'use client'
 
-import { Draggable } from '@hello-pangea/dnd'
+import { Draggable, type DraggableProvided } from '@hello-pangea/dnd'
 import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, RefreshCw, Target, Clock, ShieldAlert, Layers } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
@@ -55,163 +55,182 @@ function SlaIndicator({ deadline }: { deadline: string }) {
 }
 
 export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
-  const priorityConf = PRIORITY_CONFIG[task.priority]
-  const timeAgo = task.started_at
-    ? formatDistanceToNow(new Date(task.started_at), { addSuffix: false })
-    : task.completed_at
-      ? formatDistanceToNow(new Date(task.completed_at), { addSuffix: false })
-      : null
+  return (
+    <Draggable draggableId={task.id} index={index}>
+      {(provided, snapshot) => (
+        <BoardCardFace task={task} provided={provided} isDragging={snapshot.isDragging} onOpen={onOpen} onDelete={onDelete} />
+      )}
+    </Draggable>
+  )
+}
 
+interface BoardCardFaceProps extends Omit<BoardCardProps, 'index'> {
+  provided: DraggableProvided
+  isDragging: boolean
+}
+
+/** The card itself; its Draggable hands it the drag props. */
+function BoardCardFace({ task, provided, isDragging, onOpen, onDelete }: BoardCardFaceProps) {
+  const priorityConf = PRIORITY_CONFIG[task.priority]
   const isFailed = task.error_message != null && task.status === 'done'
   const isBlocked = task.status === 'blocked'
   const reason = stageReason(task)
 
   return (
-    <Draggable draggableId={task.id} index={index}>
-      {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          className={cn(
-            'group glass-card card-glow rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
-            'border-l-2',
-            snapshot.isDragging && 'shadow-lg shadow-primary/10 ring-1 ring-primary/20',
-            isBlocked && 'border-l-destructive bg-destructive/5',
-            isFailed && !isBlocked && 'border-l-destructive',
-            !isFailed && !isBlocked && `border-l-[${priorityConf.color}]`,
-          )}
-          style={{
-            ...provided.draggableProps.style,
-            borderLeftColor: isBlocked ? undefined : isFailed ? undefined : priorityConf.color,
-          }}
-          onClick={() => onOpen(task)}
-        >
-          {/* Type badge + delete button */}
-          <div className="flex items-center justify-between mb-1">
-            <CardKindBadge task={task} />
+    <div
+      ref={provided.innerRef}
+      {...provided.draggableProps}
+      {...provided.dragHandleProps}
+      className={cn(
+        'group glass-card card-glow rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
+        'border-l-2',
+        isDragging && 'shadow-lg shadow-primary/10 ring-1 ring-primary/20',
+        isBlocked && 'border-l-destructive bg-destructive/5',
+        isFailed && !isBlocked && 'border-l-destructive',
+        !isFailed && !isBlocked && `border-l-[${priorityConf.color}]`,
+      )}
+      style={{
+        ...provided.draggableProps.style,
+        borderLeftColor: isBlocked ? undefined : isFailed ? undefined : priorityConf.color,
+      }}
+      onClick={() => onOpen(task)}
+    >
+      <CardTopRow task={task} onDelete={onDelete} />
 
-            <div className="flex items-center gap-1">
-              {/* Child count badge */}
-              {(task.child_count ?? 0) > 0 && (
-                <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                  <Layers className="w-2.5 h-2.5" />
-                  {task.child_count}
-                </span>
-              )}
+      {/* Title */}
+      <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
+      {/* PRD-252 R3: why it waits in Review or Blocked */}
+      {reason && <span className="inline-block mb-1 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]" title={reason.says}>{reason.chip}</span>}
 
-              {/* PRD-252 R7: assign and cancel from the card */}
-              <TicketActionsMenu
-                task={task}
-                className="opacity-60 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-secondary/60"
-              />
-              {onDelete && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDelete(task.id)
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
-                  title="Delete task"
-                >
-                  <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
-                </button>
-              )}
-            </div>
-          </div>
+      {/* Description */}
+      {task.description && (
+        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+          {task.description}
+        </p>
+      )}
 
-          {/* Title */}
-          <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
-          {/* PRD-252 R3: why it waits in Review or Blocked */}
-          {reason && <span className="inline-block mb-1 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]" title={reason.says}>{reason.chip}</span>}
-
-          {/* Description */}
-          {task.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
-              {task.description}
-            </p>
-          )}
-
-          {/* Blocked reason */}
-          {isBlocked && task.blocked_reason && (
-            <div className="flex items-center gap-1 mb-2">
-              <ShieldAlert className="w-3 h-3 text-destructive shrink-0" />
-              <p className="text-[10px] text-destructive line-clamp-1">{task.blocked_reason}</p>
-            </div>
-          )}
-
-          {/* Progress bar for in-progress tasks */}
-          {task.step_progress && task.status === 'in_progress' && (
-            <div className="mb-2">
-              <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
-                <span>Step {task.step_progress.current}/{task.step_progress.total}</span>
-                <span>{Math.round((task.step_progress.current / task.step_progress.total) * 100)}%</span>
-              </div>
-              <div className="h-1 bg-secondary/50 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[hsl(var(--info))] rounded-full transition-all"
-                  style={{ width: `${(task.step_progress.current / task.step_progress.total) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Error indicator */}
-          {isFailed && (
-            <div className="flex items-center gap-1 mb-2">
-              <AlertCircle className="w-3 h-3 text-destructive shrink-0" />
-              <p className="text-[10px] text-destructive line-clamp-1">{task.error_message}</p>
-            </div>
-          )}
-
-          {/* Tags */}
-          {task.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {task.tags.slice(0, 3).map((tag) => (
-                <span
-                  key={tag}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-secondary/50 text-muted-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
-              {task.tags.length > 3 && (
-                <span className="text-[10px] text-muted-foreground">+{task.tags.length - 3}</span>
-              )}
-            </div>
-          )}
-
-          {/* Footer: agent + SLA + time */}
-          <div className="flex items-center justify-between mt-1">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {task.assignee ? (
-                <>
-                  {task.assignee.agent_icon ? (
-                    <PremiumIcon name={task.assignee.agent_icon} size={14} className="shrink-0" />
-                  ) : (
-                    <Bot className="w-3.5 h-3.5 text-primary shrink-0" />
-                  )}
-                  <span className="text-[10px] text-muted-foreground truncate">
-                    {task.assignee.agent_name}
-                  </span>
-                </>
-              ) : (
-                <span className="text-[10px] text-muted-foreground/50">Unassigned</span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {task.sla_deadline && task.status !== 'done' && (
-                <SlaIndicator deadline={task.sla_deadline} />
-              )}
-              {timeAgo && (
-                <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
-              )}
-            </div>
-          </div>
+      {/* Blocked reason */}
+      {isBlocked && task.blocked_reason && (
+        <div className="flex items-center gap-1 mb-2">
+          <ShieldAlert className="w-3 h-3 text-destructive shrink-0" />
+          <p className="text-[10px] text-destructive line-clamp-1">{task.blocked_reason}</p>
         </div>
       )}
-    </Draggable>
+
+      {/* Progress bar for in-progress tasks */}
+      {task.step_progress && task.status === 'in_progress' && <CardStepProgress progress={task.step_progress} />}
+
+      {/* Error indicator */}
+      {isFailed && (
+        <div className="flex items-center gap-1 mb-2">
+          <AlertCircle className="w-3 h-3 text-destructive shrink-0" />
+          <p className="text-[10px] text-destructive line-clamp-1">{task.error_message}</p>
+        </div>
+      )}
+
+      {task.tags.length > 0 && <CardTags tags={task.tags} />}
+      <CardFooter task={task} />
+    </div>
+  )
+}
+
+/** Type badge, child count, the ticket's actions and delete. */
+function CardTopRow({ task, onDelete }: Pick<BoardCardProps, 'task' | 'onDelete'>) {
+  return (
+    <div className="flex items-center justify-between mb-1">
+      <CardKindBadge task={task} />
+
+      <div className="flex items-center gap-1">
+        {/* Child count badge */}
+        {(task.child_count ?? 0) > 0 && (
+          <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+            <Layers className="w-2.5 h-2.5" />
+            {task.child_count}
+          </span>
+        )}
+
+        {/* PRD-252 R7: assign and cancel from the card */}
+        <TicketActionsMenu
+          task={task}
+          className="opacity-60 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-secondary/60"
+        />
+        {onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete(task.id)
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
+            title="Delete task"
+          >
+            <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CardStepProgress({ progress }: { progress: NonNullable<BoardTask['step_progress']> }) {
+  const percent = (progress.current / progress.total) * 100
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+        <span>Step {progress.current}/{progress.total}</span>
+        <span>{Math.round(percent)}%</span>
+      </div>
+      <div className="h-1 bg-secondary/50 rounded-full overflow-hidden">
+        <div className="h-full bg-[hsl(var(--info))] rounded-full transition-all" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function CardTags({ tags }: { tags: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-1 mb-2">
+      {tags.slice(0, 3).map((tag) => (
+        <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary/50 text-muted-foreground">
+          {tag}
+        </span>
+      ))}
+      {tags.length > 3 && <span className="text-[10px] text-muted-foreground">+{tags.length - 3}</span>}
+    </div>
+  )
+}
+
+/** Footer: agent, SLA and how long ago it started (or finished). */
+function CardFooter({ task }: { task: BoardTask }) {
+  const since = task.started_at || task.completed_at
+  const timeAgo = since ? formatDistanceToNow(new Date(since), { addSuffix: false }) : null
+  return (
+    <div className="flex items-center justify-between mt-1">
+      <div className="flex items-center gap-1.5 min-w-0">
+        {task.assignee ? (
+          <>
+            {task.assignee.agent_icon ? (
+              <PremiumIcon name={task.assignee.agent_icon} size={14} className="shrink-0" />
+            ) : (
+              <Bot className="w-3.5 h-3.5 text-primary shrink-0" />
+            )}
+            <span className="text-[10px] text-muted-foreground truncate">
+              {task.assignee.agent_name}
+            </span>
+          </>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/50">Unassigned</span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {task.sla_deadline && task.status !== 'done' && (
+          <SlaIndicator deadline={task.sla_deadline} />
+        )}
+        {timeAgo && (
+          <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
+        )}
+      </div>
+    </div>
   )
 }
 
