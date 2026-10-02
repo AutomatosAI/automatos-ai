@@ -25,8 +25,10 @@ import type {
   SocialTemplateSummary,
 } from '@/lib/api-client'
 import { useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
+import { useWorkspace } from '@/components/workspace-provider'
 
 export const socialsEditorKeys = {
+  brandName: (workspaceId: string | null) => ['socials', workspaceId, 'brand-name'] as const,
   templates: (workspaceId: string | null, format: string | null) => ['socials', workspaceId, 'templates', format] as const,
   library: (workspaceId: string | null) => ['socials', workspaceId, 'library'] as const,
   footage: (workspaceId: string | null) => ['socials', workspaceId, 'footage'] as const,
@@ -34,6 +36,20 @@ export const socialsEditorKeys = {
 
 export const LIBRARY_KINDS = ['image', 'video'] as const
 export const LIBRARY_LIMIT = 24
+
+/** The name the preview's post frame shows (PRD-251B US-B110): the brand kit's, else the
+ * workspace's. */
+export function useBrandName(): string {
+  const { workspace } = useWorkspace()
+  const { workspaceId, socialsOn } = useSocialsOn()
+  const { data } = useQuery<string>({
+    queryKey: socialsEditorKeys.brandName(workspaceId),
+    enabled: socialsOn,
+    queryFn: async () => (await apiClient.get<{ name?: string }>('/api/documents/brand-kit'))?.name ?? '',
+    staleTime: 5 * 60_000,
+  })
+  return data || workspace?.name || 'Your brand'
+}
 
 /** The workspace's templates for a format (GET /api/socials/templates?format=). */
 export function useSocialTemplates(format: string | null) {

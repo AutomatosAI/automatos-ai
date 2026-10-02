@@ -20,8 +20,9 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 vi.mock('@/components/deliverables/socials/socials-voice-picker', () => ({ SocialsVoicePicker: () => <div data-testid="voice-picker" /> }))
 vi.mock('@/components/deliverables/socials/studio/socials-editor-activity', () => ({ SocialsEditorActivity: () => null }))
-vi.mock('@/components/deliverables/socials/socials-composer-preview', () => ({
-  SocialsComposerPreview: ({ stale }: { stale: boolean }) => <div data-testid="preview" data-stale={String(stale)} />,
+vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
+  FilePreview: ({ url }: { url: string }) => <div data-testid="file-preview" data-url={url} />,
+  inferPreviewType: () => 'image',
 }))
 
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'

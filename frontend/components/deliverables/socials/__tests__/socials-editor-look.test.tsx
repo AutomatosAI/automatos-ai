@@ -17,7 +17,10 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 vi.mock('@/components/deliverables/socials/socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
 vi.mock('@/components/deliverables/socials/studio/socials-editor-activity', () => ({ SocialsEditorActivity: () => null }))
-vi.mock('@/components/deliverables/socials/socials-composer-preview', () => ({ SocialsComposerPreview: () => null }))
+vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
+  FilePreview: ({ url }: { url: string }) => <div data-testid="file-preview" data-url={url} />,
+  inferPreviewType: () => 'image',
+}))
 
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { DROP_HINT, DROP_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'

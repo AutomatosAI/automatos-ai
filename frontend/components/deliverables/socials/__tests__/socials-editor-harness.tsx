@@ -49,6 +49,7 @@ export const api = {
   searchSocialSources: vi.fn(),
   getSocialPostMedia: vi.fn(),
   listSocialPosts: vi.fn(),
+  get: vi.fn(),
 }
 export const apiModule = { apiClient: api, default: api }
 
@@ -91,6 +92,7 @@ export function resetApi() {
   api.searchSocialSources.mockResolvedValue({ candidates: [] })
   api.getSocialPostMedia.mockResolvedValue([])
   api.listSocialPosts.mockResolvedValue({ posts: [], total: 0 })
+  api.get.mockResolvedValue({ name: 'Automatos' }) // the brand kit
 }
 
 export function renderWith(ui: React.ReactElement) {

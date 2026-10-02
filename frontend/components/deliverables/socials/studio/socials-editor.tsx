@@ -48,7 +48,7 @@ function useEditorCalls() {
 }
 
 export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
-  const { draft, setDraft, dirty } = useEditorDraft(post)
+  const { draft, setDraft } = useEditorDraft(post)
   const { data: channelData, isLoading: channelsLoading } = useSocialChannels()
   const channels = useMemo(() => channelData ?? [], [channelData])
   const templates = useSocialTemplates(draft.format)
@@ -116,9 +116,9 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
           {post && <SocialsEditorActivity post={post} role={role} />}
         </div>
         <EditorPreviewColumn
-          post={post} base={draft.base} video={draft.format === 'video'} stale={dirty} busy={calls.render.isLoading}
+          post={post} draft={draft} channels={channels} templateSizes={chosen?.sizes ?? []}
           onBase={(base) => setDraft((d) => ({ ...d, base }))}
-          onRender={() => calls.render.mutate({ ...payload(), video: draft.format === 'video' }, opened)}
+          onChannelCopy={(toolkit, text) => setDraft((d) => ({ ...d, perChannel: { ...d.perChannel, [toolkit]: text } }))}
         />
       </div>
     </div>
