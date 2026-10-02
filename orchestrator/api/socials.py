@@ -104,6 +104,7 @@ from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_targets import router as targets_router
+from api.socials_templates import router as templates_router
 from config import config
 from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
@@ -135,7 +136,7 @@ router = APIRouter(
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
-for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router):
+for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))

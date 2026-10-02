@@ -1,5 +1,5 @@
 {
-  "route_count": 852,
+  "route_count": 853,
   "routes": [
     {
       "method": "GET",
@@ -2176,6 +2176,10 @@
     {
       "method": "GET",
       "path": "/api/socials/sources/reports/{report_id}/chart"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/templates"
     },
     {
       "method": "GET",

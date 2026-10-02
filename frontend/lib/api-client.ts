@@ -706,6 +706,23 @@ export interface SocialsUsageResponse {
  * a presigned link served inline (it expires; fetch the list again for a fresh one).
  * `url` is null when the file has no stored object, and `error` says why.
  */
+/** One of the workspace's social templates, for the editor's Look gallery (PRD-251B US-B102). */
+export interface SocialTemplateSummary {
+  id: string
+  name: string
+  description: string | null
+  /** The template format: social_image | social_video. */
+  format: string
+  kind: 'image' | 'video'
+  sizes: string[]
+  /** The lengths a video template offers, in seconds (US-B104); an image offers none. */
+  durations: number[]
+  /** A presigned inline link to the rendered thumbnail, or null until the backfill made one. */
+  thumbnail_url: string | null
+  is_starter: boolean
+  updated_at: string | null
+}
+
 export interface SocialPostMediaLink {
   aspect: string
   deliverable_id: string
@@ -2959,6 +2976,13 @@ class ApiClient {
   /** The post's media as presigned inline links (D9): the exact files an approver sees. */
   async getSocialPostMedia(postId: string): Promise<SocialPostMediaLink[]> {
     return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
+  }
+
+  /** GET /api/socials/templates (PRD-251B US-B102): the workspace's social templates for the
+   * gallery, with their declared lengths and thumbnails; `format` narrows to one post format's kind. */
+  async listSocialTemplates(format?: string): Promise<SocialTemplateSummary[]> {
+    const query = format ? `?format=${encodeURIComponent(format)}` : ''
+    return this.request<SocialTemplateSummary[]>(`/api/socials/templates${query}`)
   }
 
   /** The workspace's connected social channels and the post kinds each can publish (D8). */
