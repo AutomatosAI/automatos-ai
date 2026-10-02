@@ -151,6 +151,7 @@ def test_an_api_agent_reruns_with_the_owners_answer(monkeypatch):
     ticket = _answered_ticket()
     monkeypatch.setattr(dispatcher, "requeue_expired_leases", lambda *_a, **_k: {})
     monkeypatch.setattr(dispatcher, "scan_sla_breaches", lambda *_a, **_k: [])
+    monkeypatch.setattr(dispatcher, "release_spend_holds", lambda *_a, **_k: [])
     monkeypatch.setattr(dispatcher, "claim_tasks", lambda *_a, **_k: [ticket])
     session = SimpleNamespace(commit=lambda: None, close=lambda: None, rollback=lambda: None)
     cfg = SimpleNamespace(BOARD_DISPATCH_MAX_ATTEMPTS=3, BOARD_DISPATCH_CLAIM_BATCH=5,

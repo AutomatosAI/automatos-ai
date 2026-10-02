@@ -288,5 +288,8 @@ function mapTaskToBoardTask(item: any): BoardTask {
     blocked_reason: item.blocked_reason ?? undefined,
     result: item.result,
     runtime_ref: item.runtime_ref ?? undefined,  // PRD-234
+    review_reason: item.review_reason ?? null,  // PRD-252 R3
+    blocked_code: item.blocked_code ?? null,
+    source_type: item.source_type ?? undefined,
   }
 }

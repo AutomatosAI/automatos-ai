@@ -59,10 +59,11 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                 },
                 "review_mode": {
                     "type": "string",
-                    "enum": ["human", "llm", "auto"],
+                    # PRD-252 R3: 'llm' is hidden until a model reviewer exists (it behaved as 'human').
+                    "enum": ["human", "auto"],
                     "description": (
                         "Who signs the work off: 'human' parks the finished ticket in Review until a "
-                        "person approves it; 'llm' has a model review it; 'auto' (default) closes it Done."
+                        "person approves it; 'auto' (default) closes it Done."
                     ),
                 },
                 "sla_deadline": {
@@ -312,10 +313,10 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                 },
                 "review_mode": {
                     "type": "string",
-                    "enum": ["human", "llm", "auto"],
+                    "enum": ["human", "auto"],  # PRD-252 R3: no 'llm' until a model reviewer exists
                     "description": (
                         "Who signs the work off: 'human' parks the finished ticket in Review until a "
-                        "person approves it; 'llm' has a model review it; 'auto' closes it Done."
+                        "person approves it; 'auto' closes it Done."
                     ),
                 },
                 "tags": {

@@ -114,3 +114,14 @@ def test_other_drags_still_move_the_ticket(board):
     board.drag(task, "blocked")
 
     assert task.status == "blocked" and task.blocked_at is not None
+
+
+def test_a_ticket_dragged_into_review_says_who_put_it_there(board):
+    """PRD-252 R3: a person's move is the reason, for that review only."""
+    from core.services.ticket_reasons import MOVED_BY_YOU, review_reason
+
+    task = _ticket("in_progress", completed_at=None, review_mode="auto")
+
+    board.drag(task, "review")
+
+    assert task.status == "review" and review_reason(task) == MOVED_BY_YOU

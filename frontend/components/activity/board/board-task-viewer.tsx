@@ -8,6 +8,7 @@ import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { ReviewVerdict } from './review-verdict'
 import { TicketQuestions } from './ticket-questions'
 import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
+import { stageReason } from './ticket-stage'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -234,7 +235,8 @@ function MetadataGrid({ task }: { task: BoardTask }) {
       </MetaItem>
 
       <MetaItem icon={<Shield className="w-3.5 h-3.5" />} label="Review Mode">
-        <span className="text-sm font-medium capitalize">{task.review_mode}</span>
+        {/* PRD-252 R3: llm has no reviewer; such a ticket waits for a person */}
+        <span className="text-sm font-medium capitalize">{task.review_mode === 'llm' ? 'human' : task.review_mode}</span>
       </MetaItem>
 
       {task.due_date ? (
@@ -269,11 +271,13 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const grantApproval = useGrantApproval()
   const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  const reason = stageReason(task)  // PRD-252 R3: what it waits for, in words
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-4 space-y-3" data-testid="blocked-banner">
         <p className="text-sm font-medium">
-          {grantId ? `Waiting for your approval (grant #${grantId})` : 'Waiting for the operator'}
+          <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider">{reason?.chip}</span>
+          {grantId ? `Waiting for your approval (grant #${grantId})` : reason?.says}
         </p>
         {text && <p className="text-xs text-muted-foreground">{text}</p>}
         <div className="flex flex-wrap items-center gap-2">
@@ -414,13 +418,16 @@ function InProgressContent({ task }: { task: BoardTask }) {
 }
 
 function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => void }) {
+  const reason = stageReason(task)  // PRD-252 R3: why it is in review
+  const missionChecks = task.review_reason === 'mission_checking'
   return (
     <div className="space-y-6">
       {/* Review banner */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20" data-testid="review-banner">
         <Clock className="w-5 h-5 text-[hsl(var(--warning))] shrink-0" />
         <div className="flex-1">
-          <p className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</p>
+          <p className="text-sm font-medium text-[hsl(var(--warning))]">{reason?.stage ?? 'Awaiting Review'}</p>
+          {reason && <p className="text-xs mt-0.5">{reason.says}</p>}
           {task.completed_at && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
@@ -479,8 +486,9 @@ function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => 
         )}
       </div>
 
-      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does */}
-      <ReviewVerdict task={task} onDecided={onDecided} />
+      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does.
+          A mission's own check is the mission's verdict, not the owner's. */}
+      {!missionChecks && <ReviewVerdict task={task} onDecided={onDecided} />}
     </div>
   )
 }
@@ -686,7 +694,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
                 )}>
                   {task.status === 'in_progress' && <Loader2 className="w-3 h-3 animate-spin" />}
                   <div className={cn('w-1.5 h-1.5 rounded-full', statusConf.dotColor)} />
-                  {statusConf.label}
+                  {stageReason(task)?.stage ?? statusConf.label}
                 </span>
 
                 {/* Priority badge */}

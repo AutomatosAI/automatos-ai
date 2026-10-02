@@ -129,7 +129,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
             <SelectContent>
               <SelectItem value="auto">Auto</SelectItem>
               <SelectItem value="human">Human</SelectItem>
-              <SelectItem value="llm">LLM</SelectItem>
+              {/* PRD-252 R3: no LLM option until a model reviewer exists (it behaved as Human) */}
             </SelectContent>
           </Select>
         </div>

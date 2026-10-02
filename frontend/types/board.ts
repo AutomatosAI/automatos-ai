@@ -49,6 +49,10 @@ export interface BoardTask {
   result?: any
   // PRD-234: the session reference a `runtime: cli` ticket carries once a CLI host claims it
   runtime_ref?: Record<string, any> | null
+  /** PRD-252 R3: why it waits in Review / Blocked (core/services/ticket_reasons.py codes). */
+  review_reason?: string | null
+  blocked_code?: string | null
+  source_type?: string
 }
 
 export interface BoardColumn {

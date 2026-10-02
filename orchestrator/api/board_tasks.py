@@ -39,6 +39,8 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
 from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
 from services.ticket_verdict import record_approval
+from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
+from services.board_task_view import enrich_with_agents
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 
@@ -359,41 +361,6 @@ async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> N
     )
 
 
-# ── Helpers ──────────────────────────────────────────────────────────
-
-def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
-    """Join agent info onto task dicts.
-
-    Agents are resolved within ``workspace_id`` only: a task whose
-    ``assigned_agent_id`` points at another workspace's agent yields no ``agent``
-    block rather than leaking that agent's name/icon (defense-in-depth tenant
-    isolation — board reads are now reachable by per-workspace SDK keys).
-    """
-    agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
-    if not agent_ids:
-        return [t.to_dict() for t in tasks]
-
-    agents = {
-        a.id: a
-        for a in db.query(Agent)
-        .filter(Agent.id.in_(agent_ids), Agent.workspace_id == workspace_id)
-        .all()
-    }
-
-    result = []
-    for t in tasks:
-        d = t.to_dict()
-        agent = agents.get(t.assigned_agent_id)
-        if agent:
-            d["agent"] = {
-                "id": agent.id,
-                "name": agent.name,
-                "agent_icon": getattr(agent, "premium_icon", None),
-            }
-        result.append(d)
-    return result
-
-
 # ── CRUD ─────────────────────────────────────────────────────────────
 
 @router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
@@ -561,7 +528,7 @@ async def list_tasks(
     )
 
     return {
-        "tasks": _enrich_with_agents(tasks, db, ctx.workspace_id),
+        "tasks": enrich_with_agents(tasks, db, ctx.workspace_id),
         "total": total,
     }
 
@@ -608,7 +575,7 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    enriched = _enrich_with_agents([task], db, ctx.workspace_id)
+    enriched = enrich_with_agents([task], db, ctx.workspace_id)
     detail = dict(enriched[0])
     detail["cost"] = ticket_cost(db, task.id)
     return detail
@@ -1494,6 +1461,8 @@ def _set_status_by_hand(task: BoardTask, new_status: str, blocked_reason: Any, *
     end_session_claim(task, old_status, new_status)
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
+    if new_status == "review" and old_status != "review":  # PRD-252 R3: why it is there
+        task.runtime_ref = with_review_reason(task.runtime_ref, MOVED_BY_YOU, task.completed_at)
     if new_status == "blocked" and task.blocked_at is None:
         task.blocked_at = datetime.now(timezone.utc)
     if new_status != "blocked" and old_status == "blocked":
@@ -2090,9 +2059,10 @@ async def _named_file_check(db: Session, task_id: int, workspace_id: str, llm_te
 def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
     """Hold a ticket that would have started over the day's ceiling.
 
-    ``blocked`` with the reason on it, so the board says why and the ticket
-    comes back on its own once the ceiling is raised or the day rolls over —
-    it is not failed, and nothing it might have produced is lost.
+    ``blocked`` with the reason on it, so the board says why. PRD-252 R3: the
+    hold is marked, and the dispatch loop sends the ticket back to Assigned
+    once the ceiling is raised or the window rolls over (``release_spend_holds``).
+    It is not failed, and nothing it might have produced is lost.
     """
     try:
         task = db.query(BoardTask).get(task_id)
@@ -2102,6 +2072,8 @@ def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
         task.blocked_at = datetime.now(timezone.utc)
         task.blocked_reason = reason
         task.lease_until = None
+        # PRD-252 R3: the hold the dispatch loop releases once the ceiling allows
+        task.runtime_ref = {**(task.runtime_ref or {}), SPEND_HOLD_KEY: task.blocked_at.isoformat()}
         notify_board_event(  # F118: before the commit it rides
             db, workspace_id=str(task.workspace_id), task_id=task.id,
             status="blocked", event="task_updated",

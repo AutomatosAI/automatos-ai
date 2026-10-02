@@ -8,6 +8,7 @@ import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG } from '@/types/board'
 import { cn } from '@/lib/utils'
 import { TicketActionsMenu } from './ticket-actions-menu'
+import { stageReason } from './ticket-stage'
 
 interface BoardCardProps {
   task: BoardTask
@@ -62,6 +63,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
 
   const isFailed = task.error_message != null && task.status === 'done'
   const isBlocked = task.status === 'blocked'
+  const reason = stageReason(task)
 
   return (
     <Draggable draggableId={task.id} index={index}>
@@ -119,6 +121,8 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
 
           {/* Title */}
           <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
+          {/* PRD-252 R3: why it waits in Review or Blocked */}
+          {reason && <span className="inline-block mb-1 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]" title={reason.says}>{reason.chip}</span>}
 
           {/* Description */}
           {task.description && (

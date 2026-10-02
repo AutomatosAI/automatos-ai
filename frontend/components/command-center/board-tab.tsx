@@ -32,6 +32,7 @@ import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
 import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-menu'
+import { stageReason } from '@/components/activity/board/ticket-stage'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
@@ -167,6 +168,7 @@ function KanbanCard({
   const isCompact = density === 'compact'
   const isPlaybook = task.type === 'playbook'
   const Icon = isPlaybook ? BookMarked : CheckSquare
+  const reason = stageReason(task)
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
@@ -224,6 +226,8 @@ function KanbanCard({
             <TicketActionsMenu task={task} />
           </div>
           <div className="ttl">{task.name}</div>
+          {/* PRD-252 R3: why it waits in Review or Blocked */}
+          {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
           {!isCompact && task.description && (
             <div className="body">{task.description}</div>
           )}
