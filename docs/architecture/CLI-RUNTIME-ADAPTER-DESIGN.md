@@ -695,6 +695,12 @@ The deliverable this whole design exists to produce.
 Steps 1–3, 8, 9 are a row and a fixture. Steps 4 and 6 are the only real code, and 4 only for
 tier 2+.
 
+**Permission modes need nothing per CLI** (PRD-253 Wave P). Manual, Edit automatically and Auto are
+the gate's verdicts on `ToolIntent`. Plan is the plan turn: the gate holds the session read-only,
+the ticket file asks for the plan as the final message, and the backend files it as the Plan card.
+Give a preset a `plan_stance` only if its plan tool can be held in-turn and an approval continues
+the same turn, as Claude Code's `ExitPlanMode` does.
+
 ---
 
 ## 11. Test plan

@@ -332,6 +332,23 @@ A card for an older plan version is refused as stale.
 - [ ] The owner sees no fallback note on a Codex agent's form.
 **Editions:** local only (`isLocal`).
 
+**As built (Wave P, 2026-10-02).** Where the build differs from the stories above, and why:
+- **The plan travels as an event, not on the result.** `apply_result` is 114 lines, and touching it
+  would fail the changed-lines function-length check. The host sends `PlanReady` in the turn's final
+  event flush, and `record_events` files the card (`services/session_plans.py`). The result's
+  `_park_for_answer` then parks on it. The host now holds a session's result until its last events
+  are accepted: a failed final flush used to be dropped.
+- **The ledger is `runtime_ref.session_plans`**, one entry per plan version, not a single
+  `runtime_ref.plan`. The state is read from the latest entry (`plan_state`).
+- **The card offers Approve and Reject.** The operator's own words are the third answer.
+  A *Discuss* button would send the word "Discuss" with no feedback, because the Questions
+  tab submits a chip as the answer.
+- **`SESSION_BASH_VERBS` does not gain the Plan subset.** The system prompt is stable per agent
+  (the prompt-cache invariant). A Plan turn's rules are in the ticket file, and the gate enforces
+  `PLAN_BASH_ALLOW`.
+- **The §10 design-doc note on permission modes** (S3.2) landed with Wave P, which it describes.
+- **policy.py was split** (`shell_text.py`, unchanged code) so Wave P does not grow it past main's size.
+
 ### Wave 1 — Copilot runs, gated (two PRs: the rows, then the adapter)
 
 **S1.1 · The preset row and the registry row (S)**

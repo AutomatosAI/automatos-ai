@@ -122,6 +122,13 @@ command in it:
   its commands from input (`echo … | sh`, `bash -s`, `source /dev/stdin`) are held
   for you — in Auto mode too, where an unlisted verb otherwise runs. A write tool
   that names no file is refused in every mode.
+- **Plan is read-only, on every CLI.** In Plan mode only the read-only part of
+  the allowlist runs (`PLAN_BASH_ALLOW`: no git write, test runner or `npm run`),
+  and a redirection into a file or an in-place edit (`sed -i`) is a card. A CLI
+  with no plan mode of its own has nothing else holding it read-only. Its ticket
+  file says to end the turn with the plan, which reaches the backend as a
+  `PlanReady` event in the final flush. The result always waits for that flush
+  (PRD-253 Wave P).
 - **Every global option is peeled first.** `git -c k=v push`,
   `git --git-dir=… push` and a repeated `-C` all reach the never-allowed list as
   `git push`; `gh -R owner/name pr create` likewise. A path a global names is
