@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .permission_modes import PERMISSION_MODES, UNLISTED_BASH_MODES
+from .presets import MAX_HOLD_SECONDS
 from .sandbox import DEFAULT_ALLOWED_DOMAINS, SessionSandbox
 
 DEFAULT_URL = "http://127.0.0.1:8000"
@@ -168,7 +169,8 @@ def _add_session_args(p: argparse.ArgumentParser) -> None:
                         f"({', '.join(DEFAULT_ALLOWED_DOMAINS)}); repeatable")
     p.add_argument("--ask-timeout", type=float, default=DEFAULT_ASK_TIMEOUT_SECONDS,
                    help=("seconds a session waits for the operator to answer a permission card before "
-                         f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)})"))
+                         f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)}); inside a turn never more than "
+                         f"{int(MAX_HOLD_SECONDS)}, the longest a CLI's hook waits"))
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
 

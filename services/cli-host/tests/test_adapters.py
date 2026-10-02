@@ -40,6 +40,36 @@ def test_every_preset_is_internally_consistent(preset, tmp_path):
     assert preset.ungated_stance and all(tok in args for tok in preset.ungated_stance)
 
 
+@pytest.mark.parametrize("preset", list(REGISTRY.values()), ids=list(REGISTRY))
+def test_a_held_hook_outlasts_the_shims_wait(preset):
+    """PRD-253 D4: the host may hold a call while the operator answers; the shim
+    gives up at HOOK_WAIT_SECONDS and denies. The CLI's own timeout for a held
+    event must sit above that — a CLI that kills the hook first decides the call
+    itself, and Copilot's timed-out hook FAILS OPEN."""
+    for event in preset.hold_events:
+        assert float(preset.hook_timeout(event)) > presets.HOOK_WAIT_SECONDS, (preset.id, event)
+
+
+def test_the_shim_waits_as_long_as_the_host_says():
+    import inspect
+
+    from automatos_cli_host import hook_shim
+    assert f'"AUTOMATOS_HOOK_WAIT_SECONDS", "{presets.HOOK_WAIT_SECONDS}"' in inspect.getsource(hook_shim)
+
+
+def test_the_host_answers_every_held_call_before_the_shim_gives_up():
+    """PRD-253 D4, the other end: the host's hold ends below the shim's wait, so a
+    held call is always answered by the host. ``--ask-timeout`` (an hour by default)
+    is capped there; an answer that came after the shim gave up would be recorded
+    for a call the CLI had already been told was denied."""
+    import inspect
+
+    assert presets.MAX_HOLD_SECONDS < presets.HOOK_WAIT_SECONDS
+    assert presets.hold_seconds(3600.0) == presets.MAX_HOLD_SECONDS
+    assert presets.hold_seconds(2.0) == 2.0 and presets.hold_seconds(None) == presets.UNSET_HOLD_SECONDS
+    assert "hold_seconds(" in inspect.getsource(session.Session._ask_operator)
+
+
 def test_the_registry_resolves_ids_and_defaults_to_claude():
     assert preset_for(None) is CLAUDE and preset_for("") is CLAUDE and preset_for(" Codex ") is CODEX
     with pytest.raises(UnknownCli):

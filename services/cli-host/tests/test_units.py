@@ -87,7 +87,7 @@ def test_settings_declare_hooks_to_this_interpreter(tmp_path):
         entry = data["hooks"][event][0]
         assert entry["hooks"][0]["command"] == '"/usr/bin/python3" -m automatos_cli_host.hook_shim'
     assert data["hooks"]["PreToolUse"][0]["matcher"] == "*"
-    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == CLAUDE.hook_timeout("PreToolUse") == 540
+    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == CLAUDE.hook_timeout("PreToolUse") == 600   # D4
     assert data["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 60
     assert oct(p.stat().st_mode & 0o777) == "0o600"
     assert "mcpServers" not in data and "permissions" not in data  # hooks only

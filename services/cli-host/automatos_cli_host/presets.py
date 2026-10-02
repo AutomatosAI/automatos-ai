@@ -40,6 +40,24 @@ SCOPE_NONE = "none"                     # the CLI's own config is not relocated 
 SCOPE_PER_AGENT = "per_agent"           # one config home per agent per host — the default for tier 2
 SCOPE_PER_SESSION = "per_session"       # never for a CLI whose session index lives in the home (§6.1)
 
+# PRD-253 D4: how long the hook shim waits for the host's answer to a held call
+# (``AUTOMATOS_HOOK_WAIT_SECONDS``) before it denies on its own. Every preset's
+# timeout for a held event sits ABOVE it: a CLI that kills a hook first decides
+# the call itself, and a CLI whose timed-out hook fails open (Copilot) would run it.
+HOOK_WAIT_SECONDS = 560
+HELD_HOOK_TIMEOUT_SECONDS = 600
+# ...and the host's own hold ends BELOW it: ``--ask-timeout`` is capped here, so
+# the host answers every held call itself. An answer that came after the shim gave
+# up would be recorded for a call the CLI had already been told was denied.
+MAX_HOLD_SECONDS = HOOK_WAIT_SECONDS - 30
+UNSET_HOLD_SECONDS = 120.0
+
+
+def hold_seconds(ask_timeout: Optional[float]) -> float:
+    """How long a held call waits for the operator inside a turn: ``--ask-timeout``
+    (``UNSET_HOLD_SECONDS`` when unset), never past ``MAX_HOLD_SECONDS``."""
+    return min(float(ask_timeout or UNSET_HOLD_SECONDS), MAX_HOLD_SECONDS)
+
 # The bus (design §5): every event the host models. A preset lists the subset its CLI delivers.
 BUS_EVENTS: FrozenSet[str] = frozenset({
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
@@ -162,9 +180,9 @@ CLAUDE = CliPreset(
     # The operator's user-scope settings only, no repo .claude/, no MCP from the folder.
     required_args=("--setting-sources", "user", "--strict-mcp-config"),
     hook_events=BUS_EVENTS,
-    # PreToolUse may HOLD while the approvals inbox answers; Claude's default for a
-    # command hook is 600 s — stay under it and deny on our own clock. Seconds.
-    hook_timeouts={"*": 60, "PreToolUse": 540, "PermissionRequest": 540},
+    # PreToolUse may HOLD while the approvals inbox answers: the shim answers by
+    # HOOK_WAIT_SECONDS, before Claude's own timeout would decide the call (D4). Seconds.
+    hook_timeouts={"*": 60, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
     config_home_scope=SCOPE_NONE,              # per-session ``--settings``; CLAUDE_CONFIG_DIR stays the operator's
     strip_env=frozenset({
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -209,7 +227,9 @@ CODEX = CliPreset(
     ungated_stance=("-a", "never", "-s", "workspace-write"),   # approvals off, OS sandbox on
     required_args=("--dangerously-bypass-hook-trust",),        # trusts OUR hook file; not a gate bypass (§6.4)
     hook_events=BUS_EVENTS - {"Notification"},
-    hook_timeouts={"*": 30},                   # SECONDS, and 0 floors to 1 s (§6.3)
+    # SECONDS, and 0 floors to 1 s (§6.3). A held call outlasts the shim's wait (D4):
+    # with approvals off, a hook Codex timed out first would leave the call to Codex.
+    hook_timeouts={"*": 30, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
     config_home_env="CODEX_HOME",
     config_home_scope=SCOPE_PER_AGENT,         # the session index lives in the home (§6.1)
     strip_env=frozenset({"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"}),

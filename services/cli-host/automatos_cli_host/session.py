@@ -54,7 +54,7 @@ from .config import HostConfig
 from .env import build_session_env
 from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
 from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
-from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
+from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
 from .session_prompt import build_system_prompt, build_ticket_file
 from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
@@ -329,7 +329,7 @@ class Session:
             "tool_name": tool, "subject": subject, "reason": reason,
             "session_id": self.reported_session_id or self.session_id,
         })
-        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        timeout = hold_seconds(getattr(self.cfg, "ask_timeout", None))    # the hook's own wait bounds it (D4)
         answered = done.wait(timeout)
         with self._ask_lock:
             self._pending_asks.pop(request_id, None)
@@ -523,7 +523,7 @@ class Session:
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,
-            "AUTOMATOS_HOOK_WAIT_SECONDS": "560",
+            "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),
             # Hooks run from the session's directory: the shim (`python -m
             # automatos_cli_host.hook_shim`) must find this package from there.
             "PYTHONPATH": package_root + (os.pathsep + inherited_pp if inherited_pp else ""),
