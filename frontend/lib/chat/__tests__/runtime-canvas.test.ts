@@ -18,6 +18,6 @@ describe('Runtime Canvas (PRD-239 S7 v2)', () => {
       workspaceId: 'ws-1', rootPath: 'sessions/93', taskId: '93', runtime: true, openFullscreen: true,
     })
     expect(runtimeCanvasTitle({ task_id: 93, agent_name: 'Bob' })).toBe('Bob · session')
-    expect(runtimeCanvasTitle({ task_id: 93 })).toBe('Session · ticket #93')
+    expect(runtimeCanvasTitle({ task_id: 93 })).toBe('Session · ticket 93')   // PRD-252 R4: an id never follows a '#'
   })
 })
