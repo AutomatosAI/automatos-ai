@@ -7,18 +7,15 @@
  * its slot, and the render minutes the plan needs. Posts are made close to their slot, so
  * the work and the AI spend are spread over the plan.
  */
-import Link from 'next/link'
-
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Segmented } from '../studio/editor-ui'
 import { LATE_CHOICES, MIX_PRESETS, cadenceSummary, type MixKey, type PlanDraft } from './plan-model'
+import { PlanAiTools } from './plan-ai-tools'
 import { PlanStepHeading } from './plan-ui'
 
 const SELECT = 'h-[42px] w-full rounded-md border border-input bg-background px-2 text-sm'
 export const QUEUE_NOTE = 'Every post waits in your Queue for approval. You are told in Automatos when the day\'s posts are ready.'
-export const AI_TOOLS_NOTE = 'Paid AI tools are connected in Composio and chosen in the Brand kit; templates and Kokoro need nothing.'
-const BRAND_KIT_HREF = '/deliverables?tab=socials&view=brand'
 
 function DayChoice({ id, label, value, time, onChange }: { id: string; label: string; value: number; time: string; onChange: (early: number) => void }) {
   return (
@@ -51,10 +48,7 @@ export function PlanStepMaking({ draft, set }: { draft: PlanDraft; set: (changes
         <Segmented<MixKey> label="Visual mix" choices={MIX_PRESETS.map((p) => ({ value: p.key, label: p.label }))} value={draft.mix} onChange={(key) => set({ mix: key })} />
         <span className="text-[12.5px] text-muted-foreground">{mix.note}</span>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-3">
-        <span className="text-sm text-muted-foreground">{AI_TOOLS_NOTE}</span>
-        <Link href={BRAND_KIT_HREF as any} className="text-sm font-medium text-foreground underline-offset-4 hover:underline">AI tools</Link>
-      </div>
+      <PlanAiTools />
       <div className="flex flex-col gap-1.5">
         <span className="text-sm font-medium text-foreground">If a post is not approved by its slot</span>
         <Segmented label="Late approval" choices={LATE_CHOICES} value={draft.latePolicy} onChange={(latePolicy) => set({ latePolicy })} />

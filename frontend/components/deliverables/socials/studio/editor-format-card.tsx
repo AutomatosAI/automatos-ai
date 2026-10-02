@@ -15,7 +15,7 @@ import type { SocialFootageKind, SocialPost } from '@/lib/api-client'
 import { SocialsMusicPicker } from '../socials-music-picker'
 import { SocialsVoicePicker } from '../socials-voice-picker'
 import { lengthLabel } from './socials-calendar-model'
-import { EDITOR_FORMATS, MAX_SLIDES, MIN_SLIDES, wordsHint, type EditorDraft, type EditorFormat } from './editor-model'
+import { EDITOR_FORMATS, MAX_SLIDES, MIN_SLIDES, footageSwitchOn, wordsHint, type EditorDraft, type EditorFormat } from './editor-model'
 import { ChipGroup, EditorCard, Hint, Segmented } from './editor-ui'
 
 export const TEXT_ONLY_NOTE = 'No media. Only X and LinkedIn take a text-only post.'
@@ -62,7 +62,7 @@ function VideoOptions({ draft, durations, footageSlots, footage, post, canEdit, 
             { value: 'off', label: 'Off' },
             { value: 'on', label: footage?.label ?? 'No footage toolkit connected', disabled: !footageReady },
           ]}
-          value={draft.footageOn && footageReady ? 'on' : 'off'}
+          value={footageSwitchOn(draft, footageSlots) && footageReady ? 'on' : 'off'}
           onChange={(value) => onChange({ ...draft, footageOn: value === 'on' })}
         />
         <Hint>{footageReady ? FOOTAGE_NOTE : footage?.reason ?? 'This template has no slot for AI footage.'}</Hint>

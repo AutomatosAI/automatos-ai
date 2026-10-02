@@ -50,6 +50,9 @@ export const api = {
   getSocialPostMedia: vi.fn(),
   listSocialPosts: vi.fn(),
   get: vi.fn(),
+  // PRD-251B US-B305: AI options for an image slot.
+  makeSocialAiOptions: vi.fn(),
+  pickSocialAiOption: vi.fn(),
 }
 export const apiModule = { apiClient: api, default: api }
 
@@ -93,6 +96,10 @@ export function resetApi() {
   api.getSocialPostMedia.mockResolvedValue([])
   api.listSocialPosts.mockResolvedValue({ posts: [], total: 0 })
   api.get.mockResolvedValue({ name: 'Automatos' }) // the brand kit
+  api.makeSocialAiOptions.mockImplementation(async (id: string, slot: string, prompt: string) =>
+    post({ id, footage: { [slot]: { prompt, options: [], options_state: 'making' } } }),
+  )
+  api.pickSocialAiOption.mockImplementation(async (id: string) => post({ id }))
 }
 
 export function renderWith(ui: React.ReactElement) {

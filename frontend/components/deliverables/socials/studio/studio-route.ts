@@ -22,7 +22,7 @@ export type CalendarLayout = (typeof CALENDAR_LAYOUTS)[number]
 /** `post=new`: the editor for a post not created yet. `plan=new`: the plan form. */
 export const NEW_POST = 'new'
 export const NEW_PLAN = 'new'
-/** `view=brand`: the brand kit, a dialog over the calendar until it is a view of its own (Wave 3). */
+/** `view=brand`: an old link to the brand kit; it goes to the Brand kit tab (PRD-251B US-B301). */
 export const BRAND_VIEW = 'brand'
 
 export const DELIVERABLES_PATH = '/deliverables'

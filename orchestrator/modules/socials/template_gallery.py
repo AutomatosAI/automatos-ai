@@ -21,7 +21,7 @@ from uuid import UUID
 
 from config import config
 from core.models.core import DocumentTemplate
-from core.social_templates import SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, root_duration, slot_generatable
+from core.social_templates import IMAGE_SLOT, SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, root_duration, slot_generatable
 from modules.socials.compose_checks import template_kind
 from modules.socials.media_store import MediaStore
 
@@ -58,6 +58,13 @@ def footage_slots(blocks: Any) -> List[str]:
     return sorted(name for name, spec in slots.items() if isinstance(spec, dict) and slot_generatable(spec))
 
 
+def image_slots(blocks: Any) -> List[str]:
+    """The slots of ``footage_slots`` that take a still (PRD-251B US-B305): the editor's AI-made
+    images fill them; the rest are the hook and b-roll its AI footage switch fills."""
+    slots = blocks.get("slots") if isinstance(blocks, dict) and isinstance(blocks.get("slots"), dict) else {}
+    return [name for name in footage_slots(blocks) if slots[name].get("kind") == IMAGE_SLOT]
+
+
 def thumbnail_link(store: MediaStore, raw: Optional[str]) -> Optional[str]:
     """A presigned inline link to the stored thumbnail; an http(s) value as it is;
     ``None`` without one or without storage."""
@@ -85,6 +92,7 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "sizes": [str(size) for size in (blocks.get("sizes") or [])],
         "durations": durations_of(blocks, row.format),
         "footage_slots": footage_slots(blocks),
+        "image_slots": image_slots(blocks),
         # The template's fields: the editor's Claims and sources card fills them (US-B109).
         "variables_schema": blocks.get("variables_schema") if isinstance(blocks.get("variables_schema"), dict) else {},
         "thumbnail_url": thumbnail_link(store, row.thumbnail_url),

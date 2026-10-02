@@ -55,14 +55,17 @@ export interface EditorDraft {
   /** Ticked channel (toolkit) → the post kind it publishes. */
   kinds: Record<string, SocialPostKind>
   options: Record<string, SocialPostTargetOptions>
-  footageOn: boolean
+  /** The AI footage switch for the hook and b-roll; null: as the post asks. */
+  footageOn: boolean | null
+  /** PRD-251B US-B305: the footage the post asks for, slot → prompt (an AI image's, or the b-roll's). */
+  footage: Record<string, string>
   slot: EditorSlot | null
 }
 
 export function newDraft(): EditorDraft {
   return {
     title: '', brief: '', format: 'image', templateId: null, lengthSeconds: null, base: '', perChannel: {},
-    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, slot: null,
+    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, footage: {}, slot: null,
   }
 }
 
@@ -88,17 +91,43 @@ export function draftFromPost(post: SocialPost): EditorDraft {
     sources: { ...(post.sources as Record<string, SocialClaimSource>) },
     kinds: Object.fromEntries(targets.map((t) => [t.toolkit, t.post_kind])),
     options: Object.fromEntries(targets.filter((t) => Object.keys(t.options ?? {}).length > 0).map((t) => [t.toolkit, t.options])),
-    footageOn: Object.keys(post.footage ?? {}).length > 0,
+    footageOn: null,
+    footage: Object.fromEntries(Object.entries(post.footage ?? {}).map(([slot, asked]) => [slot, asked.prompt])),
     slot: slotOfPost(post),
   }
 }
 
+/** The template's slots the AI footage switch fills: its generatable ones that are not stills. */
+export function videoSlotsOf(footageSlots: ReadonlyArray<string>, imageSlots: ReadonlyArray<string>): string[] {
+  return footageSlots.filter((slot) => !imageSlots.includes(slot))
+}
+
+/** Whether the AI footage switch is on: as set, else whether the post asks for the hook or b-roll. */
+export function footageSwitchOn(draft: EditorDraft, videoSlots: ReadonlyArray<string>): boolean {
+  return draft.footageOn ?? videoSlots.some((slot) => slot in draft.footage)
+}
+
+/**
+ * The footage a save asks for: the hook and b-roll while the switch is on (a video's, from
+ * its brief), and every AI image slot the post asks for, with its own prompt, so a save
+ * never drops the options made for it (PRD-251B US-B305). null when it asks for none.
+ */
+export function footageAsked(draft: EditorDraft, footageSlots: ReadonlyArray<string>, imageSlots: ReadonlyArray<string>) {
+  const brief = draft.brief.trim() || draft.title.trim()
+  const videoSlots = videoSlotsOf(footageSlots, imageSlots)
+  const switched = draft.format === 'video' && footageSwitchOn(draft, videoSlots) ? videoSlots : []
+  const stills = imageSlots.filter((slot) => footageSlots.includes(slot) && draft.footage[slot])
+  const asked = Object.fromEntries([
+    ...switched.map((slot) => [slot, { prompt: brief }] as const),
+    ...stills.map((slot) => [slot, { prompt: draft.footage[slot] }] as const),
+  ])
+  return Object.keys(asked).length > 0 ? asked : null
+}
+
 /** The editor's fields as the post saves them (POST /posts or PATCH). */
-export function postFields(draft: EditorDraft, footageSlots: ReadonlyArray<string>): CreateSocialPostInput {
+export function postFields(draft: EditorDraft, footageSlots: ReadonlyArray<string>, imageSlots: ReadonlyArray<string> = []): CreateSocialPostInput {
   const video = draft.format === 'video'
-  const footage = video && draft.footageOn && footageSlots.length > 0
-    ? Object.fromEntries(footageSlots.map((slot) => [slot, { prompt: draft.brief.trim() || draft.title.trim() }]))
-    : null
+  const footage = footageAsked(draft, footageSlots, imageSlots)
   return {
     title: draft.title.trim() || NEW_POST_TITLE,
     brief: draft.brief.trim() || null,

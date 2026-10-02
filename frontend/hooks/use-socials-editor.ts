@@ -149,6 +149,24 @@ export function useUploadEditorMedia() {
   )
 }
 
+/** PRD-251B US-B305: four AI options for an image slot, made in the background; the draft is saved first. */
+export function useMakeAiOptions() {
+  return useEditorMutation<EditorSave & { imageSlot: string; prompt: string }>(
+    async ({ imageSlot, prompt, ...save }) => apiClient.makeSocialAiOptions((await saveEditor(save)).id, imageSlot, prompt),
+    'Making four options: they appear here in a minute',
+    'Could not make AI options',
+  )
+}
+
+/** The option picked becomes the slot's file. A render setting: an approval stands. */
+export function usePickAiOption() {
+  return useEditorMutation<{ postId: string; slot: string; name: string }>(
+    ({ postId, slot, name }) => apiClient.pickSocialAiOption(postId, slot, name),
+    'Option chosen',
+    'Could not use that option',
+  )
+}
+
 /** The post's visual from the Library: one of the workspace's Deliverables. */
 export function usePickLibraryMedia() {
   return useEditorMutation<EditorSave & { item: DeliverableSummary }>(

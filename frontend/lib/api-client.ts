@@ -7,6 +7,15 @@
  */
 
 import type {
+  BrandReferenceChange,
+  BrandReferenceStance,
+  BrandStyleResponse,
+  SocialAiOption,
+  SocialAiOptionsState,
+  SocialMediaToolsInput,
+  SocialMediaToolsResponse,
+} from './brand-style-types'
+import type {
   SocialMusicResponse,
   SocialPlan,
   SocialPlanInput,
@@ -464,7 +473,10 @@ export interface SocialReviewEntry {
   comment: string | null
 }
 
-/** D11 (S1.5): the voice toolkit a post is spoken with; `null` on the post is Kokoro, the template's own voice. */
+/**
+ * D11 (S1.5): the voice a post is spoken with; `null` on the post is Kokoro with the template's
+ * own voice. PRD-251B US-B306: `{ toolkit: 'kokoro', voice_id }` is one of Kokoro's voices.
+ */
 export interface SocialPostVoice {
   toolkit: string
   voice_id: string
@@ -489,6 +501,10 @@ export interface SocialPostFootage {
   estimate_usd?: number
   cost_usd?: number
   generated_at?: string
+  /** PRD-251B US-B305: the AI options made for an image slot, until one is picked. */
+  options?: SocialAiOption[]
+  options_state?: SocialAiOptionsState
+  options_error?: string
 }
 
 export interface SocialPost {
@@ -755,8 +771,10 @@ export interface SocialTemplateSummary {
   thumbnail_url: string | null
   is_starter: boolean
   updated_at: string | null
-  /** The slots a generation toolkit may fill (S1.8): what the editor's AI footage switch asks for. */
+  /** The slots a generation toolkit may fill (S1.8): the hook and b-roll the AI footage switch asks for, and the stills. */
   footage_slots: string[]
+  /** PRD-251B US-B305: those of them that take a still: the Look card's AI-made images. */
+  image_slots?: string[]
   /** The template's fields, some of them claims (D7): the editor's Claims and sources card. */
   variables_schema: Record<string, SocialTemplateVariable>
 }
@@ -3264,6 +3282,69 @@ class ApiClient {
   /** The music library a post may pick from instead of its template's track. */
   async listSocialMusic(): Promise<SocialMusicResponse> {
     return this.request<SocialMusicResponse>('/api/socials/music')
+  }
+
+  // ===== PRD-251B Wave 3: the brand kit's style references, the AI tools, AI-made visuals =====
+  /** The style references, the profile Auto read from them, and whether liked images go to AI tools (US-B302, US-B303). */
+  async getBrandStyle(): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/references')
+  }
+
+  /** A PNG, JPEG or WebP the brand likes or avoids, with a note on why (the server checks the type and size). */
+  async uploadBrandReference(file: File, note: string, stance: BrandReferenceStance): Promise<BrandStyleResponse> {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('note', note)
+    form.append('stance', stance)
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/references', { method: 'POST', body: form })
+  }
+
+  async updateBrandReference(refId: string, changes: BrandReferenceChange): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>(`/api/documents/brand-kit/references/${encodeURIComponent(refId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(changes),
+    })
+  }
+
+  async deleteBrandReference(refId: string): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>(`/api/documents/brand-kit/references/${encodeURIComponent(refId)}`, { method: 'DELETE' })
+  }
+
+  /** Read the references again now: 502 when the model's answer is not a profile, 504 when it is too slow. */
+  async readBrandStyle(): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/style/read', { method: 'POST' })
+  }
+
+  async setBrandStyleSendLiked(sendLiked: boolean): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/style', {
+      method: 'PUT',
+      body: JSON.stringify({ send_liked: sendLiked }),
+    })
+  }
+
+  /** The AI tools section: toolkit rows, the choices and defaults per media type, both caps and the spend (US-B304). */
+  async getSocialMediaTools(): Promise<SocialMediaToolsResponse> {
+    return this.request<SocialMediaToolsResponse>('/api/socials/media-tools')
+  }
+
+  async updateSocialMediaTools(input: SocialMediaToolsInput): Promise<SocialMediaToolsResponse> {
+    return this.request<SocialMediaToolsResponse>('/api/socials/media-tools', { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  /** Four AI options for one of the post's template image slots, made in the background (US-B305). */
+  async makeSocialAiOptions(postId: string, slot: string, prompt: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/ai-options`, {
+      method: 'POST',
+      body: JSON.stringify({ slot, prompt }),
+    })
+  }
+
+  /** The option picked becomes the slot's file, as a render's would; an approval stands. */
+  async pickSocialAiOption(postId: string, slot: string, name: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/ai-options/${encodeURIComponent(slot)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    })
   }
 }
 

@@ -5,18 +5,18 @@
  * actions, studio-nav.tsx) and the view the URL names (studio-route.ts). The calendar
  * view is the posts (US-B108 puts them on the Command Center's grid, with this list as its
  * List), the Queue holds what waits for approval, and Plans lists the plans (B6: a plan is a
- * campaign; Wave 2) with the other campaigns below them. Brand kit opens the brand kit dialog
- * in place. New post opens the editor at ?post=new; New plan opens the Plan page at
+ * campaign; Wave 2) with the other campaigns below them. Brand kit goes to the Brand kit tab
+ * (PRD-251B US-B301). New post opens the editor at ?post=new; New plan opens the Plan page at
  * ?view=plans&plan=new, and ?view=plans&plan=<id> a plan's own page (US-B207).
  * US-B108: the calendar view is the Socials calendar (Month · Week · List).
- * US-B109: ?post=<id> opens the post editor (studio/socials-post-page.tsx), and
- * ?view=brand (the Brand kit item's own link) opens the brand kit over the calendar.
+ * US-B109: ?post=<id> opens the post editor (studio/socials-post-page.tsx), and the old
+ * ?view=brand link goes to the Brand kit tab.
  */
-import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useEffect, useMemo } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
-import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
 import type { Workspace } from '@/components/workspace-provider'
+import { BRAND_KIT_HREF } from '@/lib/deliverables/tabs'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { SocialsPlansView } from '../plans/socials-plans-view'
@@ -56,14 +56,14 @@ export function SocialsStudio({ role, postId = null }: SocialsStudioProps) {
   const [route, go] = useSocialsRoute(postId)
   const { data, isLoading, isFetching } = useSocialPosts()
   const posts = useMemo(() => data?.posts ?? [], [data])
-  const [brandKitOpen, setBrandKitOpen] = useState(false)
+  const router = useRouter()
   const canBrand = canEditBrandKit(role)
   const brandAsked = useSearchParams()?.get('view') === BRAND_VIEW
 
-  // ?view=brand: the brand kit is a dialog over the calendar until its own view (Wave 3).
+  // ?view=brand: the brand kit is the Brand kit tab now.
   useEffect(() => {
-    if (brandAsked && canBrand) setBrandKitOpen(true)
-  }, [brandAsked, canBrand])
+    if (brandAsked) router.replace(BRAND_KIT_HREF as any)
+  }, [brandAsked, router])
 
   return (
     <div className="socials-studio space-y-5">
@@ -73,11 +73,10 @@ export function SocialsStudio({ role, postId = null }: SocialsStudioProps) {
         canAuthor={canAuthorPosts(role)}
         canBrand={canBrand}
         onView={(view) => go({ view, post: null, plan: null })}
-        onBrandKit={() => setBrandKitOpen(true)}
+        onBrandKit={() => router.push(BRAND_KIT_HREF as any)}
         onNewPlan={() => go({ view: 'plans', plan: NEW_PLAN, post: null })}
         onNewPost={() => go({ post: NEW_POST, plan: null })}
       />
-      {canBrand && <BrandKitDialog open={brandKitOpen} onOpenChange={setBrandKitOpen} />}
       <StudioBody route={route} go={go} role={role} posts={posts} loading={isLoading || isFetching} />
     </div>
   )

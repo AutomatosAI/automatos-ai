@@ -4,7 +4,7 @@
  * PRD-251B US-B109 — the post editor (Editor.dc.html), at ?post=new (the post is created on
  * the first Save draft) or ?post=<id>. The header holds Save draft, Render preview and
  * Submit for approval; the cards, in order: Brief (Redraft with Auto), Format, Channels and
- * sizes, Look (Template · Upload · Library), Claims and sources, When; beside them the
+ * sizes, Look (Template · Upload · Library · AI-made), Claims and sources, When; beside them the
  * copy and the preview. Save draft writes the post's fields (POST or PATCH), its channels
  * (PUT /targets) and its slot (PUT /slot, only when it moved); the server checks it all.
  */
@@ -14,8 +14,8 @@ import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialChannels } from '@/hooks/use-socials-composer'
 import {
-  useRedraft, usePickLibraryMedia, useRenderEditorPreview, useSaveEditor, useSocialFootageSources, useSocialTemplates,
-  useSubmitEditor, useUploadEditorMedia, type EditorSave,
+  useMakeAiOptions, usePickAiOption, useRedraft, usePickLibraryMedia, useRenderEditorPreview, useSaveEditor, useSocialFootageSources,
+  useSocialTemplates, useSubmitEditor, useUploadEditorMedia, type EditorSave,
 } from '@/hooks/use-socials-editor'
 import { channelsOverLimit } from '../socials-composer-model'
 import { EditorBriefCard } from './editor-brief-card'
@@ -26,7 +26,7 @@ import { EditorLookCard } from './editor-look-card'
 import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
-  editorTargets, postFields, slidesOf, slotChanged, slotInput, withChannelTicked, withFormat, withProposal, withSlides,
+  editorTargets, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal, withSlides,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
 import { SocialsEditorHeader } from './socials-editor-header'
@@ -44,6 +44,7 @@ function useEditorCalls() {
   return {
     save: useSaveEditor(), render: useRenderEditorPreview(), submit: useSubmitEditor(),
     upload: useUploadEditorMedia(), pick: usePickLibraryMedia(), redraft: useRedraft(),
+    aiMake: useMakeAiOptions(), aiPick: usePickAiOption(),
   }
 }
 
@@ -52,13 +53,14 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const { data: channelData, isLoading: channelsLoading } = useSocialChannels()
   const channels = useMemo(() => channelData ?? [], [channelData])
   const templates = useSocialTemplates(draft.format)
-  const footage = useSocialFootageSources(draft.format === 'video')
+  const footage = useSocialFootageSources(draft.format !== 'text')
   const chosen = templates.data?.find((t) => t.id === draft.templateId) ?? null
+  const imageSlots = chosen?.image_slots ?? []
   const calls = useEditorCalls()
 
   const payload = (): EditorSave => ({
     postId: post?.id ?? null,
-    fields: postFields(draft, chosen?.footage_slots ?? []),
+    fields: postFields(draft, chosen?.footage_slots ?? [], imageSlots),
     targets: editorTargets(draft),
     slot: slotChanged(post, draft.slot) ? slotInput(draft.slot) : undefined,
   })
@@ -91,7 +93,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
         <div className="flex min-w-0 flex-col gap-4">
           <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />
           <EditorFormatCard
-            draft={draft} durations={chosen?.durations ?? []} footageSlots={chosen?.footage_slots ?? []}
+            draft={draft} durations={chosen?.durations ?? []} footageSlots={videoSlotsOf(chosen?.footage_slots ?? [], imageSlots)}
             footage={footage.data?.kinds.video} post={post} canEdit slides={slidesOf(draft)}
             onChange={setDraft} onFormat={(format) => setDraft((d) => withFormat(d, format, channels))}
             onSlides={(n) => setDraft((d) => withSlides(d, n))}
@@ -106,6 +108,11 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
               templates={templates.data ?? []} loading={templates.isLoading} chosen={draft.templateId} onPick={pickTemplate} busy={mediaBusy}
               onUpload={(file) => calls.upload.mutate({ ...payload(), file }, opened)}
               onLibrary={(item) => calls.pick.mutate({ ...payload(), item }, opened)}
+              ai={{
+                post, imageSlots, images: footage.data?.kinds.image, aiBusy: calls.aiMake.isLoading || calls.aiPick.isLoading,
+                onAiMake: (imageSlot, prompt) => calls.aiMake.mutate({ ...payload(), imageSlot, prompt }, opened),
+                onAiPick: (slot, name) => post && calls.aiPick.mutate({ postId: post.id, slot, name }),
+              }}
             />
           )}
           <EditorClaimsCard

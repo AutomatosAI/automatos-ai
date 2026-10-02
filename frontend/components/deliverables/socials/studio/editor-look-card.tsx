@@ -5,21 +5,24 @@
  * Template: the format's templates (GET /api/socials/templates), "Let Auto pick" first
  * (no template), each with its thumbnail (a format placeholder until the backfill made
  * one) and name. Upload: a file of the person's own. Library: one of the workspace's
- * image and video Deliverables. AI-made visuals are Wave 3: not offered here.
+ * image and video Deliverables. AI-made (US-B305): AI images for the template's image slots
+ * (editor-look-ai.tsx); AI footage for the hook and b-roll is Format's switch.
  */
 import { useState } from 'react'
 
 import { cn } from '@/lib/utils'
-import type { DeliverableSummary, SocialTemplateSummary } from '@/lib/api-client'
+import type { DeliverableSummary, SocialFootageKind, SocialPost, SocialTemplateSummary } from '@/lib/api-client'
 import { useSocialLibrary } from '@/hooks/use-socials-editor'
+import { EditorLookAi } from './editor-look-ai'
 import { LibraryGrid, UploadDrop } from './editor-look-sources'
 import { EditorCard, Hint, Segmented } from './editor-ui'
 
-export type LookSource = 'template' | 'upload' | 'library'
+export type LookSource = 'template' | 'upload' | 'library' | 'ai'
 export const LOOK_SOURCES: ReadonlyArray<{ value: LookSource; label: string }> = [
   { value: 'template', label: 'Template' },
   { value: 'upload', label: 'Upload' },
   { value: 'library', label: 'Library' },
+  { value: 'ai', label: 'AI-made' },
 ]
 export const AUTO_PICK = 'Let Auto pick'
 
@@ -76,13 +79,24 @@ function TemplateGallery({ templates, loading, chosen, onPick }: TemplateGallery
   )
 }
 
+/** PRD-251B US-B305: what the AI-made source needs. */
+export interface LookAiProps {
+  post: SocialPost | null
+  imageSlots: ReadonlyArray<string>
+  images: SocialFootageKind | undefined
+  aiBusy: boolean
+  onAiMake: (slot: string, prompt: string) => void
+  onAiPick: (slot: string, name: string) => void
+}
+
 interface EditorLookCardProps extends TemplateGalleryProps {
   busy: boolean
   onUpload: (file: File) => void
   onLibrary: (item: DeliverableSummary) => void
+  ai: LookAiProps
 }
 
-export function EditorLookCard({ templates, loading, chosen, onPick, busy, onUpload, onLibrary }: EditorLookCardProps) {
+export function EditorLookCard({ templates, loading, chosen, onPick, busy, onUpload, onLibrary, ai }: EditorLookCardProps) {
   const [source, setSource] = useState<LookSource>('template')
   const library = useSocialLibrary(source === 'library')
   return (
@@ -91,6 +105,9 @@ export function EditorLookCard({ templates, loading, chosen, onPick, busy, onUpl
       {source === 'template' && <TemplateGallery templates={templates} loading={loading} chosen={chosen} onPick={onPick} />}
       {source === 'upload' && <UploadDrop busy={busy} onFile={onUpload} />}
       {source === 'library' && <LibraryGrid items={library.data} loading={library.isLoading} busy={busy} onPick={onLibrary} />}
+      {source === 'ai' && (
+        <EditorLookAi post={ai.post} imageSlots={ai.imageSlots} images={ai.images} busy={ai.aiBusy} onMake={ai.onAiMake} onPick={ai.onAiPick} />
+      )}
     </EditorCard>
   )
 }

@@ -207,3 +207,19 @@ def test_an_unknown_option_is_404_and_a_viewer_is_403(options):
     assert options.client.put(f"/api/socials/posts/{post['id']}/ai-options/still_1", json={"name": "x.png"}).status_code == 404
     options.role = "viewer"
     assert _ask(options, post["id"]).status_code == 403
+
+
+def test_the_template_summary_names_its_image_slots(options):
+    from modules.socials import template_gallery
+
+    assert template_gallery.image_slots(options.blocks) == ["still_1", "still_2", "still_3"]
+    assert template_gallery.image_slots({}) == [] and template_gallery.image_slots(None) == []
+
+
+def test_an_editor_echoing_the_stored_options_keeps_them(options):
+    post = _video_post(options)
+    assert _ask(options, post["id"]).status_code == 202
+    stored = _footage(options, post["id"])
+    echoed = options.client.patch(f"/api/socials/posts/{post['id']}", json={"footage": stored})
+    assert echoed.status_code == 200, echoed.text
+    assert _footage(options, post["id"])["still_1"] == {"prompt": PROMPT, "options": [], "options_state": "making"}

@@ -5,7 +5,7 @@
  * * Upload: the dropped file goes to POST /posts/{id}/media (a new post is saved first) and
  *   the post's media follows.
  * * Library: the workspace's image and video Deliverables; picking one sets the post's media.
- * * AI-made visuals are Wave 3: not offered.
+ * * AI-made (PRD-251B US-B305) has its own tests: socials-editor-ai.test.tsx.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -34,11 +34,10 @@ beforeEach(() => { resetApi(); go.mockReset() })
 afterEach(cleanup)
 
 describe('the Look card', () => {
-  it('offers Template, Upload and Library, and no AI-made visuals', () => {
+  it('offers Template, Upload, Library and AI-made', () => {
     renderWith(<SocialsEditor role="owner" post={null} go={go} />)
     const group = within(look()).getByRole('group', { name: 'Where the visual comes from' })
-    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Template', 'Upload', 'Library'])
-    expect(within(look()).queryByText(/AI/)).toBeNull()
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Template', 'Upload', 'Library', 'AI-made'])
   })
 
   it('Template lists the format templates, Let Auto pick first, with their thumbnails', async () => {

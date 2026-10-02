@@ -30,9 +30,6 @@ vi.mock('@/lib/api-client', () => {
   const apiClient = { listSocialPosts: vi.fn(async () => ({ posts: state.posts, total: state.posts.length })) }
   return { apiClient, default: apiClient }
 })
-vi.mock('@/components/documents/blocks/BrandKitDialog', () => ({
-  BrandKitDialog: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Brand Kit" /> : null),
-}))
 vi.mock('@/components/deliverables/socials/studio/socials-calendar', () => ({
   SocialsCalendar: ({ route }: { route: { post: string | null } }) => (
     <div data-testid="view-calendar">{route.post ?? 'no post'}</div>
@@ -129,19 +126,17 @@ describe('the Socials Studio shell', () => {
     expect(screen.getByTestId('post-page')).toHaveTextContent('p22')
   })
 
-  it('?view=brand opens the brand kit over the calendar', () => {
+  it('the old ?view=brand link goes to the Brand kit tab (PRD-251B US-B301)', () => {
     state.search = 'tab=socials&view=brand'
     renderStudio()
-    expect(screen.getByRole('dialog', { name: 'Brand Kit' })).toBeInTheDocument()
-    expect(screen.getByTestId('view-calendar')).toBeInTheDocument()
+    expect(state.replace).toHaveBeenCalledWith('/deliverables?tab=brand')
   })
 
-  it('Brand kit opens the brand kit dialog in place', () => {
+  it('Brand kit goes to the Brand kit tab', () => {
     renderStudio()
-    expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(within(nav()).getByRole('button', { name: 'Brand kit' }))
-    expect(screen.getByRole('dialog', { name: 'Brand Kit' })).toBeInTheDocument()
-    expect(state.push).not.toHaveBeenCalled()
+    expect(state.push).toHaveBeenCalledWith('/deliverables?tab=brand')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('New plan opens the plan form on Plans; New post opens the editor', () => {

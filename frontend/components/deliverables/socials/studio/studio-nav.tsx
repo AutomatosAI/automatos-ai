@@ -70,7 +70,7 @@ export function SocialsStudioNav(props: SocialsStudioNavProps) {
           </button>
         ))}
         {canBrand && (
-          <button type="button" className={cn(ITEM, OFF)} aria-haspopup="dialog" onClick={onBrandKit}>
+          <button type="button" className={cn(ITEM, OFF)} onClick={onBrandKit}>
             Brand kit
           </button>
         )}

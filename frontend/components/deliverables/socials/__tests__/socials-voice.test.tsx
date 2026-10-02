@@ -220,3 +220,37 @@ describe('reading', () => {
     expect(speaksAScript({ template_id: null, format: 'video' })).toBe(false)
   })
 })
+
+describe("PRD-251B US-B306: Kokoro's voices", () => {
+  const KOKORO_LISTED = { ...KOKORO, lists_voices: true }
+  const GEORGE = { id: 'bm_george', name: 'George', description: 'British English, male' }
+
+  it("lists Kokoro's catalogue; a voice is saved by its id, and the template's own voice is no voice", async () => {
+    server.sources = [KOKORO_LISTED]
+    server.voices = [{ id: 'af_heart', name: 'Heart', description: 'American English, female (the default)' }, GEORGE]
+    render(wrap(<SocialsVoicePicker post={post()} editable />))
+
+    const select = await screen.findByRole('combobox', { name: 'Kokoro (built in) voice' })
+    expect(select).toHaveValue('')
+    await screen.findByRole('option', { name: 'George — British English, male' })
+    expect(screen.getByRole('option', { name: "The template's own voice" })).toBeInTheDocument()
+    expect(api.listSocialToolkitVoices).toHaveBeenCalledWith('kokoro', '')
+
+    fireEvent.change(select, { target: { value: 'bm_george' } })
+    await waitFor(() =>
+      expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', { voice: { toolkit: 'kokoro', voice_id: 'bm_george', name: 'George' } }),
+    )
+  })
+
+  it("a post speaking one of Kokoro's voices shows it, and going back to the template's voice saves none", async () => {
+    server.sources = [KOKORO_LISTED]
+    server.voices = [GEORGE]
+    render(wrap(<SocialsVoicePicker post={post({ voice: { toolkit: 'kokoro', voice_id: 'bm_george', name: 'George' } })} editable />))
+
+    const select = await screen.findByRole('combobox', { name: 'Kokoro (built in) voice' })
+    await waitFor(() => expect(select).toHaveValue('bm_george'))
+    fireEvent.change(select, { target: { value: '' } })
+    await waitFor(() => expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', { voice: null }))
+    expect(voiceLabel({ toolkit: 'kokoro', voice_id: 'bm_george', name: 'George' }, [KOKORO_LISTED as any])).toBe('Kokoro (built in) — George')
+  })
+})

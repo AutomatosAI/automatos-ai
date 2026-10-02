@@ -204,6 +204,8 @@ FOOTAGE_REQUEST_KEYS = ("prompt",)
 FOOTAGE_RECORD_KEYS = (
     "status", "toolkit", "model", "deliverable_id", "name", "sha256", "bytes", "content_type",
     "estimate_usd", "cost_usd", "generated_at",
+    # PRD-251B US-B305: a slot's AI options (modules/socials/ai_options.py), the server's too.
+    "options", "options_state", "options_error",
 )
 FOOTAGE_DONE = "done"
 FOOTAGE_PROMPT_MAX_CHARS = 1500
