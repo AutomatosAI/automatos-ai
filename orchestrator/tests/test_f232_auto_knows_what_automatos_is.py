@@ -151,3 +151,13 @@ def test_autos_doctrine_says_it_never_describes_what_it_hasnt_seen():
     guidance = AutomatosPersonality.get_tool_guidance_prompt(has_tools=True)
     assert "Describe a page, setting, plan, helper or feature of Automatos that isn't in my instructions" in guidance
     assert "I say I don't know and offer to check" in guidance
+
+
+def test_autos_skill_never_offers_the_automatos_teams_agents_as_examples():
+    """#89: the create-task example said "assigned_agent_name": "ATLAS", and the
+    cookbook says to follow its patterns exactly. The seed is generated from
+    automatos-skills v2.3.1, whose examples name placeholders."""
+    skill = (ORCH / "core" / "seeds" / "platform-management-skill.md").read_text(encoding="utf-8")
+    assert not re.findall(r"\b(ATLAS|SENTINEL|VECTOR|PULSE|WATCHTOWER|SCOUT|SHOPIFY_OPS)\b", skill)
+    assert "\"assigned_agent_name\": \"<helper's name>\"" in skill
+    assert "never pass a name you haven't seen in this workspace" in skill
