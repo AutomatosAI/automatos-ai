@@ -503,6 +503,10 @@ export interface SocialPost {
   review_log: SocialReviewEntry[]
   scheduled_for: string | null
   timezone: string | null
+  /** PRD-251B (B11): the slot the post is planned for, UTC; moving it never voids an approval. */
+  planned_for: string | null
+  /** PRD-251B (B5): the chosen video length in seconds, one the template declares. */
+  length_seconds: number | null
   /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
   targets?: SocialPostTarget[]
   /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
@@ -2976,6 +2980,16 @@ class ApiClient {
   /** The post's media as presigned inline links (D9): the exact files an approver sees. */
   async getSocialPostMedia(postId: string): Promise<SocialPostMediaLink[]> {
     return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
+  }
+
+  /** PUT /api/socials/posts/{id}/slot (PRD-251B US-B105): the slot the post is planned for, in its zone.
+   * Before approval it is set alone (never a content change); an approved or scheduled post is
+   * rescheduled; a missed post without an approval restarts as a draft at the new slot. */
+  async setSocialPostSlot(postId: string, plannedFor: string | null, timezone?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/slot`, {
+      method: 'PUT',
+      body: JSON.stringify({ planned_for: plannedFor, timezone }),
+    })
   }
 
   /** GET /api/socials/templates (PRD-251B US-B102): the workspace's social templates for the

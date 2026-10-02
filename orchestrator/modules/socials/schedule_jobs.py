@@ -60,6 +60,12 @@ MISSED_OFF = "Socials was off for this workspace at its slot ({why}): nothing wa
 # Past a run's own limit, before a publishing post counts as lost: its end is written.
 LOST_MARGIN_SECONDS = 300
 MISSED_STALE = "Its approval no longer matched its content at its slot ({why}): nothing was published."
+# PRD-251B (B11, US-B105): a planned slot that passed with the post still unapproved.
+PLANNED_PASS_STATUSES = (service.DRAFT, service.NEEDS_APPROVAL, service.CHANGES_REQUESTED)
+MISSED_UNAPPROVED = (
+    "Its planned slot ({slot}) passed with no approval (the grace is {grace} minutes): nothing was posted. "
+    "Give it a new slot to try again."
+)
 
 
 def job_id(post_id: Any) -> str:
@@ -148,8 +154,37 @@ def reconcile(scheduler: Any, db: Any) -> Dict[str, Any]:
     for key in set(jobs) - set(wanted):
         scheduler.remove_job(key)
         removed += 1
-    ended = end_lost_publishes(db, datetime.now(timezone.utc))
-    return {"added": added, "moved": moved, "removed": removed, "ended": ended}
+    now = datetime.now(timezone.utc)
+    ended = end_lost_publishes(db, now)
+    passed = pass_planned_slots(db, now)
+    return {"added": added, "moved": moved, "removed": removed, "ended": ended, "passed": passed}
+
+
+def pass_planned_slots(db: Any, now: datetime) -> int:
+    """PRD-251B (B11): each unapproved post whose planned slot passed the grace ends
+    ``missed``, once, and the workspace is told as for any missed slot. Approved,
+    scheduled and published posts are never touched. A compare-and-set per post, so
+    two passes racing on one post leave one transition. How many it ended."""
+    cutoff = now - timedelta(seconds=config.SOCIALS_MISFIRE_GRACE_SECONDS)
+    ids = [row.id for row in db.query(SocialPost.id).filter(
+        SocialPost.status.in_(PLANNED_PASS_STATUSES), SocialPost.planned_for.isnot(None), SocialPost.planned_for < cutoff,
+    ).all()]
+    passed = 0
+    for post_id in ids:
+        post = db.get(SocialPost, post_id)
+        if post is None or post.status not in PLANNED_PASS_STATUSES or post.planned_for is None:
+            continue
+        status, content_hash = post.status, post.content_hash
+        slot = _utc(post.planned_for).isoformat(timespec="minutes")
+        service.slot_passed(post, SCHEDULER_ACTOR, MISSED_UNAPPROVED.format(slot=slot, grace=config.SOCIALS_MISFIRE_GRACE_SECONDS // 60))
+        if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
+            db.rollback()
+            continue
+        db.commit()
+        passed += 1
+        logger.warning("[Socials] post %s: its planned slot passed with no approval", post_id)
+        notify.notify_publish_outcome(post.workspace_id, post_id, post.title or "", service.MISSED)
+    return passed
 
 
 def end_lost_publishes(db: Any, now: datetime) -> int:

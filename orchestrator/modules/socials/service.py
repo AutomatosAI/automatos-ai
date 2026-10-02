@@ -123,6 +123,10 @@ ACTION_PARTIALLY_PUBLISHED = "partially_published"
 ACTION_PUBLISH_FAILED = "publish_failed"
 # Wave 3 (US-306): a scheduled post whose slot passed beyond the grace (D10).
 ACTION_MISSED = "missed"
+# PRD-251B (B11, US-B105): a planned slot passed with the post still unapproved; and a
+# missed post that holds no approval is given a new slot and starts again as a draft.
+ACTION_SLOT_PASSED = "slot_passed"
+ACTION_RESLOT = "reslot"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
 
@@ -157,6 +161,10 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_PARTIALLY_PUBLISHED: {PUBLISHING: PARTIALLY_PUBLISHED},
     ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
     ACTION_MISSED: {SCHEDULED: MISSED},
+    # PRD-251B (B11): an unapproved post whose planned slot passed ends missed too
+    # (nothing was posted); a missed post without an approval restarts as a draft.
+    ACTION_SLOT_PASSED: {DRAFT: MISSED, NEEDS_APPROVAL: MISSED, CHANGES_REQUESTED: MISSED},
+    ACTION_RESLOT: {MISSED: DRAFT},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
@@ -832,6 +840,33 @@ def approve(
         _log(post, actor, ACTION_APPROVE, comment or note, **extra)
     else:
         _log(post, actor, ACTION_APPROVE, comment)
+    # PRD-251B (B11, US-B105): approved with a slot still ahead, the post is scheduled
+    # into it through the one schedule path; a past or missing slot leaves it approved.
+    planned = getattr(post, "planned_for", None)
+    if planned is not None and _as_utc(planned) > _utcnow():
+        schedule(post, actor, planned, getattr(post, "timezone", None) or "UTC")
+    return post
+
+
+def slot_passed(post: SocialPost, actor: str, reason: str) -> SocialPost:
+    """draft, needs_approval or changes_requested → missed (B11): the planned slot passed
+    with no approval, so nothing was posted. A new slot restarts it (``reslot``)."""
+    target = _target(post, ACTION_SLOT_PASSED)
+    slot = post.planned_for.isoformat() if post.planned_for else None
+    post.status = target
+    _log(post, actor, ACTION_SLOT_PASSED, reason[:COMMENT_MAX_CHARS], planned_for=slot)
+    return post
+
+
+def reslot(post: SocialPost, actor: str, planned_for: datetime, tz_name: Optional[str] = None) -> SocialPost:
+    """missed → draft with a new planned slot (B11): for a post that holds no approval
+    (one whose approval stands is rescheduled with ``schedule`` instead)."""
+    target = _target(post, ACTION_RESLOT)
+    if planned_for is None:
+        raise InvalidPost("a missed post needs a new slot")
+    set_planned_for(post, planned_for, tz_name)
+    post.status = target
+    _log(post, actor, ACTION_RESLOT, None, planned_for=post.planned_for.isoformat())
     return post
 
 

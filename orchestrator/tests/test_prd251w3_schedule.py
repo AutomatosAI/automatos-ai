@@ -181,11 +181,11 @@ def test_reconcile_registers_a_missing_job_moves_a_changed_one_and_removes_an_or
         result = schedule_jobs.reconcile(scheduler, db)
         slots = {row.id: row.scheduled_for for row in db.query(harness.SocialPost)}
 
-    assert result == {"added": 1, "moved": 1, "removed": 1, "ended": 0}
+    assert result == {"added": 1, "moved": 1, "removed": 1, "ended": 0, "passed": 0}
     assert set(scheduler.jobs) == {f"social-publish-{missing}", f"social-publish-{moved}", "scheduled_task_7"}
     assert scheduler.jobs[f"social-publish-{moved}"].trigger.run_date == schedule_jobs._utc(slots[moved])
     with env.factory() as db:
-        assert schedule_jobs.reconcile(scheduler, db) == {"added": 0, "moved": 0, "removed": 0, "ended": 0}  # idempotent
+        assert schedule_jobs.reconcile(scheduler, db) == {"added": 0, "moved": 0, "removed": 0, "ended": 0, "passed": 0}  # idempotent
 
 
 def test_reconcile_does_nothing_off_the_leader(env):
