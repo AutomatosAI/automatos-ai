@@ -9,7 +9,8 @@ agent home's ``settings.json`` (``copilot_home.seeded_settings``). The block:
 * writes: the working folder and the session's folders only;
 * reads: everywhere Copilot grants by default except the credential stores, the
   platform's secrets and this host's own state (``deniedPaths``);
-* no escape hatch (``allowBypass`` false), no git/gh credentials injected, no keychain;
+* no escape hatch (``allowBypass`` false), no git/gh credentials injected, no OS
+  credential store;
 * network: outbound only to the allowed hosts (the package registries plus
   ``--session-allow-domain``) — a non-empty ``allowedHosts`` blocks every other
   host — and never the local network.

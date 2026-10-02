@@ -98,7 +98,7 @@ def test_a_token_in_the_operators_config_never_reaches_the_session(tmp_path, ope
     prepared = a.prepare(_ctx(tmp_path))
     for blob in _tree(Path(prepared.env["COPILOT_HOME"])).values():
         assert TOKEN_MARKER.encode() not in blob
-    assert a.login()[1] == "gh"                                            # a plaintext login is not the keychain
+    assert a.login()[1] == "gh"                                  # a plaintext login is not the OS credential store
 
 
 def test_two_tickets_of_one_agent_share_the_home_and_hooks_are_replaced(tmp_path, operator):
@@ -138,12 +138,12 @@ def test_the_hooks_file_is_claudes_format_and_outlasts_the_shim(tmp_path, operat
 
 # ── login (S1.2) ─────────────────────────────────────────────────────────────
 
-def test_the_keychain_route_reads_the_account_pointer_only(tmp_path, operator):
+def test_copilots_own_login_route_reads_the_account_pointer_only(tmp_path, operator):
     a = _adapter(tmp_path, operator)
-    assert a.login() == ("octocat@github.com", "keychain", None)
+    assert a.login() == ("octocat@github.com", "copilot", None)
     assert a.preflight() is None
     detected = a.detect()
-    assert detected["served"] is True and detected["login"] == "octocat@github.com" and detected["login_route"] == "keychain"
+    assert detected["served"] is True and detected["login"] == "octocat@github.com" and detected["login_route"] == "copilot"
 
 
 def test_the_gh_route_and_its_command(tmp_path, operator):
@@ -169,7 +169,7 @@ def test_refusals_say_how_to_log_in(tmp_path, operator, monkeypatch):
     plaintext = {"lastLoggedInUser": ACCOUNT, "storeTokenPlaintext": True}
     (operator / ".copilot" / "config.json").write_text(json.dumps(plaintext))
     refusal = _adapter(tmp_path, operator).preflight()
-    assert refusal.code == "copilot_plaintext_token" and "keychain" in refusal.message
+    assert refusal.code == "copilot_plaintext_token" and "credential store" in refusal.message
 
 
 # ── preflight (S1.6) ─────────────────────────────────────────────────────────

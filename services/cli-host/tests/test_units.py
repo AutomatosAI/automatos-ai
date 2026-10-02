@@ -333,11 +333,19 @@ def test_check_backend_refuses_non_local_or_disabled():
     assert check_backend(_Api({"edition": "local", "cli_runtime_enabled": True}))["edition"] == "local"
 
 
+# The one sanctioned mention of the keychain: GitHub Copilot's sandbox setting that
+# DENIES it to every sandboxed command (PRD-253 S2.2). Only this exact deny is
+# exempt; code that reads, writes or allows the keychain still fails the guard.
+KEYCHAIN_DENIED = '"keychainAccess": False'
+
+
 def test_source_guard_no_credential_handling_anywhere():
     pkg = Path(session.__file__).parent
+    assert KEYCHAIN_DENIED in (pkg / "adapters" / "copilot_sandbox.py").read_text(encoding="utf-8")
     for py in pkg.rglob("*.py"):   # the adapters too — a bridge is the likeliest place to slip
         text = py.read_text(encoding="utf-8")
         code = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#") and '"""' not in l)
+        code = code.replace(KEYCHAIN_DENIED, "")
         for token in ("keychain", "CLAUDE_CODE_ENTRYPOINT=", "ANTHROPIC_API_KEY=", "OPENAI_API_KEY="):
             assert token not in code, f"{py.relative_to(pkg)} handles credentials/identity ({token})"
     assert "--bare" in CLAUDE.forbidden_args and "-p" in CLAUDE.forbidden_args

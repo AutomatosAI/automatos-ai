@@ -128,8 +128,8 @@ def account_of(config: Mapping[str, Any]) -> Optional[str]:
 
 
 def holds_plaintext_token(config: Mapping[str, Any], settings: Mapping[str, Any]) -> bool:
-    """Whether the operator's login is a token IN a file, not the keychain. Key
-    presence only: no value is read."""
+    """Whether the operator's login is a token IN a file, not the OS credential
+    store. Key presence only: no value is read."""
     flagged = config.get(PLAINTEXT_FLAG) is True or settings.get(PLAINTEXT_FLAG) is True
     return flagged or any(config.get(key) for key in PLAINTEXT_TOKEN_KEYS)
 

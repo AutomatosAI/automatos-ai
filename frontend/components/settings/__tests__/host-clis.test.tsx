@@ -11,7 +11,7 @@ import { HostsList, type HostRow } from '@/components/settings/SessionModeSectio
 const clis = {
   claude: { version: '2.1.236 (Claude Code)', served: true },
   codex: { version: null, served: false, reason: 'Codex is not installed on this machine' },
-  copilot: { version: '1.0.91', served: true, login: 'octocat@github.com', login_route: 'keychain' },
+  copilot: { version: '1.0.91', served: true, login: 'octocat@github.com', login_route: 'copilot' },
 }
 
 describe('hostCliLines', () => {
@@ -19,7 +19,7 @@ describe('hostCliLines', () => {
     expect(hostCliLines(clis)).toEqual([
       { id: 'claude', served: true, text: 'Claude Code · 2.1.236 (Claude Code)' },
       { id: 'codex', served: false, text: 'Codex — Codex is not installed on this machine' },
-      { id: 'copilot', served: true, text: 'GitHub Copilot · 1.0.91 — runs as octocat@github.com (keychain login)' },
+      { id: 'copilot', served: true, text: 'GitHub Copilot · 1.0.91 — runs as octocat@github.com (Copilot login)' },
     ])
     expect(hostCliLines({ copilot: { served: true, login: 'me@github.com', login_route: 'gh' } })[0].text)
       .toBe('GitHub Copilot — runs as me@github.com (GitHub CLI login)')

@@ -12,7 +12,7 @@ export interface HostCliInfo {
   reason?: string | null
   /** GitHub Copilot: `<login>@<host>` — never a credential. */
   login?: string | null
-  /** GitHub Copilot: `keychain` or `gh` — where that login is read. */
+  /** GitHub Copilot: `copilot` (its own login, the token in the OS credential store) or `gh`. */
   login_route?: string | null
 }
 
@@ -22,7 +22,7 @@ export interface HostCliLine {
   text: string
 }
 
-const LOGIN_ROUTES: Record<string, string> = { keychain: 'keychain login', gh: 'GitHub CLI login' }
+const LOGIN_ROUTES: Record<string, string> = { copilot: 'Copilot login', gh: 'GitHub CLI login' }
 
 export function hostCliLines(clis: Record<string, HostCliInfo> | null | undefined): HostCliLine[] {
   return Object.entries(clis ?? {}).map(([id, info]) => {

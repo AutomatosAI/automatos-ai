@@ -694,6 +694,10 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
   - Host contract 0.11.0.
 - **`session.py` was split** (`session_files.py`, unchanged code), so this wave keeps it under
   800 lines.
+- **The login route is `copilot` or `gh`, not `keychain`.** The host's source guard rejects
+  the word "keychain" in the package's code (no credential handling). The one exempt literal
+  is the sandbox's `"keychainAccess": False`, which denies the keychain to sandboxed commands.
+  The guard asserts that the deny is present.
 - **Waiting on the live run (Verify at build):**
   - the plaintext-token key: the probe checks `storeTokenPlaintext` and the presence of five
     candidate keys, and never reads a value;

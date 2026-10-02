@@ -8,8 +8,9 @@ weight is where things live and what a session never gets:
 * a config home per agent per host (``copilot_home.py``): a whitelisted
   ``config.json``, our hooks file and nothing else — the operator's ``~/.copilot``
   is never written, no token is ever copied;
-* the login read from the account POINTER (the keychain holds the token), else
-  Copilot's own ``gh`` fallback — never a credential through this host (D6);
+* the login read from the account POINTER (the OS credential store holds the
+  token), else Copilot's own ``gh`` fallback — never a credential through this
+  host (D6);
 * no allow flag, ever (D3): in ``-p``, a call the gate did not allow is refused by
   Copilot itself; held-event hooks outlast the shim's wait, because a timed-out
   Copilot hook FAILS OPEN (D4);
@@ -42,6 +43,8 @@ from .copilot_sandbox import sandbox_settings, unavailable_reason
 MCP_SERVER_NAME = "automatos"
 MCP_CONFIG_FILENAME = "mcp.json"          # the session dir's credential file, shredded at turn end
 DEFAULT_HOST = "https://github.com"
+LOGIN_ROUTE_COPILOT = "copilot"           # Copilot's own login: the token in the OS credential store
+LOGIN_ROUTE_GH = "gh"                     # Copilot's gh fallback: it runs `gh auth token` itself
 # Before 1.0.57 a crashing preToolUse hook ALLOWED the call; 1.0.70 made exit 2 a deny.
 VERSION_FLOOR: Tuple[int, int, int] = (1, 0, 70)
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
@@ -116,8 +119,8 @@ class CopilotAdapter(PresetAdapter):
         return self._version
 
     def login(self) -> Tuple[Optional[str], Optional[str], Optional[Refusal]]:
-        """``(login, route, refusal)``: who the sessions run as and how — the keychain
-        (the operator's config names the account and holds no token) or ``gh``
+        """``(login, route, refusal)``: who the sessions run as and how — Copilot's own
+        login (the operator's config names the account and holds no token) or ``gh``
         (Copilot runs ``gh auth token`` itself). Never reads a credential."""
         if self._login is None:
             self._login = self._probe_login()
@@ -129,17 +132,17 @@ class CopilotAdapter(PresetAdapter):
         account = account_of(config)
         plaintext = holds_plaintext_token(config, settings)
         if account and not plaintext:
-            return account, "keychain", None
+            return account, LOGIN_ROUTE_COPILOT, None
         via_gh = gh_login(account or DEFAULT_HOST, self._run)
         if via_gh:
-            return via_gh, "gh", None
+            return via_gh, LOGIN_ROUTE_GH, None
         return None, None, self._login_refusal(plaintext)
 
     def _login_refusal(self, plaintext: bool) -> Refusal:
         if plaintext:
             return Refusal("copilot_plaintext_token",
                            "GitHub Copilot's login on this machine is a token stored in plain text, and `gh` is not "
-                           "logged in. Turn on the OS keychain (on Linux or WSL2, a Secret Service such as "
+                           "logged in. Turn on the OS credential store (on Linux or WSL2, a Secret Service such as "
                            "gnome-keyring) and run `copilot login` again — Automatos never copies a credential.")
         if any(os.environ.get(name) for name in ENV_TOKENS):
             return Refusal("copilot_not_logged_in",

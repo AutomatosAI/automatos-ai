@@ -222,7 +222,8 @@ never copies one:
 - a plaintext token in `~/.copilot/config.json`.
 
 Settings → Session mode shows the account each host runs Copilot as (`login`) and
-how it logs in (`keychain` or `gh`).
+how it logs in (`copilot`: its own login, with the token in the OS credential
+store; or `gh`).
 
 **How a turn runs.** Each turn is one `copilot -p` process on the host's
 pseudo-terminal, and the process exit ends the turn. GitHub documents `-p` for
@@ -303,8 +304,8 @@ for a host that serves Copilot.
 |---|---|---|
 | `copilot_missing` | No `copilot` on your PATH | Install it (above) |
 | `copilot_too_old` | Older than 1.0.70 | `copilot update` |
-| `copilot_not_logged_in` | No keychain login and no `gh` login | `copilot login`, or `gh auth login` with an account that has a Copilot seat |
-| `copilot_plaintext_token` | The login is a plaintext token in `config.json`, and `gh` is not logged in | Turn on the OS keychain (on Linux or WSL2, a Secret Service such as gnome-keyring) and run `copilot login` again |
+| `copilot_not_logged_in` | No Copilot login and no `gh` login | `copilot login`, or `gh auth login` with an account that has a Copilot seat |
+| `copilot_plaintext_token` | The login is a plaintext token in `config.json`, and `gh` is not logged in | Turn on the OS credential store (the macOS Keychain; on Linux or WSL2, a Secret Service such as gnome-keyring) and run `copilot login` again |
 | `copilot_managed_hooks_only` | A managed policy (`/etc/github-copilot/policy.d/*.json`) sets `allowManagedHooksOnly` | Ask your Copilot administrator to allow user hooks |
 | `copilot_sandbox_unavailable` | The host sandboxes and a prerequisite is missing | Install it, or use `--no-session-sandbox` on an isolated host |
 | `copilot_hooks_disabled_here` | Per ticket: the repository's `.github/copilot/settings.json` (or `settings.local.json`) sets `disableAllHooks` | Remove the setting, or give the agent another folder |
