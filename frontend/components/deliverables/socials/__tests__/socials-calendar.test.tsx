@@ -18,7 +18,8 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-const state = vi.hoisted(() => ({ go: vi.fn() }))
+const PLAN_ID = '0b9d8f3e-6c1a-4c55-9f1e-2a7b3c4d5e6f'
+const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[] }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -37,6 +38,20 @@ vi.mock('@/lib/api-client', () => {
     ]),
     setSocialPostSlot: vi.fn(async () => ({})),
     scheduleSocialPost: vi.fn(async () => ({})),
+    // PRD-251B US-B208: the active plans and their slots.
+    listSocialPlans: vi.fn(async () => ({ plans: state.plans, total: state.plans.length })),
+    listSocialPlanSlots: vi.fn(async (planId: string) => ({
+      plan_id: planId,
+      slots: [
+        { key: 'r1|2026-10-15|09:00', row_id: 'r1', channels: ['linkedin'], format: 'video', length_seconds: 30, template_id: null,
+          local_date: '2026-10-15', local_time: '09:00', at: '2026-10-15T08:00:00Z', moved: false, state: 'planned', post: null,
+          topic: { id: 'tp', title: 'Three weeks to Lisbon' } },
+        { key: 'r1|2026-10-13|09:00', row_id: 'r1', channels: ['linkedin'], format: 'video', length_seconds: 30, template_id: null,
+          local_date: '2026-10-13', local_time: '09:00', at: '2026-10-13T08:00:00Z', moved: false, state: 'made',
+          post: { id: 'planned', title: 'Post planned', status: 'draft', at: null }, topic: null },
+      ],
+    })),
+    moveSocialPlanSlot: vi.fn(async () => ({})),
   }
   return { apiClient, default: apiClient }
 })
@@ -114,6 +129,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-10-14T07:20:00Z'))
   state.go.mockReset()
+  state.plans = []
   vi.mocked(apiClient.setSocialPostSlot).mockClear()
   vi.mocked(apiClient.scheduleSocialPost).mockClear()
 })
@@ -223,5 +239,23 @@ describe('the Socials calendar', () => {
     expect(section.className).toContain('overflow-x-auto')
     expect(section.firstElementChild?.className).toContain('min-w-[840px]')
     expect(section.parentElement?.className).toContain('lg:grid-cols-[minmax(0,1fr)_340px]')
+  })
+
+  it('a plan's slot not made yet is a dashed Planned chip; it drags to a new slot and opens the plan (US-B208)', async () => {
+    state.plans = [{ id: PLAN_ID, name: 'Countdown', status: 'active', timezone: 'Europe/London', cadence: [], bank: { topics: 3, unused: 2 } }]
+    const { container } = renderCalendar()
+    const planned = await within(grid()).findByRole('button', { name: /Three weeks to Lisbon, 09:00 Video 0:30, in, Planned/ })
+    expect(planned).toHaveAttribute('data-status', 'planned')
+    expect(within(grid()).queryAllByRole('button', { name: /Planned: Countdown/ })).toHaveLength(0)  // the made slot is its post
+    const dt = dataTransfer()
+    fireEvent.dragStart(planned, { dataTransfer: dt })
+    fireEvent.drop(monthCell(container, 17), { dataTransfer: dt })
+    await waitFor(() =>
+      expect(apiClient.moveSocialPlanSlot).toHaveBeenCalledWith(PLAN_ID, 'r1|2026-10-15|09:00', { to: '2026-10-17T08:00:00.000Z' }),
+    )
+    expect(apiClient.setSocialPostSlot).not.toHaveBeenCalled()
+    fireEvent.click(planned)
+    expect(state.go).toHaveBeenCalledWith({ view: 'plans', plan: PLAN_ID, post: null })
+    expect(screen.getByRole('region', { name: 'Plan Countdown' })).toHaveTextContent('2 of 3 topics unused')
   })
 })

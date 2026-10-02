@@ -98,6 +98,8 @@ def test_make_time_videos_early_and_the_lead():
     assert plans.make_at(plan, slots["v"]) == _at(2026, 10, 13, 7)   # the day before
     assert plans.make_at(plan, slots["i"]) == _at(2026, 10, 14, 7)   # its own day, two hours ahead
     assert plans.make_at(plan, slots["e"]) == _at(2026, 10, 13, 7)   # 07:00 leaves one hour: a day earlier
+    day_before = _plan(timezone="UTC", cadence=video, make={"time": "07:00", "image_days_early": 1})
+    assert plans.make_at(day_before, slots["i"]) == _at(2026, 10, 13, 7)  # images the day before too
     # At 07:30 on the Wednesday: the video and the 08:00 image were due yesterday; the 09:00 image is made.
     due = plans.due_slots(plan, _at(2026, 10, 14, 7, 30), made={"i|2026-10-14|09:00"})
     assert [s.row_id for s in due] == ["e", "v"]

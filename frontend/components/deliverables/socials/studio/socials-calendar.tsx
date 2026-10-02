@@ -11,6 +11,8 @@
  * slot alone and on an approved or scheduled post reschedules it through the one schedule
  * path, so the planned slot and the schedule never part. List is the post list (List |
  * Board). A click opens the post; a post waiting for approval opens in the Queue.
+ * US-B208: each active plan's slots not made yet are dashed chips (plan-calendar-model.ts);
+ * dragging one moves the slot (PUT /plans/{id}/slots/{key}), a click opens the plan.
  */
 import { useMemo, useState, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
@@ -30,6 +32,9 @@ import { SocialsCalendarChip } from './socials-calendar-chip'
 import { SocialsCalendarHeader } from './socials-calendar-header'
 import { ALL_CHANNELS, isMovable, matchesFilter, opensInQueue, postEvents, type ChannelFilter } from './socials-calendar-model'
 import { SocialsTodayRail } from './socials-today-rail'
+import { parsePlannedId, plannedEvents } from './plan-calendar-model'
+import { SocialsPlannedChip } from './socials-planned-chip'
+import { usePlannedSlots } from './use-planned-slots'
 import type { GoTo, SocialsRoute } from './studio-route'
 
 export const MOVED_MESSAGE = 'Moved to the new slot.'
@@ -46,7 +51,12 @@ interface SocialsCalendarProps {
 function useCalendarMoves(): SocialReschedule {
   const invalidate = useInvalidateSocials()
   return useSocialReschedule(() => void invalidate(), {
-    move: (postId, slot, timezone) => apiClient.setSocialPostSlot(postId, slot, timezone),
+    move: (postId, slot, timezone) => {
+      const planned = parsePlannedId(postId)
+      return planned
+        ? apiClient.moveSocialPlanSlot(planned.planId, planned.key, { to: slot })
+        : apiClient.setSocialPostSlot(postId, slot, timezone)
+    },
     movedMessage: MOVED_MESSAGE,
   })
 }
@@ -81,7 +91,9 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
   const byId = useMemo(() => new Map(posts.map((post) => [post.id, post])), [posts])
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor])
-  const events = useMemo(() => postEvents(shown, windowSpanFor(mode, anchor)), [shown, mode, anchor])
+  const { plans, planned } = usePlannedSlots(mode, anchor)
+  const span = useMemo(() => windowSpanFor(mode, anchor), [mode, anchor])
+  const events = [...postEvents(shown, span), ...plannedEvents(planned, span, filter)]
 
   const open = (post: SocialPost) => go(opensInQueue(post) ? { view: 'queue', post: post.id } : { post: post.id })
   const openId = (postId: string) => {
@@ -91,10 +103,16 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
   const actionDeps = useActionDeps(social, openId)
 
   const chip = (evt: CalEvent, box?: CSSProperties) => {
+    const style = box ? { ...box, position: 'absolute' as const, overflow: 'hidden' } : undefined
+    const slotRef = parsePlannedId(evt.item.post_id)
+    const entry = slotRef ? planned.find((p) => p.planId === slotRef.planId && p.slot.key === slotRef.key) : undefined
+    if (entry) {
+      const openPlan = () => go({ view: 'plans', plan: entry.planId, post: null })
+      return <SocialsPlannedChip planned={entry} onOpen={openPlan} dragProps={social.dragProps(evt.item)} style={style} />
+    }
     const post = evt.item.post_id ? byId.get(evt.item.post_id) : undefined
     if (!post || !evt.item.next_run_at) return null
     const drag = isMovable(post) ? social.dragProps(evt.item) : undefined
-    const style = box ? { ...box, position: 'absolute' as const, overflow: 'hidden' } : undefined
     return <SocialsCalendarChip post={post} slot={evt.item.next_run_at} onOpen={() => open(post)} dragProps={drag} style={style} />
   }
 
@@ -123,7 +141,8 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
               )}
             </div>
           </section>
-          <SocialsTodayRail posts={shown} onOpen={open} onReview={() => go({ view: 'queue', post: null })} />
+          <SocialsTodayRail posts={shown} plans={plans} onOpen={open} onReview={() => go({ view: 'queue', post: null })}
+            onOpenPlan={(planId) => go({ view: 'plans', plan: planId, post: null })} />
         </div>
       )}
       {layout !== 'list' && <p className="text-[12.5px] leading-[1.45] text-muted-foreground">{DRAG_HINT}</p>}

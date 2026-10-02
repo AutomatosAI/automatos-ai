@@ -78,6 +78,7 @@ class PlanSources(_Strict):
 class PlanMake(_Strict):
     time: str = plans.DEFAULT_MAKE_TIME
     video_days_early: int = plans.DEFAULT_VIDEO_DAYS_EARLY
+    image_days_early: int = 0
     max_per_day: Optional[int] = None
     visual_mix: Optional[Dict[str, int]] = None
 

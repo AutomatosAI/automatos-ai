@@ -191,17 +191,22 @@ def _visual_mix(value: Any) -> Dict[str, int]:
     return mix
 
 
+def _days_early(raw: Mapping[str, Any], key: str, default: int) -> int:
+    early = raw.get(key, default)
+    if isinstance(early, bool) or not isinstance(early, int) or not 0 <= early <= MAX_VIDEO_DAYS_EARLY:
+        raise InvalidPlan(f"make.{key} must be 0 to {MAX_VIDEO_DAYS_EARLY}")
+    return early
+
+
 def validate_make(value: Any) -> Dict[str, Any]:
     raw = value if isinstance(value, Mapping) else {}
-    early = raw.get("video_days_early", DEFAULT_VIDEO_DAYS_EARLY)
-    if isinstance(early, bool) or not isinstance(early, int) or not 0 <= early <= MAX_VIDEO_DAYS_EARLY:
-        raise InvalidPlan(f"make.video_days_early must be 0 to {MAX_VIDEO_DAYS_EARLY}")
     per_day = raw.get("max_per_day")
     if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int) or not 0 < per_day <= MAX_PER_DAY):
         raise InvalidPlan(f"make.max_per_day must be 1 to {MAX_PER_DAY}")
     return {
         "time": _clock(raw.get("time", DEFAULT_MAKE_TIME), "make.time"),
-        "video_days_early": early,
+        "video_days_early": _days_early(raw, "video_days_early", DEFAULT_VIDEO_DAYS_EARLY),
+        "image_days_early": _days_early(raw, "image_days_early", 0),
         "max_per_day": per_day,
         "visual_mix": _visual_mix(raw.get("visual_mix")),
     }
@@ -366,10 +371,10 @@ def make_settings(plan: Any) -> Dict[str, Any]:
 
 def make_at(plan: Any, slot: Slot) -> datetime:
     """When the slot's post is made (B7): the plan's make time on the slot's day, a video
-    ``video_days_early`` days before; a day earlier when that leaves less than
-    MIN_MAKE_LEAD before the slot."""
+    ``video_days_early`` days before and any other post ``image_days_early``; a day earlier
+    when that leaves less than MIN_MAKE_LEAD before the slot."""
     settings = make_settings(plan)
-    early = settings["video_days_early"] if slot.format == VIDEO else 0
+    early = settings["video_days_early"] if slot.format == VIDEO else settings["image_days_early"]
     moment = local_to_utc(slot.local_date - timedelta(days=early), settings["time"], zone_of(plan))
     return moment if moment <= slot.at - MIN_MAKE_LEAD else moment - timedelta(days=1)
 

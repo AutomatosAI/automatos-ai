@@ -149,7 +149,7 @@ class SocialCampaign(Base):
     cadence = Column(_json_type(), nullable=True)
     # {"knowledge", "deliverables", "website", "github": bool, "notes": text, "never_say": [phrase]}
     sources = Column(_json_type(), nullable=True)
-    # {"time": "HH:MM", "video_days_early": int, "visual_mix": {...}, "max_per_day": int}
+    # {"time": "HH:MM", "video_days_early": int, "image_days_early": int, "visual_mix": {...}, "max_per_day": int}
     make = Column(_json_type(), nullable=True)
     late_policy = Column(String(16), nullable=False, server_default="skip")
     # {"day": "mon", "time": "HH:MM", "last_run_at", "last_run_id"}: the weekly research run

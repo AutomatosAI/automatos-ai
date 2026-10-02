@@ -38,9 +38,10 @@ vi.mock('@/components/deliverables/socials/studio/socials-calendar', () => ({
     <div data-testid="view-calendar">{route.post ?? 'no post'}</div>
   ),
 }))
-vi.mock('@/components/deliverables/socials/socials-campaigns-view', () => ({
-  SocialsCampaigns: ({ creating }: { creating: boolean }) => (
-    <div data-testid="view-plans">{creating ? 'plan form open' : 'plans'}</div>
+vi.mock('@/components/deliverables/socials/plans/socials-plans-view', () => ({
+  // PRD-251B Wave 2: the Plans view (the plans, a plan's page at ?plan=<id>, the Plan form at ?plan=new).
+  SocialsPlansView: ({ planId }: { planId: string | null }) => (
+    <div data-testid="view-plans">{planId === 'new' ? 'plan form open' : 'plans'}</div>
   ),
 }))
 vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({

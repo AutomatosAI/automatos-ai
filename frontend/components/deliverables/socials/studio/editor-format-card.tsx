@@ -3,21 +3,23 @@
 /**
  * PRD-251B US-B109 — the editor's Format: Image · Carousel · Video · Text only. A video
  * chooses its length among the ones its template declares (B5), with how many spoken
- * words fit, its voice (the post's voice picker, once the post is saved), and whether
- * AI footage fills the template's hook and b-roll slots; a carousel its number of slides;
+ * words fit, its voice and its music (the post's pickers, once the post is saved: the
+ * template's track, another from the music library, or none), and whether AI footage fills
+ * the template's hook and b-roll slots; a carousel its number of slides;
  * a text post says which channels take one.
  */
 import { Minus, Plus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { SocialFootageKind, SocialPost } from '@/lib/api-client'
+import { SocialsMusicPicker } from '../socials-music-picker'
 import { SocialsVoicePicker } from '../socials-voice-picker'
 import { lengthLabel } from './socials-calendar-model'
 import { EDITOR_FORMATS, MAX_SLIDES, MIN_SLIDES, wordsHint, type EditorDraft, type EditorFormat } from './editor-model'
 import { ChipGroup, EditorCard, Hint, Segmented } from './editor-ui'
 
 export const TEXT_ONLY_NOTE = 'No media. Only X and LinkedIn take a text-only post.'
-export const MUSIC_NOTE = "Music: the template's own track, with its credit line added to the copy."
+export const MUSIC_SAVE_FIRST = 'Save the draft to choose its music.'
 export const FOOTAGE_NOTE =
   'Product screens are rendered from the app and every word on screen is template text. AI footage only fills the hook and the b-roll.'
 const LABEL = 'text-sm font-medium text-foreground'
@@ -51,7 +53,7 @@ function VideoOptions({ draft, durations, footageSlots, footage, post, canEdit, 
         {draft.lengthSeconds && <Hint>{wordsHint(draft.lengthSeconds)}</Hint>}
       </div>
       {post ? <SocialsVoicePicker post={post} editable={canEdit} /> : <Hint>Save the draft to choose its voice.</Hint>}
-      <Hint>{MUSIC_NOTE}</Hint>
+      {post ? <SocialsMusicPicker post={post} editable={canEdit} /> : <Hint>{MUSIC_SAVE_FIRST}</Hint>}
       <div className="flex flex-col gap-1.5">
         <span className={LABEL}>AI footage for the hook and b-roll</span>
         <Segmented

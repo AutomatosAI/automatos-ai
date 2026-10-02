@@ -4,9 +4,10 @@
  * PRD-251B US-B107 — the Socials Studio: the header (the sub-navigation and the two
  * actions, studio-nav.tsx) and the view the URL names (studio-route.ts). The calendar
  * view is the posts (US-B108 puts them on the Command Center's grid, with this list as its
- * List), the Queue holds what waits for approval, and Plans is the campaigns view (B6: a
- * plan is a campaign). Brand kit opens the brand kit dialog in place. New post opens the
- * editor at ?post=new; New plan opens the plan form at ?view=plans&plan=new.
+ * List), the Queue holds what waits for approval, and Plans lists the plans (B6: a plan is a
+ * campaign; Wave 2) with the other campaigns below them. Brand kit opens the brand kit dialog
+ * in place. New post opens the editor at ?post=new; New plan opens the Plan page at
+ * ?view=plans&plan=new, and ?view=plans&plan=<id> a plan's own page (US-B207).
  * US-B108: the calendar view is the Socials calendar (Month · Week · List).
  * US-B109: ?post=<id> opens the post editor (studio/socials-post-page.tsx), and
  * ?view=brand (the Brand kit item's own link) opens the brand kit over the calendar.
@@ -18,7 +19,7 @@ import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
-import { SocialsCampaigns } from '../socials-campaigns-view'
+import { SocialsPlansView } from '../plans/socials-plans-view'
 import { canAuthorPosts, canEditBrandKit } from '../socials-status'
 import { SocialsCalendar } from './socials-calendar'
 import { SocialsPostPage } from './socials-post-page'
@@ -40,16 +41,7 @@ function StudioBody({ route, go, role, posts, loading }: StudioBodyProps) {
   if (route.view === 'queue') {
     return <SocialsQueue role={role} posts={posts} selectedId={route.post} onSelect={(id) => go({ post: id })} />
   }
-  if (route.view === 'plans') {
-    return (
-      <SocialsCampaigns
-        role={role}
-        posts={posts}
-        creating={route.plan === NEW_PLAN}
-        onCreatingChange={(on) => go({ plan: on ? NEW_PLAN : null })}
-      />
-    )
-  }
+  if (route.view === 'plans') return <SocialsPlansView role={role} posts={posts} planId={route.plan} go={go} />
   if (route.post) return <SocialsPostPage role={role} posts={posts} postId={route.post} loading={loading} go={go} />
   return <SocialsCalendar role={role} posts={posts} route={route} go={go} />
 }

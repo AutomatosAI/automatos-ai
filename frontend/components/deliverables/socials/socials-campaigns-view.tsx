@@ -82,9 +82,11 @@ interface SocialsCampaignsProps {
   /** PRD-251B US-B107: the Studio's New plan opens the form (?plan=new); left out, the view keeps its own. */
   creating?: boolean
   onCreatingChange?: (creating: boolean) => void
+  /** PRD-251B Wave 2: under the Plans view, the plans are listed above; this lists the rest. */
+  plansExcluded?: boolean
 }
 
-export function SocialsCampaigns({ role, posts, creating: creatingProp, onCreatingChange }: SocialsCampaignsProps) {
+export function SocialsCampaigns({ role, posts, creating: creatingProp, onCreatingChange, plansExcluded = false }: SocialsCampaignsProps) {
   const { workspace } = useWorkspace()
   const seriesOn = !!workspace?.socials?.series_approval
   const { data, isLoading, isError } = useSocialCampaigns()
@@ -92,7 +94,7 @@ export function SocialsCampaigns({ role, posts, creating: creatingProp, onCreati
   const [ownCreating, setOwnCreating] = useState(false)
   const creating = creatingProp ?? ownCreating
   const setCreating = onCreatingChange ?? setOwnCreating
-  const campaigns = data?.campaigns ?? []
+  const campaigns = (data?.campaigns ?? []).filter((campaign) => !plansExcluded || campaign.kind !== 'plan')
   const current = campaigns.find((c) => c.id === selectedId)?.id ?? campaigns[0]?.id ?? null
 
   const handleCreated = (campaign: SocialCampaign | null) => {

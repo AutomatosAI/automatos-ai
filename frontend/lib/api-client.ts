@@ -6,6 +6,18 @@
  * Base URL: NEXT_PUBLIC_API_URL.
  */
 
+import type {
+  SocialMusicResponse,
+  SocialPlan,
+  SocialPlanInput,
+  SocialPlansResponse,
+  SocialPlanSlotsResponse,
+  SocialPostMusic,
+  SocialTopic,
+  SocialTopicInput,
+  SocialTopicsResponse,
+} from './socials-plan-types'
+
 interface ApiResponse<T = any> {
   data: T
   success: boolean
@@ -513,6 +525,9 @@ export interface SocialPost {
   targets?: SocialPostTarget[]
   /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
   preview?: SocialPostPreview | null
+  /** PRD-251B Wave 2: the plan slot the post was made for, and its music (null: the template's). */
+  slot_key?: string | null
+  music?: SocialPostMusic
   created_at: string
   updated_at: string
 }
@@ -662,6 +677,8 @@ export interface UpdateSocialPostInput {
   length_seconds?: number | null
   /** The post's files, `{aspect: [Deliverable ids]}`: the editor's Library picks one (US-B109). */
   media?: Record<string, string[]>
+  /** PRD-251B: the music (a render setting): null the template's track, {track: null} none. */
+  music?: SocialPostMusic
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -836,6 +853,8 @@ export interface SocialCampaign {
   updated_at: string
   /** GET /api/socials/campaigns: how many posts the campaign holds. */
   post_count?: number
+  /** PRD-251B (B6): a plan is a campaign of kind "plan". */
+  kind?: 'campaign' | 'plan'
 }
 
 /** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
@@ -3169,6 +3188,82 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ posts, comment: comment || null }),
     })
+  }
+
+  // PRD-251B Wave 2: plans (a campaign of kind plan), their slots and their content bank.
+  async listSocialPlans(): Promise<SocialPlansResponse> {
+    return this.request<SocialPlansResponse>('/api/socials/plans')
+  }
+
+  async createSocialPlan(input: SocialPlanInput): Promise<SocialPlan> {
+    return this.request<SocialPlan>('/api/socials/plans', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  async getSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}`)
+  }
+
+  async updateSocialPlan(planId: string, input: SocialPlanInput): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async pauseSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/pause`, { method: 'POST' })
+  }
+
+  async resumeSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/resume`, { method: 'POST' })
+  }
+
+  async endSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/end`, { method: 'POST' })
+  }
+
+  /** Research again (US-B204): 409 while the Socials package's research playbook is missing. */
+  async researchSocialPlan(planId: string): Promise<{ plan_id: string; execution_id: string }> {
+    return this.request<{ plan_id: string; execution_id: string }>(`/api/socials/plans/${planId}/research`, { method: 'POST' })
+  }
+
+  /** The plan's planned and made slots in [start, end) (ISO with a zone; at most 62 days). */
+  async listSocialPlanSlots(planId: string, start: string, end: string): Promise<SocialPlanSlotsResponse> {
+    const query = `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    return this.request<SocialPlanSlotsResponse>(`/api/socials/plans/${planId}/slots${query}`)
+  }
+
+  /** Move a planned slot (`to`), put it back (`to: null`) or skip it (B208): the cadence stays. */
+  async moveSocialPlanSlot(planId: string, slotKey: string, move: { to?: string | null; skip?: boolean }): Promise<unknown> {
+    return this.request<unknown>(`/api/socials/plans/${planId}/slots/${encodeURIComponent(slotKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify(move),
+    })
+  }
+
+  async listSocialPlanTopics(planId: string): Promise<SocialTopicsResponse> {
+    return this.request<SocialTopicsResponse>(`/api/socials/plans/${planId}/topics`)
+  }
+
+  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  async updateSocialPlanTopic(planId: string, topicId: string, input: SocialTopicInput): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics/${topicId}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async pinSocialPlanTopic(planId: string, topicId: string, pinnedOn: string | null): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics/${topicId}/pin`, {
+      method: 'PUT',
+      body: JSON.stringify({ pinned_on: pinnedOn }),
+    })
+  }
+
+  async deleteSocialPlanTopic(planId: string, topicId: string): Promise<void> {
+    await this.request<void>(`/api/socials/plans/${planId}/topics/${topicId}`, { method: 'DELETE' })
+  }
+
+  /** The music library a post may pick from instead of its template's track. */
+  async listSocialMusic(): Promise<SocialMusicResponse> {
+    return this.request<SocialMusicResponse>('/api/socials/music')
   }
 }
 

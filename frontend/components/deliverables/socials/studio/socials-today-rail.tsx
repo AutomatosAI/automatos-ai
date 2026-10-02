@@ -3,13 +3,17 @@
 /**
  * PRD-251B US-B108 — the calendar's right rail (Main.dc.html): Today, with the day's posts
  * and "Review N posts" into the Queue (N = today's posts waiting for approval), and the
- * Status key: the six words and what each means. The plan card arrives with Wave 2.
+ * Status key: the six words and what each means. US-B208: a card per active plan with its
+ * cadence and its content bank's counts.
  */
 import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { SocialPost } from '@/lib/api-client'
+import type { SocialPlan } from '@/lib/socials-plan-types'
+import { statusLine } from '../plans/plan-model'
+import { planRailLine } from './plan-calendar-model'
 import { CHIP_KEY, SocialsCalendarChip, TONES } from './socials-calendar-chip'
 import { STATUS_KEY, isOnDay, opensInQueue, slotOf } from './socials-calendar-model'
 import { PRIMARY_ACTION } from './studio-nav'
@@ -28,11 +32,31 @@ export function reviewLabel(count: number): string {
 
 interface SocialsTodayRailProps {
   posts: ReadonlyArray<SocialPost>
+  /** The active plans (US-B208): each gets its card. */
+  plans?: ReadonlyArray<SocialPlan>
   onOpen: (post: SocialPost) => void
   onReview: () => void
+  onOpenPlan?: (planId: string) => void
 }
 
-export function SocialsTodayRail({ posts, onOpen, onReview }: SocialsTodayRailProps) {
+function PlanCards({ plans, onOpenPlan }: { plans: ReadonlyArray<SocialPlan>; onOpenPlan?: (planId: string) => void }) {
+  return (
+    <>
+      {plans.map((plan) => (
+        <section key={plan.id} aria-label={`Plan ${plan.name}`} className={CARD}>
+          <h2 className="text-[11.5px] font-semibold uppercase tracking-[.07em] text-muted-foreground">Plan</h2>
+          <button type="button" className="text-left text-[15px] font-semibold text-foreground hover:underline" onClick={() => onOpenPlan?.(plan.id)}>
+            {plan.name}
+          </button>
+          <span className="text-[12.5px] text-muted-foreground">{statusLine(plan)}</span>
+          <span className="text-[12.5px] text-foreground">{planRailLine(plan)}</span>
+        </section>
+      ))}
+    </>
+  )
+}
+
+export function SocialsTodayRail({ posts, plans = [], onOpen, onReview, onOpenPlan }: SocialsTodayRailProps) {
   const now = new Date()
   const today = useMemo(
     () =>
@@ -61,6 +85,7 @@ export function SocialsTodayRail({ posts, onOpen, onReview }: SocialsTodayRailPr
           </Button>
         )}
       </section>
+      <PlanCards plans={plans} onOpenPlan={onOpenPlan} />
       <section aria-label="Status key" className={CARD}>
         <h2 className="text-[11.5px] font-semibold uppercase tracking-[.07em] text-muted-foreground">Status</h2>
         <ul className="grid grid-cols-2 gap-2">
