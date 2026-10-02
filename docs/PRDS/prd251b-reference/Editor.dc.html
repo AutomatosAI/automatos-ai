@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Post editor</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,400;6..72,500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#171614}
+a{color:#F1EADF}a:hover{color:#FF8A5B}
+</style>
+</helmet>
+<div class="app">
+<dc-import name="Nav" active="calendar" hint-size="100%,112px"></dc-import>
+<main class="wrap col" style="gap: 20px;">
+<div class="row between wrapf" style="gap: 16px; align-items: flex-end;">
+<div class="col" style="gap: 6px;">
+<a href="Main.dc.html" class="row hint" style="gap: 6px; text-decoration: none; align-self: flex-start;"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>Back to calendar</a>
+<div class="row wrapf" style="gap: 12px;"><h1 class="h1">Nothing posts without you</h1><span class="pill">Draft</span></div>
+<p class="hint" style="margin: 0;">X slot of the WebSummit countdown plan · made today at 07:02 · publishes Wed 14 Oct, 12:00 once approved</p>
+</div>
+<div class="row wrapf"><button type="button" class="btn">Save draft</button><button type="button" class="btn">Render preview</button><a href="Queue.dc.html" class="btn primary">Submit for approval</a></div>
+</div>
+<div class="split" style="display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); gap: 20px; align-items: start;">
+<div class="col" style="gap: 16px;">
+<section class="card col" aria-label="Brief">
+<div class="row between"><h2 class="h2">Brief</h2><button type="button" class="btn sm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"></path></svg>Redraft with Auto</button></div>
+<textarea class="textarea" aria-label="Brief" defaultValue="The approval rule behind Socials: agents draft, and a person approves every post before it goes out. Topic from the content bank."></textarea>
+</section>
+<section class="card col" aria-label="Format">
+<h2 class="h2">Format</h2>
+<div class="seg" role="group" aria-label="Format" style="align-self: flex-start;">
+<sc-for list="{{ formats }}" as="f" hint-placeholder-count="4"><button type="button" class="{{ f.on }}" aria-pressed="{{ f.pressed }}" onClick="{{ f.pick }}">{{ f.label }}</button></sc-for>
+</div>
+<sc-if value="{{ isVideo }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 14px;">
+<div class="field"><span class="lab">Length</span><div class="row wrapf" role="group" aria-label="Length" style="gap: 6px;"><sc-for list="{{ lengths }}" as="l" hint-placeholder-count="4"><button type="button" class="chipb {{ l.on }}" aria-pressed="{{ l.pressed }}" onClick="{{ l.pick }}">{{ l.label }}</button></sc-for></div><span class="hint">About {{ words }} spoken words fit in {{ lengthLabel }}.</span></div>
+<div class="grid2">
+<div class="field"><label for="voice">Voice</label><select id="voice" class="select"><option>Kokoro · Heart (free)</option><option>Kokoro · Michael (free)</option><option>No voice, captions only</option></select></div>
+<div class="field"><label for="music">Music</label><select id="music" class="select"><option>Library · Low and steady</option><option>Library · Bright pulse</option><option>No music</option></select></div>
+</div>
+<div class="field"><span class="lab">AI footage for the hook and b-roll</span><div class="seg" role="group" aria-label="AI footage" style="align-self: flex-start;"><sc-for list="{{ footage }}" as="o" hint-placeholder-count="2"><button type="button" class="{{ o.on }}" aria-pressed="{{ o.pressed }}" onClick="{{ o.pick }}">{{ o.label }}</button></sc-for></div><span class="hint">Product screens are rendered from the app and every word on screen is template text. AI footage only fills the hook and the b-roll.</span></div>
+</div>
+</sc-if>
+<sc-if value="{{ isCarousel }}" hint-placeholder-val="{{ false }}">
+<div class="field"><span class="lab">Slides</span><div class="row" style="gap: 8px;"><button type="button" class="btn sm" aria-label="One slide fewer" onClick="{{ fewer }}">−</button><span class="mono" style="min-width: 32px; text-align: center; font-size: 16px;">{{ slides }}</span><button type="button" class="btn sm" aria-label="One slide more" onClick="{{ more }}">+</button></div><span class="hint">One point per slide; the last slide is the call to action.</span></div>
+</sc-if>
+<sc-if value="{{ isText }}" hint-placeholder-val="{{ false }}"><p class="hint" style="margin: 0;">No media. Only X and LinkedIn take a text-only post.</p></sc-if>
+</section>
+<section class="card col" aria-label="Channels and sizes">
+<div class="row between wrapf"><h2 class="h2">Channels and sizes</h2><span class="hint">Renders {{ ratioText }}</span></div>
+<sc-for list="{{ channels }}" as="c" hint-placeholder-count="5">
+<label class="row" style="gap: 12px; min-height: 46px; padding: 6px 12px; border: 1px solid #35312B; border-radius: 10px; opacity: {{ c.op }};">
+<input type="checkbox" checked="{{ c.on }}" disabled="{{ c.disabled }}" onChange="{{ c.toggle }}">
+<span class="ch">{{ c.badge }}</span>
+<span style="flex-grow: 1; font-weight: 500;">{{ c.label }}</span>
+<span class="mono" style="font-size: 12px; color: #A9A194;">{{ c.size }}</span>
+</label>
+</sc-for>
+</section>
+<section class="card col" aria-label="Look">
+<h2 class="h2">Look</h2>
+<div class="seg" role="group" aria-label="Where the visual comes from" style="align-self: flex-start;"><sc-for list="{{ sources }}" as="s" hint-placeholder-count="4"><button type="button" class="{{ s.on }}" aria-pressed="{{ s.pressed }}" onClick="{{ s.pick }}">{{ s.label }}</button></sc-for></div>
+<sc-if value="{{ srcTemplate }}" hint-placeholder-val="{{ true }}">
+<div class="grid3">
+<sc-for list="{{ templates }}" as="t" hint-placeholder-count="6">
+<button type="button" aria-pressed="{{ t.pressed }}" onClick="{{ t.pick }}" style="display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 12px; border: 2px solid {{ t.ring }}; background: #1A1816; color: #F1EADF; font: inherit; text-align: left; cursor: pointer;">
+<span style="display: flex; align-items: flex-end; width: 100%; aspect-ratio: 4 / 3; padding: 10px; border-radius: 8px; background: #141210; font-family: Newsreader, Georgia, serif; font-size: 16px; line-height: 1.1; white-space: pre-line;">{{ t.sample }}</span>
+<span style="font-size: 13px; font-weight: 500;">{{ t.name }}</span>
+</button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ srcAi }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 14px;">
+<div class="row between wrapf"><span class="row" style="gap: 8px;"><span style="font-weight: 600;">Higgsfield</span><span class="pill ok">Connected in Composio</span></span><a href="Brand.dc.html" class="hint">Manage AI tools</a></div>
+<sc-if value="{{ isVideo }}" hint-placeholder-val="{{ false }}"><div class="field"><label for="vmodel">Model</label><select id="vmodel" class="select"><option>Kling 3.0 · 5 s shots</option><option>Seedance 2.5</option><option>Minimax</option></select></div></sc-if>
+<sc-if value="{{ notVideo }}" hint-placeholder-val="{{ true }}"><div class="field"><label for="imodel">Model</label><select id="imodel" class="select"><option>GPT Image 2</option><option>Let Auto choose</option></select></div></sc-if>
+<div class="field"><label for="prompt">Prompt</label><textarea id="prompt" key="{{ fmtKey }}" class="textarea" defaultValue="{{ aiPrompt }}"></textarea><span class="hint">Words on the image come from the template, never from the AI tool.</span></div>
+<div class="row wrapf" style="gap: 8px;"><span class="lab">Style references</span><span style="width: 26px; height: 26px; border-radius: 6px; background: #3A2B20;"></span><span style="width: 26px; height: 26px; border-radius: 6px; background: #1B1815; border: 1px solid #4A443C;"></span><span style="width: 26px; height: 26px; border-radius: 6px; background: #20251F;"></span><span style="width: 26px; height: 26px; border-radius: 6px; background: #2E2620;"></span><a href="Brand.dc.html" class="hint">4 liked images in the brand kit</a></div>
+<div class="grid4">
+<sc-for list="{{ options }}" as="o" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{ o.pressed }}" onClick="{{ o.pick }}" style="display: flex; align-items: flex-end; aspect-ratio: 1 / 1; padding: 8px; border-radius: 10px; border: 2px solid {{ o.ring }}; background: {{ o.bg }}; color: #F4EEE2; font: 500 12px Geist, system-ui, sans-serif; cursor: pointer;">Option {{ o.n }}</button>
+</sc-for>
+</div>
+<div class="row between wrapf" style="gap: 10px;"><span class="hint" style="max-width: 420px;">Higgsfield counts credits: the balance is read before and after each job and booked against this post.</span><button type="button" class="btn sm primary">Generate 4 more</button></div>
+</div>
+</sc-if>
+<sc-if value="{{ srcUpload }}" hint-placeholder-val="{{ false }}">
+<div class="drop"><svg class="ic" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><span style="color: #F1EADF; font-weight: 500;">Drop an image or video here</span><span class="hint">PNG, JPG or MP4. It is cropped for each channel, and you check each crop in the preview.</span><button type="button" class="btn sm">Browse files</button></div>
+</sc-if>
+<sc-if value="{{ srcLibrary }}" hint-placeholder-val="{{ false }}">
+<div class="grid3">
+<sc-for list="{{ library }}" as="m" hint-placeholder-count="6">
+<button type="button" style="display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; border: 1px solid #35312B; background: #1A1816; color: #F1EADF; font: inherit; text-align: left; cursor: pointer;"><span style="width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; background: {{ m.bg }};"></span><span style="font-size: 13px; font-weight: 500;">{{ m.name }}</span><span class="hint">{{ m.meta }}</span></button>
+</sc-for>
+</div>
+</sc-if>
+</section>
+<section class="card col" aria-label="Claims and sources">
+<div class="row between"><h2 class="h2">Claims and sources</h2><button type="button" class="btn sm">Add a source</button></div>
+<div class="row" style="align-items: flex-start; gap: 10px;"><svg class="ic ok-ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"></path></svg><span class="col" style="gap: 2px;"><span>Nothing goes out until a person approves it</span><span class="hint">Docs · Socials</span></span></div>
+<div class="row" style="align-items: flex-start; gap: 10px;"><svg class="ic ok-ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"></path></svg><span class="col" style="gap: 2px;"><span>An edit after approval sends the post back for approval</span><span class="hint">Docs · Socials</span></span></div>
+<p class="hint" style="margin: 0;">A claim without a source needs a second confirmation from whoever approves.</p>
+</section>
+<section class="card col" aria-label="When">
+<h2 class="h2">When</h2>
+<div class="grid3">
+<div class="field"><label for="day">Date</label><input id="day" class="input" type="date" defaultValue="2026-10-14"></div>
+<div class="field"><label for="time">Time</label><input id="time" class="input" type="time" defaultValue="12:00"></div>
+<div class="field"><label for="tz">Timezone</label><select id="tz" class="select"><option>Europe/London</option><option>Europe/Lisbon</option><option>UTC</option></select></div>
+</div>
+<p class="hint" style="margin: 0;">This is the plan's X slot. Once approved it publishes at this time; if nobody approves it by then, it is skipped and nothing posts.</p>
+</section>
+</div>
+<section class="card col" aria-label="Preview" style="gap: 14px; position: sticky; top: 16px;">
+<div class="row between wrapf" style="gap: 10px;"><h2 class="h2">Preview</h2><div class="seg" role="group" aria-label="Preview channel"><sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3"><button type="button" class="{{ t.on }}" aria-pressed="{{ t.pressed }}" onClick="{{ t.pick }}">{{ t.label }}</button></sc-for></div></div>
+<div class="col" style="gap: 12px; padding: 16px; border-radius: 14px; background: #121110; border: 1px solid #35312B;">
+<div class="row" style="gap: 10px;"><span style="width: 40px; height: 40px; border-radius: 999px; background: #FF6E33; color: #1A0E07; display: inline-flex; align-items: center; justify-content: center; font-weight: 700;">A</span><span class="col" style="gap: 0;"><span style="font-weight: 600;">Automatos</span><span class="hint">{{ plName }} · Wed 14 Oct, 12:00</span></span></div>
+<p style="margin: 0; white-space: pre-line; line-height: 1.55;">{{ copy }}</p>
+<sc-if value="{{ hasMedia }}" hint-placeholder-val="{{ true }}">
+<div class="render" style="align-self: center; width: {{ mediaW }}; max-width: 100%; aspect-ratio: {{ aspect }}; background: {{ renderBg }};">
+<div class="row between"><span class="lbl">{{ topLabel }}</span><sc-if value="{{ isCarousel }}" hint-placeholder-val="{{ false }}"><span class="mono" style="font-size: 12px; color: #CFC6B8;">1 / {{ slides }}</span></sc-if></div>
+<sc-if value="{{ isVideo }}" hint-placeholder-val="{{ false }}"><span style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 64px; height: 64px; border-radius: 999px; background: rgba(244, 238, 226, 0.14); border: 1px solid rgba(244, 238, 226, 0.4); display: inline-flex; align-items: center; justify-content: center; color: #F4EEE2;"><svg class="icf" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></span></sc-if>
+<span class="col" style="gap: 10px;"><span class="big" style="font-size: {{ bigSize }};">{{ bigText }}</span><span style="font-size: 13px; color: #CFC6B8;">Nothing posts until a person says yes.</span></span>
+<div class="row between"><span class="mono" style="font-size: 11px; color: #CFC6B8;">automatos</span><sc-if value="{{ isVideo }}" hint-placeholder-val="{{ false }}"><span class="mono" style="font-size: 11px;">{{ lengthLabel }}</span></sc-if></div>
+</div>
+</sc-if>
+</div>
+<p class="hint" style="margin: 0;">{{ renderNote }}</p>
+<div class="field"><div class="row between"><label for="chcopy">Copy for {{ plName }}</label><span class="mono" style="font-size: 12px; color: #A9A194;">{{ count }} / {{ limit }}</span></div><textarea id="chcopy" key="{{ platform }}" class="textarea" style="min-height: 120px;" defaultValue="{{ copy }}"></textarea><span class="hint">Each channel starts from the same base copy. An edit here changes this channel only.</span></div>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const format = st.format || 'image';
+    const source = st.source || 'template';
+    const length = st.length || '30';
+    const slides = st.slides || 5;
+    const off = st.off || {};
+    const opt = st.opt || 2;
+    const footageOn = st.footage === 'hf';
+    const set = (patch) => () => this.setState(patch);
+    const isVideo = format === 'video';
+    const SIZES = {
+      image: { x: '1600×900 · 16:9', linkedin: '1200×1200 · 1:1', instagram: '1080×1350 · 4:5' },
+      carousel: { x: '4 images · 16:9', linkedin: 'PDF · 1080×1350 · 4:5', instagram: '1080×1350 · 4:5' },
+      video: { x: '1920×1080 · 16:9', linkedin: '1080×1350 · 4:5', instagram: 'Reel · 1080×1920 · 9:16', tiktok: '1080×1920 · 9:16', youtube: 'Short · 1080×1920 · 9:16' },
+      text: { x: 'Text post', linkedin: 'Text post' },
+    };
+    const CH = [['x', 'X', 'X'], ['linkedin', 'LinkedIn', 'in'], ['instagram', 'Instagram', 'IG'], ['tiktok', 'TikTok', 'TT'], ['youtube', 'YouTube Shorts', 'YT']];
+    const channels = CH.map(([id, label, badge]) => {
+      const size = SIZES[format][id];
+      return {
+        label,
+        badge,
+        id,
+        on: !!size && !off[id],
+        disabled: !size,
+        op: size ? '1' : '0.55',
+        size: size || (format === 'text' ? 'Needs an image or video' : 'Takes video only'),
+        toggle: () => this.setState({ off: { ...off, [id]: !off[id] } }),
+      };
+    });
+    const live = channels.filter((c) => c.on);
+    const wanted = st.platform || 'x';
+    const platform = live.some((c) => c.id === wanted) ? wanted : (live[0] ? live[0].id : 'x');
+    const ratios = [];
+    live.forEach((c) => {
+      const m = c.size.match(/\d+:\d+/);
+      if (m && ratios.indexOf(m[0]) === -1) ratios.push(m[0]);
+    });
+    const LEN = [['15', '0:15'], ['30', '0:30'], ['45', '0:45'], ['60', '1:00']];
+    const lengthLabel = (LEN.find((l) => l[0] === length) || LEN[1])[1];
+    const T_STILL = [
+      ['auto', 'Let Auto pick', 'Auto picks\nfrom the brief'],
+      ['statement', 'Big statement', 'Agents draft.\nYou approve.'],
+      ['stat', 'Stat card', 'Every post,\napproved.'],
+      ['quote', 'Quote', '“Nothing posts\nwithout you.”'],
+      ['announce', 'Announcement', 'New:\nSocials'],
+      ['define', 'Definition', 'Approval, n.'],
+      ['fact', 'Fact card', 'A fact, with\nits source'],
+    ];
+    const T_VIDEO = [
+      ['auto', 'Let Auto pick', 'Auto picks\nfrom the brief'],
+      ['uistory', 'UI story promo', 'Screens tell\nthe story'],
+      ['cinematic', 'Cinematic product promo', 'Footage, then\nthe product'],
+      ['app', 'App promo', 'In a\nphone frame'],
+      ['data', 'Data story', 'Live numbers\nas cards'],
+    ];
+    const list = isVideo ? T_VIDEO : T_STILL;
+    const tplId = list.some((t) => t[0] === st.tpl) ? st.tpl : list[1][0];
+    const BIG = {
+      auto: 'Agents draft.\nYou approve.', statement: 'Agents draft.\nYou approve.', stat: 'Every post,\napproved.',
+      quote: '“Nothing posts\nwithout you.”', announce: 'New in Automatos:\nSocials', define: 'Approval, n.\nA person says yes.',
+      fact: 'Each post is\napproved first.', uistory: 'Agents draft.\nYou approve.', cinematic: 'Nothing posts\nwithout you.',
+      app: 'One queue.\nEvery channel.', data: 'Every post,\nsourced.',
+    };
+    const ASPECT = {
+      image: { x: '16 / 9', linkedin: '1 / 1', instagram: '4 / 5' },
+      carousel: { x: '16 / 9', linkedin: '4 / 5', instagram: '4 / 5' },
+      video: { x: '16 / 9', linkedin: '4 / 5', instagram: '9 / 16', tiktok: '9 / 16', youtube: '9 / 16' },
+      text: {},
+    };
+    const aspect = ASPECT[format][platform] || '1 / 1';
+    const MEDIA_W = { '16 / 9': '100%', '1 / 1': '420px', '4 / 5': '400px', '9 / 16': '320px' };
+    const COPY = {
+      x: 'Agents draft. You approve. Nothing on your channels goes out until a person says yes, and an edit after approval sends it back for another look.',
+      linkedin: 'We built Socials around one rule: agents draft, people approve.\n\nEvery post shows the exact media and copy that will publish, with a source for each claim. Edit it after approval and it comes back for another look.',
+      instagram: 'Agents draft. You approve. One queue for every channel.',
+      tiktok: 'Agents draft. You approve. How Socials works, in under a minute.',
+      youtube: 'Agents draft. You approve. How Automatos Socials works.',
+    };
+    const LIMIT = { x: 280, linkedin: 3000, instagram: 2200, tiktok: 2200, youtube: 100 };
+    const copy = COPY[platform] || COPY.x;
+    const plName = (CH.find((c) => c[0] === platform) || CH[0])[1];
+    const mins = Math.round((Number(length) / 60) * ratios.length * 100) / 100;
+    let renderNote = 'Rendered 07:02. One PNG per size (' + ratios.join(', ') + '). Images use no render minutes.';
+    if (format === 'text') renderNote = 'Text only: nothing to render.';
+    if (isVideo) renderNote = 'Half-resolution preview, ' + lengthLabel + '. The full render is made when you submit: about ' + mins + ' render minutes (' + ratios.length + ' sizes × ' + lengthLabel + ').';
+    const TOP = { template: 'Automatos · Socials', ai: isVideo ? 'AI footage · Higgsfield' : 'AI image · Higgsfield', upload: 'Your upload', library: 'From your library' };
+    const BG = { template: '#141210', ai: '#3A2B20', upload: '#252A24', library: '#26211D' };
+    const FORMATS = [['image', 'Image'], ['carousel', 'Carousel'], ['video', 'Video'], ['text', 'Text only']];
+    const SRC = [['template', 'Template'], ['ai', 'AI-made'], ['upload', 'Upload'], ['library', 'Library']];
+    return {
+      formats: FORMATS.map(([id, label]) => ({ label, on: id === format ? 'on' : '', pressed: id === format, pick: set({ format: id }) })),
+      isVideo,
+      notVideo: !isVideo,
+      isCarousel: format === 'carousel',
+      isText: format === 'text',
+      hasMedia: format !== 'text',
+      lengths: LEN.map(([id, label]) => ({ label, on: id === length ? 'on' : '', pressed: id === length, pick: set({ length: id }) })),
+      lengthLabel,
+      words: Math.round(Number(length) * 2.5),
+      footage: [['off', 'Off'], ['hf', 'Higgsfield · Kling 3.0']].map(([id, label]) => ({ label, on: (id === 'hf') === footageOn ? 'on' : '', pressed: (id === 'hf') === footageOn, pick: set({ footage: id }) })),
+      slides,
+      fewer: () => this.setState({ slides: Math.max(2, slides - 1) }),
+      more: () => this.setState({ slides: Math.min(10, slides + 1) }),
+      channels,
+      ratioText: ratios.length ? ratios.join(' · ') : 'nothing yet',
+      sources: SRC.map(([id, label]) => ({ label, on: id === source ? 'on' : '', pressed: id === source, pick: set({ source: id }) })),
+      srcTemplate: source === 'template',
+      srcAi: source === 'ai',
+      srcUpload: source === 'upload',
+      srcLibrary: source === 'library',
+      templates: list.map(([id, name, sample]) => ({ name, sample, ring: id === tplId ? '#FF6E33' : '#35312B', pressed: id === tplId, pick: set({ tpl: id }) })),
+      fmtKey: format,
+      aiPrompt: isVideo
+        ? 'Hook, 5 s: a hand taps Approve on a phone in warm low light. B-roll, 5 s: a desk at dusk, laptop glow, slow push in.'
+        : 'A laptop on a dark desk at dusk, a queue of posts waiting for approval on screen. Warm low light, lots of dark space, editorial, shallow depth of field.',
+      options: [1, 2, 3, 4].map((k) => ({ n: k, bg: ['#3A2B20', '#2E2620', '#35291F', '#2A231D'][k - 1], ring: k === opt ? '#FF6E33' : '#35312B', pressed: k === opt, pick: set({ opt: k }) })),
+      library: [
+        ['Missions launch', 'Image · 1 Oct', '#141210'],
+        ['Ask your documents', 'Carousel · 7 Oct', '#1C1A17'],
+        ['Desk at dusk', 'Your upload', '#3A2B20'],
+        ['Terminal close-up', 'Your upload', '#20251F'],
+        ['Square mark', 'Logo', '#FF6E33'],
+        ['Release notes: Socials', 'Image · 20 Oct', '#26211D'],
+      ].map(([name, meta, bg]) => ({ name, meta, bg })),
+      tabs: live.map((c) => ({ label: c.id === 'youtube' ? 'YouTube' : c.label, on: c.id === platform ? 'on' : '', pressed: c.id === platform, pick: set({ platform: c.id }) })),
+      platform,
+      plName,
+      copy,
+      count: copy.length,
+      limit: LIMIT[platform] || 280,
+      aspect,
+      mediaW: MEDIA_W[aspect] || '100%',
+      renderBg: BG[source],
+      topLabel: TOP[source],
+      bigText: BIG[tplId] || BIG.statement,
+      bigSize: aspect === '9 / 16' ? '34px' : '42px',
+      renderNote,
+    };
+  }
+}
+</script>
+</body>
+</html>

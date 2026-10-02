@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Socials navigation</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,400;6..72,500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="font-family: Geist, system-ui, sans-serif; color: #F1EADF; background: #171614; border-bottom: 1px solid #35312B;">
+<div style="max-width: 1440px; margin: 0 auto; padding: 18px 32px 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+<div style="display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap;">
+<span style="font-family: Newsreader, Georgia, serif; font-size: 26px;">Deliverables</span>
+<span style="display: flex; gap: 16px; font-size: 13.5px; color: #A9A194;"><span>Blog</span><span>Reports</span><span>Templates</span><span style="color: #F1EADF; border-bottom: 2px solid #FF6E33; padding-bottom: 3px;">Socials</span></span>
+</div>
+<div style="display: flex; gap: 8px;">
+<a href="Plan.dc.html" class="btn sm">New plan</a>
+<a href="Editor.dc.html" class="btn sm primary">New post</a>
+</div>
+</div>
+<nav aria-label="Socials" style="display: flex; gap: 2px; flex-wrap: wrap;">
+<sc-for list="{{ items }}" as="item" hint-placeholder-count="4">
+<a href="{{ item.href }}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 500; text-decoration: none; color: {{ item.fg }}; border-bottom: 2px solid {{ item.line }};">{{ item.label }}<sc-if value="{{ item.hasCount }}" hint-placeholder-val="{{ false }}"><span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #E5AE45; color: #1A0E07; font-size: 11.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">{{ item.count }}</span></sc-if></a>
+</sc-for>
+</nav>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["calendar","queue","plans","brand"],"default":"calendar"},"$preview":{"width":1440,"height":112}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = this.props.active ?? 'calendar';
+    const defs = [
+      { id: 'calendar', label: 'Calendar', href: 'Main.dc.html', count: '' },
+      { id: 'queue', label: 'Queue', href: 'Queue.dc.html', count: '2' },
+      { id: 'plans', label: 'Plans', href: 'Plan.dc.html', count: '' },
+      { id: 'brand', label: 'Brand kit', href: 'Brand.dc.html', count: '' },
+    ];
+    return {
+      items: defs.map((d) => ({
+        ...d,
+        hasCount: d.count !== '',
+        fg: d.id === active ? '#F1EADF' : '#A9A194',
+        line: d.id === active ? '#FF6E33' : 'transparent',
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>
