@@ -24,6 +24,7 @@ import {
   DragDropContext,
   Droppable,
   Draggable,
+  type DraggableProvided,
   type DropResult,
 } from '@hello-pangea/dnd'
 import { BookMarked, CheckSquare, RefreshCw, Target } from 'lucide-react'
@@ -165,89 +166,113 @@ function KanbanCard({
   index: number
   onOpen: () => void
 }) {
-  const tone = toneFor(task.assignee?.agent_name)
-  const isCompact = density === 'compact'
-  const kind = ticketKind(task.source_type)  // PRD-252 R4: the type a person reads
-  const Icon = kind === 'Playbook' ? BookMarked : kind === 'Mission' ? Target : kind === 'Routine' ? RefreshCw : CheckSquare
-  const reason = stageReason(task)
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          className={`cc-kb-card${isCompact ? ' compact' : ''}${
-            snapshot.isDragging ? ' dragging' : ''
-          }`}
-          onClick={onOpen}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              onOpen()
-            }
-          }}
-          style={provided.draggableProps.style}
-        >
-          <div className="kind">
-            {task.number && <span className="num">{task.number}</span>}
-            <Icon style={{ width: 11, height: 11 }} />
-            {kind.toUpperCase()}
-            {runsInSession(task) && <span className="session" title="A Claude Code session runs this ticket">· &gt;_ SESSION</span>}
-            {(task.priority === 'urgent' || task.priority === 'high') && (
-              <span className="high">· {task.priority.toUpperCase()}</span>
-            )}
-            {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
-                47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
-                A requeue is only evidence of a missed ack from the second
-                attempt on. */}
-            {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
-              <span
-                className="high"
-                style={{ color: 'hsl(0 72% 60%)' }}
-                title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
-              >
-                · UNRESPONSIVE
-              </span>
-            )}
-            {task.sla_deadline &&
-              task.status !== 'done' &&
-              task.status !== 'failed' &&
-              task.status !== 'cancelled' &&
-              new Date(task.sla_deadline).getTime() < Date.now() && (
-                <span
-                  className="high"
-                  style={{ color: 'hsl(0 72% 60%)' }}
-                  title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
-                >
-                  · OVERDUE
-                </span>
-              )}
-            {/* PRD-252 R7: assign and cancel from the card */}
-            <TicketActionsMenu task={task} />
-          </div>
-          <div className="ttl">{task.name}</div>
-          {/* PRD-252 R3: why it waits in Review or Blocked */}
-          {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
-          {!isCompact && task.description && (
-            <div className="body">{task.description}</div>
-          )}
-          <div className="row">
-            {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
-              <span key={tg} className="tag">
-                {tg}
-              </span>
-            ))}
-            <span className="ag">
-              <span className="swatch" style={{ background: tone.bg }} />
-              {task.assignee?.agent_name ?? 'Unassigned'}
-            </span>
-          </div>
-        </div>
+        <KanbanCardFace task={task} density={density} onOpen={onOpen} provided={provided} isDragging={snapshot.isDragging} />
       )}
     </Draggable>
+  )
+}
+
+/** The card itself; its Draggable hands it the drag props. */
+function KanbanCardFace({
+  task,
+  density,
+  onOpen,
+  provided,
+  isDragging,
+}: {
+  task: BoardTask
+  density: Density
+  onOpen: () => void
+  provided: DraggableProvided
+  isDragging: boolean
+}) {
+  const tone = toneFor(task.assignee?.agent_name)
+  const isCompact = density === 'compact'
+  const reason = stageReason(task)
+  return (
+    <div
+      ref={provided.innerRef}
+      {...provided.draggableProps}
+      {...provided.dragHandleProps}
+      className={`cc-kb-card${isCompact ? ' compact' : ''}${isDragging ? ' dragging' : ''}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      style={provided.draggableProps.style}
+    >
+      <KanbanKindRow task={task} />
+      <div className="ttl">{task.name}</div>
+      {/* PRD-252 R3: why it waits in Review or Blocked */}
+      {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
+      {!isCompact && task.description && (
+        <div className="body">{task.description}</div>
+      )}
+      <div className="row">
+        {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
+          <span key={tg} className="tag">
+            {tg}
+          </span>
+        ))}
+        <span className="ag">
+          <span className="swatch" style={{ background: tone.bg }} />
+          {task.assignee?.agent_name ?? 'Unassigned'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/** The card's top line: its number and type, priority, the flags that say it needs a look, and its actions. */
+function KanbanKindRow({ task }: { task: BoardTask }) {
+  const kind = ticketKind(task.source_type)  // PRD-252 R4: the type a person reads
+  const Icon = kind === 'Playbook' ? BookMarked : kind === 'Mission' ? Target : kind === 'Routine' ? RefreshCw : CheckSquare
+  return (
+    <div className="kind">
+      {task.number && <span className="num">{task.number}</span>}
+      <Icon style={{ width: 11, height: 11 }} />
+      {kind.toUpperCase()}
+      {runsInSession(task) && <span className="session" title="A Claude Code session runs this ticket">· &gt;_ SESSION</span>}
+      {(task.priority === 'urgent' || task.priority === 'high') && (
+        <span className="high">· {task.priority.toUpperCase()}</span>
+      )}
+      {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
+          47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
+          A requeue is only evidence of a missed ack from the second
+          attempt on. */}
+      {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
+        <span
+          className="high"
+          style={{ color: 'hsl(0 72% 60%)' }}
+          title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
+        >
+          · UNRESPONSIVE
+        </span>
+      )}
+      {task.sla_deadline &&
+        task.status !== 'done' &&
+        task.status !== 'failed' &&
+        task.status !== 'cancelled' &&
+        new Date(task.sla_deadline).getTime() < Date.now() && (
+          <span
+            className="high"
+            style={{ color: 'hsl(0 72% 60%)' }}
+            title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
+          >
+            · OVERDUE
+          </span>
+        )}
+      {/* PRD-252 R7: assign and cancel from the card */}
+      <TicketActionsMenu task={task} />
+    </div>
   )
 }
 
