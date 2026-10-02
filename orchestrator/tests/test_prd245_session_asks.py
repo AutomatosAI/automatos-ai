@@ -186,6 +186,7 @@ def quiet(monkeypatch):
 async def test_a_hold_becomes_one_question_row_and_the_ticket_keeps_running(quiet):
     db = _FakeSession()
     task = _ticket(db)
+    task.workspace_seq = 42                               # PRD-252 R4: the card names the ticket by its number
 
     out = await svc.record_events(db, HOST, TICKET, [_hold("r1")])
 
@@ -199,7 +200,7 @@ async def test_a_hold_becomes_one_question_row_and_the_ticket_keeps_running(quie
     assert q.details == {"cli_permission": {"request_id": "r1", "task_id": TICKET}}
     # night 1 (64fc8dc4f): what the agent wants in a sentence first, the exact
     # command folded away under it, the gate's reason last
-    assert q.question_md.startswith(f"**Allow this command in ticket #{TICKET}?**\n\nThe agent wants to run **pip**.\n\n")
+    assert q.question_md.startswith("**Allow this command in ticket #0042?**\n\nThe agent wants to run **pip**.\n\n")
     assert "<summary>The exact command</summary>\n\n```sh\npip --version\n```" in q.question_md
     assert "outside this ticket's Bash allowlist" in q.question_md and "Answer `allow` or `deny`." in q.question_md
     # never parked — the host is waiting on the answer, the session is alive
