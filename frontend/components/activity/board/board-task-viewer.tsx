@@ -4,6 +4,7 @@ import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, Ex
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { sessionNotes, type SessionNote } from './session-notes'
 import { SessionPlanPanel } from './session-plan'
+import { sessionUsageText } from './session-usage'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
@@ -115,10 +116,10 @@ function SessionBlock({ task }: { task: BoardTask }) {
           <span>{ref.provider || 'claude'}{ref.model ? ` · ${ref.model}` : ''}</span>
           <span className="text-muted-foreground">State</span>
           <span>{ref.exit_reason ? `finished (${ref.exit_reason})` : ref.live_tool ? `running · ${ref.live_tool}` : ref.last_event ? `running · ${ref.last_event}` : 'claimed'}</span>
-          {usage.total_tokens != null && (
+          {sessionUsageText(usage) && (
             <>
               <span className="text-muted-foreground">Tokens</span>
-              <span>{Number(usage.total_tokens).toLocaleString()}{usage.model ? ` on ${usage.model}` : ''} · plan usage, no cost</span>
+              <span>{sessionUsageText(usage)}</span>
             </>
           )}
           {typeof ref.denials === 'number' && ref.denials > 0 && (
