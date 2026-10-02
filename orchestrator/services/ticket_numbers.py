@@ -55,11 +55,14 @@ def ticket_number(db: Session, task: Any) -> Optional[str]:
     return ticket_numbers(db, task.workspace_id, [task]).get(task.id)
 
 
-def ticket_label(task: Any, number: Optional[str] = None) -> str:
-    """How a message names a ticket: its number, else (a step, an old row) "ticket <id>"."""
-    number = number or (format_number(task.workspace_seq) if getattr(task, "source_type", None) != STEP_SOURCE
-                        else None)
-    return number or f"ticket {task.id}"
+def ticket_label(task: Any, number: Optional[str] = None, *, capital: bool = False) -> str:
+    """How a message names a ticket: "ticket #0042", or "ticket 612" for one with no
+    number of its own here (a mission step, a row from before numbering). Never
+    "#612": a '#' now means a number, and #612 may be another ticket's."""
+    number = number or (format_number(getattr(task, "workspace_seq", None))
+                        if getattr(task, "source_type", None) != STEP_SOURCE else None)
+    label = f"ticket {number}" if number else f"ticket {task.id}"
+    return label[0].upper() + label[1:] if capital else label
 
 
 def is_number_ref(ref: Any) -> bool:

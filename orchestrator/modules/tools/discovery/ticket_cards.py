@@ -46,7 +46,7 @@ def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
 def _progress_line(card: Dict[str, Any], waited_s: int) -> str:
     who = card.get("assigned_agent") or "the agent"
     # PRD-252 R4: the ticket's number, never its id behind a '#'
-    bits = [f"{who} is working on {card.get('number') or 'ticket ' + str(card['id'])} · {waited_s} s"]
+    bits = [f"{who} is working on ticket {card.get('number') or card['id']} · {waited_s} s"]
     if card.get("last_tool"):
         bits.append(f"last tool: {card['last_tool']}")
     if card.get("files_touched"):
@@ -71,7 +71,7 @@ def _wait_budget(params: Dict[str, Any]) -> Tuple[int, int]:
 def _wait_result(task: Any, card: Dict[str, Any], waited: int, limit: int) -> Dict[str, Any]:
     """The wait's answer. PRD-252 R4: it names the ticket by its number."""
     terminal = task.status in WAIT_TERMINAL_STATUSES
-    label = ticket_label(task)
+    label = ticket_label(task, capital=True)
     return {
         "success": True,
         "terminal": terminal,

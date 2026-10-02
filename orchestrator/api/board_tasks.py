@@ -41,6 +41,7 @@ from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_corre
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import enrich_with_agents
+from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 
@@ -911,12 +912,12 @@ def _refreshed(db: Session, task: BoardTask, task_id: int) -> None:
     try:
         db.refresh(task)
     except InvalidRequestError:
-        raise HTTPException(status_code=404, detail=f"Ticket #{task_id} was deleted as it was decided.")
+        raise HTTPException(status_code=404, detail="The ticket was deleted as it was decided.")
 
 
 def already_decided(task: BoardTask) -> HTTPException:
     return HTTPException(status_code=422, detail=(
-        f"Ticket #{task.id} was already decided (status: {task.status}); nothing ran again."))
+        f"{ticket_label(task, capital=True)} was already decided (status: {task.status}); nothing ran again."))
 
 
 async def _announce_approval(db: Session, workspace_id: Any, task: BoardTask) -> None:
@@ -1109,7 +1110,7 @@ def _hold_before_starting(db: Session, task: BoardTask) -> None:
         db.refresh(task, with_for_update={"skip_locked": True})
     except InvalidRequestError:
         raise HTTPException(status_code=409, detail=(
-            f"Ticket #{task.id} is being started or finished right now; try again in a moment."))
+            f"{ticket_label(task, capital=True)} is being started or finished right now; try again in a moment."))
 
 
 def keep_previous_run(task: Any, *, why: str, by: str, now: Optional[datetime] = None) -> None:
@@ -1235,7 +1236,8 @@ def mission_runs_it(db: Session, task: Any) -> Optional[str]:
     goal = (run.goal or "").strip()[:GOAL_ON_A_REFUSAL_CHARS] if run is not None else ""
     what = "the mission" if task.source_type == "orchestration" else "a step of the mission"
     return (
-        f"Ticket #{task.id} is {what}{f' “{goal}”' if goal else ''}: the mission runs its steps, "
+        f"{ticket_label(task, ticket_number(db, task), capital=True)} is {what}{f' “{goal}”' if goal else ''}: "
+        "the mission runs its steps, "
         f"not the board. Retry or change it from the mission"
         f"{f' (/missions/{run_id})' if run_id is not None else ''}."
     )
@@ -1354,7 +1356,7 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
         raise HTTPException(status_code=409, detail=unable)
     if _running_now(db, task):
         raise HTTPException(status_code=409, detail=(
-            f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes."))
+            f"{ticket_label(task, capital=True)} is already running — nothing to start; it reports when it finishes."))
     # PRD-234: pressing Run Now (or dragging to In progress) is the operator's
     # approval, so the gate lets the ticket through instead of parking it.
     record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
@@ -1368,7 +1370,7 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     task.error_message = None
     if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
         raise HTTPException(status_code=409, detail=(
-            f"Ticket #{task.id} is starting or finishing a run right now; nothing was reset."))
+            f"{ticket_label(task, capital=True)} is starting or finishing a run right now; nothing was reset."))
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
     return {"success": True, "task_id": task.id, "status": task.status,
@@ -1379,13 +1381,13 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
 def _run_now_message(task: BoardTask, was: str, rerun: bool) -> str:
     """What Run Now did, in words (#1115: a Claude Code ticket waits for a host)."""
     if _waiting_for_a_host(task):
-        return f"Ticket #{task.id} is queued, but nothing can start it yet: {task.blocked_reason}"
+        return f"{ticket_label(task, capital=True)} is queued, but nothing can start it yet: {task.blocked_reason}"
     if rerun:
-        return (f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
+        return (f"Re-running {ticket_label(task)} — it was {was}; its previous result is kept in the "
                 "ticket's history.")
     if was == "in_progress":  # F176: the word said running, but no run held it
-        return f"Ticket #{task.id} said in progress, but nothing was running it — started it now."
-    return f"Ticket #{task.id} started."
+        return f"{ticket_label(task, capital=True)} said in progress, but nothing was running it — started it now."
+    return f"{ticket_label(task, capital=True)} started."
 
 
 def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:

@@ -7,8 +7,6 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from services.ticket_numbers import ticket_label
-
 from .ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
 from .ticket_refs import by_ticket_number
 
@@ -541,7 +539,7 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
     waited = 0
     visitor = _widget_turn()
     while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
-        await turn_progress.emit(turn_id, (f"{ticket_label(task)} is still running · {waited} s" if visitor
+        await turn_progress.emit(turn_id, (f"The ticket is still running · {waited} s" if visitor
                                            else _progress_line(task_card(task, agent_name), waited)))
         await asyncio.sleep(min(poll, limit - waited))
         waited = int(time.monotonic() - started)
