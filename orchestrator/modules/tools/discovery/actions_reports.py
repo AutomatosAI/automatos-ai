@@ -4,8 +4,17 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 
 def register_report_actions(registry: ActionRegistry) -> None:
-    """Register agent report actions (PRD-76)."""
+    """Register agent report actions (PRD-76), one tool each, in this order. Each
+    ActionDefinition is built inside registry.register(...), where
+    scripts/check_hierarchy_gate.py reads it."""
+    _register_submit_report(registry)
+    _register_browse_reports(registry)
+    _register_acknowledge_report(registry)
+    _register_link_report_to_task(registry)
+    _register_get_latest_report(registry)
 
+
+def _register_submit_report(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_submit_report",
         description=(
@@ -113,6 +122,8 @@ def register_report_actions(registry: ActionRegistry) -> None:
         accepts=("agent_id",),
     ))
 
+
+def _register_browse_reports(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_browse_reports",
         description=(
@@ -175,8 +186,8 @@ def register_report_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # Wave 3 — operating-signal lifecycle tools
 
+def _register_acknowledge_report(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_acknowledge_report",
         description=(
@@ -210,10 +221,12 @@ def register_report_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_link_report_to_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_link_report_to_task",
         description=(
-            "Add a board-task id to a report's linked_task_ids. Use when Auto "
+            "Add a ticket to a report's linked_task_ids. Use when Auto "
             "promotes a report's action_items into actual board tasks — keeps "
             "the trail from finding → ask → ticket intact."
         ),
@@ -222,7 +235,9 @@ def register_report_actions(registry: ActionRegistry) -> None:
             "type": "object",
             "properties": {
                 "report_id": {"type": "string"},
-                "task_id": {"type": "integer"},
+                # PRD-252 R4: the ticket by its number, as Auto's ticket tools take it
+                "task_id": {"type": "string",
+                            "description": "The ticket: its number as the board shows it, e.g. #0042; its id still works."},
             },
             "required": ["report_id", "task_id"],
         },
@@ -230,11 +245,13 @@ def register_report_actions(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         tags=["reports", "tasks", "linkage"],
         examples=[
-            "link this report to task 42",
+            "link this report to ticket #0042",
             "tie the audit findings to the new ticket",
         ],
     ))
 
+
+def _register_get_latest_report(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_latest_report",
         description=(
