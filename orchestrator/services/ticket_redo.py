@@ -30,6 +30,15 @@ SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
 MAX_CORRECTIONS_KEPT = 20
 # What opens a redo whose owner said what is wrong (PRD-252 R2).
 OWNER_WORDS_LEAD = "The owner sent it back with these words:"
+# PRD-252 R2 (Discuss): a discussion ends with a brief the owner agreed, which
+# "Update ticket and re-queue" writes onto the ticket (api.board_tasks.rebrief_task).
+REBRIEFED = "re-briefed in a discussion"
+BRIEF_AGREED = ("The owner agreed a new brief in a discussion; it is now this ticket's description. "
+                "Work from it.")
+MAX_BRIEF_CHARS = 8000
+PREVIOUS_BRIEFS_KEPT = 5
+# After this many Rejects the review panel suggests talking it through (Discuss).
+DISCUSS_AFTER_REJECTS = 3
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -40,6 +49,22 @@ def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[
     corrections.append({"note": note, "by": by, "at": at})
     data["owner_corrections"] = corrections[-MAX_CORRECTIONS_KEPT:]
     return data
+
+
+def with_new_brief(planning_data: Any, old_description: Optional[str], *, by: str, at: str) -> Dict[str, Any]:
+    """``planning_data`` with the brief being replaced kept in ``previous_briefs``
+    (rebuilt, never mutated in place), so a re-brief loses nothing."""
+    data = dict(planning_data) if isinstance(planning_data, dict) else {}
+    briefs = list(data.get("previous_briefs") or [])
+    briefs.append({"description": old_description or "", "by": by, "at": at})
+    data["previous_briefs"] = briefs[-PREVIOUS_BRIEFS_KEPT:]
+    return data
+
+
+def times_sent_back(task: Any) -> int:
+    """How many times the owner sent this ticket back with Reject."""
+    runs = (getattr(task, "planning_data", None) or {}).get("previous_runs") or []
+    return sum(1 for run in runs if isinstance(run, dict) and run.get("why") == SENT_BACK)
 
 
 def redo_block(task: Any) -> Optional[str]:

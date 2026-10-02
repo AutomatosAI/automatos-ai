@@ -113,6 +113,40 @@ def _resolve_entry(sanitized: Dict[str, Any]) -> Optional[PageEntry]:
     return get_page(key) if key else None
 
 
+# PRD-252 R2 (Discuss, D4): a ticket or a mission opened this chat to be talked through.
+_DISCUSS_LINES = {
+    "board_task": (
+        "The owner opened this chat from ticket {id} to talk it through. Read it first with "
+        "platform_get_task (task_id {id}): its brief, its result and the notes it was sent back "
+        "with. Work out with the owner what went wrong and agree the brief its agent should work "
+        "from. When you agree, give that brief as one block they can copy: they send it back to "
+        "the agent with 'Update ticket and re-queue'."
+    ),
+    "mission": (
+        "The owner opened this chat from mission {id} to talk it through. Read it first with "
+        "platform_get_mission (mission_id {id}): its goal, its plan and where it stands. Help the "
+        "owner decide on the plan; they approve, reject or change it on the mission's page."
+    ),
+}
+
+
+def _selected_line(selected: Dict[str, str]) -> str:
+    """What the preamble says about the page's selected entity."""
+    if selected["type"] == "repo":
+        # PRD-235 W2: the chat's Code mode is open on a folder of the workspace
+        # (a session's directory or a repository under projects/). That folder
+        # is the working scope for the workspace tools, not just a reference.
+        return (
+            f"Code mode is open on the folder `{selected['id']}`. Work there: read, grep, "
+            "edit, run and use git through the workspace tools (workspace_list_dir, "
+            "workspace_read_file, workspace_grep, workspace_write_file, workspace_exec, "
+            "workspace_git) with paths under that folder, and ground answers about the "
+            "code in those files."
+        )
+    discuss = _DISCUSS_LINES.get(selected["type"])
+    return discuss.format(id=selected["id"]) if discuss else f"Selected {selected['type']}: {selected['id']}."
+
+
 def render_page_preamble(sanitized: Dict[str, Any]) -> str:
     """One renderer for both forms: manifest-grounded block, or legacy line."""
     if not sanitized:
@@ -133,19 +167,7 @@ def render_page_preamble(sanitized: Dict[str, Any]) -> str:
         bits.append(f"Tab: {tab}.")
     selected = sanitized.get("selected")
     if selected:
-        if selected["type"] == "repo":
-            # PRD-235 W2: the chat's Code mode is open on a folder of the workspace
-            # (a session's directory or a repository under projects/). That folder
-            # is the working scope for the workspace tools, not just a reference.
-            bits.append(
-                f"Code mode is open on the folder `{selected['id']}`. Work there: read, grep, "
-                "edit, run and use git through the workspace tools (workspace_list_dir, "
-                "workspace_read_file, workspace_grep, workspace_write_file, workspace_exec, "
-                "workspace_git) with paths under that folder, and ground answers about the "
-                "code in those files."
-            )
-        else:
-            bits.append(f"Selected {selected['type']}: {selected['id']}.")
+        bits.append(_selected_line(selected))
     filters = sanitized.get("filters")
     if filters:
         rendered = "; ".join(f"{k}={v}" for k, v in filters.items())

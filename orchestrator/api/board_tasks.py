@@ -1174,18 +1174,7 @@ async def reject_task(
     # approval that landed first) finds the ticket already decided.
     if not _decide(db, task, seen=seen, values={"status": "assigned"}):
         raise already_decided(task)
-    task.started_at = None
-    task.completed_at = None
-    task.result = None
-    task.lease_until = None
-    task.attempts = 0  # a human-driven redo is a fresh attempt cycle
-    task.review_feedback = feedback or SENT_BACK_WITHOUT_A_NOTE
-
-    # Wake the dispatch loop so the redo starts immediately (single spine).
-    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
-    if task.source_type != "recipe":
-        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
-    db.commit()
+    _back_to_its_agent(db, ctx, task, feedback or SENT_BACK_WITHOUT_A_NOTE)
     _refreshed(db, task, task_id)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
@@ -1198,6 +1187,21 @@ async def reject_task(
         "assigned_agent_id": task.assigned_agent_id,
         "feedback": feedback or None,
     }
+
+
+def _back_to_its_agent(db: Session, ctx: RequestContext, task: BoardTask, feedback: str) -> None:
+    """A redo the owner asked for (Reject, or a re-brief): a fresh attempt cycle
+    with ``feedback`` in context, the dispatch loop woken at once, committed."""
+    task.started_at = None
+    task.completed_at = None
+    task.result = None
+    task.lease_until = None
+    task.attempts = 0  # a human-driven redo is a fresh attempt cycle
+    task.review_feedback = feedback
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    db.commit()
 
 
 def _recipe_execution_of(source_id: str) -> str:
