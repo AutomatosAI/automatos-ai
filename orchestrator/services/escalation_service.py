@@ -60,24 +60,7 @@ def check_blocked_escalations(db: Session, workspace_id) -> int:
             continue
 
         hours_blocked = (datetime.now(timezone.utc) - task.blocked_at).total_seconds() / 3600
-
-        escalation = BoardTask(
-            workspace_id=workspace_id,
-            title=f"Escalation: '{task.title[:100]}' blocked {int(hours_blocked)}h",
-            description=(
-                f"{ticket_label(task, capital=True)} has been blocked for {int(hours_blocked)} hours.\n\n"
-                f"**Reason:** {task.blocked_reason or 'Unknown'}\n\n"
-                f"**Original task:** {task.title}\n\n"
-                f"Please investigate and unblock or reassign."
-            ),
-            status="inbox",
-            priority="high",
-            review_mode="human",
-            created_by_type="system",
-            created_by_id="escalation_service",
-            tags=["escalation", f"blocked:{task.id}"],
-        )
-        db.add(escalation)
+        db.add(_blocked_escalation_card(workspace_id, task, hours_blocked))
         created += 1
 
         logger.warning(
@@ -91,6 +74,27 @@ def check_blocked_escalations(db: Session, workspace_id) -> int:
         db.flush()
 
     return created
+
+
+def _blocked_escalation_card(workspace_id, task: BoardTask, hours_blocked: float) -> BoardTask:
+    """The inbox card that asks a person to unblock ``task``. PRD-252 R4: it names
+    the ticket by its number."""
+    return BoardTask(
+        workspace_id=workspace_id,
+        title=f"Escalation: '{task.title[:100]}' blocked {int(hours_blocked)}h",
+        description=(
+            f"{ticket_label(task, capital=True)} has been blocked for {int(hours_blocked)} hours.\n\n"
+            f"**Reason:** {task.blocked_reason or 'Unknown'}\n\n"
+            f"**Original task:** {task.title}\n\n"
+            f"Please investigate and unblock or reassign."
+        ),
+        status="inbox",
+        priority="high",
+        review_mode="human",
+        created_by_type="system",
+        created_by_id="escalation_service",
+        tags=["escalation", f"blocked:{task.id}"],
+    )
 
 
 # PRD-204 S4: notify_budget_exceeded was removed. It was dead code (zero
