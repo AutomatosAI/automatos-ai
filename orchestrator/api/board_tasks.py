@@ -1007,6 +1007,28 @@ async def _run_approval_action(db: Session, ctx: RequestContext, approval_action
         raise HTTPException(status_code=500, detail=f"Approval action failed: {e}")
 
 
+# PRD-252 D6: a mission's own card is decided on its mission, where its plan is
+# approved or changed. A ticket verdict marked the card done and left the run
+# awaiting approval, never started.
+MISSION_CARD_SOURCE = "orchestration"
+MISSION_CARD_VERDICT = ("This is a mission's card: approve or change its plan on the mission's page. "
+                        "Approving the card here would mark it done without starting the mission.")
+
+
+def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int) -> BoardTask:
+    """The ticket an Approve or Reject decides; 404 when it is not this workspace's,
+    409 for a mission's own card (D6)."""
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.source_type == MISSION_CARD_SOURCE:
+        raise HTTPException(status_code=409, detail=MISSION_CARD_VERDICT)
+    return task
+
+
 @router.post("/{task_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_task(
     task_id: int,
@@ -1020,13 +1042,7 @@ async def approve_task(
     If the task has an approval_action in planning_data, execute it
     (e.g., publish a blog post). Then move the task to done.
     """
-    task = db.query(BoardTask).filter(
-        BoardTask.id == task_id,
-        BoardTask.workspace_id == ctx.workspace_id,
-    ).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
+    task = _ticket_for_verdict(db, ctx, task_id)
     if task.status != "review":
         raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
 
@@ -1132,13 +1148,7 @@ async def reject_task(
     re-assigned task up immediately. F092: a DONE ticket can be sent back the
     same way; what it had finished with is kept in its history first.
     """
-    task = db.query(BoardTask).filter(
-        BoardTask.id == task_id,
-        BoardTask.workspace_id == ctx.workspace_id,
-    ).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
+    task = _ticket_for_verdict(db, ctx, task_id)
     if task.status not in SENDABLE_BACK:
         raise HTTPException(
             status_code=422,
