@@ -22,7 +22,7 @@ count and the rows; ATTENTION and every badge read the same count.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -54,7 +54,7 @@ _COUNTS = text("""
 """)
 
 _REVIEW_ROWS = text("""
-    SELECT bt.id, bt.title, bt.orchestration_run_id, a.name AS agent_name,
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.orchestration_run_id, a.name AS agent_name,
            COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
@@ -63,7 +63,7 @@ _REVIEW_ROWS = text("""
 """)
 # A failed mission card opens its mission: the run id rides along.
 _FAILED_ROWS = text("""
-    SELECT bt.id, bt.title, bt.orchestration_run_id, a.name AS agent_name,
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.orchestration_run_id, a.name AS agent_name,
            COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'failed' AND bt.source_type <> 'orchestration_task'
@@ -131,30 +131,44 @@ def _pending_grants(db: Session, workspace_id: Any, *, questions: bool) -> List[
 
 
 def _grant_rows(db: Session, workspace_id: Any, grants: List[Any]) -> List[Dict[str, Any]]:
-    """A question or approval grant as a row: the ticket it opens in, and who asked (F091-E1)."""
+    """A question or approval grant as a row: the ticket it opens in (and its
+    number, PRD-252 R4), and who asked (F091-E1)."""
     from core.models.approval_grants import KIND_QUESTION
     from services.grant_owners import grant_owners
 
     owners = grant_owners(db, workspace_id, grants)
+    tickets = {g.id: (owners.get(g.id) or {}).get("ticket") or {} for g in grants}
+    numbers = _numbers_of(db, workspace_id, {t["id"] for t in tickets.values() if t.get("id")})
     rows = []
     for g in grants:
-        owner = owners.get(g.id) or {}
+        ticket_id = tickets[g.id].get("id")
         rows.append({
             "source": "grant",
             "id": str(g.id),
             "title": g.question_md if g.kind == KIND_QUESTION else (g.reason or g.tool_name or "Approval"),
-            "ticket_id": (owner.get("ticket") or {}).get("id"),
-            "agent_name": (owner.get("agent") or {}).get("name"),
+            "ticket_id": ticket_id,
+            "ticket_number": numbers.get(ticket_id),
+            "agent_name": ((owners.get(g.id) or {}).get("agent") or {}).get("name"),
             "at": _iso(g.requested_at),
         })
     return rows
 
 
+def _numbers_of(db: Session, workspace_id: Any, ticket_ids: set) -> Dict[int, Optional[str]]:
+    from core.models.core import BoardTask
+    from services.ticket_numbers import ticket_numbers
+
+    if not ticket_ids:
+        return {}
+    tickets = db.query(BoardTask).filter(BoardTask.id.in_(ticket_ids), BoardTask.workspace_id == workspace_id).all()
+    return ticket_numbers(db, workspace_id, tickets)
+
+
 def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Approval grants and missions waiting for their plan's approval, newest first."""
     missions = [
-        {"source": "mission", "id": str(r.id), "title": r.goal, "ticket_id": None, "agent_name": None,
-         "at": _iso(r.updated_at)}
+        {"source": "mission", "id": str(r.id), "title": r.goal, "ticket_id": None, "ticket_number": None,
+         "agent_name": None, "at": _iso(r.updated_at)}
         for r in db.execute(_MISSION_ROWS, params)
     ]
     merged = _grant_rows(db, workspace_id, grants) + missions
@@ -166,5 +180,8 @@ def _iso(value: Any) -> Any:
 
 
 def _ticket_row(r: Any) -> Dict[str, Any]:
+    from services.ticket_numbers import format_number
+
     mission = str(r.orchestration_run_id) if r.orchestration_run_id else None
-    return {"ticket_id": r.id, "title": r.title, "agent_name": r.agent_name, "mission_id": mission, "at": _iso(r.at)}
+    return {"ticket_id": r.id, "number": format_number(r.workspace_seq), "title": r.title,
+            "agent_name": r.agent_name, "mission_id": mission, "at": _iso(r.at)}

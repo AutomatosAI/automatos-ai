@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .ticket_refs import by_ticket_number
+
 logger = logging.getLogger(__name__)
 
 
@@ -142,6 +144,7 @@ async def acknowledge_report(
         return {"success": False, "error": str(exc)}
 
 
+@by_ticket_number  # PRD-252 R4: takes the ticket as #0042
 async def link_report_to_task(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:

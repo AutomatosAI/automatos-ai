@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .ticket_refs import by_ticket_number
+
 logger = logging.getLogger(__name__)
 
 
@@ -221,6 +223,7 @@ BOARD_SNAPSHOT_TASK_LIMIT = 200
 BOARD_SNAPSHOT_RECENT = 10
 
 
+@by_ticket_number  # PRD-252 R4: each ticket listed with its number
 async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Everything a status answer needs, in ONE call.
 
