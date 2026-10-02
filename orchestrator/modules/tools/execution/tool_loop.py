@@ -193,7 +193,7 @@ class ToolLoopExecutor:
         max_iterations: int = 10,
         content_truncate_tokens: int = 2000,
         tracker: Optional[ToolExecutionTracker] = None,
-        promises: bool = False,
+        promises: Optional[bool] = None,
     ) -> None:
         self._llm = llm_callback
         self._tool = tool_callback
@@ -201,7 +201,7 @@ class ToolLoopExecutor:
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
         # F187: work said to be under way is a claim in Auto's own chat replies
-        # (an agent's draft promises in its writer's voice).
+        # (an agent's draft promises in its writer's voice). None: the turn's lane decides.
         self.promises = promises
         # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
         self._stuck = StuckDetector()

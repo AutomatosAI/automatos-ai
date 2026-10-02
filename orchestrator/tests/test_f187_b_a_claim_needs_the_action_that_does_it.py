@@ -27,6 +27,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from core.llm.clients.base import LLMResponse
+from core.llm.usage_context import LANE_BOARD_TASK, LANE_CHAT, usage_scope
 from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 
@@ -133,7 +134,17 @@ def test_exactly_as_a_figure_of_speech_is_no_claim(reply):
 ])
 def test_work_said_to_be_under_way_needs_work_the_turn_started(reply, ran):
     assert claimed_action_not_done(reply, ran, promises=True) == "under way"
-    assert claimed_action_not_done(reply, ran) is None          # an agent's draft promises in its writer's voice
+    assert claimed_action_not_done(reply, ran, promises=False) is None   # an agent's draft: its writer's voice
+
+
+def test_a_chat_turn_counts_promises_and_an_agent_run_does_not():
+    """Every chat turn is booked to the chat lane (stream_response_with_agent)."""
+    reply = "Please bear with me while I fix this."
+    assert claimed_action_not_done(reply, set()) is None                        # outside any turn
+    with usage_scope(request_type=LANE_CHAT, execution_id="chat:7177086e"):
+        assert claimed_action_not_done(reply, set()) == "under way"
+    with usage_scope(request_type=LANE_BOARD_TASK, execution_id="board_task:1146"):
+        assert claimed_action_not_done(reply, set()) is None
 
 
 @pytest.mark.parametrize("reply, ran", [
@@ -182,25 +193,27 @@ async def _ok(name, args, call_id, workspace_id):
     return {"success": True}
 
 
-def _install_turn(promises, *texts):
-    executor = ToolLoopExecutor(llm_callback=_Model(*texts), tool_callback=_ok, max_iterations=5, promises=promises)
+def _install_turn(lane, *texts):
+    """The loop as the chat and an agent run build it (no ``promises``): the lane decides."""
+    executor = ToolLoopExecutor(llm_callback=_Model(*texts), tool_callback=_ok, max_iterations=5)
     messages = [{"role": "user", "content": "Add the Weekly social posts playbook from the marketplace."}]
     create = {"id": "call_1", "type": "function", "function": {"name": "platform_execute", "arguments": json.dumps(
         {"action": "platform_create_playbook", "params": {"name": "Weekly Social Posts"}})}}
-    result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[create]),
-                                      messages=messages, tools=TOOLS, workspace_id=WS))
+    with usage_scope(request_type=lane, execution_id=f"{lane}:1"):
+        result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[create]),
+                                          messages=messages, tools=TOOLS, workspace_id=WS))
     nudges = [m for m in messages if m["role"] == "system" and "says something was under way" in m["content"]]
     return result, nudges
 
 
 def test_the_chat_loop_nudges_work_said_to_be_under_way_once():
-    result, nudges = _install_turn(True, "I'll get that installed for you right away.",
+    result, nudges = _install_turn(LANE_CHAT, "I'll get that installed for you right away.",
                                    "I made an empty playbook instead of installing it: nothing was installed.")
     assert len(nudges) == 1 and result.response.content.startswith("I made an empty playbook")
 
 
 def test_an_agent_run_leaves_a_drafted_promise_alone():
-    result, nudges = _install_turn(False, "Hi Rosie, I'll get back to you as soon as we've looked into it.")
+    result, nudges = _install_turn(LANE_BOARD_TASK, "Hi Rosie, I'll get back to you as soon as we've looked into it.")
     assert nudges == [] and result.response.content.startswith("Hi Rosie")
 
 
@@ -211,4 +224,5 @@ def test_a_first_reply_that_says_work_is_under_way_goes_through_the_loop():
     svc.workspace_id = WS
     first = NS(content="Please bear with me for a moment while I execute these steps and verify their outcome.",
                tool_calls=None)                                                                   # 26 Sep 02:34:49
-    assert asyncio.run(svc._first_reply_goes_through_the_loop(first, TOOLS, [], "Please do it.")) is True
+    with usage_scope(request_type=LANE_CHAT, execution_id="chat:7177086e"):
+        assert asyncio.run(svc._first_reply_goes_through_the_loop(first, TOOLS, [], "Please do it.")) is True

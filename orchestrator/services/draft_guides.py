@@ -96,5 +96,5 @@ def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Op
         return None
     from modules.tools.execution.action_claims import claimed_action_not_done
 
-    claim = claimed_action_not_done(str(draft or ""), set(ran or ()))
+    claim = claimed_action_not_done(str(draft or ""), set(ran or ()), promises=False)   # the writer's voice
     return CHECK_BEFORE_SENDING.format(claim=claim) if claim else None

@@ -139,7 +139,7 @@ def unexecuted_claims_notice(
         return UNRUN_SOURCE_NOTICE.format(tool=cited)
     if not any_tool_ran and looks_like_narrated_action(reply):
         return NARRATED_ACTIONS_NOTICE
-    claim = claimed_action_not_done(reply, done, promises=True)
+    claim = claimed_action_not_done(reply, done)
     if claim:
         return CLAIMED_ACTION_NOTICE.format(claim=claim)
     return None
@@ -1695,7 +1695,7 @@ class StreamingChatService:
             return False
         try:
             return bool(
-                claimed_action_not_done(response.content, {name for name, _args in prefetched}, promises=True)
+                claimed_action_not_done(response.content, {name for name, _args in prefetched})
                 or await asyncio.to_thread(invented_ids, response.content, latest_text, self.workspace_id)
             )
         except Exception:
@@ -2136,7 +2136,7 @@ class StreamingChatService:
             llm_callback=_llm_callback,
             tool_callback=_tool_callback,
             max_iterations=max_iterations,
-            content_truncate_tokens=2000, promises=True,
+            content_truncate_tokens=2000,
         )
         # F085-A: a search that already ran this turn (retrieval first) counts —
         # its repeat is skipped and citing it is no false claim (F099).
@@ -2310,7 +2310,7 @@ class StreamingChatService:
             answer = getattr(result.response, "content", "") or ""
             verdict = Verdict(
                 tools=sum(executor.tracker.tool_counts.values()) - len(prefetched or []),
-                claim=claimed_action_not_done(answer, executor.tracker.succeeded, promises=True),
+                claim=claimed_action_not_done(answer, executor.tracker.succeeded),
                 passive=passive_claim(answer),
                 ids=(await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
                      if f187["reprompted"] else []),

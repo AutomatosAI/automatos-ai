@@ -23,9 +23,9 @@ F187 (night 6: 102 unbacked claims in nine persona days), what the families miss
 - Work said to be under way when none was: "bear with me", "give me a moment",
   "I'll let you know as soon as…", "I'll get that installed right away". A chat
   turn ends with its reply, so only work the turn started (a ticket, a run, a
-  schedule, an install) is still going. Only Auto's own words in chat make this
-  claim (``promises``): an agent's draft promises in its writer's voice, and so
-  does a draft Auto quotes for the owner.
+  schedule, an install) is still going. Only Auto's own words in a chat turn make
+  this claim (``promises``; by default, the turn's lane is chat): an agent's
+  draft promises in its writer's voice, and so does a draft Auto quotes.
 """
 from __future__ import annotations
 
@@ -187,16 +187,25 @@ def _own_words(text: str) -> str:
     return "\n".join(kept)
 
 
-def claimed_action_not_done(text: str, done: Optional[set] = None, *, promises: bool = False) -> Optional[str]:
+def _auto_speaks() -> bool:
+    """A chat turn: the chat service books the whole turn to the chat lane
+    (consumers.chatbot.service.stream_response_with_agent); agent runs book theirs."""
+    from core.llm.usage_context import LANE_CHAT, current_usage_scope
+
+    return current_usage_scope().get("request_type") == LANE_CHAT
+
+
+def claimed_action_not_done(text: str, done: Optional[set] = None, *,
+                            promises: Optional[bool] = None) -> Optional[str]:
     """What the reply says was done ("approved", "installed", "checked", …) when
     no action that does it succeeded this turn, else None. ``promises``: work
-    said to be under way counts too (Auto in chat). Night 3: "I've approved the
-    mission. It's now running" (it wasn't). Night 6: "I'll get that installed
-    for you right away" after an empty copy was created; "I've checked the
-    board" with no board read."""
+    said to be under way counts too; by default, in a chat turn (Auto's own
+    words). Night 3: "I've approved the mission. It's now running" (it wasn't).
+    Night 6: "I'll get that installed for you right away" after an empty copy was
+    created; "I've checked the board" with no board read."""
     succeeded = [a.lower() for a in (done or ())]
     found = _first_unbacked(text or "", _ACTION_CLAIMS, succeeded)
-    if found or not promises:
+    if found or not (_auto_speaks() if promises is None else promises):
         return found
     return _first_unbacked(_own_words(text or ""), _PROMISES, succeeded)
 
