@@ -140,9 +140,9 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
     run_skill_script,
     set_skill_script_execution,
 )
+from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
-    create_board_task,
     list_board_tasks,
     get_board_task,
     assign_board_task,

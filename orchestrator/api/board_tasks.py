@@ -72,7 +72,10 @@ VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 # F180: PRD-234's platform_create_task said 'manual' for a person's review; the
 # board says 'human'. The tools take either and keep the board's word.
-REVIEW_MODE_ALIASES = {"manual": "human"}
+# F180: the names a model reaches for (night 6's Auto said "human_review" and was refused).
+REVIEW_MODE_ALIASES = {"manual": "human", "human_review": "human", "human-review": "human", "owner": "human",
+                       "owner_review": "human", "review": "human", "approval": "human", "llm_review": "llm",
+                       "model": "llm", "automatic": "auto", "none": "auto"}
 
 
 def _one_of(value: Any, allowed: Any) -> bool:
