@@ -73,6 +73,9 @@ PATCHABLE_TASK_FIELDS = frozenset({
 })
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
+# PRD-252 D7: 'llm' had no reviewer and behaved as 'human', so nothing offers it any
+# more (the create dialog, Auto's tools); a ticket that already has it still loads.
+OFFERED_REVIEW_MODES = ("human", "auto")
 # F180: PRD-234's platform_create_task said 'manual' for a person's review; the
 # board says 'human'. The tools take either and keep the board's word.
 REVIEW_MODE_ALIASES = {"manual": "human"}
@@ -1412,6 +1415,8 @@ async def update_task_status(
 
     body = await request.json()
     new_status = _text_of(body.get("status"), "status")
+    if new_status == "in_progress" and task.status != "in_progress":
+        _hold_before_starting(db, task)  # F209: a claim that landed while the body arrived wins
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     refusal = DECISION_DRAGS.get((task.status, new_status))

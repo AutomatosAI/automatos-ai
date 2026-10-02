@@ -4,9 +4,13 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 
 def register_scheduling_actions(registry: ActionRegistry) -> None:
-    """Register agent self-scheduling actions (PRD-77)."""
+    """Register agent self-scheduling actions (PRD-77): one builder per tool, in this order."""
+    for build in (_schedule_task, _list_scheduled_tasks, _cancel_scheduled_task, _get_schedule):
+        registry.register(build())
 
-    registry.register(ActionDefinition(
+
+def _schedule_task() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_schedule_task",
         description=(
             "Schedule a follow-up task for yourself or another agent. "
@@ -22,53 +26,7 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
         category="scheduling",
         parameters={
             "type": "object",
-            "properties": {
-                "task_type": {
-                    "type": "string",
-                    "enum": ["one_shot", "recurring"],
-                    "description": "one_shot runs once at schedule time; recurring uses cron.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "What the task should accomplish. Be specific — this becomes the opening message to the target agent.",
-                },
-                "schedule": {
-                    "type": "string",
-                    "description": "ISO datetime for one_shot (e.g. '2026-03-11T09:00:00Z'), cron for recurring (e.g. '0 9 * * 1').",
-                },
-                "target_agent_name": {
-                    "type": "string",
-                    "description": "Name of the agent to run the task (defaults to yourself).",
-                },
-                "max_runs": {
-                    "type": "integer",
-                    "description": "For recurring: max number of executions before auto-cancel. Omit for unlimited.",
-                },
-                "deliver_as": {
-                    "type": "string",
-                    "enum": ["chat", "board_task"],
-                    "description": "chat = open a chat with the target agent when it fires (default); board_task = file a board ticket when it fires.",
-                },
-                "title": {
-                    "type": "string",
-                    "description": "board_task only: the ticket title (defaults to the first line of the description).",
-                },
-                "priority": {
-                    "type": "string",
-                    "enum": ["urgent", "high", "medium", "low"],
-                    "description": "board_task only: the ticket priority (default medium).",
-                },
-                "review_mode": {
-                    "type": "string",
-                    "enum": ["auto", "human", "llm"],
-                    "description": "board_task only: the ticket's review gate (default auto).",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "board_task only: tags for the ticket.",
-                },
-            },
+            "properties": _schedule_task_properties(),
             "required": ["task_type", "description", "schedule"],
         },
         permission_level="write",
@@ -80,9 +38,62 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
             "set up a weekly check every Monday at 9am",
             "schedule the researcher to update competitor data weekly",
         ],
-    ))
+    )
 
-    registry.register(ActionDefinition(
+
+def _schedule_task_properties() -> dict:
+    return {
+        "task_type": {
+            "type": "string",
+            "enum": ["one_shot", "recurring"],
+            "description": "one_shot runs once at schedule time; recurring uses cron.",
+        },
+        "description": {
+            "type": "string",
+            "description": "What the task should accomplish. Be specific — this becomes the opening message to the target agent.",
+        },
+        "schedule": {
+            "type": "string",
+            "description": "ISO datetime for one_shot (e.g. '2026-03-11T09:00:00Z'), cron for recurring (e.g. '0 9 * * 1').",
+        },
+        "target_agent_name": {
+            "type": "string",
+            "description": "Name of the agent to run the task (defaults to yourself).",
+        },
+        "max_runs": {
+            "type": "integer",
+            "description": "For recurring: max number of executions before auto-cancel. Omit for unlimited.",
+        },
+        "deliver_as": {
+            "type": "string",
+            "enum": ["chat", "board_task"],
+            "description": "chat = open a chat with the target agent when it fires (default); board_task = file a board ticket when it fires.",
+        },
+        "title": {
+            "type": "string",
+            "description": "board_task only: the ticket title (defaults to the first line of the description).",
+        },
+        "priority": {
+            "type": "string",
+            "enum": ["urgent", "high", "medium", "low"],
+            "description": "board_task only: the ticket priority (default medium).",
+        },
+        "review_mode": {
+            "type": "string",
+            # PRD-252 D7: no 'llm' until a model reviewer exists; it behaved as 'human'.
+            "enum": ["auto", "human"],
+            "description": "board_task only: the ticket's review gate (default auto).",
+        },
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "board_task only: tags for the ticket.",
+        },
+    }
+
+
+def _list_scheduled_tasks() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_list_scheduled_tasks",
         description=(
             "List all scheduled tasks for the workspace. Shows pending, active, "
@@ -111,9 +122,11 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
             "show my scheduled tasks",
             "list active scheduled tasks",
         ],
-    ))
+    )
 
-    registry.register(ActionDefinition(
+
+def _cancel_scheduled_task() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_cancel_scheduled_task",
         description=(
             "Cancel a scheduled (recurring or one-off) task by its ID so it stops "
@@ -136,9 +149,11 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
         requires_confirmation=True,
         tags=["scheduling", "write", "destructive"],
         examples=["cancel scheduled task 5", "stop that recurring task"],
-    ))
+    )
 
-    registry.register(ActionDefinition(
+
+def _get_schedule() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_get_schedule",
         description=(
             "Show everything scheduled in the workspace right now — agent heartbeat "
@@ -168,4 +183,4 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
             "show the schedule for the next week",
             "what automations do I have set up",
         ],
-    ))
+    )
