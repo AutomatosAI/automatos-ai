@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
 import type { WorkspaceSocialsState } from '@/lib/api-client'
@@ -124,6 +125,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { isSignedIn, getToken } = useAuth()
     const { organization } = useOrganization()
     const pathname = usePathname()
+    const queryClient = useQueryClient()
     const [workspace, setWorkspace] = useState<Workspace | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<Error | null>(null)
@@ -192,7 +194,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             })
 
             if (typeof window !== 'undefined') {
+                // F226: every request names the stored workspace. Reads sent before this
+                // answer used the old one, so when it changes they all refetch: a board
+                // and a count from two workspaces never share a page.
+                const before = localStorage.getItem('last_active_workspace')
                 localStorage.setItem('last_active_workspace', data.id)
+                if (before && before !== data.id) void queryClient.invalidateQueries()
             }
 
             setError(null)
