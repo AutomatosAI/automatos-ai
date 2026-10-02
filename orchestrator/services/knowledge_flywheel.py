@@ -339,6 +339,18 @@ async def ingest_agent_output(
     )
 
 
+# The temp copy's extension, from the kinds an agent output takes (every caller
+# passes a .md name today), so no part of a name ever reaches the temp path.
+_TEMP_SUFFIXES = {".md": ".md", ".txt": ".txt", ".json": ".json", ".csv": ".csv", ".html": ".html"}
+
+
+def temp_suffix(filename: str) -> str:
+    """The temp file's extension for ``filename``: its own when it is a kind an
+    agent output takes, else ``.md``. CodeQL (F235 review): the name derives from
+    the agent's name, so it must not choose any part of a path."""
+    return _TEMP_SUFFIXES.get(os.path.splitext(str(filename))[1].lower(), ".md")
+
+
 def _report_waits(db: Session, workspace_id: UUID | str, report_id: Optional[str], content: str) -> bool:
     """F235 (Gerard, 2 Oct: approved work only): a job report becomes a Document
     only once its work is approved (``services.report_knowledge``). Read-only. A
@@ -360,7 +372,7 @@ async def _upload_output(db: Session, workspace_id: UUID | str, *, content: str,
                          created_by: str, tags: List[str], report_type: Optional[str]) -> Optional[int]:
     """The ingestion manager's upload, then the Knowledge-Graph pending when the
     output's kind earns an extraction pass. Fail-soft; the temp file always goes."""
-    suffix = os.path.splitext(filename)[1] or ".md"
+    suffix = temp_suffix(filename)
     tmp_path: Optional[str] = None
     try:
         # Lazy import: get_document_manager carries the canonical db_config

@@ -295,3 +295,15 @@ def test_the_cleanup_keeps_only_approved_work(db_session, seed_workspace, report
     _document(db_session, ws, approved)
     plan = asyncio.run(cleanup.review(db_session, ws))
     assert [d["document"] for d in plan["remove"]] == [doc] and len(plan["keep"]) == 1
+
+
+@pytest.mark.parametrize("filename, suffix", [
+    ("2026-10-02_monday-checklist.md", ".md"), ("totals.CSV", ".csv"), ("notes", ".md"),
+    ("run.sh", ".md"), ("x.md/../../etc/passwd", ".md"), ("a.md\x00.py", ".md"),
+])
+def test_a_reports_name_never_chooses_its_temp_path(filename, suffix):
+    """CodeQL (py/path-injection) on this PR: the report's file name comes from
+    the agent's name, and its extension became the temp file's suffix."""
+    from services.knowledge_flywheel import temp_suffix
+
+    assert temp_suffix(filename) == suffix
