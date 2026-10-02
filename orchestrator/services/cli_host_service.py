@@ -43,6 +43,7 @@ from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
 from services.session_report import APPROVAL_NOT_ON_RECORD
+from services.ticket_numbers import ticket_label  # PRD-252 R4
 from core.session_permission_modes import (
     MODE_EDITS,
     PERMISSION_MODE_KEY,
@@ -1320,8 +1321,9 @@ SESSION_HOLD_OPTIONS = (SESSION_HOLD_OPTION_ALLOW, SESSION_HOLD_OPTION_DENY)
 SESSION_HOLD_TTL_SECONDS = 3600
 
 
-def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
-    """The question the operator sees, wherever it reaches them.
+def session_hold_question(task_id: Any, entry: Dict[str, Any], *, ticket: Optional[str] = None) -> str:
+    """The question the operator sees, wherever it reaches them. ``ticket`` names
+    the ticket ("ticket #0042", PRD-252 R4); without it, "ticket 612".
 
     Night 1 (2026-09-18): the card was a raw, truncated shell command plus the
     gate's own wording — the operator had to reverse-engineer what the agent was
@@ -1333,7 +1335,7 @@ def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
     subject = str(entry.get("subject") or entry.get("tool") or "?")
     intent = str(entry.get("intent") or entry.get("description") or "").strip()
 
-    lines = [f"**Allow this command in ticket #{task_id}?**", ""]
+    lines = [f"**Allow this command in {ticket or f'ticket {task_id}'}?**", ""]
     lines += [intent or _plain_intent(subject), ""]
     # The full command, never truncated, but folded away — the summary line is
     # what most decisions are made on.
@@ -1506,24 +1508,11 @@ async def raise_session_ask(
         .first()
     )
     if task is None:
-        return {"success": False, "error": f"ticket #{task_id} is not in this workspace"}
-
-    # One open question at a time, and a hard ceiling per ticket. Every ask
-    # raises a card in the Questions tab, rings the bell and sends a Telegram
-    # message with text the session chose — so "ask politely once" cannot be a
-    # prompt instruction alone. A session whose prompt has been steered would
-    # otherwise reach the operator as many times as its tool allowance allows.
-    ref = dict(task.runtime_ref or {})
-    still_open = open_session_asks(ref)
-    if still_open:
-        return {"success": False,
-                "error": "you already have a question waiting for an answer on this ticket: "
-                         f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
-                         "without it and end your turn — the answer resumes you."}
-    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
-        return {"success": False,
-                "error": f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
-                         "still need in your final message and end your turn."}
+        # PRD-252 R4: an id never follows a '#', which now means a ticket's number.
+        return {"success": False, "error": f"ticket {task_id} is not in this workspace"}
+    refused = _ask_refused(task)
+    if refused:
+        return {"success": False, "error": refused}
 
     try:
         staged = await stage_question(
@@ -1547,18 +1536,36 @@ async def raise_session_ask(
     task.runtime_ref = record_session_ask(dict(task.runtime_ref or {}), grant_id=ask_id, question=question)
     db.commit()
     logger.info("[cli-host] ticket #%s asked the operator (ask #%s)", task_id, ask_id)
-    return {
-        "success": True,
-        "result": {
-            "ask_id": int(ask_id),
-            "message": (
-                f"Asked the operator (question #{ask_id}). It is on their Questions tab and their phone. "
-                "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
-                "they reply. Finish everything that does not depend on the answer now, then end your "
-                "turn. Do not wait and do not ask again."
-            ),
-        },
-    }
+    return {"success": True, "result": {"ask_id": int(ask_id), "message": ASKED.format(ask_id=ask_id)}}
+
+
+# What the session reads once its question is filed. PRD-252 R4: the question's
+# id never follows a '#', which now means a ticket's number.
+ASKED = (
+    "Asked the operator (question {ask_id}). It is on their Questions tab and their phone. "
+    "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
+    "they reply. Finish everything that does not depend on the answer now, then end your "
+    "turn. Do not wait and do not ask again."
+)
+
+
+def _ask_refused(task: Any) -> Optional[str]:
+    """Why a session may not ask now. One open question at a time, and a hard
+    ceiling per ticket. Every ask raises a card in the Questions tab, rings the
+    bell and sends a Telegram message with text the session chose — so "ask
+    politely once" cannot be a prompt instruction alone. A session whose prompt
+    has been steered would otherwise reach the operator as many times as its
+    tool allowance allows."""
+    ref = dict(task.runtime_ref or {})
+    still_open = open_session_asks(ref)
+    if still_open:
+        return ("you already have a question waiting for an answer on this ticket: "
+                f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
+                "without it and end your turn — the answer resumes you.")
+    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
+        return (f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
+                "still need in your final message and end your turn.")
+    return None
 
 
 def answer_session_ask(db: Session, grant: Any) -> bool:
@@ -1701,7 +1708,7 @@ async def _stage_hold_question(
         res = await stage_question(
             db, task.workspace_id,
             subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id),
-            question=session_hold_question(task.id, entry), options=list(SESSION_HOLD_OPTIONS),
+            question=session_hold_question(task.id, entry, ticket=ticket_label(task)), options=list(SESSION_HOLD_OPTIONS),
             ttl_seconds=SESSION_HOLD_TTL_SECONDS,
             asked_by_agent_id=task.assigned_agent_id, agent_name=agent_name,
             details={SESSION_HOLD_MARKER: {"request_id": request_id, "task_id": task.id}},
@@ -2202,7 +2209,7 @@ def _register_session_deliverables(
                 file_path=rel, source_type="task", source_id=str(task.id),
                 agent_id=agent_id, agent_name=agent_name, artifact_type=artifact_type,
                 file_size_bytes=size,
-                summary=f"Written by a Claude Code session for ticket #{task.id}",
+                summary=f"Written by a Claude Code session for {ticket_label(task)}",
                 extra={"task_id": task.id, "session_id": session_id, "host_path": str(host_path),
                        "runtime": RUNTIME_CLI},
             )
