@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from core.models.core import BoardTask
 from core.models.ticket_numbers import STEP_SOURCE
@@ -72,12 +73,29 @@ def ticket_number(db: Session, task: Any) -> Optional[str]:
     return ticket_numbers(db, workspace_id, [task]).get(task.id)
 
 
+def number_of(task: Any) -> Optional[str]:
+    """One ticket's number with no list to read it from: its own, or a mission
+    step's from its card, read through the session the step was loaded in, as a
+    relationship loads its parent. A list numbers its tickets in one read
+    (``ticket_numbers``) instead. None for a step outside a session."""
+    if getattr(task, "source_type", None) != STEP_SOURCE:
+        return format_number(getattr(task, "workspace_seq", None))
+    db = _session_of(task)
+    return ticket_number(db, task) if db is not None else None
+
+
+def _session_of(task: Any) -> Optional[Session]:
+    try:
+        return object_session(task)
+    except UnmappedInstanceError:  # a plain object standing in for a ticket
+        return None
+
+
 def ticket_label(task: Any, number: Optional[str] = None, *, capital: bool = False) -> str:
-    """How a message names a ticket: "ticket #0042", or "ticket 612" for one with no
-    number of its own here (a mission step, a row from before numbering). Never
-    "#612": a '#' now means a number, and #612 may be another ticket's."""
-    number = number or (format_number(getattr(task, "workspace_seq", None))
-                        if getattr(task, "source_type", None) != STEP_SOURCE else None)
+    """How a message names a ticket: "ticket #0042" ("ticket #0051.3" for a mission
+    step), or "ticket 612" for one with no number (a row from before numbering).
+    Never "#612": a '#' now means a number, and #612 may be another ticket's."""
+    number = number or number_of(task)
     label = f"ticket {number}" if number else f"ticket {task.id}"
     return label[0].upper() + label[1:] if capital else label
 

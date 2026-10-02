@@ -164,6 +164,22 @@ def test_wait_returns_when_the_ticket_ends_and_narrates_meanwhile(monkeypatch):
     ]
 
 
+def test_a_widget_visitor_waits_without_seeing_the_tickets_number(monkeypatch):
+    """PRD-252 R4 / F155: a number would tell a public visitor how many tickets the
+    business has, so the wait's words name no number for a widget turn."""
+    try:
+        import modules.tools.discovery.handlers_board_tasks  # noqa: F401
+    except Exception as e:
+        pytest.skip(f"handlers not importable here: {e}")
+    from core.security.surface import WIDGET, turn_surface
+
+    with turn_surface(WIDGET, ("chat", "tasks:read"), None):
+        result, lines, _ = _run_wait(monkeypatch, ["in_progress", "done"], {"task_id": 92})
+
+    assert result["message"] == "The ticket ended: done."
+    assert lines == ["The ticket is still running · 0 s"] and "#0042" not in str(result)
+
+
 def test_wait_respects_the_budget_and_says_still_running(monkeypatch):
     try:
         import modules.tools.discovery.handlers_board_tasks  # noqa: F401

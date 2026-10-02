@@ -202,6 +202,49 @@ def test_a_widget_visitor_never_sees_a_number(workspaces, new_session):
     assert "number" not in out["task"]
 
 
+def test_a_mission_steps_messages_name_it_by_its_number(workspaces, new_session):
+    """Review of #859: a message built for one ticket (the blocked escalation, the
+    wait tool's words, a decision that lost a race) named a step by its id."""
+    from types import SimpleNamespace
+
+    from core.models.core import BoardTask
+    from services.escalation_service import _blocked_escalation_card
+    from services.ticket_cards import task_card
+    from services.ticket_numbers import ticket_label
+
+    ws = workspaces()
+    card = _file(new_session, ws, "Order the green coffee", source_type="orchestration")
+    step = _file(new_session, ws, "Draft the Guji order email", source_type="orchestration_task",
+                 parent_task_id=card.id, blocked_reason="Waiting on the roaster's price list")
+    loaded = new_session().get(BoardTask, step.id)
+
+    assert ticket_label(loaded, capital=True) == "Ticket #0001.1"
+    assert task_card(loaded)["number"] == "#0001.1"
+    assert _blocked_escalation_card(ws, loaded, 26).description.startswith("Ticket #0001.1 has been blocked for 26 hours")
+    assert ticket_label(SimpleNamespace(id=7, source_type="orchestration_task")) == "ticket 7"   # no session to ask
+
+
+def test_a_bulk_status_call_numbers_its_tickets_in_one_read(workspaces, new_session, monkeypatch):
+    """Review of #859: each id of a bulk call ran the numbering again, a read per
+    ticket (up to 100 a call) whose answer the bulk call threw away."""
+    import modules.tools.discovery.handlers_board_tasks as handlers
+    import services.ticket_refs as refs
+
+    ws = workspaces()
+    tickets = [_file(new_session, ws, f"Blocked supplier check {n}") for n in range(3)]
+    reads = []
+    read = refs._numbers
+    monkeypatch.setattr(refs, "_numbers", lambda db, w, ids: reads.append(set(ids)) or read(db, w, ids))
+    monkeypatch.setattr(handlers, "_notify_board_safe", lambda *a, **k: None)
+
+    out = asyncio.run(handlers.update_board_task_status(new_session(), ws, {
+        "task_ids": ["#0001", tickets[1].id, tickets[2].id, 999999999], "status": "cancelled"}))
+
+    assert out["updated_numbers"] == ["#0001", "#0002", "#0003"]
+    assert out["failed"] == [{**out["failed"][0], "task_id": 999999999, "number": None}]
+    assert reads == [{t.id for t in tickets} | {999999999}]
+
+
 def test_the_migration_merges_both_heads_and_survives_create_all():
     source = MIGRATION.read_text(encoding="utf-8")
 
