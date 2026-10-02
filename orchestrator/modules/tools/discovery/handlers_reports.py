@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .ticket_refs import by_ticket_number
+from services.ticket_refs import by_ticket_number
 
 logger = logging.getLogger(__name__)
 

@@ -159,7 +159,7 @@ def test_the_board_serves_each_tickets_number(workspaces, new_session):
 
 
 def test_autos_tools_take_a_number_and_answer_with_numbers(workspaces, new_session):
-    from modules.tools.discovery.ticket_refs import by_ticket_number
+    from services.ticket_refs import by_ticket_number
 
     ws = workspaces()
     first = _file(new_session, ws, "Price list")
@@ -181,7 +181,7 @@ def test_autos_tools_take_a_number_and_answer_with_numbers(workspaces, new_sessi
 def test_a_widget_visitor_never_sees_a_number(workspaces, new_session):
     """F155: a number would tell a visitor how many tickets the business has."""
     from core.security.surface import WIDGET, turn_surface
-    from modules.tools.discovery.ticket_refs import by_ticket_number
+    from services.ticket_refs import by_ticket_number
 
     ws = workspaces()
     first = _file(new_session, ws, "Price list")

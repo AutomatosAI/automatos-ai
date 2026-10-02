@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from .ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
-from .ticket_refs import by_ticket_number
+from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
+from services.ticket_refs import by_ticket_number
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
