@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
 from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
+from services.ticket_verdict import record_approval
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 
@@ -934,20 +935,6 @@ def already_decided(task: BoardTask) -> HTTPException:
         f"Ticket #{task.id} was already decided (status: {task.status}); nothing ran again."))
 
 
-def _record_approval(db: Session, task_id: int, *, decided_at: datetime,
-                     action_result: Optional[Dict[str, Any]]) -> bool:
-    """Put the approval's result on the ticket only while it is still this
-    approval's 'done' (F195): a send-back that landed while the action ran keeps
-    the ticket as it sent it back. True when the ticket is still this approval's."""
-    kept = (func.coalesce(func.nullif(BoardTask.result, ""), json.dumps(action_result))
-            if action_result else BoardTask.result)
-    return bool(
-        db.query(BoardTask)
-        .filter(BoardTask.id == task_id, BoardTask.status == "done", BoardTask.completed_at == decided_at)
-        .update({BoardTask.result: kept}, synchronize_session=False)
-    )
-
-
 async def _announce_approval(db: Session, workspace_id: Any, task: BoardTask) -> None:
     """PRD-128's task_complete for an approved ticket. The approval is already on
     record (F195 commits it first), so a notice that fails is logged, never a 500."""
@@ -1060,6 +1047,7 @@ async def approve_task(
         raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
 
     body = await request.json()
+    note = _text_of(body.get("note"), "note")  # PRD-252 R2 (F038): kept on the ticket
     action_result = None
     approval_action = (task.planning_data or {}).get("approval_action")
 
@@ -1074,7 +1062,8 @@ async def approve_task(
     try:
         if approval_action:
             action_result = await _run_approval_action(db, ctx, approval_action)
-        still_approved = _record_approval(db, task_id, decided_at=decided_at, action_result=action_result)
+        still_approved = record_approval(db, task_id, workspace_id=ctx.workspace_id, decided_at=decided_at,
+                                         action_result=action_result, note=note)
         db.commit()  # the action's own writes and the ticket's result, together
     except Exception:
         _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)

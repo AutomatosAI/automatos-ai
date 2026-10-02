@@ -12,6 +12,10 @@ draft it sends back in ``previous_runs`` (api.board_tasks.reject_task). Both
 claim paths (the dispatcher's, the CLI host's ``_ticket_prompt``) fold in
 ``redo_block``: that draft and every correction, oldest first, and the ask to
 correct the draft rather than redo it.
+
+PRD-252 R2: the redo leads with the owner's words. The note that sent this
+attempt back opens the block, word for word, before the draft it corrects; it was
+the last line of a list under the draft.
 """
 from __future__ import annotations
 
@@ -24,6 +28,8 @@ SENT_BACK = "sent back"
 SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
 # A ticket sent back more often than this keeps its newest corrections.
 MAX_CORRECTIONS_KEPT = 20
+# What opens a redo whose owner said what is wrong (PRD-252 R2).
+OWNER_WORDS_LEAD = "The owner sent it back with these words:"
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -49,6 +55,8 @@ def redo_block(task: Any) -> Optional[str]:
         notes.append(latest)  # a note set another way (the PATCH, a stop) applies to this run too
     draft = _sent_back_draft(data)
     lines = ["## Redo: your last attempt was sent back"]
+    if latest != SENT_BACK_WITHOUT_A_NOTE:
+        lines += [OWNER_WORDS_LEAD, latest, ""]
     if draft:
         lines += ["Your last attempt:", draft, ""]
     if notes:
