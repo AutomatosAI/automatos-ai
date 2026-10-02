@@ -1250,8 +1250,8 @@ def _health_database() -> str:
             return "healthy"
         finally:
             db.close()
-    except Exception as e:
-        logger.error(f"Health: database check failed: {e}")
+    except Exception:
+        logger.exception("Health: database check failed")
         return "unhealthy"
 
 
