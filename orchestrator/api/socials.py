@@ -120,7 +120,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -130,6 +130,8 @@ from modules.socials.recipes import voice as voice_recipes
 from modules.socials.settings import require_socials_enabled
 
 logger = logging.getLogger(__name__)
+
+TEXT_FORMAT = "text"  # PRD-251B: a post of copy alone, no template, no media
 
 router = APIRouter(
     prefix="/api/socials",
@@ -286,6 +288,33 @@ def _check_template(db: Session, workspace_id: UUID, template_id: Optional[UUID]
         raise service.InvalidPost("template_id is not a template in this workspace")
 
 
+def _declared_lengths(db: Session, workspace_id: UUID, template_id: UUID) -> List[int]:
+    """The lengths the workspace's template declares (``blocks.durations``, else its root
+    duration; an image template declares none) — PRD-251B B5."""
+    row = (
+        db.query(DocumentTemplate.blocks, DocumentTemplate.format)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == workspace_id)
+        .first()
+    )
+    if row is None:
+        return []
+    return template_gallery.durations_of(row.blocks if isinstance(row.blocks, dict) else {}, row.format)
+
+
+def _check_choices(db: Session, workspace_id: UUID, post_format: Any, template_id: Any, length_seconds: Any) -> None:
+    """PRD-251B (B5, US-B103): a text post has no template; a chosen length is one the
+    chosen template declares."""
+    if post_format == TEXT_FORMAT and template_id is not None:
+        raise service.InvalidPost("a text post has no template")
+    if length_seconds is None or template_id is None:
+        return
+    declared = _declared_lengths(db, workspace_id, template_id)
+    if length_seconds not in declared:
+        raise service.InvalidPost(
+            f"length_seconds must be a length this template declares ({declared or 'none'}), got {length_seconds}"
+        )
+
+
 def _save(db: Session, post: SocialPost) -> Dict[str, Any]:
     db.commit()
     db.refresh(post)
@@ -432,6 +461,7 @@ async def create_post(
     the credit lines its media's music asks for (S1.6).
     """
     _check_template(db, workspace_id, fields.get("template_id"))
+    _check_choices(db, workspace_id, fields.get("format"), fields.get("template_id"), fields.get("length_seconds"))
     await _check_voice(db, workspace_id, fields.get("voice"))
     _check_footage(db, workspace_id, fields.get("footage"), fields.get("template_id"))
     if fields.get("sources"):
@@ -462,6 +492,11 @@ async def edit_post(
         raise service.InvalidPost("title cannot be empty")
     workspace_id = post.workspace_id
     _check_template(db, workspace_id, changes.get("template_id"))
+    if any(key in changes for key in ("format", "template_id", "length_seconds")):
+        _check_choices(
+            db, workspace_id, changes.get("format", post.format), changes.get("template_id", post.template_id),
+            changes.get("length_seconds", post.length_seconds),
+        )
     if "voice" in changes:
         await _check_voice(db, workspace_id, changes["voice"])
     if "footage" in changes:

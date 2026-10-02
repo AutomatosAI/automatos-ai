@@ -46,6 +46,9 @@ from modules.socials import compose
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
+from modules.socials.template_gallery import durations_of
+
+TEXT_FORMAT = "text"
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,18 @@ class ComposeRequest(BaseModel):
     brief: str = Field(..., min_length=1, max_length=BRIEF_MAX_CHARS)
     channels: Optional[List[str]] = Field(None, max_length=MAX_CHANNELS)
     format: Optional[str] = None
+    # PRD-251B (B5, US-B103): the editor's choices. The template must be one of the
+    # workspace's of the format's kind; the length one the template declares.
+    template_id: Optional[UUID] = None
+    length_seconds: Optional[int] = Field(None, ge=1)
+
+
+class ChoiceRefused(ValueError):
+    """A choice the editor sent that the workspace cannot honour (422 with a code)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +103,58 @@ def social_templates(db: Session, workspace_id: UUID, post_format: Optional[str]
         out.append({
             "id": str(row.id), "name": row.name, "format": row.format,
             "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
+            # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
+            "durations": durations_of(blocks, row.format),
         })
     return out
+
+
+def chosen_templates(templates: List[Dict[str, Any]], body: ComposeRequest) -> List[Dict[str, Any]]:
+    """The templates the composer is given: all of them, or only the chosen one (B5).
+    A text post has none."""
+    if body.format == TEXT_FORMAT:
+        if body.template_id is not None:
+            raise ChoiceRefused("template_not_allowed", "A text post has no template.")
+        return []
+    if body.template_id is None:
+        return templates
+    chosen = next((t for t in templates if t["id"] == str(body.template_id)), None)
+    if chosen is None:
+        raise ChoiceRefused(
+            "template_not_allowed",
+            "template_id is not one of this workspace's social templates of the post's format.",
+        )
+    return [chosen]
+
+
+def check_length(templates: List[Dict[str, Any]], body: ComposeRequest) -> None:
+    """A chosen length must be one the chosen template declares, or, with the template
+    left to Auto, one some video template of the workspace declares (B5, US-B104)."""
+    if body.length_seconds is None:
+        return
+    declared = sorted({d for t in templates for d in (t.get("durations") or [])})
+    if body.length_seconds not in declared:
+        where = "this template" if body.template_id is not None else "any video template of this workspace"
+        raise ChoiceRefused(
+            "length_not_declared",
+            f"length_seconds must be a length {where} declares ({declared or 'none'}), got {body.length_seconds}.",
+        )
+
+
+def text_channels(channels: List[Dict[str, str]], requested: Optional[Sequence[str]], warnings: List[str]) -> List[Dict[str, str]]:
+    """For a text post, the channels that take a text post kind: a named channel that
+    does not is refused; an unnamed one is left out with a warning."""
+    kept, refused = [], []
+    for channel in channels:
+        if channel.get("takes_text"):
+            kept.append(channel)
+        elif requested is not None and channel["toolkit"] in requested:
+            refused.append(channel["toolkit"])
+        else:
+            warnings.append(f"{channel['toolkit']} takes no text-only post; it was left out")
+    if refused:
+        raise ChoiceRefused("channel_not_text", f"{', '.join(refused)}: no text-only post kind on this channel.")
+    return kept
 
 
 def connected_channels(
@@ -97,13 +162,19 @@ def connected_channels(
 ) -> Tuple[List[Dict[str, str]], List[str]]:
     """The channels the brief is for (every connected one when none is named),
     and a warning for each named channel that is not connected."""
-    connected = {c.toolkit: {"toolkit": c.toolkit, "label": c.label} for c in social_channels(db, workspace_id)}
+    connected = {c.toolkit: {"toolkit": c.toolkit, "label": c.label, "takes_text": _takes_text(c)} for c in social_channels(db, workspace_id)}
     if requested is None:
         return list(connected.values()), []
     wanted = list(dict.fromkeys(requested))
     missing = [t for t in wanted if t not in connected]
     warnings = [f"{t} is not connected in this workspace; it was left out" for t in missing]
     return [connected[t] for t in wanted if t in connected], warnings
+
+
+def _takes_text(channel: Any) -> bool:
+    """Whether the channel offers an available text-only post kind (the registry, US-203)."""
+    kinds = getattr(channel, "post_kinds", None) or ()
+    return any(getattr(k, "kind", None) == TEXT_FORMAT and getattr(k, "available", True) for k in kinds)
 
 
 def candidate_sources(db: Session, workspace_id: UUID, brief: str) -> List[Dict[str, Any]]:
@@ -134,15 +205,21 @@ def brand_voice(db: Session, workspace_id: UUID) -> Dict[str, Any]:
 def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> compose.ComposeContext:
     """Everything the composer is given, from the caller's workspace only."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
+    if body.format == TEXT_FORMAT:
+        channels = text_channels(channels, body.channels, warnings)
+    templates = chosen_templates(social_templates(db, workspace_id, body.format), body)
+    check_length(templates, body)
     return compose.ComposeContext(
         brief=body.brief.strip(),
         format=body.format,
-        channels=channels,
-        templates=social_templates(db, workspace_id, body.format),
+        channels=[{"toolkit": c["toolkit"], "label": c["label"]} for c in channels],
+        templates=templates,
         candidates=candidate_sources(db, workspace_id, body.brief),
         voice=brand_voice(db, workspace_id),
         skills=builtin_skills(db),
         warnings=warnings,
+        template_id=str(body.template_id) if body.template_id is not None else None,
+        length_seconds=body.length_seconds,
     )
 
 
@@ -164,7 +241,10 @@ def compose_social_post(
     model's answer cannot be read twice; 504 when it does not answer in time."""
     if body.format is not None and body.format not in SOCIAL_POST_FORMATS:
         raise HTTPException(status_code=422, detail=f"format must be one of {list(SOCIAL_POST_FORMATS)}")
-    context = compose_context(db, ctx.workspace_id, body)
+    try:
+        context = compose_context(db, ctx.workspace_id, body)
+    except ChoiceRefused as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
     try:
         return anyio.from_thread.run(compose.propose, context, compose.llm_factory(ctx.workspace_id), timeout)

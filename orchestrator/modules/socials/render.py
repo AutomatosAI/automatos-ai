@@ -93,7 +93,7 @@ from core.media_render_quota import (
     sessions_for,
 )
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
-from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
+from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks, with_root_duration
 from modules.socials import notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
@@ -201,6 +201,12 @@ def bundle_for(
         blocks = validate_social_blocks(blocks, template.format)
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
+    # PRD-251B (B5, US-B103): a post that chose a length renders that timeline. The
+    # composition reads the root's data-duration (media-render derives the duration
+    # from it), so the root carries the choice; the template's own value stays the default.
+    length = getattr(post, "length_seconds", None)
+    if isinstance(length, int) and not isinstance(length, bool) and length > 0:
+        blocks = {**blocks, "html": with_root_duration(blocks.get("html") or "", length)}
     supplied = {
         name: spec.get("value")
         for name, spec in (getattr(post, "variables", None) or {}).items()

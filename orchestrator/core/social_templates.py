@@ -425,6 +425,22 @@ def _slot_errors(slots: Any, html: str, css: str) -> List[Dict[str, str]]:
 
 
 # ── stills ──────────────────────────────────────────────────────────────────
+def with_root_duration(html: str, seconds: float) -> str:
+    """``html`` with the root's ``data-duration`` set to ``seconds`` (PRD-251B B5):
+    a post that chose a length renders that timeline. Without a root tag the html
+    is returned as it is (the validator reports that on its own)."""
+    root = _ROOT_TAG.search(html or "")
+    if not root:
+        return html
+    value = f"{seconds:g}"
+    tag = root.group(0)
+    if _DURATION.search(tag):
+        new_tag = _DURATION.sub(lambda m: m.group(0)[: m.start(1) - m.start(0)] + value + m.group(0)[m.end(1) - m.start(0):], tag, count=1)
+    else:
+        new_tag = tag[:-1].rstrip() + f' data-duration="{value}">'
+    return html[: root.start()] + new_tag + html[root.end():]
+
+
 def root_duration(html: str) -> Optional[float]:
     """The root's ``data-duration`` in seconds, or ``None`` when it is not a plain number."""
     root = _ROOT_TAG.search(html or "")

@@ -33,6 +33,8 @@ REQUEST_TYPE = "socials_compose"
 ATTEMPTS = 2  # the first answer, and one retry when its JSON is unusable
 SKILL_NAMES = ("social-brand-voice", "social-template-payloads")
 SKILL_MAX_CHARS = 6000
+TEXT_FORMAT = "text"
+WORDS_PER_SECOND = 2.5  # the editor's rule of thumb for a spoken line (PRD-251B mockup)
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
 
 RETRY_NOTE = (
@@ -61,14 +63,19 @@ class ComposeContext:
     voice: Mapping[str, Any] = field(default_factory=dict)  # the brand kit's voice
     skills: Mapping[str, str] = field(default_factory=dict)  # built-in skill name → its text
     warnings: Sequence[str] = ()  # what gathering already had to say
+    # PRD-251B (B5, US-B103): the editor's choices. A chosen template is the ONLY one
+    # listed and is used whatever the model answers; a chosen length is one the template
+    # declares, and the model gets its spoken-word budget. A text post has no template.
+    template_id: Optional[str] = None
+    length_seconds: Optional[int] = None
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
 _ANSWER_SHAPE = {
     "title": "a short working title",
     "copy": {"base": "the text every channel starts from", "per_channel": {"<toolkit>": "that channel's text"}},
-    "format": "one of video, image, carousel, fact_card, infographic",
-    "template_id": "the id of ONE template listed",
+    "format": "one of video, image, carousel, fact_card, infographic, text",
+    "template_id": "the id of ONE template listed (null for a text post)",
     "variables": {"<variable name>": "its value"},
     "sources": {"<claim variable name>": {"kind": "<candidate kind>", "ref": "<candidate ref>"}},
 }
@@ -92,6 +99,15 @@ def _system(ctx: ComposeContext) -> str:
         "bind it to one of the candidate sources by kind and ref, or leave it out of sources. Never invent "
         "a source, a URL or a number. Follow the brand voice: use its tone and never its banned phrases.",
     ]
+    if ctx.template_id:
+        parts.append("The template is chosen: use the one template listed, and no other.")
+    if ctx.length_seconds:
+        parts.append(
+            f"The video is {ctx.length_seconds} seconds long: fit the spoken words into the budget given "
+            "(spoken_words_budget) and keep every on-screen line short."
+        )
+    if ctx.format == TEXT_FORMAT:
+        parts.append("This is a text-only post: no template, no variables and no image; write the copy only.")
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -107,6 +123,11 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         "templates": [dict(t) for t in ctx.templates],
         "candidate_sources": _candidate_lines(ctx),
     }
+    if ctx.template_id:
+        material["template_id"] = ctx.template_id
+    if ctx.length_seconds:
+        material["length_seconds"] = ctx.length_seconds
+        material["spoken_words_budget"] = int(round(ctx.length_seconds * WORDS_PER_SECOND))
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},

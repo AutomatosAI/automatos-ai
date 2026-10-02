@@ -21,6 +21,7 @@ from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, claim_names, resol
 from modules.socials.copy_limits import fit_copy, fit_title
 
 VIDEO_FORMAT = "video"
+TEXT_FORMAT = "text"
 TITLE_FALLBACK_CHARS = 80
 
 
@@ -39,6 +40,9 @@ def _format(raw: Any, ctx: Any) -> Optional[str]:
 
 def _template(raw_id: Any, ctx: Any, post_format: Optional[str], warnings: List[str]) -> Optional[Mapping[str, Any]]:
     by_id = {str(t["id"]): t for t in ctx.templates}
+    chosen = getattr(ctx, "template_id", None)
+    if chosen and str(chosen) in by_id:
+        return by_id[str(chosen)]  # PRD-251B B5: the editor's choice, whatever the model answered
     if raw_id is not None and str(raw_id) in by_id:
         return by_id[str(raw_id)]
     kind = template_kind(post_format)
@@ -132,10 +136,14 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
     """The proposal as the composer shows it, every field checked against ``ctx``."""
     warnings: List[str] = list(ctx.warnings)
     post_format = _format(raw.get("format"), ctx)
-    template = _template(raw.get("template_id"), ctx, post_format, warnings)
-    if post_format is None and template is not None:
-        post_format = VIDEO_FORMAT if template.get("format") == SOCIAL_VIDEO else "image"
-    variables = _variables(raw.get("variables"), template, warnings)
+    if post_format == TEXT_FORMAT:
+        # PRD-251B (US-B103): a text post is copy alone: no template, no variables, no claims.
+        template, variables = None, {}
+    else:
+        template = _template(raw.get("template_id"), ctx, post_format, warnings)
+        if post_format is None and template is not None:
+            post_format = VIDEO_FORMAT if template.get("format") == SOCIAL_VIDEO else "image"
+        variables = _variables(raw.get("variables"), template, warnings)
     return {
         "title": _title(raw.get("title"), ctx, warnings),
         "copy": _copy(raw.get("copy"), ctx, warnings),
@@ -146,5 +154,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "variables": variables,
         "sources": _sources(raw.get("sources"), variables, ctx, warnings),
         "channels": [str(c["toolkit"]) for c in ctx.channels],
+        # PRD-251B (B5): the chosen length rides along to the saved post.
+        "length_seconds": getattr(ctx, "length_seconds", None),
         "warnings": warnings,
     }
