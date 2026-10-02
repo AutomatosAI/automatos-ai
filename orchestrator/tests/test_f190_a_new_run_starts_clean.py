@@ -76,6 +76,7 @@ def _drag(monkeypatch, task, status):
     monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launched.append(kw["task_id"]))
     monkeypatch.setattr(bt, "record_operator_consent", lambda *a, **k: None)
     monkeypatch.setattr(bt, "notify_board_event", lambda *a, **k: None)
+    monkeypatch.setattr(bt, "notify_task_available", lambda *a, **k: None)
     asyncio.run(bt.update_task_status(task.id, _Req({"status": status}), ctx=CTX,
                                       db=_FakeSession(agent=NS(id=5), task=task)))
     return launched
@@ -110,5 +111,8 @@ def test_a_drag_into_in_progress_still_starts_a_clean_run(monkeypatch):
     task = _failed_ticket()
     task.status = "assigned"
 
-    assert _drag(monkeypatch, task, "in_progress") == [41]
+    # PRD-252 R6: a drag is Run Now, so the dispatch loop starts the run with the
+    # ticket's corrections and answers folded in; nothing launches the bare brief.
+    assert _drag(monkeypatch, task, "in_progress") == []
+    assert task.status == "assigned"
     assert (task.result, task.error_message) == (None, None)

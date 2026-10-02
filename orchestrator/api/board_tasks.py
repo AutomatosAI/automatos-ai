@@ -1335,6 +1335,17 @@ async def run_task_now(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    return _start_now(db, ctx, task, why=WHY_RUN_NOW)
+
+
+def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -> Dict[str, Any]:
+    """Run Now's path, for the button and (PRD-252 R6) for a drag to In progress.
+
+    The ticket goes back to a fresh ``assigned`` claim and the dispatch loop
+    starts it, so the run carries its corrections and the owner's answers
+    (the dispatcher folds both into the prompt) and the operator's consent is
+    on record. A drag used to launch the bare brief directly.
+    """
     owned = mission_runs_it(db, task)
     if owned:
         raise HTTPException(status_code=409, detail=owned)
@@ -1343,52 +1354,44 @@ async def run_task_now(
     # #1115: an agent whose model cannot run is never handed the task (F141's rule).
     from modules.tools.discovery.handlers_board_tasks import _cannot_take_tasks
 
-    agent = db.query(Agent).filter(
-        Agent.id == task.assigned_agent_id, Agent.workspace_id == ctx.workspace_id,
-    ).first()
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id, Agent.workspace_id == ctx.workspace_id).first()
     unable = _cannot_take_tasks(db, agent) if agent is not None else None
     if unable:
         raise HTTPException(status_code=409, detail=unable)
     if _running_now(db, task):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes.",
-        )
-
-    # PRD-234: pressing Run Now is the operator's approval — record it so the
-    # gate lets the ticket through instead of parking it behind a grant.
-    record_operator_consent(
-        db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
-        actor=_operator_ref(ctx), why=WHY_RUN_NOW,
-    )
+        raise HTTPException(status_code=409, detail=(
+            f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes."))
+    # PRD-234: pressing Run Now (or dragging to In progress) is the operator's
+    # approval, so the gate lets the ticket through instead of parking it.
+    record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
+                            agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
     was = task.status
-    stale = was == "in_progress"  # F176: the word said running, but no run held it
     rerun = was in FINISHED
-    if rerun:
-        keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    # F190: a new run starts clean. The last run's result goes on record (a no-op
+    # when there is none) and off the card, where the new run's would sit under it.
+    keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    task.result = None
+    task.error_message = None
     if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
         raise HTTPException(status_code=409, detail=(
-            f"Ticket #{task_id} is starting or finishing a run right now; nothing was reset."))
-
+            f"Ticket #{task.id} is starting or finishing a run right now; nothing was reset."))
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
-    # #1115: a Claude Code agent's ticket waits for a host that serves this
-    # workspace; queued, it is claimed the moment one is back, but it has not started.
-    waiting = _waiting_for_a_host(task)
-    return {
-        "success": True,
-        "task_id": task.id,
-        "status": task.status,
-        "rerun_of": was if rerun else None,
-        "started": not waiting,
-        "message": (
-            f"Ticket #{task.id} is queued, but nothing can start it yet: {task.blocked_reason}" if waiting
-            else f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
-            "ticket's history." if rerun
-            else f"Ticket #{task.id} said in progress, but nothing was running it — started it now." if stale
-            else f"Ticket #{task.id} started."
-        ),
-    }
+    return {"success": True, "task_id": task.id, "status": task.status,
+            "rerun_of": was if rerun else None, "started": not _waiting_for_a_host(task),
+            "message": _run_now_message(task, was, rerun)}
+
+
+def _run_now_message(task: BoardTask, was: str, rerun: bool) -> str:
+    """What Run Now did, in words (#1115: a Claude Code ticket waits for a host)."""
+    if _waiting_for_a_host(task):
+        return f"Ticket #{task.id} is queued, but nothing can start it yet: {task.blocked_reason}"
+    if rerun:
+        return (f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
+                "ticket's history.")
+    if was == "in_progress":  # F176: the word said running, but no run held it
+        return f"Ticket #{task.id} said in progress, but nothing was running it — started it now."
+    return f"Ticket #{task.id} started."
 
 
 def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
@@ -1411,6 +1414,15 @@ def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
         task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
 
 
+# PRD-252 R6: a drag that needs a decision goes through the decision's button.
+# Review → Done by drag skipped the ticket's approval action (a blog never
+# published), and Review → Assigned sent work back with no note.
+DECISION_DRAGS = {
+    ("review", "done"): "Use Approve on the ticket: a drag to Done would skip its approval step.",
+    ("review", "assigned"): "Use Reject on the ticket: it sends the agent what to fix with the redo.",
+}
+
+
 @router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
@@ -1418,7 +1430,12 @@ async def update_task_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Update only the status of a task (for drag-and-drop on the board)."""
+    """Update only the status of a task (for drag-and-drop on the board).
+
+    PRD-252 R6: a drag does what the matching button does. A move into In
+    progress is Run Now; a move that needs a verdict is refused, naming the
+    button that gives it.
+    """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
         BoardTask.workspace_id == ctx.workspace_id,
@@ -1428,43 +1445,22 @@ async def update_task_status(
 
     body = await request.json()
     new_status = _text_of(body.get("status"), "status")
-    if new_status == "in_progress" and task.status != "in_progress":
-        _hold_before_starting(db, task)
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
+    refusal = DECISION_DRAGS.get((task.status, new_status))
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     if new_status == "in_progress" and not task.assigned_agent_id:
         raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
+    # F190 review: a repeat of in_progress on a running ticket (a double drag)
+    # changes nothing; a stuck ticket has Run Now.
+    if new_status == "in_progress" and task.status != "in_progress" \
+            and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES:
+        return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
     owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
     if owned:
         raise HTTPException(status_code=409, detail=owned)
-
-    old_status = task.status
-    # F190 review: only a move INTO in_progress starts a run. Repeating it on a
-    # running ticket (a double drag) wiped the live run's result and launched the
-    # agent a second time; it now changes nothing. A stuck ticket has Run Now.
-    starting = new_status == "in_progress" and old_status != "in_progress"
-    if starting:
-        keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))  # its result is cleared below
-    task.status = new_status
-    end_session_claim(task, old_status, new_status)
-    if starting:
-        _new_run(task)  # F209: the run this move starts
-        task.started_at = datetime.now(timezone.utc)
-        task.completed_at = None
-        task.error_message = None
-        task.result = None
-    if new_status in ("done", "review") and not task.completed_at:
-        task.completed_at = datetime.now(timezone.utc)
-    if new_status == "blocked" and task.blocked_at is None:
-        task.blocked_at = datetime.now(timezone.utc)
-    if new_status != "blocked" and old_status == "blocked":
-        task.blocked_at = None
-        task.blocked_reason = None
-    # F036: the dedicated status route is a person's decision too (the board's
-    # drag-and-drop lands here) — same stop rule as PATCH /{task_id}.
-    from services.operator_stop import apply_explicit_status
-
-    apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
+    _set_status_by_hand(task, new_status, body.get("blocked_reason"), by=_operator_ref(ctx))
 
     # PRD-128: dispatch task_complete on drag-to-done transitions
     if new_status == "done":
@@ -1478,31 +1474,36 @@ async def update_task_status(
     )
     db.commit()
     db.refresh(task)
-
-    # Fire-and-forget: trigger agent execution when moved to in_progress.
-    # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
-    # mirror to in_progress must not re-run work the mission engine owns.
-    if (
-        starting
-        and task.assigned_agent_id
-        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
-    ):
-        # PRD-234: dragging a ticket to In Progress is the operator's approval.
-        record_operator_consent(
-            db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
-            actor=_operator_ref(ctx), why=WHY_MOVED_TO_IN_PROGRESS,
-        )
-        _launch_task_execution(
-            task_id=task.id,
-            agent_id=task.assigned_agent_id,
-            workspace_id=str(ctx.workspace_id),
-            prompt=task.raw_prompt or task.description or task.title,
-            review_mode=task.review_mode or "auto",
-            attachment_ids=task.attachment_ids,  # PRD-127
-            run_id=(task.runtime_ref or {}).get(RUN_ID_KEY),
-        )
-
     return {"id": task.id, "status": task.status}
+
+
+def _set_status_by_hand(task: BoardTask, new_status: str, blocked_reason: Any, *, by: str) -> None:
+    """A person's move of a ticket that starts no run: the status, its
+    timestamps, and the stop rule (F036)."""
+    old_status = task.status
+    if new_status == "in_progress" and old_status != "in_progress":
+        # A playbook's or a mission's own ticket (its engine runs it): the last
+        # run goes on record and off the card (F190), and nothing is launched.
+        keep_previous_run(task, why="moved to in progress", by=by)
+        _new_run(task)  # F209: the run this move starts
+        task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        task.result = None
+    task.status = new_status
+    end_session_claim(task, old_status, new_status)
+    if new_status in ("done", "review") and not task.completed_at:
+        task.completed_at = datetime.now(timezone.utc)
+    if new_status == "blocked" and task.blocked_at is None:
+        task.blocked_at = datetime.now(timezone.utc)
+    if new_status != "blocked" and old_status == "blocked":
+        task.blocked_at = None
+        task.blocked_reason = None
+    # F036: the dedicated status route is a person's decision too (the board's
+    # drag-and-drop lands here) — same stop rule as PATCH /{task_id}.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, blocked_reason, by="operator")
 
 
 class SessionDecisionBody(BaseModel):
