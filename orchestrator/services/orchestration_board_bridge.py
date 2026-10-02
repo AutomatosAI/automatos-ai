@@ -32,6 +32,7 @@ from core.models.orchestration_enums import (
 
 # Priority → SLA deadline hours: the shared table (services.board_sla).
 from services.board_sla import PRIORITY_SLA_HOURS as _PRIORITY_SLA_HOURS  # noqa: E402
+from services.board_cancel import stop_mission_sessions
 from services.cli_ticket_lane import is_lane_owned, release_step_card
 
 logger = logging.getLogger(__name__)
@@ -339,12 +340,18 @@ def sync_mission_board_status(
 
     Should be called whenever the run transitions state — especially to
     terminal states (completed, failed, cancelled) so the mission card
-    moves out of inbox/in_progress on the board.
+    moves out of inbox/in_progress on the board. ``transition_run`` calls it
+    for every transition.
+
+    F224: a mission that ended without finishing (cancelled or failed) also
+    stops every Claude Code session still working one of its steps, and the
+    step cards still queued for one.
 
     Args:
         db: SQLAlchemy session (caller manages transaction).
         run: The OrchestrationRun whose board card should be updated.
     """
+    stop_mission_sessions(db, run)
     board_task = db.query(BoardTask).filter(
         BoardTask.source_type == "orchestration",
         BoardTask.orchestration_run_id == run.id,

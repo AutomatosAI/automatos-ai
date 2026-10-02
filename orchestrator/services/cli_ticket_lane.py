@@ -285,7 +285,6 @@ MISSION_NOTE_BY = "the mission"
 STILL_WORKING = "The session is still working, and its result will land here."
 NOT_STARTED = "No session has started it yet; if one does, its result will land here."
 STOPPED_WAITING_NOTE = "The mission stopped waiting for this step{after}. {state}"
-CANCELLED_NOTE = "The mission was cancelled while this step ran. {state}"
 
 
 def _state_line(card_status: str) -> str:
@@ -300,11 +299,6 @@ def stopped_waiting_note(waited_s: Any) -> Callable[[str], str]:
     except (TypeError, ValueError):
         after = ""
     return lambda status: STOPPED_WAITING_NOTE.format(after=after, state=_state_line(status))
-
-
-def cancelled_note(card_status: str) -> str:
-    """The verdict when the owner cancelled the mission while the step ran."""
-    return CANCELLED_NOTE.format(state=_state_line(card_status))
 
 
 def note_open_step_cards(
