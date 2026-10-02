@@ -241,6 +241,11 @@ ALLOWED_UNLISTED_BASH = ("{command!r} is not on this ticket's Bash allowlist; th
 ALLOWED_FILES = "inside the session's folders"
 ALLOWED_SESSION_TOOL = "an Automatos tool this ticket may call"
 ALLOWED_NO_APPROVAL = "a tool that needs no approval"
+# PRD-253 S0.1: a write the gate cannot place. A patch keeps its paths in its
+# text (Codex's and Copilot's ``apply_patch``); when the adapter cannot read
+# them, the call names no file — and "no path" used to fall through to the
+# mode's verdict, which allows an edit in Edit automatically and Auto.
+WRITE_NAMES_NO_FILE = "a write that names no file — the gate cannot tell where it lands"
 
 Bindings = Mapping[str, Tuple[str, ...]]
 
@@ -1328,6 +1333,8 @@ def _decide_files(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     guards = [g for g in guards if g is not None]
     if any(g.behavior == "deny" for g in guards):
         return _worst(guards)
+    if not intent.paths and intent.cls is ToolClass.FILE_WRITE:
+        return Decision("deny", WRITE_NAMES_NO_FILE)   # refused in every mode: it could land anywhere
     if not intent.paths:
         return _worst([*guards, _write_in_mode(intent, ctx)])  # a search without a path works in cwd
     for target in intent.paths:

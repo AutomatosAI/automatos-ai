@@ -136,11 +136,24 @@ def test_a_declined_plan_keeps_the_session_planning(tmp_path):
     assert _hook(s, "Write", {"file_path": str(tmp_path / "index.html")}) == "deny"
 
 
-def test_a_write_that_names_no_path_follows_the_mode_too(tmp_path):
+@pytest.mark.parametrize("mode", ["manual", "edits", "plan", "auto"])
+def test_a_write_that_names_no_file_is_refused_in_every_mode(tmp_path, mode):
+    """PRD-253 S0.1: the gate cannot place a write with no path, so no mode lets it
+    run. (#845 had it follow the mode, which allowed it in Edit automatically and
+    Auto — harmless for Claude Code, whose edits always carry ``file_path``, but
+    not for a patch whose paths an adapter could not read.)"""
     intent = policy.ToolIntent(tool="NotebookEdit", cls=ToolClass.FILE_WRITE)
-    assert policy.decide(intent, _ctx(tmp_path, "manual")).behavior == "ask"
-    assert policy.decide(intent, _ctx(tmp_path, "plan")).behavior == "deny"
-    assert policy.decide(intent, _ctx(tmp_path, "edits")).behavior == "allow"
+    decision = policy.decide(intent, _ctx(tmp_path, mode))
+    assert decision.behavior == "deny"
+    assert decision.reason == policy.WRITE_NAMES_NO_FILE
+
+
+@pytest.mark.parametrize("mode", ["manual", "edits", "auto"])
+def test_a_search_without_a_path_still_works_in_the_folder(tmp_path, mode):
+    for tool in ("Grep", "Glob"):
+        intent = _CLAUDE.tool_intent(tool, {"pattern": "TODO"})
+        assert not intent.paths
+        assert policy.decide(intent, _ctx(tmp_path, mode)).behavior == "allow"
 
 
 def test_the_plan_is_read_from_claude_codes_plan_file_when_only_its_path_arrives(tmp_path):
@@ -182,6 +195,10 @@ def test_codex_sessions_take_the_same_modes(tmp_path, mode, edit, unlisted):
     # the hard lines hold for Codex too
     assert verdict("exec_command", {"cmd": "git push origin main"}) == "deny"
     assert verdict("apply_patch", _codex_patch("/etc/hosts")) == "deny"
+    # PRD-253 S0.1: a patch whose files the adapter cannot read is a write to nowhere
+    headless = {"input": "*** Begin Patch\n+x\n*** End Patch\n"}
+    assert codex.tool_intent("apply_patch", headless).paths == ()
+    assert verdict("apply_patch", headless) == "deny"
 
 
 def test_codex_has_no_plan_mode_so_plan_runs_as_edit_automatically(tmp_path):
