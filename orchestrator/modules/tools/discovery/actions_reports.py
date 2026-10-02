@@ -167,8 +167,18 @@ def _register_get_latest_report(registry: ActionRegistry) -> None:
 
 def _submit_report_parameters() -> dict:
     return {
-    "type": "object",
-    "properties": {
+        "type": "object",
+        "properties": {**_report_body_properties(), **_report_structure_properties()},
+        # report_type defaults to 'standup' and status to 'ok' in the
+        # handler (handlers_reports.submit_report) — a caller can omit both,
+        # so neither belongs in required[]. See the tool-schema walker guard.
+        "required": ["title", "content"],
+    }
+
+
+def _report_body_properties() -> dict:
+    """What the report says: its title, content, type, status, summary, metrics and attachments."""
+    return {
         "title": {
             "type": "string",
             "description": "Short title for the report (e.g. 'Platform Health Check', 'Weekly Newsletter Draft').",
@@ -207,6 +217,12 @@ def _submit_report_parameters() -> dict:
             },
             "description": "Additional files produced alongside this report (images, data files, etc.).",
         },
+    }
+
+
+def _report_structure_properties() -> dict:
+    """What a caller acts on: required sections, recommendations, action items, links and approval."""
+    return {
         "required_sections": {
             "type": "array",
             "items": {"type": "string"},
@@ -246,54 +262,49 @@ def _submit_report_parameters() -> dict:
             "type": "boolean",
             "description": "Set to true when the report's recommendations need a human decision before any action. Surfaces in the 'Decisions Needed' queue.",
         },
-    },
-    # report_type defaults to 'standup' and status to 'ok' in the
-    # handler (handlers_reports.submit_report) — a caller can omit both,
-    # so neither belongs in required[]. See the tool-schema walker guard.
-    "required": ["title", "content"],
-}
+    }
 
 
 def _browse_reports_parameters() -> dict:
     return {
-    "type": "object",
-    "properties": {
-        "agent_id": {
-            "type": "integer",
-            "description": "Optional agent filter.",
+        "type": "object",
+        "properties": {
+            "agent_id": {
+                "type": "integer",
+                "description": "Optional agent filter.",
+            },
+            "agent_name": {
+                "type": "string",
+                "description": "Optional agent name filter (substring match).",
+            },
+            "report_type": {
+                "type": "string",
+                "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "task"],
+                "description": "Optional report type filter.",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["ok", "warning", "critical", "info"],
+                "description": "Optional status filter.",
+            },
+            "trigger": {
+                "type": "string",
+                "enum": ["heartbeat", "task", "playbook"],
+                "description": "Optional trigger filter — matches metrics.trigger field.",
+            },
+            "model": {
+                "type": "string",
+                "description": "Optional model filter — matches metrics.model field (e.g. 'openai/gpt-5').",
+            },
+            "period": {
+                "type": "string",
+                "enum": ["1d", "7d", "30d", "90d", "all"],
+                "description": "Time window. Default 7d.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max rows to return (default 50, max 200).",
+            },
         },
-        "agent_name": {
-            "type": "string",
-            "description": "Optional agent name filter (substring match).",
-        },
-        "report_type": {
-            "type": "string",
-            "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "task"],
-            "description": "Optional report type filter.",
-        },
-        "status": {
-            "type": "string",
-            "enum": ["ok", "warning", "critical", "info"],
-            "description": "Optional status filter.",
-        },
-        "trigger": {
-            "type": "string",
-            "enum": ["heartbeat", "task", "playbook"],
-            "description": "Optional trigger filter — matches metrics.trigger field.",
-        },
-        "model": {
-            "type": "string",
-            "description": "Optional model filter — matches metrics.model field (e.g. 'openai/gpt-5').",
-        },
-        "period": {
-            "type": "string",
-            "enum": ["1d", "7d", "30d", "90d", "all"],
-            "description": "Time window. Default 7d.",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "Max rows to return (default 50, max 200).",
-        },
-    },
-    "required": [],
-}
+        "required": [],
+    }
