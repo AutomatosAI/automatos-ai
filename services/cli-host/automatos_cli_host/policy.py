@@ -42,6 +42,13 @@ from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
     DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED, PLAN_EDIT_REFUSED_TURN,
 )
+from .shell_text import (  # here-documents and substitutions, read before the words
+    SUBSTITUTION_MARK,
+    backtick_bodies as _backtick_bodies,
+    heredocs as _heredocs,
+    substitutions as _substitutions,
+    without_substitutions as _without_substitutions,
+)
 
 # Sessions never publish. The manager (Auto) integrates. Matched on the raw
 # command first, then on every simple command once ``git -C <path>``, the shell
@@ -229,7 +236,6 @@ _REDIRECT_CHARS = frozenset("<>")          # a run holding one of these is a red
 ALWAYS_WRITABLE = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
 _GLOB_CHARS = "*?["
 _LINE_CONTINUATION_RE = re.compile(r"\\\n")
-_HEREDOC_RE = re.compile(r"<<-?\s*(?:'([^']*)'|\"([^\"]*)\"|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 _FD_TARGET_RE = re.compile(r"^([0-9]+|-)$")            # ``>&1``, ``<&-``
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
@@ -240,7 +246,6 @@ _VAR_REF_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-
 _UNRESOLVED_RE = re.compile(r"\$(?:[{(]|[A-Za-z_0-9@*#?!$])|^\$$")
 # …used as part of a path: ``$HOME/x``, ``${D}/x``, ``${HOME:-/etc}/x``, ``$1/x``.
 _PATH_REF_RE = re.compile(r"/\$(?:[{(]|[A-Za-z_0-9@*])|\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9])/")
-SUBSTITUTION_MARK = "$_"     # stands in for a ``$(…)`` body once that body is judged on its own
 MAX_EXPANSIONS = 64          # values one word may take across the line's variables
 # ``$'…'`` / ``$"…"`` only where the ``$`` begins a word. Night 1 held every
 # ``grep -v '^$' | …`` on earth because the ``$`` ending a quoted regex sat next to the quote.
@@ -487,63 +492,6 @@ def _matches_prefix(command: str, prefixes: Sequence[str]) -> bool:
 
 # ── tokens and simple commands ───────────────────────────────────────────────
 
-def _heredoc_end(text: str, start: int, delimiter: str) -> Optional[int]:
-    """The end of the line that terminates a here-document whose body starts at
-    ``start`` (``<<-`` lets the terminator be tab-indented); None when there is none."""
-    pos = start
-    while pos <= len(text):
-        newline = text.find("\n", pos)
-        line = text[pos:] if newline < 0 else text[pos:newline]
-        if line.lstrip("\t") == delimiter:
-            return len(text) if newline < 0 else newline
-        if newline < 0:
-            return None
-        pos = newline + 1
-    return None
-
-
-def _heredoc_delimiter(match: Any) -> Tuple[str, bool]:
-    """The here-document's terminator, and whether it was QUOTED. A quoted
-    delimiter (``<<'EOF'``) makes the body inert data; an unquoted one
-    (``<<EOF``) expands the substitutions inside it as the shell reads it."""
-    if match.group(1) is not None:
-        return match.group(1), True
-    if match.group(2) is not None:
-        return match.group(2), True
-    if match.group(3) is not None:      # ``<<\EOF`` — bash treats it exactly like ``<<'EOF'``
-        return match.group(3), True
-    return match.group(4), False
-
-
-def _heredocs(command: str) -> Tuple[str, List[str]]:
-    """The command without its here-document bodies, plus the bodies whose
-    delimiter was UNQUOTED.
-
-    A body is data, not part of the command line, so it is cut before tokenising
-    (the ``<<`` itself stays, so the redirection beside it is still judged). But
-    an unquoted delimiter makes the shell RUN the substitutions in that body, so
-    those bodies come back for judging. A body without its terminator is left
-    where it is."""
-    out = command
-    expanded: List[str] = []
-    pos = 0
-    while True:
-        match = _HEREDOC_RE.search(out, pos)
-        if match is None:
-            return out, expanded
-        line_end = out.find("\n", match.end())
-        if line_end < 0:
-            return out, expanded
-        delimiter, quoted = _heredoc_delimiter(match)
-        body_end = _heredoc_end(out, line_end + 1, delimiter)
-        if body_end is None:
-            return out, expanded
-        if not quoted:
-            expanded = [*expanded, out[line_end + 1:body_end]]
-        out = out[:line_end] + out[body_end:]
-        pos = match.end()
-
-
 def _split_parens(token: str) -> List[str]:
     """A punctuation run holding a parenthesis becomes its own tokens: ``<(`` →
     ``<``, ``(``. Otherwise process substitution reads as ONE redirection token
@@ -693,65 +641,6 @@ def _peel_redirections(tokens: Sequence[str]) -> Tuple[List[str], List[str]]:
             targets = [*targets, target]
         i += 2
     return words, targets
-
-
-# ── command substitutions inside a word ──────────────────────────────────────
-
-def _matching_paren(text: str, start: int) -> int:
-    """Index of the ')' closing the '(' at ``start``; the end of the text when unbalanced."""
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return len(text)
-
-
-def _substitution_spans(word: str) -> List[Tuple[int, int, str]]:
-    """``(start, end, body)`` of every ``$(…)`` and backtick substitution in a
-    word — the tokenizer keeps them whole when quoted. Arithmetic ``$((…))`` is
-    skipped; a nested substitution is found when its body is judged."""
-    spans: List[Tuple[int, int, str]] = []
-    i = 0
-    while i < len(word):
-        if word.startswith("$((", i):
-            i = _matching_paren(word, i + 1) + 1
-        elif word.startswith("$(", i):
-            end = _matching_paren(word, i + 1)
-            spans = [*spans, (i, end + 1, word[i + 2:end])]
-            i = end + 1
-        elif word[i] == "`":
-            end = word.find("`", i + 1)
-            end = len(word) if end < 0 else end
-            spans = [*spans, (i, end + 1, word[i + 1:end])]
-            i = end + 1
-        else:
-            i += 1
-    return spans
-
-
-def _substitutions(word: str) -> List[str]:
-    return [body for _, _, body in _substitution_spans(word)]
-
-
-def _backtick_bodies(line: str) -> List[str]:
-    """The bodies of the backtick substitutions only — the ones the tokenizer
-    cannot keep whole when unquoted."""
-    return [body for start, _, body in _substitution_spans(line) if line[start] == "`"]
-
-
-def _without_substitutions(word: str) -> str:
-    """The word with each substitution replaced by ``SUBSTITUTION_MARK`` — an
-    unresolved reference wherever the body's output would land."""
-    out = ""
-    last = 0
-    for start, end, _ in _substitution_spans(word):
-        out += word[last:start] + SUBSTITUTION_MARK
-        last = end
-    return out + word[last:]
 
 
 # ── the line's own variables ─────────────────────────────────────────────────
