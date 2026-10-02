@@ -1,5 +1,5 @@
 {
-  "route_count": 871,
+  "route_count": 872,
   "routes": [
     {
       "method": "GET",
@@ -2104,6 +2104,10 @@
     {
       "method": "GET",
       "path": "/api/socials/footage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/music"
     },
     {
       "method": "GET",

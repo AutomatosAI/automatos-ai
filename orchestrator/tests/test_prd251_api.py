@@ -287,6 +287,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("PUT", "/api/socials/plans/{plan_id}/topics/{topic_id}"),
             ("DELETE", "/api/socials/plans/{plan_id}/topics/{topic_id}"),
             ("PUT", "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"),
+            # The music library a post may pick from (api/socials_templates.py).
+            ("GET", "/api/socials/music"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

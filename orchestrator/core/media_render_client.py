@@ -198,6 +198,13 @@ class MediaRenderClient:
             raise _error_for(resp, "health")
         return resp.json()
 
+    async def music(self) -> Dict[str, Any]:
+        """``GET /music`` (PRD-251B): the music library's tracks, for a post's music picker."""
+        resp = await self._send("GET", "/music", "music")
+        if resp.status_code != 200:
+            raise _error_for(resp, "music")
+        return resp.json()
+
     async def submit(self, bundle: Mapping[str, Any]) -> Dict[str, Any]:
         """``POST /render``: the job once it is staged, spoken, mixed and checked.
 

@@ -94,7 +94,8 @@ from core.media_render_quota import (
 )
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_cuts import cut_to_length, slots_cut_out
-from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
+from modules.socials.music import with_music
+from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
@@ -203,6 +204,8 @@ def bundle_for(
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
     blocks = at_chosen_length(blocks, post)
+    if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music, a render setting
+        blocks = with_music(blocks, getattr(post, "music", None))
     supplied = {
         name: spec.get("value")
         for name, spec in (getattr(post, "variables", None) or {}).items()

@@ -279,7 +279,8 @@ def _music(raw: Any, duration: float, library: Mapping[str, Track]) -> Optional[
     track = library.get(music["track"]) if isinstance(music["track"], str) else None
     if track is None:
         raise BundleError(f"audio.music.track {music['track']!r} is not in the music library")
-    start = validate.number(music.get("start", 0), "audio.music.start", minimum=0)
+    # PRD-251B: a cue without a start (a post's own pick of track) starts where the library says.
+    start = validate.number(music["start"], "audio.music.start", minimum=0) if "start" in music else track.start_for(duration)
     fade_in = validate.number(music.get("fade_in", audio.MUSIC_FADE_IN_SECONDS), "audio.music.fade_in", minimum=0)
     fade_out = validate.number(music.get("fade_out", audio.MUSIC_FADE_OUT_SECONDS), "audio.music.fade_out", minimum=0)
     if fade_in + fade_out > duration:

@@ -190,6 +190,7 @@ class CreateSocialPostRequest(_Strict):
     voice: Optional[Dict[str, Any]] = None
     # D12: {slot: {"prompt"}}, footage or stills from a connected generation toolkit.
     footage: Optional[Dict[str, Any]] = None
+    music: Optional[Dict[str, Any]] = None  # PRD-251B: the template's track (null), another, or none
     # PRD-251B (B5): the chosen video length, one the template declares (US-B103 checks).
     length_seconds: Optional[int] = Field(None, ge=1)
 
@@ -205,6 +206,7 @@ class UpdateSocialPostRequest(_Strict):
     media: Optional[Dict[str, Any]] = None
     voice: Optional[Dict[str, Any]] = None
     footage: Optional[Dict[str, Any]] = None
+    music: Optional[Dict[str, Any]] = None  # PRD-251B: the template's track (null), another, or none
     # PRD-251B (B5): the chosen video length, one the template declares (US-B103 checks).
     length_seconds: Optional[int] = Field(None, ge=1)
 

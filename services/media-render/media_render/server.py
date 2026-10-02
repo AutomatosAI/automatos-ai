@@ -196,6 +196,13 @@ async def _read_json(request: web.Request) -> Any:
         ) from None
 
 
+async def get_music(request: web.Request) -> web.Response:
+    """PRD-251B: the music library, for a post's music picker: each track's id, title, artist,
+    style, length and whether it asks for credit, by title."""
+    tracks = sorted(request.app[STATE].library.values(), key=lambda track: track.title.lower())
+    return web.json_response({"tracks": [track.listing() for track in tracks]})
+
+
 async def health(request: web.Request) -> web.Response:
     state = request.app[STATE]
     queue = {"running": state.render_lane.running, "queued": len(state.render_lane.waiting())}
@@ -360,6 +367,7 @@ def create_app(
     app = web.Application(middlewares=[internal_token], client_max_size=settings.max_bundle_bytes)
     app[STATE] = state
     app.router.add_get("/health", health)
+    app.router.add_get("/music", get_music)
     app.router.add_post("/render", post_render)
     app.router.add_get("/render/{job_id}", get_render)
     app.router.add_get("/render/{job_id}/output/{name}", get_output)

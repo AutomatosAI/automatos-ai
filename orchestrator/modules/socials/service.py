@@ -85,6 +85,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
 from modules.socials import text_search
+from modules.socials.music import validate_music
 from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 # PRD-251B (US-B101): the chosen video length is content too; the planned slot is not.
 CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", "length_seconds", TARGETS)
 LABEL_FIELDS = ("title", "brief")
-RENDER_FIELDS = ("voice", "footage")
+RENDER_FIELDS = ("voice", "footage", "music")  # PRD-251B: music, a render setting like the voice
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
@@ -580,6 +581,7 @@ _VALIDATORS = {
     TARGETS: validate_targets,
     "voice": validate_voice,
     "footage": validate_footage,
+    "music": validate_music,
 }
 
 
@@ -679,6 +681,7 @@ def create_draft(
     footage: Optional[Mapping[str, Any]] = None,
     length_seconds: Optional[int] = None,
     agent: Optional[str] = None,
+    music: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
@@ -698,6 +701,7 @@ def create_draft(
         "voice": voice,
         "footage": footage,
         "length_seconds": length_seconds,
+        "music": music,
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
