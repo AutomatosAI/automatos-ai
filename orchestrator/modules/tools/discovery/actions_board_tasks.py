@@ -18,10 +18,18 @@ def _board_statuses() -> list:
 
 
 def register_board_task_actions(registry: ActionRegistry) -> None:
-    """Register board task actions (PRD-72): one builder per tool, in this order."""
-    for build in (_create_task, _list_tasks, _board_snapshot, _board_summary, _get_task,
-                  _wait_for_task, _assign_task, _update_task, _update_task_status):
-        registry.register(build())
+    """Register board task actions (PRD-72), one tool each, in this order. Each
+    ActionDefinition is built inside registry.register(...), where
+    scripts/check_hierarchy_gate.py reads it."""
+    _register_create_task(registry)
+    _register_list_tasks(registry)
+    _register_board_snapshot(registry)
+    _register_board_summary(registry)
+    _register_get_task(registry)
+    _register_wait_for_task(registry)
+    _register_assign_task(registry)
+    _register_update_task(registry)
+    _register_update_task_status(registry)
 
 
 def _review_mode(default_note: str) -> dict:
@@ -37,8 +45,8 @@ def _review_mode(default_note: str) -> dict:
     }
 
 
-def _create_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_create_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_create_task",
         description=(
             "Create a new task on the board. Use this to raise work items for yourself "
@@ -59,7 +67,7 @@ def _create_task() -> ActionDefinition:
             "raise a task for the researcher to check competitor pricing",
             "create sub-tasks for each test failure",
         ],
-    )
+    ))
 
 
 def _create_task_properties() -> dict:
@@ -113,8 +121,8 @@ def _create_task_properties() -> dict:
 
 # ── Board read tools ────────────────────────────────────────────
 
-def _list_tasks() -> ActionDefinition:
-    return ActionDefinition(
+def _register_list_tasks(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_list_tasks",
         description=(
             "List tasks on the board with optional filters. Returns task titles, "
@@ -159,11 +167,11 @@ def _list_tasks() -> ActionDefinition:
             "list urgent tasks",
         ],
         accepts=("tags",),
-    )
+    ))
 
 
-def _board_snapshot() -> ActionDefinition:
-    return ActionDefinition(
+def _register_board_snapshot(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_board_snapshot",
         description=(
             "The whole picture of the board in ONE call: counts by status and "
@@ -190,11 +198,11 @@ def _board_snapshot() -> ActionDefinition:
             "what is the status of the board?",
             "what is everyone working on?",
         ],
-    )
+    ))
 
 
-def _board_summary() -> ActionDefinition:
-    return ActionDefinition(
+def _register_board_summary(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_board_summary",
         description=(
             "Get a summary of the task board: counts by status, by priority, "
@@ -218,11 +226,11 @@ def _board_summary() -> ActionDefinition:
             "which agent is busiest?",
             "any failed tasks?",
         ],
-    )
+    ))
 
 
-def _get_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_get_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_get_task",
         description=(
             "Get full details of a specific task by ID. Returns title, description, "
@@ -246,11 +254,11 @@ def _get_task() -> ActionDefinition:
             "what's the status of task 15?",
             "get details for task 7",
         ],
-    )
+    ))
 
 
-def _wait_for_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_wait_for_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_wait_for_task",
         description=(
             "Wait for a board task to finish and report how it ended. Re-checks the "
@@ -281,13 +289,13 @@ def _wait_for_task() -> ActionDefinition:
             "keep checking ticket 92 until it's done",
             "let me know when task 15 completes",
         ],
-    )
+    ))
 
 
 # ── Board write tools ───────────────────────────────────────────
 
-def _assign_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_assign_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_assign_task",
         description=(
             "Assign a board task to an agent by name. Moves the task to 'assigned' "
@@ -315,11 +323,11 @@ def _assign_task() -> ActionDefinition:
             "assign task 12 to the researcher",
             "give task 5 to devops",
         ],
-    )
+    ))
 
 
-def _update_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_update_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_update_task",
         description=(
             "Edit a board task's details — title, description, priority, tags, "
@@ -359,11 +367,11 @@ def _update_task() -> ActionDefinition:
             "bump task 5 to high priority",
             "add a note to task 9 that the supplier replied",
         ],
-    )
+    ))
 
 
-def _update_task_status() -> ActionDefinition:
-    return ActionDefinition(
+def _register_update_task_status(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_update_task_status",
         description=(
             "Change a task's status — one task via task_id, or MANY tasks to the "
@@ -411,4 +419,4 @@ def _update_task_status() -> ActionDefinition:
             "start task 12",
             "run task 5 now",
         ],
-    )
+    ))

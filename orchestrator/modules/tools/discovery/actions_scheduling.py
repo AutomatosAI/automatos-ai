@@ -4,13 +4,17 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 
 def register_scheduling_actions(registry: ActionRegistry) -> None:
-    """Register agent self-scheduling actions (PRD-77): one builder per tool, in this order."""
-    for build in (_schedule_task, _list_scheduled_tasks, _cancel_scheduled_task, _get_schedule):
-        registry.register(build())
+    """Register agent self-scheduling actions (PRD-77), one tool each, in this
+    order. Each ActionDefinition is built inside registry.register(...), where
+    scripts/check_hierarchy_gate.py reads it."""
+    _register_schedule_task(registry)
+    _register_list_scheduled_tasks(registry)
+    _register_cancel_scheduled_task(registry)
+    _register_get_schedule(registry)
 
 
-def _schedule_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_schedule_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_schedule_task",
         description=(
             "Schedule a follow-up task for yourself or another agent. "
@@ -38,7 +42,7 @@ def _schedule_task() -> ActionDefinition:
             "set up a weekly check every Monday at 9am",
             "schedule the researcher to update competitor data weekly",
         ],
-    )
+    ))
 
 
 def _schedule_task_properties() -> dict:
@@ -92,8 +96,8 @@ def _schedule_task_properties() -> dict:
     }
 
 
-def _list_scheduled_tasks() -> ActionDefinition:
-    return ActionDefinition(
+def _register_list_scheduled_tasks(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_list_scheduled_tasks",
         description=(
             "List all scheduled tasks for the workspace. Shows pending, active, "
@@ -122,11 +126,11 @@ def _list_scheduled_tasks() -> ActionDefinition:
             "show my scheduled tasks",
             "list active scheduled tasks",
         ],
-    )
+    ))
 
 
-def _cancel_scheduled_task() -> ActionDefinition:
-    return ActionDefinition(
+def _register_cancel_scheduled_task(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_cancel_scheduled_task",
         description=(
             "Cancel a scheduled (recurring or one-off) task by its ID so it stops "
@@ -149,11 +153,11 @@ def _cancel_scheduled_task() -> ActionDefinition:
         requires_confirmation=True,
         tags=["scheduling", "write", "destructive"],
         examples=["cancel scheduled task 5", "stop that recurring task"],
-    )
+    ))
 
 
-def _get_schedule() -> ActionDefinition:
-    return ActionDefinition(
+def _register_get_schedule(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_get_schedule",
         description=(
             "Show everything scheduled in the workspace right now — agent heartbeat "
@@ -183,4 +187,4 @@ def _get_schedule() -> ActionDefinition:
             "show the schedule for the next week",
             "what automations do I have set up",
         ],
-    )
+    ))
