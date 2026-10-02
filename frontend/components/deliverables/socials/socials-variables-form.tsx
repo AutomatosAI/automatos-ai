@@ -99,11 +99,14 @@ interface SocialsVariablesFormProps {
   variables: Variables
   sources: Sources
   onChange: (variables: Variables, sources: Sources) => void
+  /** PRD-251B US-B109: open the search of the first claim with no source ("Add a source"). */
+  openFirstUnsourced?: boolean
 }
 
-export function SocialsVariablesForm({ schema, variables, sources, onChange }: SocialsVariablesFormProps) {
+export function SocialsVariablesForm({ schema, variables, sources, onChange, openFirstUnsourced = false }: SocialsVariablesFormProps) {
   const [json, setJson] = useState(false)
   const names = Object.keys(schema)
+  const firstUnsourced = openFirstUnsourced ? names.find((name) => schema[name].claim && !sources[name]) : undefined
   const setSource = (name: string, source: SocialClaimSource | null) => {
     const { [name]: _dropped, ...rest } = sources
     onChange(variables, source ? { ...rest, [name]: source } : rest)
@@ -123,7 +126,14 @@ export function SocialsVariablesForm({ schema, variables, sources, onChange }: S
         names.map((name) => (
           <div key={name} className="space-y-1">
             <VariableField name={name} spec={schema[name]} variables={variables} onChange={(next) => onChange(next, sources)} />
-            {schema[name].claim && <ClaimSource name={name} source={sources[name] ?? null} onChange={(s) => setSource(name, s)} />}
+            {schema[name].claim && (
+              <ClaimSource
+                name={name}
+                source={sources[name] ?? null}
+                onChange={(s) => setSource(name, s)}
+                initiallyPicking={name === firstUnsourced}
+              />
+            )}
           </div>
         ))
       )}

@@ -228,21 +228,24 @@ describe('Socials on', () => {
     expect(await screen.findByText('No posts yet')).toBeInTheDocument()
   })
 
-  it('creating a draft lists it under Draft with count 1', async () => {
+  it('creating a draft in the editor lists it under Draft with count 1', async () => {
     server.role = 'editor'
     renderTab()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Blank draft/ }))
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch week teaser' } })
-    fireEvent.change(screen.getByLabelText('Brief'), { target: { value: 'Tease Monday’s launch' } })
-    fireEvent.change(screen.getByLabelText('Copy'), { target: { value: 'Something big lands Monday.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+    // PRD-251B US-B109: New post opens the editor; Save draft creates the post.
+    fireEvent.click(await screen.findByRole('button', { name: /New post/ }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Launch week teaser' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'Tease Monday’s launch' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Copy' }), { target: { value: 'Something big lands Monday.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
 
+    await waitFor(() => expect(api.createSocialPost).toHaveBeenCalled())
+    expect(api.createSocialPost).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Launch week teaser', brief: 'Tease Monday’s launch', copy: { base: 'Something big lands Monday.', channels: {} },
+    }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to calendar' }))
     const heading = await screen.findByRole('heading', { name: 'Draft 1' })
     expect(within(heading.closest('section')!).getByText('Launch week teaser')).toBeInTheDocument()
-    expect(api.createSocialPost).toHaveBeenCalledWith({
-      title: 'Launch week teaser', brief: 'Tease Monday’s launch', copy: { base: 'Something big lands Monday.' },
-    })
     expect(screen.queryByText('No posts yet')).toBeNull()
   })
 

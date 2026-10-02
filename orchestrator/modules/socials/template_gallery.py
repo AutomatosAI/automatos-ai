@@ -3,7 +3,8 @@
 ``gallery`` lists the workspace's social templates, of one post format's kind when a
 format is given, each with the lengths it declares (``blocks.durations``, US-B104; a
 video without a declared list has its root ``data-duration`` as its one length) and
-a link to its thumbnail. A thumbnail is stored like a preview file, under the
+a link to its thumbnail, and the slots a generation toolkit may fill (``footage_slots``,
+S1.8: what the editor's AI footage switch asks for, US-B109). A thumbnail is stored like a preview file, under the
 template's id, and ``thumbnail_url`` holds its storage KEY; the list presigns it
 inline for the configured TTL (D9), so a link never outlives the storage policy.
 ``missing_thumbnails`` names the templates the backfill still has to render
@@ -20,7 +21,7 @@ from uuid import UUID
 
 from config import config
 from core.models.core import DocumentTemplate
-from core.social_templates import SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, root_duration
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, root_duration, slot_generatable
 from modules.socials.compose_checks import template_kind
 from modules.socials.media_store import MediaStore
 
@@ -50,6 +51,13 @@ def durations_of(blocks: Any, fmt: Optional[str]) -> List[int]:
     return [int(round(root))] if root and root > 0 else []
 
 
+def footage_slots(blocks: Any) -> List[str]:
+    """The template's slots a generation toolkit may fill (S1.8), by name: every slot but
+    one marked ``\"generate\": false``, which only the workspace's own file fills."""
+    slots = blocks.get("slots") if isinstance(blocks, dict) and isinstance(blocks.get("slots"), dict) else {}
+    return sorted(name for name, spec in slots.items() if isinstance(spec, dict) and slot_generatable(spec))
+
+
 def thumbnail_link(store: MediaStore, raw: Optional[str]) -> Optional[str]:
     """A presigned inline link to the stored thumbnail; an http(s) value as it is;
     ``None`` without one or without storage."""
@@ -76,6 +84,9 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "kind": "video" if row.format == SOCIAL_VIDEO else "image",
         "sizes": [str(size) for size in (blocks.get("sizes") or [])],
         "durations": durations_of(blocks, row.format),
+        "footage_slots": footage_slots(blocks),
+        # The template's fields: the editor's Claims and sources card fills them (US-B109).
+        "variables_schema": blocks.get("variables_schema") if isinstance(blocks.get("variables_schema"), dict) else {},
         "thumbnail_url": thumbnail_link(store, row.thumbnail_url),
         "is_starter": (row.created_by or "") == STARTER_CREATOR,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,

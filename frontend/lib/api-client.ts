@@ -612,6 +612,10 @@ export interface CreateSocialPostInput {
   template_id?: string | null
   variables?: Record<string, SocialPostVariable>
   sources?: Record<string, SocialClaimSource>
+  /** PRD-251B (B5): the chosen video length, one the template declares. */
+  length_seconds?: number | null
+  /** Slot name → `{ prompt }`; `null` asks for no footage. */
+  footage?: Record<string, { prompt: string }> | null
 }
 
 /** POST /api/socials/compose (US-207): what the composer asks for. */
@@ -620,6 +624,9 @@ export interface SocialComposeInput {
   /** The channels (toolkits) to write for; every connected one when omitted. */
   channels?: string[]
   format?: string | null
+  /** PRD-251B (US-B103): the editor's chosen template and length, honoured by the proposal. */
+  template_id?: string | null
+  length_seconds?: number | null
 }
 
 /** The composer's draft proposal: checked by the server, never saved until "Save draft". */
@@ -649,6 +656,10 @@ export interface UpdateSocialPostInput {
   template_id?: string | null
   variables?: Record<string, SocialPostVariable>
   sources?: Record<string, SocialClaimSource>
+  /** PRD-251B (B5): the chosen video length; null for none. */
+  length_seconds?: number | null
+  /** The post's files, `{aspect: [Deliverable ids]}`: the editor's Library picks one (US-B109). */
+  media?: Record<string, string[]>
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -725,6 +736,39 @@ export interface SocialTemplateSummary {
   thumbnail_url: string | null
   is_starter: boolean
   updated_at: string | null
+  /** The slots a generation toolkit may fill (S1.8): what the editor's AI footage switch asks for. */
+  footage_slots: string[]
+  /** The template's fields, some of them claims (D7): the editor's Claims and sources card. */
+  variables_schema: Record<string, SocialTemplateVariable>
+}
+
+/** GET /api/socials/footage (D12, D15): the generation toolkit a render would use per kind, or why none. */
+export interface SocialFootageKind {
+  available: boolean
+  toolkit?: string
+  label?: string
+  model?: string
+  reason?: string
+}
+
+export interface SocialFootageSources {
+  kinds: { video?: SocialFootageKind; image?: SocialFootageKind }
+  problem?: string | null
+}
+
+/** GET /api/deliverables: the fields the editor's Library shows (PRD-251B US-B109). */
+export interface DeliverableSummary {
+  id: string
+  title: string
+  artifact_type: string
+  file_name: string | null
+  preview_url: string | null
+  created_at: string
+}
+
+export interface DeliverableSummaryList {
+  deliverables: DeliverableSummary[]
+  total: number
 }
 
 export interface SocialPostMediaLink {
@@ -2853,6 +2897,28 @@ class ApiClient {
   }
 
   // ===== PRD-251 Socials: the workspace switch and the post lifecycle =====
+  /** PRD-251B US-B109: the post's visual becomes an uploaded file (PNG, JPEG, WebP or MP4; the server sniffs it). */
+  async uploadSocialPostMedia(postId: string, file: File): Promise<SocialPost> {
+    const form = new FormData()
+    form.append('file', file)
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/media`, { method: 'POST', body: form })
+  }
+
+  /** GET /api/deliverables of one artifact type, newest first (the editor's Library, US-B109). */
+  async listDeliverables(params: { artifact_type?: string; limit?: number; offset?: number } = {}): Promise<DeliverableSummaryList> {
+    const query = new URLSearchParams()
+    if (params.artifact_type) query.set('artifact_type', params.artifact_type)
+    if (params.limit) query.set('limit', String(params.limit))
+    if (params.offset) query.set('offset', String(params.offset))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return this.request<DeliverableSummaryList>(`/api/deliverables${suffix}`)
+  }
+
+  /** GET /api/socials/footage (D12): what a template's slots can be filled with here. */
+  async getSocialFootageSources(): Promise<SocialFootageSources> {
+    return this.request<SocialFootageSources>('/api/socials/footage')
+  }
+
   async setWorkspaceSocialsEnabled(enabled: boolean): Promise<{ status: string; socials: WorkspaceSocialsState }> {
     return this.request('/api/workspaces/current/socials', {
       method: 'PUT',

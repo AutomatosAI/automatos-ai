@@ -210,6 +210,8 @@ _VALID_BODY = {
     ("POST", "/api/socials/posts/{post_id}/reject"): {"reason": "No"},
     ("POST", "/api/socials/posts/{post_id}/schedule"): {"scheduled_for": FUTURE_SLOT},
     ("PUT", "/api/socials/posts/{post_id}/targets"): {"targets": []},
+    # PRD-251B US-B105: a slot (the upload, US-B109, loads the post before it reads its file).
+    ("PUT", "/api/socials/posts/{post_id}/slot"): {"planned_for": FUTURE_SLOT},
     # US-210: putting a post in a campaign and taking it out take no body.
     ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
     ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
@@ -261,6 +263,11 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/voices/{toolkit}"),
             # Wave 1 (S1.8): what a post's slots can be filled with, and the month's media spend.
             ("GET", "/api/socials/footage"),
+            # PRD-251B Wave 1: the template gallery (US-B102), a post's planned slot (US-B105,
+            # api/socials_slots.py) and an uploaded visual (US-B109, api/socials_media_upload.py).
+            ("GET", "/api/socials/templates"),
+            ("PUT", "/api/socials/posts/{post_id}/slot"),
+            ("POST", "/api/socials/posts/{post_id}/media"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

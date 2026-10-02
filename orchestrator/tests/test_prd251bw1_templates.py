@@ -225,6 +225,13 @@ def test_a_save_that_changes_the_composition_clears_the_thumbnail_and_a_rename_k
     assert changed is not None and changed.thumbnail_url is None
 
 
+def test_footage_slots_are_the_generatable_ones():
+    blocks = {"slots": {"hook": {"kind": "video"}, "broll": {"kind": "video", "generate": True},
+                        "logo_reel": {"kind": "video", "generate": False}, "bad": "not a slot"}}
+    assert template_gallery.footage_slots(blocks) == ["broll", "hook"]
+    assert template_gallery.footage_slots({}) == [] and template_gallery.footage_slots(None) == []
+
+
 def test_durations_of_and_the_starter_marker():
     assert template_gallery.durations_of({"durations": [30, 15]}, "social_video") == [15, 30]
     assert template_gallery.durations_of(COMPOSITION, "social_video") == [40]

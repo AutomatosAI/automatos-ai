@@ -103,6 +103,8 @@ from api.socials_channels import router as channels_router
 from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
+from api.socials_media_upload import router as media_upload_router
+from api.socials_slots import router as slots_router
 from api.socials_targets import router as targets_router
 from api.socials_templates import router as templates_router
 from config import config
@@ -120,7 +122,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, notify, preview, publish_lifecycle, render, schedule_jobs, service, template_gallery
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -138,7 +140,10 @@ router = APIRouter(
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
-for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router):
+for sub_router in (
+    channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router,
+    slots_router, media_upload_router,  # PRD-251B: planned slots (US-B105), an uploaded visual (US-B109)
+):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
@@ -224,12 +229,6 @@ class RenderRequest(_Strict):
 class ScheduleRequest(_Strict):
     scheduled_for: datetime
     timezone: str = "UTC"
-
-
-class SlotRequest(_Strict):
-    """PRD-251B (B11): the slot a post is planned for; ``null`` clears it (before approval)."""
-    planned_for: Optional[datetime] = None
-    timezone: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -752,50 +751,6 @@ async def schedule_social_post(
     status, content_hash = post.status, post.content_hash
     try:
         service.schedule(post, _actor(ctx), body.scheduled_for, body.timezone)
-        return _commit_unchanged(db, post, status=status, content_hash=content_hash)
-    except service.SocialsError as exc:
-        _raise_for(exc)
-
-
-SLOT_EDIT_STATUSES = frozenset({service.DRAFT, service.NEEDS_APPROVAL, service.CHANGES_REQUESTED})
-SLOT_RESCHEDULE_STATUSES = frozenset({service.APPROVED, service.SCHEDULED, service.MISSED})
-
-
-def _apply_slot(post: SocialPost, actor: str, body: SlotRequest) -> None:
-    """PRD-251B (B11, US-B105): before approval the slot is set alone (never a content
-    change); an approved or scheduled post, or a missed one whose approval stands, is
-    rescheduled through the one schedule path; a missed post without an approval
-    restarts as a draft at the new slot; the publishing states refuse."""
-    if post.status in SLOT_EDIT_STATUSES:
-        service.set_planned_for(post, body.planned_for, body.timezone)
-        return
-    if post.status == service.MISSED and not publish_lifecycle.approval_matches(post):
-        service.reslot(post, actor, body.planned_for, body.timezone)
-        return
-    if post.status in SLOT_RESCHEDULE_STATUSES:
-        if body.planned_for is None:
-            raise service.InvalidPost("an approved post keeps its slot: unschedule it instead")
-        service.schedule(post, actor, body.planned_for, body.timezone or post.timezone or "UTC")
-        service.set_planned_for(post, body.planned_for, body.timezone)
-        return
-    raise service.IllegalTransition(post.status, "slot")
-
-
-@router.put("/posts/{post_id}/slot", dependencies=[CAN_UPDATE])
-def set_social_post_slot(
-    post_id: UUID,
-    body: SlotRequest,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """The slot the post is planned for (PRD-251B B11, US-B105), stored in UTC with its
-    zone. Not content: the hash and the approval are untouched, so moving a slot never
-    voids an approval; approving a post with a future slot schedules it there. A plain
-    ``def`` (F105)."""
-    post = _load(db, ctx, post_id)
-    status, content_hash = post.status, post.content_hash
-    try:
-        _apply_slot(post, _actor(ctx), body)
         return _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)

@@ -43,8 +43,8 @@ vi.mock('@/components/deliverables/socials/socials-campaigns-view', () => ({
     <div data-testid="view-plans">{creating ? 'plan form open' : 'plans'}</div>
   ),
 }))
-vi.mock('@/components/deliverables/socials/socials-composer', () => ({
-  SocialsComposer: () => <div role="region" aria-label="Composer" />,
+vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({
+  SocialsPostPage: ({ postId }: { postId: string }) => <div data-testid="post-page">{postId}</div>,
 }))
 vi.mock('@/components/deliverables/socials/socials-post-detail', () => ({
   SocialsPostDetail: ({ post }: { post: any }) => <article aria-label={`Post: ${post.title}`} />,
@@ -112,15 +112,22 @@ describe('the Socials Studio shell', () => {
     expect(current()).toHaveTextContent('Plans')
   })
 
-  it('?post=<id> opens that post, from the URL or the page', () => {
+  it('?post=<id> opens that post, from the URL or the page (US-B109: the post page)', () => {
     state.search = 'tab=socials&post=p333'
     renderStudio()
-    expect(screen.getByTestId('view-calendar')).toHaveTextContent('p333')
+    expect(screen.getByTestId('post-page')).toHaveTextContent('p333')
     cleanup()
 
     state.search = ''
     renderStudio('p22')
-    expect(screen.getByTestId('view-calendar')).toHaveTextContent('p22')
+    expect(screen.getByTestId('post-page')).toHaveTextContent('p22')
+  })
+
+  it('?view=brand opens the brand kit over the calendar', () => {
+    state.search = 'tab=socials&view=brand'
+    renderStudio()
+    expect(screen.getByRole('dialog', { name: 'Brand Kit' })).toBeInTheDocument()
+    expect(screen.getByTestId('view-calendar')).toBeInTheDocument()
   })
 
   it('Brand kit opens the brand kit dialog in place', () => {
@@ -131,7 +138,7 @@ describe('the Socials Studio shell', () => {
     expect(state.push).not.toHaveBeenCalled()
   })
 
-  it('New plan opens the plan form on Plans; New post opens the composer', () => {
+  it('New plan opens the plan form on Plans; New post opens the editor', () => {
     renderStudio()
     fireEvent.click(screen.getByRole('button', { name: 'New plan' }))
     expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=plans&plan=new')
@@ -139,7 +146,7 @@ describe('the Socials Studio shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /New post/ }))
     expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=plans&post=new')
-    expect(screen.getByRole('region', { name: 'Composer' })).toBeInTheDocument()
+    expect(screen.getByTestId('post-page')).toHaveTextContent('new')
   })
 
   it('a viewer sees the views but neither action nor the brand kit', () => {

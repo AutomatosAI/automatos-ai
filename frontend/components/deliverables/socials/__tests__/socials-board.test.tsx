@@ -211,17 +211,24 @@ describe('on a wide screen', () => {
 })
 
 describe('?post= (global search links a post there)', () => {
-  it('opens that post', async () => {
+  // PRD-251B US-B109: the post opens in the editor, with its way back to the calendar.
+  it('opens that post in the editor', async () => {
     renderTab('post-launch-day')
-    expect(await screen.findByRole('article', { name: 'Post: Launch day' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Approved posts' })).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Launch day')
+    expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
+    expect(listSections()).toHaveLength(0)
   })
 
-  it('on a phone, opens it in place of the list', async () => {
+  it('on a phone, opens it the same way, in place of the list', async () => {
     state.compact = true
     renderTab('post-launch-day')
-    expect(await screen.findByRole('article', { name: 'Post: Launch day' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Back to posts' })).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Launch day')
     expect(listSections()).toHaveLength(0)
+  })
+
+  it('a published post opens in its read view', async () => {
+    state.posts = [...POSTS, seed('Out already', 'published', 7)]
+    renderTab('post-out-already')
+    expect(await screen.findByRole('article', { name: 'Post: Out already' })).toBeInTheDocument()
   })
 })

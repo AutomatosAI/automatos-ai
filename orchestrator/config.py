@@ -1946,6 +1946,10 @@ class Config:
     # returns: at most this many bytes, fetched within this many seconds.
     SOCIALS_VOICE_LINE_MAX_BYTES: int = int(os.getenv("SOCIALS_VOICE_LINE_MAX_BYTES", "16777216"))
     SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS", "60"))
+    # PRD-251B US-B109: a file uploaded as a post's visual (POST /api/socials/posts/{id}/media),
+    # at most this many bytes: a PNG, JPEG or WebP image, or an MP4 video.
+    SOCIALS_UPLOAD_IMAGE_MAX_BYTES: int = int(os.getenv("SOCIALS_UPLOAD_IMAGE_MAX_BYTES", "10485760"))
+    SOCIALS_UPLOAD_VIDEO_MAX_BYTES: int = int(os.getenv("SOCIALS_UPLOAD_VIDEO_MAX_BYTES", "209715200"))
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation

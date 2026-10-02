@@ -21,7 +21,7 @@
  * that post.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, FilePlus, Loader2, Share2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { Workspace } from '@/components/workspace-provider'
@@ -29,7 +29,6 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { SocialsBoard } from './socials-board'
-import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
 import { SocialsRenderMinutes } from './socials-render-minutes'
 import { SocialsStatusList } from './socials-status-list'
@@ -88,8 +87,6 @@ interface SocialsPostListProps {
 
 export function SocialsPostList({ role, focusPostId = null }: SocialsPostListProps) {
   const { data, isLoading, isError, error } = useSocialPosts()
-  // "Blank draft": the bare form. "New post" (the composer) is in the Studio's header.
-  const [creating, setCreating] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(focusPostId)
   const [view, setView] = useState<SocialsView>('list')
 
@@ -101,11 +98,6 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
   const posts = useMemo(() => data?.posts ?? [], [data])
   const groups = useMemo(() => groupPostsByStatus(posts), [posts])
   const canAuthor = canAuthorPosts(role)
-
-  const handleDraftDone = (post: SocialPost | null) => {
-    setCreating(false)
-    if (post) setSelectedId(post.id)
-  }
 
   return (
     <div className="socials-tab space-y-6">
@@ -119,16 +111,8 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SocialsViewToggle value={view} onChange={setView} />
-          {canAuthor && !creating && (
-            <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-              <FilePlus className="mr-1.5 h-4 w-4" aria-hidden />
-              Blank draft
-            </Button>
-          )}
         </div>
       </div>
-
-      {creating && <SocialsNewDraft onDone={handleDraftDone} />}
 
       {isLoading ? (
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">

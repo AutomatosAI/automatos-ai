@@ -1,5 +1,5 @@
 {
-  "route_count": 854,
+  "route_count": 855,
   "routes": [
     {
       "method": "GET",
@@ -2127,6 +2127,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/posts/{post_id}/media"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/posts/{post_id}/media"
     },
     {

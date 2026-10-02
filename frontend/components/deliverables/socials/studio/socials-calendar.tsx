@@ -30,7 +30,7 @@ import { SocialsCalendarChip } from './socials-calendar-chip'
 import { SocialsCalendarHeader } from './socials-calendar-header'
 import { ALL_CHANNELS, isMovable, matchesFilter, opensInQueue, postEvents, type ChannelFilter } from './socials-calendar-model'
 import { SocialsTodayRail } from './socials-today-rail'
-import { NEW_POST, type GoTo, type SocialsRoute } from './studio-route'
+import type { GoTo, SocialsRoute } from './studio-route'
 
 export const MOVED_MESSAGE = 'Moved to the new slot.'
 export const DRAG_HINT = 'Drag a post to another day to move it. Click a post to open it.'
@@ -74,7 +74,7 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
   const [filter, setFilter] = useState<ChannelFilter>(ALL_CHANNELS)
   const { data: channels } = useSocialChannels()
   const social = useCalendarMoves()
-  const layout = route.post && route.post !== NEW_POST ? 'list' : route.cal
+  const layout = route.cal
   const mode = layout === 'week' ? 'week' : 'month'
 
   const shown = useMemo(() => posts.filter((post) => matchesFilter(post, filter)), [posts, filter])
@@ -111,7 +111,7 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
         onFilter={setFilter}
       />
       {layout === 'list' ? (
-        <SocialsPostList role={role} focusPostId={route.post} />
+        <SocialsPostList role={role} />
       ) : (
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section aria-label={title} className="socials-calendar-grid overflow-x-auto">
