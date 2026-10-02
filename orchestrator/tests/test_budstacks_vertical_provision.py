@@ -250,9 +250,13 @@ def test_vertical_key_verifier_triad(monkeypatch):
 
 def test_a_roster_seeded_over_the_plan_is_logged_not_refused(monkeypatch, caplog):
     """F200: the vertical's roster is the product's own, so provisioning never meets
-    the plan's agent limit; one bigger than the plan is logged (Shopify's is 9 on basic's 5)."""
+    the plan's agent limit; one bigger than the plan is logged (Shopify's is 9 on basic's 5).
+    Plans are the hosted edition's (F230), and so is vertical provisioning."""
     import logging
 
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     db = _FakeSession(
         {
             "Workspace": _FakeQuery(first_result=None),
