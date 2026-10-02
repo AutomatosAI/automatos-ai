@@ -5,6 +5,8 @@ import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { sessionNotes, type SessionNote } from './session-notes'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
+import { ReviewVerdict } from './review-verdict'
+import { TicketQuestions } from './ticket-questions'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -18,7 +20,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
-import { useUpdateTaskStatus, useApproveTask, useRejectTask, useRunTask } from '@/hooks/use-board-tasks'
+import { useUpdateTaskStatus, useRunTask } from '@/hooks/use-board-tasks'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +28,8 @@ interface BoardTaskViewerProps {
   task: BoardTask | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** PRD-252 R1: opened from a question link — that question is highlighted. */
+  focusQuestionId?: number | null
 }
 
 /**
@@ -408,8 +412,7 @@ function InProgressContent({ task }: { task: BoardTask }) {
   )
 }
 
-function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: BoardTask; onStatusChange: (status: string) => void; onApprove: () => void; onReject: (feedback?: string) => void }) {
-  const hasApprovalAction = !!task.planning_data?.approval_action
+function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => void }) {
   return (
     <div className="space-y-6">
       {/* Review banner */}
@@ -475,37 +478,8 @@ function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: Bo
         )}
       </div>
 
-      {/* Approval action info */}
-      {hasApprovalAction && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
-          <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-          <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Approval action:</span>{' '}
-            {task.planning_data?.approval_action?.type === 'publish_blog'
-              ? 'Publish blog post to live site'
-              : task.planning_data?.approval_action?.type ?? 'Execute action'}
-          </p>
-        </div>
-      )}
-
-      {/* Review actions */}
-      <div className="flex gap-3 pt-2 border-t border-border/30">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={() => onReject()}
-        >
-          <AlertCircle className="w-4 h-4 mr-2" />
-          Reject
-        </Button>
-        <Button
-          className="flex-1"
-          onClick={onApprove}
-        >
-          <CheckCircle2 className="w-4 h-4 mr-2" />
-          {hasApprovalAction ? 'Approve & Publish' : 'Approve'}
-        </Button>
-      </div>
+      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does */}
+      <ReviewVerdict task={task} onDecided={onDecided} />
     </div>
   )
 }
@@ -637,11 +611,9 @@ function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () 
 
 // ── Main Modal ──────────────────────────────────────────────────────
 
-export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTaskViewerProps) {
+export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuestionId }: BoardTaskViewerProps) {
   const task = useLiveTask(propTask)
   const updateStatus = useUpdateTaskStatus()
-  const approveTask = useApproveTask()
-  const rejectTask = useRejectTask()
   const runTask = useRunTask()
 
   if (!task) return null
@@ -654,16 +626,6 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
     if (newStatus === 'done') {
       onOpenChange(false)
     }
-  }
-
-  const handleApprove = () => {
-    approveTask.mutate({ taskId: task.id }, {
-      onSuccess: () => onOpenChange(false),
-    })
-  }
-
-  const handleReject = (feedback?: string) => {
-    rejectTask.mutate({ taskId: task.id, feedback })
   }
 
   // PRD-161 S5: re-dispatch a failed/idle/blocked task on demand.
@@ -732,10 +694,11 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
 
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
+          <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
-          {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
+          {task.status === 'review' && <ReviewContent task={task} onDecided={() => onOpenChange(false)} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
 
           {/* PRD-161 S5: failed tasks surface the error + a re-run affordance. */}

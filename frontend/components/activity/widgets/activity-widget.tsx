@@ -11,7 +11,7 @@ import { Activity, CheckCircle2, ChefHat, Clock, Eye, Loader2, RefreshCw, XCircl
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
-import { rowHref } from '@/components/command-center/activity-tab'
+import { feedItemHref } from '@/lib/ticket-links'
 import { cn } from '@/lib/utils'
 
 const RUNNING_ROWS = 5
@@ -63,7 +63,7 @@ export function ActivityWidget({ period, onViewAll, className }: ActivityWidgetP
   const isLoading = running.isLoading || done.isLoading
 
   const open = (item: ActivityFeedItem) => {
-    const href = rowHref(item)
+    const href = feedItemHref(item)
     if (href) router.push(href as any)
   }
 

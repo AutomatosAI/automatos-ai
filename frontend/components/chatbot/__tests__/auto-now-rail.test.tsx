@@ -1,8 +1,9 @@
 /**
  * PRD-244 D5 — "Auto now" on fake hook data: with one open question, one due
- * watch and one running agent the rail shows three honest rows, each landing
- * on the right Command Centre tab; with nothing, it says so; answering sends
- * the grant id and the option or text.
+ * watch and one running agent the rail shows three honest rows, each opening
+ * the thing itself (PRD-252 R1: the agent's ticket, the question inside its
+ * ticket); with nothing, it says so; answering sends the grant id and the
+ * option or text.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
@@ -46,7 +47,7 @@ describe('AutoNowRail', () => {
     expect(screen.getAllByText('—')).toHaveLength(4)
   })
 
-  it('with one running agent, one open question, one due watch and one decision, shows honest rows that land on the right tabs', () => {
+  it('with one running agent, one open question, one due watch and one decision, shows honest rows that open their items', () => {
     data.stats.data = { working_now: 1, agents_active: 2, tasks_in_queue: 3, needs_attention: 1 }
     data.fleet.data = { agents: [
       { agent_id: 9, name: 'OPS', current: { kind: 'board_task', id: 1, title: 'Draft the Q3 vendor email', since: '2026-09-17T09:00:00Z' } },
@@ -56,10 +57,10 @@ describe('AutoNowRail', () => {
     data.watches.data = { watches: [{ id: 'w1', title: 'Invoice run', next_check_at: '2026-09-17T16:00:00Z' }] }
     data.decisions.data = { total: 1, items: [] }
     render(<AutoNowRail />)
-    expect(screen.getByText('OPS').closest('a')).toHaveAttribute('href', '/command-center?tab=board')
+    expect(screen.getByText('OPS').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=1')
     expect(screen.getByText('Draft the Q3 vendor email')).toBeInTheDocument()
     expect(screen.queryByText('IDLE')).toBeNull()
-    expect(screen.getByText('Which vendor?').closest('a')).toHaveAttribute('href', '/command-center?tab=questions')
+    expect(screen.getByText('Which vendor?').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=7&question=41')
     expect(screen.getByText('Invoice run').closest('a')).toHaveAttribute('href', '/command-center?tab=watchlist')
     expect(screen.getByText('1 waiting for a decision').closest('a')).toHaveAttribute('href', '/command-center?tab=governance')
     expect(screen.getByText('3')).toBeInTheDocument() // queue stat

@@ -4,8 +4,11 @@
  * PRD-244 review batch 2 (Gerard, 2026-09-17) — "Needs you": the one widget
  * for everything only a human can move: open questions (PRD-225), missions
  * waiting for approval (approval gates) and decisions (reports + missions
- * escalated). Replaces the Decisions Needed and Approval Gates widgets. Each
- * row lands on the Command Centre tab that owns it.
+ * escalated). Replaces the Decisions Needed and Approval Gates widgets.
+ *
+ * PRD-252 R1: a row opens the thing itself, not the tab that lists it — the
+ * ticket in review, the question inside its ticket, the mission at its plan.
+ * "All →" still lands on the tab that owns the family.
  */
 import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, FileText, HelpCircle, Loader2, ShieldCheck, Target } from 'lucide-react'
@@ -14,6 +17,7 @@ import { useQuestions } from '@/hooks/use-approval-grants'
 import { useBoardTasksList } from '@/hooks/use-board-tasks-api'
 import { AUTO_NOW_LINKS, questionPreview } from '@/components/chatbot/auto-now-rail'
 import { cn } from '@/lib/utils'
+import { missionHref, questionHref, ticketHref } from '@/lib/ticket-links'
 
 const ROWS = 3
 
@@ -55,6 +59,11 @@ function Section({ title, count, href, children }: { title: string; count: numbe
 }
 
 const rowClass = 'block w-full rounded-lg border border-border/50 bg-muted/30 p-2 text-left transition-colors hover:bg-muted/60'
+
+/** A mission waiting for a decision opens at its plan; a report on Governance. */
+function decisionHref(item: { kind: string; id: string }): string {
+  return item.kind === 'mission' ? missionHref(item.id) : AUTO_NOW_LINKS.governance
+}
 
 // F207: a list that could not be loaded is never "Nothing on your plate".
 const DECISIONS_NOT_LOADED = 'The decisions waiting for you could not be loaded. Try again shortly.'
@@ -110,7 +119,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
           <>
             <Section title="Questions" count={asks.length} href={AUTO_NOW_LINKS.questions}>
               {asks.slice(0, ROWS).map((q) => (
-                <Link key={q.id} href={AUTO_NOW_LINKS.questions as any} className={rowClass}>
+                <Link key={q.id} href={questionHref(q) as any} className={rowClass}>
                   <div className="flex items-start gap-2">
                     <HelpCircle className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
                     <span className="text-xs leading-snug line-clamp-2 flex-1">{questionPreview(q.question_md)}</span>
@@ -125,7 +134,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
 
             <Section title="In review" count={reviewTotal} href={AUTO_NOW_LINKS.board}>
               {reviewTasks.slice(0, ROWS).map((t: any) => (
-                <Link key={t.id} href={AUTO_NOW_LINKS.board as any} className={rowClass}>
+                <Link key={t.id} href={ticketHref(t.id) as any} className={rowClass}>
                   <div className="flex items-start gap-2">
                     <ClipboardCheck className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
                     <span className="text-xs leading-snug line-clamp-2 flex-1">{t.title}</span>
@@ -140,7 +149,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
 
             <Section title="Approvals" count={pendingCount} href={AUTO_NOW_LINKS.governance}>
               {pendingMissions.slice(0, ROWS).map((m) => (
-                <Link key={m.id} href={AUTO_NOW_LINKS.governance as any} className={cn(rowClass, 'border-warning/10 bg-warning/5')}>
+                <Link key={m.id} href={missionHref(m.id) as any} className={cn(rowClass, 'border-warning/10 bg-warning/5')}>
                   <div className="flex items-start gap-2">
                     <ShieldCheck className="w-3 h-3 mt-0.5 shrink-0 text-warning" />
                     <span className="text-xs leading-snug line-clamp-2 flex-1">{m.goal}</span>
@@ -165,7 +174,7 @@ export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
                 const level = item.escalation_level ?? 0
                 const Icon = item.kind === 'report' ? FileText : Target
                 return (
-                  <Link key={`${item.kind}:${item.id}`} href={AUTO_NOW_LINKS.governance as any} className={rowClass}>
+                  <Link key={`${item.kind}:${item.id}`} href={decisionHref(item) as any} className={rowClass}>
                     <div className="flex items-start gap-2">
                       <Icon className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
                       <span className="text-xs leading-snug line-clamp-2 flex-1">{item.title}</span>

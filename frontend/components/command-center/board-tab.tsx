@@ -19,32 +19,22 @@
  * lives in /chat?mode=plan and routine creation in /agents.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useCallback, useMemo, useState } from 'react'
 import {
   DragDropContext,
   Droppable,
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import {
-  Columns,
-  LayoutList,
-  Rows,
-  AlignJustify,
-  Search,
-  BookMarked,
-  CheckSquare,
-} from 'lucide-react'
-import { useBoardTasks, useBoardTask, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { BookMarked, CheckSquare } from 'lucide-react'
+import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
+import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
-
-type Mode = 'column' | 'lane'
-type Density = 'comfortable' | 'compact'
+import { BoardToolbar, type BoardDensity as Density, type BoardMode as Mode } from './board-toolbar'
 
 const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   inbox:       { label: 'Inbox',       color: 'hsl(30 14% 12%)' },
@@ -70,6 +60,7 @@ export function BoardTab() {
   const [agentFilter, setAgentFilter] = useState<number | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
   const [openTask, setOpenTask] = useState<BoardTask | null>(null)
+  const [focusQuestion, setFocusQuestion] = useState<number | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
 
   const { columns, isLoading } = useBoardTasks({
@@ -82,18 +73,14 @@ export function BoardTab() {
 
   const allTasks = useMemo(() => columns.flatMap((c) => c.tasks), [columns])
 
-  // Deep link: ?task_id=123 (the calendar's "Open on board", notifications).
-  // Fetched by id so the search/agent/priority filters can't hide the card
-  // from the link. Opens once per id.
-  const deepLinkTaskId = useSearchParams().get('task_id')
-  const { data: deepLinkedTask } = useBoardTask(deepLinkTaskId)
-  const openedDeepLink = useRef<string | null>(null)
-  useEffect(() => {
-    if (!deepLinkTaskId || !deepLinkedTask || openedDeepLink.current === deepLinkTaskId) return
-    openedDeepLink.current = deepLinkTaskId
-    setOpenTask(deepLinkedTask)
+  const openTicket = useCallback((task: BoardTask, questionId: number | null = null) => {
+    setOpenTask(task)
+    setFocusQuestion(questionId)
     setViewerOpen(true)
-  }, [deepLinkTaskId, deepLinkedTask])
+  }, [])
+  // PRD-252 R1: ?task_id= (and &question=) open that ticket, fetched by id so
+  // the filters below can't hide it from the link.
+  const clearDeepLink = useTicketDeepLink(openTicket)
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return
@@ -107,121 +94,25 @@ export function BoardTab() {
     updateStatus.mutate({ taskId: draggableId, status: nextStatus })
   }
 
-  const handleCardClick = (task: BoardTask) => {
-    setOpenTask(task)
-    setViewerOpen(true)
-  }
+  const handleCardClick = (task: BoardTask) => openTicket(task)
 
   return (
     <>
       {/* PRD-235 W3: Claude Code agents need the paired host — say so once, at the top */}
       <HostOfflineBanner />
-      <div className="cc-toolbar">
-        <div className="cc-seg" role="group" aria-label="Board mode">
-          <button
-            type="button"
-            className={mode === 'column' ? 'on' : ''}
-            onClick={() => setMode('column')}
-          >
-            <Columns style={{ width: 12, height: 12 }} /> Columns
-          </button>
-          <button
-            type="button"
-            className={mode === 'lane' ? 'on' : ''}
-            onClick={() => setMode('lane')}
-          >
-            <LayoutList style={{ width: 12, height: 12 }} /> By agent
-          </button>
-        </div>
-
-        <div className="cc-seg" role="group" aria-label="Density">
-          <button
-            type="button"
-            className={density === 'comfortable' ? 'on' : ''}
-            onClick={() => setDensity('comfortable')}
-          >
-            <Rows style={{ width: 11, height: 11 }} /> Comfortable
-          </button>
-          <button
-            type="button"
-            className={density === 'compact' ? 'on' : ''}
-            onClick={() => setDensity('compact')}
-          >
-            <AlignJustify style={{ width: 11, height: 11 }} /> Compact
-          </button>
-        </div>
-
-        <div style={{ display: 'inline-flex', gap: 6 }}>
-          <select
-            className="cc-btn"
-            value={priorityFilter ?? ''}
-            onChange={(e) => setPriorityFilter(e.target.value || null)}
-            aria-label="Filter by priority"
-            style={{ height: 28, fontSize: 11.5, paddingRight: 24 }}
-          >
-            <option value="">All priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <select
-            className="cc-btn"
-            value={agentFilter ?? ''}
-            onChange={(e) =>
-              setAgentFilter(e.target.value ? Number(e.target.value) : null)
-            }
-            aria-label="Filter by agent"
-            style={{ height: 28, fontSize: 11.5, paddingRight: 24 }}
-          >
-            <option value="">All agents</option>
-            {Array.isArray(agents) &&
-              agents.map((a: any) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        <div style={{ marginLeft: 'auto' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '0 10px',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: 6,
-              background: 'hsl(var(--card))',
-              minWidth: 220,
-            }}
-          >
-            <Search
-              style={{
-                width: 12,
-                height: 12,
-                color: 'hsl(var(--muted-foreground))',
-              }}
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tasks…"
-              style={{
-                background: 'transparent',
-                border: 0,
-                outline: 'none',
-                fontSize: 12,
-                height: 28,
-                flex: 1,
-                color: 'hsl(var(--foreground))',
-              }}
-            />
-          </div>
-        </div>
-      </div>
+      <BoardToolbar
+        mode={mode}
+        onMode={setMode}
+        density={density}
+        onDensity={setDensity}
+        priority={priorityFilter}
+        onPriority={setPriorityFilter}
+        agentId={agentFilter}
+        onAgentId={setAgentFilter}
+        agents={agents}
+        search={search}
+        onSearch={setSearch}
+      />
 
       {isLoading ? (
         <div className="cc-panel-empty">Loading tasks…</div>
@@ -246,9 +137,13 @@ export function BoardTab() {
       <BoardTaskViewer
         task={openTask}
         open={viewerOpen}
+        focusQuestionId={focusQuestion}
         onOpenChange={(o) => {
           setViewerOpen(o)
-          if (!o) setOpenTask(null)
+          if (!o) {
+            setOpenTask(null)
+            clearDeepLink()
+          }
         }}
       />
     </>

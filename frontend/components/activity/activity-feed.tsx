@@ -30,6 +30,7 @@ import {
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
 import { ExecutionDetail } from './execution-detail'
+import { feedItemHref } from '@/lib/ticket-links'
 import dynamic from 'next/dynamic'
 import { cn } from '@/lib/utils'
 
@@ -131,7 +132,6 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   const [statusFilter, setStatusFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [selectedItem, setSelectedItem] = useState<ActivityFeedItem | null>(null)
-  const deepLinkHandled = useRef(false)
 
   const filters = useMemo<ActivityFeedFilters>(
     () => ({
@@ -150,61 +150,8 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   const total = data?.total ?? 0
   const hasMore = items.length < total
 
-  // Track known IDs to detect items arriving via polling (for log-slide-in animation)
-  const knownIds = useRef<Set<string>>(new Set())
-  const isInitialLoad = useRef(true)
-
-  const newItemIds = useMemo(() => {
-    if (isInitialLoad.current || items.length === 0) return new Set<string>()
-    const result = new Set<string>()
-    for (const item of items) {
-      if (!knownIds.current.has(item.id)) result.add(item.id)
-    }
-    return result
-  }, [items])
-
-  useEffect(() => {
-    if (items.length > 0) {
-      for (const item of items) {
-        knownIds.current.add(item.id)
-      }
-      isInitialLoad.current = false
-    }
-  }, [items])
-
-  // Deep-link: /activity?openExecution=X&recipeId=Y → auto-select matching item
-  useEffect(() => {
-    if (!openExecution || deepLinkHandled.current || items.length === 0) return
-    // Find matching item by execution ID in the source_url or id
-    const match = items.find(
-      (item) =>
-        item.source_url?.includes(`openExecution=${openExecution}`) ||
-        item.id === `recipe-${openExecution}`
-    )
-    if (match) {
-      setSelectedItem(match)
-      deepLinkHandled.current = true
-    } else if (!isLoading) {
-      // Item not in current page — build a minimal stub so ExecutionDetail can render
-      setSelectedItem({
-        id: `recipe-${openExecution}`,
-        type: 'recipe',
-        name: 'Playbook Execution',
-        status: 'completed',
-        started_at: null,
-        completed_at: null,
-        duration_seconds: null,
-        agent: null,
-        agents: [],
-        summary: '',
-        source_id: deepLinkRecipeId || null,
-        source_url: `/activity?openExecution=${openExecution}&recipeId=${deepLinkRecipeId}`,
-        trigger: null,
-        error_message: null,
-      })
-      deepLinkHandled.current = true
-    }
-  }, [openExecution, deepLinkRecipeId, items, isLoading])
+  const newItemIds = useNewItemIds(items)
+  useOpenExecutionLink({ openExecution, deepLinkRecipeId, items, isLoading, onOpen: setSelectedItem })
 
   const toggleType = useCallback((type: string) => {
     setActiveTypes((prev) => {
@@ -225,24 +172,11 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   }, [])
 
   const handleViewItem = useCallback((item: ActivityFeedItem) => {
-    // Navigate to ExecutionKitchen for recipes (detailed live view)
-    if (item.type === 'recipe' && item.source_id) {
-      const execId = item.id.replace('recipe-', '')
-      router.push(`/activity/execution?id=${execId}&recipeId=${item.source_id}`)
-      return
-    }
-    // For chats, navigate to the chat
-    if (item.type === 'chat' && item.source_id) {
-      router.push(`/chat?chatId=${item.source_id}`)
-      return
-    }
-    // For tasks, jump to the kanban board with the task highlighted
-    if (item.type === 'task' && item.source_id) {
-      router.push(`/command-center?tab=board&task=${item.source_id}` as any)
-      return
-    }
-    // Fallback to inline detail for routines
-    setSelectedItem(item)
+    // A row opens the thing itself: a playbook's run, the chat, the ticket
+    // (PRD-252 R1; F218 built ?task=, which nothing read). Routines open inline.
+    const href = item.type === 'routine' ? null : feedItemHref(item)
+    if (href) router.push(href as any)
+    else setSelectedItem(item)
   }, [router])
 
   const handleCloseDetail = useCallback(() => {
@@ -289,13 +223,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           onStatusChange={handleStatusChange}
           isFetching={isFetching}
         />
-        <div className="glass-card p-12 text-center text-muted-foreground">
-          <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No activity yet</p>
-          <p className="text-sm mt-1 max-w-sm mx-auto">
-            Create a routine or run a playbook to see your workforce in action
-          </p>
-        </div>
+        <FeedEmpty />
       </div>
     )
   }
@@ -312,19 +240,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           onStatusChange={handleStatusChange}
           isFetching={false}
         />
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="glass-card p-4 animate-pulse">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-secondary/30" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-secondary/30 rounded w-1/3" />
-                  <div className="h-3 bg-secondary/20 rounded w-1/4" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <FeedSkeleton />
       </div>
     )
   }
@@ -375,6 +291,109 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           </Button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Feed state, split out of ActivityFeed ──────────────
+
+/** Ids that arrived by polling after the first load (they slide in). */
+function useNewItemIds(items: ActivityFeedItem[]): Set<string> {
+  const knownIds = useRef<Set<string>>(new Set())
+  const isInitialLoad = useRef(true)
+
+  const newItemIds = useMemo(() => {
+    if (isInitialLoad.current || items.length === 0) return new Set<string>()
+    const result = new Set<string>()
+    for (const item of items) {
+      if (!knownIds.current.has(item.id)) result.add(item.id)
+    }
+    return result
+  }, [items])
+
+  useEffect(() => {
+    if (items.length > 0) {
+      for (const item of items) {
+        knownIds.current.add(item.id)
+      }
+      isInitialLoad.current = false
+    }
+  }, [items])
+
+  return newItemIds
+}
+
+interface OpenExecutionLink {
+  openExecution?: string | null
+  deepLinkRecipeId?: string | null
+  items: ActivityFeedItem[]
+  isLoading: boolean
+  onOpen: (item: ActivityFeedItem) => void
+}
+
+/** Deep-link: /activity?openExecution=X&recipeId=Y → auto-select the matching item. */
+function useOpenExecutionLink({ openExecution, deepLinkRecipeId, items, isLoading, onOpen }: OpenExecutionLink) {
+  const handled = useRef(false)
+  useEffect(() => {
+    if (!openExecution || handled.current || items.length === 0) return
+    // Find matching item by execution ID in the source_url or id
+    const match = items.find(
+      (item) =>
+        item.source_url?.includes(`openExecution=${openExecution}`) ||
+        item.id === `recipe-${openExecution}`
+    )
+    if (match) {
+      onOpen(match)
+      handled.current = true
+    } else if (!isLoading) {
+      // Item not in current page — build a minimal stub so ExecutionDetail can render
+      onOpen({
+        id: `recipe-${openExecution}`,
+        type: 'recipe',
+        name: 'Playbook Execution',
+        status: 'completed',
+        started_at: null,
+        completed_at: null,
+        duration_seconds: null,
+        agent: null,
+        agents: [],
+        summary: '',
+        source_id: deepLinkRecipeId || null,
+        source_url: `/activity?openExecution=${openExecution}&recipeId=${deepLinkRecipeId}`,
+        trigger: null,
+        error_message: null,
+      })
+      handled.current = true
+    }
+  }, [openExecution, deepLinkRecipeId, items, isLoading, onOpen])
+}
+
+function FeedEmpty() {
+  return (
+    <div className="glass-card p-12 text-center text-muted-foreground">
+      <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
+      <p className="font-medium">No activity yet</p>
+      <p className="text-sm mt-1 max-w-sm mx-auto">
+        Create a routine or run a playbook to see your workforce in action
+      </p>
+    </div>
+  )
+}
+
+function FeedSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="glass-card p-4 animate-pulse">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-lg bg-secondary/30" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 bg-secondary/30 rounded w-1/3" />
+              <div className="h-3 bg-secondary/20 rounded w-1/4" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

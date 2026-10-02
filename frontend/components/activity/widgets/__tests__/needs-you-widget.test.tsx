@@ -1,4 +1,4 @@
-/** PRD-244 review batch 2 — "Needs you": questions, approvals and decisions in one place, each row landing on its tab. */
+/** PRD-244 review batch 2 — "Needs you": questions, approvals and decisions in one place. PRD-252 R1: each row opens the item itself. */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
@@ -29,7 +29,7 @@ describe('NeedsYouWidget', () => {
     expect(screen.queryByText(/waiting$/)).toBeNull()
   })
 
-  it('shows the three families with honest counts and links to the owning tab', () => {
+  it('shows the three families with honest counts; a row opens the item, not its tab', () => {
     data.questions.data = { grants: [{ id: 41, question_md: '## Which vendor?', asked_by_agent_id: 3, requested_at: null }] }
     data.gates.data = { pending_count: 1, pending_missions: [{ id: 'm1', goal: 'Ship the invoice run', created_at: null, waiting_since: null }] }
     data.decisions.data = { total: 2, items: [{ kind: 'report', id: 'r1', title: 'Q3 review', escalation_level: 3, agent_name: 'OPS', created_at: null }, { kind: 'mission', id: 'm2', title: 'Budget', escalation_level: 0, created_at: null }] }
@@ -38,18 +38,33 @@ describe('NeedsYouWidget', () => {
     expect(screen.getByText('Questions · 1')).toBeInTheDocument()
     expect(screen.getByText('Approvals · 1')).toBeInTheDocument()
     expect(screen.getByText('Decisions · 2')).toBeInTheDocument()
+    // A question asked about no ticket has nowhere else to go than the Questions tab.
     expect(screen.getByText('Which vendor?').closest('a')).toHaveAttribute('href', '/command-center?tab=questions')
-    expect(screen.getByText('Ship the invoice run').closest('a')).toHaveAttribute('href', '/command-center?tab=governance')
+    // A mission waiting for approval opens at its plan, where Approve is.
+    expect(screen.getByText('Ship the invoice run').closest('a')).toHaveAttribute('href', '/missions/m1')
+    expect(screen.getByText('Budget').closest('a')).toHaveAttribute('href', '/missions/m2')
     expect(screen.getByText('Q3 review').closest('a')).toHaveAttribute('href', '/command-center?tab=governance')
     expect(screen.getByText('L3 URGENT')).toBeInTheDocument()
   })
 
-  it('counts a ticket waiting in review as its own family, linked to the board', () => {
-    data.reviews.data = { total: 1, tasks: [{ id: 760, title: 'Monday dispatch', agent_name: 'CLUB SECRETARY', completed_at: null }] }
+  it('counts a ticket waiting in review as its own family; the row opens that ticket', () => {
+    data.reviews.data = { total: 2, tasks: [
+      { id: 760, title: 'Monday dispatch', agent_name: 'CLUB SECRETARY', completed_at: null },
+      { id: 761, title: 'Step 3: draft the post', parent_task_id: 700, completed_at: null },
+    ] }
     render(<NeedsYouWidget period="1d" />)
-    expect(screen.getByText('1 waiting')).toBeInTheDocument()
-    expect(screen.getByText('In review · 1')).toBeInTheDocument()
-    expect(screen.getByText('Monday dispatch').closest('a')).toHaveAttribute('href', '/command-center?tab=board')
+    expect(screen.getByText('2 waiting')).toBeInTheDocument()
+    expect(screen.getByText('In review · 2')).toBeInTheDocument()
+    // The owner: "it just takes me to the board and I see loads of tickets in review, when one needs me."
+    expect(screen.getByText('Monday dispatch').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=760')
+    // A step ticket (hidden from the board's columns) opens by id all the same.
+    expect(screen.getByText('Step 3: draft the post').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=761')
+  })
+
+  it('opens a question inside the ticket it was asked on', () => {
+    data.questions.data = { grants: [{ id: 41, question_md: 'Which café?', subject_type: 'board_task', subject_id: '612', requested_at: null }] }
+    render(<NeedsYouWidget period="1d" />)
+    expect(screen.getByText('Which café?').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=612&question=41')
   })
 
   it('says the decisions could not be loaded instead of "nothing on your plate" (F207)', () => {
