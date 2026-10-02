@@ -51,8 +51,12 @@ def ticket_numbers(db: Session, workspace_id: Any, tasks: Iterable[Any]) -> Dict
 
 
 def ticket_number(db: Session, task: Any) -> Optional[str]:
-    """One ticket's number (see ``ticket_numbers``)."""
-    return ticket_numbers(db, task.workspace_id, [task]).get(task.id)
+    """One ticket's number (see ``ticket_numbers``); a step's needs its workspace."""
+    workspace_id = getattr(task, "workspace_id", None)
+    if workspace_id is None:
+        return None if getattr(task, "source_type", None) == STEP_SOURCE else format_number(
+            getattr(task, "workspace_seq", None))
+    return ticket_numbers(db, workspace_id, [task]).get(task.id)
 
 
 def ticket_label(task: Any, number: Optional[str] = None, *, capital: bool = False) -> str:
