@@ -713,11 +713,12 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
   - **F234.** Copilot runs its hooks inside its own sandbox. The seatbelt profile lets a process
     reach a Unix socket only at a read-write path, so the shim could not reach the host and
     every call was denied. The hook socket itself is now in `readwritePaths`; nothing else of
-    the host's state is. The profile writes the denials first and the grants after them, so a
-    grant under the denied state dir (the session dir, the socket) should hold. This is read
-    from the 1.0.91 profile and is to be confirmed live. A read-write socket path also lets a
-    sandboxed command unlink it and bind its
-    own, so the shim checks that the peer is the host's PID (`AUTOMATOS_HOST_PID`; macOS
+    the host's state is. The live rerun (1269-1271) showed that the profile writes its
+    `deniedPaths` after its grants ("override broader allow rules"): the denied state dir beat
+    the socket's grant and the session dir's (`ticket.md`). So the state is now denied entry by
+    entry around this session's folder and the socket (`deny_all_but`). A read-write socket
+    path also lets a sandboxed command unlink it and bind its own, so the shim checks that
+    the peer is the host's PID (`AUTOMATOS_HOST_PID`; macOS
     `LOCAL_PEERPID`, Linux `SO_PEERCRED`). Under Linux's bubblewrap the socket is a bind mount
     that cannot be unlinked.
 
