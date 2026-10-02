@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from inspect import unwrap
 from typing import Optional, Any, Dict
 from uuid import UUID, uuid4
 
@@ -548,7 +549,7 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
             return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
 
     card = task_visitor_view(task) if visitor else task_card(task, agent_name)
-    return _wait_result(task, card, waited, limit)
+    return _wait_result(task, card, waited, limit, visitor=visitor)
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
@@ -676,6 +677,9 @@ async def _update_many_board_task_statuses(
         return {"success": False, "error": "task_id (or task_ids) and status are required"}
 
     single = {k: v for k, v in params.items() if k != "task_ids"}
+    # PRD-252 R4 review: the bulk call took its numbers and numbers its whole
+    # answer in one read, so each id runs the handler without its numbering.
+    update_one = unwrap(update_board_task_status)
     updated = []
     failed = []
     for raw_id in task_ids:
@@ -684,7 +688,7 @@ async def _update_many_board_task_statuses(
         except (TypeError, ValueError):
             failed.append({"task_id": raw_id, "error": "not an integer task id"})
             continue
-        result = await update_board_task_status(db, workspace_id, {**single, "task_id": tid})
+        result = await update_one(db, workspace_id, {**single, "task_id": tid})
         if result.get("success"):
             updated.append(tid)
         else:

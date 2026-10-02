@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from services.ticket_numbers import format_number, ticket_label
+from services.ticket_numbers import number_of, ticket_label
 
 #: PRD-238 S4: statuses at which a ticket has nothing more to wait for.
 WAIT_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "review", "blocked"})
@@ -29,7 +29,7 @@ def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
     files = ref.get("files_touched") or []
     return {
         "id": task.id,
-        "number": format_number(getattr(task, "workspace_seq", None)),  # PRD-252 R4
+        "number": number_of(task),  # PRD-252 R4: #0042, a mission step's #0051.3
         "title": task.title,
         "status": task.status,
         "assigned_agent": agent_name or "unassigned",
@@ -68,10 +68,12 @@ def _wait_budget(params: Dict[str, Any]) -> Tuple[int, int]:
     return limit, max(1, int(config.CHATBOT_WAIT_POLL_S))
 
 
-def _wait_result(task: Any, card: Dict[str, Any], waited: int, limit: int) -> Dict[str, Any]:
-    """The wait's answer. PRD-252 R4: it names the ticket by its number."""
+def _wait_result(task: Any, card: Dict[str, Any], waited: int, limit: int, *, visitor: bool = False) -> Dict[str, Any]:
+    """The wait's answer. PRD-252 R4: it names the ticket by its number, which a
+    public widget visitor never sees (F155: it would say how many tickets the
+    business has)."""
     terminal = task.status in WAIT_TERMINAL_STATUSES
-    label = ticket_label(task, capital=True)
+    label = "The ticket" if visitor else ticket_label(task, card.get("number"), capital=True)
     return {
         "success": True,
         "terminal": terminal,

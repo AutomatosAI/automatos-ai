@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -88,7 +88,17 @@ def _with_numbers(db: Session, workspace_id: Any, result: Any) -> Any:
     card = (out.get("frontend_data") or {}).get("task_card")
     if isinstance(card, dict):
         out["frontend_data"] = {**out["frontend_data"], "task_card": _numbered(card, numbers)}
-    return out
+    return _numbered_bulk(out, numbers)
+
+
+def _numbered_bulk(out: Dict[str, Any], numbers: Dict[int, Optional[str]]) -> Dict[str, Any]:
+    """A bulk status answer names its tickets by number too: ``updated_numbers``
+    beside ``updated``, and each failed ticket's ``number``."""
+    if not isinstance(out.get("updated"), list):
+        return out
+    failed = [{**f, "number": numbers.get(f.get("task_id"))} if isinstance(f, dict) else f
+              for f in out.get("failed") or []]
+    return {**out, "updated_numbers": [numbers.get(i) for i in out["updated"]], "failed": failed}
 
 
 def _numbered(ticket: Any, numbers: Dict[int, Optional[str]]) -> Any:
@@ -100,7 +110,15 @@ def _ticket_ids(result: Dict[str, Any]) -> Set[int]:
            ((result.get("frontend_data") or {}).get("task_card") or {}).get("id")}
     for key in TICKET_LISTS:
         ids.update(t.get("id") for t in result.get(key) or [] if isinstance(t, dict))
+    ids.update(_bulk_ids(result))
     return {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
+
+
+def _bulk_ids(result: Dict[str, Any]) -> List[Any]:
+    """The tickets a bulk status answer names: those it updated and those it could not."""
+    updated = result.get("updated") if isinstance(result.get("updated"), list) else []
+    failed = [f.get("task_id") for f in result.get("failed") or [] if isinstance(f, dict)]
+    return [*updated, *failed]
 
 
 def _numbers(db: Session, workspace_id: Any, ids: Set[int]) -> Dict[int, Optional[str]]:
