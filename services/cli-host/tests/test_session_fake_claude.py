@@ -215,3 +215,22 @@ def test_without_a_default_root_nothing_is_copied(short_tmp, fake_home, env_clea
     assert (sdir / "note.md").exists() and not (short_tmp / "ws" / "sessions").exists()
     assert [p for p in out.files_touched if p.endswith("note.md")] == [str(sdir / "note.md")]
     assert "Deliverables:" not in (sdir / "ticket.md").read_text()
+
+
+def test_a_claude_plan_turn_without_exitplanmode_still_hands_its_plan_over(short_tmp, fake_home, env_clean):
+    """PRD-253 Wave P: a Plan turn's plan is the ExitPlanMode text when one was
+    presented, otherwise its final message — on Claude Code as on every CLI. A turn
+    that ended without the tool finished its ticket with no plan approved."""
+    from automatos_cli_host.permission_modes import PLAN_EVENT
+
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    s, out = _run(short_tmp, _ticket(workdir, permission_mode="plan"))
+    assert out.status == "success", out
+    assert not (workdir / "hello.txt").exists()                      # Plan refused the edit
+    assert s.plan == {"text": out.result_text, "approved_in_turn": False}
+    events = []
+    while not s.events.empty():
+        events.append(s.events.get_nowait())
+    assert [e["text"] for e in events if e.get("event") == PLAN_EVENT] == [out.result_text]
+    assert any(f.endswith("plan.md") for f in out.files_touched)

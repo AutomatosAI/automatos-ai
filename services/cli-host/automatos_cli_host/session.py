@@ -753,8 +753,9 @@ class Session:
         """PRD-253 Wave P: a plan this turn produced reaches the backend before the
         turn's result — an event in the final flush, which files it as the Plan card
         (or records an approval given in the turn) — and lands as plan.md beside the
-        deliverables. A Plan turn's plan is its final message."""
-        if self.plan is None and self.plan_turn and text.strip():
+        deliverables. A Plan turn's plan is the one it presented, else its final
+        message — on Claude Code too, when the turn ends without ExitPlanMode."""
+        if self.plan is None and self.permission_mode == MODE_PLAN and text.strip():
             self.plan = {"text": text.strip(), "approved_in_turn": False}
         if self.plan is None:
             return files
