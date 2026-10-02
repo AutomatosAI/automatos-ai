@@ -1,6 +1,6 @@
 {
   "name": "Data story",
-  "description": "A 40 s vertical data story: footage and stills behind data cards that the template draws from the post's own data (price bars and plan levels become chart shapes, and every figure on screen is computed from them). The hook, the reveal on the kick, the data, the odds, the log, a replay, and the end card. Six media slots; an empty slot falls back to the template's motion graphics. Ported from the Markets posh cut (PRD-251A). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s, as in the reference; the post's copy carries its credit.",
+  "description": "A 40 s vertical data story: footage and stills behind data cards that the template draws from the post's own data (price bars and plan levels become chart shapes, and every figure on screen is computed from them). The hook, the reveal on the kick, the data, the odds, the log, a replay, and the end card. Six media slots; an empty slot falls back to the template's motion graphics. Ported from the data story reference cut (PRD-251A). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s, as in the reference; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -572,7 +572,7 @@
     "hook_line_1": "The sea doesn't care",
     "hook_line_2": "how sure you are.",
     "hook_accent": "Neither does the market.",
-    "product_name": "Market Intelligence",
+    "product_name": "Your product",
     "tide_line": "It reads the tide",
     "tide_accent": "before you sail.",
     "tide_pill_1": "LIVE PUBLIC DATA",
@@ -622,8 +622,8 @@
     "calm_accent": "in every market.",
     "end_line": "The market,",
     "end_accent": "computed.",
-    "end_url": "markets.automatos.app",
-    "end_note": "MARKET INTELLIGENCE · RESEARCH, NOT SIGNALS",
+    "end_url": "yourbrand.com",
+    "end_note": "YOUR PRODUCT · RESEARCH, NOT SIGNALS",
     "end_disclaimer": "NOT FINANCIAL ADVICE",
     "cap_numbers": "Every number, computed. None invented.",
     "cap_odds": "Every plan shows its odds. Even when they're against you.",

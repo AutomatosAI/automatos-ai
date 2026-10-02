@@ -645,7 +645,11 @@ def documents(monkeypatch, tmp_path):
     monkeypatch.setattr(generation_service, "GENERATED_DIR", str(tmp_path))
     monkeypatch.setattr(generation_service, "is_storage_configured", lambda: False)
     monkeypatch.setattr(generation_service, "brand_kit_for_media_render", lambda kit: dict(kit))
-    monkeypatch.setattr(generation_service, "enforce_render_quota", lambda db, workspace: None)
+
+    async def reserve(sessions, workspace, seconds, **kwargs):  # no quota here (P251W1-RVW-3 holds nothing)
+        return None
+
+    monkeypatch.setattr(generation_service, "reserve_render", reserve)
     state = SimpleNamespace(booked=[], registered=[], dir=tmp_path)
     monkeypatch.setattr(generation_service, "book_render_seconds", lambda **kwargs: state.booked.append(kwargs))
 

@@ -1,6 +1,6 @@
 {
   "name": "App promo",
-  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the Academy reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit.",
+  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the app promo reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -578,11 +578,11 @@
     "hook_line": "Everyone says they know",
     "hook_accent": "AI.",
     "hook_question": "Can you prove it?",
-    "app_name": "Automatos Academy",
+    "app_name": "Your app",
     "slogan_line_1": "TRAIN YOUR",
     "slogan_accent": "AI",
     "slogan_line_2": "MIND",
-    "slogan_note": "Academy Coach",
+    "slogan_note": "Your study coach",
     "course_code": "CCA-F",
     "today_detail": "18 reviews · 1 weak-domain drill · ~11 min",
     "today_percent": 68,
@@ -623,7 +623,7 @@
     "track_5_code": "AIGP",
     "track_5_name": "AI Governance Professional (IAPP)",
     "track_6_code": "APA",
-    "track_6_name": "Automatos Platform Architect",
+    "track_6_name": "Agent Platform Architect",
     "track_7_code": "ABF",
     "track_7_name": "AI Business Foundations",
     "track_8_code": "AIX",
@@ -634,7 +634,7 @@
     "track_10_name": "Cross-Vendor Fluency",
     "end_line": "Free · Learn by doing.",
     "end_accent": "Prove it.",
-    "end_url": "academy.automatos.app",
+    "end_url": "yourbrand.com",
     "end_note": "Independent exam prep. Not affiliated with Anthropic, GitHub, Google Cloud or IAPP.",
     "cap_practice": "Ten minutes a day. Questions, labs and real scenarios.",
     "cap_tutor": "Stuck? Ask the tutor. Every answer cites its source.",
@@ -644,9 +644,9 @@
     "beat_3": "GitHub Copilot,",
     "beat_4": "Google Cloud,",
     "beat_5": "AI governance.",
-    "reveal_voice": "Meet Automatos Academy. Train your AI mind.",
+    "reveal_voice": "Meet your app. Train your AI mind.",
     "grade_voice": "A-plus, or not yet.",
-    "end_voice": "Automatos Academy. Free. Learn by doing. Prove it."
+    "end_voice": "Your app. Free. Learn by doing. Prove it."
   },
   "preview": {
     "at": [

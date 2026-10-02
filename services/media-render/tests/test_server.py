@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
+import pytest
 import soundfile
 from aiohttp.test_utils import TestClient, TestServer
 
 from helpers import TOKEN, bundle
+from media_render.config import ConfigError, load_settings
 from media_render.kokoro_tts import SpokenLine
 from media_render.pipeline import CheckOutcome, PipelineError, RenderResult
 from media_render.server import TOKEN_HEADER, create_app
@@ -221,6 +223,63 @@ def test_a_full_queue_answers_503(settings):
             await settle(lambda: not pipeline.running)
 
     asyncio.run(go())
+
+
+async def ended(client, job_id, attempts=200):
+    for _ in range(attempts):
+        if await status_of(client, job_id) in ("done", "failed"):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"render {job_id} never ended")
+
+
+def test_one_workspace_is_held_to_its_share_while_the_others_are_admitted(settings):
+    """P251W1-RVW-4: a workspace past its own bound gets 429; the service still admits the others."""
+
+    async def go():
+        pipeline = StubPipeline()
+        bounded = replace(settings, max_active_jobs=4, max_active_jobs_per_workspace=2)
+        async with serve(bounded, pipeline) as client:
+            first = {}
+            for reference in ("a1", "a2"):
+                status, job = await post(client, bundle("ws-a", reference=reference))
+                assert status == 202
+                first[reference] = job["id"]
+
+            refused = await client.post("/render", data=json.dumps(bundle("ws-a", reference="a3")), headers=AUTH)
+            body = await refused.json()
+            assert refused.status == 429 and body["error"] == "workspace_busy"
+            assert "this workspace already has 2 renders in progress" in body["message"]
+            assert refused.headers["Retry-After"] == str(bounded.busy_retry_after_seconds)
+            assert "id" not in body, "a refused submission creates no job"
+
+            # Another workspace is admitted while the service as a whole has room.
+            status, _ = await post(client, bundle("ws-b", reference="b1"))
+            assert status == 202
+            assert pipeline.checked == ["a1", "a2", "b1"], "the refused submission never reached the check"
+
+            # One of ws-a's jobs ends: ws-a is admitted again.
+            pipeline.gate("a1").set()
+            await ended(client, first["a1"])
+            status, _ = await post(client, bundle("ws-a", reference="a3"))
+            assert status == 202
+            assert pipeline.checked == ["a1", "a2", "b1", "a3"]
+
+            for reference in ("a2", "a3", "b1"):
+                pipeline.gate(reference).set()
+            await settle(lambda: len(pipeline.started) == 4 and not pipeline.running)
+
+    asyncio.run(go())
+
+
+def test_the_workspace_bound_is_a_setting_below_the_services():
+    defaults = load_settings({})
+    assert defaults.max_active_jobs_per_workspace == 4
+    assert defaults.max_active_jobs_per_workspace < defaults.max_active_jobs
+    assert load_settings({"MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE": "3"}).max_active_jobs_per_workspace == 3
+    for raw in ("0", "-1", "four"):
+        with pytest.raises(ConfigError, match="MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE"):
+            load_settings({"MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE": raw})
 
 
 def test_a_pipeline_failure_fails_the_job_with_its_status(settings):

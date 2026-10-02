@@ -90,11 +90,12 @@ export interface ScheduleRecurrence {
 }
 
 /**
- * The five sources of the schedule feed (PRD-162 + the board-task SLA source):
+ * The six sources of the schedule feed (PRD-162 + the board-task SLA source):
  * routine = agent heartbeat, recipe = cron playbook, task = agent-scheduled task,
- * mission = a mission's SLA deadline, task_due = a board task's SLA deadline.
+ * mission = a mission's SLA deadline, task_due = a board task's SLA deadline,
+ * social = a scheduled social post (PRD-251 US-307).
  */
-export type ScheduleItemType = 'routine' | 'recipe' | 'task' | 'mission' | 'task_due'
+export type ScheduleItemType = 'routine' | 'recipe' | 'task' | 'mission' | 'task_due' | 'social'
 
 export interface ScheduleItem {
   id: string
@@ -117,6 +118,9 @@ export interface ScheduleItem {
   /** task_due only: the board card's status and priority */
   status?: string
   priority?: string
+  /** social only: the post, and the timezone its slot is shown in (the post's own) */
+  post_id?: string
+  timezone?: string
 }
 
 export interface ScheduleResponse {

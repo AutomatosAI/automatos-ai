@@ -35,6 +35,7 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'approval_grant', // modules/tools/execution/tool_grants.py, services/board_approval.py, services/watch_rerun.py
   'watch', // services/watch_notifications.py
   'question', // PRD-225: modules/tools/discovery/handlers_asks.py (question_pending)
+  'social_post', // PRD-251 US-206: modules/socials/notify.py (approval_pending)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {

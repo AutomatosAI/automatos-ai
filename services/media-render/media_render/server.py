@@ -1,7 +1,7 @@
 """The media-render HTTP service (aiohttp, as the workspace worker is).
 
     GET  /health                     open: the image's versions and the queue
-    POST /render                     a composition bundle -> 202 job | 422 findings | 400 | 502 | 503
+    POST /render                     a composition bundle -> 202 job | 422 findings | 400 | 429 | 502 | 503
     GET  /render/{id}                the job: status, check report, timings, outputs
     GET  /render/{id}/output/{name}  the rendered file (Range requests work)
     POST /tts                        Kokoro lines -> durations and voiced segments (WAVs on request)
@@ -17,6 +17,13 @@ instead of the full render (US-106), through the same check and the same
 slots. A checked job waits for a render slot: two at once overall, one per
 workspace, first come first served (lanes.py). Staging and the check have
 their own, smaller lane, so the renders' limit is never exceeded by a check.
+
+Admission comes first, and holds a job from the moment it is accepted until it
+ends (checking, queued or rendering): at most MEDIA_RENDER_MAX_ACTIVE_JOBS
+across the service (past it, 503 ``busy``) and at most
+MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE for one workspace (past it, 429
+``workspace_busy`` for that workspace alone), so one workspace's burst never
+takes every slot and shuts the others out (P251W1-RVW-4). Both carry Retry-After.
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ from aiohttp import web
 from .bundle import parse_bundle
 from .config import Settings
 from .hyperframes import LOG_TAIL_CHARS
+from .jpeg import JPEG_CONTENT_TYPE, JpegError, to_jpeg
 from .jobs import DONE, FAILED, QUEUED, REJECTED, RENDERING, Job, JobStore, delete_files, job_json, remove_working_files, reset_work_dir
 from .lanes import Lane
 from .music import Track, load_library
@@ -75,6 +83,26 @@ def _token_matches(supplied: str, expected: str) -> bool:
 
 def _error(status: int, code: str, message: str, *, headers: Optional[Dict[str, str]] = None, **extra: Any) -> web.Response:
     return web.json_response({"error": code, "message": message, **extra}, status=status, headers=headers)
+
+
+def _retry_later(state: ServiceState, status: int, code: str, message: str) -> web.Response:
+    """A refusal the caller may submit again after Retry-After."""
+    retry = {"Retry-After": str(state.settings.busy_retry_after_seconds)}
+    return _error(status, code, message, headers=retry)
+
+
+def _workspace_refusal(state: ServiceState, workspace_id: str) -> Optional[web.Response]:
+    """429 ``workspace_busy`` when the workspace already holds its share of the jobs; None when it may submit."""
+    own = state.store.active_count(workspace_id)
+    limit = state.settings.max_active_jobs_per_workspace
+    if own < limit:
+        return None
+    logger.info("render refused for workspace %s: %d of its renders already in progress", workspace_id, own)
+    message = (
+        f"this workspace already has {own} renders in progress, the most one workspace may have at once; "
+        "try again when one of them ends"
+    )
+    return _retry_later(state, 429, "workspace_busy", message)
 
 
 def _job_body(state: ServiceState, job: Job) -> Dict[str, Any]:
@@ -179,12 +207,15 @@ async def post_render(request: web.Request) -> web.Response:
     payload = await _read_json(request)
     active = state.store.active_count()
     if active >= state.settings.max_active_jobs:
-        retry = {"Retry-After": str(state.settings.busy_retry_after_seconds)}
-        return _error(503, "busy", f"{active} renders are already in progress; try again shortly", headers=retry)
+        return _retry_later(state, 503, "busy", f"{active} renders are already in progress; try again shortly")
     try:
         bundle = parse_bundle(payload, state.settings, state.library)
     except BundleError as exc:
         return _error(400, "invalid_bundle", str(exc))
+    # No await from here to create(): the count and the admission are one step.
+    refusal = _workspace_refusal(state, bundle.workspace_id)
+    if refusal is not None:
+        return refusal
     job = state.store.create(bundle)
     logger.info("render %s accepted for workspace %s (%s)", job.id, bundle.workspace_id, bundle.reference or "-")
     try:
@@ -253,6 +284,20 @@ async def post_tts(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
+async def post_jpeg(request: web.Request) -> web.Response:
+    """``POST /jpeg``: the image in the body, answered as a JPEG (US-303: Instagram
+    takes JPEG only, and the stills are PNG)."""
+    settings = request.app[STATE].settings
+    image = await request.read()
+    try:
+        jpeg = await asyncio.to_thread(
+            to_jpeg, image, ffmpeg_bin=settings.ffmpeg_bin, timeout_seconds=settings.probe_timeout_seconds
+        )
+    except JpegError as exc:
+        return _error(400, "not_an_image", str(exc))
+    return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE)
+
+
 async def _sweep(state: ServiceState) -> None:
     while True:
         await asyncio.sleep(state.settings.sweep_interval_seconds)
@@ -319,6 +364,7 @@ def create_app(
     app.router.add_get("/render/{job_id}", get_render)
     app.router.add_get("/render/{job_id}/output/{name}", get_output)
     app.router.add_post("/tts", post_tts)
+    app.router.add_post("/jpeg", post_jpeg)
     app.cleanup_ctx.append(_lifecycle(real_pipeline))
     return app
 

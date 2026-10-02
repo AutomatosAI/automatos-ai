@@ -72,6 +72,8 @@ import modules.socials.settings as socials_settings  # noqa: E402
 from core.composio.client import ComposioClient  # noqa: E402
 from core.composio.tool_executor import ComposioToolExecutor  # noqa: E402
 from core.database.database import Base  # noqa: E402
+from core.models.composio import ComposioConnection, ComposioEntity  # noqa: E402
+from core.models.composio_cache import ComposioActionCache  # noqa: E402
 from core.models.system_settings import SystemSetting  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from tests.helpers_unreadable_settings import UNREADABLE_MODES, settings_unreadable  # noqa: E402
@@ -141,6 +143,11 @@ def _sqlite_copy(table: sa.Table, metadata: sa.MetaData) -> sa.Table:
 
 _TABLES = sa.MetaData()
 WORKSPACES = _sqlite_copy(Workspace.__table__, _TABLES)
+# The Socials channel registry's tables (PRD-251 Wave 2, US-203): for an action the
+# registry may class as publishing, the gate reads the workspace's connections and
+# (for the generic adapter) the action's cached schema. Empty unless a test fills them.
+for _table in (ComposioEntity.__table__, ComposioConnection.__table__, ComposioActionCache.__table__):
+    _sqlite_copy(_table, _TABLES)
 
 
 @pytest.fixture
@@ -148,7 +155,7 @@ def env(monkeypatch):
     """read_system_setting and the gate's workspace read → SessionLocal → one
     in-memory database: the Wave 0 deny list, the wave's settings (the post gate's
     list among them), the Socials master switch ON, a Socials-on and a Socials-off
-    workspace."""
+    workspace, and the channel registry's tables, empty (no toolkit connected)."""
     engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     _TABLES.create_all(engine)
     SystemSetting.__table__.create(bind=engine)
@@ -677,9 +684,9 @@ async def test_only_the_platform_publisher_passes_a_listed_action(env, monkeypat
     agent.sdk.tools.execute.assert_called_once()
 
 
-def test_nothing_passes_the_way_through_yet():
-    """The platform publisher (Wave 3) will. Until then the one use is the executor
-    handing its own parameter to the gate."""
+def test_only_the_platform_publisher_passes_the_way_through():
+    """Wave 3 (US-301): the publisher's step runner is the one caller that passes it;
+    everywhere else it is only forwarded (the executor handing its own parameter on)."""
     offenders = []
     for path in _source_files():
         source = path.read_text(encoding="utf-8")
@@ -695,9 +702,9 @@ def test_nothing_passes_the_way_through_yet():
                 forwarded = isinstance(keyword.value, ast.Name) and keyword.value.id == "way_through"
                 if keyword.arg == "way_through" and not forwarded:
                     offenders.append((path.relative_to(_ORCH).as_posix(), node.lineno))
-    assert offenders == []
+    assert {path for path, _ in offenders} == {"modules/socials/publish_steps.py"} and len(offenders) == 1
     holders = [p.relative_to(_ORCH).as_posix() for p in _source_files() if "PLATFORM_PUBLISHER" in p.read_text(encoding="utf-8")]
-    assert holders == ["core/composio/post_gate.py"]
+    assert sorted(holders) == ["core/composio/post_gate.py", "modules/socials/publish_steps.py"]
 
 
 # ---------------------------------------------------------------------------

@@ -24,14 +24,23 @@ import { apiClient } from '@/lib/api-client'
 import type {
   CreateSocialPostInput,
   SocialPost,
+  SocialPostMediaLink,
   SocialPostsResponse,
   SocialsUsageResponse,
   SocialToolkitVoicesResponse,
   SocialVoiceSourcesResponse,
   UpdateSocialPostInput,
 } from '@/lib/api-client'
+import type {
+  SocialCampaignApprovalMode,
+  SocialCampaignsResponse,
+  SocialCampaignWithPosts,
+  SocialSeriesApproval,
+  SocialSeriesShownPost,
+} from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
-import { anyRendering } from '@/components/deliverables/socials/socials-status'
+import { anyInFlight } from '@/components/deliverables/socials/socials-status'
+import { unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
 
 // ============= QUERY KEYS =============
 
@@ -42,14 +51,16 @@ export const socialsQueryKeys = {
   voices: (workspaceId: string | null) => ['socials', workspaceId, 'voices'] as const,
   toolkitVoices: (workspaceId: string | null, toolkit: string | null, query: string) =>
     ['socials', workspaceId, 'voices', toolkit, query] as const,
+  media: (workspaceId: string | null, postId: string, contentHash: string) =>
+    ['socials', workspaceId, 'media', postId, contentHash] as const,
 }
 
 /** How often the list refetches while a post renders. */
 export const SOCIALS_RENDER_POLL_MS = 5_000
 
-/** The list's refetch interval: poll while any post renders, otherwise not at all. */
+/** The list's refetch interval: poll while any post renders or publishes (US-308), otherwise not at all. */
 export function renderPollInterval(data: SocialPostsResponse | undefined): number | false {
-  return data && anyRendering(data.posts) ? SOCIALS_RENDER_POLL_MS : false
+  return data && anyInFlight(data.posts) ? SOCIALS_RENDER_POLL_MS : false
 }
 
 function useWorkspaceId(): string | null {
@@ -57,10 +68,15 @@ function useWorkspaceId(): string | null {
 }
 
 const HTTP_CONFLICT = 409
+const HTTP_UNPROCESSABLE = 422
 
 /** Shown when an action answers 409: the post changed since this screen loaded it. */
 export const SOCIAL_POST_CHANGED_MESSAGE =
   'This post changed since you opened it. Review the latest version, then try again.'
+
+/** Shown when Approve answers 409 (US-206): the approver was shown an older version. */
+export const SOCIAL_POST_REVIEW_STALE_MESSAGE =
+  'This post changed while you were reviewing it — review the new version'
 
 /** The HTTP status apiClient.request() puts on the Error it throws, if any. */
 function httpStatusOf(error: unknown): number | undefined {
@@ -68,7 +84,7 @@ function httpStatusOf(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
-function useInvalidateSocials() {
+export function useInvalidateSocials() {
   const workspaceId = useWorkspaceId()
   const queryClient = useQueryClient()
   return () => queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(workspaceId) })
@@ -76,7 +92,7 @@ function useInvalidateSocials() {
 
 /** onError for a post write: a 409 says the post changed and refetches the
  * posts; anything else shows the server's message, or `fallback`. */
-function usePostWriteErrorHandler(fallback: string) {
+export function usePostWriteErrorHandler(fallback: string) {
   const invalidate = useInvalidateSocials()
   return async (error: Error) => {
     if (httpStatusOf(error) === HTTP_CONFLICT) {
@@ -90,7 +106,7 @@ function usePostWriteErrorHandler(fallback: string) {
 
 // ============= QUERY HOOKS =============
 
-function useSocialsOn(): { workspaceId: string | null; socialsOn: boolean } {
+export function useSocialsOn(): { workspaceId: string | null; socialsOn: boolean } {
   const { workspace } = useWorkspace()
   const workspaceId = workspace?.id ?? null
   const socialsOn = !!workspace?.socials?.available && !!workspace?.socials?.enabled
@@ -130,6 +146,19 @@ export function useSocialVoiceSources() {
     enabled: socialsOn,
     queryFn: () => apiClient.getSocialVoiceSources(),
     staleTime: 60_000,
+  })
+}
+
+/** The post's media as presigned inline links (D9, S3.4): the exact files the
+ * approval view shows, fetched again whenever the post's content changes. */
+export function useSocialPostMedia(postId: string, contentHash: string, enabled: boolean) {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialPostMediaLink[]>({
+    queryKey: socialsQueryKeys.media(workspaceId, postId, contentHash),
+    enabled: socialsOn && enabled,
+    queryFn: () => apiClient.getSocialPostMedia(postId),
+    staleTime: 60_000,
+    retry: false,
   })
 }
 
@@ -190,11 +219,10 @@ export function useUpdateSocialPost() {
   })
 }
 
-/** The review and submit actions, each one server call. Approve carries the
- * content_hash of the version on screen (D6). */
+/** The review and submit actions, each one server call. Approve has its own
+ * hook (useApproveSocialPost): it carries the version on screen (D6). */
 export type SocialPostAction =
   | { kind: 'submit' }
-  | { kind: 'approve'; contentHash: string }
   | { kind: 'request_changes'; comment: string }
   | { kind: 'reject'; reason?: string }
 
@@ -215,7 +243,6 @@ export function useRenderSocialPost() {
 
 const ACTION_DONE: Record<SocialPostAction['kind'], string> = {
   submit: 'Sent for approval',
-  approve: 'Approved',
   request_changes: 'Changes requested',
   reject: 'Rejected',
 }
@@ -224,8 +251,6 @@ function runAction(postId: string, action: SocialPostAction): Promise<SocialPost
   switch (action.kind) {
     case 'submit':
       return apiClient.submitSocialPost(postId)
-    case 'approve':
-      return apiClient.approveSocialPost(postId, action.contentHash)
     case 'request_changes':
       return apiClient.requestSocialPostChanges(postId, action.comment)
     case 'reject':
@@ -243,5 +268,166 @@ export function useSocialPostAction() {
       toast.success(ACTION_DONE[action.kind])
     },
     onError,
+  })
+}
+
+export interface ApproveSocialPostInput {
+  postId: string
+  /** The content_hash of the version on screen (D6). */
+  contentHash: string
+  /** The second confirmation: approve with the named unsourced claims (D7). */
+  overrideUnsourced?: boolean
+}
+
+interface ApproveHandlers {
+  /** 409: the post changed while it was reviewed; the posts are refetched. */
+  onStale: () => void
+  /** 422: claims the server counts as unsourced, to confirm by name. */
+  onUnsourced: (claims: string[]) => void
+}
+
+function approve({ postId, contentHash, overrideUnsourced }: ApproveSocialPostInput): Promise<SocialPost> {
+  return overrideUnsourced
+    ? apiClient.approveSocialPost(postId, contentHash, { overrideUnsourced: true })
+    : apiClient.approveSocialPost(postId, contentHash)
+}
+
+/** Approve the version on screen (US-206). A 409 says the post changed while it
+ * was reviewed and reloads it; a 422 naming claims asks for the second
+ * confirmation; anything else shows the server's message. */
+export function useApproveSocialPost({ onStale, onUnsourced }: ApproveHandlers) {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialPost, Error, ApproveSocialPostInput>({
+    mutationFn: approve,
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Approved')
+    },
+    onError: async (error) => {
+      const claims = httpStatusOf(error) === HTTP_UNPROCESSABLE ? unsourcedClaimsOf(error) : null
+      if (claims && claims.length > 0) {
+        onUnsourced(claims)
+        return
+      }
+      if (httpStatusOf(error) === HTTP_CONFLICT) {
+        toast.error(SOCIAL_POST_REVIEW_STALE_MESSAGE)
+        onStale()
+        await invalidate()
+        return
+      }
+      toast.error(error.message || 'Could not approve the post')
+    },
+  })
+}
+
+// ============= CAMPAIGNS AND SERIES APPROVAL (S2.4, D6) =============
+
+export const socialsCampaignKeys = {
+  list: (workspaceId: string | null) => ['socials', workspaceId, 'campaigns'] as const,
+  one: (workspaceId: string | null, campaignId: string | null) =>
+    ['socials', workspaceId, 'campaigns', campaignId] as const,
+}
+
+/** The workspace's campaigns, newest first, each with its post count. */
+export function useSocialCampaigns() {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialCampaignsResponse>({
+    queryKey: socialsCampaignKeys.list(workspaceId),
+    enabled: socialsOn,
+    queryFn: () => apiClient.listSocialCampaigns(),
+    staleTime: 15_000,
+  })
+}
+
+/** One campaign with its posts, read only while `campaignId` is set. */
+export function useSocialCampaign(campaignId: string | null) {
+  const { workspaceId, socialsOn } = useSocialsOn()
+  return useQuery<SocialCampaignWithPosts>({
+    queryKey: socialsCampaignKeys.one(workspaceId, campaignId),
+    enabled: socialsOn && !!campaignId,
+    queryFn: () => apiClient.getSocialCampaign(campaignId as string),
+    staleTime: 15_000,
+  })
+}
+
+export function useCreateSocialCampaign() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialCampaignWithPosts, Error, { name: string; approval_mode: SocialCampaignApprovalMode }>({
+    mutationFn: (input) => apiClient.createSocialCampaign(input),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Campaign created')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not create the campaign')
+    },
+  })
+}
+
+export function useUpdateSocialCampaign() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<
+    SocialCampaignWithPosts,
+    Error,
+    { campaignId: string; changes: { name?: string; approval_mode?: SocialCampaignApprovalMode } }
+  >({
+    mutationFn: ({ campaignId, changes }) => apiClient.updateSocialCampaign(campaignId, changes),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success('Campaign saved')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not save the campaign')
+    },
+  })
+}
+
+/** Put a post in a campaign, or take it out. */
+export function useSocialCampaignPost() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialPost, Error, { campaignId: string; postId: string; action: 'add' | 'remove' }>({
+    mutationFn: ({ campaignId, postId, action }) =>
+      action === 'add'
+        ? apiClient.addSocialCampaignPost(campaignId, postId)
+        : apiClient.removeSocialCampaignPost(campaignId, postId),
+    onSuccess: async (_post, { action }) => {
+      await invalidate()
+      toast.success(action === 'add' ? 'Post added to the campaign' : 'Post taken out of the campaign')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not change the campaign')
+    },
+  })
+}
+
+/** Turn the workspace's series approval on or off, then refetch the workspace. */
+export function useSetSeriesApproval() {
+  const { refreshWorkspace } = useWorkspace()
+  return useMutation<unknown, Error, boolean>({
+    mutationFn: (on) => apiClient.setWorkspaceSeriesApproval(on),
+    onSuccess: async (_result, on) => {
+      await refreshWorkspace()
+      toast.success(on ? 'Series approval is on' : 'Series approval is off')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Could not change series approval')
+    },
+  })
+}
+
+/** Approve the posts on screen as one series (D6). The answer names each post left
+ * unapproved and why; the posts and campaigns are refetched either way. */
+export function useApproveSocialSeries() {
+  const invalidate = useInvalidateSocials()
+  return useMutation<SocialSeriesApproval, Error, { campaignId: string; posts: SocialSeriesShownPost[] }>({
+    mutationFn: ({ campaignId, posts }) => apiClient.approveSocialCampaignSeries(campaignId, posts),
+    onSuccess: async (result) => {
+      await invalidate()
+      if (result.approved.length > 0) toast.success(`Approved ${result.approved.length} post(s)`)
+    },
+    onError: async (error) => {
+      await invalidate()
+      toast.error(error.message || 'Could not approve the series')
+    },
   })
 }

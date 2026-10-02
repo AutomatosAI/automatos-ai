@@ -438,6 +438,13 @@ export interface SocialPostCopy {
   channels?: Record<string, string>
 }
 
+/** D7: where a claim's figure comes from (`sources[claim]`). */
+export interface SocialClaimSource {
+  kind: 'deliverable' | 'report' | 'document' | 'url' | 'metric'
+  ref: string
+  as_of?: string | null
+}
+
 export interface SocialReviewEntry {
   at: string
   by: string
@@ -496,8 +503,38 @@ export interface SocialPost {
   review_log: SocialReviewEntry[]
   scheduled_for: string | null
   timezone: string | null
+  /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
+  targets?: SocialPostTarget[]
+  /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
+  preview?: SocialPostPreview | null
   created_at: string
   updated_at: string
+}
+
+/** A target's options: the values of its post kind's `$option.<name>` (LinkedIn's author, TikTok's privacy level...). */
+export type SocialPostTargetOptions = Record<string, string | number | boolean | string[]>
+
+/** One channel and post kind a post publishes to, as PUT /api/socials/posts/{id}/targets takes it. */
+export interface SocialPostTargetInput {
+  toolkit: string
+  post_kind: SocialPostKind
+  options?: SocialPostTargetOptions
+}
+
+/** A post's target as the post answers it: its options, and the receipt the publisher fills (Wave 3). */
+export interface SocialPostTarget {
+  id: string
+  toolkit: string
+  post_kind: SocialPostKind
+  options: SocialPostTargetOptions
+  status: 'pending' | 'uploading' | 'published' | 'failed'
+  attempts: number
+  remote_id: string | null
+  permalink: string | null
+  error: string | null
+  published_at: string | null
+  /** What the receipt says beside the id and link: an optional step skipped, and why (Wave 3). */
+  notes?: string[]
 }
 
 export interface SocialPostsResponse {
@@ -505,10 +542,94 @@ export interface SocialPostsResponse {
   total: number
 }
 
+/** One file of a post's preview: `url` is the post's media route (fetched with auth). */
+export interface SocialPreviewFile {
+  name: string
+  url: string
+  aspect?: string
+  content_type?: string
+  duration?: number
+  width?: number
+  height?: number
+}
+
+/** US-208: a post's preview render, for the version `content_hash` names. */
+export interface SocialPostPreview {
+  status: 'rendering' | 'done' | 'failed'
+  content_hash: string
+  files: SocialPreviewFile[]
+  error: string | null
+  at: string
+}
+
+/** A social template's variable (core/social_templates.py variables_schema). */
+export interface SocialTemplateVariable {
+  type: 'text' | 'number' | 'boolean'
+  label?: string
+  description?: string
+  default?: string | number | boolean
+  claim?: boolean
+  max_chars?: number
+  min?: number
+  max?: number
+}
+
+/** The composer's template: what its fields and preview sizes come from. */
+export interface SocialComposeTemplate {
+  id: string
+  name: string
+  format: 'social_image' | 'social_video'
+  sizes: string[]
+  variables_schema: Record<string, SocialTemplateVariable>
+}
+
+/** GET /api/socials/sources: a candidate a claim may be bound to (D7). */
+export interface SocialSourceCandidate {
+  kind: SocialClaimSource['kind']
+  ref: string
+  title: string
+  detail?: string | null
+  as_of?: string | null
+  value?: unknown
+}
+
+/** A variable of the post's template, as the post stores it: its value, and whether it is a claim (D7). */
+export interface SocialPostVariable {
+  value: string | number | boolean
+  claim?: boolean
+}
+
 export interface CreateSocialPostInput {
   title: string
   brief?: string | null
   copy?: SocialPostCopy
+  /** US-207: what the composer's proposal fills in. */
+  format?: string | null
+  template_id?: string | null
+  variables?: Record<string, SocialPostVariable>
+  sources?: Record<string, SocialClaimSource>
+}
+
+/** POST /api/socials/compose (US-207): what the composer asks for. */
+export interface SocialComposeInput {
+  brief: string
+  /** The channels (toolkits) to write for; every connected one when omitted. */
+  channels?: string[]
+  format?: string | null
+}
+
+/** The composer's draft proposal: checked by the server, never saved until "Save draft". */
+export interface SocialComposeProposal {
+  title: string
+  copy: { base: string; per_channel: Record<string, string> }
+  format: string | null
+  template_id: string | null
+  /** US-208: the chosen template's variables and sizes; null when none fits. */
+  template: SocialComposeTemplate | null
+  variables: Record<string, SocialPostVariable>
+  sources: Record<string, SocialClaimSource>
+  channels: string[]
+  warnings: string[]
 }
 
 export interface UpdateSocialPostInput {
@@ -519,6 +640,11 @@ export interface UpdateSocialPostInput {
   voice?: SocialPostVoice | { toolkit: 'kokoro' } | null
   /** Slot name → `{ prompt }`; `null` asks for no footage. */
   footage?: Record<string, { prompt: string }> | null
+  /** US-208: what the composer saves again after a first save. */
+  format?: string | null
+  template_id?: string | null
+  variables?: Record<string, SocialPostVariable>
+  sources?: Record<string, SocialClaimSource>
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -556,6 +682,8 @@ export interface SocialToolkitVoicesResponse {
 export interface WorkspaceSocialsState {
   available: boolean
   enabled: boolean
+  /** D6 (S2.4): whether a campaign in series mode can be approved as one series. */
+  series_approval?: boolean
 }
 
 /** This month's render minutes (PRD-251 S1.1c): `quota_minutes` is null when the plan has no quota. */
@@ -571,6 +699,117 @@ export interface SocialRenderMinutes {
 
 export interface SocialsUsageResponse {
   render_minutes: SocialRenderMinutes
+}
+
+/**
+ * GET /api/socials/posts/{id}/media (D9, S3.4): one file of a post's media, with
+ * a presigned link served inline (it expires; fetch the list again for a fresh one).
+ * `url` is null when the file has no stored object, and `error` says why.
+ */
+export interface SocialPostMediaLink {
+  aspect: string
+  deliverable_id: string
+  name: string | null
+  url: string | null
+  content_type: string | null
+  bytes: number | null
+  error: string | null
+}
+
+/** A post kind a channel publishes (social_post_targets.post_kind). */
+export type SocialPostKind = 'text' | 'image' | 'carousel' | 'video' | 'reel' | 'short' | 'story'
+
+/**
+ * One post kind of a connected channel (D8, S3.2). `reason` says why it is not
+ * available (a missing or blocked action, public storage); `needs_public_storage`
+ * marks a step that takes only a link, skipped or blocking without public storage.
+ */
+export interface SocialChannelPostKind {
+  kind: SocialPostKind
+  available: boolean
+  reason: string | null
+  needs_public_storage: boolean
+}
+
+/**
+ * GET /api/socials/channels: a social channel connected in the workspace. `verified`
+ * is false for a generic channel until one of its targets has published (its label
+ * says "unverified channel"); `setup_note` is what connecting it takes beyond Composio.
+ */
+export interface SocialChannel {
+  toolkit: string
+  label: string
+  post_kinds: SocialChannelPostKind[]
+  verified: boolean
+  setup_note: string | null
+  /** US-207: the channel's copy limits (`text`; `title`, `hashtags` where it has them); null when none is known. */
+  copy_limits?: SocialCopyLimits | null
+}
+
+export interface SocialCopyLimits {
+  text: number
+  title?: number
+  hashtags?: number
+}
+
+/** PRD-251 S2.4 (D6): a campaign approves its posts one by one, or as one series. */
+export type SocialCampaignApprovalMode = 'per_post' | 'series'
+
+/** A named set of posts. `approved_hash_set` holds the content hashes a series approval approved. */
+export interface SocialCampaign {
+  id: string
+  workspace_id: string
+  name: string
+  approval_mode: SocialCampaignApprovalMode
+  approved_hash_set: string[]
+  approved_by: string | null
+  approved_at: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  /** GET /api/socials/campaigns: how many posts the campaign holds. */
+  post_count?: number
+}
+
+/** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
+export interface SocialCampaignWithPosts extends SocialCampaign {
+  posts: SocialPost[]
+}
+
+export interface SocialCampaignsResponse {
+  campaigns: SocialCampaign[]
+  total: number
+}
+
+/** A post the approver was shown: the content_hash of the version on screen (D6). */
+export interface SocialSeriesShownPost {
+  post_id: string
+  content_hash: string
+  /** D7's second confirmation, for this post's unsourced claims. */
+  override_unsourced?: boolean
+}
+
+/** Why a series approval left a post unapproved. */
+export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown'
+
+export interface SocialSeriesLeftPost {
+  post_id: string
+  title: string | null
+  status: SocialPostStatus | null
+  reason: SocialSeriesLeftReason
+  message: string
+  /** `changed`: the post's current hash. */
+  content_hash?: string
+  /** `unsourced`: the claims to confirm by name. */
+  claims?: string[]
+  unresolved?: Record<string, string>
+}
+
+/** POST /api/socials/campaigns/{id}/approve: the posts approved, and each post left, with why. */
+export interface SocialSeriesApproval {
+  campaign: SocialCampaign
+  approved: SocialPost[]
+  left: SocialSeriesLeftPost[]
 }
 
 class ApiClient {
@@ -2600,8 +2839,12 @@ class ApiClient {
     })
   }
 
-  async listSocialPosts(): Promise<SocialPostsResponse> {
-    return this.request<SocialPostsResponse>('/api/socials/posts')
+  /** The workspace's posts, newest first; `q` keeps those whose title or brief holds it,
+   * case-insensitively (US-205: global search finds a post by its title). */
+  async listSocialPosts(params: { q?: string } = {}): Promise<SocialPostsResponse> {
+    const text = params.q?.trim()
+    const q = text ? `?q=${encodeURIComponent(text)}` : ''
+    return this.request<SocialPostsResponse>(`/api/socials/posts${q}`)
   }
 
   async createSocialPost(input: CreateSocialPostInput): Promise<SocialPost> {
@@ -2627,11 +2870,20 @@ class ApiClient {
   }
 
   /** Approve the version the reviewer saw (D6): `contentHash` is that version's
-   * `content_hash`. A post that changed since answers 409. */
-  async approveSocialPost(postId: string, contentHash: string, comment?: string): Promise<SocialPost> {
+   * `content_hash`. A post that changed since answers 409; one with unsourced claims
+   * answers 422 naming them unless `overrideUnsourced` (D7, the second confirmation). */
+  async approveSocialPost(
+    postId: string,
+    contentHash: string,
+    options: { comment?: string; overrideUnsourced?: boolean } = {},
+  ): Promise<SocialPost> {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ content_hash: contentHash, comment: comment || null }),
+      body: JSON.stringify({
+        content_hash: contentHash,
+        comment: options.comment || null,
+        override_unsourced: !!options.overrideUnsourced,
+      }),
     })
   }
 
@@ -2649,14 +2901,88 @@ class ApiClient {
     })
   }
 
+  /** Publish an approved or scheduled post now (Wave 3, US-301): answers 202 with
+   * the post in `publishing`; the publish ends it `published`, `partially_published`
+   * or `failed`, each target with its receipt. 409 = its approval no longer matches. */
+  async publishSocialPostNow(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/publish-now`, { method: 'POST' })
+  }
+
+  /** Publish again the failed targets of a failed or partially published post (US-301). */
+  async retrySocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retry`, { method: 'POST' })
+  }
+
+  /** Schedule an approved post, or move a scheduled or missed one (PRD-251 D10, US-306):
+   * `scheduledFor` is the slot (an ISO instant), `timezone` the IANA zone it is shown in.
+   * The approval stands; 409 = the post changed, 422 = a slot in the past. */
+  async scheduleSocialPost(postId: string, scheduledFor: string, timezone: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/schedule`, {
+      method: 'POST',
+      body: JSON.stringify({ scheduled_for: scheduledFor, timezone }),
+    })
+  }
+
+  /** Take a scheduled post off its slot; it stays approved (US-306). */
+  async unscheduleSocialPost(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/unschedule`, { method: 'POST' })
+  }
+
   /** Start a render (S1.1c): answers with the post in `rendering`; the render
    * ends it in `needs_approval` or `failed`. 429 = no render minutes left this month. */
-  async renderSocialPost(postId: string): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+  async renderSocialPost(postId: string, options: { preview?: boolean } = {}): Promise<SocialPost> {
+    if (!options.preview) return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, { method: 'POST' })
+    // US-208: the composer's half-resolution preview; the post keeps its status, media and hash.
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/render`, {
+      method: 'POST',
+      body: JSON.stringify({ preview: true }),
+    })
+  }
+
+  /** GET /api/socials/sources (D7): what a claim can be bound to, from this workspace. */
+  async searchSocialSources(params: { q?: string; kind?: string; limit?: number } = {}): Promise<{
+    candidates: SocialSourceCandidate[]
+    total: number
+  }> {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.kind) query.set('kind', params.kind)
+    if (params.limit) query.set('limit', String(params.limit))
+    const suffix = query.toString() ? `?${query}` : ''
+    return this.request(`/api/socials/sources${suffix}`)
   }
 
   async getSocialsUsage(): Promise<SocialsUsageResponse> {
     return this.request<SocialsUsageResponse>('/api/socials/usage')
+  }
+
+  /** The post's media as presigned inline links (D9): the exact files an approver sees. */
+  async getSocialPostMedia(postId: string): Promise<SocialPostMediaLink[]> {
+    return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
+  }
+
+  /** The workspace's connected social channels and the post kinds each can publish (D8). */
+  /** POST /api/socials/compose (US-207): a brief becomes a draft proposal, not saved.
+   * 502 when the model's answer cannot be read; 504 when it is too slow. */
+  async composeSocialPost(input: SocialComposeInput): Promise<SocialComposeProposal> {
+    return this.request<SocialComposeProposal>('/api/socials/compose', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async listSocialChannels(): Promise<SocialChannel[]> {
+    return this.request<SocialChannel[]>('/api/socials/channels')
+  }
+
+  /** Replace where the post publishes (US-204): one target per channel and post kind. The
+   * channels are approved content, so changing an approved post's resets its approval.
+   * 422 names a kind the workspace cannot post now, and why. */
+  async setSocialPostTargets(postId: string, targets: SocialPostTargetInput[]): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/targets`, {
+      method: 'PUT',
+      body: JSON.stringify({ targets }),
+    })
   }
 
   /** The voices a post can be spoken with (S1.5): Kokoro, the connected voice toolkits, and the ones to connect. */
@@ -2668,6 +2994,67 @@ class ApiClient {
   async listSocialToolkitVoices(toolkit: string, query?: string): Promise<SocialToolkitVoicesResponse> {
     const q = query && query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
     return this.request<SocialToolkitVoicesResponse>(`/api/socials/voices/${encodeURIComponent(toolkit)}${q}`)
+  }
+
+  // ===== PRD-251 S2.4 (D6): campaigns and series approval =====
+  /** Turn the workspace's series approval on or off (workspace:manage). */
+  async setWorkspaceSeriesApproval(on: boolean): Promise<{ status: string; socials: WorkspaceSocialsState }> {
+    return this.request('/api/workspaces/current/socials', {
+      method: 'PUT',
+      body: JSON.stringify({ socials: { series_approval: on } }),
+    })
+  }
+
+  async listSocialCampaigns(): Promise<SocialCampaignsResponse> {
+    return this.request<SocialCampaignsResponse>('/api/socials/campaigns')
+  }
+
+  async createSocialCampaign(input: {
+    name: string
+    approval_mode?: SocialCampaignApprovalMode
+  }): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>('/api/socials/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async getSocialCampaign(campaignId: string): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>(`/api/socials/campaigns/${campaignId}`)
+  }
+
+  async updateSocialCampaign(
+    campaignId: string,
+    changes: { name?: string; approval_mode?: SocialCampaignApprovalMode },
+  ): Promise<SocialCampaignWithPosts> {
+    return this.request<SocialCampaignWithPosts>(`/api/socials/campaigns/${campaignId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    })
+  }
+
+  /** Put a post in the campaign (sets its campaign_id); its approval is untouched. */
+  async addSocialCampaignPost(campaignId: string, postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'POST' })
+  }
+
+  /** Take a post out of the campaign (clears its campaign_id). */
+  async removeSocialCampaignPost(campaignId: string, postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'DELETE' })
+  }
+
+  /** Approve the posts the approver was shown as one series (D6): each with the content_hash
+   * on screen. The answer reports the posts approved and each post left, with why; 409 when
+   * the workspace's series approval is off or the campaign approves post by post. */
+  async approveSocialCampaignSeries(
+    campaignId: string,
+    posts: SocialSeriesShownPost[],
+    comment?: string,
+  ): Promise<SocialSeriesApproval> {
+    return this.request<SocialSeriesApproval>(`/api/socials/campaigns/${campaignId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ posts, comment: comment || null }),
+    })
   }
 }
 

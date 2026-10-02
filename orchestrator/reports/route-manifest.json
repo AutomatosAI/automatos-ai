@@ -1,5 +1,5 @@
 {
-  "route_count": 839,
+  "route_count": 851,
   "routes": [
     {
       "method": "GET",
@@ -2063,6 +2063,42 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/campaigns"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/campaigns/{campaign_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/socials/campaigns/{campaign_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns/{campaign_id}/approve"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/campaigns/{campaign_id}/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/campaigns/{campaign_id}/posts/{post_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/channels"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/compose"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/footage"
     },
     {
@@ -2087,6 +2123,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/posts/{post_id}/media"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/posts/{post_id}/media/{file_name}"
     },
     {
@@ -2107,11 +2147,19 @@
     },
     {
       "method": "POST",
+      "path": "/api/socials/posts/{post_id}/retry"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/posts/{post_id}/schedule"
     },
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/submit"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/targets"
     },
     {
       "method": "POST",

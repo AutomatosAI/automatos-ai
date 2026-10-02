@@ -7,7 +7,8 @@ two migrations: the Wave 0 deny list and the US-110 media allowlist). The media
 capability registry reads them for real. Composio is mocked where it is called
 (``ComposioToolExecutor`` in the voice recipe), media-render at the HTTP layer
 (``httpx.MockTransport``, the real client), and storage, the Deliverable
-registry and the usage tracker are recording fakes. Pins:
+registry and the usage tracker are recording fakes (the voice's own booking is
+real, ``media_ledger``; the money tests run the real tracker: ``ledger``). Pins:
 
 * AC2 — with ``fish_audio`` connected and chosen, the same script renders with
   no other change: one Composio call per line through the allowlisted speech
@@ -25,7 +26,16 @@ registry and the usage tracker are recording fakes. Pins:
 * the recipe: a Composio file output, a link or inline bytes; audio by its
   first bytes; a link fetched from public addresses only, pinned, size-capped;
   a failed line still books what was spent; a balance that cannot be read
-  first means nothing is spoken; ElevenLabs books characters at $0;
+  first means nothing is spoken; ElevenLabs books its characters at the
+  configured price;
+* the money (D13, P251W1-RVW-2): the script is priced before its first line
+  (its units at the toolkit's configured price) and checked against the post's
+  cap and the workspace's monthly media cap inside the workspace's spend window,
+  the one footage takes: over either cap nothing is spoken and nothing is booked
+  (``voice_refused``). With the real usage tracker writing ``llm_usage``, the
+  voice's row is there when the render returns (no ``best_effort.drain()``),
+  even when the connection pool has no room; a closing balance that cannot be
+  read books the priced amount;
 * the column: ``social_posts.voice`` comes from the wave's one migration,
   create_all-first safe (``@integration`` on Postgres: create_all, then the
   upgrade twice).
@@ -41,7 +51,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -71,12 +81,15 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every mapper)
 import api.socials as socials_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
+import core.best_effort as best_effort  # noqa: E402
 import core.composio.deny_list as deny_list  # noqa: E402
 import core.database.database as database_mod  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
 import core.media_render_quota as render_quota  # noqa: E402
+import modules.socials.media_caps as media_caps  # noqa: E402
 import modules.socials.media_store as media_store  # noqa: E402
 import modules.socials.recipes.files as files  # noqa: E402
+import modules.socials.media_ledger as media_ledger  # noqa: E402
 import modules.socials.recipes.toolkit as toolkit  # noqa: E402
 import modules.socials.recipes.voice as voice  # noqa: E402
 import modules.socials.render as render  # noqa: E402
@@ -147,6 +160,12 @@ ELEVEN_SPEAK_SCHEMA = {
     "required": ["text", "voice_id"],
 }
 SCHEMAS = {SPEAK: FISH_SPEAK_SCHEMA, LIST_VOICES: FISH_LIST_SCHEMA, ELEVEN_SPEAK: ELEVEN_SPEAK_SCHEMA}
+# D13: each voice toolkit's price per unit (config.py's defaults), and the two caps, pinned.
+FISH_PER_BYTE = 0.000015
+ELEVEN_PER_CHARACTER = 0.00008
+POST_CAP = 10.0
+MONTHLY_CAP = 30.0
+FAL_MODEL = "fal-ai/kling-video/v2.1/standard/text-to-video"
 # A two-line script: the first line reads a variable, as the seeded templates' lines do.
 SCRIPT = [{"id": "l01", "at": 0.3, "text": "{{ headline }}"}, {"id": "l02", "at": 2.4, "text": "Three weeks to go."}]
 COMPOSITION = {
@@ -317,7 +336,7 @@ for _table in (
 
 def _set_config(monkeypatch, **values):
     """Patch the config object every module under test reads (one object, unless a reload split it)."""
-    modules = (render, render_quota, media_render_client, media_store, voice, socials_api)
+    modules = (render, render_quota, media_render_client, media_store, voice, media_caps, socials_api, socials_settings)
     for cfg in {id(m.config): m.config for m in modules}.values():
         for name, value in values.items():
             monkeypatch.setattr(cfg, name, value, raising=False)
@@ -368,6 +387,10 @@ def env(monkeypatch):
         SOCIALS_VOICE_LINE_MAX_BYTES=16 * 1024 * 1024,
         SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS=60,
         SOCIALS_VOICE_LIST_LIMIT=30,
+        SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE=FISH_PER_BYTE,
+        SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER=ELEVEN_PER_CHARACTER,
+        SOCIALS_MEDIA_POST_CAP_USD=POST_CAP,
+        SOCIALS_MEDIA_MONTHLY_CAP_USD=MONTHLY_CAP,
     )
     Deliverables.calls = []
     monkeypatch.setattr(deliverable_service, "DeliverableService", Deliverables)
@@ -400,6 +423,29 @@ def env(monkeypatch):
         session.close()
         deny_list.reset_cache()
         engine.dispose()
+
+
+# The usage tracker's own media booking, before the env fixture records it instead.
+TRACK_MEDIA = UsageTracker.__dict__["track_media"].__func__
+
+
+@pytest.fixture
+def ledger(env, monkeypatch):
+    """The env with the real usage tracker writing the media lane into its
+    ``llm_usage``, so a test reads what was booked when it was booked. The
+    renderer's own seconds stay recorded in ``env.booked``, so the media rows
+    these tests read are the voice's and the footage's alone; the render quota's
+    tests read the renderer's booking (test_prd251w1_render_quota.py, P251W1-RVW-3)."""
+
+    def track_media(**kwargs):
+        if kwargs.get("provider") == MEDIA_RENDER_PROVIDER:
+            env.booked.append({**kwargs, "scope": dict(uc.current_usage_scope())})
+            return None
+        return TRACK_MEDIA(**kwargs)
+
+    monkeypatch.setattr(UsageTracker, "track_media", staticmethod(track_media))
+    yield env
+    best_effort.drain(timeout=5)
 
 
 def _cache(env, app, *slugs):
@@ -482,6 +528,34 @@ def _render(env, post_id, store):
 def _post(env, post_id):
     env.session.expire_all()
     return env.session.get(SocialPost, uuid.UUID(post_id))
+
+
+def _settings(env, **socials):
+    workspace = env.session.get(Workspace, WS)
+    workspace.settings = {"socials": {"enabled": True, **socials}}
+    env.session.commit()
+
+
+def _spent(env, usd, *, execution_id="social_post:other"):
+    """A booking already on the media lane this month (another post's footage)."""
+    env.session.add(
+        LLMUsage(
+            workspace_id=WS, model_id=FAL_MODEL, provider="fal_ai", tier="direct", execution_id=execution_id,
+            request_type="media", input_tokens=5, output_tokens=0, total_tokens=5, cache_read_tokens=0,
+            cache_write_tokens=0, input_cost=usd, output_cost=0.0, total_cost=usd, is_byok=True, status="success",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+    )
+    env.session.commit()
+
+
+def _media_rows(env, post_id=None):
+    """The media lane in llm_usage as it is now: read at once, never after a best_effort.drain()."""
+    env.session.expire_all()
+    query = env.session.query(LLMUsage).filter(LLMUsage.request_type == "media")
+    if post_id is not None:
+        query = query.filter(LLMUsage.execution_id == f"social_post:{post_id}")
+    return query.order_by(LLMUsage.id).all()
 
 
 def _script_fish(env):
@@ -570,13 +644,14 @@ def test_with_fish_audio_chosen_the_same_script_renders_with_no_other_change(env
     assert stripped == kokoro_bundle, "anything but the spoken lines changed"
 
     # D13: Fish Audio's balance difference is booked on the media lane against the post.
-    voice_booking, render_booking = env.booked
-    assert voice_booking["provider"] == "fish_audio" and voice_booking["model_id"] == SPEAK.lower()
-    assert voice_booking["usd"] == pytest.approx(0.01)
-    assert voice_booking["units"] == len("Lisbon, here we come.".encode()) + len("Three weeks to go.".encode())
-    assert voice_booking["error_message"] is None
-    assert voice_booking["scope"]["request_type"] == "media" and voice_booking["scope"]["workspace_id"] == WS
-    assert voice_booking["scope"]["execution_id"] == f"social_post:{post['id']}"
+    (voice_booking,) = _media_rows(env, post["id"])
+    assert voice_booking.provider == "fish_audio" and voice_booking.model_id == SPEAK.lower()
+    assert voice_booking.total_cost == pytest.approx(0.01)
+    assert voice_booking.input_tokens == len("Lisbon, here we come.".encode()) + len("Three weeks to go.".encode())
+    assert voice_booking.error_message is None
+    assert voice_booking.request_type == "media" and uuid.UUID(str(voice_booking.workspace_id)) == WS
+    assert voice_booking.execution_id == f"social_post:{post['id']}"
+    (render_booking,) = env.booked
     assert render_booking["provider"] == MEDIA_RENDER_PROVIDER
 
 
@@ -596,8 +671,8 @@ def test_a_line_the_toolkit_cannot_speak_fails_the_render_and_still_books_the_sp
     assert row.status == "failed"
     assert "Fish Audio could not speak line l02: voice model not found" in row.review_log[-1]["comment"]
     assert list(store.objects) == [f"social-media/{WS}/{post['id']}/voice-l01.mp3"] and len(links) == 1
-    (booking,) = env.booked
-    assert booking["provider"] == "fish_audio" and booking["usd"] == pytest.approx(0.01)
+    (booking,) = _media_rows(env, post["id"])
+    assert booking.provider == "fish_audio" and booking.total_cost == pytest.approx(0.01) and env.booked == []
 
 
 def test_a_balance_that_cannot_be_read_first_speaks_nothing(env):
@@ -610,7 +685,7 @@ def test_a_balance_that_cannot_be_read_first_speaks_nothing(env):
 
     assert ok is False and renderer.bundles == []
     assert env.composio.slugs() == [BALANCE]
-    assert env.booked == []
+    assert env.booked == [] and _media_rows(env) == []
     assert "balance could not be read" in _post(env, post["id"]).review_log[-1]["comment"]
 
 
@@ -628,7 +703,9 @@ def test_a_toolkit_that_returns_no_audio_fails_the_render_saying_so(env):
     assert "returned something that is not audio for line l01" in _post(env, post["id"]).review_log[-1]["comment"]
 
 
-def test_elevenlabs_books_characters_at_no_price(env):
+def test_elevenlabs_books_its_characters_at_the_configured_price(env):
+    """(d) ElevenLabs bills the customer's own plan: its characters are booked at the
+    configured price per character, so the caps see them (never a hard-coded $0)."""
     _cache_voice_toolkits(env)
     _connect(env, "ELEVENLABS")
     post = _create(env, voice={"toolkit": "elevenlabs", "voice_id": "21m00Tcm4TlvDq8ikWAM"})
@@ -643,9 +720,10 @@ def test_elevenlabs_books_characters_at_no_price(env):
         {"text": "Lisbon, here we come.", "voice_id": "21m00Tcm4TlvDq8ikWAM"},
         {"text": "Three weeks to go.", "voice_id": "21m00Tcm4TlvDq8ikWAM"},
     ]
-    voice_booking = env.booked[0]
-    assert voice_booking["provider"] == "elevenlabs" and voice_booking["usd"] == 0.0
-    assert voice_booking["units"] == len("Lisbon, here we come.") + len("Three weeks to go.")
+    (voice_booking,) = _media_rows(env, post["id"])
+    characters = len("Lisbon, here we come.") + len("Three weeks to go.")
+    assert voice_booking.provider == "elevenlabs" and voice_booking.input_tokens == characters
+    assert voice_booking.total_cost == pytest.approx(characters * ELEVEN_PER_CHARACTER) and voice_booking.total_cost > 0
     assert [line["path"] for line in renderer.bundles[0]["audio"]["voice"]["lines"]] == [f"{VOICE_DIR}l01.mp3", f"{VOICE_DIR}l02.mp3"]
 
 
@@ -697,6 +775,158 @@ def test_on_a_database_without_advisory_locks_the_window_is_the_process_lock(env
             return toolkit.account_lock(WS, "fish_audio").locked()
 
     assert asyncio.run(go()) is True
+
+
+# ---------------------------------------------------------------------------
+# P251W1-RVW-2 — the voice is priced, capped and booked before it is spoken (D13)
+# ---------------------------------------------------------------------------
+
+SPOKEN = ("Lisbon, here we come.", "Three weeks to go.")
+FISH_VOICE_CHOSEN = {"toolkit": "fish_audio", "voice_id": FISH_VOICE}
+
+
+def _fish_bytes():
+    return sum(len(text.encode("utf-8")) for text in SPOKEN)
+
+
+def _resets():
+    """The month the monthly media cap resets in (media_caps: the first of the next UTC month)."""
+    return f"{datetime.now(timezone.utc).replace(day=1) + timedelta(days=32):%B}"
+
+
+def _fish_post(env):
+    _cache_voice_toolkits(env)
+    _connect(env, "FISH_AUDIO")
+    post = _create(env, voice=FISH_VOICE_CHOSEN)
+    _script_fish(env)
+    return post
+
+
+def test_a_voice_over_the_workspaces_monthly_cap_speaks_nothing_and_books_nothing(ledger):
+    """(a) socials.media_monthly_cap_usd 1.00, and 1.00 already booked this month."""
+    env = ledger
+    _settings(env, media_monthly_cap_usd=1.0)
+    _spent(env, 1.00)
+    post = _fish_post(env)
+
+    ok, renderer, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is False and renderer.bundles == []
+    assert env.composio.calls == [], f"priced and refused: no balance read, and {SPEAK} never called"
+    entry = _post(env, post["id"]).review_log[-1]
+    assert entry["action"] == "render_failed" and entry["report"]["code"] == "voice_refused"
+    assert entry["comment"] == (
+        f"The Fish Audio voice (2 lines) would cost about ${_fish_bytes() * FISH_PER_BYTE:.4f}, and this workspace "
+        f"has spent $1.00 of its $1.00 monthly media cap, which resets on 1 {_resets()}: nothing was submitted. "
+        "Nothing was rendered."
+    )
+    assert [row.total_cost for row in _media_rows(env)] == [pytest.approx(1.00)], "nothing new was booked"
+
+
+def test_a_voice_over_the_posts_cap_its_own_footage_spent_speaks_nothing_and_books_nothing(ledger):
+    """(b) The post's own footage, booked as the footage recipe books it, spent the
+    post's whole cap (SOCIALS_MEDIA_POST_CAP_USD)."""
+    env = ledger
+    post = _fish_post(env)
+    media_ledger.commit(env.factory, WS, uuid.UUID(post["id"]), provider="fal_ai", model_id=FAL_MODEL, units=5, usd=POST_CAP)
+
+    ok, renderer, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is False and renderer.bundles == []
+    assert SPEAK not in env.composio.slugs() and env.composio.calls == []
+    entry = _post(env, post["id"]).review_log[-1]
+    assert entry["report"]["code"] == "voice_refused"
+    assert entry["comment"] == (
+        f"The Fish Audio voice (2 lines) would cost about ${_fish_bytes() * FISH_PER_BYTE:.4f}, and this post has "
+        f"spent ${POST_CAP:.2f} of its ${POST_CAP:.2f} media cap: nothing was submitted. Nothing was rendered."
+    )
+    rows = _media_rows(env, post["id"])
+    assert [(row.provider, row.total_cost) for row in rows] == [("fal_ai", pytest.approx(POST_CAP))], "nothing new was booked"
+
+
+def test_with_room_under_both_caps_the_voice_row_is_in_as_soon_as_the_render_returns(ledger):
+    """(c) No best_effort.drain() before the read: the voice's booking was written
+    before speak() returned."""
+    env = ledger
+    post = _fish_post(env)
+
+    ok, renderer, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is True and len(renderer.bundles) == 1
+    assert env.composio.slugs() == [BALANCE, SPEAK, SPEAK, BALANCE]
+    (row,) = _media_rows(env, post["id"])
+    assert (row.provider, row.model_id, row.input_tokens) == ("fish_audio", SPEAK.lower(), _fish_bytes())
+    assert row.total_cost == pytest.approx(0.01) and row.error_message is None
+    assert row.request_type == "media" and bool(row.is_byok) is True
+
+
+def test_the_voice_booking_lands_when_the_connection_pool_has_no_room(ledger, monkeypatch):
+    """(e) A booking handed to the best-effort threads waits BEST_EFFORT_POOL_WAIT_S
+    for pool room, then is dropped; the voice's is written inline, off the loop."""
+    env = ledger
+    post = _fish_post(env)
+    monkeypatch.setattr(best_effort, "_pool_has_room", lambda: False)
+
+    ok, _, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is True
+    (row,) = _media_rows(env, post["id"])
+    assert (row.provider, row.total_cost) == ("fish_audio", pytest.approx(0.01))
+
+
+def test_a_closing_balance_that_cannot_be_read_books_the_priced_amount_and_says_why(ledger):
+    """Fish Audio's spend is its balance difference; without the closing reading it
+    is booked at the configured price per byte, never $0, with the problem recorded."""
+    env = ledger
+    post = _fish_post(env)
+    env.composio.answers[BALANCE] = [_balance("10.00"), _failed("rate limited")]
+
+    ok, _, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is True
+    (row,) = _media_rows(env, post["id"])
+    assert row.total_cost == pytest.approx(_fish_bytes() * FISH_PER_BYTE) and row.total_cost > 0
+    assert row.error_message == "Fish Audio's balance could not be read after speaking: booked at its configured price"
+
+
+def test_the_voice_checks_its_caps_inside_the_spend_window_footage_takes(ledger, monkeypatch):
+    """Footage and voice share one spend window per workspace: a voice that starts
+    while another render holds it waits, then checks against what that render
+    booked, so two renders never spend the same remaining cap."""
+    env = ledger
+    monkeypatch.setattr(toolkit, "_LOCKS", {})  # this test's locks go with its event loop
+    _cache_voice_toolkits(env)
+    _connect(env, "FISH_AUDIO")
+    _settings(env, media_monthly_cap_usd=1.0)
+    _script_fish(env)
+    plan = voice.plan_for(FISH_VOICE_CHOSEN, media_capabilities(env.session, WS))
+    footage = {"provider": "fal_ai", "model_id": FAL_MODEL, "units": 5, "usd": 1.0}
+
+    async def scenario():
+        async with toolkit.spend_window(env.factory, WS):  # another render's footage
+            speaking = asyncio.create_task(
+                voice.speak(plan, workspace_id=WS, post_id=uuid.uuid4(), lines=[("l01", "One line.")],
+                            session_factory=env.factory, store=FakeStore())
+            )
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not speaking.done() and env.composio.calls == [], "the voice went ahead inside another's window"
+            await asyncio.to_thread(media_ledger.commit, env.factory, WS, uuid.uuid4(), **footage)
+        with pytest.raises(voice.VoiceRefused, match=r"this workspace has spent \$1\.00 of its \$1\.00 monthly media cap"):
+            await speaking
+
+    asyncio.run(scenario())
+    assert env.composio.calls == []
+    assert [row.provider for row in _media_rows(env)] == ["fal_ai"]
+
+
+def test_a_voice_is_priced_by_its_toolkits_units_at_the_configured_price():
+    fish, eleven = voice.RECIPES["fish_audio"], voice.RECIPES["elevenlabs"]
+    texts = ["Olá, Lisboa.", "Three weeks to go."]
+    assert voice.script_units(fish, texts) == len("Olá, Lisboa.".encode("utf-8")) + 18 == 31
+    assert voice.script_units(eleven, texts) == 12 + 18
+    assert voice.price_usd(fish, texts) == pytest.approx(31 * voice.config.SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE)
+    assert voice.price_usd(eleven, texts) == pytest.approx(30 * voice.config.SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,35 @@
+{
+  "ui-story-promo": {
+    "tagline_lead": "An operating system for",
+    "tagline_accent": "autonomous",
+    "tagline_tail": "agent teams.",
+    "chat_greeting": "Hey Gerard, what can I do for you today?",
+    "chat_counter_label": "AUTO NOW",
+    "end_url": "automatos.app",
+    "end_note": "OPEN SOURCE · APACHE 2.0",
+    "cap_ask": "Tell Auto what you need."
+  },
+  "cinematic-product-promo": {
+    "tagline_lead": "An operating system for",
+    "tagline_accent": "autonomous",
+    "tagline_tail": "agent teams.",
+    "chat_greeting": "Hey Gerard, what can I do for you today?",
+    "chat_counter_label": "AUTO NOW",
+    "end_url": "automatos.app",
+    "end_note": "OPEN SOURCE · APACHE 2.0",
+    "cap_ask": "Tell Auto what you need."
+  },
+  "app-promo": {
+    "app_name": "Automatos Academy",
+    "slogan_note": "Academy Coach",
+    "track_6_name": "Automatos Platform Architect",
+    "end_url": "academy.automatos.app",
+    "reveal_voice": "Meet Automatos Academy. Train your AI mind.",
+    "end_voice": "Automatos Academy. Free. Learn by doing. Prove it."
+  },
+  "data-story": {
+    "product_name": "Market Intelligence",
+    "end_url": "markets.automatos.app",
+    "end_note": "MARKET INTELLIGENCE · RESEARCH, NOT SIGNALS"
+  }
+}

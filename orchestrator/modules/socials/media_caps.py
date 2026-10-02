@@ -2,7 +2,10 @@
 
 Footage and stills from the workspace's Composio generation toolkit (S1.8) are
 priced before anything is submitted: the toolkit's own estimate where it prices
-a call, else a configured ceiling per shot. The price must fit two caps:
+a call, else a configured ceiling per shot. A voice toolkit's script (S1.5) is
+priced before its first line is spoken: its units (Fish Audio's UTF-8 bytes,
+ElevenLabs's characters) at the toolkit's configured price per unit. The price
+must fit two caps:
 
 * **the post's cap**, ``config.SOCIALS_MEDIA_POST_CAP_USD``: everything the
   post's renders have booked on the media lane (its footage, its premium voice)
@@ -16,29 +19,38 @@ Over either cap nothing is submitted, and :class:`MediaCapExceeded` says which
 cap, what was spent and what the work would cost. A monthly cap that cannot be
 read spends nothing. The spend is what the media lane booked (``llm_usage``,
 US-103): the same rows the workspace budget gate and the daily spend guard read.
+Each check runs inside the workspace's spend window
+(``recipes/toolkit.spend_window``), and every booking lands before that window
+closes (:func:`check_spend`): a render's footage and voice, and every other
+render of the workspace, are checked against one running total.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import func
 
 from config import config
 from core.llm.usage_context import LANE_MEDIA
 from core.models.core import LLMUsage
+from core.models.workspaces import Workspace
 from core.utils.timestamps import month_window_utc
 from modules.socials.settings import media_monthly_cap_usd
 
 # The post's execution id on the media lane: every booking a post's render makes.
 POST_EXECUTION_PREFIX = "social_post:"
-# Money is shown to the cent.
+# Money is shown to the cent; an amount under a cent (a short voice script) to
+# the hundredth of a cent, so a price is never shown as $0.00.
 CENTS = 2
+SUB_CENT_PLACES = 4
+WORKSPACE_GONE = "the workspace is gone: nothing was submitted."
 
 
 class MediaCapExceeded(Exception):
-    """The work would take a post or the workspace over its media cap: nothing was submitted."""
+    """The work may not be spent: it would take a post or the workspace over its
+    media cap, or the workspace is gone. Nothing was submitted."""
 
 
 def post_execution_id(post_id: Any) -> str:
@@ -80,7 +92,8 @@ def month_spend_usd(db: Any, workspace_id: Any, start: datetime, end: datetime) 
 
 
 def _usd(amount: float) -> str:
-    return f"${amount:.{CENTS}f}"
+    places = SUB_CENT_PLACES if 0 < amount < 10 ** -CENTS else CENTS
+    return f"${amount:.{places}f}"
 
 
 @dataclass(frozen=True)
@@ -141,3 +154,20 @@ def check_caps(spend: MediaSpend, price_usd: float, what: str) -> None:
     refusal = spend.refusal(price_usd, what)
     if refusal:
         raise MediaCapExceeded(refusal)
+
+
+def check_spend(session_factory: Callable[[], Any], workspace_id: Any, post_id: Any, price_usd: float, what: str) -> None:
+    """:class:`MediaCapExceeded` unless ``what`` at ``price_usd`` fits the post's
+    cap and the workspace's monthly media cap, as the media lane has them now.
+
+    A blocking read on its own session: a recipe calls it off the event loop,
+    inside the workspace's spend window, so what it reads is everything booked
+    before it."""
+    db = session_factory()
+    try:
+        workspace = db.get(Workspace, workspace_id)
+        if workspace is None:
+            raise MediaCapExceeded(WORKSPACE_GONE)
+        check_caps(media_spend(db, workspace, post_id), price_usd, what)
+    finally:
+        db.close()

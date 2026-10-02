@@ -3,6 +3,7 @@
  * the order the groups show in, and which actions a role and a status allow.
  * Wave 1 (S1.1c) adds rendering: a post with a template renders from any status
  * that holds no approval, and a failed render can be edited and rendered again.
+ * Wave 2 (S2.1) adds the board's columns, from the list's own grouping.
  * The server enforces all of it; this only decides which buttons to show.
  */
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
@@ -29,6 +30,13 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   render: 'Render started',
   render_done: 'Rendered',
   render_failed: 'Render failed',
+  // Wave 3 (US-301, US-306): publishing, and a slot that passed.
+  publish: 'Publishing started',
+  retry: 'Retry started',
+  published: 'Published',
+  partially_published: 'Partially published',
+  publish_failed: 'Publish failed',
+  missed: 'Missed its slot',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
@@ -44,6 +52,21 @@ export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
   failed: 'Failed',
   missed: 'Missed',
   archived: 'Archived',
+}
+
+// The seeded channels' names (modules/socials/channel_adapters.py labels); any other
+// toolkit is named from its own slug.
+const CHANNEL_LABELS: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  twitter: 'X',
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+}
+
+/** A channel's name from its Composio toolkit: "LinkedIn", "X", "Blue Sky". */
+export function channelLabel(toolkit: string): string {
+  return CHANNEL_LABELS[toolkit] ?? toolkit.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 /** Group order: what needs a person first, finished and archived work last. */
@@ -73,7 +96,7 @@ const REVIEW_ROLES: ReadonlySet<WorkspaceRole> = new Set<WorkspaceRole>(['owner'
 const SUBMITTABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['draft', 'changes_requested'])
 const REVIEWABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>(['needs_approval'])
 const EDITABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
-  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'failed',
+  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'missed', 'failed',
 ])
 // S1.1c: the statuses a render starts from (modules/socials/service.py TRANSITIONS['render']).
 const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
@@ -124,9 +147,14 @@ export function speaksAScript(post: Pick<SocialPost, 'template_id' | 'format'>):
   return !!post.template_id && !(post.format && STILL_FORMATS.has(post.format))
 }
 
-/** Whether any post is rendering: the list polls until none is. */
+/** Whether any post is rendering. */
 export function anyRendering(posts: ReadonlyArray<SocialPost>): boolean {
   return posts.some((post) => post.status === 'rendering')
+}
+
+/** Whether any post is rendering or publishing: the list polls until none is (US-308). */
+export function anyInFlight(posts: ReadonlyArray<SocialPost>): boolean {
+  return posts.some((post) => post.status === 'rendering' || post.status === 'publishing')
 }
 
 /** "3.5 / 10" (or "3.5" with no quota), minutes to one decimal place. */
@@ -145,11 +173,22 @@ function newestFirst(a: SocialPost, b: SocialPost): number {
   return (b.created_at || '').localeCompare(a.created_at || '')
 }
 
-/** Posts grouped by status in SOCIAL_STATUS_ORDER, newest first; empty groups omitted. */
-export function groupPostsByStatus(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+/** Every status in SOCIAL_STATUS_ORDER with its posts, newest first. */
+function statusGroups(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
   return SOCIAL_STATUS_ORDER.map((status) => ({
     status,
     label: SOCIAL_STATUS_LABELS[status],
     posts: posts.filter((post) => post.status === status).sort(newestFirst),
-  })).filter((group) => group.posts.length > 0)
+  }))
+}
+
+/** The list's groups: posts by status in SOCIAL_STATUS_ORDER, newest first; empty groups omitted. */
+export function groupPostsByStatus(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+  return statusGroups(posts).filter((group) => group.posts.length > 0)
+}
+
+/** S2.1: the board's columns, one per status in SOCIAL_STATUS_ORDER, empty ones kept. The
+ * same grouping as the list's, so the two views show the same posts and the same counts. */
+export function boardColumns(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
+  return statusGroups(posts)
 }

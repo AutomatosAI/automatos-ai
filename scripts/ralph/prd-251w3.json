@@ -1,0 +1,327 @@
+{
+ "project": "PRD-251 Socials — Wave 3: schedule and publish",
+ "branchName": "feat/prd-251-w3-publish",
+ "baseBranch": "feat/prd-251-w2-socials-tab (stacked until Wave 2 is on main; then main)",
+ "description": "Wave 3 of PRD-251 (docs/PRDS/PRD-251-SOCIALS.md — D1-D17 binding, plus the 'Waves 2+3 build' block at the top). The publisher and its five channel publishers (S3.3a-e: LinkedIn, X, Instagram, TikTok, YouTube; plus the generic adapter), scheduling with one-shot jobs, reconcile and missed slots (S3.1a), the calendar kind 'social' with drag to reschedule (S3.1b), the publish controls and receipts in the post view (S3.3f), and the end-to-end check of D14's one way out. Wave 2 built what publishing needs: media hosting (S3.4), the channel registry and adapter data (S3.2), channels as approved content (the hash covers the targets) and the post gate's PLATFORM_PUBLISHER way through (D14b). No migration: every status the wave uses already exists in core/models/socials.py (SOCIAL_POST_STATUSES, SOCIAL_TARGET_STATUSES). CI has no Composio connections: every channel is proven against a mocked executor; one live publish per channel is the owner's (docs/PRDS/prd251-w3-owner-test.md).",
+ "userStories": [
+  {
+   "id": "US-301",
+   "title": "S3.3 — The publisher: a post's targets published through Composio, file-first, idempotent, with receipts",
+   "description": "Fill the Wave 0 seam in orchestrator/modules/socials/publisher.py (publish_post, :1-38; PublishingUnavailable goes). ONE engine runs every channel; the channels differ only in the adapter DATA (modules/socials/channel_adapters.py, read through capabilities.py ChannelStep :343). Put the engine in new modules (e.g. modules/socials/publishing.py for the run, publish_sources.py for resolving step params) — service.py (992 lines) and api/socials.py (970 lines) are over 800: do not grow them beyond the few lines a transition or a route needs. The run: (1) assert_publishable (service.py:914) first, always; claim the post with a compare-and-set approved|scheduled → publishing (service.claim_unchanged) so two workers never both publish; (2) for each target not yet published (social_post_targets, targets.py; its action_plan holds the registry's resolved STEPS, targets.py:36,180), run its steps in order through ComposioToolExecutor.execute (core/composio/tool_executor.py:364) with way_through=PLATFORM_PUBLISHER (core/composio/post_gate.py:134) — the ONLY caller that passes it; the deny list still runs first and a denied step fails its target (or is skipped when optional). Resolve each step's params from their sources (channel_adapters.py docstring): $copy (the channel's own copy, else the base), $title, $media / $media[] (the post's rendered files, modules/socials/media_urls.py resolve_post_media :181), $media.content_type, $media.bytes, $thumbnail, $option.<name> (the target's options), $steps.<id> (a value an earlier step returned; define per step which result field it reads, in the adapter data), and a|b fallbacks. FILE-FIRST: a param named in the step's `files` is handed to the executor's file resolver (tool_executor.py:126 resolve_file_uploads) as the adapter's OWN upload spec — add a keyword (e.g. upload_params=) so the resolver converts exactly those params for this call; NEVER add a slug to the global UPLOAD_ACTIONS (:41). A param in `urls` takes a presigned inline link (media_urls presigned_inline_url, D9) and needs public storage: without SOCIALS_PUBLIC_MEDIA_BUCKET the step is skipped when optional, else the target fails saying so. A `status` step polls until done or SOCIALS_PUBLISH_MAX_WAIT_SECONDS (new config, e.g. 600) every SOCIALS_PUBLISH_POLL_SECONDS (new, e.g. 5). Retries (D8): a transient failure (timeout, 5xx, 429, a connection error) retries the target up to SOCIALS_MAX_TARGET_ATTEMPTS (config.py:1911, 3) with backoff SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS (new); a 4xx or a platform refusal does not retry and records the platform's message on the target (error). attempts counts every try. Receipts: on success the target stores remote_id and permalink (from the publish step's result: define the result fields per step in the adapter data), status published, published_at. The post ends published (all targets), partially_published (some) or failed (none), each logged in review_log; a failed or partially published post notifies (new event types social_post_failed, social_post_published in notification_dispatcher VALID_EVENT_TYPES :45; link_type social_post). Idempotency: a published target is never run again (its idempotency_key, targets.py:155, is passed to the platform where the action takes one); a retry runs only the failed targets. Routes: POST /api/socials/posts/{id}/publish-now (api/socials.py:727, CAN_UPDATE) now publishes — it answers 202 with the post in publishing and runs in the background (launch_guarded, as render does) — and POST /api/socials/posts/{id}/retry (new, CAN_UPDATE) re-runs the failed targets of a failed or partially_published post, only while its approval still matches (an assert_retryable beside assert_publishable). Status machine (service.py TRANSITIONS :116): publish {approved, scheduled, failed?, partially_published → publishing}, publish_done {publishing → published | partially_published | failed}; a post stuck in publishing is failed by the boot reaper like a stuck render (core/boot/reaper.py:217 _reap_social_renders is the precedent), leaving its published targets' receipts as they are. This story proves the engine with LinkedIn (S3.3a: text, image through the workspace-scoped image workaround core/composio/linkedin_image_workaround.py, video LINKEDIN_UPLOAD_VIDEO → LINKEDIN_CREATE_VIDEO_POST).",
+   "acceptanceCriteria": [
+    "With a mocked ComposioToolExecutor: a LinkedIn text, image and video post each issue exactly the adapter's documented sequence, with way_through=PLATFORM_PUBLISHER, the files through the resolver's per-call upload spec, and store remote_id and permalink (tests). → DONE — CI run 36698181881 on d4d4651: orchestrator-tests green, running tests/test_prd251w3_publisher.py — test_a_linkedin_text_post_runs_the_adapter_sequence_and_stores_its_receipt, test_a_linkedin_image_post_hands_its_files_to_the_upload_spec and test_a_linkedin_video_uploads_then_posts_with_the_returned_video_urn assert each sequence, way_through=PLATFORM_PUBLISHER, the files as upload_params, and remote_id + permalink.",
+    "assert_publishable runs first: a stale approval publishes nothing and makes no executor call; two concurrent publishes of one post issue ONE sequence (compare-and-set claim; test on the CI Postgres). → DONE — CI run 36698181881 on d4d4651: test_a_stale_approval_claims_nothing_and_calls_nothing and test_a_run_whose_post_lost_its_approval_publishes_nothing (no executor call); test_two_concurrent_publishes_of_one_post_issue_one_sequence_on_postgres ran on the CI Postgres (its fixture raises rather than skips when CI is set) and passed: one claim, one LINKEDIN_CREATE_LINKED_IN_POST, also under a double run.",
+    "A transient error retries up to SOCIALS_MAX_TARGET_ATTEMPTS then fails the target; a 4xx does not retry and stores the platform's message; one target failing of two ends partially_published and notifies; retry re-runs only the failed target (tests). → DONE — CI run 36698181881 on d4d4651: test_a_transient_error_tries_again_up_to_the_limit_then_fails_the_target (3 attempts, backoff, 503 kept), test_a_4xx_is_not_retried_and_keeps_the_platform_message, test_one_target_of_two_failing_ends_partially_published_and_retry_runs_only_it (social_post_failed notice; the retry runs only the video target) all passed.",
+    "UPLOAD_ACTIONS is unchanged; the deny list still refuses a denied step; the new settings are in config.py and config-surface.json; the retry route is a plain def, in the committed manifest with its apiClient method (tests + gate). → DONE — CI run 36698181881 on d4d4651: test_execute_with_uploads_converts_exactly_the_named_params_then_executes (UPLOAD_ACTIONS unchanged), test_a_denied_or_gated_call_uploads_nothing_and_executes_nothing, test_the_publisher_settings_are_config_and_named_in_the_surface, test_the_publish_routes_are_plain_defs_in_the_manifest_and_the_client_posts_them (retry and publish-now: plain def, POST, route-manifest.json with route_count 851, apiClient POST); Frontend CI route-contract green.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36698181881 on d4d4651 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI (tsc baselined, vitest, eslint, route-contract, code shape), Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 1,
+   "passes": true,
+   "notes": "Anchors: publisher.py; service.py:116,914; tool_executor.py:41,126,364; post_gate.py:134,336; channel_adapters.py; capabilities.py:343; targets.py:36,155,180; media_urls.py:124,132,181; notification_dispatcher.py:45; api/socials.py:727; config.py:1909,1911. Precedent for background work + boot reaper: modules/socials/render.py (launch_guarded, the stale-render reaper). Boot reaper: core/boot/reaper.py:217. The adapter data does not yet say which result field a $steps.<id> reads, nor where a publish step's remote id and permalink are: add that to the data (e.g. a step's `returns`), checked when capabilities.py loads it."
+  },
+  {
+   "id": "US-302",
+   "title": "S3.3b — X: text, image and video (chunked), with the customer's own X app",
+   "description": "Run X through the US-301 engine: text → TWITTER_CREATION_OF_A_POST; image → TWITTER_UPLOAD_MEDIA then the post with its media id; video → the chunked path the adapter data carries (TWITTER_UPLOAD_LARGE_MEDIA / TWITTER_FINALIZE_MEDIA_UPLOAD, polling processing where the action reports it). Fix the adapter data only where Composio's docs (docs.composio.dev/toolkits/twitter) show a param or result field is wrong — data, never code branches per channel. X needs the customer's own X API app (setup_note, 'Waves 2+3 build' block): an auth failure surfaces that note in the target's error.",
+   "acceptanceCriteria": [
+    "With the executor mocked: X text, image and video each issue the documented sequence, the media id flows from the upload step into the post ($steps), and the receipt holds the tweet id and its permalink (tests). → DONE — CI run 36702158476 on 043dd4f: orchestrator-tests green, running tests/test_prd251w3_x.py — test_an_x_text_post_is_one_post_call_and_its_receipt_is_the_tweet, test_an_x_image_uploads_the_file_then_posts_with_its_media_id (media_media_ids from $steps.media) and test_an_x_video_is_chunked_polled_until_processed_then_posted assert each sequence and the receipt (tweet id, https://x.com/i/web/status/<id>).",
+    "An auth refusal from X is not retried and the target's error names the X setup note (test). → DONE — CI run 36702158476 on 043dd4f: test_an_auth_refusal_is_not_retried_and_names_the_x_setup_note (one attempt, no backoff, the adapter setup note in the target error) passed.",
+    "No stale slug (TWITTER_CREATE_TWEET) is called; the engine has no X-specific branch (gate greps + test). → DONE — CI run 36702158476 on 043dd4f: test_no_x_sequence_calls_the_stale_create_tweet and test_the_engine_has_no_channel_specific_code (no channel name in the publishing modules) passed; test_prd251w2_channels.py::test_no_channel_slug_literal_outside_the_adapter_data still green.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36702158476 on 043dd4f (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 2,
+   "passes": true,
+   "notes": "Anchors: channel_adapters.py 'twitter' (:103); capabilities.py (setup_note); US-301's engine."
+  },
+  {
+   "id": "US-303",
+   "title": "S3.3c — Instagram: image, Reel and carousel, container then publish",
+   "description": "Run Instagram through the engine: INSTAGRAM_POST_IG_USER_MEDIA with image_file / video_file (file-first, the adapter's upload spec) → wait for the container (the publish action waits for processing; poll where the adapter has a status step) → INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH; carousel: one child container per image, then INSTAGRAM_CREATE_CAROUSEL_CONTAINER, then publish. Instagram needs JPEG images (Traps), and stills render as PNG today. Pillow is NOT an orchestrator dependency and a new dependency needs the owner's OK (AGENTS.md), so convert where the tools already are: ask media-render for a JPEG copy of the still (it has ffmpeg), or refuse the Instagram image target with a clear message; say which in the commit body. Never convert in the orchestrator with a new library. Never the deprecated actions (INSTAGRAM_CREATE_MEDIA_CONTAINER, INSTAGRAM_CREATE_POST, INSTAGRAM_GET_POST_STATUS). Never widen UPLOAD_ACTIONS.",
+   "acceptanceCriteria": [
+    "With the executor mocked: an image, a Reel and a 3-slide carousel each issue the documented sequence, with the container id flowing into the publish step, and store the media id and permalink (tests). → DONE — CI run 36704196633 on 5ba7e6f: orchestrator-tests green, running tests/test_prd251w3_instagram.py — test_an_instagram_image_is_a_jpeg_container_waited_on_then_published, test_a_reel_uploads_its_video_file_unconverted and test_a_three_slide_carousel_sends_three_jpegs_to_one_carousel_container assert each sequence, the container id flowing into INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH (), and the stored media id and permalink.",
+    "A container that never finishes processing within SOCIALS_PUBLISH_MAX_WAIT_SECONDS fails the target clearly and publishes nothing (test). → DONE — CI run 36704196633 on 5ba7e6f: test_a_container_that_never_finishes_fails_clearly_and_publishes_nothing (the target fails naming SOCIALS_PUBLISH_MAX_WAIT_SECONDS; no publish call) and test_a_container_instagram_rejects_fails_with_its_status passed.",
+    "A PNG still reaches Instagram as JPEG through media-render, or the target is refused with a clear message, as the commit body decides; no deprecated Instagram action is called (tests + gate). → DONE — CI run 36704196633 on 5ba7e6f: the commit body decides conversion — test_an_instagram_image_is_a_jpeg_container_waited_on_then_published (a PNG reaches Instagram as the JPEG media-render made), test_a_jpeg_still_is_not_converted_again, test_a_png_media_render_cannot_convert_fails_the_target_saying_so and test_the_client_posts_the_image_to_media_render_s_jpeg_route passed; test_no_deprecated_instagram_action_is_in_a_sequence passed; the media-render job (services/media-render/tests/test_jpeg.py) green.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36704196633 on 5ba7e6f (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 3,
+   "passes": true,
+   "notes": "Anchors: channel_adapters.py 'instagram' (:162); Traps (JPEG, public fetch); US-301."
+  },
+  {
+   "id": "US-304",
+   "title": "S3.3d — TikTok: upload the file, privacy from the creator info, AI label, poll the publish status",
+   "description": "Run TikTok through the engine: TIKTOK_QUERY_CREATOR_INFO (read: the allowed privacy levels) → TIKTOK_UPLOAD_VIDEO with the file (never TIKTOK_PUBLISH_VIDEO / TIKTOK_POST_PHOTO: they pull from a verified domain Composio owns) → TIKTOK_FETCH_PUBLISH_STATUS until done. privacy_level: the target's option when it is one the creator allows, else the most private allowed level (SELF_ONLY), never a public default the person did not choose; is_aigc: true when the post's footage was generated (post.footage records a done slot) or the target's option says so. The composer left TikTok's privacy and AI label to publish (US-209): the publish controls (US-309) show them.",
+   "acceptanceCriteria": [
+    "With the executor mocked: the sequence is creator info → upload the file → poll status, the privacy level comes from the allowed list as specified, is_aigc is set for generated footage, and the receipt stores the publish id (tests). → DONE — CI run 36706021962 on d4d7ffe: orchestrator-tests green, running tests/test_prd251w3_tiktok.py — test_the_sequence_is_creator_info_upload_the_file_then_poll_until_published (TIKTOK_QUERY_CREATOR_INFO → TIKTOK_UPLOAD_VIDEO with the staged file → TIKTOK_FETCH_PUBLISH_STATUS until PUBLISH_COMPLETE, the publish id in the receipt), test_a_privacy_level_the_creator_may_not_use_falls_back_to_the_most_private, test_no_privacy_choice_is_never_a_public_default, test_a_creator_allowing_only_public_is_refused_unless_the_person_chose_public and test_generated_footage_sets_the_ai_label passed.",
+    "A status that reports a failure fails the target with TikTok's message; a timeout fails it clearly (tests). → DONE — CI run 36706021962 on d4d7ffe: test_a_status_that_reports_a_failure_fails_the_target_with_tiktok_s_reason (TikTok's fail_reason in the target error, not retried) and test_a_publish_that_never_finishes_fails_saying_so (fails after SOCIALS_PUBLISH_MAX_WAIT_SECONDS naming the status step) passed.",
+    "TIKTOK_PUBLISH_VIDEO and TIKTOK_POST_PHOTO are never called (gate grep + test). → DONE — CI run 36706021962 on d4d7ffe: test_the_url_pull_actions_are_never_in_a_sequence_and_the_gate_still_refuses_them passed (neither slug in any TikTok sequence; both still in the adapter publish_actions the post gate refuses); the acceptance gate's no_forbidden_slugs check (no added code line calls either slug) passes.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36706021962 on d4d7ffe (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 4,
+   "passes": true,
+   "notes": "Anchors: channel_adapters.py 'tiktok' (:227); 'Waves 2+3 build' block (TikTok uploads files); US-209 (options decided at publish)."
+  },
+  {
+   "id": "US-305",
+   "title": "S3.3e — YouTube: the video upload, and the thumbnail that needs public storage",
+   "description": "Run YouTube through the engine: YOUTUBE_UPLOAD_VIDEO with videoFilePath as a file (title from $title, max 100 — the composer fits it; description from $copy; categoryId, privacyStatus, tags from the target's options: US-209 writes privacy_status and category_id) → the optional thumbnail step (YOUTUBE_UPDATE_THUMBNAIL) takes only a public link (D9): with SOCIALS_PUBLIC_MEDIA_BUCKET it gets a presigned inline link to the post's still; without it the step is skipped and the receipt says so. Also finish the generic adapter (D8 'Generic (text + media)'): a generic channel's post runs its one create action with copy and media, and its first success marks the channel verified (capabilities.py :414 verified; the 'unverified channel' label goes).",
+   "acceptanceCriteria": [
+    "With the executor mocked: the upload issues the documented params from the post and the target options, and the receipt stores the video id and its watch URL (tests). → DONE — CI run 36717540121 on 71e3dc3: orchestrator-tests green, running tests/test_prd251w3_youtube.py — test_the_upload_takes_the_file_the_title_the_copy_and_the_options (YOUTUBE_UPLOAD_VIDEO with videoFilePath staged, title, the YouTube copy, categoryId, privacyStatus, tags; receipt = video id and https://www.youtube.com/watch?v=<id>).",
+    "With no public bucket the thumbnail step is skipped and recorded; with one it receives a presigned inline link (tests). → DONE — CI run 36717540121 on 71e3dc3: test_without_public_storage_the_thumbnail_is_skipped_and_the_receipt_says_so, test_with_public_storage_the_thumbnail_gets_a_presigned_link_to_the_still and test_a_thumbnail_youtube_refuses_does_not_fail_the_published_video passed.",
+    "A generic channel publishes through its create action and becomes verified after its first published target (tests). → DONE — CI run 36717540121 on 71e3dc3: test_a_generic_channel_publishes_through_its_one_create_action_and_becomes_verified, test_a_generic_text_post_sends_the_copy_alone and test_a_failed_generic_publish_leaves_the_channel_unverified passed.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success. US-305..US-309 and the review fixes were pushed together at the owner's instruction, so this run covers them; US-305's own run 36708118727 on 99cf28d had 14 of 15 jobs green (orchestrator-tests included) when that push cancelled it (media-render unfinished)."
+   ],
+   "priority": 5,
+   "passes": true,
+   "notes": "Anchors: channel_adapters.py 'youtube' (:259) and GENERIC_ADAPTER; capabilities.py :319,:414; media_urls.py :124,:132; US-209 (options)."
+  },
+  {
+   "id": "US-306",
+   "title": "S3.1a — Scheduling: one-shot jobs, reconcile, and missed slots",
+   "description": "D10. Scheduling a post (service.schedule :771 via POST /posts/{id}/schedule :696) registers an APScheduler DateTrigger job id social-publish-<post_id> on the unified scheduler (services/scheduler.py; one leader holds the fcntl lock, main.py:419), registered with a module-level function and plain args (post_id, workspace_id as strings), never a closure, so the RedisJobStore can pickle it (precedent: services/scheduled_task_service.py:706). Unschedule (:712), an edit that voids approval, reject/archive and a reschedule (POST /schedule on a scheduled post: the slot moves, the approval stands — add the scheduled→scheduled move to TRANSITIONS) remove or move the job. A request usually lands on a worker without the scheduler: add a socials pass to services/schedule_reconcile.py run_reconcile_once (:34) that registers a job for every scheduled post, removes jobs whose post is no longer scheduled, and runs every RECONCILE_INTERVAL_SECONDS (scheduled_task_service.py:41). The job runs the US-301 publisher (its claim makes a double fire publish once). Missed slot: when the job fires (or the reconcile finds a scheduled post whose slot passed) later than SOCIALS_MISFIRE_GRACE_SECONDS (config.py:1909) after the slot, the post goes to missed (service transition scheduled → missed) and the owner is notified (event social_post_missed); within the grace it publishes. A missed post can be rescheduled or published now while its approval still matches (stale content is never posted silently).",
+   "acceptanceCriteria": [
+    "Scheduling registers social-publish-<post_id> with picklable args; unschedule, a voiding edit and reject remove it; a reschedule moves it and keeps the approval (tests with a fake scheduler). → DONE — CI run 36717540121 on 71e3dc3: tests/test_prd251w3_schedule.py — test_scheduling_registers_a_picklable_one_shot_job_at_the_slot (social-publish-<id>, string args, module-level fire_scheduled_post), test_unschedule_and_a_voiding_edit_remove_the_job (and a reject after it leaves none), test_a_reschedule_moves_the_job_and_keeps_the_approval, test_publish_now_on_a_scheduled_post_removes_its_job passed (fake scheduler).",
+    "The reconcile pass registers a missing job and removes an orphan; a job firing twice publishes once (tests; the double fire on the CI Postgres). → DONE — CI run 36717540121 on 71e3dc3: test_reconcile_registers_a_missing_job_moves_a_changed_one_and_removes_an_orphan, test_a_job_fired_twice_publishes_once and the @integration test_a_double_fire_on_postgres_publishes_once (PASSED in the orchestrator-tests log, on the CI Postgres) passed.",
+    "A slot missed by more than the grace ends missed with a notification and publishes nothing; within the grace it publishes; a missed post can be rescheduled (tests). → DONE — CI run 36717540121 on 71e3dc3: test_a_slot_missed_beyond_the_grace_ends_missed_notifies_and_publishes_nothing, test_a_fire_within_the_grace_publishes, test_a_slot_with_socials_off_is_missed and test_a_missed_post_can_be_rescheduled_or_published_now passed.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success. US-305..US-309 and the review fixes were pushed together at the owner's instruction, so this run covers them; US-305's own run 36708118727 on 99cf28d had 14 of 15 jobs green (orchestrator-tests included) when that push cancelled it (media-render unfinished)."
+   ],
+   "priority": 6,
+   "passes": true,
+   "notes": "Anchors: services/scheduler.py; main.py:419-460; services/schedule_reconcile.py:34,:54; services/scheduled_task_service.py:41,:706; service.py:116,:771,:792; api/socials.py:696,:712; config.py:1909."
+  },
+  {
+   "id": "US-307",
+   "title": "S3.1b — The calendar: social posts in the Command Center calendar, drag to reschedule",
+   "description": "D10 Calendar. Backend: a sixth source _social_post_items beside the five in services/activity_service.py (:906-912) — the file is 1,327 lines, so the source lives in a NEW module (e.g. services/activity_social_items.py) and activity_service only adds it to the tuple. Each scheduled post in the window becomes an item: id social-<post_id>, type 'social', name the post title, next_run_at its slot (UTC ISO), plus post_id and timezone (social_posts.timezone) so the UI shows the time in the post's own timezone; only while Socials is on for the workspace (settings.socials_state); scoped to the caller's workspace. Frontend: the kind 'social' in the three union files — ScheduleItemType (frontend/hooks/use-activity-api.ts:97), components/command-center/calendar-kinds.ts, components/command-center/calendar-actions.ts (a case 'social'). Clicking an item opens /deliverables?tab=socials&post=<id>. A Reschedule menu item and drag-and-drop (native HTML5 drag events, NO new npm dependency) call POST /api/socials/posts/{id}/schedule with the new slot and the post's timezone: the slot moves, the approval stands. calendar-tab.tsx is 1,019 lines: put the drag and the social item's rendering in new files and add only the hooks it needs.",
+   "acceptanceCriteria": [
+    "Backend: a scheduled post appears as social-<post_id> with its slot and timezone; another workspace's post and a post that is not scheduled never appear; with Socials off there are no social items (tests). → DONE — CI run 36717540121 on 71e3dc3: tests/test_prd251w3_calendar.py — test_a_scheduled_post_is_a_social_item_with_its_slot_and_timezone, test_another_workspace_s_post_an_unscheduled_post_and_a_slot_outside_the_window_never_appear, test_with_socials_off_there_are_no_social_items and the @integration test_the_schedule_feed_carries_the_social_item_on_postgres passed.",
+    "vitest: the social kind renders with its label and colour, shows the time in the post's timezone, opens the post on click, and Reschedule and a drop call the schedule route with the new slot. → DONE — CI run 36717540121 on 71e3dc3: Frontend CI vitest — components/command-center/__tests__/calendar-social.test.tsx: its own label and colour in the legend, the time in the post's own timezone, opens the post and offers Reschedule, a drop on a day column and Reschedule… call the schedule route with the new slot in the post's timezone (and a Month-view drop keeps the post's time of day in its timezone).",
+    "No new npm dependency; the three union files carry 'social' (gate). → DONE — CI run 36717540121 on 71e3dc3: calendar-social.test.tsx 'drag uses native HTML5 events: the calendar imports no drag library'; package.json unchanged in the wave; the acceptance gate's 'three calendar union files carry social' check passes.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success. US-305..US-309 and the review fixes were pushed together at the owner's instruction, so this run covers them; US-305's own run 36708118727 on 99cf28d had 14 of 15 jobs green (orchestrator-tests included) when that push cancelled it (media-render unfinished)."
+   ],
+   "priority": 7,
+   "passes": true,
+   "notes": "Anchors: services/activity_service.py:895-915,:1089 (a source's item shape); frontend/hooks/use-activity-api.ts:97-110; frontend/components/command-center/calendar-kinds.ts, calendar-actions.ts, calendar-tab.tsx; api/socials.py:696."
+  },
+  {
+   "id": "US-308",
+   "title": "S3.3f — Publish controls and receipts in the post view",
+   "description": "Extend the post view (frontend/components/deliverables/socials/socials-post-detail.tsx and the US-206 split files; keep each component ≤150 lines, add new files): for an approved post, Schedule (a date-time picker; the timezone from the browser, Intl.DateTimeFormat().resolvedOptions().timeZone, sent to POST /schedule) and Publish now (a confirmation naming the channels); for a scheduled post, its slot in the post's timezone, Reschedule and Unschedule; for a publishing post, per-target progress while it polls (reuse the list's poll, use-socials-api.ts renderPollInterval pattern); for a published / partially_published / failed post, each target's receipt — status, permalink (opens the live post), the platform's error — and Retry for the failed targets (POST /retry, US-301); for a missed post, 'Missed its slot' with Reschedule and Publish now. TikTok targets show the privacy level and AI label that publish will use (US-304). Every call through apiClient (publishSocialPostNow, retrySocialPost, schedule/unschedule exist) with the backend's verb; a 409 (the approval changed) says so and reloads, as approve does. The board's and the list's status labels already cover publishing/published/partially_published/missed.",
+   "acceptanceCriteria": [
+    "vitest: an approved post schedules with the browser's timezone and publishes now after a confirmation; a scheduled post shows its slot in its own timezone and unschedules. → DONE — CI run 36717540121 on 71e3dc3: Frontend CI vitest — components/deliverables/socials/__tests__/socials-publish.test.tsx: schedules with the browser's timezone; publishes now only after a confirmation that names its channels; a scheduled post shows its slot in its own timezone and unschedules; reschedules through the schedule route.",
+    "vitest: a partially published post shows each target's permalink and error, and Retry calls the retry route for it; a missed post offers Reschedule and Publish now; a 409 shows the changed message and reloads. → DONE — CI run 36717540121 on 71e3dc3: socials-publish.test.tsx: a partially published post shows each channel's permalink and error, and Retry calls the retry route; a missed post offers Reschedule and Publish now; a 409 says the post changed and reloads it.",
+    "apiClient calls publish-now and retry with POST (gate). → DONE — CI run 36717540121 on 71e3dc3: socials-publish.test.tsx 'calls publish-now and retry with POST' passed; the acceptance gate's apiClient verb check passes.",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success. US-305..US-309 and the review fixes were pushed together at the owner's instruction, so this run covers them; US-305's own run 36708118727 on 99cf28d had 14 of 15 jobs green (orchestrator-tests included) when that push cancelled it (media-render unfinished)."
+   ],
+   "priority": 8,
+   "passes": true,
+   "notes": "Anchors: socials-post-detail.tsx, socials-post-review.tsx, socials-post-evidence.tsx (US-206); socials-status.ts (labels, postActions); hooks/use-socials-api.ts; lib/api-client.ts (publish-now/schedule/unschedule methods); api/socials.py:696-745."
+  },
+  {
+   "id": "US-309",
+   "title": "S3.5-check — One way out, end to end, and the owner's test",
+   "description": "Close the wave: (1) prove D14 end to end now that a way through exists — an agent's direct call to every publish action of every seeded channel is still refused in a Socials-on workspace on every agent path (tool_executor.py :416 and :726), and only the publisher passes PLATFORM_PUBLISHER (a test scans the orchestrator for the name: only publishing code references it); (2) the Socials agent tools stay draft-only (modules/tools/discovery/handlers_socials.py: no tool publishes, schedules or approves); (3) docs: docs/getting-started/self-hosting.md says what publishing needs (COMPOSIO_KEY, the customer's X app, SOCIALS_PUBLIC_MEDIA_BUCKET for the YouTube thumbnail); docs/PRDS/prd251-w3-owner-test.md is the owner's checklist (written with the kit; update it if the build changed a step). Nothing claims a live publish: that is the owner's.",
+   "acceptanceCriteria": [
+    "A test proves every seeded channel's publish actions are refused to an agent in a Socials-on workspace on both executor paths, and that PLATFORM_PUBLISHER is referenced only by the publisher (tests). → DONE — CI run 36717540121 on 71e3dc3: tests/test_prd251w3_one_way_out.py — test_an_agent_asking_for_a_publish_action_is_refused_before_validation and test_an_agent_whose_name_validation_resolves_onto_a_publish_action_is_refused (every seeded channel's publish actions, both executor paths), test_the_publishers_call_passes_the_gate_and_the_same_call_without_it_is_refused, test_the_way_through_is_named_only_where_it_is_defined_and_by_the_publisher and test_only_the_publisher_passes_a_way_through passed.",
+    "No Socials agent tool publishes, schedules or approves (test over the tool registry). → DONE — CI run 36717540121 on 71e3dc3: test_no_socials_agent_tool_publishes_schedules_or_approves passed (the action registry's socials tools are the five draft tools; their handlers import nothing that publishes).",
+    "self-hosting.md names what publishing needs; the owner test document matches the built controls (gate greps). → DONE — CI run 36717540121 on 71e3dc3: the acceptance gate's 'self-hosting docs say what publishing needs' and 'the owner's test exists' checks pass; docs/PRDS/prd251-w3-owner-test.md names the built controls (Publish now, Publish status, Retry the failed channels, Reschedule, Unschedule).",
+    "CI green on the story's commit for the required jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render, Code standards on changed lines); record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success. US-305..US-309 and the review fixes were pushed together at the owner's instruction, so this run covers them; US-305's own run 36708118727 on 99cf28d had 14 of 15 jobs green (orchestrator-tests included) when that push cancelled it (media-render unfinished)."
+   ],
+   "priority": 9,
+   "passes": true,
+   "notes": "Anchors: core/composio/tool_executor.py:416,:726; core/composio/post_gate.py:131-134,:336; modules/tools/discovery/handlers_socials.py; docs/getting-started/self-hosting.md; docs/PRDS/prd251-w3-owner-test.md."
+  },
+  {
+   "id": "P251W3-RVW-1",
+   "title": "With channels, the post's title is approved content (YouTube publishes $title)",
+   "description": "First review, CRITICAL: modules/socials/service.py _content_of hashed no title while channel_adapters.py sends $title.",
+   "acceptanceCriteria": [
+    "A title change after approval voids it for a post with channels; a post with none hashes as before (tests). → DONE — CI run 36717540121 on 71e3dc3: tests/test_prd251w3_recovery.py test_a_title_change_after_approval_voids_it_when_the_post_has_channels and test_a_title_is_not_content_for_a_post_with_no_channels passed; test_prd251w2_targets.py's hash test pins the field.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 11,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-2",
+   "title": "A publish step is never sent again blindly",
+   "description": "First review, HIGH: publish_steps.py retried a publish-class step on a timeout or 5xx.",
+   "acceptanceCriteria": [
+    "A publish step is retried only on a 429 or a refused connection; otherwise the target fails saying the post may be live, as does a failure after the publish ran (tests). → DONE — CI run 36717540121 on 71e3dc3: test_a_publish_step_is_tried_again_only_when_nothing_reached_the_platform, test_a_publish_that_timed_out_is_not_sent_again_and_says_it_may_be_live (test_prd251w3_publisher.py) and test_a_publish_that_never_finishes_fails_saying_so (tiktok) passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 12,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-3",
+   "title": "A publisher call gets no global UPLOAD_ACTIONS conversion",
+   "description": "First review, MEDIUM: execute() ran resolve_file_uploads on publisher calls (core/composio/tool_executor.py).",
+   "acceptanceCriteria": [
+    "A LinkedIn text post whose copy is a bare link is sent as approved; an agent's call keeps the conversion (test). → DONE — CI run 36717540121 on 71e3dc3: test_a_call_with_its_own_upload_spec_gets_no_global_upload_conversion passed; the upload spec lives in core/composio/upload_spec.py.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 13,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-4",
+   "title": "A lost or unstartable publish ends its post",
+   "description": "First review, MEDIUM: a publish lost inside the boot cutoff, or whose load_work failed, stayed publishing.",
+   "acceptanceCriteria": [
+    "The leader's reconcile tick ends a post publishing past SOCIALS_PUBLISH_RUN_MAX_SECONDS plus a margin, once; a run that cannot start still ends the post (tests). → DONE — CI run 36717540121 on 71e3dc3: test_the_reconcile_tick_ends_a_publish_lost_inside_the_boot_cutoff, test_a_publish_that_cannot_start_still_ends_the_post_and_retry_publishes_the_untried and test_a_run_whose_post_lost_its_approval_publishes_nothing passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 14,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-5",
+   "title": "No database session is held across a publish",
+   "description": "First review, LOW: publishing.run_publish held one session for the whole run.",
+   "acceptanceCriteria": [
+    "The default executor opens and closes a session per Composio call (test). → DONE — CI run 36717540121 on 71e3dc3: test_the_default_executor_opens_a_session_per_call_and_closes_it passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 15,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-6",
+   "title": "A target never tried can be retried",
+   "description": "First review, LOW: a target left pending was never retryable.",
+   "acceptanceCriteria": [
+    "A pending target fails as 'not tried' when the publish ends, and Retry publishes it (test). → DONE — CI run 36717540121 on 71e3dc3: test_a_publish_that_cannot_start_still_ends_the_post_and_retry_publishes_the_untried passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 16,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-7",
+   "title": "A reschedule racing a firing job wins",
+   "description": "First review, LOW: schedule_jobs._claim checked status and hash only.",
+   "acceptanceCriteria": [
+    "A reschedule committed while the job fires leaves the post scheduled at the new slot and publishes nothing (test). → DONE — CI run 36717540121 on 71e3dc3: test_a_reschedule_that_lands_while_the_job_fires_wins (test_prd251w3_schedule.py) passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 17,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-8",
+   "title": "An attempt's end does not overwrite a lost end",
+   "description": "First review, LOW: publish_records._write read the target without a lock.",
+   "acceptanceCriteria": [
+    "With end_lost holding the target rows, a late record_published waits and writes nothing (test on Postgres). → DONE — CI run 36717540121 on 71e3dc3: the @integration test_an_attempt_ending_while_its_post_is_ended_as_lost_does_not_overwrite_the_end passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 18,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-9",
+   "title": "The post view states the TikTok privacy honestly",
+   "description": "First review, LOW: socials-post-receipts.tsx showed a chosen privacy as certain.",
+   "acceptanceCriteria": [
+    "The receipt says the choice applies if the account allows it, else the most private level (vitest). → DONE — CI run 36717540121 on 71e3dc3: socials-publish.test.tsx 'shows the privacy level and AI label a TikTok target will publish with' passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 19,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-10",
+   "title": "No new test file over 800 lines",
+   "description": "Final review, HIGH: tests/test_prd251w3_publisher.py reached 898 lines; Code standards on changed lines went red on f86f6d1.",
+   "acceptanceCriteria": [
+    "check_changed_code_shape.py reports 0 errors against origin/main (CI). → DONE — CI run 36717540121 on 71e3dc3: Code standards on changed lines green; the recovery tests live in tests/test_prd251w3_recovery.py.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 20,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-11",
+   "title": "A publisher call reaches Composio once",
+   "description": "Final review, CRITICAL: core/composio/client.py's composio handle re-sent (max_retries 2) on a timeout, 408, 409, 429 or 5xx.",
+   "acceptanceCriteria": [
+    "Against the real SDK over a mock transport answering 504, a publisher call sends one execute POST and the target reads it as may-be-live; any other call keeps the SDK's retries (tests). → DONE — CI run 36717540121 on 71e3dc3: tests/test_prd251w3_send_once.py (2 tests) passed; test_the_publishers_call_passes_the_gate_and_the_same_call_without_it_is_refused asserts the send-once handle.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 21,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-12",
+   "title": "A missing step output or a stale plan fails closed",
+   "description": "Final review, HIGH: publish_sources.resolve_params dropped a $steps param that resolved to nothing; Wave 2 plans lack returns.",
+   "acceptanceCriteria": [
+    "An X image whose upload returns no id publishes nothing; a $steps param that resolves to nothing stops its step; a pre-Wave-3 plan fails its target at once, calling nothing (tests). → DONE — CI run 36717540121 on 71e3dc3: test_an_x_image_whose_upload_returns_no_media_id_publishes_nothing, test_a_param_reading_an_earlier_step_that_returned_nothing_stops_the_step and test_a_target_whose_plan_predates_publishing_fails_and_calls_nothing passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 22,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-13",
+   "title": "Whether footage is AI-made is approved content",
+   "description": "Final review, MEDIUM: TikTok's $generated read unhashed footage (service.py RENDER_FIELDS).",
+   "acceptanceCriteria": [
+    "With channels, an edit that changes whether the footage is AI-made voids the approval (test). → DONE — CI run 36717540121 on 71e3dc3: test_editing_the_footage_after_approval_voids_it_so_the_ai_label_never_drops_silently and test_generated_footage_sets_the_ai_label passed.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 23,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-14",
+   "title": "A lost publish notifies the workspace",
+   "description": "Final review, MEDIUM: end_lost_publishes and the boot reaper ended posts silently.",
+   "acceptanceCriteria": [
+    "The reconcile tick and the boot reaper each send the outcome notification after the committed end (tests). → DONE — CI run 36717540121 on 71e3dc3: test_the_reconcile_tick_ends_a_publish_lost_inside_the_boot_cutoff and test_the_boot_reaper_ends_a_lost_publish_and_keeps_its_receipts assert the social_post_failed notice.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 24,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-15",
+   "title": "capabilities.py back under 800 lines",
+   "description": "Final review, LOW: Wave 3 grew modules/socials/capabilities.py from 750 to 805 lines.",
+   "acceptanceCriteria": [
+    "The step source grammar lives in modules/socials/step_sources.py, used by capabilities.py and publish_sources.py; capabilities.py is at most 800 lines (check). → DONE — CI run 36717540121 on 71e3dc3: capabilities.py is 761 lines; check_changed_code_shape.py reports no growth warning for it; the Socials suites pass unchanged.",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 25,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  },
+  {
+   "id": "P251W3-RVW-16",
+   "title": "A Month-view drop keeps the post's time in its timezone",
+   "description": "Final review, LOW: calendar-social-reschedule.tsx kept the viewer's local time of day.",
+   "acceptanceCriteria": [
+    "slotOnDay moves the slot to the dropped date at the post's own time of day in its timezone (vitest, any viewer zone). → DONE — CI run 36717540121 on 71e3dc3: calendar-social.test.tsx 'a Month-view drop keeps the post's own time of day, in its timezone, on the new date' passed (checked locally under TZ=UTC, America/Los_Angeles and Asia/Kolkata).",
+    "CI green on the fix's commit for the required jobs; record the run id. → DONE — CI run 36717540121 on 71e3dc3 (test.yml): orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built, media-render and Code standards on changed lines — all 15 jobs success."
+   ],
+   "priority": 26,
+   "passes": true,
+   "notes": "Review finding, fixed on this branch."
+  }
+ ]
+}

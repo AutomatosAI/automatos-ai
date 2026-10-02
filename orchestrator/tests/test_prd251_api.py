@@ -66,7 +66,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.core import DocumentTemplate  # noqa: E402
-from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
 
@@ -75,7 +75,7 @@ WS_B = uuid.uuid4()
 WS_OFF = uuid.uuid4()
 NOW = datetime(2026, 9, 23, 12, 0)
 MANIFEST = _ORCH / "reports" / "route-manifest.json"
-ACTION_PATHS = ("submit", "approve", "request-changes", "reject", "schedule", "unschedule", "publish-now")
+ACTION_PATHS = ("submit", "approve", "request-changes", "reject", "schedule", "unschedule", "publish-now", "retry")
 FUTURE_SLOT = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
 
@@ -118,7 +118,9 @@ def api(monkeypatch):
     _sqlite_copy(Workspace.__table__, copies)
     _sqlite_copy(DocumentTemplate.__table__, copies)
     copies.create_all(engine)
-    SocialPost.metadata.create_all(engine, tables=[SocialPost.__table__, SocialPostTarget.__table__])
+    SocialPost.metadata.create_all(
+        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__]
+    )
 
     session = sessionmaker(bind=engine)()
     for ws_id, settings in (
@@ -134,7 +136,7 @@ def api(monkeypatch):
         )
     session.commit()
 
-    state = SimpleNamespace(session=session, ctx=_ctx(WS_A), role="owner", master="true")
+    state = SimpleNamespace(session=session, ctx=_ctx(WS_A), role="owner", master="true", launched=[])
 
     def fake_read_system_setting(category, key):
         assert (category, key) == ("socials", "enabled")
@@ -142,6 +144,8 @@ def api(monkeypatch):
 
     monkeypatch.setattr(socials_settings, "read_system_setting", fake_read_system_setting)
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: state.role)
+    # Wave 3 (US-301): a publish is launched in the background; here it is only recorded.
+    monkeypatch.setattr(publisher, "launch", state.launched.append)
 
     app = FastAPI()
     app.include_router(socials_api.router)
@@ -185,8 +189,16 @@ def _router_routes():
     return sorted(out)
 
 
-def _url(path, post_id):
-    return path.replace("{post_id}", post_id)
+def _campaign(api, **body):
+    """A campaign of the caller's workspace (US-210), through the API."""
+    resp = api.client.post("/api/socials/campaigns", json={"name": "Countdown series", **body})
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _url(path, post_id, campaign_id=None):
+    """``path`` with the post's id, and a campaign's (a fresh id when none is given)."""
+    return path.replace("{post_id}", post_id).replace("{campaign_id}", campaign_id or str(uuid.uuid4()))
 
 
 # A body each route accepts, so a 404 proves the lookup, not a validation error.
@@ -197,6 +209,10 @@ _VALID_BODY = {
     ("POST", "/api/socials/posts/{post_id}/request-changes"): {"comment": "Change it"},
     ("POST", "/api/socials/posts/{post_id}/reject"): {"reason": "No"},
     ("POST", "/api/socials/posts/{post_id}/schedule"): {"scheduled_for": FUTURE_SLOT},
+    ("PUT", "/api/socials/posts/{post_id}/targets"): {"targets": []},
+    # US-210: putting a post in a campaign and taking it out take no body.
+    ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
+    ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
 }
 
 
@@ -205,7 +221,7 @@ _VALID_BODY = {
 # ---------------------------------------------------------------------------
 
 
-def test_the_router_serves_every_wave_0_and_wave_1_route():
+def test_the_router_serves_exactly_the_socials_routes():
     assert _router_routes() == sorted(
         [
             ("GET", "/api/socials/posts"),
@@ -216,6 +232,26 @@ def test_the_router_serves_every_wave_0_and_wave_1_route():
             ("POST", "/api/socials/posts/{post_id}/render"),
             ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
             ("GET", "/api/socials/usage"),
+            # Wave 2 (US-202, S3.4): the post's media as presigned inline links.
+            ("GET", "/api/socials/posts/{post_id}/media"),
+            # Wave 2 (US-203, S3.2): the connected channels and what each can post
+            # (api/socials_channels.py, included in this router).
+            ("GET", "/api/socials/channels"),
+            # Wave 2 (US-204): a post's channels, approved content
+            # (api/socials_targets.py, included in this router).
+            ("PUT", "/api/socials/posts/{post_id}/targets"),
+            # Wave 2 (US-207): the composer turns a brief into a draft proposal
+            # (api/socials_compose.py, included in this router).
+            ("POST", "/api/socials/compose"),
+            # Wave 2 (US-210, S2.4): campaigns and their series approval
+            # (api/socials_campaigns.py, included in this router).
+            ("GET", "/api/socials/campaigns"),
+            ("POST", "/api/socials/campaigns"),
+            ("GET", "/api/socials/campaigns/{campaign_id}"),
+            ("PATCH", "/api/socials/campaigns/{campaign_id}"),
+            ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"),
+            ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"),
+            ("POST", "/api/socials/campaigns/{campaign_id}/approve"),
             # Wave 1 (S1.4): the source picker's search.
             ("GET", "/api/socials/sources"),
             # Wave 1 (S1.7): a chart template filled from a report (the infographic).
@@ -232,17 +268,17 @@ def test_the_router_serves_every_wave_0_and_wave_1_route():
 
 @pytest.mark.parametrize("method, path", _router_routes())
 def test_every_route_is_404_when_the_master_switch_is_off(api, method, path):
-    post = _create(api)
+    post, campaign = _create(api), _campaign(api)
     api.master = "false"
-    resp = api.client.request(method, _url(path, post["id"]), json={})
+    resp = api.client.request(method, _url(path, post["id"], campaign["id"]), json={})
     assert resp.status_code == 404
 
 
 @pytest.mark.parametrize("method, path", _router_routes())
 def test_every_route_is_404_when_the_workspace_switch_is_off(api, method, path):
-    post = _create(api)
+    post, campaign = _create(api), _campaign(api)
     api.ctx = _ctx(WS_OFF)
-    resp = api.client.request(method, _url(path, post["id"]), json={})
+    resp = api.client.request(method, _url(path, post["id"], campaign["id"]), json={})
     assert resp.status_code == 404
 
 
@@ -270,12 +306,13 @@ def test_another_workspaces_post_is_404_everywhere(api):
     theirs = _create(api, title="Theirs")
     api.ctx = _ctx(WS_A)
     mine = _create(api, title="Mine")
+    my_campaign = _campaign(api)
 
     for method, path in _router_routes():
         if "{post_id}" not in path:
             continue
         body = _VALID_BODY.get((method, path))
-        resp = api.client.request(method, _url(path, theirs["id"]), json=body)
+        resp = api.client.request(method, _url(path, theirs["id"], my_campaign["id"]), json=body)
         assert resp.status_code == 404, (method, path, resp.status_code, resp.text)
 
     listed = api.client.get("/api/socials/posts").json()
@@ -380,8 +417,6 @@ def test_publish_now_on_a_stale_approval_is_409_and_never_reaches_composio(api, 
 
     composio = MagicMock(name="ComposioToolExecutor.execute", side_effect=AssertionError("must not run"))
     monkeypatch.setattr(ComposioToolExecutor, "execute", composio)
-    seam = MagicMock(name="_publish_targets")
-    monkeypatch.setattr(publisher, "_publish_targets", seam)
 
     approved = _approved(api)
     row = api.session.get(SocialPost, uuid.UUID(approved["id"]))
@@ -392,7 +427,7 @@ def test_publish_now_on_a_stale_approval_is_409_and_never_reaches_composio(api, 
 
     assert resp.status_code == 409
     composio.assert_not_called()
-    seam.assert_not_called()
+    assert api.launched == []
 
 
 def test_publish_now_after_an_edit_is_409_and_never_reaches_composio(api, monkeypatch):
@@ -407,18 +442,46 @@ def test_publish_now_after_an_edit_is_409_and_never_reaches_composio(api, monkey
     composio.assert_not_called()
 
 
-def test_publish_now_on_a_valid_approval_answers_501_in_wave_0(api, monkeypatch):
+_LINKEDIN_TEXT = {
+    "toolkit": "linkedin", "post_kind": "text", "options": {},
+    "steps": [{"id": "post", "action": "LINKEDIN_CREATE_LINKED_IN_POST", "class": "publish", "params": {"commentary": "$copy"}}],
+}
+
+
+def _approved_with_a_channel(api):
+    approved = _approved(api)
+    row = api.session.get(SocialPost, uuid.UUID(approved["id"]))
+    socials_service.update_post(row, "user-author", {"targets": [_LINKEDIN_TEXT]})  # voids the approval
+    api.session.commit()
+    again = _post(api, approved["id"], "approve", {"content_hash": row.content_hash})
+    assert again.status_code == 200, again.text
+    return again.json()
+
+
+def test_publish_now_with_no_channel_is_409_and_launches_nothing(api):
+    approved = _approved(api)
+    resp = _post(api, approved["id"], "publish-now")
+    assert resp.status_code == 409 and "no channels" in resp.json()["detail"]
+    assert api.launched == []
+
+
+def test_publish_now_on_a_valid_approval_answers_202_and_launches_one_publish(api, monkeypatch):
     from core.composio.tool_executor import ComposioToolExecutor
 
     composio = MagicMock(name="ComposioToolExecutor.execute")
     monkeypatch.setattr(ComposioToolExecutor, "execute", composio)
-    approved = _approved(api)
+    approved = _approved_with_a_channel(api)
 
     resp = _post(api, approved["id"], "publish-now")
 
-    assert resp.status_code == 501
-    assert resp.json()["detail"] == "Channel publishing arrives in Wave 3"
-    composio.assert_not_called()
+    assert resp.status_code == 202 and resp.json()["status"] == "publishing"
+    assert resp.json()["review_log"][-1]["action"] == "publish"
+    assert [job.post_id for job in api.launched] == [uuid.UUID(approved["id"])]
+    assert api.launched[0].content_hash == approved["content_hash"]
+    composio.assert_not_called()  # the request only claims; the background task publishes
+    # A second click finds the post publishing: 409, and nothing more is launched.
+    assert _post(api, approved["id"], "publish-now").status_code == 409
+    assert len(api.launched) == 1
 
 
 def test_an_illegal_transition_is_409(api):
@@ -718,7 +781,11 @@ def test_schedule_and_unschedule(api):
     resp = _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT, "timezone": "Europe/Lisbon"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "scheduled" and resp.json()["timezone"] == "Europe/Lisbon"
-    assert _post(api, approved["id"], "schedule", {"scheduled_for": FUTURE_SLOT}).status_code == 409
+    # Wave 3 (US-306): scheduling a scheduled post reschedules it; the approval stands.
+    later = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+    moved = _post(api, approved["id"], "schedule", {"scheduled_for": later, "timezone": "Europe/Lisbon"})
+    assert moved.status_code == 200 and moved.json()["status"] == "scheduled"
+    assert moved.json()["approved_hash"] == approved["approved_hash"] == moved.json()["content_hash"]
     resp = _post(api, approved["id"], "unschedule")
     assert resp.status_code == 200 and resp.json()["status"] == "approved"
     assert resp.json()["scheduled_for"] is None

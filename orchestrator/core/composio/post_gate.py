@@ -32,10 +32,22 @@ Where it runs: on the agent paths, right after the Wave 0 deny list
 * a Playbook step's Composio branch (``api/recipe_executor._execute_step``),
   before the dedup cache, the LinkedIn image workaround and the spine.
 
-The way through: the platform's own publisher (Wave 3,
-``modules/socials/publisher.py``) publishes a post a person approved, so it will
-pass ``way_through=PLATFORM_PUBLISHER`` and the gate lets it by. Nothing passes it
-yet. The Wave 0 deny list applies to it all the same.
+The channel registry too (US-203, D14 completed): the gate ALSO refuses any action
+the Socials registry (``modules/socials/capabilities.py``) classes as ``publish`` for
+a channel connected in the workspace: a seeded channel's publish step (TikTok's
+upload, YouTube's upload, X's post, ...) or a publish action it never offers, and a
+connected toolkit's post action the generic adapter offers. The slugs are the
+registry's data (``modules/socials/channel_adapters.py``), not this module's, so
+taking one off the list above does not let an agent post to a connected channel.
+Whether an action may be one is answered from the data, in memory; only a candidate
+not on the list, in a workspace whose switches are not both read as off, costs one
+read in a worker thread (the workspace's connections, and for the generic adapter
+the action's cached schema). A read that cannot complete refuses (logged at ERROR).
+
+The way through: the platform's own publisher (Wave 3, US-301) publishes a post a
+person approved, so its step runner (``modules/socials/publish_steps.py``) passes
+``way_through=PLATFORM_PUBLISHER`` and the gate lets it by. Nothing else passes it.
+The Wave 0 deny list applies to it all the same.
 
 Fails closed for a Socials-on workspace (the Wave 0 RVW-1 lesson: a gate that
 can't decide must deny):
@@ -94,6 +106,10 @@ _LIST_READ_FAILED = (
     "its list of posting actions (system setting socials.post_actions) could not be "
     "read, so no Composio action runs here until it can be"
 )
+REGISTRY_UNREAD_REFUSAL = (
+    "Socials is on for this workspace, and Automatos could not tell whether {slug} posts "
+    "to a connected channel, so it did not run: " + _DRAFT
+)
 LIST_REFUSAL = "Socials is on for this workspace and {problem}. To post, " + _DRAFT
 LIST_AND_SWITCH_REFUSAL = (
     "Automatos could not read whether Socials is on for this workspace, and {problem}. "
@@ -113,8 +129,8 @@ class _WayThrough:
         return f"<Socials post gate way through: {self.holder}>"
 
 
-# Only the platform's own publisher passes it (Wave 3), for a post a person
-# approved. Anything else — True, a string, another object — is no way through.
+# Only the platform's own publisher passes it (Wave 3, publish_steps.py), for a
+# post a person approved. Anything else — True, a string, another object — is no way through.
 PLATFORM_PUBLISHER = _WayThrough("the platform publisher (PRD-251 Wave 3)")
 
 
@@ -272,31 +288,78 @@ def _socials_on(workspace_id: Any) -> Optional[bool]:
     return row is not None and parse_workspace_socials(row[0]).enabled
 
 
-def _refusal(slug: str, outcome: Optional[object], socials_on: Optional[bool]) -> str:
-    if isinstance(outcome, frozenset):  # the action is listed
-        return SOCIALS_ON_REFUSAL if socials_on else SWITCH_UNREAD_REFUSAL.format(slug=slug)
-    problem = _LIST_UNREADABLE if outcome is _UNREADABLE else _LIST_READ_FAILED
-    return (LIST_REFUSAL if socials_on else LIST_AND_SWITCH_REFUSAL).format(problem=problem)
+def _registry_candidate(slug: str) -> Optional[str]:
+    """Whether the Socials channel registry may class ``slug`` as a channel's publish
+    action, from its data alone (no read). A registry that cannot be imported
+    classes nothing, and the list above still decides: it is never missing where
+    the app runs, since ``api/socials.py`` imports it at start-up."""
+    try:
+        from modules.socials.capabilities import publish_candidate
+    except ImportError:
+        logger.exception("[SocialsPostGate] the Socials channel registry could not be imported")
+        return None
+    return publish_candidate(slug)
+
+
+def _registry_publish(workspace_id: Any, slug: str) -> Optional[bool]:
+    """Whether the registry classes ``slug`` as the publish action of a channel
+    connected in the workspace; None when it cannot tell (logged at ERROR). Reads
+    the database, so it runs in a worker thread."""
+    try:
+        from core.database.database import SessionLocal
+        from modules.socials.capabilities import channel_publish_action
+
+        db = SessionLocal()
+        try:
+            return channel_publish_action(db, workspace_id, slug)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 — a registry that cannot be read fails closed
+        logger.error(
+            "[SocialsPostGate] could not tell whether %s posts to a connected channel in workspace %s; refusing",
+            slug,
+            workspace_id,
+            exc_info=True,
+        )
+        return None
+
+
+def _refusal(slug: str, outcome: Optional[object], socials_on: Optional[bool], classified: Optional[bool]) -> str:
+    if not isinstance(outcome, frozenset):  # the list cannot be decided
+        problem = _LIST_UNREADABLE if outcome is _UNREADABLE else _LIST_READ_FAILED
+        return (LIST_REFUSAL if socials_on else LIST_AND_SWITCH_REFUSAL).format(problem=problem)
+    if not socials_on:
+        return SWITCH_UNREAD_REFUSAL.format(slug=slug)
+    return REGISTRY_UNREAD_REFUSAL.format(slug=slug) if classified is None else SOCIALS_ON_REFUSAL
 
 
 async def post_action_refusal(action: Any, workspace_id: Any, *, way_through: Any = None) -> Optional[str]:
     """Why an agent's Composio call to ``action`` may not run in ``workspace_id``
     (D14b), else ``None``. Call it after the Wave 0 deny list. Never raises.
 
-    Only ``way_through=PLATFORM_PUBLISHER`` passes a listed action in a Socials-on
-    workspace. The switches are read only for a listed action, or while the list
-    cannot be decided.
+    Only ``way_through=PLATFORM_PUBLISHER`` passes a listed action, or one the
+    channel registry classes as publishing to a connected channel, in a Socials-on
+    workspace. The switches are read only for a listed action, a registry
+    candidate, or while the list cannot be decided; the registry's read, only for a
+    candidate the list does not hold, after the switches.
     """
     if way_through is PLATFORM_PUBLISHER:
         return None
     slug = str(action or "").strip().upper()
     outcome = await _post_actions()
-    if isinstance(outcome, frozenset) and slug not in outcome:
+    decided = isinstance(outcome, frozenset)
+    candidate = _registry_candidate(slug) if decided and slug not in outcome else None
+    if decided and slug not in outcome and candidate is None:
         return None
     socials_on = await asyncio.to_thread(_socials_on, workspace_id)
     if socials_on is False:
         return None
-    refusal = _refusal(slug, outcome, socials_on)
+    classified: Optional[bool] = True
+    if candidate is not None:
+        classified = await asyncio.to_thread(_registry_publish, workspace_id, slug)
+        if classified is False:
+            return None
+    refusal = _refusal(slug, outcome, socials_on, classified)
     logger.warning("[SocialsPostGate] refused %s in workspace %s: %s", slug, workspace_id, refusal)
     return refusal
 

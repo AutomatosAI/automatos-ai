@@ -138,8 +138,13 @@ class JobStore:
             raise ValueError(f"{status} is not a final state")
         return self.update(job_id, status=status, finished_at=self._clock(), **changes)
 
-    def active_count(self) -> int:
-        return sum(1 for job in self._jobs.values() if not job.terminal)
+    def active_count(self, workspace_id: Optional[str] = None) -> int:
+        """Jobs not yet finished: every workspace's, or only ``workspace_id``'s."""
+        return sum(
+            1
+            for job in self._jobs.values()
+            if not job.terminal and (workspace_id is None or job.workspace_id == workspace_id)
+        )
 
     def expire(self, ttl_seconds: int) -> List[Job]:
         """Forget finished jobs older than the TTL; the caller deletes their files."""

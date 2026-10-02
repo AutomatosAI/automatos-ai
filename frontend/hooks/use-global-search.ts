@@ -1,16 +1,22 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { apiClient } from '@/lib/api-client'
+import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
+import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
+import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
 
 export interface SearchResult {
   id: string
   label: string
   description?: string
-  category: 'pages' | 'tasks' | 'agents' | 'memories'
+  category: 'pages' | 'tasks' | 'agents' | 'memories' | 'socials'
   path: string
   icon?: string
+  /** More text the result was found by (a post's brief): the dialog keeps it listed when the query matches it. */
+  keywords?: string
 }
+
+// PRD-251 S2.1: the Socials page is listed only while the platform offers Socials.
+const SOCIALS_PAGE_ID = 'nav-socials'
 
 const NAVIGATION_PAGES: SearchResult[] = [
   { id: 'nav-command-centre', label: 'Command Center', category: 'pages', path: '/command-center' },
@@ -29,13 +35,21 @@ const NAVIGATION_PAGES: SearchResult[] = [
   { id: 'nav-missions', label: 'Missions', category: 'pages', path: '/assignments?tab=missions' },
   { id: 'nav-blogs', label: 'Blogs', category: 'pages', path: '/deliverables?tab=blogs' },
   { id: 'nav-templates', label: 'Templates', category: 'pages', path: '/deliverables?tab=templates' },
+  { id: SOCIALS_PAGE_ID, label: 'Socials', category: 'pages', path: '/deliverables?tab=socials' },
   { id: 'nav-explorer', label: 'Explorer', category: 'pages', path: '/deliverables/explorer' },
 ]
 
-function filterPages(query: string): SearchResult[] {
-  if (!query) return NAVIGATION_PAGES
+/** The query waits this long after the last keystroke, and needs this many characters. */
+const SEARCH_DEBOUNCE_MS = 300
+const MIN_QUERY_CHARS = 2
+/** Posts listed per search, as the other sources ask for `limit=5`. */
+const SOCIAL_POSTS_SHOWN = 5
+
+function filterPages(query: string, socialsAvailable: boolean): SearchResult[] {
+  const pages = socialsAvailable ? NAVIGATION_PAGES : NAVIGATION_PAGES.filter((p) => p.id !== SOCIALS_PAGE_ID)
+  if (!query) return pages
   const lower = query.toLowerCase()
-  return NAVIGATION_PAGES.filter((p) => p.label.toLowerCase().includes(lower))
+  return pages.filter((p) => p.label.toLowerCase().includes(lower))
 }
 
 // Routes are the real backend prefixes: activity lives at /api/activity and
@@ -80,18 +94,77 @@ async function searchMemories(query: string): Promise<SearchResult[]> {
   })
 }
 
-export function useGlobalSearch() {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
+// PRD-251 S2.1: the posts whose title or brief holds the query (GET /api/socials/posts?q=),
+// each opening in the Socials tab. Asked only while Socials is on: the route is 404 otherwise (D1).
+async function searchSocialPosts(query: string): Promise<SearchResult[]> {
+  const { posts } = await apiClient.listSocialPosts({ q: query })
+  return posts.slice(0, SOCIAL_POSTS_SHOWN).map((post) => ({
+    id: `social-post-${post.id}`,
+    label: post.title,
+    description: SOCIAL_STATUS_LABELS[post.status],
+    category: 'socials' as const,
+    path: `/deliverables?tab=socials&post=${encodeURIComponent(post.id)}`,
+    keywords: post.brief ?? undefined,
+  }))
+}
+
+interface ApiResults {
+  tasks: SearchResult[]
+  agents: SearchResult[]
+  memories: SearchResult[]
+  socials: SearchResult[]
+}
+
+const NO_RESULTS: ApiResults = { tasks: [], agents: [], memories: [], socials: [] }
+
+const settledResults = (outcome: PromiseSettledResult<SearchResult[]>): SearchResult[] =>
+  outcome.status === 'fulfilled' ? outcome.value : []
+
+async function searchSources(query: string, withSocials: boolean): Promise<{ results: ApiResults; failed: number }> {
+  // allSettled, not all: one source failing must not blank the others, and
+  // a failure is surfaced (error state) rather than silently swallowed.
+  const settled = await Promise.allSettled([
+    searchTasks(query),
+    searchAgents(query),
+    searchMemories(query),
+    withSocials ? searchSocialPosts(query) : Promise.resolve<SearchResult[]>([]),
+  ])
+  const [tasks, agents, memories, socials] = settled.map(settledResults)
+  const failed = settled.filter((outcome) => outcome.status === 'rejected').length
+  return { results: { tasks, agents, memories, socials }, failed }
+}
+
+/** The API sources, searched once the query has settled; a newer query discards an older answer. */
+function useSourceResults(query: string, withSocials: boolean) {
+  const [results, setResults] = useState<ApiResults>(NO_RESULTS)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pages, setPages] = useState<SearchResult[]>(NAVIGATION_PAGES)
-  const [tasks, setTasks] = useState<SearchResult[]>([])
-  const [agents, setAgents] = useState<SearchResult[]>([])
-  const [memories, setMemories] = useState<SearchResult[]>([])
-  const abortRef = useRef(0)
+  const generationRef = useRef(0)
 
-  // Keyboard shortcut + custom open event (Studio cmdK button uses the event)
+  useEffect(() => {
+    const generation = ++generationRef.current
+    if (query.length < MIN_QUERY_CHARS) {
+      setResults(NO_RESULTS)
+      setError(null)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    const timer = setTimeout(async () => {
+      const { results: found, failed } = await searchSources(query, withSocials)
+      if (generationRef.current !== generation) return
+      setResults(found)
+      setError(failed > 0 ? 'Some results could not be loaded. Try again.' : null)
+      setLoading(false)
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [query, withSocials])
+
+  return { results, loading, error }
+}
+
+/** ⌘K / Ctrl+K toggles the dialog; the Studio header's search button opens it with an event. */
+function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -106,57 +179,28 @@ export function useGlobalSearch() {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('automatos:global-search-open', openHandler)
     }
-  }, [])
+  }, [setOpen])
+}
 
-  // Reset on close
+/**
+ * The global search. `socials` is the workspace's Socials state (PRD-251 D1): the
+ * Socials page is listed while the platform offers it, and posts are searched while
+ * this workspace has it on too. Without it (outside a workspace), neither.
+ */
+export function useGlobalSearch(socials?: WorkspaceSocialsState | null) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const socialsAvailable = socials?.available === true
+  const socialsOn = socialsAvailable && socials?.enabled === true
+  const pages = useMemo(() => filterPages(query, socialsAvailable), [query, socialsAvailable])
+  const { results, loading, error } = useSourceResults(query, socialsOn)
+  useSearchShortcut(setOpen)
+
+  // Reset on close: the cleared query clears the results.
   const handleOpenChange = useCallback((next: boolean) => {
     setOpen(next)
-    if (!next) {
-      setQuery('')
-      setTasks([])
-      setAgents([])
-      setMemories([])
-      setError(null)
-      setPages(NAVIGATION_PAGES)
-    }
+    if (!next) setQuery('')
   }, [])
 
-  // Debounced search
-  useEffect(() => {
-    setPages(filterPages(query))
-
-    if (query.length < 2) {
-      setTasks([])
-      setAgents([])
-      setMemories([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    const generation = ++abortRef.current
-
-    const timer = setTimeout(async () => {
-      // allSettled, not all: one source failing must not blank the others, and
-      // a failure is surfaced (error state) rather than silently swallowed.
-      const settled = await Promise.allSettled([
-        searchTasks(query),
-        searchAgents(query),
-        searchMemories(query),
-      ])
-      if (abortRef.current !== generation) return
-      const [t, a, m] = settled
-      setTasks(t.status === 'fulfilled' ? t.value : [])
-      setAgents(a.status === 'fulfilled' ? a.value : [])
-      setMemories(m.status === 'fulfilled' ? m.value : [])
-      const failed = settled.filter((r) => r.status === 'rejected').length
-      setError(failed > 0 ? 'Some results could not be loaded. Try again.' : null)
-      setLoading(false)
-    }, 300)
-
-    return () => clearTimeout(timer)
-  }, [query])
-
-  return { open, query, setQuery, loading, error, pages, tasks, agents, memories, handleOpenChange }
+  return { open, query, setQuery, loading, error, pages, ...results, handleOpenChange }
 }

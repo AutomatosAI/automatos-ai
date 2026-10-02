@@ -14,7 +14,10 @@ and sweeps the three durable-launch surfaces:
     ``error_message`` + ``completed_at``;
   - **social post** stuck ``rendering`` (PRD-251 S1.1c) → ``failed``, the reason
     in its ``review_log`` (the post lifecycle's own render failure), so it can
-    be edited and rendered again.
+    be edited and rendered again;
+  - **render reservation** (P251W1-RVW-3): the seconds a render held against its
+    workspace's render quota, which a render that died with the old process
+    never gave back → deleted once its render's deadline has passed.
 
 A row is reaped only once it has been in-flight longer than
 ``BOOT_REAPER_STALE_MINUTES`` — long enough that no legitimately running job
@@ -44,6 +47,7 @@ from core.utils.exception_telemetry import record_error
 logger = logging.getLogger(__name__)
 
 _ORPHAN_REASON = "orphaned_on_restart"
+# PRD-251 US-301: a social post's channel still uploading when its publish was lost.
 # Boot waits on each orphan's close: its task_failed notice can reach Telegram or
 # Slack. The status is committed before the notice, so a slow channel only cuts
 # the notice short (review MEDIUM on adc84365e). The bound cuts awaits, not the
@@ -220,6 +224,9 @@ def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
     ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays under the stale cutoff, so
     a reaped post has no task left to finish it. The failure goes through the
     post lifecycle (``fail_render``), which writes the reason to ``review_log``.
+    What the render's footage and voice spent stays in ``llm_usage``: each was
+    booked before its toolkit was called (P251W1-RVW-5), and the provider may
+    still bill a job the dead process submitted.
     """
     from core.models.socials import SocialPost
     from modules.socials import service as socials
@@ -241,6 +248,77 @@ def _reap_social_renders(db, cutoff: datetime, now: datetime) -> int:
             extra={"reaped_ids": [str(r.id) for r in stale], "reason": _ORPHAN_REASON},
         )
     return len(stale)
+
+
+async def _tell_publish_outcomes(ended) -> None:
+    """Tell each workspace how its lost publish ended (US-301), each notice bounded."""
+    from modules.socials import notify
+
+    for workspace_id, post_id, title, status in ended:
+        try:
+            await asyncio.wait_for(
+                notify.dispatch_publish_outcome(workspace_id, post_id, title, status), timeout=ORPHAN_CLOSE_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Boot reaper: the publish notice of post %s timed out", post_id)
+
+
+async def _reap_social_publishes(db, cutoff: datetime, now: datetime) -> int:
+    """End ``social_posts`` stuck in ``publishing`` — PRD-251 US-301.
+
+    The publish runs as a background task of the process that started it, and lives
+    at most ``SOCIALS_PUBLISH_RUN_MAX_SECONDS`` (under the stale cutoff), so a
+    publishing post older than the cutoff has no task left to finish it. A target it
+    left uploading fails, saying the platform may have taken it; a published target
+    keeps its receipt; the post ends by its targets (published, partially published
+    or failed) through the lifecycle, which logs it in ``review_log``
+    (``publish_records.end_lost``). One lost to a restart inside the cutoff is ended
+    by the leader's reconcile tick (``schedule_jobs.end_lost_publishes``).
+
+    The workspace is told how each ended, as a run's own end tells it: the ends are
+    committed here first (a notice never announces an end that is not written), then
+    each notice gets ``ORPHAN_CLOSE_SECONDS`` at most.
+    """
+    from core.models.socials import SocialPost
+    from modules.socials import service as socials
+    from modules.socials.publish_records import end_lost
+
+    rows = db.query(SocialPost).filter(SocialPost.status == socials.PUBLISHING).all()
+    stale = [r for r in rows if r.status == socials.PUBLISHING and _is_stale(r.updated_at, cutoff)]
+    ended = [(r.workspace_id, r.id, r.title or "", end_lost(r, _ORPHAN_REASON)) for r in stale]
+    if ended:
+        db.commit()
+        record_error(
+            subsystem="socials",
+            operation="boot_reap",
+            error=OrphanedRunError(f"reaped {len(ended)} orphaned social publish(es)"),
+            extra={"reaped_ids": [str(post_id) for _, post_id, _, _ in ended], "reason": _ORPHAN_REASON},
+        )
+        await _tell_publish_outcomes(ended)
+    return len(ended)
+
+
+def _reap_render_reservations(db, cutoff: datetime, now: datetime) -> int:
+    """Release render-quota reservations whose render is gone — P251W1-RVW-3.
+
+    A render holds its seconds against the workspace's quota until it ends
+    (``core/media_render_quota.py``); one that died with the old process never
+    gave them back. Past its render's deadline a reservation no longer counts,
+    and here it is deleted, whichever path rendered it (a Socials post, or
+    ``generate_document``). A post reaped above is always past it: its render's
+    wait and the reservation's grace stay under the stale cutoff.
+    """
+    from core.media_render_quota import release_expired_reservations
+
+    released = release_expired_reservations(db, now)
+    if released:
+        record_error(
+            subsystem="media_render",
+            operation="boot_reap",
+            error=OrphanedRunError(f"released {released} orphaned render reservation(s)"),
+            extra={"reason": _ORPHAN_REASON},
+        )
+    return released
 
 
 async def _run_surface(
@@ -289,6 +367,10 @@ async def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     reaped += await _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
     # PRD-251 S1.1c: a post whose render task died with the old process.
     reaped += await _run_surface(db, cutoff, now, "socials", _reap_social_renders)
+    # PRD-251 US-301: a post whose publish task died with the old process.
+    reaped += await _run_surface(db, cutoff, now, "socials", _reap_social_publishes)
+    # P251W1-RVW-3: the render minutes such a render still held against its quota.
+    reaped += await _run_surface(db, cutoff, now, "media_render", _reap_render_reservations)
 
     if reaped:
         try:

@@ -7,12 +7,16 @@
   renders (S1.1c): ``render`` moves a post that holds no approval to
   rendering, and the render ends in needs_approval with the rendered files in
   ``media``, or in failed with the report in ``review_log``. A failed post can
-  be edited and rendered again. Publishing and missed arrive with Wave 3.
+  be edited and rendered again. Wave 3 publishes (US-301): ``publish`` moves an
+  approved or scheduled post to publishing, and the publish ends it published,
+  partially_published or failed (``modules/socials/publish_lifecycle.py``).
 * **The content hash (D6).** ``compute_content_hash`` is sha256 over canonical
   JSON of what is published: copy, variables, sources, format, template_id and
-  media. An approval binds to it: the approver sends the hash of the version
-  they were shown, and a post whose content has changed since refuses the
-  approval (:class:`StaleContent`, carrying the current hash). Any content edit
+  media, and where: the post's targets (Wave 2, US-204: a channel is approved
+  content, ``modules/socials/targets.py``). An approval binds to it: the
+  approver sends the hash of the version they were shown, and a post whose
+  content has changed since refuses the approval (:class:`StaleContent`,
+  carrying the current hash). Any content edit, a change of channels included,
   changes the hash, so an approved or scheduled post goes back to
   needs_approval and its approval is void, because ``approved_hash`` no longer
   matches.
@@ -72,13 +76,16 @@ import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
+from modules.socials import targets as post_targets
+from modules.socials import text_search
+from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
 DRAFT = "draft"
@@ -87,6 +94,10 @@ NEEDS_APPROVAL = "needs_approval"
 CHANGES_REQUESTED = "changes_requested"
 APPROVED = "approved"
 SCHEDULED = "scheduled"
+PUBLISHING = "publishing"
+PUBLISHED = "published"
+PARTIALLY_PUBLISHED = "partially_published"
+MISSED = "missed"
 FAILED = "failed"
 ARCHIVED = "archived"
 
@@ -103,6 +114,15 @@ ACTION_APPROVAL_VOIDED = "approval_voided"
 ACTION_RENDER = "render"
 ACTION_RENDER_DONE = "render_done"
 ACTION_RENDER_FAILED = "render_failed"
+# Wave 3 (US-301): a publish or a retry starts, then ends one of three ways
+# (modules/socials/publish_lifecycle.py).
+ACTION_PUBLISH = "publish"
+ACTION_RETRY = "retry"
+ACTION_PUBLISHED = "published"
+ACTION_PARTIALLY_PUBLISHED = "partially_published"
+ACTION_PUBLISH_FAILED = "publish_failed"
+# Wave 3 (US-306): a scheduled post whose slot passed beyond the grace (D10).
+ACTION_MISSED = "missed"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
 
@@ -113,10 +133,12 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_APPROVE: {NEEDS_APPROVAL: APPROVED},
     ACTION_REQUEST_CHANGES: {NEEDS_APPROVAL: CHANGES_REQUESTED},
     ACTION_REJECT: {NEEDS_APPROVAL: ARCHIVED},
-    ACTION_SCHEDULE: {APPROVED: SCHEDULED},
+    # Wave 3 (US-306): a scheduled post is rescheduled (the slot moves, the approval
+    # stands), and a missed one can be given a new slot.
+    ACTION_SCHEDULE: {APPROVED: SCHEDULED, SCHEDULED: SCHEDULED, MISSED: SCHEDULED},
     ACTION_UNSCHEDULE: {SCHEDULED: APPROVED},
     # A content edit voids the approval of an approved or scheduled post.
-    ACTION_EDIT: {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL},
+    ACTION_EDIT: {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL, MISSED: NEEDS_APPROVAL},
     # Wave 1 (S1.1c): only a post that holds no approval renders. An approved
     # or scheduled post is edited first, which voids its approval.
     ACTION_RENDER: {
@@ -127,6 +149,14 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     },
     ACTION_RENDER_DONE: {RENDERING: NEEDS_APPROVAL},
     ACTION_RENDER_FAILED: {RENDERING: FAILED},
+    # Wave 3 (US-301): an approved or scheduled post publishes; a retry re-runs the
+    # failed targets of a publish that failed or published partly.
+    ACTION_PUBLISH: {APPROVED: PUBLISHING, SCHEDULED: PUBLISHING, MISSED: PUBLISHING},
+    ACTION_RETRY: {FAILED: PUBLISHING, PARTIALLY_PUBLISHED: PUBLISHING},
+    ACTION_PUBLISHED: {PUBLISHING: PUBLISHED},
+    ACTION_PARTIALLY_PUBLISHED: {PUBLISHING: PARTIALLY_PUBLISHED},
+    ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
+    ACTION_MISSED: {SCHEDULED: MISSED},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
@@ -139,12 +169,12 @@ ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
 # scheduled post voids its approval; in the others the post keeps its status.
 # A failed render is fixed by an edit and rendered again. A rendering post is
 # not edited: the render is working from its content.
-EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, FAILED})
-PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED})
+EDITABLE_STATUSES = frozenset({DRAFT, NEEDS_APPROVAL, CHANGES_REQUESTED, APPROVED, SCHEDULED, MISSED, FAILED})
+PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 
 # What the hash covers (D6), and what a post edit may change. The voice (D11)
 # and the footage (D12) are render settings: editable, never hashed.
-CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media")
+CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", TARGETS)
 LABEL_FIELDS = ("title", "brief")
 RENDER_FIELDS = ("voice", "footage")
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
@@ -153,7 +183,7 @@ EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 # Composio voice toolkit (modules/socials/recipes/voice.py).
 KOKORO = "kokoro"
 VOICE_KEYS = ("toolkit", "voice_id", "name")
-VOICE_TOOLKIT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+VOICE_TOOLKIT = post_targets.TOOLKIT_NAME  # a Composio toolkit's name, as a channel's
 VOICE_TEXT_MAX_CHARS = 200
 
 # D12 (S1.8): footage a post asks for, per slot, and what a render recorded for
@@ -258,7 +288,7 @@ def _as_utc(value: datetime) -> datetime:
 # ── the content hash (D6) ───────────────────────────────────────────────────
 def _content_of(post: Any) -> Dict[str, Any]:
     template_id = getattr(post, "template_id", None)
-    return {
+    content = {
         "copy": getattr(post, "copy", None) or {},
         "variables": getattr(post, "variables", None) or {},
         "sources": getattr(post, "sources", None) or {},
@@ -266,15 +296,33 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
+    # Only a post with targets hashes them: one with none hashes as before (US-204).
+    # With channels, the title is content too: a channel publishes it (YouTube's
+    # video title, $title in channel_adapters.py), and so is whether its footage is
+    # AI-made (TikTok's AI label, $generated): changing either voids the approval.
+    targets = post_targets.target_set(post)
+    if not targets:
+        return content
+    generated = footage_generated(getattr(post, "footage", None))
+    return {**content, TARGETS: targets, "title": getattr(post, "title", None) or "", "generated": generated}
+
+
+def footage_generated(footage: Any) -> bool:
+    """Whether a render recorded footage an AI toolkit made for one of the post's
+    slots (D12): what a channel's AI label says (``$generated``)."""
+    slots = footage.values() if isinstance(footage, Mapping) else ()
+    return any(isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE for slot in slots)
 
 
 def compute_content_hash(post: Any) -> str:
-    """sha256 over canonical JSON of copy, variables, sources, format, template_id and media.
+    """sha256 over canonical JSON of copy, variables, sources, format, template_id
+    and media, and the post's targets, title and whether its footage is AI-made
+    when it has any targets.
 
     Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
     ``ensure_ascii=False``, so key order never changes the hash.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
-    also binds to the exact rendered bytes.
+    also binds to the exact rendered bytes; Wave 2 adds where the post goes.
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -456,6 +504,14 @@ def validate_footage(value: Any) -> Optional[Dict[str, Dict[str, str]]]:
     return clean
 
 
+def validate_targets(value: Any) -> List[Dict[str, Any]]:
+    """The post's channels (US-204): ``modules/socials/targets.py``'s shape, as InvalidPost."""
+    try:
+        return post_targets.validate_targets(value)
+    except ValueError as exc:
+        raise InvalidPost(str(exc)) from None
+
+
 def footage_after_edit(stored: Any, requested: Optional[Mapping[str, Mapping[str, str]]]) -> Optional[Dict[str, Any]]:
     """``requested`` (``validate_footage``'s shape) keeping what a render already
     made for every slot whose prompt did not change: a new prompt asks again."""
@@ -492,6 +548,7 @@ _VALIDATORS = {
     "variables": _validate_variables,
     "sources": validate_sources,
     "media": _validate_media,
+    TARGETS: validate_targets,
     "voice": validate_voice,
     "footage": validate_footage,
 }
@@ -593,7 +650,8 @@ def create_draft(
     footage: Optional[Mapping[str, Any]] = None,
     agent: Optional[str] = None,
 ) -> SocialPost:
-    """A new post in ``draft``, added to ``db`` (the caller commits).
+    """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
+    which its targets' keys name (US-204).
 
     ``agent`` names the agent drafting it (US-116): ``review_log`` then opens
     with a ``draft`` entry by ``created_by`` that names it.
@@ -612,6 +670,7 @@ def create_draft(
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
+        id=uuid4(),
         workspace_id=workspace_id,
         created_by=created_by,
         status=DRAFT,
@@ -626,12 +685,18 @@ def create_draft(
     return post
 
 
+def _approved(name: str, value: Any) -> Any:
+    """A field's value as an edit compares it: targets by what an approval covers."""
+    return post_targets.approved_set(value) if name == TARGETS else value
+
+
 def update_post(
     post: SocialPost, actor: str, changes: Mapping[str, Any], *, agent: Optional[str] = None
 ) -> SocialPost:
     """Apply an edit. A content change recomputes the hash; if the post was
     approved or scheduled, it goes back to ``needs_approval`` and its approval
-    is void (``approved_hash`` no longer matches ``content_hash``).
+    is void (``approved_hash`` no longer matches ``content_hash``). ``targets``
+    replaces the post's channels (US-204), so changing them voids it too.
 
     ``agent`` names the agent editing (US-116): an edit that changes a field
     logs an ``edit`` entry by ``actor`` naming the agent and the fields, before
@@ -646,9 +711,15 @@ def update_post(
     clean = {name: _VALIDATORS[name](value) for name, value in changes.items()}
     if "footage" in clean:
         clean["footage"] = footage_after_edit(post.footage, clean["footage"])
-    changed = [name for name in EDITABLE_FIELDS if name in clean and getattr(post, name) != clean[name]]
+    changed = [
+        name for name in EDITABLE_FIELDS
+        if name in clean and _approved(name, getattr(post, name)) != _approved(name, clean[name])
+    ]
     for name, value in clean.items():
-        setattr(post, name, value)
+        if name == TARGETS:
+            post_targets.replace_targets(post, value)
+        else:
+            setattr(post, name, value)
     if agent and changed:
         _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed)
 
@@ -737,7 +808,8 @@ def reject(post: SocialPost, actor: str, reason: Optional[str] = None) -> Social
 
 
 def schedule(post: SocialPost, actor: str, scheduled_for: datetime, tz_name: str) -> SocialPost:
-    """approved → scheduled at ``scheduled_for`` (stored in UTC; ``tz_name`` is for display)."""
+    """approved, scheduled (a reschedule) or missed → scheduled at ``scheduled_for``
+    (stored in UTC; ``tz_name`` is for display). The approval stands."""
     target = _target(post, ACTION_SCHEDULE)
     assert_publishable(post)
     if not isinstance(scheduled_for, datetime):
@@ -936,16 +1008,21 @@ def list_posts(
     statuses: Optional[Sequence[str]] = None,
     window_from: Optional[datetime] = None,
     window_to: Optional[datetime] = None,
+    q: Optional[str] = None,
     limit: Optional[int] = None,
 ) -> List[SocialPost]:
     """The caller's posts, newest first; the ``limit`` newest when given.
 
     ``window_from`` / ``window_to`` bound a post's date: its slot when it is
-    scheduled, otherwise when it was created (``[from, to)``, UTC).
+    scheduled, otherwise when it was created (``[from, to)``, UTC). ``q`` keeps
+    the posts whose title or brief holds it, case-insensitively and literally.
     """
     query = db.query(SocialPost).filter(SocialPost.workspace_id == workspace_id)
     if statuses:
         query = query.filter(SocialPost.status.in_(list(statuses)))
+    text = (q or "").strip()
+    if text:
+        query = query.filter(or_(text_search.holds(SocialPost.title, text), text_search.holds(SocialPost.brief, text)))
     post_date = func.coalesce(SocialPost.scheduled_for, SocialPost.created_at)
     if window_from is not None:
         query = query.filter(post_date >= _as_utc(window_from))

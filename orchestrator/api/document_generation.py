@@ -21,7 +21,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
-from core.media_render_client import NOT_CONFIGURED, MediaRenderError, MediaRenderUnavailable
+from core.media_render_client import NOT_CONFIGURED, WORKSPACE_BUSY, MediaRenderError, MediaRenderUnavailable
 from core.media_render_quota import RenderQuotaExceeded
 from core.social_templates import InvalidVariableValues, SocialTemplateError, is_social_format
 from config import config
@@ -118,6 +118,7 @@ SOCIAL_TEMPLATE_ERRORS = (SocialTemplateError, UnknownTemplateFormat)
 SOCIAL_RENDER_ERRORS = (SocialTemplateError, RenderQuotaExceeded, MediaRenderError)
 RENDER_NOT_CONFIGURED = "Rendering is not configured on this server."
 RENDER_UNREACHABLE = "The renderer cannot be reached right now. Try again in a few minutes."
+RENDER_WORKSPACE_BUSY = "This workspace has too many renders in progress. Try again when one of them ends."
 
 
 def _template_error_422(e: ValueError) -> HTTPException:
@@ -135,6 +136,8 @@ def _social_render_error(e: Exception) -> HTTPException:
     if isinstance(e, RenderQuotaExceeded):
         return HTTPException(status_code=429, detail=str(e))
     logger.warning("Social render failed: %s (%s)", e, getattr(e, "code", None))
+    if isinstance(e, MediaRenderError) and e.code == WORKSPACE_BUSY:
+        return HTTPException(status_code=429, detail=RENDER_WORKSPACE_BUSY)
     if isinstance(e, MediaRenderUnavailable):
         return HTTPException(
             status_code=503, detail=RENDER_NOT_CONFIGURED if e.code == NOT_CONFIGURED else RENDER_UNREACHABLE

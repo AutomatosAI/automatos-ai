@@ -42,10 +42,11 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | Route | Answers |
 |---|---|
 | `GET /health` | the versions, and how many renders are running and queued |
-| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **503** when too many jobs are in progress. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render, and with `"still": {"at": [seconds…]}` it is an image (see below) |
+| `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **429** `workspace_busy` when this workspace already has `MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE` jobs in progress (other workspaces are still admitted); **503** `busy` when the service as a whole has `MEDIA_RENDER_MAX_ACTIVE_JOBS` in progress. Both carry `Retry-After`. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render, and with `"still": {"at": [seconds…]}` it is an image (see below) |
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
 | `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
+| `POST /jpeg` | The image's bytes (a PNG still): the same picture as a JPEG, transparency over white (PRD-251 US-303: Instagram takes JPEG only). 400 `not_an_image` when ffmpeg cannot read it |
 
 **The bundle** is described at the top of `media_render/bundle.py`:
 - the template's HTML and CSS, and the variables that fill its `{{ name }}` placeholders (HTML-escaped text: every word on screen is template text);
@@ -115,6 +116,8 @@ Adding a track is the owner's call (PRD-251 open question 5): add its entry with
 
 **Concurrency** (owner, 2026-09-23): at most two renders at once overall and one per workspace. Further jobs queue first come, first served. A queued job never waits behind another workspace's queued job.
 
+**Admission** comes before the queue. A job counts from the moment `POST /render` accepts it until it ends, whether it is checking, queued or rendering. The service holds at most `MEDIA_RENDER_MAX_ACTIVE_JOBS` of them (past it, 503 `busy`), and one workspace at most `MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE` (past it, 429 `workspace_busy` for that workspace alone), so one workspace's burst never takes every slot and shuts the others out (P251W1-RVW-4). The orchestrator waits out either one for its `Retry-After`, within the render's deadline (`core/media_render_client.submit_when_free`).
+
 Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS`.
 
 ## Boot assertions
@@ -146,7 +149,8 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_MEDIA_URL_PREFIXES` | unset: no media URL is accepted. Our storage, e.g. `https://<bucket>.s3.<region>.amazonaws.com` or `http://minio:9000/<bucket>/` |
 | `MEDIA_RENDER_MAX_CONCURRENT_RENDERS` / `_MAX_RENDERS_PER_WORKSPACE` | `2` / `1` |
 | `MEDIA_RENDER_MAX_CONCURRENT_CHECKS` / `_MAX_CHECKS_PER_WORKSPACE` | `1` / `1` |
-| `MEDIA_RENDER_MAX_ACTIVE_JOBS` / `_BUSY_RETRY_AFTER_SECONDS` | `20` / `30` (the 503's `Retry-After`) |
+| `MEDIA_RENDER_MAX_ACTIVE_JOBS` / `_BUSY_RETRY_AFTER_SECONDS` | `20` / `30` (the `Retry-After` of the 503 and the 429) |
+| `MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE` | `4`: one workspace's jobs in progress (checking, queued or rendering); past it, 429 `workspace_busy` for that workspace |
 | `MEDIA_RENDER_JOB_TTL_SECONDS` / `_SWEEP_INTERVAL_SECONDS` | `3600` / `60` |
 | `MEDIA_RENDER_RENDER_TIMEOUT_SECONDS` / `_CHECK_` / `_MIX_` / `_PROBE_` / `_FETCH_` | `900` / `300` / `120` / `60` / `120` |
 | `MEDIA_RENDER_MAX_BUNDLE_BYTES` / `_MAX_ASSET_BYTES` / `_MAX_MEDIA_BYTES` | 32 MiB / 8 MiB / 256 MiB |

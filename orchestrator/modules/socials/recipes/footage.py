@@ -12,15 +12,19 @@ before media-render (``modules/socials/render.py``):
    still) with every action it calls on offer in the media capability registry
    (``footage_toolkits.py``). With no such toolkit the slot plays the template's
    own motion graphics, and the render's report says why.
-2. **The money** (D13), inside one footage window per workspace across every
-   worker process (a Postgres advisory lock), so two renders never spend the
-   same headroom: every shot is priced (fal.ai by its estimate action, the
-   others at ``SOCIALS_FOOTAGE_CEILING_*_USD``) and the total must fit the
-   post's cap and the workspace's monthly media cap
-   (``modules/socials/media_caps.py``). Over a cap nothing is submitted, and the
-   render fails saying why.
-3. **Submit, then poll**, never one long call: every shot is submitted, then
-   polled every ``SOCIALS_FOOTAGE_POLL_SECONDS``, all of them within
+2. **The money** (D13), inside the workspace's spend window across every
+   worker process (a Postgres advisory lock, ``toolkit.spend_window``), which the
+   render's voice takes after it, so two renders never spend the same headroom:
+   every shot is priced (fal.ai by its estimate action, the others at
+   ``SOCIALS_FOOTAGE_CEILING_*_USD``) and the total must fit the post's cap and
+   the workspace's monthly media cap (``modules/socials/media_caps.py``). Over a
+   cap nothing is submitted, and the render fails saying why.
+3. **Booked, then submitted, then polled**, never one long call: each shot's
+   price is booked on the media lane against the post before it is submitted
+   (``media_ledger.commit``, P251W1-RVW-5), so a process that stops while the
+   job runs (a redeploy, a crash) leaves it booked; a submit the toolkit refuses
+   takes its booking back. Every shot is submitted, then polled every
+   ``SOCIALS_FOOTAGE_POLL_SECONDS``, all of them within
    ``SOCIALS_FOOTAGE_MAX_WAIT_SECONDS`` of the window opening (one deadline for
    the render's footage, however many toolkits make it), through
    ``ComposioToolExecutor``, which checks the Wave 0 deny list again.
@@ -30,11 +34,13 @@ before media-render (``modules/socials/render.py``):
    ``social-media/{workspace}/{post}/footage-<slot>-<sha8>.<ext>`` (D9) and
    registered as a Deliverable. Only then is the slot marked done on the post
    (``service.record_footage``), where the next render reuses it.
-5. **Booked** on the media lane against the post, before the window closes so
-   the next cap check sees it: each shot fal.ai completed at its estimate; a
-   credit-billed toolkit's balance difference (Kie.ai, Higgsfield), read before
-   the first submit and after the last job ends inside the toolkit's credit
-   window, at ``SOCIALS_*_USD_PER_CREDIT``.
+5. **Settled** when the jobs end, whatever happened, before the window closes
+   so the next cap check sees it (``media_ledger.settle``): each booking is
+   updated in place to what the toolkit spent. fal.ai keeps a shot's estimate,
+   or takes it back when it says the job failed; a credit-billed toolkit's
+   balance difference (Kie.ai, Higgsfield), read before the first submit and
+   after the last job ends inside the toolkit's credit window, at
+   ``SOCIALS_*_USD_PER_CREDIT``, is shared across its shots by their prices.
 
 Generated clips fill template slots only (the hook and the b-roll): product
 screens stay HTML, and every word on screen is template text.
@@ -57,14 +63,12 @@ from uuid import UUID
 
 from config import config
 from core.composio.tool_executor import ComposioToolExecutor
-from core.llm.usage_context import LANE_MEDIA, usage_scope
-from core.llm.usage_tracker import UsageTracker
 from core.models.socials import SocialPost
-from core.models.workspaces import Workspace
 from core.social_templates import IMAGE_SLOT, VIDEO_SLOT, slot_generatable
-from modules.socials import service
+from modules.socials import media_ledger, service
 from modules.socials.capabilities import MediaCapabilities
-from modules.socials.media_caps import MediaCapExceeded, check_caps, media_spend, post_execution_id
+from modules.socials.media_caps import MediaCapExceeded, check_spend
+from modules.socials.media_ledger import Settlement
 from modules.socials.media_store import MediaNameError, MediaStore, media_key, media_route, valid_file_name
 from modules.socials.recipes.files import FileOutputError, ReturnedFile, fetch
 from modules.socials.recipes.footage_toolkits import (
@@ -78,6 +82,7 @@ from modules.socials.recipes.footage_toolkits import (
     FootageRecipe,
     FootageRefused,
     FootageToolError,
+    FootageUntracked,
     JobState,
     Route,
     Shot,
@@ -91,13 +96,11 @@ from modules.socials.recipes.toolkit import (
     error_of,
     output_of,
     params_for,
-    window,
+    spend_window,
 )
 
 logger = logging.getLogger(__name__)
 
-# The footage window's advisory lock namespace ('socf'): one window per workspace.
-FOOTAGE_LOCK_NAMESPACE = 0x736F6366
 # A job whose status cannot be read this many times running is given up on.
 MAX_POLL_FAILURES = 5
 FOOTAGE_FILE_PREFIX = "footage-"
@@ -490,16 +493,10 @@ async def _price(executor: Any, workspace_id: UUID, shots: Sequence[Tuple[Shot, 
 
 
 def _check_caps(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUID, price_usd: float, what: str) -> None:
-    db = session_factory()
     try:
-        workspace = db.get(Workspace, workspace_id)
-        if workspace is None:
-            raise FootageRefused("the workspace is gone: nothing was submitted.")
-        check_caps(media_spend(db, workspace, post_id), price_usd, what)
+        check_spend(session_factory, workspace_id, post_id, price_usd, what)
     except MediaCapExceeded as exc:
         raise FootageRefused(str(exc)) from exc
-    finally:
-        db.close()
 
 
 # ── polling ─────────────────────────────────────────────────────────────────
@@ -508,10 +505,13 @@ class _Job:
     shot: Shot
     route: Route
     price: float
+    # The shot's llm_usage row, booked before it was submitted (P251W1-RVW-5).
+    booking: int
     handle: Any
     state: JobState = field(default_factory=lambda: JobState(RUNNING))
     poll_failures: int = 0
-    # Given up on because its status could not be read: the provider may still finish it.
+    # Its status cannot be read (polling it kept failing, or its submit named no
+    # job to poll): the provider may still finish it, and bill it.
     unreadable: bool = False
 
 
@@ -539,61 +539,148 @@ async def _wait(executor: Any, workspace_id: UUID, jobs: Sequence[_Job], deadlin
         await asyncio.sleep(config.SOCIALS_FOOTAGE_POLL_SECONDS)
 
 
-# ── booking (D13) ───────────────────────────────────────────────────────────
-def _book_rows(workspace_id: UUID, post_id: UUID, rows: Sequence[Mapping[str, Any]]) -> None:
-    """Book on the media lane against the post. Called off the event loop, the
-    booking is written before this returns: the next cap check sees it."""
-    with usage_scope(request_type=LANE_MEDIA, execution_id=post_execution_id(post_id), workspace_id=workspace_id):
-        for row in rows:
-            UsageTracker.track_media(**row)
-
-
+# ── the booking (D13, P251W1-RVW-5) ─────────────────────────────────────────
 def _units(shot: Shot) -> int:
     """What a shot is counted in: its seconds of footage, or one still."""
     return int(config.SOCIALS_FOOTAGE_CLIP_SECONDS) if shot.kind == VIDEO_SLOT else 1
 
 
-def _priced_rows(jobs: Sequence[_Job], latency_ms: int) -> List[Dict[str, Any]]:
-    """A pricing toolkit bills what it completes: each shot at its estimate, unless
-    the toolkit said the job failed. A job still running when the wait ended, or
-    whose status could not be read, is booked too: the toolkit may finish it."""
+def _credits(recipe: FootageRecipe, usd: float) -> float:
+    """The credit ``usd`` buys from a credit-billed toolkit at its configured price."""
+    per_credit = recipe.usd_per_credit()
+    return usd / per_credit if per_credit > 0 else 0.0
+
+
+def _book_shot(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUID, shot: Shot, route: Route,
+               price: float) -> int:
+    """Book what the shot is committed to, before it is submitted: fal.ai's
+    estimate (in seconds of footage, or a still), a credit-billed toolkit's
+    ceiling (in its credit). The booking's llm_usage row."""
+    recipe = route.recipe
+    units = _credits(recipe, price) if recipe.credit_billed else _units(shot)
+    return media_ledger.commit(
+        session_factory, workspace_id, post_id, provider=recipe.toolkit, model_id=route.model, units=units, usd=price,
+    )
+
+
+def _priced_settlements(jobs: Sequence[_Job]) -> List[Settlement]:
+    """A pricing toolkit bills what it completes: each shot keeps its estimate,
+    unless the toolkit said its job failed, when its booking is reversed. A job
+    still running when the wait ended, or whose status cannot be read, keeps it:
+    the toolkit may finish it."""
     return [
-        {"provider": job.route.recipe.toolkit, "model_id": job.route.model, "units": _units(job.shot),
-         "usd": job.price, "latency_ms": latency_ms}
+        Settlement(job.booking, reverse=True)
+        if job.state.status == FAILED and not job.unreadable
+        else Settlement(job.booking, units=_units(job.shot), usd=job.price)
         for job in jobs
-        if job.state.status != FAILED or job.unreadable
     ]
 
 
-def _credit_rows(recipe: FootageRecipe, jobs: Sequence[_Job], before: Optional[Decimal], after: Optional[Decimal],
-                 latency_ms: int) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
-    """A credit-billed toolkit's balance difference, one row, and each shot's share
-    of it (by its price). A difference that cannot be read books the submitted
-    shots at their ceilings, and says so."""
-    if not jobs:
-        return [], {}
+def _apportioned(total: int, weights: Sequence[float]) -> List[int]:
+    """``total`` whole credits shared by ``weights`` (which sum to 1): each share
+    rounded down, and those left over going to the largest remainders, so the
+    shares add up to ``total``."""
+    exact = [total * weight for weight in weights]
+    shares = [math.floor(value) for value in exact]
+    by_remainder = sorted(range(len(exact)), key=lambda index: exact[index] - shares[index], reverse=True)
+    left = set(by_remainder[: max(0, total - sum(shares))])
+    return [share + (index in left) for index, share in enumerate(shares)]
+
+
+def _credit_settlements(recipe: FootageRecipe, jobs: Sequence[_Job], before: Optional[Decimal],
+                        after: Optional[Decimal]) -> Tuple[List[Settlement], Dict[str, float]]:
+    """A credit-billed toolkit's balance difference, shared across its shots by
+    their prices: each shot's booking settles to its share (its credits whole,
+    together the credits used), and each slot's share is returned. A difference
+    that cannot be read keeps every shot at its ceiling, and says so."""
     budget = sum(job.price for job in jobs)
-    problem = None
+    weights = [job.price / budget if budget else 1 / len(jobs) for job in jobs]
     if before is None or after is None:
-        usd, used = budget, 0.0
         problem = f"{recipe.label}'s balance could not be read after the jobs: booked at the ceiling"
         logger.error("[SocialsFootage] %s", problem)
+        usd, credits = budget, [_credits(recipe, job.price) for job in jobs]
     else:
+        problem = None
         used = float(max(before - after, Decimal(0)))
-        usd = used * recipe.usd_per_credit()
-    models = sorted({job.route.model for job in jobs})
-    row = {"provider": recipe.toolkit, "model_id": "+".join(models), "units": math.ceil(used), "usd": usd,
-           "latency_ms": latency_ms, "error_message": problem}
-    shares = {job.shot.slot: usd * (job.price / budget if budget else 1 / len(jobs)) for job in jobs}
-    return [row], shares
+        usd, credits = used * recipe.usd_per_credit(), _apportioned(math.ceil(used), weights)
+    settlements = [
+        Settlement(job.booking, units=units, usd=usd * weight, error_message=problem)
+        for job, weight, units in zip(jobs, weights, credits)
+    ]
+    return settlements, {job.shot.slot: usd * weight for job, weight in zip(jobs, weights)}
+
+
+async def _settle(executor: Any, session_factory: Callable[[], Any], recipe: FootageRecipe, jobs: Sequence[_Job],
+                  before: Optional[Decimal], *, workspace_id: UUID, latency_ms: int) -> Dict[str, float]:
+    """Settle every job's booking to what the toolkit spent, in place, off the
+    event loop, so the next cap check sees it; a credit-billed toolkit's share
+    for each slot."""
+    if not jobs:
+        return {}
+    shares: Dict[str, float] = {}
+    if recipe.credit_billed:
+        after = await _read_balance(executor, workspace_id, jobs[0].route)
+        settlements, shares = _credit_settlements(recipe, jobs, before, after)
+    else:
+        settlements = _priced_settlements(jobs)
+    await asyncio.to_thread(media_ledger.settle, session_factory, settlements, latency_ms)
+    return shares
 
 
 # ── generating ──────────────────────────────────────────────────────────────
+async def _submit(executor: Any, session_factory: Callable[[], Any], shot: Shot, route: Route, price: float, *,
+                  workspace_id: UUID, post_id: UUID) -> _Job:
+    """Book the shot's price, then submit it (D13, P251W1-RVW-5): the booking is
+    in llm_usage before the provider can charge, so a process that stops while
+    the job runs leaves it booked. A submit the toolkit refuses reverses its
+    booking; one it took without naming a job to poll keeps it."""
+    try:
+        booking = await asyncio.to_thread(_book_shot, session_factory, workspace_id, post_id, shot, route, price)
+    except media_ledger.BookingFailed as exc:
+        raise FootageToolError(
+            f"what {route.recipe.label} would spend could not be booked, so it was not submitted"
+        ) from exc
+    try:
+        handle = await route.recipe.submit(_asker(executor, workspace_id, route), shot, route)
+    except FootageUntracked as exc:
+        return _Job(shot=shot, route=route, price=price, booking=booking, handle=None,
+                    state=JobState(FAILED, reason=str(exc)), unreadable=True)
+    except FootageToolError:
+        await asyncio.to_thread(media_ledger.settle, session_factory, [Settlement(booking, reverse=True)])
+        raise
+    return _Job(shot=shot, route=route, price=price, booking=booking, handle=handle)
+
+
+async def _collect(store: MediaStore, session_factory: Callable[[], Any], jobs: Sequence[_Job], *,
+                   workspace_id: UUID, post_id: UUID, title: str) -> Tuple[Dict[str, Made], Dict[str, str]]:
+    """Each job as the wait left it: one that finished is kept (fetched, stored,
+    registered and marked done); one still running, or failed, says why."""
+    made: Dict[str, Made] = {}
+    failed: Dict[str, str] = {}
+    for job in jobs:
+        label = job.route.recipe.label
+        if job.state.status == RUNNING:
+            minutes = config.SOCIALS_FOOTAGE_MAX_WAIT_SECONDS // 60
+            failed[job.shot.slot] = f"{label} did not finish it within {minutes} minutes"
+        elif job.state.status == FAILED:
+            failed[job.shot.slot] = job.state.reason or f"{label} could not make it"
+        else:
+            try:
+                made[job.shot.slot] = await _keep(
+                    store, session_factory, job.shot, job.route, job.price, job.state.file,
+                    workspace_id=workspace_id, post_id=post_id, title=title,
+                )
+            except FootageError as exc:
+                failed[job.shot.slot] = str(exc)
+    return made, failed
+
+
 async def _run_toolkit(executor: Any, store: MediaStore, session_factory: Callable[[], Any],
                        group: Sequence[Tuple[Shot, Route, float]], *, workspace_id: UUID, post_id: UUID,
                        title: str, deadline: float) -> Tuple[Dict[str, Made], Dict[str, str]]:
-    """One toolkit's shots: submit them all, poll them together, keep each that
-    completes, and book what the toolkit spent, whatever happened."""
+    """One toolkit's shots: each booked, then submitted; all polled together;
+    each that completes kept; and every booking settled to what the toolkit
+    spent, whatever happened (P251W1-RVW-5)."""
     recipe = group[0][1].recipe
     made: Dict[str, Made] = {}
     failed: Dict[str, str] = {}
@@ -608,39 +695,21 @@ async def _run_toolkit(executor: Any, store: MediaStore, session_factory: Callab
                 "nothing was submitted to it"
             )
             return made, {shot.slot: why for shot, _, _ in group}
-        shares: Dict[str, float] = {}
         try:
             for shot, route, price in group:
                 try:
-                    handle = await recipe.submit(_asker(executor, workspace_id, route), shot, route)
+                    jobs.append(await _submit(executor, session_factory, shot, route, price,
+                                              workspace_id=workspace_id, post_id=post_id))
                 except FootageToolError as exc:
                     failed[shot.slot] = str(exc)
-                    continue
-                jobs.append(_Job(shot=shot, route=route, price=price, handle=handle))
             await _wait(executor, workspace_id, jobs, deadline)
-            for job in jobs:
-                if job.state.status == RUNNING:
-                    minutes = config.SOCIALS_FOOTAGE_MAX_WAIT_SECONDS // 60
-                    failed[job.shot.slot] = f"{recipe.label} did not finish it within {minutes} minutes"
-                elif job.state.status == FAILED:
-                    failed[job.shot.slot] = job.state.reason or f"{recipe.label} could not make it"
-                else:
-                    try:
-                        made[job.shot.slot] = await _keep(
-                            store, session_factory, job.shot, job.route, job.price, job.state.file,
-                            workspace_id=workspace_id, post_id=post_id, title=title,
-                        )
-                    except FootageError as exc:
-                        failed[job.shot.slot] = str(exc)
+            made, lost = await _collect(store, session_factory, jobs, workspace_id=workspace_id, post_id=post_id,
+                                        title=title)
+            failed.update(lost)
         finally:
             latency_ms = int((time.monotonic() - started) * 1000)
-            if recipe.credit_billed:
-                after = await _read_balance(executor, workspace_id, group[0][1])
-                rows, shares = _credit_rows(recipe, jobs, before, after, latency_ms)
-            else:
-                rows = _priced_rows(jobs, latency_ms)
-            if rows:
-                await asyncio.to_thread(_book_rows, workspace_id, post_id, rows)
+            shares = await _settle(executor, session_factory, recipe, jobs, before, workspace_id=workspace_id,
+                                   latency_ms=latency_ms)
     kept_shares = {slot: usd for slot, usd in shares.items() if slot in made}
     if kept_shares:
         await asyncio.to_thread(_record_costs, session_factory, workspace_id, post_id, kept_shares)
@@ -661,7 +730,7 @@ async def generate(plan: FootagePlan, *, workspace_id: UUID, post_id: UUID, titl
     db = session_factory()
     try:
         executor = ComposioToolExecutor(db)
-        async with window(session_factory, FOOTAGE_LOCK_NAMESPACE, str(workspace_id)):
+        async with spend_window(session_factory, workspace_id):
             deadline = time.monotonic() + config.SOCIALS_FOOTAGE_MAX_WAIT_SECONDS
             priced = await _price(executor, workspace_id, plan.shots)
             total = sum(price for _, _, price in priced)

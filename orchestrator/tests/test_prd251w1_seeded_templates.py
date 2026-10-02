@@ -10,8 +10,9 @@ Pins:
   each reference composition (docs/PRDS/prd251-reference/) starts and lasts
   exactly as it did, and the whole runs as long.
 * **Every word is a variable.** No line of a reference's copy is baked into its
-  template; the starter's sample data carries the reference's own copy, and it
-  fills every variable a render needs.
+  template; the starter's sample data carries the reference's own copy less its
+  brand (P251W1-RVW-6: the CI previews lay that back on), and it fills every
+  variable a render needs.
 * **Seeding (AC 1).** Turning Socials on seeds the four into the workspace in the
   switch's own commit, with the eight image templates US-107 and US-113 add
   beside them (test_prd251w1_image_templates.py); turning it on twice leaves the same rows;
@@ -77,9 +78,9 @@ from core.brand_palette import STAGE_TOKENS, contrast, luminance, parse_hex, sta
 from core.database.database import get_db  # noqa: E402
 from core.media_render_bundle import build_bundle  # noqa: E402
 from core.models.core import DocumentTemplate  # noqa: E402
+from core.social_brand_rule import brand_literals  # noqa: E402
 from core.social_templates import (  # noqa: E402
     SocialTemplateError,
-    brand_literals,
     resolve_variables,
     validate_social_blocks,
     without_slots,
@@ -352,7 +353,10 @@ def test_turning_socials_on_seeds_the_starters_in_the_switchs_own_commit(monkeyp
 
     resp = client.put(SWITCH_ROUTE, json={"socials": {"enabled": True}})
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"status": "saved", "socials": {"available": True, "enabled": True}}
+    assert resp.json() == {
+        "status": "saved",
+        "socials": {"available": True, "enabled": True, "series_approval": False},
+    }
     assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
 
     # On again: the same rows. Off: nothing seeded, nothing removed.

@@ -13,6 +13,11 @@
   toolkit runs at a time, in this process and across every worker process
   (:func:`credit_window`, a Postgres advisory lock), so a render never books
   another render's spend.
+* **The workspace's spend (D13).** Every paid step of a render (its footage,
+  then its voice) is priced, checked against the caps, spent and booked inside
+  one spend window per workspace (:func:`spend_window`), so each check sees
+  everything booked before it and two renders never spend the same headroom.
+  The spend window is always taken before a credit window.
 """
 from __future__ import annotations
 
@@ -131,8 +136,10 @@ def balance_of(response: Any, keys: Sequence[str]) -> Optional[Decimal]:
 
 
 # One lock's key space in the database: a namespace per kind of window keeps its
-# keys apart from every other advisory lock ('socv', the credit window).
+# keys apart from every other advisory lock ('socv', the credit window; 'socf',
+# the spend window, first taken by footage alone).
 CREDIT_LOCK_NAMESPACE = 0x736F6376
+SPEND_LOCK_NAMESPACE = 0x736F6366
 _TRY_LOCK = text("SELECT pg_try_advisory_xact_lock(:namespace, hashtext(:key))")
 # Within one process, a window is also an asyncio lock: renders on this event
 # loop queue here without holding a database connection each.
@@ -184,3 +191,9 @@ async def window(session_factory: Callable[[], Any], namespace: int, key: str) -
 def credit_window(session_factory: Callable[[], Any], workspace_id: UUID, toolkit: str):
     """One credit window per workspace and toolkit at a time, across every worker process."""
     return window(session_factory, CREDIT_LOCK_NAMESPACE, credit_lock_key(workspace_id, toolkit))
+
+
+def spend_window(session_factory: Callable[[], Any], workspace_id: UUID):
+    """One spend window per workspace at a time, across every worker process:
+    footage and voice price, check the caps, spend and book inside it."""
+    return window(session_factory, SPEND_LOCK_NAMESPACE, str(workspace_id))

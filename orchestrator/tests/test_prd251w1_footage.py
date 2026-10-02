@@ -17,7 +17,9 @@ registry are recording fakes. Pins:
   both carry the estimate;
 * AC2 — an estimate over the workspace's monthly media cap (or the post's cap)
   submits nothing and the render says why; a cap that cannot be read spends
-  nothing; a booking is seen by the next render's cap check;
+  nothing; a booking is seen by the next render's cap check; the check runs in
+  the workspace's spend window, the one a render's voice takes too
+  (P251W1-RVW-2);
 * AC3 — the file is in our storage before its slot is marked done; a file that
   cannot be stored is never marked done, and what the toolkit spent is booked;
 * AC4 — Higgsfield MCP (credit-billed): one ``params`` string, JOBS_WAIT polled,
@@ -29,8 +31,9 @@ registry are recording fakes. Pins:
   a render setting outside the content hash; a save names only slots the
   template has and lets a toolkit fill; a denied action is never used;
 * the column: ``social_posts.footage`` comes from the wave's one migration,
-  create_all-first safe (``@integration`` on Postgres), and the footage window
-  holds across worker processes (``@integration``).
+  create_all-first safe (``@integration`` on Postgres), and the spend window
+  holds across worker processes (``@integration``);
+* D15: no recipe carries a provider client; ``files.py``'s one fetch is pinned.
 """
 from __future__ import annotations
 
@@ -751,6 +754,36 @@ def test_a_booking_is_seen_by_the_next_renders_cap_check(env):
     assert "spent $0.46 of its $0.80 monthly media cap" in _last_log(env, second["id"])["comment"]
 
 
+def test_footage_prices_and_checks_its_caps_inside_the_spend_window_voice_takes(env, monkeypatch):
+    """Footage and voice share one spend window per workspace (P251W1-RVW-2):
+    footage that starts while another render's voice holds it waits, then checks
+    against what that voice booked."""
+    monkeypatch.setattr(toolkit, "_LOCKS", {})  # this test's locks go with its event loop
+    _cache_fal(env)
+    _connect(env, "FAL_AI")
+    _script_fal(env, estimate=0.46)
+    _settings(env, media_monthly_cap_usd=1.0)
+    post = _create(env)
+    assert env.client.post(f"/api/socials/posts/{post['id']}/render").status_code == 202
+    job = env.launched[-1]
+
+    async def scenario():
+        async with toolkit.spend_window(env.factory, WS):  # another render's voice
+            generating = asyncio.create_task(
+                footage.generate(job.footage, workspace_id=WS, post_id=job.post_id, title=job.title,
+                                 session_factory=env.factory, store=FakeStore())
+            )
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not generating.done() and env.composio.calls == [], "the footage went ahead inside another's window"
+            _spent(env, 0.80, execution_id="social_post:voiced")
+        with pytest.raises(footage.FootageRefused, match=r"this workspace has spent \$0\.80 of its \$1\.00 monthly media cap"):
+            await generating
+
+    asyncio.run(scenario())
+    assert env.composio.slugs() == [FAL_ESTIMATE], "priced, then refused: nothing was submitted"
+
+
 @pytest.mark.parametrize("stored", ["lots", -5, True])
 def test_a_monthly_cap_that_is_not_a_number_of_dollars_spends_nothing(env, stored):
     _cache_fal(env)
@@ -1251,14 +1284,40 @@ def test_a_footage_file_name_never_replaces_an_earlier_one():
     assert footage.footage_file_name("hook", "cd" * 32, "mp4") != first
 
 
+# An HTTP library or a media provider's own SDK: a recipe reaches a provider through Composio only.
+PROVIDER_CLIENTS = {"httpx", "requests", "aiohttp", "urllib3", "fal_client", "elevenlabs", "fish_audio_sdk", "fishaudio"}
+
+
+def _recipe_imports(name):
+    tree = ast.parse((_ORCH / "modules" / "socials" / "recipes" / name).read_text(encoding="utf-8"))
+    imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    imported |= {(node.module or "").split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    return tree, imported
+
+
 def test_the_recipes_write_no_provider_client():
     """D15: every call goes through the workspace's Composio connection; a file link
     is read only through files.fetch (public, pinned, capped)."""
-    for name in ("footage.py", "footage_toolkits.py", "toolkit.py"):
-        tree = ast.parse((_ORCH / "modules" / "socials" / "recipes" / name).read_text(encoding="utf-8"))
-        imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
-        imported |= {(node.module or "").split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-        assert not imported & {"httpx", "requests", "aiohttp", "urllib3", "fal_client", "elevenlabs"}, name
+    for name in ("footage.py", "footage_toolkits.py", "toolkit.py", "voice.py"):
+        assert not _recipe_imports(name)[1] & PROVIDER_CLIENTS, name
+
+
+def test_the_one_file_fetch_in_the_recipes_is_pinned():
+    """files.py is the one recipe that reads a link: over httpx, with no provider
+    SDK, and every request it sends is built pinned to the address the outbound
+    check resolved (``build_pinned_request``), never a plain get."""
+    tree, imported = _recipe_imports("files.py")
+    assert imported & PROVIDER_CLIENTS == {"httpx"}
+    used = {node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "httpx"}
+    assert used <= {"AsyncClient", "URL", "HTTPError", "Response"}, used
+    requests = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "client"]
+    assert requests and all(
+        call.func.attr == "send" and isinstance(call.args[0], ast.Call)
+        and getattr(call.args[0].func, "id", None) == "build_pinned_request"
+        for call in requests
+    )
 
 
 def test_the_seeded_app_promo_never_generates_the_apps_own_loop():
@@ -1325,13 +1384,13 @@ def test_a_footage_window_held_by_another_worker_is_waited_for(pg_engine, monkey
     headroom: a window another process holds keeps this one out until it ends."""
     monkeypatch.setattr(toolkit.config, "SOCIALS_RENDER_POLL_SECONDS", 0.05, raising=False)
     factory = sessionmaker(bind=pg_engine)
-    params = {"namespace": footage.FOOTAGE_LOCK_NAMESPACE, "key": str(WS)}
+    params = {"namespace": toolkit.SPEND_LOCK_NAMESPACE, "key": str(WS)}
 
     async def scenario():
         entered = asyncio.Event()
 
         async def second():
-            async with toolkit.window(factory, footage.FOOTAGE_LOCK_NAMESPACE, str(WS)):
+            async with toolkit.spend_window(factory, WS):
                 entered.set()
 
         with pg_engine.connect() as holder:

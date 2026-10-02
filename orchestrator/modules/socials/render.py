@@ -7,14 +7,18 @@ which runs in the background:
 
 0. when the post asks for footage (US-114, D12), generate it through the
    workspace's Composio generation toolkit first: priced and capped before any
-   submit (D13), submitted and polled, each file copied into our storage and
-   registered as a Deliverable before its slot is marked done, and booked on the
-   media lane; a slot generated earlier for the same prompt is reused, and one
-   no connected toolkit can make plays the template's own motion graphics
-   (``modules/socials/recipes/footage.py``). Then, when the post chose a voice
-   toolkit (US-111, D11), speak its script through the workspace's Composio
-   connection, one call per line, each line copied into our storage as it
-   returns, and make the bundle's lines name those files
+   submit (D13), each shot's price booked on the media lane before it is
+   submitted and settled when its job ends (P251W1-RVW-5), submitted and polled,
+   each file copied into our storage and registered as a Deliverable before its
+   slot is marked done; a slot generated earlier for the same prompt is reused,
+   and one no connected toolkit can make plays the template's own motion
+   graphics (``modules/socials/recipes/footage.py``). Then, when the post chose a
+   voice toolkit (US-111, D11), speak its script through the workspace's
+   Composio connection: priced and capped before the first line (D13), in the
+   same per-workspace spend window as the footage, so the footage just booked
+   counts against the voice's check; the price booked before the first line and
+   settled when the script ends; one call per line, each line copied into our
+   storage as it returns, and the bundle's lines made to name those files
    (``modules/socials/recipes/voice.py``); Kokoro needs nothing here;
 1. submit the bundle to media-render (``core/media_render_client.py``), which
    answers once the job is staged, spoken, mixed and checked; a full renderer
@@ -30,13 +34,20 @@ which runs in the background:
    (``core/music_credit.py``), or ``rendering`` → ``failed`` with the report in
    ``review_log``. A report that asks for credit and gives no line fails it;
 5. book the rendered seconds on the ``media`` lane at $0 (US-103), the units
-   the quota counts.
+   the quota counts, written before the render returns.
+
+The render arrives holding its seconds against the month's quota (the job's
+``reservation``, taken before anything reached media-render,
+``core/media_render_quota.py``); however it ends, the hold is given back, after
+the rendered seconds are booked when it finished (P251W1-RVW-3).
 
 Steps 0-3 together get at most ``SOCIALS_RENDER_MAX_WAIT_SECONDS``, which stays
 under the boot reaper's stale cutoff, so the reaper only ever fails a render no
 live task owns. A post that moved on while it rendered (the reaper failed it)
-is left as it is, and nothing is booked. The renderer assembles; it never
-generates (D3).
+is left as it is, and its rendered seconds are not booked. What its footage and
+voice spent stays booked either way: each was booked before its toolkit was
+called (P251W1-RVW-5), so a process that died mid-render leaves it counted. The
+renderer assembles; it never generates (D3).
 The bundle (``core/media_render_bundle.py``, S1.2) is the social template's
 composition, checked against its contract (``core/social_templates.py``), the
 post's variable values with the template's defaults, the audio plan, and the
@@ -68,14 +79,22 @@ from core.media_render_client import (
     NOT_CONFIGURED,
     NOT_FOUND,
     TIMEOUT,
+    WORKSPACE_BUSY,
     MediaRenderClient,
     MediaRenderError,
     MediaRenderUnavailable,
 )
-from core.media_render_quota import book_render_seconds
+from core.media_render_quota import (
+    RenderReservation,
+    book_render_seconds,
+    declared_seconds,
+    release_render,
+    reserve_render,
+    sessions_for,
+)
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
-from modules.socials import service
+from modules.socials import notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -90,6 +109,8 @@ MAX_REPORTED_FINDINGS = 20
 FINDING_KEYS = ("section", "severity", "code", "message", "selector", "containerSelector", "time", "fixHint", "source", "line")
 FINDING_TEXT_CHARS = 300
 DEFAULT_ASPECT = "original"
+# US-208: a preview's files never share a name with the post's rendered media.
+PREVIEW_FILE_PREFIX = "preview-"
 
 MEDIA_PROFILE_MESSAGE = (
     "Rendering needs the media profile: start the renderer with "
@@ -98,6 +119,8 @@ MEDIA_PROFILE_MESSAGE = (
 NOT_CONFIGURED_MESSAGE = "Rendering is not configured on this server (SOCIALS_RENDER_URL is empty)."
 UNREACHABLE_MESSAGE = "The renderer cannot be reached right now. Try again in a few minutes."
 STORAGE_MESSAGE = "Rendering needs object storage: the rendered files are kept there."
+# A render still refused at its deadline because its workspace has its share in progress (P251W1-RVW-4).
+WORKSPACE_BUSY_MESSAGE = "This workspace has too many renders in progress. Render again when one of them ends."
 
 
 class RendererUnavailable(service.SocialsError):
@@ -200,6 +223,19 @@ def bundle_for(
     )
 
 
+async def reserve_seconds(db: Any, workspace: Any, post: Any, template: Any) -> RenderReservation:
+    """Hold the post's render against the month's quota, before anything reaches
+    media-render (P251W1-RVW-3): its template's declared duration, in a session of
+    its own on ``db``'s database. ``RenderQuotaExceeded`` when the minutes used and
+    those renders in progress hold leave none."""
+    return await reserve_render(
+        sessions_for(db),
+        workspace,
+        declared_seconds(composition_of(template), getattr(template, "format", None)),
+        execution_id=f"{EXECUTION_PREFIX}{post.id}",
+    )
+
+
 def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_recipes.FootagePlan]:
     """The footage the post asks for (US-114), planned over its template's slots
     with the workspace's media capabilities ``caps``; ``None`` when it asks for none."""
@@ -232,6 +268,11 @@ class RenderJob:
     voice: Optional[voice_recipes.VoicePlan] = None
     # D12: the footage the post asks for, resolved as the render started; None asks for none.
     footage: Optional[footage_recipes.FootagePlan] = None
+    # P251W1-RVW-3: the seconds the render holds against the quota, given back when it ends.
+    reservation: Optional[RenderReservation] = None
+    # US-208: a preview render (half resolution) is stored as the post's preview:
+    # its files are named ``preview-…`` and registered as no Deliverable.
+    preview: bool = False
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -258,6 +299,8 @@ def _report(*, findings: Any = (), report: Optional[Mapping[str, Any]] = None) -
 def _failure_from(exc: MediaRenderError) -> RenderFailure:
     if isinstance(exc, MediaRenderUnavailable):
         return RenderFailure(exc.code, unavailable_message(exc))
+    if exc.code == WORKSPACE_BUSY:
+        return RenderFailure(exc.code, WORKSPACE_BUSY_MESSAGE)
     if exc.code == "check_failed":
         errors = sum(1 for f in exc.findings if isinstance(f, dict) and f.get("severity") == "error")
         first = next((f for f in exc.findings if isinstance(f, dict) and f.get("severity") == "error"), None)
@@ -323,6 +366,8 @@ async def _voiced(
             job.voice, workspace_id=job.workspace_id, post_id=job.post_id, lines=lines,
             session_factory=session_factory, store=store,
         )
+    except voice_recipes.VoiceRefused as exc:
+        raise RenderFailure("voice_refused", f"{str(exc).rstrip('.')}. Nothing was rendered.") from exc
     except voice_recipes.VoiceError as exc:
         raise RenderFailure("voice_failed", f"{str(exc).rstrip('.')}. Nothing was rendered.") from exc
     ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS
@@ -376,7 +421,8 @@ def stored_file_name(job: RenderJob, output: Mapping[str, Any], *, several: bool
     aspect = str(output.get("aspect") or DEFAULT_ASPECT)
     index = output.get("index")
     number = f"-{index:02d}" if several and isinstance(index, int) and not isinstance(index, bool) else ""
-    return f"{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
+    prefix = PREVIEW_FILE_PREFIX if getattr(job, "preview", False) else ""
+    return f"{prefix}{job.format or 'render'}-{_aspect_slug(aspect)}{number}{ext}"
 
 
 def _music_of(job: RenderJob, finished: Mapping[str, Any]) -> Optional[MusicCredit]:
@@ -442,47 +488,61 @@ async def _store_outputs(
     if not outputs:
         raise RenderFailure("no_output", "The renderer finished but returned no file.")
     with tempfile.TemporaryDirectory(prefix="socials-render-") as scratch:
-        fetched = []
-        for output in outputs:
-            file_name = stored_file_name(job, output, several=len(outputs) > 1)
-            try:
-                key = media_key(job.workspace_id, job.post_id, file_name)
-            except MediaNameError as exc:
-                raise RenderFailure("bad_output", f"The renderer returned a file the post cannot store: {exc}") from exc
-            if any(name == file_name for _, name, _, _, _, _ in fetched):
-                raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
-            path = Path(scratch) / file_name
-            try:
-                size, digest = await client.download(str(record["id"]), str(output["name"]), path)
-            except MediaRenderError as exc:
-                raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
-            if size <= 0:
-                raise RenderFailure("empty_output", "The renderer returned an empty file.")
-            fetched.append((output, file_name, key, path, size, digest))
-
+        fetched = [await _fetch(client, job, record, output, Path(scratch), several=len(outputs) > 1) for output in outputs]
+        names = [item[1] for item in fetched]
+        doubled = next((name for name in names if names.count(name) > 1), None)
+        if doubled:
+            raise RenderFailure("bad_output", f"The renderer returned two files for {doubled}.")
         media: Dict[str, List[Dict[str, Any]]] = {}
-        for output, file_name, key, path, size, digest in fetched:
-            aspect = str(output.get("aspect") or DEFAULT_ASPECT)
-            content_type = content_type_for(file_name)
-            try:
-                await asyncio.to_thread(store.put_file, key, path, content_type)
-            except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
-                logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
-                raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
-            entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}
-            deliverable_id = await asyncio.to_thread(_register, session_factory, job, key, file_name, entry, music)
-            file_record: Dict[str, Any] = {
-                "deliverable_id": deliverable_id,
-                "name": file_name,
-                "sha256": digest,
-                "bytes": size,
-                "content_type": content_type,
-            }
-            for fact in ("duration", "width", "height"):
-                if isinstance(output.get(fact), (int, float)) and not isinstance(output.get(fact), bool):
-                    file_record[fact] = output[fact]
+        for item in fetched:
+            aspect, file_record = await _store_one(store, session_factory, job, item, music)
             media.setdefault(aspect, []).append(file_record)
     return media
+
+
+async def _fetch(
+    client: MediaRenderClient, job: RenderJob, record: Mapping[str, Any], output: Mapping[str, Any], scratch: Path,
+    *, several: bool,
+) -> tuple:
+    """One output fetched into ``scratch`` with its sha256: (output, file name, key, path, size, digest)."""
+    file_name = stored_file_name(job, output, several=several)
+    try:
+        key = media_key(job.workspace_id, job.post_id, file_name)
+    except MediaNameError as exc:
+        raise RenderFailure("bad_output", f"The renderer returned a file the post cannot store: {exc}") from exc
+    path = scratch / file_name
+    if path.exists():
+        raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
+    try:
+        size, digest = await client.download(str(record["id"]), str(output["name"]), path)
+    except MediaRenderError as exc:
+        raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
+    if size <= 0:
+        raise RenderFailure("empty_output", "The renderer returned an empty file.")
+    return output, file_name, key, path, size, digest
+
+
+async def _store_one(
+    store: MediaStore, session_factory: Callable[[], Any], job: RenderJob, item: tuple, music: Optional[MusicCredit],
+) -> tuple:
+    """Store one fetched file and register it as a Deliverable (a preview's is not
+    registered): its aspect and its file record."""
+    output, file_name, key, path, size, digest = item
+    aspect = str(output.get("aspect") or DEFAULT_ASPECT)
+    content_type = content_type_for(file_name)
+    try:
+        await asyncio.to_thread(store.put_file, key, path, content_type)
+    except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
+        logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
+        raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
+    file_record: Dict[str, Any] = {"name": file_name, "sha256": digest, "bytes": size, "content_type": content_type}
+    if not job.preview:
+        entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}
+        file_record = {"deliverable_id": await asyncio.to_thread(_register, session_factory, job, key, file_name, entry, music), **file_record}
+    for fact in ("duration", "width", "height"):
+        if isinstance(output.get(fact), (int, float)) and not isinstance(output.get(fact), bool):
+            file_record[fact] = output[fact]
+    return aspect, file_record
 
 
 def rendered_seconds(media: Mapping[str, List[Mapping[str, Any]]]) -> float:
@@ -570,10 +630,20 @@ async def run_render(
     store: Optional[MediaStore] = None,
     session_factory: Optional[Callable[[], Any]] = None,
 ) -> bool:
-    """Render the post in the background; ``True`` when it reached needs_approval."""
-    client = client or MediaRenderClient()
-    store = store or MediaStore()
+    """Render the post in the background; ``True`` when it reached needs_approval.
+
+    However it ends (done, failed, timed out, an unexpected error), the seconds
+    the job holds against the quota are given back, after its own were booked
+    when it finished (P251W1-RVW-3).
+    """
     factory = session_factory or _default_session_factory()
+    try:
+        return await _render(job, client or MediaRenderClient(), store or MediaStore(), factory)
+    finally:
+        await release_render(factory, job.reservation)
+
+
+async def _render(job: RenderJob, client: MediaRenderClient, store: MediaStore, factory: Callable[[], Any]) -> bool:
     started = time.monotonic()
     budget = config.SOCIALS_RENDER_MAX_WAIT_SECONDS
     deadline = started + budget
@@ -607,6 +677,9 @@ async def run_render(
     ended = await asyncio.to_thread(_finish, factory, job, media=media, report=report, credits=credits)
     if ended != service.NEEDS_APPROVAL:
         return False
-    # latency: the whole render, from submit to the files in storage.
-    _book(job, rendered_seconds(media), int((time.monotonic() - started) * 1000))
+    # latency: the whole render, from submit to the files in storage. Written
+    # inline, off the loop, before the render returns: the quota counts it next.
+    await asyncio.to_thread(_book, job, rendered_seconds(media), int((time.monotonic() - started) * 1000))
+    # US-206: the post now needs a person; its approvers hear so (never raises).
+    await notify.dispatch_approval_pending(job.workspace_id, job.post_id, job.title, session_factory=factory)
     return True

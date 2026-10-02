@@ -91,7 +91,7 @@
       "type": "text",
       "label": "Chat: the counter's label",
       "max_chars": 12,
-      "default": "AUTO NOW"
+      "default": "ACTIVE"
     },
     "chat_counter": {
       "type": "text",
@@ -101,7 +101,7 @@
     },
     "chat_greeting": {
       "type": "text",
-      "label": "Chat: Auto's greeting",
+      "label": "Chat: the assistant's greeting",
       "max_chars": 60,
       "description": "Shown before the request is typed."
     },
@@ -119,7 +119,7 @@
     },
     "chat_reply": {
       "type": "text",
-      "label": "Chat: Auto's reply",
+      "label": "Chat: the assistant's reply",
       "max_chars": 40,
       "default": "On it. Here's the plan."
     },
@@ -814,12 +814,12 @@
     "hook_line": "Your Shopify store never",
     "hook_accent": "sleeps.",
     "hook_turn": "You have to.",
-    "tagline_lead": "An operating system for",
-    "tagline_accent": "autonomous",
-    "tagline_tail": "agent teams.",
+    "tagline_lead": "The one line that says",
+    "tagline_accent": "what",
+    "tagline_tail": "you do.",
     "chat_title": "Tonight's store run",
     "chat_counter": "4",
-    "chat_greeting": "Hey Gerard, what can I do for you today?",
+    "chat_greeting": "Hey there, what can I do for you today?",
     "chat_request": "Run the store tonight — ship today's orders, reorder low stock, answer customer emails.",
     "step_1_detail": "· store notes",
     "step_2_detail": "· returns policy",
@@ -874,9 +874,9 @@
     "team_roster": "SHOPKEEPER, COUNTINGHOUSE, CLUB SECRETARY, TRACKER, RESEARCHER, NEWSROOM, WRITER, OPS, HAMMER",
     "end_line": "Run your store —",
     "end_accent": "even when you're not.",
-    "end_url": "automatos.app",
-    "end_note": "OPEN SOURCE · APACHE 2.0",
-    "cap_ask": "Tell Auto what you need.",
+    "end_url": "yourbrand.com",
+    "end_note": "LINK IN BIO",
+    "cap_ask": "Ask for what you need.",
     "cap_handoff": "The right agent takes it.",
     "beat_1": "Orders.",
     "beat_2": "Stock.",

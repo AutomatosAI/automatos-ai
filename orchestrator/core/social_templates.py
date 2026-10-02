@@ -49,8 +49,8 @@ carries a composition in ``blocks``, which media-render renders:
   top rows fill them, and a render checks they still match the report.
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
   a composition as ``--brand-*`` CSS variables, ``{{ brand.logo }}`` and (D5, the
-  square mark) ``{{ brand.logo_mark }}``.
-  :func:`brand_literals` finds a hex colour, a named font family or a logo baked
+  square mark) ``{{ brand.logo_mark }}``. ``core/social_brand_rule.py`` finds a
+  colour (hex, ``rgb()``/``hsl()`` or named), a named font family or a logo baked
   into the template outside a ``var()`` fallback, and a template carrying one is
   refused on save.
 
@@ -65,10 +65,10 @@ import copy
 import math
 import re
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core.chart_binding import data_errors
+from core.social_brand_rule import brand_literals
 
 # The two formats a social template has. core/models/core.py reads them from
 # here for the document_templates format CHECK (the prd251_wave1 migration).
@@ -606,227 +606,6 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
     return {key: copy.deepcopy(blocks[key]) for key in BLOCK_KEYS if key in blocks}
 
 
-# ── the brand rule (D4) ─────────────────────────────────────────────────────
-HEX_COLOUR = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![0-9A-Za-z_-])")
-_WHOLE_HEX = re.compile(r"^\s*#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\s*$")
-_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-_INNERMOST_BLOCK = re.compile(r"\{([^{}]*)\}")
-_CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
-_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
-_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
-# A script's colour or font is a value: after ':' or '=' ("color: '#fff'", "el.style.color = '#fff'").
-_SCRIPT_HEX = re.compile(r"""[:=]\s*(["'`])(#[0-9a-fA-F]{3,8})\1""")
-_SCRIPT_FONT = re.compile(r"""fontFamily\s*[:=]\s*(["'`])(.*?)\1""")
-# A font shorthand's family list follows its size: "500 42px/1.2 Geist, sans-serif".
-_FONT_SIZE_THEN_FAMILY = re.compile(
-    r"(?:^|\s)(?:\d*\.?\d+(?:px|em|rem|%|pt|pc|vh|vw|vmin|vmax|ch|ex|cm|mm|in|q|lh|rlh)"
-    r"|xx-small|x-small|small|medium|large|x-large|xx-large|xxx-large|larger|smaller)"
-    r"(?:\s*/\s*\S+)?\s+(.+)$",
-    re.IGNORECASE,
-)
-GENERIC_FAMILIES = frozenset(
-    {
-        "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif",
-        "ui-sans-serif", "ui-monospace", "ui-rounded", "emoji", "math", "fangsong",
-        "inherit", "initial", "unset", "revert", "revert-layer",
-    }
-)
-# Attributes that load something (media-render's list); a logo would sit in one.
-REFERENCE_ATTRIBUTES = frozenset(
-    {"src", "href", "xlink:href", "poster", "srcset", "data", "background", "data-composition-src"}
-)
-BRAND_ASSET_DIR = "assets/brand/"
-
-
-def _call_end(text: str, start: int) -> int:
-    """The index just past the ``)`` that closes the call opened at ``text[start] == '('``."""
-    depth, quote, i = 0, None, start
-    while i < len(text):
-        ch = text[i]
-        if quote:
-            quote = None if ch == quote else quote
-        elif ch in "\"'":
-            quote = ch
-        elif ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return len(text)
-
-
-def strip_var_calls(value: str) -> str:
-    """``value`` without its ``var(...)`` calls, fallbacks and nesting included."""
-    out, i = [], 0
-    lowered = value.lower()
-    while i < len(value):
-        if lowered.startswith("var(", i) and (i == 0 or not (value[i - 1].isalnum() or value[i - 1] in "-_")):
-            i = _call_end(value, i + 3)
-            continue
-        out.append(value[i])
-        i += 1
-    return "".join(out)
-
-
-def _split_top(text: str, separator: str) -> List[str]:
-    """Split ``text`` on ``separator`` outside quotes and parentheses."""
-    parts, buf, depth, quote = [], [], 0, None
-    for ch in text:
-        if quote:
-            quote = None if ch == quote else quote
-        elif ch in "\"'":
-            quote = ch
-        elif ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth = max(0, depth - 1)
-        elif ch == separator and depth == 0:
-            parts.append("".join(buf))
-            buf = []
-            continue
-        buf.append(ch)
-    parts.append("".join(buf))
-    return parts
-
-
-def _declarations(block: str) -> Iterable[Tuple[str, str]]:
-    """``(property, value)`` for each declaration in a declaration list."""
-    for part in _split_top(block, ";"):
-        head, *rest = _split_top(part, ":")
-        if rest and head.strip():
-            yield head.strip().lower(), ":".join(rest).strip()
-
-
-def _named_families(family_list: str) -> List[str]:
-    names = []
-    for entry in _split_top(family_list, ","):
-        name = entry.strip().strip("\"'").strip()
-        if name and name.lower() not in GENERIC_FAMILIES:
-            names.append(name)
-    return names
-
-
-def _font_findings(prop: str, value: str) -> List[str]:
-    bare = strip_var_calls(value).replace("!important", "").strip()
-    if prop == "font-family":
-        names = _named_families(bare)
-    elif prop == "font":
-        match = _FONT_SIZE_THEN_FAMILY.search(bare)
-        names = _named_families(match.group(1)) if match else [q.strip("\"'") for q in _QUOTED.findall(bare)]
-    else:
-        return []
-    return [f"font family {name!r} outside a var() fallback; use var(--brand-body-font) or var(--brand-heading-font)" for name in names]
-
-
-def _reference_finding(value: str) -> Optional[str]:
-    """Why a referenced file bakes a brand asset into the template, or ``None``."""
-    ref = value.strip()
-    if not ref or "{{" in ref or ref.startswith("#") or ref.lower().startswith("data:"):
-        return None
-    if _SCHEME.match(ref) or ref.startswith("//"):
-        return f"{ref[:80]!r} is a URL; a template carries no URLs (the brand kit supplies the logo)"
-    path = ref.split("#", 1)[0].split("?", 1)[0].lower()
-    path = path[2:] if path.startswith("./") else path
-    if "logo" in path or path.startswith(BRAND_ASSET_DIR):
-        return f"{ref[:80]!r} bakes a logo into the template; use {{{{ brand.logo }}}}"
-    return None
-
-
-def _declaration_findings(prop: str, value: str) -> List[str]:
-    findings = _font_findings(prop, value)
-    bare = strip_var_calls(value)
-    for match in _CSS_URL.finditer(bare):
-        finding = _reference_finding(next(g for g in match.groups() if g is not None))
-        if finding:
-            findings.append(finding)
-    colours = _QUOTED.sub("", _CSS_URL.sub("", bare))
-    findings += [
-        f"hex colour {colour} outside a var() fallback in '{prop}'; use var(--brand-…, {colour})"
-        for colour in HEX_COLOUR.findall(colours)
-    ]
-    return findings
-
-
-def _stylesheet_findings(css: str) -> List[str]:
-    # A placeholder's braces would hide its rule from the innermost-block scan.
-    text = PLACEHOLDER.sub("0", _CSS_COMMENT.sub("", css or ""))
-    return [
-        finding
-        for block in _INNERMOST_BLOCK.findall(text)
-        for prop, value in _declarations(block)
-        for finding in _declaration_findings(prop, value)
-    ]
-
-
-class _Scan(HTMLParser):
-    """Attributes, <style> bodies and <script> bodies of a composition."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.attributes: List[Tuple[str, str, str]] = []
-        self.styles: List[str] = []
-        self.scripts: List[str] = []
-        self._open: Optional[str] = None
-        self._buffer: List[str] = []
-
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
-        self.attributes += [(tag, name.lower(), value) for name, value in attrs if value is not None]
-        if tag in ("style", "script"):
-            self._open, self._buffer = tag, []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == self._open:
-            (self.styles if tag == "style" else self.scripts).append("".join(self._buffer))
-            self._open = None
-
-    def handle_data(self, data: str) -> None:
-        if self._open:
-            self._buffer.append(data)
-
-
-def _attribute_findings(tag: str, name: str, value: str) -> List[str]:
-    if name == "style":
-        return [f for prop, val in _declarations(value) for f in _declaration_findings(prop, val)]
-    if name in REFERENCE_ATTRIBUTES:
-        refs = [p.split()[0] for p in value.split(",") if p.split()] if name == "srcset" else [value]
-        return [f"<{tag} {name}>: {f}" for f in map(_reference_finding, refs) if f]
-    if name == "font-family" or (tag == "font" and name == "face"):
-        return [f"<{tag} {name}>: {f}" for f in _font_findings("font-family", value)]
-    if _WHOLE_HEX.match(value):
-        return [f"<{tag} {name}>: hex colour {value.strip()}; use a --brand-* variable in a style"]
-    return []
-
-
-def _script_findings(script: str) -> List[str]:
-    findings = [f"script: hex colour {m.group(2)} as a value; read a --brand-* variable" for m in _SCRIPT_HEX.finditer(script)]
-    findings += [f"script: {f}" for m in _SCRIPT_FONT.finditer(script) for f in _font_findings("font-family", m.group(2))]
-    return findings
-
-
-def brand_literals(html: str, css: str = "") -> List[Tuple[str, str]]:
-    """``(field, finding)`` for every colour, font or logo the template hardcodes (D4).
-
-    A hex colour, a named font family or a logo file counts only OUTSIDE a
-    ``var()`` fallback: ``color: var(--brand-primary, #1a1a2e)`` is the rule,
-    ``color: #1a1a2e`` breaks it. Generic families (``sans-serif``) and CSS-wide
-    keywords are fine; so are ``{{ brand.logo }}`` and data: URIs (textures).
-    """
-    scan = _Scan()
-    scan.feed(html or "")
-    scan.close()
-    found: List[Tuple[str, str]] = []
-    for style in scan.styles:
-        found += [("html", f"<style>: {f}") for f in _stylesheet_findings(style)]
-    for tag, name, value in scan.attributes:
-        found += [("html", f) for f in _attribute_findings(tag, name, value)]
-    for script in scan.scripts:
-        found += [("html", f) for f in _script_findings(script)]
-    found += [("css", f) for f in _stylesheet_findings(css or "")]
-    return list(dict.fromkeys(found))
-
-
 __all__ = [
     "BLOCK_KEYS",
     "IMAGE_SLOT",
@@ -837,7 +616,6 @@ __all__ = [
     "SOCIAL_VIDEO",
     "SocialTemplateError",
     "VIDEO_SLOT",
-    "brand_literals",
     "claim_names",
     "fill_text",
     "is_bundle_variable",
@@ -849,7 +627,6 @@ __all__ = [
     "slot_generatable",
     "slot_names_in",
     "still_moments",
-    "strip_var_calls",
     "validate_social_blocks",
     "voice_lines",
     "without_slots",

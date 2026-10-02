@@ -378,6 +378,68 @@ Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` 
 - **Render minutes.** The local edition has no monthly render quota. The hosted
   plans do: Basic 10, Pro 60 and Business 240 minutes a month.
 
+### Media links and public storage
+
+Socials hands out its media as presigned links: signed, expiring URLs to the
+stored file, served inline with the file's type (`video/mp4`, `image/jpeg`,
+`image/png`), so a browser plays them and a fetcher can ask for byte ranges. A
+link lives `SOCIALS_MEDIA_URL_TTL_SECONDS` (default 86400, one day).
+
+- **The approval view** shows a post's exact media through these links. Your
+  browser opens them, so they are signed against `S3_PUBLIC_ENDPOINT_URL`
+  (`http://localhost:9000` in `envs/api.defaults`, §6). Nothing else is needed.
+- **Publishing is file-first.** LinkedIn, X, Instagram, TikTok and YouTube get
+  the file itself through your Composio connection, so none of them needs to
+  reach your storage.
+- **Public storage** is needed only by a channel step that takes nothing but a
+  URL, which the platform then fetches: today, the YouTube custom thumbnail.
+  The hosted edition's AWS S3 serves such links as it is. The local edition's
+  MinIO is private, so that step shows **"Needs public storage"** and is skipped
+  until you set both of these in `envs/api.local`:
+  - `SOCIALS_PUBLIC_MEDIA_BUCKET`: the bucket platforms fetch from. Socials
+    copies the file into it under `social-media/<workspace>/<post>/<file>` and
+    links it from there. MinIO creates it on first use.
+  - `S3_PUBLIC_ENDPOINT_URL`: an address of your store that the internet can
+    reach (an `https://` host, never `localhost`). Every presigned link is
+    signed against it, so a reverse proxy in front of MinIO must pass the
+    `Host` header through unchanged. It can expose that bucket's path alone.
+
+### Publishing and scheduling posts
+
+Socials publishes an approved post to its channels itself (PRD-251 Wave 3), through
+the workspace's own Composio connections; no platform key goes in Settings. What it
+needs:
+
+- **`COMPOSIO_KEY`** (§7), each channel connected in Composio by the workspace
+  (LinkedIn, X, Instagram as a professional account, TikTok, YouTube), and the action
+  cache synced (Settings → Tools → Sync), so every step of a channel's sequence is
+  known.
+- **X: your own X API app.** Composio removed its managed X credentials in February
+  2026, so X is connected in Composio with the workspace's own X app. A refused X
+  credential shows this note on the channel's receipt.
+- **LinkedIn images** go through the workspace's own "LinkedIn Community Management
+  OAuth2 API" credential (Composio cannot upload LinkedIn images); text and video go
+  through Composio.
+- **The `media` profile** (above) for Instagram images: Instagram takes JPEG only and
+  the stills render as PNG, so `media-render` converts them at publish time. Without
+  it an Instagram image or carousel fails saying so; every other channel publishes.
+- **`SOCIALS_PUBLIC_MEDIA_BUCKET`** only for the YouTube custom thumbnail (see *Media
+  links and public storage*); without it the thumbnail is skipped and the receipt
+  says so.
+- **Scheduling** runs on the backend's scheduler (one worker holds the scheduler lock;
+  with `REDIS_URL` set its jobs survive a restart). A slot missed by more than
+  `SOCIALS_MISFIRE_GRACE_SECONDS` (default 1800) while the backend was down is marked
+  **Missed**, with a notification, and never posted late; reschedule it or publish
+  it now.
+- **Tuning** (optional, `envs/api.local`): `SOCIALS_MAX_TARGET_ATTEMPTS` (3 tries of
+  a channel on a transient error), `SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS` (5),
+  `SOCIALS_PUBLISH_POLL_SECONDS` (5) and `SOCIALS_PUBLISH_MAX_WAIT_SECONDS` (600) for a
+  platform still processing an upload, and `SOCIALS_PUBLISH_RUN_MAX_SECONDS` (1500),
+  one post's whole publish, kept under `BOOT_REAPER_STALE_MINUTES`.
+
+Agents never publish: they draft posts, a person approves them, and only the
+platform's publisher reaches a channel's publish action (D14).
+
 ### media-render on Railway (SaaS)
 
 The hosted edition runs the renderer as its own Railway service (owner sizing,

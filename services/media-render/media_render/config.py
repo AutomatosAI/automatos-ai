@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, TypeVar
 
 from .media_urls import UrlPrefix, parse_prefixes
 
@@ -88,7 +88,10 @@ class Settings:
     max_checks_per_workspace: int
     # Jobs not yet finished (checking, queued or rendering); past this, 503.
     max_active_jobs: int
-    # What a 503 tells the caller to wait before it submits again.
+    # One workspace's unfinished jobs; past this, 429 for that workspace alone, so
+    # one workspace's burst never holds every slot above (P251W1-RVW-4).
+    max_active_jobs_per_workspace: int
+    # What a 503 or a 429 tells the caller to wait before it submits again.
     busy_retry_after_seconds: int
     job_ttl_seconds: int
     sweep_interval_seconds: int
@@ -138,111 +141,168 @@ def _workers(raw: str) -> str:
     return raw
 
 
+@dataclass(frozen=True)
+class _Env:
+    """One environment mapping; every refusal names its variable."""
+
+    source: Mapping[str, str]
+
+    def text(self, name: str, default: str) -> str:
+        return (self.source.get(name) or "").strip() or default
+
+    def positive_int(self, name: str, default: int) -> int:
+        return _parse(name, self.text(name, str(default)), int, lambda v: v > 0, "a positive whole number")
+
+    def prefixes(self, name: str) -> Tuple[UrlPrefix, ...]:
+        try:
+            return parse_prefixes(self.source.get(name) or "")
+        except ValueError as exc:
+            raise ConfigError(f"{name}: {exc}") from None
+
+
+def _service(env: _Env) -> Dict[str, Any]:
+    """Where the service listens, and the token it asks for."""
+    return {
+        "environment": env.text("ENVIRONMENT", "development"),
+        "bind_host": env.text("MEDIA_RENDER_BIND_HOST", "0.0.0.0"),
+        "port": _parse(
+            "MEDIA_RENDER_PORT", env.text("MEDIA_RENDER_PORT", "8090"), int, lambda v: 0 < v < 65536, "a TCP port"
+        ),
+        "internal_token": (env.source.get(TOKEN_ENV) or "").strip(),
+    }
+
+
+def _image(env: _Env) -> Dict[str, Any]:
+    """The image's own files and programs (the Dockerfile's layout), and where jobs work."""
+    return {
+        "espeak_data_path": env.text("MEDIA_RENDER_ESPEAK_DATA_PATH", "/opt/espeak"),
+        "kokoro_model_path": env.text("MEDIA_RENDER_KOKORO_MODEL", "/opt/kokoro/kokoro-v1.0.onnx"),
+        "kokoro_voices_path": env.text("MEDIA_RENDER_KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin"),
+        "gsap_path": env.text("MEDIA_RENDER_GSAP_PATH", "/opt/media-render/vendor/gsap.min.js"),
+        "versions_path": env.text("MEDIA_RENDER_VERSIONS_PATH", "/opt/media-render/versions.json"),
+        "browser_path": env.text("HYPERFRAMES_BROWSER_PATH", "/opt/chrome/chrome-headless-shell"),
+        "hyperframes_bin": env.text("MEDIA_RENDER_HYPERFRAMES_BIN", "hyperframes"),
+        "ffmpeg_bin": env.text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
+        "ffprobe_bin": env.text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
+        "work_dir": env.text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
+        "music_dir": env.text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
+    }
+
+
+def _rendering(env: _Env) -> Dict[str, Any]:
+    """How a render runs, and how long each of its steps may take."""
+    return {
+        "render_quality": _parse(
+            "MEDIA_RENDER_QUALITY",
+            env.text("MEDIA_RENDER_QUALITY", "delivery"),
+            str,
+            lambda v: v in RENDER_QUALITIES,
+            "one of " + ", ".join(sorted(RENDER_QUALITIES)),
+        ),
+        "render_fps": _parse(
+            "MEDIA_RENDER_FPS",
+            env.text("MEDIA_RENDER_FPS", "30"),
+            int,
+            lambda v: v in RENDER_FPS,
+            "one of " + ", ".join(str(f) for f in sorted(RENDER_FPS)),
+        ),
+        "render_workers": _parse(
+            "MEDIA_RENDER_WORKERS", env.text("MEDIA_RENDER_WORKERS", "auto"), _workers, bool, "'auto' or a positive number"
+        ),
+        "render_timeout_seconds": env.positive_int("MEDIA_RENDER_RENDER_TIMEOUT_SECONDS", 900),
+        "check_timeout_seconds": env.positive_int("MEDIA_RENDER_CHECK_TIMEOUT_SECONDS", 300),
+        "mix_timeout_seconds": env.positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", 120),
+        "probe_timeout_seconds": env.positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
+        "fetch_timeout_seconds": env.positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
+    }
+
+
+def _admission(env: _Env) -> Dict[str, Any]:
+    """How many jobs run, wait and are held at once, overall and per workspace, and for how long."""
+    return {
+        "max_concurrent_renders": env.positive_int("MEDIA_RENDER_MAX_CONCURRENT_RENDERS", 2),
+        "max_renders_per_workspace": env.positive_int("MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE", 1),
+        "max_concurrent_checks": env.positive_int("MEDIA_RENDER_MAX_CONCURRENT_CHECKS", 1),
+        "max_checks_per_workspace": env.positive_int("MEDIA_RENDER_MAX_CHECKS_PER_WORKSPACE", 1),
+        "max_active_jobs": env.positive_int("MEDIA_RENDER_MAX_ACTIVE_JOBS", 20),
+        "max_active_jobs_per_workspace": env.positive_int("MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE", 4),
+        "busy_retry_after_seconds": env.positive_int("MEDIA_RENDER_BUSY_RETRY_AFTER_SECONDS", 30),
+        "job_ttl_seconds": env.positive_int("MEDIA_RENDER_JOB_TTL_SECONDS", 3600),
+        "sweep_interval_seconds": env.positive_int("MEDIA_RENDER_SWEEP_INTERVAL_SECONDS", 60),
+    }
+
+
+def _bundle_limits(env: _Env) -> Dict[str, Any]:
+    """What one bundle, and one voice request, may carry."""
+    return {
+        "media_url_prefixes": env.prefixes("MEDIA_RENDER_MEDIA_URL_PREFIXES"),
+        "max_bundle_bytes": env.positive_int("MEDIA_RENDER_MAX_BUNDLE_BYTES", 32 * MEBIBYTE),
+        "max_asset_bytes": env.positive_int("MEDIA_RENDER_MAX_ASSET_BYTES", 8 * MEBIBYTE),
+        "max_media_bytes": env.positive_int("MEDIA_RENDER_MAX_MEDIA_BYTES", 256 * MEBIBYTE),
+        "max_files": env.positive_int("MEDIA_RENDER_MAX_FILES", 32),
+        "max_duration_seconds": env.positive_int("MEDIA_RENDER_MAX_DURATION_SECONDS", 180),
+        "max_variables": env.positive_int("MEDIA_RENDER_MAX_VARIABLES", 200),
+        "max_variable_chars": env.positive_int("MEDIA_RENDER_MAX_VARIABLE_CHARS", 2000),
+        "max_brand_tokens": env.positive_int("MEDIA_RENDER_MAX_BRAND_TOKENS", 64),
+        "tts_max_lines": env.positive_int("MEDIA_RENDER_TTS_MAX_LINES", 40),
+        "tts_max_chars": env.positive_int("MEDIA_RENDER_TTS_MAX_CHARS", 500),
+    }
+
+
+def _voice(env: _Env) -> Dict[str, Any]:
+    """Kokoro's defaults, and how a spoken line is fitted to its script window."""
+    return {
+        "kokoro_voice": env.text("MEDIA_RENDER_KOKORO_VOICE", "af_heart"),
+        "kokoro_speed": _parse(
+            "MEDIA_RENDER_KOKORO_SPEED",
+            env.text("MEDIA_RENDER_KOKORO_SPEED", "0.95"),
+            float,
+            lambda v: 0.5 <= v <= 2.0,
+            "a speed between 0.5 and 2.0",
+        ),
+        "kokoro_lang": env.text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
+        "voice_max_tempo": _parse(
+            "MEDIA_RENDER_VOICE_MAX_TEMPO",
+            env.text("MEDIA_RENDER_VOICE_MAX_TEMPO", "1.25"),
+            float,
+            lambda v: VOICE_TEMPO_RANGE[0] <= v <= VOICE_TEMPO_RANGE[1],
+            f"a tempo from {VOICE_TEMPO_RANGE[0]:g} to {VOICE_TEMPO_RANGE[1]:g}",
+        ),
+        "voice_fit_gap_seconds": _parse(
+            "MEDIA_RENDER_VOICE_FIT_GAP_SECONDS",
+            env.text("MEDIA_RENDER_VOICE_FIT_GAP_SECONDS", "0.1"),
+            float,
+            lambda v: VOICE_FIT_GAP_RANGE[0] <= v < VOICE_FIT_GAP_RANGE[1],
+            f"seconds from {VOICE_FIT_GAP_RANGE[0]:g} up to {VOICE_FIT_GAP_RANGE[1]:g}",
+        ),
+    }
+
+
+def _frames(env: _Env) -> Dict[str, Any]:
+    """Previews (US-106) and stills (US-107)."""
+    return {
+        "preview_width": env.positive_int("MEDIA_RENDER_PREVIEW_WIDTH", 540),
+        "preview_max_frames": env.positive_int("MEDIA_RENDER_PREVIEW_MAX_FRAMES", 12),
+        "preview_reel_fps": env.positive_int("MEDIA_RENDER_PREVIEW_REEL_FPS", 2),
+        "preview_timeout_seconds": env.positive_int("MEDIA_RENDER_PREVIEW_TIMEOUT_SECONDS", 120),
+        "still_max_frames": env.positive_int("MEDIA_RENDER_STILL_MAX_FRAMES", 10),
+    }
+
+
 def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
     """Read the settings from ``env`` (the process environment by default).
 
     Raises ConfigError naming the variable when a value cannot be used, so a
     misconfigured container fails at boot rather than on its first render.
     """
-    source = os.environ if env is None else env
-
-    def text(name: str, default: str) -> str:
-        return (source.get(name) or "").strip() or default
-
-    def positive_int(name: str, default: int) -> int:
-        return _parse(name, text(name, str(default)), int, lambda v: v > 0, "a positive whole number")
-
-    def prefixes(name: str) -> Tuple[UrlPrefix, ...]:
-        try:
-            return parse_prefixes(source.get(name) or "")
-        except ValueError as exc:
-            raise ConfigError(f"{name}: {exc}") from None
-
+    read = _Env(os.environ if env is None else env)
+    # Unpacked one by one, so a field two sections both set is a TypeError, not a silent override.
     return Settings(
-        environment=text("ENVIRONMENT", "development"),
-        bind_host=text("MEDIA_RENDER_BIND_HOST", "0.0.0.0"),
-        port=_parse(
-            "MEDIA_RENDER_PORT", text("MEDIA_RENDER_PORT", "8090"), int, lambda v: 0 < v < 65536, "a TCP port"
-        ),
-        internal_token=(source.get(TOKEN_ENV) or "").strip(),
-        espeak_data_path=text("MEDIA_RENDER_ESPEAK_DATA_PATH", "/opt/espeak"),
-        kokoro_model_path=text("MEDIA_RENDER_KOKORO_MODEL", "/opt/kokoro/kokoro-v1.0.onnx"),
-        kokoro_voices_path=text("MEDIA_RENDER_KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin"),
-        kokoro_voice=text("MEDIA_RENDER_KOKORO_VOICE", "af_heart"),
-        kokoro_speed=_parse(
-            "MEDIA_RENDER_KOKORO_SPEED",
-            text("MEDIA_RENDER_KOKORO_SPEED", "0.95"),
-            float,
-            lambda v: 0.5 <= v <= 2.0,
-            "a speed between 0.5 and 2.0",
-        ),
-        kokoro_lang=text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
-        gsap_path=text("MEDIA_RENDER_GSAP_PATH", "/opt/media-render/vendor/gsap.min.js"),
-        versions_path=text("MEDIA_RENDER_VERSIONS_PATH", "/opt/media-render/versions.json"),
-        browser_path=text("HYPERFRAMES_BROWSER_PATH", "/opt/chrome/chrome-headless-shell"),
-        hyperframes_bin=text("MEDIA_RENDER_HYPERFRAMES_BIN", "hyperframes"),
-        ffmpeg_bin=text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
-        ffprobe_bin=text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
-        render_quality=_parse(
-            "MEDIA_RENDER_QUALITY",
-            text("MEDIA_RENDER_QUALITY", "delivery"),
-            str,
-            lambda v: v in RENDER_QUALITIES,
-            "one of " + ", ".join(sorted(RENDER_QUALITIES)),
-        ),
-        render_fps=_parse(
-            "MEDIA_RENDER_FPS",
-            text("MEDIA_RENDER_FPS", "30"),
-            int,
-            lambda v: v in RENDER_FPS,
-            "one of " + ", ".join(str(f) for f in sorted(RENDER_FPS)),
-        ),
-        render_workers=_parse(
-            "MEDIA_RENDER_WORKERS", text("MEDIA_RENDER_WORKERS", "auto"), _workers, bool, "'auto' or a positive number"
-        ),
-        render_timeout_seconds=positive_int("MEDIA_RENDER_RENDER_TIMEOUT_SECONDS", 900),
-        check_timeout_seconds=positive_int("MEDIA_RENDER_CHECK_TIMEOUT_SECONDS", 300),
-        mix_timeout_seconds=positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", 120),
-        probe_timeout_seconds=positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
-        fetch_timeout_seconds=positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
-        work_dir=text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
-        music_dir=text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
-        media_url_prefixes=prefixes("MEDIA_RENDER_MEDIA_URL_PREFIXES"),
-        max_concurrent_renders=positive_int("MEDIA_RENDER_MAX_CONCURRENT_RENDERS", 2),
-        max_renders_per_workspace=positive_int("MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE", 1),
-        max_concurrent_checks=positive_int("MEDIA_RENDER_MAX_CONCURRENT_CHECKS", 1),
-        max_checks_per_workspace=positive_int("MEDIA_RENDER_MAX_CHECKS_PER_WORKSPACE", 1),
-        max_active_jobs=positive_int("MEDIA_RENDER_MAX_ACTIVE_JOBS", 20),
-        busy_retry_after_seconds=positive_int("MEDIA_RENDER_BUSY_RETRY_AFTER_SECONDS", 30),
-        job_ttl_seconds=positive_int("MEDIA_RENDER_JOB_TTL_SECONDS", 3600),
-        sweep_interval_seconds=positive_int("MEDIA_RENDER_SWEEP_INTERVAL_SECONDS", 60),
-        max_bundle_bytes=positive_int("MEDIA_RENDER_MAX_BUNDLE_BYTES", 32 * MEBIBYTE),
-        max_asset_bytes=positive_int("MEDIA_RENDER_MAX_ASSET_BYTES", 8 * MEBIBYTE),
-        max_media_bytes=positive_int("MEDIA_RENDER_MAX_MEDIA_BYTES", 256 * MEBIBYTE),
-        max_files=positive_int("MEDIA_RENDER_MAX_FILES", 32),
-        max_duration_seconds=positive_int("MEDIA_RENDER_MAX_DURATION_SECONDS", 180),
-        max_variables=positive_int("MEDIA_RENDER_MAX_VARIABLES", 200),
-        max_variable_chars=positive_int("MEDIA_RENDER_MAX_VARIABLE_CHARS", 2000),
-        max_brand_tokens=positive_int("MEDIA_RENDER_MAX_BRAND_TOKENS", 64),
-        tts_max_lines=positive_int("MEDIA_RENDER_TTS_MAX_LINES", 40),
-        tts_max_chars=positive_int("MEDIA_RENDER_TTS_MAX_CHARS", 500),
-        voice_max_tempo=_parse(
-            "MEDIA_RENDER_VOICE_MAX_TEMPO",
-            text("MEDIA_RENDER_VOICE_MAX_TEMPO", "1.25"),
-            float,
-            lambda v: VOICE_TEMPO_RANGE[0] <= v <= VOICE_TEMPO_RANGE[1],
-            f"a tempo from {VOICE_TEMPO_RANGE[0]:g} to {VOICE_TEMPO_RANGE[1]:g}",
-        ),
-        voice_fit_gap_seconds=_parse(
-            "MEDIA_RENDER_VOICE_FIT_GAP_SECONDS",
-            text("MEDIA_RENDER_VOICE_FIT_GAP_SECONDS", "0.1"),
-            float,
-            lambda v: VOICE_FIT_GAP_RANGE[0] <= v < VOICE_FIT_GAP_RANGE[1],
-            f"seconds from {VOICE_FIT_GAP_RANGE[0]:g} up to {VOICE_FIT_GAP_RANGE[1]:g}",
-        ),
-        preview_width=positive_int("MEDIA_RENDER_PREVIEW_WIDTH", 540),
-        preview_max_frames=positive_int("MEDIA_RENDER_PREVIEW_MAX_FRAMES", 12),
-        preview_reel_fps=positive_int("MEDIA_RENDER_PREVIEW_REEL_FPS", 2),
-        preview_timeout_seconds=positive_int("MEDIA_RENDER_PREVIEW_TIMEOUT_SECONDS", 120),
-        still_max_frames=positive_int("MEDIA_RENDER_STILL_MAX_FRAMES", 10),
+        **_service(read),
+        **_image(read),
+        **_rendering(read),
+        **_admission(read),
+        **_bundle_limits(read),
+        **_voice(read),
+        **_frames(read),
     )

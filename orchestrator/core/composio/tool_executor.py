@@ -15,7 +15,7 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Sequence
 from uuid import UUID
 from datetime import datetime, timezone
 import time
@@ -28,6 +28,7 @@ from sqlalchemy import func
 from core.composio.client import ComposioClient, get_composio_client
 from core.composio.deny_list import composio_action_denial_async, denied_result
 from core.composio.post_gate import post_action_refusal, refused_result
+from core.composio import upload_spec
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +341,10 @@ class ComposioToolExecutor:
         params: Dict[str, Any],
         workspace_id: UUID,
     ) -> tuple[Dict[str, Any], list[Path]]:
-        """Delegate to the module-level resolve_file_uploads()."""
+        """Delegate to the module-level resolve_file_uploads(), unless the call
+        carries its own upload spec (execute_with_uploads, PRD-251 D8)."""
+        if upload_spec.is_publisher_call():
+            return params, []
         return await resolve_file_uploads(action, params, workspace_id)
 
     @staticmethod
@@ -360,6 +364,25 @@ class ComposioToolExecutor:
             "action": action,
             "execution_time_ms": int((time.time() - start_time) * 1000),
         }
+
+    async def execute_with_uploads(
+        self,
+        action: str,
+        params: Dict[str, Any],
+        *,
+        agent_id: int,
+        workspace_id: UUID,
+        app_name: str,
+        upload_params: Sequence[str] = (),
+        way_through: Optional[object] = None,
+    ) -> Dict[str, Any]:
+        """Run ``action`` for the platform with the call's own upload spec (PRD-251
+        D8): the deny list, the post gate, the files, then :meth:`execute`
+        (``core/composio/upload_spec.py``, :func:`~core.composio.upload_spec.execute_with_uploads`)."""
+        return await upload_spec.execute_with_uploads(
+            self, action, params, agent_id=agent_id, workspace_id=workspace_id,
+            app_name=app_name, upload_params=upload_params, way_through=way_through,
+        )
 
     async def execute(
         self,

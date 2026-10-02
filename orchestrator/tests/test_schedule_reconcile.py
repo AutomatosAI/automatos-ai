@@ -280,11 +280,15 @@ class TestTick:
             pbmod, "get_playbook_scheduler",
             lambda: SimpleNamespace(reconcile_with_db=lambda _db: {"added": 1, "changed": 0, "removed": 0}),
         )
+        import modules.socials.schedule_jobs as socials_jobs
+        monkeypatch.setattr(socials_jobs, "reconcile", lambda s, _db: {"added": 2, "moved": 0, "removed": 1})
         out = sr.run_reconcile_once(_FakeScheduler())
         assert out == {
             "tasks": {"added": 1, "removed": 0, "skipped": False},
             "heartbeats": {"added": 0, "removed": 2, "changed": 0},
             "playbooks": {"added": 1, "changed": 0, "removed": 0},
+            # PRD-251 D10 (US-306): scheduled social posts' one-shot jobs.
+            "socials": {"added": 2, "moved": 0, "removed": 1},
         }
         assert db.closed is True
 

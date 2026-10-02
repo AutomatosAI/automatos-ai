@@ -111,7 +111,7 @@ export function DeliverablesStudio() {
         ))}
       {tab === 'blogs' && <DeliverablesBlog variant="studio" />}
       {tab === 'templates' && <TemplateStudio />}
-      {tab === 'socials' && <SocialsTab />}
+      {tab === 'socials' && <SocialsTab postId={searchParams?.get('post') ?? null} />}
     </div>
   )
 }

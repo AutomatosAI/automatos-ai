@@ -1,7 +1,8 @@
 /**
  * Calendar kinds — what an item IS decides its colour; the agent is the dot.
  *
- * The feed (GET /api/activity/schedule) carries five kinds. Colouring by agent
+ * The feed (GET /api/activity/schedule) carries six kinds (a scheduled social post
+ * is the sixth, PRD-251 US-307). Colouring by agent
  * (the old scheme) made a heartbeat, a playbook run and a deadline for the same
  * agent indistinguishable, and a calendar full of WATCHTOWER grey said nothing
  * about what was actually scheduled. The legend in the calendar toolbar uses
@@ -24,10 +25,11 @@ export const KIND_META: Record<ScheduleItemType, KindMeta> = {
   task: { label: 'Scheduled task', plural: 'scheduled tasks', tone: 'hsl(158 44% 35%)' },
   mission: { label: 'Mission SLA', plural: 'mission SLAs', tone: 'hsl(28 70% 45%)' },
   task_due: { label: 'Task deadline', plural: 'deadlines', tone: 'hsl(345 60% 45%)' },
+  social: { label: 'Social post', plural: 'social posts', tone: 'hsl(221 70% 52%)' },
 }
 
 /** Legend order: recurring things first, deadlines last. */
-export const KIND_ORDER: readonly ScheduleItemType[] = ['routine', 'recipe', 'task', 'mission', 'task_due']
+export const KIND_ORDER: readonly ScheduleItemType[] = ['routine', 'recipe', 'task', 'mission', 'social', 'task_due']
 
 export function kindTone(type: ScheduleItemType): string {
   return (KIND_META[type] ?? KIND_META.routine).tone

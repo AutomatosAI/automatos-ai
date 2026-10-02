@@ -103,6 +103,7 @@ class ComposioClient:
             logger.warning("COMPOSIO_API_KEY/COMPOSIO_KEY not set. Composio integration will not work.")
         
         self._composio = None
+        self._composio_once = None  # PRD-251 D8: the handle that never re-sends a call
         self._toolset = None
         self._action_count_cache: Dict[str, Any] = {}
         self._action_count_ttl_seconds = 600
@@ -123,7 +124,12 @@ class ComposioClient:
     
     @property
     def composio(self):
-        """Lazy-load Composio client."""
+        """Lazy-load Composio client. Inside a Socials publisher call it is the handle
+        with the SDK's re-send off (``_send_once_handle``, PRD-251 D8)."""
+        from core.composio.upload_spec import is_publisher_call
+
+        if is_publisher_call():
+            return self._send_once_handle()
         if self._composio is None and self.api_key:
             with _sdk_init_lock:
                 if self._composio is None:
@@ -141,6 +147,20 @@ class ComposioClient:
                         toolkit_versions={"default": "latest", "shopify": "20260414_00"},
                     )
         return self._composio
+
+    def _send_once_handle(self):
+        """The Composio handle with the SDK's re-send off (PRD-251 D8): the Socials
+        publisher's calls go through it, since a publish re-sent after a timeout or a
+        5xx the platform had already acted on posts twice."""
+        if self._composio_once is None and self.api_key:
+            with _sdk_init_lock:
+                if self._composio_once is None:
+                    self._composio_once = _get_composio()(
+                        api_key=self.api_key,
+                        toolkit_versions={"default": "latest", "shopify": "20260414_00"},
+                        max_retries=0,
+                    )
+        return self._composio_once
 
     @property
     def toolset(self):

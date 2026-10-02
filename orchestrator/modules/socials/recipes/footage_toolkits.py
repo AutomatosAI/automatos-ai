@@ -78,6 +78,11 @@ class FootageToolError(FootageError):
     """The toolkit answered a call with an error, or with nothing a recipe can use."""
 
 
+class FootageUntracked(FootageToolError):
+    """The toolkit took the shot but named no job to poll: it may still make it,
+    and bill it, so its booking stays (P251W1-RVW-5)."""
+
+
 @dataclass(frozen=True)
 class Shot:
     """One slot to generate: what the post asks, and the shape the template shows it in."""
@@ -301,7 +306,7 @@ class FalRecipe(FootageRecipe):
         answer = await ask(SUBMIT, {"model_id": route.model, "input": request}, ("model_id", "input"))
         request_id = find_text(answer, ("request_id", "requestId"))
         if not request_id:
-            raise FootageToolError(f"fal.ai took the {shot.label.lower()} but gave no request id")
+            raise FootageUntracked(f"fal.ai took the {shot.label.lower()} but gave no request id")
         return request_id
 
     async def check(self, ask: Ask, shot: Shot, route: Route, job: Any) -> JobState:

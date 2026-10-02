@@ -21,6 +21,21 @@
 > - **S4.4 (the `media` cost lane) moves into Wave 1**, because S1.8 books footage spend and needs the lane to exist.
 > - **The agent layer moves into Wave 1 (owner, later on 2026-09-23: "reuse what exists").** Add brand-kit tools, Socials draft tools (S4.1), social formats in `generate_document` and a general image tool, the post gate (S3.5), built-in skills synced from `automatos-skills` with no push, and the Socials marketplace package. The package has two agents, Social Media Director and Brand Designer, and four playbooks: brand kit from your website, launch video, weekly social posts (S4.2) and image carousel. The owner tests through the package on his local stack. PRs come later.
 >
+> **Waves 2+3 build (2026-09-25).** Owner: "We can go back to development and finish the social build?", then "lets keep building on their own branch and we can test each stage one at a time". Each wave is its own Ralph run on its own branch, launched by the owner and tested on the socials stack before the next launches:
+> - **Wave 2**, `feat/prd-251-w2-socials-tab` (`scripts/ralph/launch-251w2.sh`, 10 stories, US-201..US-210): the tab you can test by hand, plus what the composer needs from the Wave 3 list below — media hosting (S3.4), the channel registry (S3.2) and channels as approved content. It carries ONE migration (`social_campaigns`). Nothing publishes yet: publish-now answers 501.
+> - **Wave 3**, `feat/prd-251-w3-publish` (`scripts/ralph/launch-251w3.sh`, 9 stories, US-301..US-309): the publisher, the five channel publishers, scheduling, the publish controls in the post view, and the calendar. No migration is expected.
+>
+> Each wave stacks on the previous wave's branch until that wave is on `main`. These points were checked in the code and in Composio's docs on 2026-09-25, and they amend the decisions below:
+> - **Channels are approved content.** Before this run, the content hash (D6) covered copy, variables, sources, format, template and media, but not the post's channels, so a channel added after approval would have published without one. The hash now covers the target set, and a target change voids approval like any edit. Socials is dormant everywhere, so no real approval is lost.
+> - **File-first publishing.** Every channel's media action on Composio takes a file: LinkedIn video, X media, Instagram `image_file`/`video_file`, TikTok `file_to_upload`, YouTube `videoFilePath`. The publishers pass files, through the executor's file resolver with a per-channel upload spec. The global `UPLOAD_ACTIONS` list is never widened. Public storage (D9) is needed only where an action takes nothing but a URL, today just the YouTube custom thumbnail. This replaces D9's "Instagram and TikTok need a public bucket".
+> - **LinkedIn images** keep going through the workspace-scoped workaround (S0.4), because Composio's own LinkedIn image upload is broken (Composio issues #3094/#3113/#3231). LinkedIn video uses `LINKEDIN_UPLOAD_VIDEO` → `LINKEDIN_CREATE_VIDEO_POST`. The owner's live test decides whether video needs the workaround's approach too.
+> - **X needs the customer's own X app.** Composio's docs: "As of February 2026, Composio managed credentials for the Twitter toolkit have been removed. You must now bring your own Twitter API credentials." The channel list shows this as a setup note.
+> - **TikTok uploads files.** `TIKTOK_PUBLISH_VIDEO` and `TIKTOK_POST_PHOTO` pull media from a URL on a domain the app owner has verified. Composio owns the app, so our storage domain can't be verified. The publisher therefore uses `TIKTOK_UPLOAD_VIDEO`, with the privacy level chosen from `TIKTOK_QUERY_CREATOR_INFO` and `is_aigc` set for generated footage.
+> - **Reschedule is `POST /api/socials/posts/{id}/schedule`** on a scheduled post, which moves the slot and keeps the approval. `PATCH` stays the content edit, which voids approval. This replaces D10's "drag calls PATCH".
+> - **Times are shown in the post's own timezone** (`social_posts.timezone`, set from the scheduler's browser). There is no workspace timezone field (`workspaces` has none). This replaces "the workspace timezone" in D10, S3.1 and Traps.
+> - **The action cache often has empty schemas.** `composio_actions_cache.parameters` is empty after the v3 bulk sync. A seeded adapter needs only the slug to be present in the cache, and carries its own documented parameters.
+> - **The owner's items.** One live publish per channel, and the browser checks at 390 px and 1440 px, are the owner's to run: `docs/PRDS/prd251-w2-owner-test.md` (the tab) and `docs/PRDS/prd251-w3-owner-test.md` (publishing). CI has no Composio connections, and nothing runs on the build machine.
+
 > **Lineage:** `docs/PRDS/prd-content-engine.md:5,132` deferred social distribution to "a separate future PRD". This is that PRD.
 >
 > **Proof of concept (outside the repo):** `Automatos-AI-Platform/brag-output-2026-09-22-225946/`. A 39.5 s, 1080×1920 promo rendered from one HTML composition with Hyperframes, a local Kokoro voice-over, a CC BY music bed with ducking, and captions. It is the reference implementation for the render pipeline in Wave 1 (`composition/index.html`, `composition/scripts/mix.py`, `composition/scripts/synth_vo.py`).
@@ -332,7 +347,7 @@ It keeps the same GET/PUT API and dialog. The dialog also opens from the Socials
 - **Storage:** rendered files go to S3 under `social-media/{workspace}/{post}/{file}` and are registered as Deliverables.
 - **At publish time** the publisher mints a presigned GET with `ResponseContentDisposition=inline`, the correct `ResponseContentType`, and a TTL of `SOCIALS_MEDIA_URL_TTL_SECONDS` (24 h).
 - **Never** use `/api/generated-images/` (the 1000-key and Range defects).
-- **Local edition:** channels that fetch media by URL (Instagram, TikTok publish-from-URL, the YouTube thumbnail) need `SOCIALS_PUBLIC_MEDIA_BUCKET` configured. Otherwise those channels show "needs public storage".
+- **Local edition:** publishing is file-first (Waves 2+3 build), so only actions that take nothing but a URL need public storage — today the YouTube custom thumbnail. They need `SOCIALS_PUBLIC_MEDIA_BUCKET` configured; otherwise that step shows "needs public storage" and is skipped.
 
 ### D10 · Scheduling uses the socials service's own one-shot jobs
 - Each scheduled post registers an APScheduler `DateTrigger` job, id `social-publish-<post_id>`, registered with args (not a closure) so the RedisJobStore can pickle it.
@@ -343,8 +358,8 @@ It keeps the same GET/PUT API and dialog. The dialog also opens from the Socials
   - The backend gets a sixth source, `_social_post_items`, with id `social-<post_id>`.
   - The frontend gets a new kind, `social`, in the three union files.
   - Clicking an item opens the post.
-  - Drag-to-reschedule calls `PATCH /api/socials/posts/{id}` with `scheduled_for`.
-  - Times are stored in UTC and shown in the workspace timezone.
+  - Drag-to-reschedule (and a Reschedule menu item) calls `POST /api/socials/posts/{id}/schedule` on the scheduled post: the slot moves, the approval stands. `PATCH` stays the content edit, which voids approval (Waves 2+3 build).
+  - Times are stored in UTC and shown in the post's own timezone (`social_posts.timezone`); there is no workspace timezone field.
 
 ### D11 · Voice: Kokoro by default, or a Composio voice tool the workspace has connected
 
@@ -669,7 +684,7 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
 - **Acceptance:**
   - [ ] A post scheduled 2 minutes ahead publishes once. Two backend workers do not double-publish, thanks to the fcntl lock plus the idempotency key.
   - [ ] A backend down across the slot for longer than the grace period yields `missed` and a notification.
-  - [ ] The calendar shows the post in the workspace timezone.
+  - [ ] The calendar shows the post in the post's own timezone.
 - **Editions:** both.
 
 **S3.2 · Channel capability registry (M)**
@@ -689,14 +704,14 @@ This makes the "UI story" and "app promo" kinds of video (reference v1 and Acade
   - [ ] Against a mocked Composio executor, the adapter issues the documented action sequence.
   - [ ] A transient error retries up to `SOCIALS_MAX_TARGET_ATTEMPTS`.
   - [ ] A 4xx error does not retry and surfaces the platform's message.
-  - [ ] One live smoke publish per channel to an owner-controlled test account, recorded in the PR (no spend).
+  - [ ] One live smoke publish per channel to an owner-controlled test account, run by the owner (`docs/PRDS/prd251-w3-owner-test.md`) and recorded in the PR (no spend).
 - **Editions:** both, subject to D9.
 
 **S3.4 · Media hosting (S)**
 - S3 keys and presigned inline URLs, per D9.
 - **Acceptance:**
   - [ ] The presigned URL returns `Content-Type: video/mp4` and `Content-Disposition: inline`, and supports Range requests (checked with a HEAD and a Range GET in CI against MinIO).
-- **Editions:** both (local needs a public bucket for URL-fetch channels).
+- **Editions:** both (local needs a public bucket only for URL-only actions, today the YouTube thumbnail).
 
 **S3.5 · One way out (M; D14b confirmed 2026-09-23 — built in Wave 1 as US-118)**
 - The executor guard: when Socials is on, a direct agent call to a registry-classified post action returns a structured refusal pointing to `platform_create_social_post`.
@@ -773,7 +788,7 @@ Engagement is scoped here, not specified:
 | Kokoro voice | ✔ | ✔ (in `media-render`) |
 | Paid footage, stills and voice (the workspace's Composio tools) | ✔ | Needs `COMPOSIO_KEY` |
 | Publish via Composio | ✔ | Needs `COMPOSIO_KEY` |
-| URL-fetch channels (Instagram, TikTok publish-from-URL, YouTube thumbnail) | ✔ | Needs `SOCIALS_PUBLIC_MEDIA_BUCKET` |
+| URL-only actions (today the YouTube custom thumbnail; publishing is file-first) | ✔ | Needs `SOCIALS_PUBLIC_MEDIA_BUCKET` |
 | Series approval | ✔ | ✔ |
 
 ## Not in this PRD (owner decisions)
@@ -816,10 +831,10 @@ Engagement is scoped here, not specified:
 
 | Assumption | How it is settled |
 |---|---|
-| The TikTok publish-from-URL slug and parameters | Query `composio_actions_cache` where `app_name='tiktok'` |
-| The YouTube upload action accepts a `FileUploadable` | The cached schema for `YOUTUBE_UPLOAD_VIDEO` |
-| LinkedIn has a video post action | The cached LinkedIn schemas |
-| Instagram fetches from a presigned S3 URL with a query string | Owner test account, one Reel |
+| The TikTok slugs and parameters | Checked 2026-09-25 on Composio's docs (`TIKTOK_UPLOAD_VIDEO`, `TIKTOK_FETCH_PUBLISH_STATUS`, `TIKTOK_QUERY_CREATOR_INFO`); the owner's test confirms them in `composio_actions_cache` |
+| The YouTube upload action accepts a `FileUploadable` | Composio's docs, 2026-09-25: `videoFilePath` is a file object, with title, description, categoryId, privacyStatus and tags all required |
+| LinkedIn has a video post action | Composio's docs, 2026-09-25: `LINKEDIN_UPLOAD_VIDEO` → `LINKEDIN_CREATE_VIDEO_POST`; the owner's live test proves it end to end |
+| Instagram takes our media | File-first: `image_file`/`video_file` on `INSTAGRAM_POST_IG_USER_MEDIA` (Composio's docs, 2026-09-25); owner test account, one Reel |
 | Hyperframes renders headless on Linux within budget | CI render of the proof-of-concept bundle, timed (the 2 m 42 s baseline was measured on a macOS 8-core machine) |
 | Kokoro in the container | Boot assertion on the data path length, plus one line synthesised |
 | Pinned Hyperframes stays compatible | `hyperframes check` passes on every seeded template in CI |
@@ -849,10 +864,14 @@ Engagement is scoped here, not specified:
 - **ElevenLabs on Composio uses the customer's API key.** Its "Text to speech" action (`ELEVENLABS_TEXT_TO_SPEECH`) returns a downloadable audio file, and "Get voices list" lists the voices. Confirm both slugs in the action cache before seeding.
 - **Composio's Ayrshare has three tools and no create-post action.** Don't plan publishing through it.
 - **Provider output URLs expire.** Copy every generated file into our storage the moment its job completes.
-- **`UPLOAD_ACTIONS` omits Instagram and TikTok.** Use the adapters; do not widen the global list blindly.
+- **`UPLOAD_ACTIONS` omits Instagram and TikTok.** Use the adapters with their own upload spec; do not widen the global list blindly.
+- **X credentials:** Composio removed its managed X credentials in February 2026. Each workspace connects X with its own X API app.
+- **TikTok URL pulls need a verified domain.** Composio owns the TikTok app, so upload files (`TIKTOK_UPLOAD_VIDEO`); never `TIKTOK_PUBLISH_VIDEO` or `TIKTOK_POST_PHOTO` for our media.
+- **Stale slugs:** `TWITTER_CREATE_TWEET` (the real one is `TWITTER_CREATION_OF_A_POST`) and the deprecated Instagram actions (`INSTAGRAM_CREATE_MEDIA_CONTAINER`, `INSTAGRAM_CREATE_POST`, `INSTAGRAM_GET_POST_STATUS`).
+- **Empty cached schemas:** `composio_actions_cache.parameters` is often empty after the bulk sync; seeded adapters carry their own parameters.
 - **Seed and skill slugs disagree** (`LINKEDIN_CREATE_POST` vs `LINKEDIN_CREATE_LINKED_IN_POST`). Resolve slugs from the cache (S3.2).
 - **The scheduler runs on one uvicorn worker** (fcntl lock). Its job store pickles jobs, so register with ids and arguments, never closures. Publishing must be idempotent.
-- **Times:** UTC in the database, the workspace timezone in the UI.
+- **Times:** UTC in the database, the post's own timezone in the UI.
 - **The GPL boundary:** `phonemizer` and espeak-ng are GPL-3.0. Keep them in `media-render`, never imported by the orchestrator.
 - **CC BY music** needs its credit line.
 - **Canonical terms:** Deliverable (not "output" or "artifact"), Playbook, Command Center, Auto.

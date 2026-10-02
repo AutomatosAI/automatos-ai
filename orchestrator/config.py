@@ -1909,6 +1909,14 @@ class Config:
     SOCIALS_MISFIRE_GRACE_SECONDS: int = int(os.getenv("SOCIALS_MISFIRE_GRACE_SECONDS", "1800"))
     # D8: transient-error retries per channel target.
     SOCIALS_MAX_TARGET_ATTEMPTS: int = int(os.getenv("SOCIALS_MAX_TARGET_ATTEMPTS", "3"))
+    # D8 (US-301): the publisher. A transient failure tries again after this many
+    # seconds times the attempt; a status step (an upload processing, a publish
+    # finishing) is called every POLL seconds for at most MAX_WAIT; one post's whole
+    # publish lives at most RUN_MAX, under BOOT_REAPER_STALE_MINUTES.
+    SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS", "5"))
+    SOCIALS_PUBLISH_POLL_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_POLL_SECONDS", "5"))
+    SOCIALS_PUBLISH_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_MAX_WAIT_SECONDS", "600"))
+    SOCIALS_PUBLISH_RUN_MAX_SECONDS: int = int(os.getenv("SOCIALS_PUBLISH_RUN_MAX_SECONDS", "1500"))
     # D3: the media-render service (Wave 1). Empty = no renderer configured.
     SOCIALS_RENDER_URL: str = os.getenv("SOCIALS_RENDER_URL", "").strip()
     # S1.1c: the client (core/media_render_client.py). The token is sent as
@@ -1924,6 +1932,11 @@ class Config:
     # live process still owns.
     SOCIALS_RENDER_POLL_SECONDS: int = int(os.getenv("SOCIALS_RENDER_POLL_SECONDS", "5"))
     SOCIALS_RENDER_MAX_WAIT_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_WAIT_SECONDS", "1500"))
+    # P251W1-RVW-3: the longest composition media-render renders (its own
+    # MEDIA_RENDER_MAX_DURATION_SECONDS). A render holds its composition's
+    # declared duration against the monthly quota while it runs, at most this;
+    # one whose duration cannot be read holds this much.
+    SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
@@ -1973,6 +1986,17 @@ class Config:
     SOCIALS_MEDIA_MONTHLY_CAP_USD: float = float(os.getenv("SOCIALS_MEDIA_MONTHLY_CAP_USD", "30"))
     SOCIALS_KIEAI_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_KIEAI_USD_PER_CREDIT", "0.005"))
     SOCIALS_HIGGSFIELD_USD_PER_CREDIT: float = float(os.getenv("SOCIALS_HIGGSFIELD_USD_PER_CREDIT", "0.0625"))
+    # A voice toolkit's script (S1.5) is priced before its first line is spoken,
+    # at these prices per unit, and must fit the same two caps (P251W1-RVW-2).
+    # Fish Audio bills API credit per UTF-8 byte: $15 per million bytes
+    # (docs.fish.audio, 2026-09-28); its render still books its balance
+    # difference. ElevenLabs bills the customer's own plan per character: $0.08
+    # per 1,000, its API rate for its dearest models (elevenlabs.io/pricing/api,
+    # 2026-09-28), so a cap binds early; its render books its characters at this.
+    SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE: float = float(os.getenv("SOCIALS_VOICE_FISH_AUDIO_USD_PER_BYTE", "0.000015"))
+    SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER: float = float(
+        os.getenv("SOCIALS_VOICE_ELEVENLABS_USD_PER_CHARACTER", "0.00008")
+    )
     # D9: the local edition's public bucket for channels that fetch media by URL
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".
@@ -1985,6 +2009,9 @@ class Config:
     # socials.post_actions system setting) is cached per process
     # (core/composio/post_gate.py). An edit applies within this, with no restart.
     SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS: int = int(os.getenv("SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS", "30"))
+    # PRD-251 S2.2a (US-207): how long the composer waits for the model to turn a
+    # brief into a draft proposal (POST /api/socials/compose answers 504 after it).
+    SOCIALS_COMPOSE_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_COMPOSE_TIMEOUT_SECONDS", "60"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

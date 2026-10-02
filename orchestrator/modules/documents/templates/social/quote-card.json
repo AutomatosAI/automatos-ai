@@ -1,6 +1,6 @@
 {
   "name": "Quote card",
-  "description": "A pull-quote set large on the brand's paper, one phrase in the brand colour, with who said it. Ported from the automatos-social quote family.",
+  "description": "A pull-quote set large on the brand's paper, one phrase in the brand colour, with who said it.",
   "format": "social_image",
   "category": "social",
   "sizes": [
@@ -64,7 +64,7 @@
     "quote_accent": "harness is the moat",
     "attribution": "LangChain, canonical definition, 2026",
     "counter": "",
-    "handle": "@automatos.app",
+    "handle": "@yourbrand",
     "cta": "Save this post"
   }
 }

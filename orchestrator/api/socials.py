@@ -13,8 +13,7 @@ post is a 404. Review actions (approve, request changes, reject) need
 The lifecycle lives in ``modules/socials/service.py``; this module maps its
 errors: IllegalTransition → 409, StaleContent → 409 (giving the current
 ``content_hash``), UnsourcedClaims → 422 (naming the claims), SourcesNotFound →
-422 (naming each claim and why), NotPublishable → 409, PublishingUnavailable →
-501, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
+422 (naming each claim and why), NotPublishable → 409, InvalidPost → 422, NotRenderable → 422, RenderQuotaExceeded → 429,
 RendererUnavailable → 503, ReportNotFound → 404, ChartNotBindable → 422,
 ReportUnreadable → 503, PostNotFound → 404.
 
@@ -22,14 +21,20 @@ Facts carry sources (D7, S1.4): a save refuses a source it adds or changes
 unless it resolves in the caller's workspace (``modules/socials/sources.py``);
 an approval resolves every source again, and a claim whose source is gone counts
 as unsourced. ``GET /sources`` searches candidates per kind for the composer.
+Included below: ``api/socials_channels.py`` (D8, S3.2), ``api/socials_targets.py``
+(US-204), ``api/socials_campaigns.py``, campaigns and series approval (S2.4), and
+``api/socials_publish.py``, publish now and retry (Wave 3, US-301).
 
 Rendering (S1.1c): ``POST /posts/{id}/render`` checks the post, its template,
-the month's render minutes (refused before anything reaches media-render),
-storage and the renderer, then moves the post to ``rendering`` and answers 202;
-the render runs in the background (``modules/socials/render.py``) and ends the
-post in ``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}``
-streams a rendered file (the Deliverable's preview link), and ``GET /usage``
-reads the render minutes used and the quota.
+the month's render minutes, counting those renders in progress hold (refused
+before anything reaches media-render, P251W1-RVW-3), storage and the renderer,
+then moves the post to ``rendering`` and answers 202; the render runs in the
+background (``modules/socials/render.py``) and ends the post in
+``needs_approval`` or ``failed``. ``GET /posts/{id}/media/{file}`` streams a
+rendered file (the Deliverable's preview link), and ``GET /usage`` reads the
+render minutes used and held, and the quota. ``GET /posts/{id}/media`` lists the
+post's media as presigned inline links (D9, S3.4: ``modules/socials/media_urls.py``),
+the exact files the approval view shows.
 
 Voice (S1.5, D11): a post is spoken by Kokoro unless its ``voice`` names a
 voice toolkit the workspace has connected in Composio (Fish Audio, ElevenLabs);
@@ -77,7 +82,7 @@ and rendering a post are the flows ``create_post``, ``edit_post``,
 ``submit_post`` and ``render_post``, which the routes and the platform tools
 (``modules/tools/discovery/handlers_socials.py``) both call. There is no flow
 that approves, schedules or publishes for a tool to reach: a person approves in
-the Socials tab (D6), and the platform publishes (Wave 3).
+the Socials tab (D6), and the platform publishes it (``api/socials_publish.py``).
 """
 
 from __future__ import annotations
@@ -93,6 +98,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.socials_campaigns import router as campaigns_router
+from api.socials_channels import router as channels_router
+from api import socials_preview
+from api.socials_publish import router as publish_router
+from api.socials_compose import router as compose_router
+from api.socials_targets import router as targets_router
 from config import config
 from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
@@ -104,15 +115,15 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SOCIAL_POST_STATUSES, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SocialTemplateError, slot_generatable, validate_social_blocks
+from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, render, service
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service
 from modules.socials import credits as post_credits
-from modules.socials import report_charts
+from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
-from modules.socials.publisher import PublishingUnavailable, publish_post
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
 from modules.socials.settings import require_socials_enabled
@@ -124,6 +135,8 @@ router = APIRouter(
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
+for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router):
+    router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
@@ -196,6 +209,11 @@ class RejectRequest(_Strict):
     reason: Optional[str] = None
 
 
+class RenderRequest(_Strict):
+    # US-208: the composer's half-resolution preview, stored as the post's preview.
+    preview: bool = False
+
+
 class ScheduleRequest(_Strict):
     scheduled_for: datetime
     timezone: str = "UTC"
@@ -224,9 +242,7 @@ def _raise_for(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=422, detail={"message": str(exc), "unresolved": exc.unresolved})
     if isinstance(exc, service.StaleContent):
         raise HTTPException(status_code=409, detail={"message": str(exc), "content_hash": exc.current_hash})
-    if isinstance(exc, PublishingUnavailable):
-        raise HTTPException(status_code=501, detail=str(exc))
-    if isinstance(exc, (service.IllegalTransition, service.NotPublishable)):
+    if isinstance(exc, (service.IllegalTransition, service.NotPublishable, preview.PreviewInProgress)):
         raise HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, (service.InvalidPost, render.NotRenderable)):
         raise HTTPException(status_code=422, detail=str(exc))
@@ -277,7 +293,10 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
     another writer committed first, roll back, write nothing and raise
     :class:`service.StaleContent` with the post's current hash (409). Call it
     straight after the service mutation: a query in between would autoflush the
-    change before the check."""
+    change before the check. A write that moved the post into needs_approval
+    notifies its approvers once committed (US-206), and the post's scheduled job
+    follows its status and slot (US-306: scheduled, rescheduled, unscheduled, or
+    an edit that voided the approval)."""
     post_id, workspace_id = post.id, post.workspace_id
     if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
@@ -285,7 +304,11 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
         if current is None:
             raise service.PostNotFound()
         raise service.StaleContent(service.compute_content_hash(current))
-    return _save(db, post)
+    saved = _save(db, post)
+    notify.notify_if_entered(status, post)
+    # D10 (US-306): the post's one-shot job follows its status and slot.
+    schedule_jobs.sync_job(post)
+    return saved
 
 
 def _workspace(db: Session, ctx: RequestContext) -> Workspace:
@@ -460,12 +483,13 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     rendering (IllegalTransition), has no social template (NotRenderable), is a
     chart bound to a report that no longer shows the report's rows or names it,
     names a voice toolkit the workspace cannot speak with now, the workspace has
-    used its render minutes this month (RenderQuotaExceeded, before any call to
-    media-render), or there is no storage or renderer to use
+    used its render minutes this month, counting those renders in progress hold
+    (RenderQuotaExceeded, before any call to media-render; a render holds its
+    seconds from then until it ends), or there is no storage or renderer to use
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
     the files in ``media``, or in ``failed`` with the report in ``review_log``:
-    a render whose footage would take the post or the workspace over its media
-    cap submits nothing and fails saying why (D13).
+    a render whose footage or voice would take the post or the workspace over
+    its media cap submits nothing more and fails saying why (D13).
     """
     status, content_hash = post.status, post.content_hash
     voice = post.voice
@@ -489,10 +513,14 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     voice_plan = None
     if voice and voice_script(bundle):
         voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, workspace.id))
-    render_quota.enforce_render_quota(db, workspace)
-    await render.ensure_renderer()
-    service.start_render(post, actor)
-    saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
+    reservation = await render.reserve_seconds(db, workspace, post, template)
+    try:
+        await render.ensure_renderer()
+        service.start_render(post, actor)
+        saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
+    except BaseException:
+        await render_quota.release_render(render_quota.sessions_for(db), reservation)
+        raise
     _launch_render(
         render.RenderJob(
             post_id=post.id,
@@ -504,6 +532,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             bundle=bundle,
             voice=voice_plan,
             footage=footage_plan,
+            reservation=reservation,
         )
     )
     return saved
@@ -515,21 +544,24 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
 
 
 @router.get("/posts")
-async def list_social_posts(
+def list_social_posts(
     status: Optional[str] = Query(None, description="One status, or several comma-separated"),
     window_from: Optional[datetime] = Query(None, alias="from"),
     window_to: Optional[datetime] = Query(None, alias="to"),
+    q: Optional[str] = Query(None, max_length=text_search.QUERY_MAX_CHARS, description="Title or brief holds this"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """The workspace's posts, newest first. ``from``/``to`` bound a post's date:
-    its slot when scheduled, otherwise when it was created."""
+    its slot when scheduled, otherwise when it was created. ``q`` (global search,
+    US-205) keeps those whose title or brief holds it, case-insensitively."""
     posts = service.list_posts(
         db,
         ctx.workspace_id,
         statuses=_parse_statuses(status),
         window_from=window_from,
         window_to=window_to,
+        q=q,
     )
     return {"posts": [p.to_dict() for p in posts], "total": len(posts)}
 
@@ -694,22 +726,6 @@ async def unschedule_social_post(
         _raise_for(exc)
 
 
-@router.post("/posts/{post_id}/publish-now", dependencies=[CAN_UPDATE])
-async def publish_social_post_now(
-    post_id: UUID,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """The approval guard runs first (409 on a stale approval). Wave 0 has no
-    channel publishers, so a valid post answers 501."""
-    post = _load(db, ctx, post_id)
-    try:
-        publish_post(db, post)
-    except service.SocialsError as exc:
-        _raise_for(exc)
-    return _save(db, post)
-
-
 # ---------------------------------------------------------------------------
 # Rendering (S1.1c)
 # ---------------------------------------------------------------------------
@@ -718,6 +734,7 @@ async def publish_social_post_now(
 @router.post("/posts/{post_id}/render", status_code=202, dependencies=[CAN_UPDATE])
 async def render_social_post(
     post_id: UUID,
+    body: Optional[RenderRequest] = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -728,17 +745,21 @@ async def render_social_post(
     that no longer shows the report's rows or names it (422, saying which row
     differs; 503 when the report's file cannot be read), names a voice toolkit the
     workspace cannot speak with now (422, saying why), the workspace has used
-    its render minutes this month (429, before any call to media-render), or
-    there is no storage or renderer to use (503). The render ends the post in
-    ``needs_approval`` with the files in ``media``, or in ``failed`` with the
-    report in ``review_log``: a render whose footage would take the post or the
-    workspace over its media cap submits nothing and fails saying why (D13).
+    its render minutes this month, counting those renders in progress hold (429,
+    before any call to media-render), or there is no storage or renderer to use
+    (503). The render ends the post in ``needs_approval`` with the files in
+    ``media``, or in ``failed`` with the report in ``review_log``: a render whose
+    footage would take the post or the workspace over its media cap submits
+    nothing and fails saying why (D13). With ``{"preview": true}`` (US-208) it is
+    the composer's half-resolution preview (``api/socials_preview.py``): the post
+    keeps its status, media and hash, and the same quota rule applies.
     """
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
     workspace = _workspace(db, ctx)
+    flow = socials_preview.preview_post if body is not None and body.preview else render_post
     try:
-        return await render_post(db, workspace, post, actor)
+        return await flow(db, workspace, post, actor)
     except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         _raise_for(exc)
 
@@ -771,6 +792,24 @@ async def get_social_post_media(
             "Cache-Control": MEDIA_CACHE_CONTROL,
         },
     )
+
+
+@router.get("/posts/{post_id}/media")
+def list_social_post_media(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The caller's post's media as presigned inline links (D9, S3.4): the exact
+    files the approval view shows, each ``{aspect, deliverable_id, name, url,
+    content_type, bytes, error}``, living ``SOCIALS_MEDIA_URL_TTL_SECONDS``. A
+    file with no stored object has ``url`` null and says why; 503 when a file
+    has one and there is no storage to link to."""
+    post = _load(db, ctx, post_id)
+    try:
+        return media_urls.post_media_links(db, post)
+    except StorageNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=MEDIA_STORAGE_UNAVAILABLE) from exc
 
 
 @router.get("/usage")

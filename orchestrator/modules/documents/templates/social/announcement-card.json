@@ -1,6 +1,6 @@
 {
   "name": "Announcement card",
-  "description": "A launch or release: a status pill, a big headline, a supporting line and up to three numbered features, on the brand's paper. Ported from the automatos-social announcement family.",
+  "description": "A launch or release: a status pill, a big headline, a supporting line and up to three numbered features, on the brand's paper.",
   "format": "social_image",
   "category": "social",
   "sizes": [
@@ -117,7 +117,7 @@
     "feature_3_title": "Works with your Playbooks",
     "feature_3_body": "Wrap any Playbook step in a Mission block, and it runs as before.",
     "counter": "",
-    "handle": "@automatos.app",
+    "handle": "@yourbrand",
     "cta": "Read the changelog"
   }
 }
