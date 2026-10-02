@@ -1,6 +1,6 @@
 # PRD-253: GitHub Copilot as a session CLI, and all four permission modes on every session CLI
 
-> **Status:** DRAFT 2026-10-02. Not started.
+> **Status:** IN BUILD 2026-10-02 — W0 [#855](https://github.com/AutomatosAI/automatos-ai/pull/855), Wave P [#856](https://github.com/AutomatosAI/automatos-ai/pull/856), W1–W3 in one PR stacked on #856. Each is a draft until the owner's local test.
 >
 > **The owner's words:** "We wrote a pattern for loading runtime agents like claude code, codex, copilot and so on … I would like to look at adding copilot next as we have a possible bank poc which would be huge." The same day, on [#845](https://github.com/AutomatosAI/automatos-ai/pull/845) (Claude Code's four permission modes for sessions, merged 2026-09-30): "User should be able to do this for all runtime models."
 >
@@ -645,6 +645,62 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
 
 **The cli-host README:** how to install, `copilot login`, the refusal table, and what an organisation admin must allow.
 **Files:** `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`, `services/cli-host/README.md`.
+
+**As built (W1–W3, 2026-10-02).** One PR, stacked on Wave P. Where the build differs from the stories above, and why:
+- **The hooks file is Claude's own format.** Copilot 1.0.91 reads a Claude-format file in
+  `$COPILOT_HOME/hooks/` unmodified and answers it with Claude's snake_case payloads and Claude's
+  tool names. The decision is read from `hookSpecificOutput`, so the shim and the gate need no
+  translation.
+  - Every event is written under its PascalCase bus name, with `timeout` (not `timeoutSec`).
+  - The tool events carry `matcher: "*"`.
+  - `PermissionRequest` and `Notification` also name themselves with `--event` on the command line.
+- **`config.json` and `settings.json` are two files.** Since 1.0.91, `config.json` is Copilot's
+  state, and its settings are in `settings.json`. The agent's home gets:
+  - `config.json`: the account pointer and `trustedFolders: []`;
+  - `settings.json`: the fixed values, plus `askUser: false` and `disableAllHooks: false`, the
+    operator's co-author and proxy settings (from their `settings.json`, else the legacy
+    `config.json`), and the sandbox block.
+- **The sandbox is switched on by settings, not a flag.** 1.0.91 has no `--sandbox`. A saved
+  `sandbox.enabled`, with `experimental: true`, turns it on.
+  - The block uses 1.0.91's `userPolicy` schema (`adapters/copilot_sandbox.py`).
+  - A non-empty `allowedHosts` blocks every other host, so the package registries and
+    `--session-allow-domain` are the only outbound hosts.
+  - The prerequisites are checked on the login-shell `PATH`, plus `/dev/net/tun` on Linux.
+- **`permission_request="rejudge"` was built before the live check (verify 10).** Denying there
+  would refuse a call the gate had allowed. Copilot's re-ask gets an allow when the gate allowed the
+  identical call earlier in the turn (the last 64 calls) or would allow it now. Anything else is
+  denied, and it is never a card. Claude Code and Codex keep the deny.
+- **The soul reaches every CLI without a system-prompt flag.** Design §6.9 put the soul on
+  `UserPromptSubmit`, but only the ticket ever rode it, so Codex sessions never saw their system
+  prompt. `_turn_context` now puts the system prompt ahead of the ticket for any preset with no
+  `system_prompt_flag`. That covers Codex as well as Copilot.
+- **D4 holds for every preset, at both ends.**
+  - The held-hook timeouts were below the shim's 560 s wait: Claude Code at 540 s, Codex at 30 s.
+    With Codex's approvals off, a hook it timed out left the call to Codex. Every preset now uses
+    `HELD_HOOK_TIMEOUT_SECONDS` (600).
+  - The host's own hold is capped at `MAX_HOLD_SECONDS` (530) inside a turn. `--ask-timeout`
+    defaults to an hour (night 1). Every CLI's hook died first, so a hold never really lasted past
+    about nine minutes. An answer after that was recorded as approved for a call the CLI had
+    already been told was denied ("host is unreachable").
+  - One test pins the order for every preset: hook timeout > shim wait > host hold.
+- **The Canvas take-over opens the agent's own home** (W0's note on `codex resume` described this,
+  but the terminal opened the operator's home).
+  - The terminal launch now carries `agent_id`.
+  - For a per-agent CLI whose home exists, the host starts it with
+    `/usr/bin/env CODEX_HOME|COPILOT_HOME=<agent home> PYTHONPATH=<host package> …`, and reads the
+    turn's usage from that home.
+  - Our hooks are installed there, so the shim stands aside when `AUTOMATOS_TERMINAL` is set and
+    there is no host socket.
+  - Host contract 0.11.0.
+- **`session.py` was split** (`session_files.py`, unchanged code), so this wave keeps it under
+  800 lines.
+- **Waiting on the live run (Verify at build):**
+  - the plaintext-token key: the probe checks `storeTokenPlaintext` and the presence of five
+    candidate keys, and never reads a value;
+  - the MCP tool-name spelling: six spellings are accepted;
+  - `--worktree` combined with `--resume` (`worktree_excludes_resume` stays false);
+  - the `totalNanoAiu` unit (booked as `/1e9` AI credits);
+  - the version floor (1.0.70).
 
 ## Bank PoC
 

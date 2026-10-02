@@ -127,7 +127,7 @@ Every cell is sourced: **(m)** = read from munder's code; **(v)** = verified on 
 | Pi | hooks | `PI_CODING_AGENT_DIR` per agent; extension; copies `models.json` (m) | `tool_call, tool_result, agent_end` (m) | `agent_end`→`Stop` | BYOK (m) | ✗ |
 | Qwen | proxy | `OPENAI_BASE_URL` → loopback (m, TODO-verify in munder) | synthesized | synthesized | OAuth ended 2026-04-15 → BYOK | ✗ |
 | Crush | proxy | `CRUSH_GLOBAL_CONFIG` + `CRUSH_GLOBAL_DATA` per agent (m) | synthesized | synthesized | BYOK (m) | ✗ |
-| Copilot | seed | none needed | **none**; `-p` print mode only (m) | `process_exit` | GitHub login (m) | ✗ |
+| **Copilot** | hooks (corrected, PRD-253) | `COPILOT_HOME` per agent + `hooks/automatos.json` (v: 1.0.91 bundle) | PascalCase events → Claude-shaped snake_case payloads, identity; `permissionRequest`/`notification` camelCase-only, event named on argv (v) | `process_exit` (`-p`) | GitHub login: keychain or `gh` (v) | ✗ |
 | Cursor | seed | none needed | **none** (v: no hook flag in `--help`) ; `-p --output-format stream-json` exists (v) | `process_exit` (print) / `pty_idle` (TUI) | Cursor login (v: `models … for this account`) | ✓ |
 
 Read the two right-hand columns together with §9.1 and §14: **hook surface × legitimate own-plan
@@ -610,7 +610,7 @@ plan, are not.** `auth_probe` per preset, checked in `preflight()`, refusing wit
 | Kimi | Moonshot — **verify** | (?) | (?) |
 | Antigravity | Google | in `~/.gemini` (m) | `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
 | Gemini CLI | Google | in `GEMINI_CLI_HOME` (m) | `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
-| Copilot | GitHub | (?) | `GITHUB_TOKEN` (?) |
+| **Copilot** | GitHub Copilot seat | `config.json` names the account and holds no plaintext token (keychain), else `gh auth status` (Copilot runs `gh auth token` itself) | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `COPILOT_ALLOW_ALL`, `COPILOT_PROVIDER_*` (BYOK), … (`presets.py`) |
 | Cursor | Cursor | `cursor-agent models` lists "for this account" (v) | `CURSOR_API_KEY` (?) |
 | OpenCode | **none of its own** — BYOK, or OAuth into Anthropic/OpenAI plans (§9.4) | — | — |
 | Pi | BYOK (m) | — | — |
@@ -632,6 +632,7 @@ against the preset's tuple:
 | `claude` | `-p`, `--print`, `--bare`, `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` | — | headless billing posture; removes our gate |
 | `codex` | `--dangerously-bypass-approvals-and-sandbox`, `exec`, `--ephemeral` | `--dangerously-bypass-hook-trust` | drops the OS sandbox; `exec` has no hooks; ephemeral persists nothing |
 | `grok` | `--permission-mode bypassPermissions` (?) | — | same axis as Claude |
+| `copilot` | every allow flag (`--allow-all-tools`, `--allow-all`/`--yolo`, `--allow-tool`, `--allow-all-paths`, `--allow-all-urls`, `--assisted-approval`), `--enable-memory`, `--config-dir`, `--remote`, `--acp`, `-i` … | `--no-ask-user`, `--disable-builtin-mcps`, `--no-remote`, `--no-auto-update`, `--no-auto-login` | in `-p` with no allow flag, the gate's allow is the only lift; GitHub's own MCP server would write to GitHub outside the shell gate (PRD-253 D3, D5) |
 | seed-tier | (none — there is no gate to protect) | — | see D-3 |
 
 ### 9.3 "Sessions never push"
@@ -662,7 +663,9 @@ only, same as the proxy tier.
 The deliverable this whole design exists to produce.
 
 1. **Classify** (§3): hook surface / config-file hooks / nothing. Then **turn end**: `Stop` hook,
-   process exit, or PTY idle.
+   process exit, or PTY idle. **Classify from the vendor's current binary, not a reference
+   implementation** — Copilot sat in the seed row for three weeks because it was read from
+   munder's code; its 1.0.91 bundle has full hooks (PRD-253).
 2. **Check admissibility** (§9.1): first-party own-plan login in the unmodified binary? If not,
    local-upstream only, or not at all.
 3. **Add the preset row.** Launch flags, resume shape, `hook_events`, `hook_timeout_literal`,
@@ -744,7 +747,8 @@ CI-only, no spend, no live CLI (workspace rule).
   permissive — a hardcoded list rots, and PRD-223's lesson was about the *route* validating nothing,
   which the preset now fixes. PRD-223's quarantine list, if it is a governance rule and not an
   Auto-route rule, applies to CLI models too — say which.
-- **D-3 · Seed-tier CLIs** (Copilot, Cursor, and any tier-2 CLI whose bridge is unverified).
+- **D-3 · Seed-tier CLIs** (Cursor, and any tier-2 CLI whose bridge is unverified; Copilot turned
+  out to be a hooks-tier CLI — PRD-253 — so D-3 no longer applies to it).
   Refuse them for session agents, or allow them with a permanent "ungated" marker on the ticket?
   No `PreToolUse` gate, no never-push rule, no approvals. Not a blocker for Codex or Grok; must be
   answered before Copilot/Cursor.
@@ -820,7 +824,8 @@ verified*, the order that keeps every step shippable is:
 | 2 | **Gemini CLI**, **Grok** | tier-2 with a name-map translation each; Gemini's isolation story is the cleanest of the twelve (munder); Grok needs D-5 and the binary |
 | 3 | **Antigravity** | tier-2 but global-config write + argv event names + fail-closed allow — three sharp edges, all modelled by rev 2 fields |
 | 4 | **Kimi** | tier-2 *if* its hooks are as munder says; nobody has written the bridge — a genuine spike |
-| 5 | **Copilot**, **Cursor** | seed tier; blocked on D-3; Cursor is on this machine and its `--output-format stream-json` print mode is worth a look as a structured-stdout bridge before declaring it ungated |
+| 1b | **Copilot** | PRD-253: hooks tier after all (the seed row above was read from munder's code, not the binary); `copilot -p`, a per-agent `COPILOT_HOME`, identity translation; built right after Codex for the bank PoC |
+| 5 | **Cursor** | seed tier; blocked on D-3; Cursor is on this machine and its `--output-format stream-json` print mode is worth a look as a structured-stdout bridge before declaring it ungated |
 | 6 | **OpenCode**, **Pi** | tier-2 mechanically, but BYOK and `LIVE-UNVERIFIED` even in munder; OpenCode's OAuth-into-Anthropic path is the forbidden pattern (§9.4) |
 | 7 | **Qwen**, **Crush** | proxy tier; local-upstream only (D-6); Crush's `type-into-tui` seed delivery is the last new mechanism |
 
