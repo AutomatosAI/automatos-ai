@@ -63,7 +63,10 @@ def test_files_one_assigned_ticket_in_the_lanes_shape(monkeypatch):
     # two commits: the insert, then the notices (F119 — after the consent, so the
     # dispatch wake follows it; a notice after the last commit was rolled back)
     assert t.created_by_type == "system" and t.blocked_reason is None and db.commits == 2
-    assert lane.queued_line(t) == "queued for your Claude Code session as ticket #4242"
+    # PRD-252 R4: a ticket with no number here is "ticket 4242", never "#4242" (a number's form)
+    assert lane.queued_line(t) == "queued for your Claude Code session as ticket 4242"
+    t.workspace_seq = 42
+    assert lane.queued_line(t) == "queued for your Claude Code session as ticket #0042"
 
 
 def test_an_open_ticket_from_the_same_source_is_reused_not_duplicated(monkeypatch):
