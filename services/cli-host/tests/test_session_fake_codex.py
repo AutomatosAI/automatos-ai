@@ -151,8 +151,7 @@ def test_a_plan_turn_on_codex_ends_with_the_plan_for_the_operator(short_tmp, fak
     assert out.status == "success", out
     assert not (workdir / "hello.txt").exists()                                  # the edit was refused
     assert any(d["reason"] == PLAN_EDIT_REFUSED_TURN for d in out.permission_denials)
-    assert out.plan == {"text": out.result_text, "approved_in_turn": False}
-    assert out.as_result_payload(1)["plan"] == out.plan
+    assert s.plan == {"text": out.result_text, "approved_in_turn": False}
     assert any(f.endswith("plan.md") for f in out.files_touched)
     events = []
     while not s.events.empty():
@@ -166,6 +165,6 @@ def test_an_approved_plan_resumes_codex_as_edit_automatically(short_tmp, fake_co
     """The claim after Approve says Edit automatically: the same patch now lands."""
     workdir = short_tmp / "ws" / "repo"
     workdir.mkdir(parents=True)
-    _, out = _run(short_tmp, _ticket(workdir, permission_mode="edits", plan_approved=True))
-    assert out.status == "success" and out.plan is None
+    s, out = _run(short_tmp, _ticket(workdir, permission_mode="edits", plan_approved=True))
+    assert out.status == "success" and s.plan is None
     assert (workdir / "hello.txt").read_text() == "hi\n"

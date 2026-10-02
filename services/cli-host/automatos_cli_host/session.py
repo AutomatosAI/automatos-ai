@@ -86,7 +86,6 @@ class SessionOutcome:
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
     resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
-    plan: Optional[Dict[str, Any]] = None   # PRD-253 Wave P: {"text", "approved_in_turn"} when the turn made a plan
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -104,7 +103,6 @@ class SessionOutcome:
             # the directory `claude --resume` and the editor links must open.
             "effective_cwd": self.effective_cwd,
             "resets_at": self.resets_at,
-            "plan": self.plan,
         }
 
 
@@ -748,7 +746,7 @@ class Session:
         self._shred_session_credentials()
         outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
                                 files_touched=files)
-        outcome.resets_at, outcome.plan = resets, self.plan
+        outcome.resets_at = resets
         return outcome
 
     def _report_plan(self, text: str, files: List[str]) -> List[str]:
