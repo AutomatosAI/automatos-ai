@@ -4,7 +4,7 @@
  * re-queue". A mission's ticket points at the mission instead (D4).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import type { BoardTask } from '@/types/board'
 
 const nav = vi.hoisted(() => ({ query: 'ticket=612', replace: vi.fn() }))
@@ -17,13 +17,34 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
-vi.mock('@/stores/chat-session-store', () => ({
-  useChatSessionStore: (pick: (s: unknown) => unknown) => pick({ hydrated: true, newDraft: session.newDraft, session: { activeChatId: null } }),
+// A small stand-in for the chat-session store: an open tab, and a draft Discuss opens.
+const { OPEN_TAB } = vi.hoisted(() => ({
+  OPEN_TAB: { activeChatId: 'chat-old', openChatIds: ['chat-old'], titles: { 'chat-old': 'Rota questions' }, draftOpen: false },
 }))
+vi.mock('@/stores/chat-session-store', async () => {
+  const { create } = await import('zustand')
+  const store: any = create(() => ({ hydrated: true, session: OPEN_TAB, newDraft: () => {} }))
+  store.setState({
+    newDraft: () => {
+      session.newDraft()
+      store.setState((s: any) => ({ session: { ...s.session, activeChatId: null, draftOpen: true } }))
+    },
+  })
+  return { useChatSessionStore: store }
+})
 vi.mock('../rebrief-dialog', () => ({ RebriefDialog: () => <div data-testid="rebrief-dialog" /> }))
 
 import { DiscussionBar } from '../discussion-bar'
 import { useDiscussionStore } from '@/stores/discussion-store'
+import { useChatSessionStore } from '@/stores/chat-session-store'
+
+function activate(chatId: string, alsoOpen: string[] = []) {
+  act(() => {
+    (useChatSessionStore as any).setState((s: any) => ({
+      session: { ...s.session, activeChatId: chatId, draftOpen: false, openChatIds: [...s.session.openChatIds, ...alsoOpen] },
+    }))
+  })
+}
 
 function ticket(over: Partial<BoardTask> = {}): BoardTask {
   return { id: '612', type: 'task', name: 'Welcome email', status: 'review', priority: 'medium', tags: [],
@@ -37,6 +58,7 @@ beforeEach(() => {
   board.task = ticket()
   board.isError = false
   useDiscussionStore.getState().end()
+  ;(useChatSessionStore as any).setState({ session: OPEN_TAB })
 })
 afterEach(cleanup)
 
@@ -81,5 +103,19 @@ describe('DiscussionBar', () => {
     board.isError = true
     render(<DiscussionBar />)
     expect(screen.getByTestId('discussion-bar')).toHaveTextContent('Ticket 999 could not be opened here')
+  })
+
+  it('stays with the conversation its draft becomes (review of #861)', () => {
+    render(<DiscussionBar />)
+    activate('chat-new', ['chat-new'])                       // the first message named the draft
+    expect(useDiscussionStore.getState()).toMatchObject({ chatId: 'chat-new', discussion: { ticketId: '612' } })
+    expect(nav.replace).not.toHaveBeenCalled()
+  })
+
+  it('ends when another conversation is opened, so the ticket never reaches it', () => {
+    render(<DiscussionBar />)
+    activate('chat-old')                                     // back to the tab that was open
+    expect(useDiscussionStore.getState().discussion).toBeNull()
+    expect(nav.replace).toHaveBeenCalledWith('/chat')
   })
 })

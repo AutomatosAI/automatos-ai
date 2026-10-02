@@ -95,12 +95,30 @@ def test_the_agreed_brief_goes_onto_the_ticket_and_back_to_its_agent(ticket):
 def test_the_next_run_works_from_the_agreed_brief(ticket):
     """Acceptance: the re-queued ticket's prompt is the brief, with the owner's word on it."""
     from services.cli_host_service import _ticket_prompt
-    from services.ticket_redo import BRIEF_AGREED
+    from services.ticket_redo import AGREED_BRIEF_BLOCK
 
     _rebrief(ticket)
 
     prompt = _ticket_prompt(_row(ticket))
-    assert prompt.startswith(AGREED) and BRIEF_AGREED in prompt
+    assert prompt.startswith(AGREED) and prompt.endswith(AGREED_BRIEF_BLOCK)
+
+
+def test_a_brief_agreed_after_send_backs_is_not_mixed_with_the_old_draft(ticket):
+    """Review of #861: the redo after a re-brief still carried the draft sent back
+    before the discussion, and "keep everything else as it was"."""
+    from services.cli_host_service import _ticket_prompt
+    from services.ticket_redo import AGREED_BRIEF_BLOCK
+
+    _sent_back(ticket, "Draft 1: Hello!", "Too long.")
+    _rebrief(ticket)
+    prompt = _ticket_prompt(_row(ticket))
+    assert prompt.startswith(AGREED) and AGREED_BRIEF_BLOCK in prompt
+    assert "Draft 1" not in prompt and "Too long." not in prompt and "last attempt" not in prompt
+
+    _sent_back(ticket, "Draft 2 from the agreed brief", "Sign it Sam.")      # a send-back after the brief
+    prompt = _ticket_prompt(_row(ticket))
+    assert "Draft 2 from the agreed brief" in prompt and "Sign it Sam." in prompt
+    assert "Draft 1" not in prompt and "Too long." not in prompt
 
 
 @pytest.mark.parametrize("source", ["orchestration", "orchestration_task", "mission"])
@@ -115,6 +133,16 @@ def test_a_missions_tickets_are_not_rebriefed_on_the_board(ticket, source):
     assert refused.value.status_code == 409 and _row(ticket).description == "Write the welcome email."
 
 
+def test_a_blank_brief_is_refused_at_the_door():
+    from pydantic import ValidationError
+
+    from api.board_task_rebrief import RebriefBody
+
+    assert RebriefBody(brief="  Two paragraphs.  ").brief == "Two paragraphs."
+    with pytest.raises(ValidationError):
+        RebriefBody(brief="   ")
+
+
 def test_a_running_ticket_is_not_rebriefed_under_its_run(ticket):
     s = ticket.new()
     s.execute(text("UPDATE board_tasks SET status = 'in_progress' WHERE id = :i"), {"i": ticket.id})
@@ -126,13 +154,14 @@ def test_a_running_ticket_is_not_rebriefed_under_its_run(ticket):
     assert refused.value.status_code == 409 and "running" in refused.value.detail
 
 
-def _sent_back(ticket, draft):
+def _sent_back(ticket, draft, note=None):
     import api.board_tasks as bt
 
     s = ticket.new()
     s.execute(text("UPDATE board_tasks SET status = 'review', result = :r WHERE id = :i"), {"r": draft, "i": ticket.id})
     s.commit()
-    asyncio.run(bt.reject_task(ticket.id, _Req({"feedback": f"Not yet: {draft}"}), ctx=ticket.ctx, db=ticket.new()))
+    note = note or f"Not yet: {draft}"
+    asyncio.run(bt.reject_task(ticket.id, _Req({"feedback": note}), ctx=ticket.ctx, db=ticket.new()))
 
 
 def test_the_board_counts_the_send_backs_since_the_brief_was_agreed(ticket):

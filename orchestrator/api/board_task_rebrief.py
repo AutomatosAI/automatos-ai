@@ -9,9 +9,10 @@ to its agent, the way Reject does. Its own router: api/board_tasks.py is over
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from api.board_tasks import (
@@ -29,7 +30,8 @@ router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
 
 class RebriefBody(BaseModel):
-    brief: str = Field(..., min_length=1, max_length=MAX_BRIEF_CHARS)
+    # Stripped before the bounds, so a blank brief never empties a ticket.
+    brief: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_BRIEF_CHARS)]
 
 
 @router.post("/{task_id}/rebrief", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -58,7 +60,7 @@ def rebrief_task(
     data = with_correction(task.planning_data, BRIEF_AGREED, by=by, at=at)
     # A claim works from raw_prompt, else the description: both carry the new brief.
     task.planning_data = with_new_brief(data, task.raw_prompt or task.description, by=by, at=at)
-    task.raw_prompt = task.description = body.brief.strip()
+    task.raw_prompt = task.description = body.brief
     if not _decide(db, task, seen=seen, values={"status": "assigned"}):
         raise already_decided(task)
     _back_to_its_agent(db, ctx, task, BRIEF_AGREED)
