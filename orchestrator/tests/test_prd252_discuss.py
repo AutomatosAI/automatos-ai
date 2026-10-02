@@ -157,4 +157,5 @@ def test_a_chat_opened_from_a_ticket_or_a_mission_tells_auto_to_read_it_first():
         {"page": "chat", "route": "/chat", "selected": {"type": "mission", "id": "b6af0355"}}))
 
     assert "platform_get_task (task_id 612)" in ticket and "Update ticket and re-queue" in ticket
+    assert "one fenced block (```)" in ticket                              # where the dialog finds the brief
     assert "platform_get_mission (mission_id b6af0355)" in mission            # D4: a mission is Auto's to discuss

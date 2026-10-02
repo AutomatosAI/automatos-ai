@@ -18,6 +18,7 @@ vi.mock('@/hooks/use-board-tasks', () => ({
   useRejectTask: () => verdict.reject,
 }))
 vi.mock('sonner', () => ({ toast }))
+vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 
 import { ReviewVerdict } from '../review-verdict'
 import { approveEffect, approveLabel, approvedMessage } from '../approval-effect'
@@ -101,5 +102,18 @@ describe('Approve', () => {
   it('confirms what an approval action did', () => {
     expect(approvedMessage({ action_result: { type: 'publish_blog', title: 'Oat milk' } }, '5')).toBe('Approved. "Oat milk" is published.')
     expect(approvedMessage({ action_result: { type: 'create_blog', topic: 'Oat milk' } }, '5')).toBe('Approved. The blog post on "Oat milk" has started.')
+  })
+})
+
+describe('after three send-backs (D3)', () => {
+  it('suggests talking it through with Auto', () => {
+    render(<ReviewVerdict task={ticket({ times_sent_back: 3 })} onDecided={vi.fn()} />)
+    expect(screen.getByTestId('discuss-hint')).toHaveTextContent('Sent back 3 times')
+    expect(screen.getByText('Discuss with Auto →').closest('a')).toHaveAttribute('href', '/chat?ticket=5')
+  })
+
+  it('says nothing before that', () => {
+    render(<ReviewVerdict task={ticket({ times_sent_back: 2 })} onDecided={vi.fn()} />)
+    expect(screen.queryByTestId('discuss-hint')).toBeNull()
   })
 })

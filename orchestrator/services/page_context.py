@@ -119,8 +119,8 @@ _DISCUSS_LINES = {
         "The owner opened this chat from ticket {id} to talk it through. Read it first with "
         "platform_get_task (task_id {id}): its brief, its result and the notes it was sent back "
         "with. Work out with the owner what went wrong and agree the brief its agent should work "
-        "from. When you agree, give that brief as one block they can copy: they send it back to "
-        "the agent with 'Update ticket and re-queue'."
+        "from. When you agree, give the whole brief in one fenced block (```): the owner's "
+        "'Update ticket and re-queue' takes it from there and sends it back to the agent."
     ),
     "mission": (
         "The owner opened this chat from mission {id} to talk it through. Read it first with "

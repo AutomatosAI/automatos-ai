@@ -6,13 +6,13 @@ import { sessionNotes, type SessionNote } from './session-notes'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { ReviewVerdict } from './review-verdict'
+import { MissionVerdict } from './mission-verdict'
 import { TicketQuestions } from './ticket-questions'
 import { TicketApprovals } from './ticket-approvals'
 import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
 import { stageReason } from './ticket-stage'
 import { runsInSession, ticketKind } from './ticket-kind'
 import { isMissionTicket } from './ticket-actions'
-import { missionHref } from '@/lib/ticket-links'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -492,16 +492,8 @@ function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => 
       </div>
 
       {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does.
-          D6: a mission's plan is approved on its page; a step is its mission's to check. */}
-      {missionDecides ? (
-        task.mission_id && (
-          <Link href={missionHref(task.mission_id) as any} className="text-sm text-primary underline-offset-2 hover:underline" data-testid="review-on-mission">
-            {task.review_reason === 'mission_plan' ? 'Approve or change the plan on the mission' : 'Open the mission'} →
-          </Link>
-        )
-      ) : (
-        <ReviewVerdict task={task} onDecided={onDecided} />
-      )}
+          D6: a mission's plan is decided with the mission's own buttons; a step is its mission's to check. */}
+      {missionDecides ? <MissionVerdict task={task} onDecided={onDecided} /> : <ReviewVerdict task={task} onDecided={onDecided} />}
     </div>
   )
 }
