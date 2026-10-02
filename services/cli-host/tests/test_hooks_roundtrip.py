@@ -50,6 +50,33 @@ def test_shim_forwards_to_the_registered_session_and_prints_its_answer(short_tmp
         server.stop()
 
 
+def test_the_shim_talks_to_the_host_process_only(short_tmp):
+    """F234: under Copilot's sandbox the socket path is granted read-write so the
+    hooks can reach the host — a sandboxed command could then bind its own socket
+    there and answer its own calls. The shim checks the peer is the host's PID."""
+    server = HookServer(short_tmp / "h.sock")
+    server.start()
+    seen = []
+
+    def handler(payload):
+        seen.append(payload)
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+
+    server.register("42", handler)
+    try:
+        env = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "h.sock"), "AUTOMATOS_TASK_ID": "42"}
+        call = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
+        host = {**env, "AUTOMATOS_HOST_PID": str(os.getpid())}       # the server runs in this process
+        assert json.loads(_run_shim(call, host))["hookSpecificOutput"]["permissionDecision"] == "allow"
+        impostor = {**env, "AUTOMATOS_HOST_PID": str(os.getpid() + 100000)}
+        out = json.loads(_run_shim(call, impostor))["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and "not the host's" in out["permissionDecisionReason"]
+        assert _run_shim({"hook_event_name": "Stop"}, impostor) == ""
+        assert len(seen) == 1                                          # nothing was sent to the impostor
+    finally:
+        server.stop()
+
+
 def test_shim_fails_closed_when_the_host_is_unreachable(short_tmp):
     env = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TASK_ID": "1"}
     out = json.loads(_run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, env))

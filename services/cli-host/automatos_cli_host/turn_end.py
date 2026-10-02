@@ -19,9 +19,15 @@ from __future__ import annotations
 import re
 from typing import Any, Optional, Tuple
 
+from .hook_shim import NOT_THE_HOST_MARK, UNREACHABLE_MARK
 from .presets import REGISTRY, TIER_HOOKS, TIER_NATIVE, TIER_PROXY, TURN_END_STOP_HOOK
 
 GATED_TIERS = (TIER_NATIVE, TIER_HOOKS, TIER_PROXY)
+NO_SESSION_START = "no_session_start"
+# F234: the shim's own deny in the CLI's output — its hooks never reached this host.
+HOOKS_CUT_OFF = ("{cli}'s hooks could not reach this Automatos host, so the gate denied every call and no session "
+                 "started. Restart the host; if it happens again, the CLI's sandbox is blocking the hook socket. "
+                 "Last output:\n{tail}")
 # F233: a CLI that could not sign in exits before its hooks load. That is a login
 # to fix, not hooks switched off — in the CLIs' own words.
 _SIGN_IN_FAILED = re.compile(
@@ -77,21 +83,32 @@ def sign_in_failure(cli: str, tail: str) -> Optional[str]:
     return SIGN_IN_FAILED.format(how=how, tail=tail)
 
 
+def cause_in_tail(reason: str, cli: str, tail: str) -> Optional[str]:
+    """What the CLI's own output says stopped it before its gate loaded — its hooks
+    could not reach this host, or it could not sign in — else None. Only then: no
+    tool has run, so the tail is the CLI's own."""
+    if reason not in (UNGATED_EXIT, NO_SESSION_START):
+        return None
+    flat = " ".join((tail or "").split())          # a terminal wraps long lines mid-phrase
+    if any(mark in flat for mark in (UNREACHABLE_MARK, NOT_THE_HOST_MARK)):
+        return HOOKS_CUT_OFF.format(cli=cli, tail=tail)
+    return sign_in_failure(cli, tail)
+
+
 def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, startup_window: float,
              session_timeout: float, stopped_by_host: Optional[str]) -> Tuple[str, Optional[str]]:
     """The ticket's status and, unless it succeeded, the sentence that says why."""
     if reason == COMPLETED:
         return "success", None
-    # Only before the gate loaded: no tool has run, so the tail is the CLI's own.
-    signed_out = sign_in_failure(cli, tail) if reason == UNGATED_EXIT else None
-    if signed_out:
-        return "error", signed_out
+    cause = cause_in_tail(reason, cli, tail)
+    if cause:
+        return "error", cause
     if reason == "cancelled":
         # F015: the operator did not cancel it — the machine stopped serving it.
         return ("host_stopped", stopped_by_host) if stopped_by_host else ("cancelled", "cancelled by the operator")
     if reason == "timeout":
         return "error", f"session exceeded {int(session_timeout)} s"
-    if reason == "no_session_start":
+    if reason == NO_SESSION_START:
         return "error", (
             f"{cli} did not start a session within {int(startup_window)} s — "
             f"it is probably showing a login screen or a dialog. Run `{cli}` in that directory once "
@@ -108,5 +125,6 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
 
 __all__ = [
     "COMPLETED", "EXITED_BEFORE_STOP", "EXIT_GRACE_AFTER_SESSION_END_SECONDS", "GATED_TIERS", "UNGATED_EXIT",
-    "describe", "exit_reason", "is_gated", "sign_in_failure", "startup_timeout",
+    "HOOKS_CUT_OFF", "NO_SESSION_START", "cause_in_tail", "describe", "exit_reason", "is_gated", "sign_in_failure",
+    "startup_timeout",
 ]

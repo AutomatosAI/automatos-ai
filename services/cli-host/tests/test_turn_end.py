@@ -116,6 +116,18 @@ def test_a_cli_that_could_not_sign_in_says_so_not_that_hooks_are_off():
     assert unknown.startswith("newcli could not sign in on this machine")
 
 
+@pytest.mark.parametrize("reason", ["no_session_start", "ungated_exit"])
+def test_hooks_that_could_not_reach_the_host_say_so(reason):
+    """F234: 1266 said "probably showing a login screen", 1267/1268 "a repository
+    setting or an organisation policy". Every call had been denied by the shim."""
+    tail = ("✗ Read ticket.md (sandbox policy) ~/.automatos/cli-host/sessions/1266/ticket.md\n"
+            "   Denied by preToolUse hook: Automatos CLI host is\n   unreachable — call denied")   # wrapped, as on 1266
+    status, error = turn_end.describe(reason, cli="copilot", returncode=None, tail=tail, startup_window=30,
+                                      session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot's hooks could not reach this Automatos host")
+    assert "login screen" not in error and "organisation policy" not in error
+
+
 def test_a_turn_that_ran_tools_is_never_read_as_a_sign_in_failure():
     """Past the gate, the tail can be a tool's output ("gh: not logged in")."""
     status, error = turn_end.describe("exited_before_stop", cli="copilot", returncode=1, tail="gh: not logged in",

@@ -7,6 +7,10 @@ experimental feature in 1.0.91, switched on by a saved ``sandbox.enabled`` in th
 agent home's ``settings.json`` (``copilot_home.seeded_settings``). The block:
 
 * writes: the working folder and the session's folders only;
+* the host's hook socket, and nothing else of the host's: Copilot runs its hooks
+  inside the sandbox, whose profile lets a process reach a Unix socket only at a
+  read-write path (F234). The shim talks to the host's PID only, so a socket a
+  sandboxed command put in its place is refused (``hook_shim``);
 * reads: everywhere Copilot grants by default except the credential stores, the
   platform's secrets and this host's own state (``deniedPaths``);
 * no escape hatch (``allowBypass`` false), no git/gh credentials injected, no OS
@@ -65,9 +69,12 @@ def unavailable_reason(sandbox: Optional[SessionSandbox], system: Optional[str] 
 
 
 def sandbox_settings(sandbox: SessionSandbox, *, writable: Sequence[Path], secret_roots: Sequence[Path] = (),
-                     off_limits: Sequence[Path] = ()) -> Dict[str, Any]:
+                     off_limits: Sequence[Path] = (), sockets: Sequence[Path] = ()) -> Dict[str, Any]:
     """The ``sandbox`` block of the agent home's ``settings.json`` (1.0.91 schema).
-    Every path absolute: the policy names absolute paths only."""
+    Every path absolute: the policy names absolute paths only. A grant under a
+    denied path (the session dir and the hook socket under the host's state)
+    holds: the profile writes the denials first and the grants after them."""
+    granted = dict.fromkeys(str(Path(p).expanduser()) for p in (*writable, *sockets))
     return {
         "enabled": True,
         "addCurrentWorkingDirectory": True,
@@ -76,7 +83,7 @@ def sandbox_settings(sandbox: SessionSandbox, *, writable: Sequence[Path], secre
         "sandboxMcpServers": True,
         "userPolicy": {
             "filesystem": {
-                "readwritePaths": [str(Path(p).expanduser()) for p in writable],
+                "readwritePaths": list(granted),
                 "deniedPaths": [os.path.expanduser(p) for p in deny_read(secret_roots, off_limits)],
             },
             "network": {"allowOutbound": True, "allowLocalNetwork": False,

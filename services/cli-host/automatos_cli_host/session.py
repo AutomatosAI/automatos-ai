@@ -539,7 +539,7 @@ class Session:
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
             session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
-            extra_dirs=tuple(self._policy.extra_dirs),
+            extra_dirs=tuple(self._policy.extra_dirs), hook_socket=self.sock_path,
         )
         return ctx, worktree
 
@@ -551,6 +551,7 @@ class Session:
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
         env = build_session_env(preset, extra={
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
+            "AUTOMATOS_HOST_PID": str(os.getpid()),      # the shim talks to this process only (F234)
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,
             "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),

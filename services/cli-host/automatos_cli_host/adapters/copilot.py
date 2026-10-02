@@ -236,7 +236,8 @@ class CopilotAdapter(PresetAdapter):
         from ..policy import platform_secret_roots  # policy imports the adapters' base
         return sandbox_settings(self.sandbox, writable=(ctx.session_dir, *ctx.extra_dirs),
                                 secret_roots=platform_secret_roots(),
-                                off_limits=(ctx.state_dir,) if ctx.state_dir else ())
+                                off_limits=(ctx.state_dir,) if ctx.state_dir else (),
+                                sockets=(ctx.hook_socket,) if ctx.hook_socket else ())
 
     # ── the bus ─────────────────────────────────────────────────────────────
     def render_response(self, event: str, reply: Reply) -> Optional[Dict[str, Any]]:

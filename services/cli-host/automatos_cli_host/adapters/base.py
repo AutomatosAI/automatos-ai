@@ -107,6 +107,9 @@ class LaunchContext:
     # when it is elsewhere, the ticket's deliverables folder (PRD-253: a CLI with a
     # path check of its own is told the same folders).
     extra_dirs: Tuple[Path, ...] = ()
+    # The host's hook socket: a CLI that runs its hooks inside its own sandbox must
+    # let them reach it (F234, Copilot).
+    hook_socket: Optional[Path] = None
 
 
 @dataclass(frozen=True)

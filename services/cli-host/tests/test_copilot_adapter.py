@@ -365,6 +365,20 @@ def test_a_sandboxed_host_seeds_copilots_sandbox_in_the_agents_settings(tmp_path
     assert block["userPolicy"]["seatbelt"] == {"keychainAccess": False}
 
 
+def test_the_hooks_can_reach_the_host_from_inside_copilots_sandbox(tmp_path, operator):
+    """F234 (build 5, tickets 1266-1268): Copilot runs its hooks inside its sandbox,
+    whose profile lets a process reach a Unix socket only at a read-write path, so
+    every call was denied "host is unreachable". The socket itself is granted —
+    nothing else of the host's state — and the session dir is listed once."""
+    a = _adapter(tmp_path, operator, sandbox=SessionSandbox())
+    socket_path = tmp_path / "state" / "hooks.sock"
+    ctx = _ctx(tmp_path, hook_socket=socket_path, extra_dirs=(tmp_path / "state" / "sessions" / "7",))
+    settings = json.loads((Path(a.prepare(ctx).env["COPILOT_HOME"]) / "settings.json").read_text())
+    files = settings["sandbox"]["userPolicy"]["filesystem"]
+    assert files["readwritePaths"] == [str(ctx.session_dir), str(socket_path)]       # old: no socket, the dir twice
+    assert str(ctx.state_dir) in files["deniedPaths"]                                # the rest of the state stays out
+
+
 def test_no_session_sandbox_drops_the_block(tmp_path, operator):
     prepared = _adapter(tmp_path, operator, sandbox=SessionSandbox(enabled=False)).prepare(_ctx(tmp_path))
     settings = json.loads((Path(prepared.env["COPILOT_HOME"]) / "settings.json").read_text())
