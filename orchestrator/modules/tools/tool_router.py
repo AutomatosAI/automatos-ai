@@ -473,6 +473,13 @@ def _hidden_categories(workspace_id: Any, session_used: Any) -> Tuple[str, ...]:
     return hidden_categories_for_workspace(workspace_id, session_used)
 
 
+def _hidden_scope(hidden: Tuple[str, ...]):
+    """The registry's turn scope for the hidden categories (PRD-251B US-B106)."""
+    from modules.tools.discovery.action_registry import hidden_scope
+
+    return hidden_scope(hidden)
+
+
 def _exclude_kwargs(hidden: Tuple[str, ...]) -> Dict[str, Tuple[str, ...]]:
     """The registry's / index's ``exclude_categories`` keyword, only while anything is hidden."""
     from modules.tools.discovery.hidden_categories import exclude_kwargs
@@ -549,6 +556,38 @@ async def _narrow_dispatcher_actions_async(
     return allowed, None, False
 
 
+def _wide_ranker(
+    index: Any,
+    query: str,
+    is_admin: bool,
+    is_super_admin: bool,
+    workspace_id: Optional[str],
+    exclude_categories: Optional[Iterable[str]],
+) -> Any:
+    """PRD-248 S4: the wide ranking the decision engine judges. When the embedding times
+    out or matches nothing, it judges the lexical shortlist the narrowing itself falls
+    back to (a None score marks the source): the embedding-outage turn is where a judge
+    helps most. A hidden category (PRD-251B US-B106) is in neither."""
+    from modules.tools.discovery.hidden_categories import exclude_kwargs
+
+    async def rank_wide(n: int):
+        ranked = await index.rank_actions(
+            query,
+            top_k=n,
+            exclude_admin=not is_admin,
+            exclude_promoted=False,
+            include_super_admin=is_super_admin,
+            workspace_id=workspace_id,
+            **exclude_kwargs(exclude_categories),
+        )
+        if ranked:
+            return ranked
+        names = _lexical_shortlist(index, query, n, not is_admin, False, is_super_admin, exclude_categories) or []
+        return [(name, None) for name in names]
+
+    return rank_wide
+
+
 async def _apply_decision_rerank(
     query: Optional[str],
     allowed: Optional[List[str]],
@@ -571,28 +610,10 @@ async def _apply_decision_rerank(
             return allowed
         from modules.tools.discovery import get_action_registry
         from modules.tools.discovery.action_semantic_index import get_action_semantic_index
-        from modules.tools.discovery.hidden_categories import exclude_kwargs
 
         index = get_action_semantic_index()
         registry = get_action_registry()
-
-        async def rank_wide(n: int):
-            ranked = await index.rank_actions(
-                query,
-                top_k=n,
-                exclude_admin=not is_admin,
-                exclude_promoted=False,
-                include_super_admin=is_super_admin,
-                workspace_id=workspace_id,
-                **exclude_kwargs(exclude_categories),
-            )
-            if ranked:
-                return ranked
-            # The embedding timed out or matched nothing: judge the lexical
-            # shortlist the narrowing itself falls back to (a None score marks
-            # the source) — the embedding-outage turn is where a judge helps most.
-            names = _lexical_shortlist(index, query, n, not is_admin, False, is_super_admin, exclude_categories) or []
-            return [(name, None) for name in names]
+        rank_wide = _wide_ranker(index, query, is_admin, is_super_admin, workspace_id, exclude_categories)
 
         def describe(name: str) -> str:
             action = registry.get(name)
@@ -923,12 +944,8 @@ def _get_tools_for_agent_core(
     narrowing: Tuple[Optional[List[str]], Optional[str]],
     trace_id: str,
     start_time: float,
-    hidden: Tuple[str, ...] = (),
 ) -> List[Dict[str, Any]]:
     """Shared body for get_tools_for_agent / get_tools_for_agent_async.
-
-    ``hidden`` (PRD-251B US-B106) names the categories the workspace is not shown;
-    they leave the dispatcher enum whatever the narrowing decided.
 
     Callers resolve workspace_id / is_admin and compute ``narrowing`` =
     (allowed_names, narrow_reason) FIRST — sync callers via the thread
@@ -1097,7 +1114,6 @@ def _get_tools_for_agent_core(
                 allow_promoted_in_allowlist=from_pins,
                 # first-class actions are attached directly, not duplicated in the enum
                 exclude_names=enum_exclude_names,
-                **_exclude_kwargs(hidden),
             )
             openai_tools.append(dispatcher_schema)
             dispatcher_count = len([a for a in all_actions if a.name not in first_class_names])
@@ -1224,18 +1240,19 @@ def get_tools_for_agent(
         narrowing = _apply_onboarding_prior(
             narrowing, session_used, workspace_id, is_admin, is_super_admin
         )
-        return _get_tools_for_agent_core(
-            agent_id=agent_id,
-            session_used=session_used,
-            workspace_id=workspace_id,
-            is_admin=is_admin,
-            is_super_admin=is_super_admin,
-            query=query,
-            narrowing=narrowing,
-            trace_id=trace_id,
-            start_time=start_time,
-            hidden=hidden,
-        )
+        # PRD-251B US-B106: the registry leaves the hidden categories out of every listing.
+        with _hidden_scope(hidden):
+            return _get_tools_for_agent_core(
+                agent_id=agent_id,
+                session_used=session_used,
+                workspace_id=workspace_id,
+                is_admin=is_admin,
+                is_super_admin=is_super_admin,
+                query=query,
+                narrowing=narrowing,
+                trace_id=trace_id,
+                start_time=start_time,
+            )
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
         return []
@@ -1331,18 +1348,19 @@ async def get_tools_for_agent_async(
         narrowing = _apply_onboarding_prior(
             narrowing, session_used, workspace_id, is_admin, is_super_admin
         )
-        tools = _get_tools_for_agent_core(
-            agent_id=agent_id,
-            session_used=session_used,
-            workspace_id=workspace_id,
-            is_admin=is_admin,
-            is_super_admin=is_super_admin,
-            query=query,
-            narrowing=narrowing,
-            trace_id=trace_id,
-            start_time=start_time,
-            hidden=hidden,
-        )
+        # PRD-251B US-B106: the registry leaves the hidden categories out of every listing.
+        with _hidden_scope(hidden):
+            tools = _get_tools_for_agent_core(
+                agent_id=agent_id,
+                session_used=session_used,
+                workspace_id=workspace_id,
+                is_admin=is_admin,
+                is_super_admin=is_super_admin,
+                query=query,
+                narrowing=narrowing,
+                trace_id=trace_id,
+                start_time=start_time,
+            )
         tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
         await _maybe_log_shadow_surface(
             query, is_admin, is_super_admin, tools, trace_id, workspace_id=ws_key

@@ -18,7 +18,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from .action_registry import ActionDefinition, action_is_available, get_action_registry
+from .action_registry import ActionDefinition, action_is_available, get_action_registry, hidden_categories_now
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ class ActionSemanticIndex:
         # available_only=False so a tool configured later is ready to rank.
         # PRD-251B US-B106: a hidden category (Socials while it is off for the
         # workspace) is not eligible for any shortlist.
-        hidden = set(exclude_categories or ())
+        hidden = hidden_categories_now(exclude_categories)
         return [
             a for a in self._registry.get_all()
             if not (exclude_admin and a.admin_only)

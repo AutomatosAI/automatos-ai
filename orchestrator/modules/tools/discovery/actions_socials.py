@@ -44,8 +44,8 @@ def _post_id() -> dict:
     return {"type": "string", "description": "The post's id (platform_list_social_posts lists them)."}
 
 
-def _post_fields() -> dict:
-    """What a post carries: the REST body's fields, plus template (id or name) and chart_report."""
+def _post_copy_fields() -> dict:
+    """What a post says: its title, brief, copy, format and a video's length."""
     return {
         "title": {
             "type": "string",
@@ -73,6 +73,12 @@ def _post_fields() -> dict:
                 "(platform_get_template_schema). Leave it out for the template's own length."
             ),
         },
+    }
+
+
+def _post_template_fields() -> dict:
+    """The template a post fills, its variables and the sources of its claims."""
+    return {
         "template": {
             "type": "string",
             "description": (
@@ -101,6 +107,12 @@ def _post_fields() -> dict:
                 "null removes one."
             ),
         },
+    }
+
+
+def _post_media_fields() -> dict:
+    """What a post shows and sounds like: files already made, its voice, its AI footage."""
+    return {
         "media": {
             "type": "object",
             "description": (
@@ -131,6 +143,12 @@ def _post_fields() -> dict:
                 "connected, the slot plays the template's own motion graphics."
             ),
         },
+    }
+
+
+def _post_chart_field() -> dict:
+    """A chart template filled from a report (the Infographic)."""
+    return {
         "chart_report": {
             "type": "object",
             "description": (
@@ -157,6 +175,11 @@ def _post_fields() -> dict:
             "required": ["report_id"],
         },
     }
+
+
+def _post_fields() -> dict:
+    """What a post carries: the REST body's fields, plus template (id or name) and chart_report."""
+    return {**_post_copy_fields(), **_post_template_fields(), **_post_media_fields(), **_post_chart_field()}
 
 
 def register_socials_actions(registry: ActionRegistry) -> None:

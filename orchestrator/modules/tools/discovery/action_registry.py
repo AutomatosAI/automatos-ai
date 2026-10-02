@@ -14,10 +14,39 @@ Usage:
 
 import logging
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+# PRD-251B US-B106 (B3, off means invisible): the action categories the current turn's
+# workspace is not shown (Socials while it is off for it). A turn's entry sets them
+# (hidden_scope) for the listings it cannot hand them to; every listing reads them
+# beside its own exclude_categories.
+_turn_hidden: ContextVar[Optional[Tuple[str, ...]]] = ContextVar("hidden_action_categories", default=None)
+
+
+@contextmanager
+def hidden_scope(categories: Optional[Iterable[str]]):
+    """Hide ``categories`` from every action listing for the duration of the block."""
+    token = _turn_hidden.set(tuple(categories or ()))
+    try:
+        yield
+    finally:
+        _turn_hidden.reset(token)
+
+
+def turn_hidden() -> Optional[Tuple[str, ...]]:
+    """The categories the current turn hides, or None outside a ``hidden_scope``."""
+    return _turn_hidden.get()
+
+
+def hidden_categories_now(extra: Optional[Iterable[str]] = None) -> Set[str]:
+    """The categories hidden here: the turn's (``hidden_scope``) and ``extra``."""
+    return set(_turn_hidden.get() or ()) | set(extra or ())
+
 
 # Thread-safe singleton
 _registry_lock = threading.Lock()
@@ -193,7 +222,8 @@ class ActionRegistry:
                 action the caller isn't entitled to.
         """
         self._ensure_initialized()
-        promoted = [a for a in self._actions.values() if a.promoted and action_is_available(a)]
+        hidden = hidden_categories_now()
+        promoted = [a for a in self._actions.values() if a.promoted and a.category not in hidden and action_is_available(a)]
         if first_class_names is not None:
             promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
@@ -201,6 +231,87 @@ class ActionRegistry:
         if exclude_admin:
             promoted = [a for a in promoted if not a.admin_only]
         return [a.to_openai_schema() for a in promoted]
+
+    def _eligible_names(
+        self, exclude_admin: bool, exclude_promoted: bool, include_super_admin: bool, excluded: Set[str], hidden: Set[str],
+    ) -> List[str]:
+        """The names the dispatcher may offer, sorted: the role and tier gates (the su filter
+        runs BEFORE any allow-list, so no fallback can re-admit su actions), less the names
+        attached first-class this turn (US-014) and the hidden categories (PRD-251B US-B106),
+        and only what can run here (F078)."""
+        return sorted(
+            a.name for a in self._actions.values()
+            if (not exclude_promoted or not a.promoted)
+            and (not exclude_admin or not a.admin_only)
+            and (include_super_admin or not a.super_admin_only)
+            and a.name not in excluded
+            and a.category not in hidden
+            and action_is_available(a)
+        )
+
+    @staticmethod
+    def _narrowed(valid: List[str], pool: List[str], allowed_names: Optional[List[str]]) -> List[str]:
+        """PRD-138 US-008: the ranker's allow-list narrows the enum (the gates above ran
+        first). None keeps the full enum; an empty list, or an intersection the gates left
+        empty, falls back to it with a warning: never a schema with zero options."""
+        if allowed_names is None:
+            return valid
+        if len(allowed_names) == 0:
+            logger.warning(
+                "[ActionRegistry] to_dispatcher_schema(allowed_names=[]) — "
+                "empty allow-list, falling back to full enum"
+            )
+            return valid
+        allow_set = set(allowed_names)
+        narrowed = [n for n in pool if n in allow_set]
+        if not narrowed:
+            logger.warning(
+                "[ActionRegistry] to_dispatcher_schema: allowed_names "
+                "intersection is empty after permission filters, "
+                "falling back to full enum"
+            )
+            return valid
+        return narrowed
+
+    @staticmethod
+    def _dispatcher_tool(enum_actions: List[str]) -> Dict[str, Any]:
+        """The platform_execute tool schema over ``enum_actions`` (no enum when empty)."""
+        action_property: Dict[str, Any] = {
+            "type": "string",
+            "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
+        }
+        if enum_actions:
+            action_property["enum"] = enum_actions
+
+        return {
+            "type": "function",
+            "function": {
+                "name": "platform_execute",
+                "description": (
+                    "Execute an internal Automatos platform action. "
+                    "You MUST pass both 'action' and 'params'. "
+                    "Example: platform_execute(action='platform_configure_agent_heartbeat', "
+                    "params={'agent_id': 147, 'enabled': true, 'interval_minutes': 15}). "
+                    "See the 'Available Platform Actions' section in your system prompt "
+                    "for the full list of actions and their required parameters."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": action_property,
+                        "params": {
+                            "type": "object",
+                            "description": (
+                                "Parameters for the action as a JSON object. "
+                                "Always include required params from the action's definition. "
+                                "Example: {'agent_id': 147, 'enabled': true, 'interval_minutes': 60}"
+                            ),
+                        },
+                    },
+                    "required": ["action", "params"],
+                },
+            },
+        }
 
     def to_dispatcher_schema(
         self,
@@ -250,60 +361,16 @@ class ActionRegistry:
                 switched off for the workspace (Socials) is not offered at all.
         """
         self._ensure_initialized()
-
-        exclude_set = set(exclude_names or ())
-        hidden = set(exclude_categories or ())
-
-        # Build enum of valid action names AFTER admin/su/promoted filters.
-        # The su filter applies here, BEFORE the allow-list, so the
-        # empty-intersection fallback below can never re-admit su actions.
-        # US-014: exclude_set drops the first-class-attached names (pins + ranked
-        # promoted) so they aren't duplicated in the enum.
-        valid_actions = sorted(
-            a.name for a in self._actions.values()
-            if (not exclude_promoted or not a.promoted)
-            and (not exclude_admin or not a.admin_only)
-            and (include_super_admin or not a.super_admin_only)
-            and a.name not in exclude_set
-            and a.category not in hidden
-            and action_is_available(a)
+        excluded = set(exclude_names or ())
+        hidden = hidden_categories_now(exclude_categories)
+        valid_actions = self._eligible_names(exclude_admin, exclude_promoted, include_super_admin, excluded, hidden)
+        # PR-B: the closed-pins fallback's pins are largely promoted: the same gates, promoted admitted.
+        pool = (
+            self._eligible_names(exclude_admin, False, include_super_admin, excluded, hidden)
+            if allow_promoted_in_allowlist and exclude_promoted
+            else valid_actions
         )
-
-        # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
-        # sees the ranker's top-K. Permission filters above always run first.
-        if allowed_names is None:
-            narrowed_actions = valid_actions
-        elif len(allowed_names) == 0:
-            logger.warning(
-                "[ActionRegistry] to_dispatcher_schema(allowed_names=[]) — "
-                "empty allow-list, falling back to full enum"
-            )
-            narrowed_actions = valid_actions
-        else:
-            allow_set = set(allowed_names)
-            intersect_pool = valid_actions
-            if allow_promoted_in_allowlist and exclude_promoted:
-                # Same role gates as valid_actions, promoted admitted — the
-                # allow-list (pins) is the narrowing here, not the flag.
-                intersect_pool = sorted(
-                    a.name for a in self._actions.values()
-                    if (not exclude_admin or not a.admin_only)
-                    and (include_super_admin or not a.super_admin_only)
-                    and a.name not in exclude_set
-                    and a.category not in hidden
-                    and action_is_available(a)
-                )
-            narrowed_actions = [n for n in intersect_pool if n in allow_set]
-            # Defensive: if the intersection is empty (e.g. ranker returned
-            # only admin actions for a non-admin caller), fall back to the
-            # full eligible set rather than ship a schema with zero options.
-            if not narrowed_actions:
-                logger.warning(
-                    "[ActionRegistry] to_dispatcher_schema: allowed_names "
-                    "intersection is empty after permission filters, "
-                    "falling back to full enum"
-                )
-                narrowed_actions = valid_actions
+        narrowed_actions = self._narrowed(valid_actions, pool, allowed_names)
 
         # F025: what the model is STEERED to this turn, published for the
         # caller to render as a late system line, and — when the cache-stable
@@ -314,42 +381,7 @@ class ActionRegistry:
             publish_narrowed_actions(narrowed_actions)
         enum_actions = valid_actions if enum_is_cache_stable() else narrowed_actions
 
-        action_property: Dict[str, Any] = {
-            "type": "string",
-            "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
-        }
-        if enum_actions:
-            action_property["enum"] = enum_actions
-
-        return {
-            "type": "function",
-            "function": {
-                "name": "platform_execute",
-                "description": (
-                    "Execute an internal Automatos platform action. "
-                    "You MUST pass both 'action' and 'params'. "
-                    "Example: platform_execute(action='platform_configure_agent_heartbeat', "
-                    "params={'agent_id': 147, 'enabled': true, 'interval_minutes': 15}). "
-                    "See the 'Available Platform Actions' section in your system prompt "
-                    "for the full list of actions and their required parameters."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": action_property,
-                        "params": {
-                            "type": "object",
-                            "description": (
-                                "Parameters for the action as a JSON object. "
-                                "Always include required params from the action's definition. "
-                                "Example: {'agent_id': 147, 'enabled': true, 'interval_minutes': 60}"
-                            ),
-                        },
-                    },
-                    "required": ["action", "params"],
-                },
-            },
-        }
+        return self._dispatcher_tool(enum_actions)
 
     def build_prompt_summary(
         self,
@@ -453,7 +485,7 @@ class ActionRegistry:
         the names blocked (PRD-229), the categories hidden (PRD-251B US-B106: a feature
         switched off for the workspace, such as Socials), the su tier unless asked for
         (PRD-143), and the admin or promoted ones when excluded."""
-        blocked, hidden = set(exclude_names or ()), set(exclude_categories or ())
+        blocked, hidden = set(exclude_names or ()), hidden_categories_now(exclude_categories)
         return [
             action
             for action in actions

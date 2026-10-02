@@ -2646,12 +2646,16 @@ class StreamingChatService:
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
         from core.security.surface import WIDGET, turn_surface
+        from modules.tools.discovery.action_registry import hidden_scope
 
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
+        # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
+        # is off for it) leaves every action listing of the turn, the ATOM enum too.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
-                             self.widget_agent_lock):
+                             self.widget_agent_lock), \
+                hidden_scope(self._hidden_action_categories(agent_id)):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2661,6 +2665,14 @@ class StreamingChatService:
                 page_context=page_context, spoken_mode=spoken_mode,
             ):
                 yield chunk
+
+    def _hidden_action_categories(self, agent_id: int) -> tuple:
+        """PRD-251B US-B106: the action categories this turn's workspace is not shown."""
+        from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace
+
+        if not self.workspace_id:
+            self._resolve_workspace_id(agent_id)
+        return hidden_categories_for_workspace(self.workspace_id, self.db)
 
     async def _stream_response_with_agent_scoped(
         self,
@@ -2844,24 +2856,18 @@ class StreamingChatService:
                 # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    from modules.tools.discovery.hidden_categories import exclude_kwargs, hidden_categories_for_workspace
                     from modules.tools.tool_router import _narrow_dispatcher_actions_async
-                    # PRD-251B US-B106 (B3): what this workspace is not shown (Socials
-                    # while it is off for it) leaves the ATOM enum too.
-                    _hidden = hidden_categories_for_workspace(self.workspace_id, self.db)
                     # Shared narrowing contract (PR-B): same ranking + fallback
                     # posture as the full path, so ATOM turns honor closed-pins
                     # instead of failing open to the full enum.
                     _allowed, _nreason, _from_pins = await _narrow_dispatcher_actions_async(
-                        latest_text, is_admin=False, is_super_admin=is_super_admin,
-                        workspace_id=str(self.workspace_id) if self.workspace_id else None, **exclude_kwargs(_hidden)
+                        latest_text, is_admin=False, is_super_admin=is_super_admin
                     )
                     _dispatcher = get_action_registry().to_dispatcher_schema(
                         exclude_admin=True,
                         allowed_names=_allowed,
                         include_super_admin=is_super_admin,
                         allow_promoted_in_allowlist=_from_pins,
-                        **exclude_kwargs(_hidden),
                     )
                     # PRD-007 v0.5: proactive openers get zero tools — directive
                     # is self-contained (page context + graph related products).

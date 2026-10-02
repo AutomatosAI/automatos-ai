@@ -36,10 +36,15 @@ def hidden_categories_for_workspace(workspace_id: Any, db: Any = None) -> Tuple[
     when the caller has a session, else with a short session of this function's own.
 
     No workspace (``None``), an id that is not a UUID, or a read that fails hides the
-    Socials category (fail-closed); a failed read is logged.
+    Socials category (fail-closed); a failed read is logged. Inside a turn's
+    ``hidden_scope`` (the chat turn sets one) the turn's answer is used: one read a turn.
     """
     from modules.socials.settings import SOCIALS_ACTION_CATEGORY
+    from modules.tools.discovery.action_registry import turn_hidden
 
+    scoped = turn_hidden()
+    if scoped is not None:
+        return scoped
     if workspace_id in (None, ""):
         return (SOCIALS_ACTION_CATEGORY,)
     try:

@@ -316,7 +316,10 @@ def test_the_migration_builds_exactly_the_model_schema():
     }
     assert any(fk[:3] == (("post_id",), "social_posts", ("id",)) for fk in targets["fks"])
     posts = model["social_posts"]
-    assert {name for name, _sql in posts["checks"]} == {"ck_social_posts_status", "ck_social_posts_format"}
+    # PRD-251B Wave 1 (US-B101): a chosen length is positive.
+    assert {name for name, _sql in posts["checks"]} == {
+        "ck_social_posts_status", "ck_social_posts_format", "ck_social_posts_length_seconds",
+    }
     assert any(fk[:3] == (("workspace_id",), "workspaces", ("id",)) for fk in posts["fks"])
     assert (("campaign_id",), "social_campaigns", ("id",), "SET NULL") in posts["fks"]
     assert ("ix_social_posts_campaign_id", ("campaign_id",), False) in posts["indexes"]
