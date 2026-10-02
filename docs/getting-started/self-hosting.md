@@ -581,6 +581,23 @@ nothing counts as unset.
 `docker compose logs -f workspace-worker`, `docker compose logs -f frontend`.
 `docker compose ps` shows health.
 
+**Windows: `exec ...entrypoint.sh: no such file or directory`.** The script
+may have CRLF line endings, making Linux read the shebang as `/bin/bash\r`.
+The repository's `.gitattributes` keeps container runtime files at LF on new
+checkouts, even with `core.autocrlf=true`. Pulling that file into an older
+checkout does not rewrite unchanged files. Check the two entrypoints from
+the repository root:
+
+```bash
+git ls-files --eol orchestrator/docker-entrypoint.sh services/workspace-worker/entrypoint.sh
+```
+
+If either reports `w/crlf`, change its line-ending setting to LF in your editor
+and save, preserving any local edits. Then run
+`docker compose up -d --build backend workspace-worker`. Rebuilding alone
+cannot repair the backend script: Compose bind-mounts the host's copy over
+the image's entrypoint.
+
 **`password authentication failed for user "postgres"` after changing
 `POSTGRES_PASSWORD`.** Postgres applies the password only when it initialises
 an empty volume; an existing `automatos_postgres_data` keeps the old one, so
