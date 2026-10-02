@@ -632,7 +632,7 @@ against the preset's tuple:
 | `claude` | `-p`, `--print`, `--bare`, `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` | — | headless billing posture; removes our gate |
 | `codex` | `--dangerously-bypass-approvals-and-sandbox`, `exec`, `--ephemeral` | `--dangerously-bypass-hook-trust` | drops the OS sandbox; `exec` has no hooks; ephemeral persists nothing |
 | `grok` | `--permission-mode bypassPermissions` (?) | — | same axis as Claude |
-| `copilot` | every allow flag (`--allow-all-tools`, `--allow-all`/`--yolo`, `--allow-tool`, `--allow-all-paths`, `--allow-all-urls`, `--assisted-approval`), `--enable-memory`, `--config-dir`, `--remote`, `--acp`, `-i` … | `--no-ask-user`, `--disable-builtin-mcps`, `--no-remote`, `--no-auto-update`, `--no-auto-login` | in `-p` with no allow flag, the gate's allow is the only lift; GitHub's own MCP server would write to GitHub outside the shell gate (PRD-253 D3, D5) |
+| `copilot` | every allow flag (`--allow-all-tools`, `--allow-all`/`--yolo`, `--allow-tool`, `--allow-all-paths`, `--allow-all-urls`, `--assisted-approval`), `--enable-memory`, `--config-dir`, `--remote`, `--acp`, `-i` … | `--no-ask-user`, `--disable-builtin-mcps`, `--no-remote`, `--no-auto-update` (never `--no-auto-login`: it disables sign-in) | in `-p` with no allow flag, the gate's allow is the only lift; GitHub's own MCP server would write to GitHub outside the shell gate (PRD-253 D3, D5) |
 | seed-tier | (none — there is no gate to protect) | — | see D-3 |
 
 ### 9.3 "Sessions never push"

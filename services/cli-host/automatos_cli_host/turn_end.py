@@ -16,11 +16,19 @@ Pure: no I/O and no process handling. ``session.py`` asks; this answers.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional, Tuple
 
-from .presets import TIER_HOOKS, TIER_NATIVE, TIER_PROXY, TURN_END_STOP_HOOK
+from .presets import REGISTRY, TIER_HOOKS, TIER_NATIVE, TIER_PROXY, TURN_END_STOP_HOOK
 
 GATED_TIERS = (TIER_NATIVE, TIER_HOOKS, TIER_PROXY)
+# F233: a CLI that could not sign in exits before its hooks load. That is a login
+# to fix, not hooks switched off — in the CLIs' own words.
+_SIGN_IN_FAILED = re.compile(
+    r"no authentication information found|authentication token found but could not be validated"
+    r"|not logged in|please run /login|invalid api key", re.I)
+SIGN_IN_FAILED = "{how} Last output:\n{tail}"
+SIGN_IN_HOW = "{cli} could not sign in on this machine. Sign in to it in a terminal, then retry."
 # A print-mode CLI fires SessionEnd, flushes and exits. One still running this
 # long after SessionEnd is terminated; its turn is over all the same.
 EXIT_GRACE_AFTER_SESSION_END_SECONDS = 30.0
@@ -59,11 +67,25 @@ def exit_reason(preset: Any, *, returncode: Optional[int], session_started: bool
     return EXITED_BEFORE_STOP
 
 
+def sign_in_failure(cli: str, tail: str) -> Optional[str]:
+    """The sentence for a CLI that exited because it could not sign in — its own
+    preset's how-to — else None."""
+    if not _SIGN_IN_FAILED.search(tail or ""):
+        return None
+    probe = getattr(REGISTRY.get(cli), "auth_probe", None)
+    how = probe.refusal if probe is not None else SIGN_IN_HOW.format(cli=cli)
+    return SIGN_IN_FAILED.format(how=how, tail=tail)
+
+
 def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, startup_window: float,
              session_timeout: float, stopped_by_host: Optional[str]) -> Tuple[str, Optional[str]]:
     """The ticket's status and, unless it succeeded, the sentence that says why."""
     if reason == COMPLETED:
         return "success", None
+    # Only before the gate loaded: no tool has run, so the tail is the CLI's own.
+    signed_out = sign_in_failure(cli, tail) if reason == UNGATED_EXIT else None
+    if signed_out:
+        return "error", signed_out
     if reason == "cancelled":
         # F015: the operator did not cancel it — the machine stopped serving it.
         return ("host_stopped", stopped_by_host) if stopped_by_host else ("cancelled", "cancelled by the operator")
@@ -86,5 +108,5 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
 
 __all__ = [
     "COMPLETED", "EXITED_BEFORE_STOP", "EXIT_GRACE_AFTER_SESSION_END_SECONDS", "GATED_TIERS", "UNGATED_EXIT",
-    "describe", "exit_reason", "is_gated", "startup_timeout",
+    "describe", "exit_reason", "is_gated", "sign_in_failure", "startup_timeout",
 ]

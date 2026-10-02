@@ -223,6 +223,14 @@ def test_a_new_session_and_a_resumed_one(tmp_path, operator):
     assert resumed[1:3] == ["--resume", "copilot-1"] and "--session-id" not in resumed
 
 
+def test_a_session_may_sign_in_by_itself(tmp_path, operator):
+    """F233 (2 Oct, build 5): --no-auto-login switches off the stored login and the gh
+    fallback. With the env tokens stripped, every session failed "No authentication
+    information found"."""
+    args, _ = _argv(tmp_path, operator)
+    assert "--no-auto-login" not in args and "--no-auto-login" not in COPILOT.required_args
+
+
 def test_no_allow_flag_in_any_launch(tmp_path, operator):
     for over in ({}, {"model": "auto"}, {"resume_session_id": "x"}, {"worktree_name": "w"}):
         args, _ = _argv(tmp_path, operator, **over)
@@ -400,6 +408,26 @@ def test_the_gate_answers_a_cli_that_re_asks():
     refused, why = answer("rejudge", allowed_before=False, behavior="ask", reason="held for the operator")
     assert refused is False and "held for the operator" in why            # never a card: a held call already was one
     assert answer("deny", allowed_before=True, behavior="allow", reason="")[0] is False   # Claude, Codex: unchanged
+
+
+def test_copilots_own_config_with_its_comment_header_is_read(tmp_path, operator):
+    """F233: Copilot writes config.json under "//" lines, which json.loads refused,
+    so the operator's account pointer never reached the agent's home."""
+    config = operator / ".copilot" / "config.json"
+    config.write_text("// User settings belong in settings.json.\n// This file is managed automatically.\n"
+                      + json.dumps({"lastLoggedInUser": ACCOUNT, "loggedInUsers": [ACCOUNT],
+                                    "firstLaunchAt": "2026-07-30T10:00:00.000Z"}, indent=2))
+    a = _adapter(tmp_path, operator)
+    assert a.login() == ("octocat@github.com", "copilot", None)        # old: gh probe, then refused
+    ctx = _ctx(tmp_path)
+    home = Path(a.prepare(ctx).env["COPILOT_HOME"])
+    assert json.loads((home / "config.json").read_text())["lastLoggedInUser"] == ACCOUNT
+
+
+def test_a_url_inside_a_value_is_not_a_comment(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('// managed\n{"lastLoggedInUser": {"host": "https://github.com", "login": "octocat"}}')
+    assert home_mod.read_json(path)["lastLoggedInUser"]["host"] == "https://github.com"
 
 
 def test_the_account_pointer_is_read_in_either_shape():

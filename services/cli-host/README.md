@@ -233,7 +233,7 @@ requests, or AI credits).
 ```
 copilot -p "<pointer>" (--session-id <uuid> | --resume <id>) --add-dir <session dir> [--add-dir <deliverables>]
         [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json]
-        --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update --no-auto-login
+        --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update
 ```
 
 - **No allow flag, ever.** In `-p`, Copilot itself refuses any call that would

@@ -278,7 +278,11 @@ COPILOT = CliPreset(
     ungated_stance=(),                         # nothing: the gate's allow is the only lift (D3)
     plan_stance=(),                            # Plan is the plan turn (Wave P); Copilot's own --plan is not used
     permission_request="rejudge",              # its own path/URL checks may re-ask after the gate allowed (S1.4)
-    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update", "--no-auto-login"),
+    # Never --no-auto-login: it switches off the stored login AND the gh fallback, the
+    # only ways a session signs in (env tokens are stripped), so every session failed
+    # "No authentication information found" (F233). Without a credential, -p exits
+    # with that error; it never waits on a login prompt.
+    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"),
     hook_events=BUS_EVENTS - {"PostCompact"},
     # SECONDS (``timeoutSec``). A timed-out Copilot hook FAILS OPEN, so a held call
     # must be answered by the shim first (D4).

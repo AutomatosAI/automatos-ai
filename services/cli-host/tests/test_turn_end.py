@@ -99,6 +99,30 @@ def test_an_ungated_run_reports_nothing_it_produced():
     assert status == "error" and "without Automatos' gate" in error
 
 
+COPILOT_SIGNED_OUT = ("Error: No authentication information found.\n\nCopilot can be authenticated with GitHub "
+                      "using an OAuth Token or a Fine-Grained Personal Access Token.")
+
+
+def test_a_cli_that_could_not_sign_in_says_so_not_that_hooks_are_off():
+    """F233 (build 5): tickets 1263-1265 said a repository setting or an organisation
+    policy had switched the hooks off. Copilot had not signed in."""
+    from automatos_cli_host.presets import COPILOT
+
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=1, tail=COPILOT_SIGNED_OUT,
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith(COPILOT.auth_probe.refusal)
+    assert "without Automatos' gate" not in error and "No authentication information found" in error
+    unknown = turn_end.sign_in_failure("newcli", "Error: not logged in")
+    assert unknown.startswith("newcli could not sign in on this machine")
+
+
+def test_a_turn_that_ran_tools_is_never_read_as_a_sign_in_failure():
+    """Past the gate, the tail can be a tool's output ("gh: not logged in")."""
+    status, error = turn_end.describe("exited_before_stop", cli="copilot", returncode=1, tail="gh: not logged in",
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot exited (code 1) before finishing the turn")
+
+
 # ── the real loop against a stand-in print-mode CLI ─────────────────────────
 
 def test_a_print_mode_turn_that_proved_its_gate_succeeds(short_tmp, monkeypatch, print_cli, env_clean):

@@ -77,14 +77,19 @@ DISABLE_HOOKS_KEY = "disableAllHooks"
 
 _GH_LOGIN_RE = re.compile(r"Logged in to (?P<host>\S+) (?:account|as) (?P<login>[A-Za-z0-9-]+)")
 GH_STATUS_TIMEOUT_SECONDS = 10
+# Copilot writes config.json under a header of "//" lines ("This file is managed
+# automatically."), which json.loads refuses: the operator's account pointer was
+# never read (F233). Whole comment lines only, so a URL inside a value stays.
+_COMMENT_LINE = re.compile(r"^[ \t]*//[^\n]*$", re.M)
 
 
 # ── files ────────────────────────────────────────────────────────────────────
 
 def read_json(path: Path) -> Dict[str, Any]:
-    """A JSON object from ``path``; ``{}`` when it is missing, unreadable or not an object."""
+    """A JSON object from ``path``, Copilot's "//" comment lines allowed; ``{}`` when
+    it is missing, unreadable or not an object."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(_COMMENT_LINE.sub("", path.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}

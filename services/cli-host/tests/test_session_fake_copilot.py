@@ -80,8 +80,9 @@ def test_a_copilot_turn_end_to_end(short_tmp, fake_copilot_home, env_clean):
     argv = list(s.proc.args)
     assert argv[argv.index("-p") + 1].startswith("Work the Automatos ticket")
     assert not set(ALLOW_FLAGS) & set(argv)
-    for flag in ("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update", "--no-auto-login"):
+    for flag in ("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"):
         assert flag in argv
+    assert "--no-auto-login" not in argv                     # F233: it switches the session's sign-in off
     assert _tree(fake_copilot_home / ".copilot") == before   # the operator's home is untouched
     home = short_tmp / "state" / "agents" / "58" / ".copilot"
     assert json.loads((home / "config.json").read_text())["trustedFolders"] == []

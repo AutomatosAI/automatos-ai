@@ -131,7 +131,7 @@ No migration, table, route or dependency is added. The CLI picker needs no chang
   |---|---|
   | `--disable-builtin-mcps` | GitHub's own MCP server. It would let a session write to GitHub with the operator's token, outside the shell gate (§9.3). |
   | `--no-remote` | Remote control from github.com |
-  | `--no-auto-login` | A device-code prompt nobody can answer |
+  | ~~`--no-auto-login`~~ | Not used (F233, 2 Oct): it switches off the stored login and the `gh` fallback, the only ways a session signs in, and `-p` never waits on a login prompt anyway |
   | `--no-auto-update` and `COPILOT_AUTO_UPDATE=false` | A version change mid-run; the host runs the version it announced |
   | `--no-ask-user` | Questions inside Copilot; they go through `ask_human` (PRD-245 W2) |
 
@@ -369,7 +369,7 @@ COPILOT = CliPreset(
     name_flag="--name",
     ungated_stance=(),                                        # nothing: our hook's allow is the only lift (D3)
     plan_stance=(),                                           # Plan = the plan turn (D9, Wave P); Copilot's own --plan is not used
-    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update", "--no-auto-login"),
+    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"),   # never --no-auto-login (F233)
     hook_events=BUS_EVENTS - {"PostCompact"},
     hook_timeouts={"*": 60, "PreToolUse": 600, "PermissionRequest": 600},   # SECONDS (timeoutSec); timeouts fail OPEN
     config_home_env="COPILOT_HOME", config_home_scope=SCOPE_PER_AGENT,
@@ -455,7 +455,7 @@ Until S1.2 lands, the host announces `copilot: served:false` with the reason. Co
 
 **S1.3 · Launch (S)**
 A new session:
-`copilot -p "<pointer>" --session-id <uuid> --add-dir <session dir> [--add-dir <deliverables folder>] [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json] --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update --no-auto-login`
+`copilot -p "<pointer>" --session-id <uuid> --add-dir <session dir> [--add-dir <deliverables folder>] [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json] --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update`
 
 A resumed session uses `--resume <cli_session_id>` in place of `--session-id`.
 
