@@ -1,6 +1,7 @@
 /**
  * PRD-251 S2.2a (US-207) — the composer's first step, against a mocked apiClient:
- * "New post" opens it (the bare form stays as "Blank draft"); a brief and the
+ * "New post" (the Studio's header, PRD-251B US-B107) opens it (the bare form stays as
+ * "Blank draft"); a brief and the
  * channel chips → "Draft it" → the proposal fills the composer → "Save draft"
  * creates the post and sets its targets.
  */
@@ -24,8 +25,14 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 vi.mock('@/components/documents/blocks/BrandKitDialog', () => ({ BrandKitDialog: () => null }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsTabletOrBelow: () => false }))
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+}))
 
-import { SocialsPostList } from '@/components/deliverables/socials/socials-post-list'
+import { SocialsStudio } from '@/components/deliverables/socials/studio/studio-shell'
 import type { SocialChannel, SocialComposeProposal } from '@/lib/api-client'
 
 const kind = (k: string, available = true) => ({ kind: k, available, reason: available ? null : 'no action', needs_public_storage: false })
@@ -48,7 +55,7 @@ function renderList() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <SocialsPostList role="owner" />
+      <SocialsStudio role="owner" />
     </QueryClientProvider>,
   )
 }

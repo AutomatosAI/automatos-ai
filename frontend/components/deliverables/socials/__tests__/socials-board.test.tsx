@@ -23,6 +23,12 @@ const state = vi.hoisted(() => ({
   workspace: { id: 'w1', role: 'editor', socials: { available: true, enabled: true } } as any,
 }))
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+}))
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => state.compact,
   useIsTabletOrBelow: () => state.compact,

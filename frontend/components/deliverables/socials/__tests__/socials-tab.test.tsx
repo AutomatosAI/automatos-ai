@@ -19,7 +19,12 @@ const server = vi.hoisted(() => ({
   clock: 0,
 }))
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/deliverables' }))
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+}))
 vi.mock('@/lib/auth-hooks', () => {
   const organization = { id: 'org-1' }
   return {

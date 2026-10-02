@@ -79,14 +79,19 @@ interface SocialsCampaignsProps {
   role: Workspace['role']
   /** The workspace's posts (the list's one query), to add to a campaign. */
   posts: ReadonlyArray<SocialPost>
+  /** PRD-251B US-B107: the Studio's New plan opens the form (?plan=new); left out, the view keeps its own. */
+  creating?: boolean
+  onCreatingChange?: (creating: boolean) => void
 }
 
-export function SocialsCampaigns({ role, posts }: SocialsCampaignsProps) {
+export function SocialsCampaigns({ role, posts, creating: creatingProp, onCreatingChange }: SocialsCampaignsProps) {
   const { workspace } = useWorkspace()
   const seriesOn = !!workspace?.socials?.series_approval
   const { data, isLoading, isError } = useSocialCampaigns()
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [ownCreating, setOwnCreating] = useState(false)
+  const creating = creatingProp ?? ownCreating
+  const setCreating = onCreatingChange ?? setOwnCreating
   const campaigns = data?.campaigns ?? []
   const current = campaigns.find((c) => c.id === selectedId)?.id ?? campaigns[0]?.id ?? null
 

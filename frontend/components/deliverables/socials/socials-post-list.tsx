@@ -8,6 +8,10 @@
  * under the heading; S1.3 opens the brand kit (D5) from here for a role that
  * edits it.
  *
+ * PRD-251B US-B107: this is the Studio's calendar view until US-B108 (then its
+ * List); New post, the brand kit and the campaigns (Plans) moved to the Studio's
+ * header (studio/studio-shell.tsx).
+ *
  * S2.1 (US-205): a Board beside the List (the List | Board toggle). Both views
  * read the one posts query, so they show the same posts and the same counts,
  * and the board is read-only: a post moves only through its detail's actions.
@@ -17,23 +21,20 @@
  * that post.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, FilePlus, Loader2, Palette, Plus, Share2 } from 'lucide-react'
+import { ArrowLeft, FilePlus, Loader2, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { BrandKitDialog } from '@/components/documents/blocks/BrandKitDialog'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { SocialsBoard } from './socials-board'
-import { SocialsCampaigns } from './socials-campaigns-view'
-import { SocialsComposer } from './socials-composer'
 import { SocialsNewDraft } from './socials-new-draft'
 import { SocialsPostDetail } from './socials-post-detail'
 import { SocialsRenderMinutes } from './socials-render-minutes'
 import { SocialsStatusList } from './socials-status-list'
 import { SocialsViewToggle, type SocialsView } from './socials-view-toggle'
-import { anyRendering, canAuthorPosts, canEditBrandKit, groupPostsByStatus, type StatusGroup } from './socials-status'
+import { anyRendering, canAuthorPosts, groupPostsByStatus, type StatusGroup } from './socials-status'
 
 interface SocialsPostsBodyProps {
   posts: SocialPost[]
@@ -50,8 +51,6 @@ function SocialsPostsBody({ posts, groups, role, view, selectedId, onSelect }: S
   const compact = useIsTabletOrBelow()
   const selected = posts.find((post) => post.id === selectedId) ?? null
 
-  // S2.4: the Campaigns view, with series approval (D6).
-  if (view === 'campaigns') return <SocialsCampaigns role={role} posts={posts} />
   if (selected && (compact || view === 'board')) {
     return (
       <div className="space-y-3">
@@ -89,10 +88,9 @@ interface SocialsPostListProps {
 
 export function SocialsPostList({ role, focusPostId = null }: SocialsPostListProps) {
   const { data, isLoading, isError, error } = useSocialPosts()
-  // US-207: 'post' is the composer ("New post"), 'blank' the bare form ("Blank draft").
-  const [creating, setCreating] = useState<'post' | 'blank' | null>(null)
+  // "Blank draft": the bare form. "New post" (the composer) is in the Studio's header.
+  const [creating, setCreating] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(focusPostId)
-  const [brandKitOpen, setBrandKitOpen] = useState(false)
   const [view, setView] = useState<SocialsView>('list')
 
   // A new ?post= (another search result) opens that post.
@@ -103,10 +101,9 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
   const posts = useMemo(() => data?.posts ?? [], [data])
   const groups = useMemo(() => groupPostsByStatus(posts), [posts])
   const canAuthor = canAuthorPosts(role)
-  const canBrand = canEditBrandKit(role)
 
   const handleDraftDone = (post: SocialPost | null) => {
-    setCreating(null)
+    setCreating(false)
     if (post) setSelectedId(post.id)
   }
 
@@ -122,31 +119,16 @@ export function SocialsPostList({ role, focusPostId = null }: SocialsPostListPro
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SocialsViewToggle value={view} onChange={setView} />
-          {canBrand && (
-            <Button size="sm" variant="outline" onClick={() => setBrandKitOpen(true)}>
-              <Palette className="mr-1.5 h-4 w-4" aria-hidden />
-              Brand kit
-            </Button>
-          )}
           {canAuthor && !creating && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setCreating('blank')}>
-                <FilePlus className="mr-1.5 h-4 w-4" aria-hidden />
-                Blank draft
-              </Button>
-              <Button size="sm" onClick={() => setCreating('post')}>
-                <Plus className="mr-1.5 h-4 w-4" aria-hidden />
-                New post
-              </Button>
-            </>
+            <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+              <FilePlus className="mr-1.5 h-4 w-4" aria-hidden />
+              Blank draft
+            </Button>
           )}
         </div>
       </div>
 
-      {canBrand && <BrandKitDialog open={brandKitOpen} onOpenChange={setBrandKitOpen} />}
-
-      {creating === 'post' && <SocialsComposer onDone={handleDraftDone} />}
-      {creating === 'blank' && <SocialsNewDraft onDone={handleDraftDone} />}
+      {creating && <SocialsNewDraft onDone={handleDraftDone} />}
 
       {isLoading ? (
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
