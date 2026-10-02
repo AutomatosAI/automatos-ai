@@ -7,6 +7,7 @@
  * List), the Queue holds what waits for approval, and Plans is the campaigns view (B6: a
  * plan is a campaign). Brand kit opens the brand kit dialog in place. New post opens the
  * composer at ?post=new; New plan opens the plan form at ?view=plans&plan=new.
+ * US-B108: the calendar view is the Socials calendar (Month · Week · List).
  */
 import { useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
@@ -18,8 +19,8 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSocialPosts } from '@/hooks/use-socials-api'
 import { SocialsCampaigns } from '../socials-campaigns-view'
 import { SocialsComposer } from '../socials-composer'
-import { SocialsPostList } from '../socials-post-list'
 import { canAuthorPosts, canEditBrandKit } from '../socials-status'
+import { SocialsCalendar } from './socials-calendar'
 import { SocialsQueue, queuedPosts } from './socials-queue'
 import { SocialsStudioNav } from './studio-nav'
 import { NEW_PLAN, NEW_POST, useSocialsRoute, type GoTo, type SocialsRoute } from './studio-route'
@@ -58,7 +59,7 @@ function StudioBody({ route, go, role, posts }: StudioBodyProps) {
       />
     )
   }
-  return <SocialsPostList role={role} focusPostId={route.post} />
+  return <SocialsCalendar role={role} posts={posts} route={route} go={go} />
 }
 
 interface SocialsStudioProps {

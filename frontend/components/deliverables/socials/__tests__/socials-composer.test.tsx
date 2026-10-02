@@ -29,7 +29,8 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/deliverables',
   // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(''),
+  // US-B108: the calendar's List is the post list these tests drive.
+  useSearchParams: () => new URLSearchParams('tab=socials&cal=list'),
 }))
 
 import { SocialsStudio } from '@/components/deliverables/socials/studio/studio-shell'

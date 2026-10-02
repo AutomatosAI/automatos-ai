@@ -33,9 +33,9 @@ vi.mock('@/lib/api-client', () => {
 vi.mock('@/components/documents/blocks/BrandKitDialog', () => ({
   BrandKitDialog: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Brand Kit" /> : null),
 }))
-vi.mock('@/components/deliverables/socials/socials-post-list', () => ({
-  SocialsPostList: ({ focusPostId }: { focusPostId: string | null }) => (
-    <div data-testid="view-calendar">{focusPostId ?? 'no post'}</div>
+vi.mock('@/components/deliverables/socials/studio/socials-calendar', () => ({
+  SocialsCalendar: ({ route }: { route: { post: string | null } }) => (
+    <div data-testid="view-calendar">{route.post ?? 'no post'}</div>
   ),
 }))
 vi.mock('@/components/deliverables/socials/socials-campaigns-view', () => ({
