@@ -1539,10 +1539,9 @@ async def raise_session_ask(
     return {"success": True, "result": {"ask_id": int(ask_id), "message": ASKED.format(ask_id=ask_id)}}
 
 
-# What the session reads once its question is filed. PRD-252 R4: the question's
-# id never follows a '#', which now means a ticket's number.
+# What the session reads once its question is filed.
 ASKED = (
-    "Asked the operator (question {ask_id}). It is on their Questions tab and their phone. "
+    "Asked the operator (question #{ask_id}). It is on their Questions tab and their phone. "
     "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
     "they reply. Finish everything that does not depend on the answer now, then end your "
     "turn. Do not wait and do not ask again."
