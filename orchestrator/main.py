@@ -1245,9 +1245,13 @@ async def readiness_probe(request: Request):
          description="Get comprehensive system health status including all components and services",
          tags=["🏥 System Health"],
          response_description="Detailed system health information")
-async def health_check():
+def health_check():
     """
     System health check with real probes for database, config, and resources.
+
+    A plain ``def`` (F229, F105): its database probe and its /proc reads run in the
+    threadpool, never on the event loop, and the CPU reading never sleeps
+    (``interval=None``: the use since the previous reading).
 
     **Status Values:**
     - `healthy`: All systems operational
@@ -1277,7 +1281,7 @@ async def health_check():
 
     # Real system metrics via psutil
     try:
-        cpu_pct = psutil.cpu_percent(interval=0.1)
+        cpu_pct = psutil.cpu_percent(interval=None)
         mem = psutil.virtual_memory()
         metrics = {
             "cpu_percent": round(cpu_pct, 1),
