@@ -10,6 +10,7 @@ Source: PRD-126 US-009
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -56,7 +57,7 @@ class GraphSection(BaseSection):
             return ""
 
         # 2. Load graph
-        from modules.knowledge.graph_service import get_graph_service, team_filtered_view
+        from modules.knowledge.graph_service import get_graph_service
 
         service = get_graph_service()
         graph = await service.load_graph(str(ctx.workspace_id))
@@ -68,17 +69,16 @@ class GraphSection(BaseSection):
         from core.team_access import retrieval_team
 
         agent_team = getattr(ctx.agent, "team", None) if ctx.agent else None
-        graph = team_filtered_view(graph, retrieval_team(agent_team))
-        if graph.number_of_nodes() == 0:
-            return ""
 
         # 4. Score nodes against message terms
         terms = [t.lower() for t in message.split() if len(t) > 2]
         if not terms:
             return ""
 
-        scored = self._score_nodes_by_terms(graph, terms)
-        if not scored or scored[0][1] < _RELEVANCE_THRESHOLD:
+        # F227: the team filter copies the graph and the scoring walks every node:
+        # CPU work, done off the event loop (the watchdog caught it stalling a turn).
+        graph, scored = await asyncio.to_thread(self._visible_and_scored, graph, retrieval_team(agent_team), terms)
+        if graph.number_of_nodes() == 0 or not scored or scored[0][1] < _RELEVANCE_THRESHOLD:
             return ""
 
         # 4. BFS from top scoring nodes, merge results
@@ -118,6 +118,15 @@ class GraphSection(BaseSection):
                     if isinstance(content, str) and content.strip():
                         return content.strip()
         return ctx.task_description or ""
+
+    @classmethod
+    def _visible_and_scored(cls, graph: nx.Graph, team: Optional[str],
+                            terms: list[str]) -> tuple[nx.Graph, list[tuple[str, float]]]:
+        """The graph the team may see, and its nodes scored against ``terms``."""
+        from modules.knowledge.graph_service import team_filtered_view
+
+        visible = team_filtered_view(graph, team)
+        return visible, (cls._score_nodes_by_terms(visible, terms) if visible.number_of_nodes() else [])
 
     @staticmethod
     def _score_nodes_by_terms(

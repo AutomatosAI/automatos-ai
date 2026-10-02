@@ -15,13 +15,20 @@ Cost: one embedding and one search per question turn in a workspace with
 documents — booked to the turn in llm_usage like any search, logged here, and
 shown in the reply's activity trail. Dial: chatbot.knowledge_prefetch (on
 unless set false); off is the path as it was.
+
+F227/F085 (2 Oct, night 6): a message asking several questions got ONE search
+for all of them, and under load the model answered every question from those
+five passages without searching (F088KB 3/8, was 8/8). A numbered or bulleted
+list of questions, or several sentences ending in "?", is now searched once per
+question (up to MAX_QUESTIONS, in order), each with its own passages; the header
+tells the model to search for itself any question its passages do not answer.
 """
 from __future__ import annotations
 
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import text
@@ -42,6 +49,20 @@ PREFETCH_DATABASE_NOTE = (
     "This workspace also has a connected database: for current counts, totals or rankings, call "
     "smart_query_database rather than answering from these passages; a document's figure may be out of date."
 )
+# F227: several questions in one message, each searched on its own.
+MAX_QUESTIONS = 8
+MIN_QUESTION_CHARS = 8
+PER_QUESTION_MIN = 2
+MULTI_HEADER = (
+    "Passages from this workspace's documents, found for each of the owner's questions before you answered "
+    "(search_knowledge ran automatically, once per question). Answer each question from its own passages and "
+    "name the file. Where a question's passages are missing or do not answer it, call search_knowledge for that "
+    "question before you answer it; never answer it from another question's passages."
+)
+QUESTION_HEADING = "Question {number}: {question}"
+NOTHING_FOR_QUESTION = "No passage cleared the relevance floor: search for it yourself before you answer it."
+_ITEM = re.compile(r"^\s*(?:\(?\d{1,2}[.)]|\(?[a-h][.)]|[-*\u2022\u2013])\s+(?P<text>\S.*?)\s*$", re.IGNORECASE)
+_ASKED = re.compile(r"[^?.!\n]+\?")
 
 # An instruction, even one phrased as a question ("Can you create an agent?").
 _INSTRUCTION = re.compile(
@@ -75,6 +96,17 @@ def is_question(message: Optional[str]) -> bool:
     return "?" in t or bool(_QUESTION_START.match(t)) or bool(_ASKING.search(t))
 
 
+def split_questions(message: Optional[str]) -> List[str]:
+    """The separate questions of a message that asks several: a numbered or
+    bulleted list, else the sentences ending in "?". [] for a single question."""
+    lines = [line for line in (message or "").splitlines() if line.strip()]
+    items = [m.group("text") for m in (_ITEM.match(line) for line in lines) if m]
+    if len(items) < 2:
+        items = [sentence.strip() for sentence in _ASKED.findall(message or "")]
+    items = [item for item in items if len(item) >= MIN_QUESTION_CHARS]
+    return items[:MAX_QUESTIONS] if len(items) >= 2 else []
+
+
 def documents_in(db: Any, workspace_id: Any) -> int:
     """Searchable documents in the workspace."""
     row = db.execute(
@@ -94,6 +126,9 @@ class Prefetch:
     found: int
     elapsed_ms: int
     frontend_data: Any = None
+    # Every search that ran (one per question for several, F227): the tool loop
+    # counts each, so the model's repeat of one is skipped as done.
+    searches: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -116,6 +151,40 @@ def _has_database(db: Any, workspace_id: Any) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class _Found:
+    args: Dict[str, Any]
+    kept: List[Dict[str, Any]]
+    found: int
+    frontend_data: Any = None
+
+
+async def _search_one(search: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]], query: str, limit: int,
+                      min_score: float) -> _Found:
+    args = {"query": query.strip()[:MAX_QUERY_CHARS], "limit": limit}
+    result = await search(args) or {}
+    found = [r for r in ((result.get("raw_result") or {}).get("results") or []) if isinstance(r, dict)]
+    kept = [r for r in found if float(r.get("similarity") or 0.0) >= min_score]
+    return _Found(args=args, kept=kept, found=len(found), frontend_data=result.get("frontend_data"))
+
+
+def _passages(kept: List[Dict[str, Any]]) -> str:
+    from modules.tools.formatting.result_formatter import ToolResultFormatter
+
+    return ToolResultFormatter.format_for_llm({"success": True, "results": kept}, PREFETCH_TOOL)
+
+
+def _content_for(questions: List[str], searches: List[_Found], header: str) -> Optional[str]:
+    """What the model reads: the passages of one search, or of each question under its heading."""
+    if not any(found.kept for found in searches):
+        return None
+    if not questions:
+        return f"{header}\n\n{_passages(searches[0].kept)}"
+    blocks = [QUESTION_HEADING.format(number=n, question=q) + "\n" + (_passages(f.kept) if f.kept else NOTHING_FOR_QUESTION)
+              for n, (q, f) in enumerate(zip(questions, searches), start=1)]
+    return f"{header}\n\n" + "\n\n".join(blocks)
+
+
 async def prefetch(
     db: Any,
     workspace_id: Any,
@@ -131,7 +200,8 @@ async def prefetch(
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
     or the search failed. ``search`` runs search_knowledge with the given args
-    and returns the tool router's result (``raw_result`` / ``frontend_data``)."""
+    and returns the tool router's result (``raw_result`` / ``frontend_data``).
+    A message asking several questions is searched once per question (F227)."""
     if not enabled or (question_only and not is_question(message)):
         return None
     try:
@@ -140,29 +210,29 @@ async def prefetch(
     except Exception:  # noqa: BLE001 — cannot tell: the turn runs as it did
         logger.warning("[F085] retrieval first skipped: could not count documents", exc_info=True)
         return None
-    args = {"query": (message or "").strip()[:MAX_QUERY_CHARS], "limit": limit}
+    questions = split_questions(message)
+    queries = questions or [message or ""]
+    each = max(PER_QUESTION_MIN, limit // len(queries)) if questions else limit
     started = time.monotonic()
     try:
-        result = await search(args) or {}
+        searches = [await _search_one(search, query, each, min_score) for query in queries]
     except Exception:  # noqa: BLE001 — the model can still search for itself
         logger.warning("[F085] retrieval first failed", exc_info=True)
         return None
     elapsed = int((time.monotonic() - started) * 1000)
-    found = [r for r in ((result.get("raw_result") or {}).get("results") or []) if isinstance(r, dict)]
-    kept = [r for r in found if float(r.get("similarity") or 0.0) >= min_score]
+    kept = [passage for found in searches for passage in found.kept]
     files = list(dict.fromkeys(str(r.get("filename") or r.get("source") or "document") for r in kept))
     logger.info(
-        "[F085] retrieval first fired (ws=%s): %d of %d passages at or above %.2f from %d file(s) in %d ms — "
-        "one embedding and one search, booked to this turn",
-        workspace_id, len(kept), len(found), min_score, len(files), elapsed,
+        "[F085] retrieval first fired (ws=%s): %d search(es), %d of %d passages at or above %.2f from %d file(s) "
+        "in %d ms — booked to this turn",
+        workspace_id, len(searches), len(kept), sum(f.found for f in searches), min_score, len(files), elapsed,
     )
-    message_for_model = None
-    if kept:
-        from modules.tools.formatting.result_formatter import ToolResultFormatter
-
-        body = ToolResultFormatter.format_for_llm({"success": True, "results": kept}, PREFETCH_TOOL)
-        if header is None:
-            header = f"{PREFETCH_HEADER} {PREFETCH_DATABASE_NOTE}" if _has_database(db, workspace_id) else PREFETCH_HEADER
-        message_for_model = {"role": "system", "content": f"{header}\n\n{body}"}
-    return Prefetch(args=args, message=message_for_model, passages=len(kept), files=files, found=len(found),
-                    elapsed_ms=elapsed, frontend_data=result.get("frontend_data"))
+    if header is None:
+        base = MULTI_HEADER if questions else PREFETCH_HEADER
+        header = f"{base} {PREFETCH_DATABASE_NOTE}" if kept and _has_database(db, workspace_id) else base
+    content = _content_for(questions, searches, header)
+    return Prefetch(args=searches[0].args if not questions else {"query": (message or "").strip()[:MAX_QUERY_CHARS],
+                                                                "limit": limit},
+                    message={"role": "system", "content": content} if content else None,
+                    passages=len(kept), files=files, found=sum(f.found for f in searches), elapsed_ms=elapsed,
+                    frontend_data=searches[0].frontend_data, searches=[f.args for f in searches])
