@@ -16,6 +16,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from core.models.core import BoardTask
+from services.ticket_numbers import ticket_label, ticket_label_for  # PRD-252 R4
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def check_blocked_escalations(db: Session, workspace_id) -> int:
             workspace_id=workspace_id,
             title=f"Escalation: '{task.title[:100]}' blocked {int(hours_blocked)}h",
             description=(
-                f"Task #{task.id} has been blocked for {int(hours_blocked)} hours.\n\n"
+                f"{ticket_label(task, capital=True)} has been blocked for {int(hours_blocked)} hours.\n\n"
                 f"**Reason:** {task.blocked_reason or 'Unknown'}\n\n"
                 f"**Original task:** {task.title}\n\n"
                 f"Please investigate and unblock or reassign."
@@ -197,7 +198,7 @@ def escalate_stalled_task(
         workspace_id=workspace_id,
         title=f"Repeated stall: '{task_title[:100]}' ({stall_count}x)",
         description=(
-            f"Task #{task_id} has stalled {stall_count} times.\n\n"
+            f"{ticket_label_for(db, workspace_id, task_id, capital=True)} has stalled {stall_count} times.\n\n"
             f"**Agent:** {agent_name}\n"
             f"**Task:** {task_title}\n\n"
             f"Consider reassigning to a different agent or investigating the root cause."

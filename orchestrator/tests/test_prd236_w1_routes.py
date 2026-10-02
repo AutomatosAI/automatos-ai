@@ -223,7 +223,10 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # columns document ingestion writes); the guard follows it.
     chunks = (versions / "document_chunks_ingestion_columns.py").read_text()
     assert 'down_revision = "prd251w1_merge_heads"' in chunks
-    assert 'EXPECTED_HEAD = "document_chunks_ingestion_columns"' in guard
+    # 2026-10-02: prd252_ticket_numbers merges the two heads #852 left (PRD-252 R4).
+    numbers = (versions / "prd252_ticket_numbers.py").read_text()
+    assert 'down_revision = ("prd251_wave2", "document_chunks_ingestion_columns")' in numbers
+    assert 'EXPECTED_HEAD = "prd252_ticket_numbers"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

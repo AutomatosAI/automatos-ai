@@ -24,6 +24,7 @@ from core.cli_runtime import (
     runtime_kind_of,
 )
 from core.models.core import Agent, BoardTask
+from services.ticket_numbers import ticket_label  # PRD-252 R4
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 # work awaiting sign-off; the next fire files a new ticket (agent 15's #93 absorbed
 # 236 heartbeats while it sat in review).
 REUSABLE_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked")
-QUEUED_LINE = "queued for your Claude Code session as ticket #{task_id}"
+QUEUED_LINE = "queued for your Claude Code session as {ticket}"  # PRD-252 R4: its number
 NO_HOST_REASON = (
     "Waiting for a CLI host — none is online. Start it with `make cli-host`; "
     "the ticket is claimed on its first poll."
@@ -220,7 +221,7 @@ def _waiting_line(db: Session, workspace_id: Any, agent_id: int) -> Optional[str
 
 def queued_line(task: BoardTask) -> str:
     """The one line a lane replies with."""
-    line = QUEUED_LINE.format(task_id=task.id)
+    line = QUEUED_LINE.format(ticket=ticket_label(task))
     reason = getattr(task, "blocked_reason", None)
     if is_no_cli_host_reason(reason):
         head = reason.split(" — ")[0]                      # "Waiting for a CLI host that runs codex"
@@ -597,12 +598,12 @@ def exec_result_for(task: Any) -> dict:
         result = getattr(task, "result", None) or ""
         if status == "review":
             result = (result + "\n\n" if result else "") + (
-                f"(ticket #{task.id} is held for review on the board)"
+                f"({ticket_label(task)} is held for review on the board)"
             )
         return {"status": "success", "result": result, **base}
     if status == "cancelled":
-        return {"status": "cancelled", "result": "", "error": f"ticket #{task.id} was cancelled", **base}
-    error = getattr(task, "error_message", None) or f"ticket #{task.id} failed"
+        return {"status": "cancelled", "result": "", "error": f"{ticket_label(task)} was cancelled", **base}
+    error = getattr(task, "error_message", None) or f"{ticket_label(task)} failed"
     return {"status": "error", "result": "", "error": error, **base}
 
 

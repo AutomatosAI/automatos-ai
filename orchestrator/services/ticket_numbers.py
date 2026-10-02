@@ -65,6 +65,14 @@ def ticket_label(task: Any, number: Optional[str] = None, *, capital: bool = Fal
     return label[0].upper() + label[1:] if capital else label
 
 
+def ticket_label_for(db: Session, workspace_id: Any, task_id: Any, *, capital: bool = False) -> str:
+    """``ticket_label`` for a ticket known only by its id (a step's from its mission card)."""
+    task = db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
+    if task is None:
+        return f"{'T' if capital else 't'}icket {task_id}"
+    return ticket_label(task, ticket_number(db, task), capital=capital)
+
+
 def is_number_ref(ref: Any) -> bool:
     """True for "#0042" or "#0051.3": a number, not an id."""
     return isinstance(ref, str) and bool(_NUMBER_REF.match(ref.strip()))
