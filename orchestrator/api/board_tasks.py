@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 
@@ -475,7 +475,7 @@ async def create_task(
 
 
 @router.get("")
-async def list_tasks(
+def list_tasks(
     ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None, description="Comma-separated statuses"),
@@ -485,55 +485,69 @@ async def list_tasks(
     parent_task_id: Optional[int] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    finished_limit: Optional[int] = Query(
+        None, ge=1, le=500,
+        description="The board's view: every open ticket, whatever its age, and this many finished ones",
+    ),
 ):
-    """List board tasks with optional filters."""
-    query = db.query(BoardTask).filter(BoardTask.workspace_id == ctx.workspace_id)
+    """List board tasks with optional filters.
 
+    F225: the board asked for the newest 200 tickets, so an old ticket still in
+    Review fell off it (9 of 33 showed while Needs you counted 33). With
+    ``finished_limit`` every open ticket comes back and only Done, Cancelled and
+    Closed are windowed, newest first; ``limit`` and ``offset`` then do not apply.
+    A plain ``def``: a synchronous session never runs on the event loop (F105).
+    """
+    query = _filtered_tasks(db, ctx.workspace_id, status, agent_id, priority, parent_task_id, search)
+    total = query.count()
+    if finished_limit:
+        open_tasks = query.filter(~BoardTask.status.in_(BOARD_FINISHED)).order_by(BoardTask.created_at.desc()).all()
+        finished = (query.filter(BoardTask.status.in_(BOARD_FINISHED))
+                    .order_by(func.coalesce(BoardTask.completed_at, BoardTask.updated_at).desc())
+                    .limit(finished_limit).all())
+        tasks = open_tasks + finished
+    else:
+        tasks = query.order_by(BoardTask.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "tasks": enrich_with_agents(tasks, db, ctx.workspace_id),
+        "total": total,
+    }
+
+
+# F225: the board windows only these; every other ticket is open and always shown.
+BOARD_FINISHED = ("done", "cancelled", "closed")
+
+
+def _filtered_tasks(db: Session, workspace_id: Any, status: Optional[str], agent_id: Optional[int],
+                    priority: Optional[str], parent_task_id: Optional[int], search: Optional[str]):
+    """The workspace's tickets under the list's filters, without the archived Done ones."""
+    query = db.query(BoardTask).filter(BoardTask.workspace_id == workspace_id)
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         invalid = [s for s in statuses if s not in VALID_STATUSES]
         if invalid:
             raise HTTPException(status_code=422, detail=f"Invalid status values: {invalid}")
         query = query.filter(BoardTask.status.in_(statuses))
-
     if agent_id is not None:
         query = query.filter(BoardTask.assigned_agent_id == agent_id)
-
     if priority:
         if priority not in VALID_PRIORITIES:
             raise HTTPException(status_code=422, detail=f"Invalid priority: {priority}")
         query = query.filter(BoardTask.priority == priority)
-
     if parent_task_id is not None:
         query = query.filter(BoardTask.parent_task_id == parent_task_id)
-
     if search:
-        like_term = f"%{search}%"
-        query = query.filter(BoardTask.title.ilike(like_term))
-
+        query = query.filter(BoardTask.title.ilike(f"%{search}%"))
     # PRD-161 S5: archive — done tasks completed longer ago than the configured
     # window drop off the active board (retained in the DB, just not surfaced).
     archive_before = datetime.now(timezone.utc) - timedelta(days=config.BOARD_ARCHIVE_DONE_DAYS)
-    query = query.filter(
+    return query.filter(
         ~(
             (BoardTask.status == "done")
             & BoardTask.completed_at.isnot(None)
             & (BoardTask.completed_at < archive_before)
         )
     )
-
-    total = query.count()
-    tasks = (
-        query.order_by(BoardTask.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-
-    return {
-        "tasks": enrich_with_agents(tasks, db, ctx.workspace_id),
-        "total": total,
-    }
 
 
 @router.get("/stream")

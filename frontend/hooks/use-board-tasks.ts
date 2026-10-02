@@ -64,7 +64,9 @@ export function useBoardTasks(filters?: BoardFilters) {
   if (filters?.agent_id) params.set('agent_id', String(filters.agent_id))
   if (filters?.priority) params.set('priority', filters.priority)
   if (filters?.search) params.set('search', filters.search)
-  params.set('limit', '200')
+  // F225: every open ticket, whatever its age (an old one in Review fell off the
+  // newest 200); only Done and Cancelled are windowed, to the newest 200.
+  params.set('finished_limit', '200')
 
   const endpoint = `/api/v1/tasks?${params.toString()}`
 

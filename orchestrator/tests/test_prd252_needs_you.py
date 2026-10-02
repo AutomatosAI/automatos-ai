@@ -63,6 +63,10 @@ def floor(engine, new_session):
         "INSERT INTO orchestration_runs (workspace_id, goal, created_by, state, state_type) "
         "VALUES (CAST(:w AS uuid), 'Launch the autumn blend', 'owner', 'awaiting_approval', 'blocked') RETURNING id"),
         {"w": ws}).scalar()
+    lost = s.execute(text(
+        "INSERT INTO orchestration_runs (workspace_id, goal, created_by, state, state_type) "
+        "VALUES (CAST(:w AS uuid), 'Winter menu', 'owner', 'failed', 'terminal') RETURNING id"),
+        {"w": ws}).scalar()
     hour_ago, days_ago = NOW - timedelta(hours=1), NOW - timedelta(days=3)
     t = NS(
         review=_ticket(s, ws, "Price list for the cafés", "review", done=hour_ago),
@@ -72,7 +76,10 @@ def floor(engine, new_session):
         failed_old=_ticket(s, ws, "Supplier check", "failed", done=days_ago),
         failed_step=_ticket(s, ws, "Book the photographer", "failed", source="orchestration_task", done=hour_ago),
         blocked=_ticket(s, ws, "Rota for October", "blocked"),
-        run=str(run), ws=ws,
+        # A step a Claude Code session ran carries its run, and it is on the board: it opens itself.
+        session_step=_ticket(s, ws, "Mission: write the menu post", "review", source="mission", done=hour_ago, run=run),
+        failed_card=_ticket(s, ws, "Winter menu", "failed", source="orchestration", done=hour_ago, run=lost),
+        run=str(run), lost=str(lost), ws=ws,
     )
     _grant(s, ws, "question", "pending", t.blocked, question="Which café opens first on Sundays?")
     # Past its expiry but never answered: the Questions tab still lists it, so it still counts.
@@ -93,10 +100,11 @@ def test_needs_you_counts_each_thing_once(floor, new_session):
 
     out = needs_you(new_session(), UUID(floor.ws), "1d")
 
-    # review: not the step (its mission checks it), not the card (the mission's approval)
-    # approval: the grant and the mission, once. failed: today's, not the step's.
-    assert out["counts"] == {"review": 1, "question": 2, "approval": 2, "failed": 1}
-    assert out["total"] == 6
+    # review: not the step (its mission checks it), not the card (the mission's approval);
+    # a session-run step on the board is. approval: the grant and the mission, once.
+    # failed: today's ticket and mission card, not the step.
+    assert out["counts"] == {"review": 2, "question": 2, "approval": 2, "failed": 2}
+    assert out["total"] == 8
     assert sum(len(rows) for rows in out["rows"].values()) == out["total"]     # the widget lists every one
 
 
@@ -105,11 +113,13 @@ def test_each_row_opens_the_thing_itself(floor, new_session):
 
     rows = needs_you(new_session(), UUID(floor.ws), "1d")["rows"]
 
-    assert [r["ticket_id"] for r in rows["review"]] == [floor.review]
+    assert {(r["ticket_id"], r["mission_id"]) for r in rows["review"]} == {
+        (floor.review, None), (floor.session_step, None)}                      # F225 review: never the mission page
     assert {r["ticket_id"] for r in rows["question"]} == {floor.blocked}       # opens inside its ticket
     assert {(r["source"], r["ticket_id"]) for r in rows["approval"]} == {("grant", floor.review), ("mission", None)}
     assert [r["id"] for r in rows["approval"] if r["source"] == "mission"] == [floor.run]
-    assert [r["ticket_id"] for r in rows["failed"]] == [floor.failed]
+    assert {(r["ticket_id"], r["mission_id"]) for r in rows["failed"]} == {
+        (floor.failed, None), (floor.failed_card, floor.lost)}                 # a mission's card opens its mission
 
 
 def test_the_period_only_moves_failures(floor, new_session):
@@ -117,7 +127,7 @@ def test_the_period_only_moves_failures(floor, new_session):
 
     week = needs_you(new_session(), UUID(floor.ws), "7d")
 
-    assert week["counts"]["failed"] == 2 and week["total"] == 7
+    assert week["counts"]["failed"] == 3 and week["total"] == 9
     assert needs_you(new_session(), UUID(floor.ws), "nonsense")["period"] == "1d"
 
 
@@ -126,9 +136,9 @@ def test_a_member_who_cannot_answer_is_not_counted_what_they_cannot_open(floor, 
 
     out = needs_you(new_session(), UUID(floor.ws), "1d", may_answer=False)
 
-    assert out["counts"] == {"review": 1, "question": 0, "approval": 1, "failed": 1}
+    assert out["counts"] == {"review": 2, "question": 0, "approval": 1, "failed": 2}
     assert out["rows"]["question"] == [] and [r["source"] for r in out["rows"]["approval"]] == ["mission"]
-    assert sum(len(rows) for rows in out["rows"].values()) == out["total"] == 3
+    assert sum(len(rows) for rows in out["rows"].values()) == out["total"] == 5
 
 
 @pytest.mark.parametrize("may_answer", [True, False])
@@ -151,7 +161,7 @@ def test_the_endpoint_serves_the_viewers_number(floor, new_session, monkeypatch)
     monkeypatch.setattr(activity, "may_see_own_workspace_health", lambda db, ctx: False)
     out = activity.get_needs_you(period="1d", db=new_session(), ctx=NS(workspace_id=UUID(floor.ws)))
 
-    assert out["total"] == 3 and out["rows"]["question"] == []
+    assert out["total"] == 5 and out["rows"]["question"] == []
 
 
 def test_a_failed_read_is_never_nothing_needs_you(monkeypatch):
