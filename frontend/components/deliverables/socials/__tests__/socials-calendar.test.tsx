@@ -241,7 +241,7 @@ describe('the Socials calendar', () => {
     expect(section.parentElement?.className).toContain('lg:grid-cols-[minmax(0,1fr)_340px]')
   })
 
-  it('a plan's slot not made yet is a dashed Planned chip; it drags to a new slot and opens the plan (US-B208)', async () => {
+  it("a plan's slot not made yet is a dashed Planned chip; it drags to a new slot and opens the plan (US-B208)", async () => {
     state.plans = [{ id: PLAN_ID, name: 'Countdown', status: 'active', timezone: 'Europe/London', cadence: [], bank: { topics: 3, unused: 2 } }]
     const { container } = renderCalendar()
     const planned = await within(grid()).findByRole('button', { name: /Three weeks to Lisbon, 09:00 Video 0:30, in, Planned/ })

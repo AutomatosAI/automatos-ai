@@ -108,6 +108,7 @@ ALLOW_LIST: Set[str] = {
     "platform_create_social_post",         # PRD-251: REST POST documents:create, editor and up
     "platform_update_social_post",         # PRD-251: REST PATCH documents:update, editor and up
     "platform_submit_social_post",         # PRD-251: REST POST .../submit documents:update; asks a person, never publishes
+    "platform_add_social_topics",          # PRD-251B: draft-only topics in the plan's content bank; never posts
     "platform_generate_cover_image",
     "platform_upload_document",
     "platform_scan_business_site",
