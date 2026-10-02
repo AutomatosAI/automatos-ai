@@ -27,3 +27,10 @@ ea1df1ad2defdcbfc11a4cd9b139d218727a3a0a:orchestrator/tests/test_system_settings
 # ak_live_ value (a sequential tail, matches no real key) to prove the session RPC never
 # carries or returns a credential. Flagged by the #783 history scan.
 7fae5c5c2e4b508758a1bfafe6fad33a7ed1bf18:orchestrator/tests/test_prd245_session_composio.py:generic-api-key:197
+
+# PRD-251 W2 (US-202): the media-hosting tests name a render file as a fixture
+# argument; generic-api-key matched the file name by its entropy after the word
+# before it. Flagged by the #852 history scan.
+e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:429
+e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:451
+e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:467
