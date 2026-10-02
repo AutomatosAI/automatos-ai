@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from . import secret_reach
+from . import secret_reach, shell_words
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
     DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED,
@@ -50,16 +50,8 @@ from .permission_modes import (
 NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)git\s+push\b"),
     re.compile(r"(^|[;&|(]\s*)git\s+remote\s+(add|set-url)\b"),
-    # PRD-253 S0.3: every gh write publishes — to the operator's issues, pull
-    # requests, releases, repositories, workflow runs, secrets and gists. Reads
-    # (view, list, diff, checks) stay ordinary verbs; ``gh api`` is read word by
-    # word (``_gh_api_writes``). Copilot is GitHub's own agent: it reaches for gh.
-    re.compile(r"(^|[;&|(]\s*)gh\s+(issue|pr)\s+(create|comment|edit|close|reopen|merge|review|ready|lock)\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+release\s+(create|upload|edit|delete)\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+repo\s+(create|edit|delete|fork|rename|archive|sync)\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+(workflow\s+(run|enable|disable)|run\s+(rerun|cancel))\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+(secret|variable)\s+(set|delete)\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+gist\s+(create|edit|delete)\b"),
+    # ``gh`` is not here: in a session it reads, and every subcommand not known to
+    # be a read is refused per simple command (``shell_words.gh_writes``, PRD-253 S0.3).
     re.compile(r"(^|[;&|(]\s*)(sudo|su)\b"),
     re.compile(r"(^|[;&|(]\s*)rm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+/(\s|$)"),
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
@@ -95,7 +87,7 @@ ALWAYS_ASK_BASH = (
 # ``find``'s exec options are here for the orphan case: a second ``-exec`` after
 # a ``;`` is a simple command of its own whose first word is the option.
 COMMAND_WRAPPERS = frozenset({
-    "xargs", "env", "command", "builtin", "exec", "time", "timeout", "nice", "ionice",
+    "xargs", "env", "command", "builtin", "exec", "time", "timeout", "nice", "ionice", "busybox",
     "nohup", "stdbuf", "caffeinate", "chronic", "watch", "-exec", "-execdir", "-ok", "-okdir",
 })
 _WRAPPER_VALUE_RE = re.compile(r"^\d+[smhd]?$")      # ``timeout 5``, ``timeout 30s``, ``nice -n 10``
@@ -879,71 +871,25 @@ def _runs_own_code(words: Sequence[str]) -> bool:
     return not args[0].startswith("-")  # an unknown interpreter flag is not a plain "run this file"
 
 
-# PRD-253 S0.3. A shell's ``-c`` and ``eval`` run a command line given as an
-# argument, which the gate's word-level checks never saw: ``bash -c 'git push'``
-# reads as the verb ``bash`` (unlisted — run unasked in Auto mode, or a card an
-# operator could approve without seeing what it runs).
-SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
-_SHELL_COMMAND_FLAG_RE = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")      # -c, -lc, -ec …
-# ``gh api`` POSTs as soon as it carries a field or an input body, and any method
-# but GET/HEAD writes (``-X POST``, ``-XPOST``, ``--method=PATCH``).
-GH_API_READ_METHODS = frozenset({"GET", "HEAD"})
-_GH_API_BODY_RE = re.compile(r"^(?:-[fF].*|--(?:raw-)?field(?:=.*)?|--input(?:=.*)?)$")
-_GH_API_METHOD_RE = re.compile(r"^(?:-X|--method)(?:=?(?P<value>.+))?$")
-
-
-def _inline_commands(words: Sequence[str]) -> List[str]:
-    """The command line a shell's ``-c`` or an ``eval`` runs, judged like any other."""
-    if not words:
-        return []
-    head = Path(words[0]).name
-    if head == "eval":
-        return [" ".join(words[1:])] if len(words) > 1 else []
-    if head not in SHELLS:
-        return []
-    flag = next((i for i, word in enumerate(words[1:-1], start=1) if _SHELL_COMMAND_FLAG_RE.match(word)), None)
-    return [words[flag + 1]] if flag is not None else []
-
-
-def _gh_api_method(rest: Sequence[str], index: int) -> Optional[str]:
-    match = _GH_API_METHOD_RE.match(rest[index])
-    if match is None:
-        return None
-    return match.group("value") or (rest[index + 1] if index + 1 < len(rest) else "")
-
-
-def _gh_api_writes(words: Sequence[str]) -> bool:
-    """``gh api`` that sends a body or names a method other than GET or HEAD."""
-    if len(words) < 2 or Path(words[0]).name != "gh" or words[1] != "api":
-        return False
-    rest = list(words[2:])
-    for index, word in enumerate(rest):
-        if _GH_API_BODY_RE.match(word):
-            return True
-        method = _gh_api_method(rest, index)
-        if method is not None and method.upper() not in GH_API_READ_METHODS:
-            return True
-    return False
-
-
 def _never_allowed(words: Sequence[str], bindings: Bindings, ctx: "PolicyContext",
                    roots: Sequence[Path], depth: int, floor: Decision) -> Optional[Decision]:
-    """The hard lines for one simple command: the never-allowed list on its words,
-    a ``gh api`` that writes, and — for a shell's ``-c`` or an ``eval`` — what the
-    gate says of the command line it runs whenever that is not a plain allow (so a
-    push is refused and a card stays a card, in Auto mode too). ``floor`` is the
-    verdict on the command's own redirections, kept in either case. ``None`` = the
-    command is judged as the verb it is."""
+    """The hard lines for one simple command (PRD-253 S0.3, ``shell_words``): the
+    never-allowed list on its words and any ``gh`` that is not a read are refused;
+    for a shell's ``-c`` or an ``eval``, what the gate says of the line it runs
+    whenever that is not a plain allow; and a command the gate cannot see through
+    is a card, in Auto mode too. ``floor`` is the verdict on the command's own
+    redirections, kept in every case. ``None`` = judge it as the verb it is."""
     joined = " ".join(words)
-    if any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or _gh_api_writes(words):
+    if any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or shell_words.gh_writes(words):
         return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
-    for text in _inline_commands(words):
+    for text in shell_words.inline_commands(words):
         if any(pattern.search(text) for pattern in NEVER_ALLOWED_BASH):    # the line nets, as on a raw line
             return Decision("deny", f"never allowed in a session: {_first_words(text)!r} (sessions do not push or escalate)")
         within = _judge_command(text, bindings, ctx, roots, depth + 1)
         if within.behavior != "allow":
             return _worst([within, floor])
-    return None
+    opaque = shell_words.opaque_reason(words)
+    return _worst([Decision("ask", opaque), floor]) if opaque else None
 
 
 def _judge_cd(words: Sequence[str], bindings: Bindings, roots: Sequence[Path]) -> Decision:
