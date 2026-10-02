@@ -95,12 +95,12 @@ def test_the_agreed_brief_goes_onto_the_ticket_and_back_to_its_agent(ticket):
 def test_the_next_run_works_from_the_agreed_brief(ticket):
     """Acceptance: the re-queued ticket's prompt is the brief, with the owner's word on it."""
     from services.cli_host_service import _ticket_prompt
-    from services.ticket_redo import BRIEF_AGREED
+    from services.ticket_redo import AGREED_BRIEF_BLOCK
 
     _rebrief(ticket)
 
     prompt = _ticket_prompt(_row(ticket))
-    assert prompt.startswith(AGREED) and BRIEF_AGREED in prompt
+    assert prompt.startswith(AGREED) and prompt.endswith(AGREED_BRIEF_BLOCK)
 
 
 def test_a_brief_agreed_after_send_backs_is_not_mixed_with_the_old_draft(ticket):
