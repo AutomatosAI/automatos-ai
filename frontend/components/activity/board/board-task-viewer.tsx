@@ -744,7 +744,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
-          <TicketApprovals taskId={task.id} focusGrantId={focusQuestionId} />
+          <TicketApprovals taskId={task.id} blockedReason={task.status === 'blocked' ? task.blocked_reason : null} focusGrantId={focusQuestionId} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}

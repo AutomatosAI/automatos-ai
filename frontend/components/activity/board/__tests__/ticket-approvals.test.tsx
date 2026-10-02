@@ -35,6 +35,17 @@ describe('TicketApprovals', () => {
     expect(screen.getByText('Send the price list').parentElement).not.toHaveAttribute('data-focused')
   })
 
+  it("leaves a grant the blocked reason names to the Blocked panel's Approve button", () => {
+    pending.grants = [
+      { id: 11, reason: 'Send the price list', subject_type: 'board_task', subject_id: '760' },
+      { id: 12, reason: 'Post to Instagram', subject_type: 'board_task', subject_id: '760' },
+    ]
+    render(<TicketApprovals taskId="760" blockedReason="Awaiting human approval (grant #11): board task requires approval" />)
+
+    expect(screen.queryByText('Send the price list')).toBeNull()      // shown once, in the Blocked panel
+    expect(screen.getByText('Post to Instagram')).toBeInTheDocument()
+  })
+
   it('renders nothing for a ticket with no pending approval', () => {
     pending.grants = [{ id: 13, reason: 'Another ticket', subject_type: 'board_task', subject_id: '7' }]
     const { container } = render(<TicketApprovals taskId="760" />)

@@ -5,26 +5,31 @@
  *
  * An approval row in Needs you opens the ticket at its approval
  * (`&question=<grant id>`, the one link format), and the card there is the one
- * the Governance inbox shows, with Grant and Deny. Before, a ticket blocked on
- * an approval said only that it was waiting, and the buttons lived on another
- * tab. Approvals are a workspace admin's to give: anyone else sees nothing here.
+ * the Governance inbox shows, with Grant and Deny. A grant the ticket's blocked
+ * reason names already has its Approve button in the Blocked panel, so it is not
+ * shown twice. Approvals are a workspace admin's to give: anyone else sees
+ * nothing here.
  */
 
 import { useEffect, useRef } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { useApprovalGrants } from '@/hooks/use-approval-grants'
+import { parseBlockedReason } from './blocked-reason'
 import { GrantCard } from '@/components/command-center/governance/approvals-inbox'
 import { questionTicketId } from '@/lib/ticket-links'
 import { cn } from '@/lib/utils'
 
 interface TicketApprovalsProps {
   taskId: string
+  /** The ticket's blocked reason: the grant it names is the Blocked panel's to show. */
+  blockedReason?: string | null
   focusGrantId?: number | null
 }
 
-export function TicketApprovals({ taskId, focusGrantId }: TicketApprovalsProps) {
+export function TicketApprovals({ taskId, blockedReason, focusGrantId }: TicketApprovalsProps) {
   const { data } = useApprovalGrants('pending', 'approval')
-  const grants = (data?.grants ?? []).filter((g) => questionTicketId(g) === taskId)
+  const shown = parseBlockedReason(blockedReason).grantId
+  const grants = (data?.grants ?? []).filter((g) => questionTicketId(g) === taskId && g.id !== shown)
   const focused = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
