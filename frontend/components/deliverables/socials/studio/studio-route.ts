@@ -10,7 +10,7 @@
  * the URL decides whenever it changes (back, forward, a link from search or a notification).
  * An unknown view is the calendar; the deep link ?tab=socials&post=<id> keeps working.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 export const SOCIALS_VIEWS = ['calendar', 'queue', 'plans'] as const
@@ -75,9 +75,13 @@ export function useSocialsRoute(initialPost: string | null = null): [SocialsRout
     return { ...parsed, post: parsed.post ?? initialPost }
   })
 
-  // The URL decides when it changes: back, forward, or a link from elsewhere.
+  // The URL decides when it CHANGES (back, forward, a link from elsewhere); the first
+  // render already read it, with the page's ?post= when the URL names no post.
+  const seen = useRef(query)
   useEffect(() => {
-    if (query) setRoute(parseSocialsRoute(new URLSearchParams(query)))
+    if (query === seen.current) return
+    seen.current = query
+    setRoute(parseSocialsRoute(new URLSearchParams(query)))
   }, [query])
 
   const go = useCallback<GoTo>(

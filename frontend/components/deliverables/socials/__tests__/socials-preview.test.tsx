@@ -53,7 +53,7 @@ afterEach(cleanup)
 describe('the preview', () => {
   it('has one tab per ticked channel, each with its own copy, count and limit', async () => {
     renderEditor(TWO_CHANNELS)
-    const tabs = within(preview()).getByRole('group', { name: 'Preview channel' })
+    const tabs = await within(preview()).findByRole('group', { name: 'Preview channel' })
     await waitFor(() => expect(within(tabs).getAllByRole('button').map((b) => b.textContent)).toEqual(['X', 'LinkedIn']))
     expect(within(preview()).getByRole('textbox', { name: 'Copy for X' })).toHaveValue('x'.repeat(281))
     const count = within(preview()).getByTestId('socials-copy-count-twitter')

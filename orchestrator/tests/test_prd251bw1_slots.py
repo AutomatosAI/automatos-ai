@@ -19,14 +19,12 @@ On the S0.3b API harness (SQLite, the real gate) with the fake scheduler. Pinned
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -47,8 +45,13 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from config import config  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials import publish_lifecycle, schedule_jobs, service  # noqa: E402
-from tests.test_prd251_api import WS_A, _approved, _create, _post, api  # noqa: E402,F401
-from tests.test_prd251w3_schedule import FakeScheduler, leader  # noqa: E402,F401
+import tests.test_prd251_api as api_harness  # noqa: E402
+import tests.test_prd251w3_schedule as schedule_harness  # noqa: E402
+from tests.test_prd251_api import WS_A, _approved, _create, _post  # noqa: E402
+from tests.test_prd251w3_schedule import FakeScheduler  # noqa: E402
+
+api = api_harness.api
+leader = schedule_harness.leader
 
 LONDON = ZoneInfo("Europe/London")
 

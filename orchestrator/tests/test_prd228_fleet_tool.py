@@ -361,7 +361,8 @@ async def test_heartbeat_dispatcher_always_includes_fleet_under_semantic_narrowi
     ]
     assert "platform_fleet_status" not in ranked_without_fleet
 
-    async def _fake_narrow(query, is_admin, is_super_admin):
+    async def _fake_narrow(query, is_admin, is_super_admin, **_scope):
+        # PRD-251B US-B106: the lane passes its workspace and the categories it hides.
         # (allowed_names, reason, from_pins) — a decided, narrowed surface.
         assert query  # the heartbeat always supplies a non-empty query
         return list(ranked_without_fleet), "ranked", False

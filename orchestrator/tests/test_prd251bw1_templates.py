@@ -196,7 +196,8 @@ def test_the_backfill_renders_each_missing_template_once_and_writes_its_key(env)
     by_reference = {bundle["reference"]: bundle for bundle in renderer.bundles}
     video_bundle = by_reference[f"{render_harness.render.EXECUTION_PREFIX}{video}"]
     image_bundle = by_reference[f"{render_harness.render.EXECUTION_PREFIX}{image}"]
-    assert video_bundle["still"] == {"at": [1.0]} and "still" not in image_bundle  # a video is one still
+    # A video is one still at its still moment; an image is its own still, at 0.
+    assert video_bundle["still"] == {"at": [1.0]} and image_bundle["still"] == {"at": [0.0]}
     assert video_bundle["variables"]["size.width"] == 540 and video_bundle["variables"]["size.height"] == 960
     assert image_bundle["variables"]["size.width"] == 540 and image_bundle["variables"]["size.height"] == 540
     assert sorted(store.objects) == sorted([video_key, image_key])

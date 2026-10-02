@@ -15,7 +15,7 @@ build stays stdlib-light (the utterance-corpus linter leaf-loads this module);
 from .action_registry import ActionDefinition, ActionRegistry
 
 # core/models/socials.py SOCIAL_POST_FORMATS
-POST_FORMATS = ["video", "image", "carousel", "fact_card", "infographic"]
+POST_FORMATS = ["video", "image", "carousel", "fact_card", "infographic", "text"]
 # core/models/socials.py SOCIAL_POST_STATUSES
 POST_STATUSES = [
     "draft",
@@ -66,6 +66,13 @@ def _post_fields() -> dict:
             },
         },
         "format": {"type": "string", "enum": POST_FORMATS, "description": "What the post is."},
+        "length_seconds": {
+            "type": "integer",
+            "description": (
+                "A video's length in seconds: one of the lengths its template declares "
+                "(platform_get_template_schema). Leave it out for the template's own length."
+            ),
+        },
         "template": {
             "type": "string",
             "description": (

@@ -24,7 +24,6 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -41,7 +40,11 @@ import sqlalchemy as sa  # noqa: E402
 import api.socials_compose as compose_api  # noqa: E402
 from core.social_templates import root_duration, with_root_duration  # noqa: E402
 from modules.socials import render, service  # noqa: E402
-from tests.test_prd251w2_compose import BRIEF, SCHEMA, WS_A, WS_B, _answer, _compose, api, composer  # noqa: E402,F401
+import tests.test_prd251w2_compose as compose_harness  # noqa: E402
+from tests.test_prd251w2_compose import BRIEF, SCHEMA, WS_A, WS_B, _answer, _compose  # noqa: E402,F401
+
+api = compose_harness.api
+composer = compose_harness.composer
 
 ROOT_HTML = (
     '<!doctype html><html><head></head><body><div id="root" data-composition-id="main" data-width="1080" '
@@ -178,9 +181,9 @@ def test_with_root_duration_sets_the_roots_data_duration():
 def test_the_bundle_carries_the_posts_length_and_the_templates_own_without_one():
     template = SimpleNamespace(id=uuid.uuid4(), format="social_video", blocks={**VIDEO_BLOCKS, "variables_schema": {"headline": {"type": "text"}}})
     post = SimpleNamespace(id=uuid.uuid4(), workspace_id=WS_A, variables={"headline": {"value": "Three weeks"}}, length_seconds=15)
-    assert root_duration(render.bundle_for(post, template, {})["composition"]) == 15.0
+    assert root_duration(render.bundle_for(post, template, {})["composition"]["html"]) == 15.0
     post.length_seconds = None
-    assert root_duration(render.bundle_for(post, template, {})["composition"]) == 39.5
+    assert root_duration(render.bundle_for(post, template, {})["composition"]["html"]) == 39.5
 
 
 # ---------------------------------------------------------------------------

@@ -62,6 +62,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 import core.auth.workspace_permission as permission_mod  # noqa: E402
+import modules.socials.settings as socials_settings  # noqa: E402
 import modules.documents.brand_logo as bl  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
@@ -145,7 +146,9 @@ def api(storage, monkeypatch):
 
     role = {"value": "owner"}
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: role["value"])
-    workspace = SimpleNamespace(id=WS, name="Acme", settings={})
+    # PRD-251B US-B106: the social handles show only while Socials is on (master and workspace).
+    monkeypatch.setattr(socials_settings, "read_system_setting", lambda category, key: "true")
+    workspace = SimpleNamespace(id=WS, name="Acme", settings={"socials": {"enabled": True}})
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = workspace
     app = FastAPI()

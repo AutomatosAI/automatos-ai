@@ -66,6 +66,7 @@ from core.models.system_settings import SystemSetting  # noqa: E402
 MIGRATION = _ORCH / "alembic" / "versions" / "prd251_socials.py"
 WAVE1_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave1.py"
 WAVE2_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave2.py"
+WAVE1B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave1.py"
 MODELS = _ORCH / "core" / "models" / "socials.py"
 TABLES = ("social_posts", "social_post_targets")
 
@@ -117,6 +118,10 @@ def _migration_engine():
         wave2 = _load_migration(WAVE2_MIGRATION, "prd251_wave2_migration_models")
         with Operations.context(MigrationContext.configure(conn)):
             wave2.upgrade()
+        # PRD-251B Wave 1 (US-B101): planned_for and length_seconds, and the text format.
+        wave1b = _load_migration(WAVE1B_MIGRATION, "prd251b_wave1_migration_models")
+        with Operations.context(MigrationContext.configure(conn)):
+            wave1b.upgrade()
     return engine
 
 
@@ -166,7 +171,8 @@ def test_d2_value_sets():
         "draft", "rendering", "needs_approval", "changes_requested", "approved", "scheduled",
         "publishing", "published", "partially_published", "failed", "missed", "archived",
     )
-    assert SOCIAL_POST_FORMATS == ("video", "image", "carousel", "fact_card", "infographic")
+    # PRD-251B (B4, US-B101): a text-only post.
+    assert SOCIAL_POST_FORMATS == ("video", "image", "carousel", "fact_card", "infographic", "text")
     assert SOCIAL_TARGET_POST_KINDS == ("text", "image", "carousel", "video", "reel", "short", "story")
     assert SOCIAL_TARGET_STATUSES == ("pending", "uploading", "published", "failed")
 
@@ -184,6 +190,8 @@ def test_social_posts_carries_every_d2_column():
         "footage",
         # Wave 2 (US-208): the composer's last preview render, outside the hash.
         "preview",
+        # PRD-251B Wave 1 (US-B101): the planned slot (outside the hash) and the chosen length.
+        "planned_for", "length_seconds",
     }
 
 
@@ -296,7 +304,7 @@ def test_the_migration_builds_exactly_the_model_schema():
         for facet in ("columns", "pk", "unique", "checks", "fks", "indexes"):
             assert migration[table][facet] == model[table][facet], (
                 f"{table}.{facet} drifted between the migrations (prd251_socials, prd251_wave1, "
-                f"prd251_wave2) and "
+                f"prd251_wave2, prd251b_wave1) and "
                 f"core/models/socials.py:\n migration={migration[table][facet]}\n model={model[table][facet]}"
             )
 

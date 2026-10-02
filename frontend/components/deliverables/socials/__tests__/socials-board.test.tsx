@@ -129,7 +129,7 @@ describe('the Board beside the List', () => {
     }
     expect(Object.values(columns).reduce((sum, column) => sum + column.count, 0)).toBe(POSTS.length)
 
-    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show posts as' })).getByRole('button', { name: 'List' }))
     expect(shown(listSections(), ' posts')).toEqual(list)
     // Both views read the same query: switching views fetched nothing.
     expect(apiClient.listSocialPosts).toHaveBeenCalledTimes(1)

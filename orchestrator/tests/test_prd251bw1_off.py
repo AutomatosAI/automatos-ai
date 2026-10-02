@@ -311,7 +311,12 @@ def test_the_summaries_leave_a_hidden_category_out(registry):
     assert registry.build_prompt_summary(exclude_admin=True, exclude_categories=()) == plain
 
 
-def test_the_dispatcher_enum_never_readmits_a_hidden_category(registry):
+def test_the_dispatcher_enum_never_readmits_a_hidden_category(registry, monkeypatch):
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    # The narrowed enum itself (F025's cache-stable mode would ship the whole eligible set).
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: False)
+    monkeypatch.setattr(turn_narrowing, "publish_narrowed_actions", lambda names: None)
     assert _enum(registry.to_dispatcher_schema(exclude_promoted=False)) == [
         "platform_create_social_post", "platform_list_agents", "platform_list_documents", "platform_submit_social_post",
     ]

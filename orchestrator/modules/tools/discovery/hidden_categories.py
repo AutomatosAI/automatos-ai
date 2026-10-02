@@ -44,6 +44,10 @@ def hidden_categories_for_workspace(workspace_id: Any, db: Any = None) -> Tuple[
         return (SOCIALS_ACTION_CATEGORY,)
     try:
         key = uuid.UUID(str(workspace_id))
+    except (TypeError, ValueError, AttributeError):
+        logger.debug("[Socials] %r is not a workspace id; its Socials actions are hidden", workspace_id)
+        return (SOCIALS_ACTION_CATEGORY,)
+    try:
         if db is not None:
             return hidden_categories_for(_workspace(db, key))
         from core.database.database import SessionLocal
