@@ -188,7 +188,7 @@ async def refresh_profile(workspace_id: UUID) -> Optional[Dict[str, Any]]:
     references = await asyncio.to_thread(_load_references, workspace_id)
     if references is None:
         return None
-    images = await asyncio.to_thread(images_for_read, references)
+    images = await asyncio.to_thread(images_for_read, references) if references else []
     profile = await read_profile(workspace_id, images) if images else None
     await asyncio.to_thread(_store_profile, workspace_id, profile, references)
     return profile

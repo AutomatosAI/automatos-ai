@@ -302,7 +302,11 @@ def test_the_one_wave_revision_chains_onto_the_base_head_and_alone_builds_the_ta
     )
     assert creators == ["prd251_wave2.py"]
     # The migration writes the model's CHECK, key name and index name.
-    (check,) = [c for c in SocialCampaign.__table__.constraints if isinstance(c, sa.CheckConstraint)]
+    # PRD-251B Wave 2 gave the table three more CHECKs (kind, status, late_policy): this wave's is the approval mode.
+    (check,) = [
+        c for c in SocialCampaign.__table__.constraints
+        if isinstance(c, sa.CheckConstraint) and c.name == "ck_social_campaigns_approval_mode"
+    ]
     assert mod.CAMPAIGN_APPROVAL_MODE_CHECK == str(check.sqltext)
     assert (mod.POST_CAMPAIGN_FK, mod.POST_CAMPAIGN_INDEX) == (CAMPAIGN_FK, CAMPAIGN_INDEX)
 
@@ -615,6 +619,8 @@ def test_the_downgrade_on_postgres_drops_the_key_the_index_and_the_table(pg_engi
             conn.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
             # create_all built the key and the index; the downgrade finds them by name.
             _start_from(conn, "fresh")
+            # PRD-251B's content bank refers to the campaigns: a later wave's table goes first.
+            conn.execute(sa.text("DROP TABLE IF EXISTS social_topics"))
             _run(conn, WAVE2, "downgrade")
             assert conn.execute(sa.text("SELECT to_regclass('social_campaigns')")).scalar() is None
             assert _campaign_key_rows(conn) == [] and _indexes_on_campaign_id(conn) == []

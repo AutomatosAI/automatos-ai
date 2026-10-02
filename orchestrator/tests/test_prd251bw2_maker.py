@@ -89,7 +89,8 @@ def maker(api, monkeypatch):
 
 def _text_plan(api, **overrides):
     cadence = [{"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "09:00"}]
-    return _create_plan(api, timezone="UTC", starts_on="2026-10-12", ends_on="2026-11-08", cadence=cadence, **overrides)
+    body = {"timezone": "UTC", "starts_on": "2026-10-12", "ends_on": "2026-11-08", "cadence": cadence, **overrides}
+    return _create_plan(api, **body)
 
 
 def _topic(api, plan, title):

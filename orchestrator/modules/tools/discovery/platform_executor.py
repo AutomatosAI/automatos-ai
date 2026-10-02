@@ -603,7 +603,12 @@ class PlatformActionExecutor:
     def __init__(self, db: Session, workspace_id: UUID):
         self.db = db
         self.workspace_id = workspace_id
-        self._handlers: Dict[str, Callable] = dict(PLATFORM_HANDLERS)  # a copy: a test or a caller may swap one
+        # Each handler as this module binds it NOW: one patched on the module (a test's stub) is
+        # the one this executor calls, as when the table was built here per instance.
+        module = globals()
+        self._handlers: Dict[str, Callable] = {
+            action: module.get(_HANDLER_ATTRS.get(action, ""), handler) for action, handler in PLATFORM_HANDLERS.items()
+        }
 
     def _workspace_has_admin_owner(self) -> bool:
         """Check if the workspace owner has an admin/owner role.
@@ -1582,3 +1587,12 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_codegraph_reindex": codegraph_reindex,
     "platform_codegraph_set_auto_reindex": codegraph_set_auto_reindex,
 }
+
+
+def _bound_name(handler: Callable) -> str:
+    """The module attribute ``handler`` is bound to here, or "" when none is."""
+    return next((name for name, value in globals().items() if value is handler and not name.startswith("_")), "")
+
+
+# Each action's handler by the name this module binds it to (PlatformActionExecutor resolves it per instance).
+_HANDLER_ATTRS: Dict[str, str] = {action: _bound_name(handler) for action, handler in PLATFORM_HANDLERS.items()}

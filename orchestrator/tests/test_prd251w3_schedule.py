@@ -181,7 +181,8 @@ def test_reconcile_registers_a_missing_job_moves_a_changed_one_and_removes_an_or
         result = schedule_jobs.reconcile(scheduler, db)
         slots = {row.id: row.scheduled_for for row in db.query(harness.SocialPost)}
 
-    assert result == {"added": 1, "moved": 1, "removed": 1, "ended": 0, "passed": 0}
+    # PRD-251B (B11): the late pass reports too ("late": slots a plan moved or skipped).
+    assert result == {"added": 1, "moved": 1, "removed": 1, "ended": 0, "passed": 0, "late": 0}
     assert set(scheduler.jobs) == {f"social-publish-{missing}", f"social-publish-{moved}", "scheduled_task_7"}
     assert scheduler.jobs[f"social-publish-{moved}"].trigger.run_date == schedule_jobs._utc(slots[moved])
     with env.factory() as db:

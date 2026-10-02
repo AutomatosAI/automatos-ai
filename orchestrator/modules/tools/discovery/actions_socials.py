@@ -117,7 +117,7 @@ def _post_template_fields() -> dict:
 
 
 def _post_media_fields() -> dict:
-    """What a post shows and sounds like: files already made, its voice, its AI footage."""
+    """What a post shows and sounds like: files already made, its voice and music, its AI footage."""
     return {
         "media": {
             "type": "object",
@@ -130,7 +130,8 @@ def _post_media_fields() -> dict:
         "voice": {
             "type": "object",
             "description": (
-                "Who speaks the script: leave it out for Kokoro, the template's own voice, or name a "
+                "Who speaks the script: leave it out for Kokoro with the template's own voice; one of "
+                "Kokoro's own voices, {\"toolkit\": \"kokoro\", \"voice_id\": \"bm_george\"}; or a "
                 "voice toolkit the workspace has connected: {\"toolkit\": \"fish_audio\" or "
                 "\"elevenlabs\", \"voice_id\", \"name\"}."
             ),
@@ -139,6 +140,14 @@ def _post_media_fields() -> dict:
                 "voice_id": {"type": "string"},
                 "name": {"type": "string"},
             },
+        },
+        "music": {
+            "type": "object",
+            "description": (
+                "The music a video plays: leave it out for its template's own track, {\"track\": null} "
+                "for none, or {\"track\": \"<id>\"} for another track from the music library."
+            ),
+            "properties": {"track": {"type": ["string", "null"]}},
         },
         "footage": {
             "type": "object",

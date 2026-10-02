@@ -297,7 +297,8 @@ class TestTick:
         passes: list = []
         monkeypatch.setattr(sr, "run_reconcile_once", lambda s, db=None: passes.append(s) or {})
         assert asyncio.run(sr.start_schedule_reconcile(fake)) is True
-        assert fake.added == [sr.RECONCILE_JOB_ID]
+        # PRD-251B (US-B205): the leader also hosts the Socials plan tick.
+        assert fake.added == [sr.RECONCILE_JOB_ID, "socials_plan_tick"]
         assert passes == [fake]
 
     def test_tick_job_carries_no_scheduler_argument(self, monkeypatch):
