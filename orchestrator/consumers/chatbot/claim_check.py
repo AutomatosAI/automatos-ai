@@ -58,8 +58,8 @@ _MARKDOWN = re.compile(r"[*_`]")
 # Tier 3, log only: a completion told in the passive voice.
 _PASSIVE = re.compile(
     r"\b(?:has|have) been (?:created|scheduled|sent|updated|assigned|approved|added|set up|saved|filed|queued|"
-    r"started|launched|drafted|posted)\b|"
-    r"\b(?:is|are) now (?:on (?:your|the) board|scheduled|running|live|set up|assigned|active)\b", re.I)
+    r"started|launched|drafted|posted|installed)\b|"
+    r"\b(?:is|are) now (?:on (?:your|the) board|scheduled|running|live|set up|assigned|active|installed)\b", re.I)
 # Intent or plan, not a report: "I'm going to re-assign…", "Once the agent drafts it…".
 _INTENT = re.compile(r"\b(?:i'?m going to|i am going to|i will|i'll|i’ll|will be|once|when|after)\b", re.I)
 

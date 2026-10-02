@@ -26,7 +26,7 @@ import pytest
 
 from consumers.chatbot import claim_check
 from consumers.chatbot.claim_check import NOTHING_DONE, Verdict, invented_ids, passive_claim
-from modules.tools.execution.tool_loop import claimed_action_not_done
+from modules.tools.execution.action_claims import claimed_action_not_done
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 TOOLS = [{"type": "function", "function": {"name": "platform_execute", "parameters": {"type": "object",
