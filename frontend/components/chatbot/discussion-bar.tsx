@@ -29,6 +29,7 @@ const BAR_CLASS =
 export function DiscussionBar() {
   const { discussion, missing } = useDiscussionFromLink()
   const end = useEndDiscussion()
+  useEndOnAnotherConversation(end)
   const [rebriefing, setRebriefing] = useState(false)
   if (missing) {
     return (
@@ -106,6 +107,26 @@ function useDiscussionFromLink(): { discussion: Discussion | null; missing: stri
     newDraft()
   }, [ticketId, task, hydrated, discussion, start, end, newDraft])
   return { discussion: ticketId ? discussion : null, missing: ticketId && isError ? ticketId : null }
+}
+
+/** The discussion is its own conversation: the draft it opened, then the
+ * conversation that draft becomes. That one is new: not already a tab, and not
+ * yet named (the history panel names the chat it opens). Opening any other
+ * conversation ends the discussion, so the ticket never reaches an unrelated chat. */
+function useEndOnAnotherConversation(onLeave: () => void): void {
+  const { discussion, chatId, adopt } = useDiscussionStore()
+  const session = useChatSessionStore((s) => s.session)
+  const before = useRef(session)
+  useEffect(() => {
+    const previous = before.current
+    before.current = session
+    const active = session.activeChatId
+    if (!discussion || previous.activeChatId === active || active === chatId) return
+    const draftNamed = chatId === null && previous.activeChatId === null && active !== null
+      && !previous.openChatIds.includes(active) && !session.titles[active]
+    if (draftNamed) adopt(active)
+    else onLeave()
+  }, [session, discussion, chatId, adopt, onLeave])
 }
 
 /** Ends the discussion: the ticket leaves the chat's context and its link. */
