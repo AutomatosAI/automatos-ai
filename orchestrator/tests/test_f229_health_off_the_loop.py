@@ -30,8 +30,10 @@ def test_the_health_route_is_a_plain_def():
 
 
 def test_no_cpu_reading_in_the_health_route_sleeps():
+    # The route reads the CPU through _health_metrics (a plain def it calls).
+    assert isinstance(_route("_health_metrics"), ast.FunctionDef) and isinstance(_route("_health_database"), ast.FunctionDef)
     calls = [
-        node for node in ast.walk(_route("health_check"))
+        node for node in ast.walk(_route("_health_metrics"))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "cpu_percent"
     ]
     assert calls, "the route reports the CPU"
