@@ -111,7 +111,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false,
       ws.send(encodeResize(term.cols, term.rows))
       term.focus()
       setStatus('connected')
-      setNote(describeLaunch(grant.launch, grant.cwd, taskId != null ? `ticket #${taskId}'s session folder` : 'the host’s first allowed folder'))
+      setNote(describeLaunch(grant.launch, grant.cwd, taskId != null ? `ticket ${taskId}'s session folder` : 'the host’s first allowed folder'))
     } catch (err) {
       setStatus('error')
       setNote(err instanceof Error ? err.message : 'Could not open a terminal')
@@ -165,7 +165,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false,
       </div>
       {status === 'idle' && host && !runtime && (
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          Opens your own shell here, in {taskId != null ? `ticket #${taskId}'s folder` : cwd ? cwd : 'the host’s folder'}. Run <code className="font-mono">claude</code> or <code className="font-mono">codex</code> yourself — your login, your subscription.
+          Opens your own shell here, in {taskId != null ? `ticket ${taskId}'s folder` : cwd ? cwd : 'the host’s folder'}. Run <code className="font-mono">claude</code> or <code className="font-mono">codex</code> yourself — your login, your subscription.
         </p>
       )}
       {status === 'idle' && host && runtime && !autoOpen && (
