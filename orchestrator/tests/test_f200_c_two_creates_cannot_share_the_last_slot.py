@@ -31,6 +31,14 @@ def engine():
     eng.dispose()
 
 
+@pytest.fixture(autouse=True)
+def hosted(monkeypatch):
+    """F230: a plan's agent limit is the hosted edition's; the local edition has none."""
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+
+
 def _agent(session, ws, name):
     session.execute(text(
         "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, owner_type) "
