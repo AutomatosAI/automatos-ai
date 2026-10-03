@@ -104,13 +104,14 @@ export function useDeletePlaybook() {
   })
 }
 
-// Execute playbook directly (creates workflow + launches execution)
+// Execute playbook directly (creates workflow + launches execution). `waitForMe` is
+// this run's own "wait for me" (F242); left out, the playbook's own setting decides.
 export function useExecutePlaybook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ playbookId, inputData }: { playbookId: string; inputData?: Record<string, any> }) =>
-      apiClient.executeRecipe(playbookId, inputData),
+    mutationFn: ({ playbookId, inputData, waitForMe }: { playbookId: string; inputData?: Record<string, any>; waitForMe?: boolean }) =>
+      apiClient.executeRecipe(playbookId, inputData, waitForMe),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: playbookKeys.lists() })
     },

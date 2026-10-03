@@ -61,16 +61,18 @@ def redo_refusal(db: Any, task: Any) -> Optional[str]:
 
 
 def _playbook_refusal(db: Any, task: Any) -> Optional[str]:
+    from services.playbook_run_refusal import run_refusal
     from services.ticket_numbers import ticket_label
 
     run = playbook_run_of(db, task)
-    if run is None or _playbook_of(db, run) is None:
+    playbook = _playbook_of(db, run) if run is not None else None
+    if playbook is None:
         return (f"{ticket_label(task, capital=True)}'s playbook run can no longer be found, so it can't run "
                 "again here. Run the playbook from its page.")
     if run.status in LIVE_RUN_STATUSES:
         return (f"{ticket_label(task, capital=True)}'s playbook is still running. Cancel it first, or wait "
                 "for it to finish.")
-    return None
+    return run_refusal(playbook)  # F270: a step with no agent; #0183's Run now ran 103 again, and failed again
 
 
 def _mission_refusal(db: Any, task: Any) -> Optional[str]:
