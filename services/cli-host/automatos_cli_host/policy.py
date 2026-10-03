@@ -40,7 +40,14 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from . import secret_reach, shell_words
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
-    DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED,
+    DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED, PLAN_EDIT_REFUSED_TURN,
+)
+from .shell_text import (  # here-documents and substitutions, read before the words
+    SUBSTITUTION_MARK,
+    backtick_bodies as _backtick_bodies,
+    heredocs as _heredocs,
+    substitutions as _substitutions,
+    without_substitutions as _without_substitutions,
 )
 
 # Sessions never publish. The manager (Auto) integrates. Matched on the raw
@@ -126,6 +133,21 @@ DEFAULT_BASH_ALLOW = (
     "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
     "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
 )
+
+# PRD-253 Wave P: Plan is read-only on every CLI, and a CLI with no plan mode of its
+# own has nothing but this gate holding it there. In Plan the allowlist is the
+# read-only part of the default one — no git write, no test runner, no ``npm run``
+# (each can change the tree) and no agent extras; anything else is a card.
+PLAN_BASH_ALLOW = tuple(v for v in DEFAULT_BASH_ALLOW if v not in {
+    "git add", "git commit", "git stash", "git restore", "git checkout -b", "git switch -c",
+    "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run", "pnpm test",
+    "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
+    "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
+})
+# ...and a read-only verb can still write: ``sed -i`` edits in place, a
+# redirection creates the file it names.
+_IN_PLACE_FLAG_RE = re.compile(r"^(?:-i\S*|--in-place(?:=.*)?|-[A-Za-z]*i[A-Za-z]*)$")
+PLAN_SHELL_WRITE = "Plan mode: {what} writes to {target} — the plan comes first, so the operator decides"
 
 # Verbs that shape text and never open a path: a path-shaped word among their
 # arguments is a string, not a file (``echo /etc/passwd`` prints a path, it does
@@ -214,7 +236,6 @@ _REDIRECT_CHARS = frozenset("<>")          # a run holding one of these is a red
 ALWAYS_WRITABLE = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
 _GLOB_CHARS = "*?["
 _LINE_CONTINUATION_RE = re.compile(r"\\\n")
-_HEREDOC_RE = re.compile(r"<<-?\s*(?:'([^']*)'|\"([^\"]*)\"|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 _FD_TARGET_RE = re.compile(r"^([0-9]+|-)$")            # ``>&1``, ``<&-``
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
@@ -225,7 +246,6 @@ _VAR_REF_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-
 _UNRESOLVED_RE = re.compile(r"\$(?:[{(]|[A-Za-z_0-9@*#?!$])|^\$$")
 # …used as part of a path: ``$HOME/x``, ``${D}/x``, ``${HOME:-/etc}/x``, ``$1/x``.
 _PATH_REF_RE = re.compile(r"/\$(?:[{(]|[A-Za-z_0-9@*])|\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9])/")
-SUBSTITUTION_MARK = "$_"     # stands in for a ``$(…)`` body once that body is judged on its own
 MAX_EXPANSIONS = 64          # values one word may take across the line's variables
 # ``$'…'`` / ``$"…"`` only where the ``$`` begins a word. Night 1 held every
 # ``grep -v '^$' | …`` on earth because the ``$`` ending a quoted regex sat next to the quote.
@@ -273,6 +293,10 @@ class PolicyContext:
     # host's own state — its token). Empty = no such guard (tests, other hosts).
     secret_roots: Sequence[Path] = ()
     off_limits: Sequence[Path] = ()
+    # PRD-253 Wave P: the CLI presents its plan with a tool the gate holds in the
+    # turn (Claude Code's ExitPlanMode). Without one, the plan is the turn's final
+    # message — and Plan's refusals say so.
+    plan_tool: bool = False
 
 
 @dataclass
@@ -468,63 +492,6 @@ def _matches_prefix(command: str, prefixes: Sequence[str]) -> bool:
 
 # ── tokens and simple commands ───────────────────────────────────────────────
 
-def _heredoc_end(text: str, start: int, delimiter: str) -> Optional[int]:
-    """The end of the line that terminates a here-document whose body starts at
-    ``start`` (``<<-`` lets the terminator be tab-indented); None when there is none."""
-    pos = start
-    while pos <= len(text):
-        newline = text.find("\n", pos)
-        line = text[pos:] if newline < 0 else text[pos:newline]
-        if line.lstrip("\t") == delimiter:
-            return len(text) if newline < 0 else newline
-        if newline < 0:
-            return None
-        pos = newline + 1
-    return None
-
-
-def _heredoc_delimiter(match: Any) -> Tuple[str, bool]:
-    """The here-document's terminator, and whether it was QUOTED. A quoted
-    delimiter (``<<'EOF'``) makes the body inert data; an unquoted one
-    (``<<EOF``) expands the substitutions inside it as the shell reads it."""
-    if match.group(1) is not None:
-        return match.group(1), True
-    if match.group(2) is not None:
-        return match.group(2), True
-    if match.group(3) is not None:      # ``<<\EOF`` — bash treats it exactly like ``<<'EOF'``
-        return match.group(3), True
-    return match.group(4), False
-
-
-def _heredocs(command: str) -> Tuple[str, List[str]]:
-    """The command without its here-document bodies, plus the bodies whose
-    delimiter was UNQUOTED.
-
-    A body is data, not part of the command line, so it is cut before tokenising
-    (the ``<<`` itself stays, so the redirection beside it is still judged). But
-    an unquoted delimiter makes the shell RUN the substitutions in that body, so
-    those bodies come back for judging. A body without its terminator is left
-    where it is."""
-    out = command
-    expanded: List[str] = []
-    pos = 0
-    while True:
-        match = _HEREDOC_RE.search(out, pos)
-        if match is None:
-            return out, expanded
-        line_end = out.find("\n", match.end())
-        if line_end < 0:
-            return out, expanded
-        delimiter, quoted = _heredoc_delimiter(match)
-        body_end = _heredoc_end(out, line_end + 1, delimiter)
-        if body_end is None:
-            return out, expanded
-        if not quoted:
-            expanded = [*expanded, out[line_end + 1:body_end]]
-        out = out[:line_end] + out[body_end:]
-        pos = match.end()
-
-
 def _split_parens(token: str) -> List[str]:
     """A punctuation run holding a parenthesis becomes its own tokens: ``<(`` →
     ``<``, ``(``. Otherwise process substitution reads as ONE redirection token
@@ -676,65 +643,6 @@ def _peel_redirections(tokens: Sequence[str]) -> Tuple[List[str], List[str]]:
     return words, targets
 
 
-# ── command substitutions inside a word ──────────────────────────────────────
-
-def _matching_paren(text: str, start: int) -> int:
-    """Index of the ')' closing the '(' at ``start``; the end of the text when unbalanced."""
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return len(text)
-
-
-def _substitution_spans(word: str) -> List[Tuple[int, int, str]]:
-    """``(start, end, body)`` of every ``$(…)`` and backtick substitution in a
-    word — the tokenizer keeps them whole when quoted. Arithmetic ``$((…))`` is
-    skipped; a nested substitution is found when its body is judged."""
-    spans: List[Tuple[int, int, str]] = []
-    i = 0
-    while i < len(word):
-        if word.startswith("$((", i):
-            i = _matching_paren(word, i + 1) + 1
-        elif word.startswith("$(", i):
-            end = _matching_paren(word, i + 1)
-            spans = [*spans, (i, end + 1, word[i + 2:end])]
-            i = end + 1
-        elif word[i] == "`":
-            end = word.find("`", i + 1)
-            end = len(word) if end < 0 else end
-            spans = [*spans, (i, end + 1, word[i + 1:end])]
-            i = end + 1
-        else:
-            i += 1
-    return spans
-
-
-def _substitutions(word: str) -> List[str]:
-    return [body for _, _, body in _substitution_spans(word)]
-
-
-def _backtick_bodies(line: str) -> List[str]:
-    """The bodies of the backtick substitutions only — the ones the tokenizer
-    cannot keep whole when unquoted."""
-    return [body for start, _, body in _substitution_spans(line) if line[start] == "`"]
-
-
-def _without_substitutions(word: str) -> str:
-    """The word with each substitution replaced by ``SUBSTITUTION_MARK`` — an
-    unresolved reference wherever the body's output would land."""
-    out = ""
-    last = 0
-    for start, end, _ in _substitution_spans(word):
-        out += word[last:start] + SUBSTITUTION_MARK
-        last = end
-    return out + word[last:]
-
-
 # ── the line's own variables ─────────────────────────────────────────────────
 
 def _expand(word: str, bindings: Bindings) -> Tuple[str, ...]:
@@ -852,6 +760,36 @@ def _judge_targets(targets: Sequence[str], bindings: Bindings, roots: Sequence[P
         elif _PATH_REF_RE.search(value):
             verdicts = [*verdicts, Decision("ask", f"redirection to a path the gate cannot resolve: {value}")]
     return _worst(verdicts)
+
+
+# PRD-253 Wave P — what a read-only verb can still write while the session plans.
+IN_PLACE_EDITORS = frozenset({"sed", "gsed", "awk", "gawk", "perl"})
+
+
+def _plan_output_target(tokens: Sequence[str]) -> Optional[str]:
+    """The first file an OUTPUT redirection writes (``>``, ``>>``, ``&>``); an input
+    redirection reads, a file descriptor or a device is no file."""
+    for i, token in enumerate(tokens[:-1]):
+        if ">" in token and _is_redirection(token):
+            target = tokens[i + 1]
+            if target not in ALWAYS_WRITABLE and not _FD_TARGET_RE.match(target):
+                return target
+    return None
+
+
+def _plan_writes(tokens: Sequence[str], words: Sequence[str], ctx: "PolicyContext") -> Decision:
+    """In Plan, a command that writes is a card for the operator — a redirection
+    into a file, an in-place edit. Outside Plan it says nothing (a reasonless allow)."""
+    if ctx.permission_mode != MODE_PLAN:
+        return Decision("allow")
+    target = _plan_output_target(tokens)
+    if target is not None:
+        return Decision("ask", PLAN_SHELL_WRITE.format(what="a redirection", target=target))
+    inner = _unwrapped(words) if words and words[0] in COMMAND_WRAPPERS else list(words)
+    head = Path(inner[0]).name if inner else ""
+    if head in IN_PLACE_EDITORS and any(_IN_PLACE_FLAG_RE.match(word) for word in inner[1:]):
+        return Decision("ask", PLAN_SHELL_WRITE.format(what=f"{head} -i", target="the files it names"))
+    return Decision("allow")
 
 
 # ── one simple command ───────────────────────────────────────────────────────
@@ -1099,7 +1037,8 @@ def _judge_segment(tokens: Sequence[str], bindings: Bindings, ctx: PolicyContext
         verdict, bound = _bind_loop(words, bindings, roots)
         return _worst([*nested, verdict]), bound
     words, bound = _bind_assignments(words, bindings)
-    return _worst([*nested, _judge_simple(words, targets, bound, ctx, roots, depth)]), bound
+    plan_writes = _plan_writes(tokens, words, ctx)          # PRD-253 Wave P: Plan is read-only
+    return _worst([*nested, plan_writes, _judge_simple(words, targets, bound, ctx, roots, depth)]), bound
 
 
 def _judge_command(command: str, bindings: Bindings, ctx: PolicyContext,
@@ -1369,7 +1308,7 @@ def _write_in_mode(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     if intent.cls is not ToolClass.FILE_WRITE:
         return Decision("allow", ALLOWED_FILES)
     if ctx.permission_mode == MODE_PLAN:
-        return Decision("deny", PLAN_EDIT_REFUSED)
+        return Decision("deny", PLAN_EDIT_REFUSED if ctx.plan_tool else PLAN_EDIT_REFUSED_TURN)
     if ctx.permission_mode == MODE_MANUAL:
         return Decision("ask", MANUAL_EDIT)
     return Decision("allow", ALLOWED_FILES)

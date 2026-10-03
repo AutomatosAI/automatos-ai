@@ -136,3 +136,35 @@ def test_a_codex_session_exiting_early_is_an_error_with_diagnostics(short_tmp, f
     monkeypatch.setenv("FAKE_CODEX_SCENARIO", "exit-early")
     _, out = _run(short_tmp, _ticket(workdir))
     assert out.status == "error" and out.exit_reason == "exited_before_stop" and "code 3" in (out.error or "")
+
+
+def test_a_plan_turn_on_codex_ends_with_the_plan_for_the_operator(short_tmp, fake_codex_home, env_clean):
+    """PRD-253 Wave P: Codex has no plan mode of its own — Plan is the gate and the
+    ticket file. The patch is refused with the final-message wording, the turn's
+    final message is the plan, it lands as plan.md and travels to the backend as a
+    PlanReady event in the final flush, ahead of the result."""
+    from automatos_cli_host.permission_modes import PLAN_EDIT_REFUSED_TURN, PLAN_EVENT
+
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    s, out = _run(short_tmp, _ticket(workdir, permission_mode="plan"))
+    assert out.status == "success", out
+    assert not (workdir / "hello.txt").exists()                                  # the edit was refused
+    assert any(d["reason"] == PLAN_EDIT_REFUSED_TURN for d in out.permission_denials)
+    assert s.plan == {"text": out.result_text, "approved_in_turn": False}
+    assert any(f.endswith("plan.md") for f in out.files_touched)
+    events = []
+    while not s.events.empty():
+        events.append(s.events.get_nowait())
+    plans = [e for e in events if e.get("event") == PLAN_EVENT]
+    assert len(plans) == 1 and plans[0]["text"] == out.result_text and plans[0]["approved_in_turn"] is False
+    assert "## Plan mode" in (s.session_dir / "ticket.md").read_text(encoding="utf-8")
+
+
+def test_an_approved_plan_resumes_codex_as_edit_automatically(short_tmp, fake_codex_home, env_clean):
+    """The claim after Approve says Edit automatically: the same patch now lands."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    s, out = _run(short_tmp, _ticket(workdir, permission_mode="edits", plan_approved=True))
+    assert out.status == "success" and s.plan is None
+    assert (workdir / "hello.txt").read_text() == "hi\n"
