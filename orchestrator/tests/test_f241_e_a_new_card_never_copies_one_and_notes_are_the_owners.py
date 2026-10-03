@@ -214,3 +214,31 @@ def test_a_status_sent_to_the_edit_tool_is_told_about_send_back():
     refused = undeclared_params_refusal("platform_update_task", action,
                                         {"task_id": 199, "status": "pending", "description": NEW_BRIEF}, "t")
     assert "send_back: true" in refused
+
+
+def _cancel_with(note_written):
+    """A status handler that cancels the card, writing its own note when told to (F273's cancel)."""
+    from modules.tools.discovery.ticket_changes import STATUS, guarded_and_recorded
+
+    @guarded_and_recorded(STATUS)
+    async def cancel(db, workspace_id, params):
+        from core.models.core import BoardTask
+        from services.cli_host_service import append_session_note
+
+        db.query(BoardTask).filter(BoardTask.id == params["task_id"]).update({"status": "cancelled"})
+        if note_written:
+            append_session_note(db, task_id=params["task_id"], workspace_id=workspace_id,
+                                note="Cancelled the playbook run, in chat.", by="Auto")
+        db.commit()
+        return {"success": True, "task_id": params["task_id"], "status": "cancelled"}
+    return cancel
+
+
+def test_a_cancel_that_notes_itself_gets_no_second_note(shop):
+    asyncio.run(_cancel_with(True)(shop.db, shop.ws, {"task_id": shop.card.id, "status": "cancelled"}))
+    assert [n["note"] for n in _notes(shop)] == ["Cancelled the playbook run, in chat."]
+
+
+def test_a_cancel_that_writes_no_note_is_noted_as_a_move(shop):
+    asyncio.run(_cancel_with(False)(shop.db, shop.ws, {"task_id": shop.card.id, "status": "cancelled"}))
+    assert [n["note"].split(",")[0] for n in _notes(shop)] == ["Moved this from Inbox to Cancelled"]
