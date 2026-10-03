@@ -9,7 +9,7 @@
  * S2.1: `postId` is the page's `?post=` (global search links a post there), and
  * the list opens that post.
  * PRD-251B US-B107: with both on it is the Socials Studio (studio/studio-shell.tsx):
- * Calendar · Queue · Plans · Brand kit, the view held in the URL.
+ * Calendar · Queue · Plans, the view held in the URL (the brand kit is its own tab, F250).
  */
 import { useWorkspace } from '@/components/workspace-provider'
 import { SocialsStudio } from './studio/studio-shell'

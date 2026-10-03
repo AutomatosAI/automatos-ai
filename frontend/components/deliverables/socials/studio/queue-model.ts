@@ -4,6 +4,7 @@
  * publishes and how long is left, and the pane's meta line.
  */
 import type { SocialPost } from '@/lib/api-client'
+import { hasChannels } from '../socials-review'
 import { channelLabel } from '../socials-status'
 import { formatLabel, postTime } from './socials-calendar-model'
 
@@ -71,10 +72,11 @@ export function timeLeft(slot: string, now: Date): string {
   return `in ${Math.round(minutes / DAY_MIN)}d`
 }
 
-/** "Approve · publishes 12:00", or "Approve" for a post with no slot. */
+/** "Approve · publishes 12:00", or "Approve" for a post with no slot, or with no channel, which
+ * publishes nothing (F256). */
 export function approveLabel(post: SocialPost): string {
   const slot = slotOfQueued(post)
-  return slot ? `Approve · publishes ${postTime(post, slot)}` : 'Approve'
+  return slot && hasChannels(post) ? `Approve · publishes ${postTime(post, slot)}` : 'Approve'
 }
 
 /** "12:00 · X, LinkedIn · Image · WebSummit countdown". */

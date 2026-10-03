@@ -7,8 +7,10 @@
  * sizes, Look (Template · Upload · Library · AI-made), Claims and sources, When; beside them the
  * copy and the preview. Save draft writes the post's fields (POST or PATCH), its channels
  * (PUT /targets) and its slot (PUT /slot, only when it moved); the server checks it all.
+ * F254: a new post is one post: once a Save, Render or Submit has created it, every later
+ * try edits it, and a try that failed after creating it opens it.
  */
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
@@ -57,14 +59,22 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const chosen = templates.data?.find((t) => t.id === draft.templateId) ?? null
   const imageSlots = chosen?.image_slots ?? []
   const calls = useEditorCalls()
+  // F254: the post a Save, Render or Submit created, kept even when a later step fails, so
+  // the next try edits it instead of creating another.
+  const created = useRef<string | null>(null)
 
   const payload = (): EditorSave => ({
-    postId: post?.id ?? null,
+    postId: post?.id ?? created.current,
     fields: postFields(draft, chosen?.footage_slots ?? [], imageSlots),
     targets: editorTargets(draft),
     slot: slotChanged(post, draft.slot) ? slotInput(draft.slot) : undefined,
+    onCreated: (saved) => { created.current = saved.id },
   })
-  const opened = { onSuccess: (saved: SocialPost) => (post ? undefined : go({ post: saved.id })) }
+  const opened = {
+    onSuccess: (saved: SocialPost) => (post ? undefined : go({ post: saved.id })),
+    // F254: a try that failed after creating the post opens that post, as it now is.
+    onError: () => (post || !created.current ? undefined : go({ post: created.current })),
+  }
   const busy = calls.save.isLoading ? 'save' : calls.render.isLoading ? 'render' : calls.submit.isLoading ? 'submit' : null
   const pickTemplate = (templateId: string | null) => {
     const lengths = templates.data?.find((t) => t.id === templateId)?.durations ?? []

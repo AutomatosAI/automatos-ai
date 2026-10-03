@@ -10,7 +10,7 @@
  * * the style references: added (liked), turned to avoid, noted, removed; the kit full;
  * * what Auto takes from them, Read the references again, and whether liked images go;
  * * the AI tools: the rows, a default changed (only the changed one is sent) and the caps;
- *   with Socials off, a note instead.
+ *   a dropdown with one choice says what to connect (F252); with Socials off, a note instead.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
@@ -331,6 +331,11 @@ describe('the AI tools', () => {
     expect(within(rows).getByRole('button', { name: 'Connect Kie.ai' })).toBeInTheDocument()
     expect(within(rows).getAllByText('Built in · free')).toHaveLength(2)
     expect(within(section).getByText(/Spent this month: \$1\.25 of \$30\.00/)).toBeInTheDocument()
+    // F252: a dropdown with one choice says why, and what to connect for more; one with a choice says nothing.
+    expect(within(section).getByLabelText('Voice')).toHaveAccessibleDescription(
+      'Only Kokoro (free) for now: no AI tool for this is set up on this platform.',
+    )
+    expect(within(section).getByLabelText('Images')).not.toHaveAccessibleDescription()
 
     fireEvent.change(within(section).getByLabelText('AI images'), { target: { value: 'fal_ai' } })
     fireEvent.change(within(section).getByLabelText('Per-post media cap (USD)'), { target: { value: '4.5' } })

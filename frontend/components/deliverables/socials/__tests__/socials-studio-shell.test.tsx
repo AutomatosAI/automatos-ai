@@ -1,6 +1,7 @@
 /**
  * PRD-251B US-B107 — the Socials Studio shell: the sub-navigation Calendar · Queue (its
- * count) · Plans · Brand kit with New plan and New post, and the view held in the URL
+ * count) · Plans with New plan and New post (F250: the brand kit is its own Deliverables
+ * tab, with no second entry here), and the view held in the URL
  * (/deliverables?tab=socials&view=…&post=…&plan=…). A view change is a router.push, so
  * back returns to it; an unknown view is the calendar; ?post=<id> opens that post.
  *
@@ -80,10 +81,10 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the Socials Studio shell', () => {
-  it('has Calendar, Queue with its count, Plans and Brand kit, and New plan and New post', async () => {
+  it('has Calendar, Queue with its count and Plans, and New plan and New post', async () => {
     renderStudio()
     const items = within(nav()).getAllByRole('button').map((b) => b.textContent)
-    expect(items).toEqual(['Calendar', 'Queue', 'Plans', 'Brand kit'])
+    expect(items).toEqual(['Calendar', 'Queue', 'Plans'])
     expect(await within(nav()).findByText('2 posts need you')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /New post/ })).toBeInTheDocument()
@@ -132,11 +133,10 @@ describe('the Socials Studio shell', () => {
     expect(state.replace).toHaveBeenCalledWith('/deliverables?tab=brand')
   })
 
-  it('Brand kit goes to the Brand kit tab', () => {
+  it('F250: the brand kit has one entry, the Deliverables tab: none in the Socials nav, for any role', () => {
     renderStudio()
-    fireEvent.click(within(nav()).getByRole('button', { name: 'Brand kit' }))
-    expect(state.push).toHaveBeenCalledWith('/deliverables?tab=brand')
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(nav()).queryByRole('button', { name: 'Brand kit' })).toBeNull()
+    expect(screen.queryByText('Brand kit')).toBeNull()
   })
 
   it('New plan opens the plan form on Plans; New post opens the editor', () => {
