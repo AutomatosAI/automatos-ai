@@ -107,10 +107,13 @@ Composio, if you add a key).
 | `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
-`automatos_minio_data`, `automatos_backend_logs`, and `backend_data`, which
-holds the auto-generated credential-encryption key (`CREDENTIAL_KEY_FILE` in
-`envs/api.defaults`). The workspace directory is a **bind mount** of a host
-folder, not a volume (§5).
+`automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
+and `backend_data`, which holds the auto-generated credential-encryption key
+(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`). Your workspace's directory is a
+**bind mount** of a host folder, not a volume (§5). `automatos_workspaces_data`
+holds the files of every other workspace on the stack (a second or a test
+workspace), so they survive `docker compose up --build`; `make reset` removes
+it with the rest.
 
 ### Where configuration lives
 
