@@ -12,6 +12,7 @@ from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
+from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
@@ -197,6 +198,7 @@ def _parse_deadline(value: Any):
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@auto_approves_only_what_it_runs  # auto_approve runs only publish_blog; others wait for the owner
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
