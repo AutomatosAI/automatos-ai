@@ -649,8 +649,7 @@ def test_agent_update_status_notifies_board_event(monkeypatch):
     """platform_update_task_status fires status_changed — the same event name the
     human drag-and-drop PATCH emits (api/board_tasks.py:912)."""
     calls = _patch_notify(monkeypatch)
-    # F259: Review needs work on the card, as a drag to Review does
-    db = _FakeSession(task=_fresh_task(id=3, status="assigned", result="A first draft."))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", result="A first draft."))  # F259: work to review
 
     result = asyncio.run(
         _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "review"})
@@ -1558,8 +1557,7 @@ class _MultiSession:
 
 def test_bulk_status_update_closes_every_id_in_one_call(monkeypatch):
     calls = _patch_notify(monkeypatch)
-    tasks = [_fresh_task(id=i, status="blocked", blocked_at=1, blocked_reason="x", result="Done by hand.")  # F259
-             for i in (11, 12, 13)]
+    tasks = [_fresh_task(id=i, status="blocked", blocked_at=1, blocked_reason="x", result="Done.") for i in (11, 12, 13)]
     db = _MultiSession(tasks)
 
     result = asyncio.run(
