@@ -19,7 +19,8 @@ Deliverable registry and the usage tracker are recording fakes. Pins:
   enterprise and the local edition have none; the month's media-lane render
   units are the minutes used; a render past the quota is refused (429) BEFORE
   any call to media-render;
-* no template → 422; no renderer → 503, "Rendering needs the media profile" in
+* no template → 422 (a post left to "Let Auto pick" asks Auto first, F253, and 422
+  says why when Auto cannot pick); no renderer → 503, "Rendering needs the media profile" in
   the local edition; GET /usage; GET /media streams a rendered file;
 * the client sends X-Internal-Token with config's timeouts, and maps 202 / 422 /
   503 / connection and read failures; a download streams to disk with its sha256;
@@ -67,6 +68,7 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import core.models  # noqa: E402,F401  (registers every mapper)
 import api.socials as socials_api  # noqa: E402
+import api.socials_compose as socials_compose  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.boot.reaper as reaper  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
@@ -671,10 +673,16 @@ def test_an_edit_can_never_write_a_rendered_file_record():
 # ---------------------------------------------------------------------------
 
 
-def test_a_post_without_a_template_or_a_composition_is_422(env):
+def test_a_post_without_a_template_or_a_composition_is_422(env, monkeypatch):
+    # F253: a post left to "Let Auto pick" asks Auto first; when Auto cannot pick, 422 says why.
+    async def no_pick(db, workspace_id, post):
+        raise render.NotRenderable(socials_compose.NO_TEMPLATE_FOR.format(format=post.format))
+
+    monkeypatch.setattr(socials_compose, "auto_template", no_pick)
     bare = _create(env)
     resp = env.client.post(f"/api/socials/posts/{bare['id']}/render")
     assert resp.status_code == 422 and "template" in resp.json()["detail"]
+    assert _post(env, bare["id"]).template_id is None and _post(env, bare["id"]).status == "draft"
 
     empty = _create(env, template_id=str(_template(env, blocks={"version": 1, "blocks": []})))
     resp = env.client.post(f"/api/socials/posts/{empty['id']}/render")

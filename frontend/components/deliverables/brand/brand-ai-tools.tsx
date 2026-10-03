@@ -6,6 +6,7 @@
  * and Kokoro built in and free; the default per media type, from what is offered now; the
  * monthly media cap and the per-post cap, with this month's spend. Paid tools are connected
  * in Composio only (D15). Owners and admins change them; the server checks every choice.
+ * F252: a dropdown with one choice says why, and what to connect for more.
  */
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -17,6 +18,7 @@ import type { SocialMediaToolkitRow, SocialMediaToolsResponse, SocialMediaType }
 import { useSocialMediaTools, useUpdateSocialMediaTools } from '@/hooks/use-media-tools'
 import { useSocialsOn } from '@/hooks/use-socials-api'
 import { ConnectToolkit } from '../socials/connect-toolkit'
+import { oneChoiceHint } from './brand-ai-tools-model'
 
 export const MEDIA_TYPE_LABELS: Record<SocialMediaType, string> = {
   images: 'Images',
@@ -76,17 +78,24 @@ function ToolsForm({ tools, canEdit }: ToolsFormProps) {
   const capsValid = [monthly, perPost].every((value) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0)
   return (
     <fieldset disabled={!canEdit} className="grid gap-3 sm:grid-cols-2">
-      {MEDIA_TYPES.map((type) => (
-        <div key={type}>
-          <Label htmlFor={`media-default-${type}`} className="text-xs">{MEDIA_TYPE_LABELS[type]}</Label>
-          <select id={`media-default-${type}`} className={SELECT_CLASS} value={defaults[type]} onChange={(e) => setDefaults({ ...defaults, [type]: e.target.value })}>
-            {!(tools.offered[type] ?? []).some((choice) => choice.value === defaults[type]) && (
-              <option value={defaults[type]}>{defaults[type]} (not available now)</option>
-            )}
-            {(tools.offered[type] ?? []).map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
-          </select>
-        </div>
-      ))}
+      {MEDIA_TYPES.map((type) => {
+        const hint = oneChoiceHint(type, tools)
+        return (
+          <div key={type}>
+            <Label htmlFor={`media-default-${type}`} className="text-xs">{MEDIA_TYPE_LABELS[type]}</Label>
+            <select
+              id={`media-default-${type}`} className={SELECT_CLASS} value={defaults[type]} aria-describedby={hint ? `media-default-${type}-hint` : undefined}
+              onChange={(e) => setDefaults({ ...defaults, [type]: e.target.value })}
+            >
+              {!(tools.offered[type] ?? []).some((choice) => choice.value === defaults[type]) && (
+                <option value={defaults[type]}>{defaults[type]} (not available now)</option>
+              )}
+              {(tools.offered[type] ?? []).map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+            </select>
+            {hint && <p id={`media-default-${type}-hint`} className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+          </div>
+        )
+      })}
       <div>
         <Label htmlFor="media-cap-monthly" className="text-xs">Monthly media cap (USD)</Label>
         <Input id="media-cap-monthly" type="number" min={0} step="0.01" value={monthly} onChange={(e) => setMonthly(e.target.value)} />

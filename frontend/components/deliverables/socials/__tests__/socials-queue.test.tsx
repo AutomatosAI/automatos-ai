@@ -9,6 +9,8 @@
  *   Make another take asks for one without guidance.
  * * Approve all shown is offered only with series approval on; it approves each shown post by
  *   its hash (the series path for one series campaign) and reports one that changed.
+ * * F256: a post with no channel publishes nothing: its Approve is disabled and says why, and
+ *   Approve all shown leaves it out.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -41,6 +43,7 @@ import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
 import { queueHeading, timeLeft } from '@/components/deliverables/socials/studio/queue-model'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { NO_CHANNEL_HINT } from '@/components/deliverables/socials/socials-post-review'
 import { renderWith } from './socials-editor-harness'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -134,6 +137,23 @@ describe('the Queue', () => {
     renderQueue(TODAY)
     fireEvent.click(within(pane()).getByRole('button', { name: /Make another take/ }))
     await waitFor(() => expect(api.retakeSocialPost).toHaveBeenCalledWith('a'))
+  })
+
+  it('F256: a post with no channel cannot be approved, and says nothing would post', () => {
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { targets: [] })])
+    expect(within(pane()).getByRole('button', { name: 'Approve' })).toBeDisabled()
+    expect(within(pane()).queryByRole('button', { name: /publishes/ })).toBeNull()
+    expect(within(pane()).getByText(NO_CHANNEL_HINT)).toBeInTheDocument()
+    expect(within(pane()).getByText('No channels chosen yet.')).toBeInTheDocument()
+  })
+
+  it('F256: Approve all shown leaves out a post with no channel', async () => {
+    state.seriesOn = true
+    api.approveSocialPost.mockImplementation(async (id: string) => ({ id, status: 'scheduled' }))
+    renderQueue([...TODAY, waiting('e', '2026-10-14T20:00:00Z', { targets: [] })])
+    fireEvent.click(screen.getByRole('button', { name: 'Approve all shown' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Approved 2 posts.'))
+    expect(api.approveSocialPost.mock.calls.map(([id]) => id)).toEqual(['a', 'b'])
   })
 
   it('Approve all shown is absent while series approval is off', () => {

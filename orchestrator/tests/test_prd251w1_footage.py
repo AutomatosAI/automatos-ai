@@ -1177,8 +1177,9 @@ def test_the_footage_sources_say_what_the_slots_can_be_filled_with(env):
     assert body["kinds"]["image"]["model"] == FAL_IMAGE_MODEL
     assert body["toolkits"] == [
         {"toolkit": "fal_ai", "label": "fal.ai", "status": "available", "makes": ["video", "image"]},
-        {"toolkit": "kieai", "label": "Kie.ai", "status": "connect"},
-        {"toolkit": "higgsfield_mcp", "label": "Higgsfield", "status": "connect"},
+        # F252: a toolkit to connect says what it would make, for the Brand kit's AI tools.
+        {"toolkit": "kieai", "label": "Kie.ai", "status": "connect", "makes": ["video", "image"]},
+        {"toolkit": "higgsfield_mcp", "label": "Higgsfield", "status": "connect", "makes": ["video", "image"]},
     ]
     assert body["spend"]["monthly_cap_usd"] == 30.0 and body["spend"]["month_usd"] == 0.0
     assert body["problem"] is None

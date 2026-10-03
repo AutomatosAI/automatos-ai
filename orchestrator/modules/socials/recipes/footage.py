@@ -226,7 +226,8 @@ def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, h
 
 def footage_sources(caps: MediaCapabilities) -> Dict[str, Any]:
     """What a post's slots can be filled with here (D15, D16): per kind, the toolkit
-    a render would use; per generation toolkit, available, to connect, or why not."""
+    a render would use; per generation toolkit, available, to connect, or why not, and
+    what it makes (or, to connect, would make)."""
     kinds = {}
     for kind in (VIDEO_SLOT, IMAGE_SLOT):
         route = route_for(kind, caps)
@@ -240,9 +241,10 @@ def footage_sources(caps: MediaCapabilities) -> Dict[str, Any]:
         recipe = RECIPES[toolkit]
         entry: Dict[str, Any] = {"toolkit": toolkit, "label": recipe.label}
         if toolkit not in caps.connected:
-            offers = any(toolkit in caps.connectable(KIND_CAPABILITY[kind]) for kind in (VIDEO_SLOT, IMAGE_SLOT))
+            # F252: what it would make once connected, so the Brand kit can say what to connect.
+            offers = [kind for kind in (VIDEO_SLOT, IMAGE_SLOT) if toolkit in caps.connectable(KIND_CAPABILITY[kind])]
             if offers and not caps.problem:
-                toolkits.append({**entry, "status": CONNECT})
+                toolkits.append({**entry, "status": CONNECT, "makes": offers})
             continue
         made = {kind: recipe.route(kind, caps) for kind in (VIDEO_SLOT, IMAGE_SLOT)}
         makes = [kind for kind, (route, _) in made.items() if route is not None]

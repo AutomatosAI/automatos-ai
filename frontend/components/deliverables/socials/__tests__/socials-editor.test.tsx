@@ -9,6 +9,8 @@
  * * Save draft writes the post (POST, or PATCH once it exists), its channels (PUT /targets)
  *   and its slot (PUT /slot, only when it moved); Redraft with Auto sends the editor's
  *   choices and replaces the copy, the variables and the sources only; Submit submits.
+ * * F254: a try that fails after creating the post opens that post, and the next try edits
+ *   it: one post, never a new row per Save, Render or Submit.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -190,6 +192,20 @@ describe('the post editor', () => {
     await screen.findByText('TikTok')
     fireEvent.click(screen.getByRole('button', { name: 'Render preview' }))
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', { preview: true }))
+  })
+
+  it('a try that fails after creating the post opens that post, and the next try edits it (F254)', async () => {
+    api.renderSocialPost.mockRejectedValueOnce(new Error('this post has no template to render'))
+    renderEditor()
+    await screen.findByText('TikTok')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'First Post' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Render preview' }))
+    await waitFor(() => expect(go).toHaveBeenCalledWith({ post: 'post-new' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
+    await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-new'))
+    expect(api.createSocialPost).toHaveBeenCalledTimes(1)
+    expect(api.updateSocialPost).toHaveBeenCalledWith('post-new', expect.objectContaining({ title: 'First Post' }))
   })
 
   it('a claim shows Unsourced until it has a source, and Add a source opens its search', async () => {
