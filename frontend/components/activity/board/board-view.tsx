@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useState, useCallback } from 'react'
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,7 +9,8 @@ import { BoardFiltersBar } from './board-filters'
 import { BoardTaskViewer } from './board-task-viewer'
 import { CreateTaskDialog } from './create-task-dialog'
 import { HostOfflineBanner } from './host-offline-banner'
-import { useBoardTasks, useBoardTask, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
+import { useBoardTasks, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
+import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { useDeleteTask } from '@/hooks/use-board-tasks-api'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,7 @@ export function BoardView({ period, className }: BoardViewProps) {
   const [filters, setFilters] = useState<BoardFilters>({ period })
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<BoardTask | null>(null)
+  const [focusQuestion, setFocusQuestion] = useState<number | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
 
   // Merge agent filter from dropdown
@@ -52,28 +53,24 @@ export function BoardView({ period, className }: BoardViewProps) {
 
   const [taskViewerOpen, setTaskViewerOpen] = useState(false)
 
-  const handleOpenTask = useCallback((task: BoardTask) => {
+  const handleOpenTask = useCallback((task: BoardTask, questionId: number | null = null) => {
     setOpenTask(task)
+    setFocusQuestion(questionId)
     setTaskViewerOpen(true)
   }, [])
+
+  // PRD-252 R1: ?task_id= (and &question=) open that ticket, fetched by id so a
+  // period/agent filter that hides the card from the columns can't hide it from
+  // the link. Closing the viewer drops the link.
+  const clearDeepLink = useTicketDeepLink(handleOpenTask)
 
   const handleTaskViewerChange = useCallback((open: boolean) => {
     setTaskViewerOpen(open)
-    if (!open) setOpenTask(null)
-  }, [])
-
-  // Deep link: /command-center?tab=board&task_id=123 (the calendar's "Open on
-  // board", notifications). Fetched by id so a period/agent filter that hides
-  // the card from the columns can't hide it from the link. Opens once per id.
-  const deepLinkTaskId = useSearchParams().get('task_id')
-  const { data: deepLinkedTask } = useBoardTask(deepLinkTaskId)
-  const openedDeepLink = useRef<string | null>(null)
-  useEffect(() => {
-    if (!deepLinkTaskId || !deepLinkedTask || openedDeepLink.current === deepLinkTaskId) return
-    openedDeepLink.current = deepLinkTaskId
-    setOpenTask(deepLinkedTask)
-    setTaskViewerOpen(true)
-  }, [deepLinkTaskId, deepLinkedTask])
+    if (!open) {
+      setOpenTask(null)
+      clearDeepLink()
+    }
+  }, [clearDeepLink])
 
   const handleSelectAgent = useCallback((agentId: number | null) => {
     setSelectedAgentId(agentId)
@@ -133,7 +130,7 @@ export function BoardView({ period, className }: BoardViewProps) {
       </div>
 
       {/* Task viewer modal */}
-      <BoardTaskViewer task={openTask} open={taskViewerOpen} onOpenChange={handleTaskViewerChange} />
+      <BoardTaskViewer task={openTask} open={taskViewerOpen} focusQuestionId={focusQuestion} onOpenChange={handleTaskViewerChange} />
     </div>
   )
 }

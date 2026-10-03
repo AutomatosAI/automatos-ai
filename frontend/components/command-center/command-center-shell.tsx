@@ -9,12 +9,18 @@
  *   3. Tab strip (Summary · Board · Calendar · Activity) with live counts
  *   4. Tab body
  *
+ * PRD-252 R8: the page scrolls as one. The head and the stats scroll away, the
+ * tab strip sticks at the top, and the strip with the tab body (`.cc-work`) is
+ * at least the visible height, so a work surface can take the whole screen.
+ * Board and Calendar fill it exactly and keep their own inner scroll; the other
+ * tabs grow with their content under the stuck strip (globals.css).
+ *
  * The active tab is driven by `?tab=` in the URL. Counts on tabs come from
  * the same data hooks that the tabs use, so they stay in sync as backend
  * state changes.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { RotateCw } from 'lucide-react'
 
@@ -66,6 +72,8 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 const VALID_TABS = new Set<TabKey>(TABS.map((t) => t.key))
+// PRD-252 R8: the work surfaces that take the whole height under the tab strip.
+const FILL_TABS = new Set<TabKey>(['board', 'calendar'])
 
 function todayDateline(): string {
   const now = new Date()
@@ -109,7 +117,10 @@ export function CommandCenterShell() {
   // makes "Streaming live" honest (the board no longer polls on an interval).
   useBoardEventStream(true)
 
-  const dateline = useMemo(todayDateline, [])
+  // F219: the clock is the reader's, so it is written after mount. Rendered on
+  // the server it carried the server's time and zone, and React logged #418.
+  const [dateline, setDateline] = useState('')
+  useEffect(() => setDateline(todayDateline()), [])
   // Seven tabs are wider than a phone, so the active one is scrolled into
   // view on a compact viewport (PRD-246 US-002).
   const tabStrip = useTabStripScroll(activeTab)
@@ -172,7 +183,7 @@ export function CommandCenterShell() {
     <div className="cc-page">
       <div className="cc-headrow">
         <div className="cc-head">
-          <p className="cc-eyebrow">Operations · {dateline}</p>
+          <p className="cc-eyebrow">{dateline ? `Operations · ${dateline}` : 'Operations'}</p>
           <h1 className="cc-h1">Command Centre</h1>
           <p className="cc-sub">{lede}</p>
         </div>
@@ -201,33 +212,35 @@ export function CommandCenterShell() {
           powerup/completed stages or once dismissed). */}
       <SetupChecklistCard className="my-3" />
 
-      <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
-        {TABS.map((t) => {
-          const isActive = t.key === activeTab
-          const count = tabCounts[t.key]
-          return (
-            <button
-              key={t.key}
-              type="button"
-              className={`cc-tab${isActive ? ' active' : ''}`}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={() => setTab(t.key)}
-            >
-              <span>{t.label}</span>
-              {count > 0 && <span className="cc-tab-ct">{count}</span>}
-            </button>
-          )
-        })}
-      </nav>
+      <div className={`cc-work${FILL_TABS.has(activeTab) ? ' fill' : ''}`}>
+        <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
+          {TABS.map((t) => {
+            const isActive = t.key === activeTab
+            const count = tabCounts[t.key]
+            return (
+              <button
+                key={t.key}
+                type="button"
+                className={`cc-tab${isActive ? ' active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setTab(t.key)}
+              >
+                <span>{t.label}</span>
+                {count > 0 && <span className="cc-tab-ct">{count}</span>}
+              </button>
+            )
+          })}
+        </nav>
 
-      <div className="cc-body">
-        {activeTab === 'summary' && <SummaryTab period={period} />}
-        {activeTab === 'board' && <BoardTab />}
-        {activeTab === 'calendar' && <CalendarTab />}
-        {activeTab === 'activity' && <ActivityTab period={period} />}
-        {activeTab === 'watchlist' && <WatchlistTab />}
-        {activeTab === 'questions' && <QuestionsTab />}
-        {activeTab === 'governance' && <GovernanceTab />}
+        <div className="cc-body">
+          {activeTab === 'summary' && <SummaryTab period={period} />}
+          {activeTab === 'board' && <BoardTab />}
+          {activeTab === 'calendar' && <CalendarTab />}
+          {activeTab === 'activity' && <ActivityTab period={period} />}
+          {activeTab === 'watchlist' && <WatchlistTab />}
+          {activeTab === 'questions' && <QuestionsTab />}
+          {activeTab === 'governance' && <GovernanceTab />}
+        </div>
       </div>
     </div>
   )

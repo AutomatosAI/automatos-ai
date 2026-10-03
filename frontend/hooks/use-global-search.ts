@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
+import { feedItemHref } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
+
+const ACTIVITY_HREF = '/command-center?tab=activity'
 
 export interface SearchResult {
   id: string
@@ -58,12 +61,15 @@ function filterPages(query: string, socialsAvailable: boolean): SearchResult[] {
 async function searchTasks(query: string): Promise<SearchResult[]> {
   const data = await apiClient.request<any>(`/api/activity/feed?search=${encodeURIComponent(query)}&limit=5`)
   const items = Array.isArray(data) ? data : data?.items ?? data?.data ?? []
+  // PRD-252 R1: a feed item's id is "task-<id>", not the ticket's id (that is
+  // source_id), so `task_id=${t.id}` never opened a ticket. Each row opens the
+  // thing itself, as it does on the Activity tab.
   return items.map((t: any) => ({
     id: `task-${t.id}`,
     label: t.name || t.title || 'Untitled Task',
     description: [t.status, t.agent_name].filter(Boolean).join(' · '),
     category: 'tasks' as const,
-    path: `/command-center?tab=board&task_id=${t.id}`,
+    path: feedItemHref(t) ?? ACTIVITY_HREF,
   }))
 }
 

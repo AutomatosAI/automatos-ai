@@ -1493,9 +1493,10 @@
 
   /* Page frame */
   .cc-page {
+    --cc-page-pad-top: 24px;
     display: flex; flex-direction: column;
     height: 100%; min-height: 0;
-    padding: 24px 28px 0;
+    padding: var(--cc-page-pad-top) 28px 0;
     gap: 18px;
     overflow-y: auto;
   }
@@ -1548,8 +1549,11 @@
     margin: 0 -28px;
     padding: 0 28px;
     /* Pin to top of the .cc-page scroll container — stays visible
-       even after the user scrolls into the library below. */
-    position: sticky; top: 0;
+       even after the user scrolls into the library below. A sticky box keeps
+       clear of its scroller's padding, so `top: 0` left the strip 24px below
+       the app header, over the top of the tab body (PRD-252 R8): the negative
+       top puts it flush under the header. Outside .cc-page the var is unset. */
+    position: sticky; top: calc(-1 * var(--cc-page-pad-top, 0px));
     background: hsl(var(--background));
     z-index: 20;
     box-shadow: 0 1px 0 hsl(var(--border));
@@ -1589,6 +1593,25 @@
     padding-bottom: 32px;
     display: flex; flex-direction: column; gap: 14px;
   }
+
+  /* PRD-252 R8: a work surface can take the whole screen. The page scrolls as
+     one: the head, the stats and the strips scroll away and the tab strip
+     sticks at the top. `.cc-work` (the strip and the tab body) is at least the
+     page's visible height (its 100% plus the top padding above it), so one
+     scroll leaves only the app header and the strip above the surface. Board
+     and Calendar (`.fill`) are exactly that tall and keep their own inner
+     scroll; every other tab grows with its content under the stuck strip.
+     Before, `.cc-body` took whatever height the head left and the head never
+     scrolled away. */
+  :is(.studio, .cc-page) .cc-work {
+    display: flex; flex-direction: column; gap: 18px;
+    flex: none; min-height: calc(100% + var(--cc-page-pad-top));
+  }
+  :is(.studio, .cc-page) .cc-work > .cc-body { flex: 1 0 auto; min-height: 0; overflow: visible; }
+  :is(.studio, .cc-page) .cc-work.fill { height: calc(100% + var(--cc-page-pad-top)); }
+  :is(.studio, .cc-page) .cc-work.fill > .cc-body { flex: 1 1 0; overflow-y: auto; padding-bottom: 12px; }
+  /* A strip inside a tab (Governance) scrolls with the tab, under the page's. */
+  :is(.studio, .cc-page) .cc-body .cc-tabs { position: static; }
 
   /* Stats strip (STATS-A) — CD round-4 six-cell editorial row with sparklines */
   :is(.studio, .cc-page) .cc-stats {
@@ -2998,6 +3021,15 @@
      ─────────────────────────────────────────────────────────────────── */
 
   @media (max-width: 1023px) {
+    /* PRD-252 R8 is the desktop frame: below 1024 the tab strip and the tab
+       body stay children of the page, laid out as they were before it. */
+    :is(.studio, .cc-page) .cc-work { display: contents; }
+    :is(.studio, .cc-page) :is(.cc-work, .cc-work.fill) > .cc-body {
+      flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 32px;
+    }
+    :is(.studio, .cc-page) .cc-body .cc-tabs { position: sticky; }
+    :is(.studio, .cc-page) .cc-tabs { top: 0; }
+
     /* The rail is a sheet at this width (main-layout), so its rows are read
        and tapped with a thumb rather than pointed at (M4). */
     .studio .sh-side .sh-item {

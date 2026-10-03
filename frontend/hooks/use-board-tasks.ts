@@ -25,6 +25,13 @@ interface BoardResponse {
   total: number
 }
 
+/** What POST /api/v1/tasks/{id}/approve returns; `action_result` is null without an approval_action. */
+export interface ApproveResult {
+  task_id?: number | string
+  status?: string
+  action_result?: { type?: string; title?: string; topic?: string; warning?: string } | null
+}
+
 // ============= QUERY KEYS =============
 
 export const boardQueryKeys = {
@@ -160,15 +167,16 @@ export function useUpdateTaskStatus() {
 
 /**
  * Approve a task in review status — executes approval_action (e.g., publish blog).
+ * PRD-252 R2: an optional note, kept on the ticket (F038: it was thrown away).
  */
 export function useApproveTask() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ taskId }: { taskId: string }) => {
-      return apiClient.request(`/api/v1/tasks/${taskId}/approve`, {
+    mutationFn: async ({ taskId, note }: { taskId: string; note?: string }) => {
+      return apiClient.request<ApproveResult>(`/api/v1/tasks/${taskId}/approve`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(note ? { note } : {}),
       })
     },
     onSettled: () => {
@@ -178,13 +186,14 @@ export function useApproveTask() {
 }
 
 /**
- * Reject a task in review status with optional feedback.
+ * Reject a task in review status. PRD-252 R2: the owner's words are required
+ * here; they lead the redo's brief (services/ticket_redo.py).
  */
 export function useRejectTask() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ taskId, feedback }: { taskId: string; feedback?: string }) => {
+    mutationFn: async ({ taskId, feedback }: { taskId: string; feedback: string }) => {
       return apiClient.request(`/api/v1/tasks/${taskId}/reject`, {
         method: 'POST',
         body: JSON.stringify({ feedback }),

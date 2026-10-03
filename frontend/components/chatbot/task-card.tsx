@@ -14,6 +14,7 @@ import { apiClient } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
 import type { TaskCardData } from '@/types'
 import { STATUS_CONFIG, type BoardStatus } from '@/types/board'
+import { ticketHref } from '@/lib/ticket-links'
 
 export interface TaskCardProps {
   card: TaskCardData
@@ -108,7 +109,7 @@ export function TaskCard({ card: initial }: TaskCardProps) {
         variant="outline"
         size="sm"
         className="border-primary/30 text-primary hover:bg-primary/10"
-        onClick={() => router.push(`/command-center?tab=board&task_id=${card.id}` as any)}
+        onClick={() => router.push(ticketHref(card.id) as any)}
       >
         Open on the board
         <ArrowRight className="ml-1.5 h-3.5 w-3.5" />

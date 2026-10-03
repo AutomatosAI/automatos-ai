@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation'
 import { Rows, Table2 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
+import { feedItemHref } from '@/lib/ticket-links'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
 
@@ -107,41 +108,6 @@ function fmtTokens(tokens: number | null | undefined): string {
   return `${tokens} tok`
 }
 
-export function rowHref(item: ActivityFeedItem): string | null {
-  // Mirror the classic ActivityFeed's deep-link behaviour. Only playbooks
-  // (recipes) belong in the ExecutionKitchen viewer. Routines are
-  // heartbeats — they should go to the agent that owns them, not the
-  // playbook viewer.
-  switch (item.type) {
-    case 'mission':
-      return item.source_id ? `/missions/${item.source_id}` : null
-    case 'chat':
-      // Use query param so client-side auth loads the thread; /chat/[id]
-      // server route 404s without a server-side auth context.
-      return item.source_id
-        ? `/chat?chatId=${encodeURIComponent(item.source_id)}`
-        : null
-    case 'recipe':
-      if (!item.source_id) return null
-      // Recipe id pattern: feed id is "recipe-<execId>", source_id is the recipe id
-      return `/activity/execution?id=${encodeURIComponent(
-        item.id.replace(/^recipe-/, ''),
-      )}&recipeId=${encodeURIComponent(item.source_id)}`
-    case 'task':
-      // The board opens the ticket for ?task_id= (its deep-link contract).
-      return item.source_id
-        ? `/command-center?tab=board&task_id=${encodeURIComponent(item.source_id)}`
-        : null
-    case 'routine':
-      // Heartbeat — the report it produced (file explorer, like the Agent
-      // Reports widget) when there is one; else the agent's Reports panel.
-      if (item.source_url?.startsWith('/deliverables/explorer')) return item.source_url
-      return item.agent?.id ? `/agents?agent=${item.agent.id}&panel=reports` : null
-    default:
-      return null
-  }
-}
-
 export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   const router = useRouter()
   // The table is a four-column ledger, so it is desktop-only (PRD-246
@@ -176,7 +142,7 @@ export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   }, [allData, items])
 
   const handleRowClick = (item: ActivityFeedItem) => {
-    const href = rowHref(item)
+    const href = feedItemHref(item)
     if (href) router.push(href as any)
   }
 
