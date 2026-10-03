@@ -40,6 +40,7 @@ from core.models.orchestration_enums import (
     TaskType,
 )
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
+from modules.coordination.step_inputs import with_its_inputs
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
@@ -990,6 +991,7 @@ class MissionDispatcher:
         sync_board_status(db, task)
 
     @staticmethod
+    @with_its_inputs  # F248: the last step's whole results, and the documents it names
     def build_task_prompt(
         task: OrchestrationTask,
         goal: Optional[str] = None,

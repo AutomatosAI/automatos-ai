@@ -6,6 +6,11 @@ and the Watch verdict did, F202), and a FAIL after the step's one revision passe
 through to VERIFIED anyway. Now a step's output with slots left in fails its checks
 first, whatever its criteria. If the slots are still there after its revision, the
 step fails, naming them.
+
+The slots were there because the summary never had the figures: the results of the
+steps it built on reached it trimmed to 1,200 tokens. The mission's last step now gets
+them whole. And #0139.1 listed 24 of 27 cafés because its agent could not find the
+sheet the goal named; a step is now told the document id of a file it names.
 """
 from __future__ import annotations
 
@@ -94,3 +99,90 @@ def test_any_other_fail_after_the_revision_stays_advisory(verifying):
     step = verifying.task(requeues=1)
     assert _verdict(verifying, step, ["Output is 12 words; at least 50 required"]) is False
     assert step.state == TaskState.VERIFIED.value
+
+
+# ── the summary is built from the steps' results; a step is told the sheet it names ──
+
+SHEET = "harbourline-wholesale-invoices-2026-09-26.csv"
+OWED = "\n".join(f"| HL-23{n:02d} | Cafe {n} | contact{n}@example.com | £{100 + n}.40 | due 2026-08-{n % 28 + 1:02d} |"
+                 for n in range(1, 28))                      # 27 cafés, as the owner's sheet has
+LETTER = ("Hi all,\n\nFrom 2 November our wholesale prices change: " + "House Espresso £24.50 a kilo, " * 123
+          + "and delivery stays as it is.\n\nThanks, Gerard")    # with OWED, over the digest's 1,200 tokens
+
+
+@pytest.fixture
+def mission(db_session, seed_workspace):
+    """#0139's shape: a list from the invoice sheet, a letter, and a note built on both."""
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask, OrchestrationTaskDependency
+
+    ws = UUID(seed_workspace())
+    run = OrchestrationRun(workspace_id=ws, goal=f"Get my wholesale cafes ready for the price change, from {SHEET}",
+                           state=RunState.RUNNING.value, created_by="user_test", config={})
+    db_session.add(run)
+    db_session.flush()
+
+    def step(n, title, output=None):
+        task = OrchestrationTask(run_id=run.id, title=title, description="Do it.", sequence_number=n,
+                                 state=TaskState.VERIFIED.value if output else TaskState.RUNNING.value,
+                                 state_type="active", output=output, input_context={})
+        db_session.add(task)
+        db_session.flush()
+        return task
+
+    owed, letter = step(1, "List every cafe and what it owes", OWED), step(2, "Write the price-change letter", LETTER)
+    note = step(3, "A one-page note: who gets the letter, and who to chase first")
+    db_session.add_all([OrchestrationTaskDependency(task_id=note.id, depends_on_task_id=owed.id),
+                        OrchestrationTaskDependency(task_id=note.id, depends_on_task_id=letter.id)])
+    db_session.flush()
+    return NS(db=db_session, ws=ws, run=run, owed=owed, letter=letter, note=note)
+
+
+def _dispatched(mission, task):
+    """What _prepare_task does for a step: the digest is attached, then its prompt is built."""
+    from modules.coordination.dispatcher import MissionDispatcher
+    from services.coordinator_service import CoordinatorService
+
+    svc = CoordinatorService.__new__(CoordinatorService)
+    svc._field, svc._get_field = None, lambda: None
+    rows = CoordinatorService._collect_upstream_digest_rows(mission.db, task)
+    asyncio.run(svc._attach_field_digest(mission.db, mission.run, task, None, 1, upstream_rows=rows))
+    return MissionDispatcher.build_task_prompt(task, goal=mission.run.goal)
+
+
+def test_the_last_step_is_given_the_results_it_builds_on_whole(mission):
+    from modules.coordination.step_inputs import RESULTS_HEADING
+
+    prompt = _dispatched(mission, mission.note)
+
+    assert RESULTS_HEADING in prompt and "Take every figure, name and date from them exactly" in prompt
+    assert OWED in prompt and LETTER in prompt      # the 1,200-token digest kept only the first of them
+    assert "field_digest" not in mission.note.input_context
+
+
+def test_a_step_another_builds_on_keeps_the_budgeted_digest(mission):
+    from core.models.orchestration import OrchestrationTaskDependency
+    from modules.coordination.step_inputs import RESULTS_HEADING
+
+    mission.db.add(OrchestrationTaskDependency(task_id=mission.letter.id, depends_on_task_id=mission.owed.id))
+    mission.db.flush()
+    prompt = _dispatched(mission, mission.letter)
+
+    assert RESULTS_HEADING not in prompt
+    assert "Cafe 1 " in mission.letter.input_context["field_digest"]
+
+
+def test_a_step_is_told_the_document_its_mission_names(mission):
+    from core.models.core import Document
+    from modules.coordination.dispatcher import MissionDispatcher
+
+    sheet = Document(filename=SHEET, original_filename=SHEET, workspace_id=mission.ws, file_type="text/csv",
+                     file_size=3209, status="processed")
+    mission.db.add(sheet)
+    mission.db.flush()
+
+    prompt = MissionDispatcher.build_task_prompt(mission.owed, goal=mission.run.goal)
+    assert f"- {SHEET}: document_id {sheet.id}" in prompt
+    assert "Read each one whole with platform_read_document" in prompt
+
+    mission.owed.description = "Save the list as drafts/owed.md and as owed.md."    # files it writes, not reads
+    assert "## Documents this work names" not in MissionDispatcher.build_task_prompt(mission.owed)
