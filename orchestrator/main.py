@@ -5,6 +5,7 @@ Main FastAPI Application for Automatos AI
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
+import functools
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -160,6 +161,42 @@ api_call_stats = defaultdict(lambda: {
     "status_codes": defaultdict(int)
 })
 
+def _seed_social_starters_where_on() -> None:
+    """PRD-251B: a social starter that shipped after a workspace turned Socials on (the photo
+    cards) reaches it too. Turning Socials on seeds the starters; this covers the workspaces
+    already on. Only the boot leader runs it (the core seeds' advisory lock); it is idempotent,
+    so a worker that takes the lock after the leader finds nothing to do."""
+    from core.database.boot_lock import boot_leader_lock
+    from core.database.database import engine, get_db_session
+    from modules.documents.seed_templates import seed_social_starters_where_on
+    from modules.socials.settings import parse_workspace_socials
+
+    try:
+        with boot_leader_lock(engine) as is_leader:
+            if not is_leader:
+                return
+            with get_db_session() as db:
+                starters = seed_social_starters_where_on(db, lambda settings: parse_workspace_socials(settings).enabled)
+            logger.info("Social starters seed: %s", starters)
+    except Exception:
+        logger.exception("Social starters seed failed; the next boot tries again")
+
+
+def _then_social_starters(phase):
+    """``phase``, then the social starters for workspaces already on Socials. A decorator, so
+    the long core phase below stays as it is."""
+
+    import asyncio as _asyncio
+
+    @functools.wraps(phase)
+    async def run():
+        await phase()
+        await _asyncio.to_thread(_seed_social_starters_where_on)
+
+    return run
+
+
+@_then_social_starters
 async def _boot_phase_1_core():
     """
     Phase 1: Core infrastructure — database tables + per-deploy seeds.
@@ -294,17 +331,6 @@ async def _boot_phase_1_core():
             logger.info("Socials package seed: %s", socials_seeded)
         except Exception as e:
             logger.warning("Socials package seed: %s", e)
-
-        # PRD-251B: a social starter that shipped after a workspace turned Socials on
-        # (the photo cards) reaches it too. Turning Socials on seeds them; this covers the rest.
-        try:
-            from modules.documents.seed_templates import seed_social_starters_where_on
-            from modules.socials.settings import parse_workspace_socials
-            with get_db_session() as db:
-                starters = seed_social_starters_where_on(db, lambda settings: parse_workspace_socials(settings).enabled)
-            logger.info("Social starters seed: %s", starters)
-        except Exception as e:
-            logger.warning("Social starters seed: %s", e)
 
         # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
         # manual script, so prod carried ZERO packages — the Packages tab was
