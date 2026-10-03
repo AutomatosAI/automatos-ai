@@ -70,11 +70,12 @@ def drag_refusal(task: Any, new_status: str, *, running: bool, mission_ticket: b
 
 
 def _nothing_to_show(task: Any, label: str, what: str) -> str:
+    """``label`` opens a sentence ("Ticket #0052"); mid-sentence it is lower case."""
     if task.status == "failed":
         return f"{label}'s run failed and left nothing to {what}: use Run now to try again, or Cancel it."
     if task.status in NOT_STARTED:
         start = "use Run now" if task.assigned_agent_id else "assign an agent and use Run now"
-        return (f"No one has worked on {label} yet, so there is nothing to {what}: {start}, "
+        return (f"No one has worked on {ticket_label(task)} yet, so there is nothing to {what}: {start}, "
                 "or Cancel it if it isn't needed.")
     return f"{label} has nothing to {what} yet: use Run now, or Cancel it."
 
