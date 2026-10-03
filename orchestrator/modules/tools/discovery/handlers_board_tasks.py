@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
+from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
@@ -795,6 +796,7 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @guarded_and_recorded(STATUS)  # F241: never a closed ticket; each change noted on its ticket
+@stops_what_it_cancels  # F241 with F245: a cancel stops what runs the card, as the board's does
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Update a board task's status. Moving to in_progress triggers execution.
     With ``task_ids`` (a list) every id is updated to the same status — see

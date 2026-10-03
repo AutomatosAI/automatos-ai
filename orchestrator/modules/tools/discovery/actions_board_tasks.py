@@ -375,7 +375,8 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "assigned agent at once; a task with no agent is refused, so assign one "
             "first (platform_assign_task). Moving to 'done' completes it. "
             "'blocked' requires blocked_reason. To cancel a ticket set 'cancelled', never 'done' "
-            "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed."
+            "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed. "
+            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop."
         ),
         category="tasks",
         parameters={
