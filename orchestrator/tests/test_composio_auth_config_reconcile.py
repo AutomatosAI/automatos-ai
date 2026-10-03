@@ -27,7 +27,7 @@ class _AuthConfigs:
         self.list_calls = 0
         self.created = []
 
-    def list(self):
+    def list(self, **query):  # the SDK's signature: toolkit_slug, limit, cursor
         self.list_calls += 1
         return _Obj(items=list(self.items))
 
