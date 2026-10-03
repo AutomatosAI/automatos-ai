@@ -205,27 +205,11 @@ async def _approve(
     approves does the prescription actuate; the board task is then marked done
     with the actuation result written to it (status=done, result != null).
     """
-    from core.services.approval_policy import evaluate_approval
-
     task_id = str(task.get("id"))
     user_id = _caller_user_id(caller_identity)
-
-    # Idempotency: the shared applied-tasks ledger is the source of truth, so a
-    # second /approve (or a later tick) never re-applies the same change.
-    ledger = svc._read_applied_tasks(db, workspace_id)
-    if ledger is None:
-        # F156: without the ledger, a change may already have been applied.
-        return {
-            "success": False,
-            "message": f"The HARNESS ledger could not be read, so {rx_id} was not applied. Try again shortly.",
-        }
-    applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
-    if task_id in applied_ids:
-        return {
-            "success": True,
-            "already_applied": True,
-            "message": f"{rx_id} was already applied",
-        }
+    handled = _already_handled(db, svc, workspace_id, task_id, rx_id)
+    if handled is not None:
+        return handled
 
     agents_by_name = await svc._resolve_agents_by_name(executor)
     rx = svc._parse_harness_task(task, agents_by_name=agents_by_name)
@@ -236,23 +220,9 @@ async def _approve(
             "message": f"Could not resolve the target for {rx_id}; nothing applied",
         }
 
-    # GOVERNED ACTIVATION: route through the policy plane's ask verdict before
-    # actuating. A self-management change makes no LLM spend, so the estimated
-    # cost is $0; the admin approve is the explicit per-request override. The
-    # plane can still refuse (e.g. a locked-down workspace policy), in which case
-    # the prescription does NOT actuate.
-    decision = evaluate_approval(
-        db, workspace_id, 0.0, override_auto_approve=True
-    )
+    decision = _governed_verdict(db, workspace_id)
     if not decision.auto_approve:
-        logger.info(
-            "[HARNESS] Policy plane declined actuation of rx=%s in workspace=%s: %s",
-            rx_id, workspace_id, decision.reason,
-        )
-        return {
-            "success": False,
-            "message": f"Policy plane declined {rx_id}: {decision.reason}",
-        }
+        return _declined(workspace_id, rx_id, decision)
 
     current_before = svc._snapshot_current_value(rx)
     # F151: the change is made for the approving admin, so an admin_only action
@@ -267,15 +237,77 @@ async def _approve(
             "message": f"Failed to apply {rx_id}: {apply_result.get('error', 'unknown')}",
         }
 
-    # Apply succeeded — mark the board task done WITH the actuation result, so a
-    # completed governed action never leaves a null result (and a failed apply
-    # above never marks the task done). status='done' also sets completed_at.
-    await executor.execute(
-        "platform_update_task_status", {"task_id": task.get("id"), "status": "done"}
+    await _done_with_its_result(db, executor, workspace_id, task.get("id"), apply_result, decision)
+    svc._write_applied_tasks(db, workspace_id, [_applied_entry(task_id, rx, current_before, user_id, decision)], [])
+    logger.info(
+        "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s via policy plane",
+        rx_id, rx.get("change_type"), rx.get("target_name"), workspace_id, user_id,
     )
-    _record_board_task_result(db, workspace_id, task.get("id"), apply_result, decision)
+    return {
+        "success": True,
+        "message": f"Applied {rx.get('change_type')} for {rx.get('target_name')}",
+        "change_type": rx.get("change_type"),
+        "target_name": rx.get("target_name"),
+    }
 
-    entry = {
+
+def _already_handled(db, svc, workspace_id: UUID, task_id: str, rx_id: str) -> Optional[Dict[str, Any]]:
+    """Idempotency: the shared applied-tasks ledger is the source of truth, so a
+    second /approve (or a later tick) never re-applies the same change. The
+    answer when it must not apply now, or None."""
+    ledger = svc._read_applied_tasks(db, workspace_id)
+    if ledger is None:
+        # F156: without the ledger, a change may already have been applied.
+        return {
+            "success": False,
+            "message": f"The HARNESS ledger could not be read, so {rx_id} was not applied. Try again shortly.",
+        }
+    applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
+    if task_id in applied_ids:
+        return {
+            "success": True,
+            "already_applied": True,
+            "message": f"{rx_id} was already applied",
+        }
+    return None
+
+
+def _governed_verdict(db, workspace_id: UUID):
+    """GOVERNED ACTIVATION: the policy plane's ask verdict before actuating. A
+    self-management change makes no LLM spend, so the estimated cost is $0; the
+    admin approve is the explicit per-request override. The plane can still refuse
+    (e.g. a locked-down workspace policy), in which case the prescription does NOT
+    actuate."""
+    from core.services.approval_policy import evaluate_approval
+
+    return evaluate_approval(db, workspace_id, 0.0, override_auto_approve=True)
+
+
+def _declined(workspace_id: UUID, rx_id: str, decision) -> Dict[str, Any]:
+    logger.info(
+        "[HARNESS] Policy plane declined actuation of rx=%s in workspace=%s: %s",
+        rx_id, workspace_id, decision.reason,
+    )
+    return {
+        "success": False,
+        "message": f"Policy plane declined {rx_id}: {decision.reason}",
+    }
+
+
+async def _done_with_its_result(db, executor: Any, workspace_id: UUID, raw_task_id: Any,
+                                apply_result: Dict[str, Any], decision) -> None:
+    """Apply succeeded: the board task is marked done WITH the actuation result, so
+    a completed governed action never leaves a null result (and a failed apply never
+    marks the task done). The result goes on first: Auto's status tool files a
+    ticket as done only with work on the card (F259), and this task's work is its
+    actuation result. status='done' also sets completed_at."""
+    _record_board_task_result(db, workspace_id, raw_task_id, apply_result, decision)
+    await executor.execute("platform_update_task_status", {"task_id": raw_task_id, "status": "done"})
+
+
+def _applied_entry(task_id: str, rx: Dict[str, Any], current_before: Any, user_id: Any, decision) -> Dict[str, Any]:
+    """The US-021 ledger's record of the change this approval applied."""
+    return {
         "task_id": task_id,
         "prescription_id": rx.get("prescription_id"),
         "target_id": rx.get("target_id"),
@@ -287,18 +319,6 @@ async def _approve(
         "approved_via": "command",
         "approved_by": user_id,
         "policy_verdict": decision.reason,
-    }
-    svc._write_applied_tasks(db, workspace_id, [entry], [])
-
-    logger.info(
-        "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s via policy plane",
-        rx_id, rx.get("change_type"), rx.get("target_name"), workspace_id, user_id,
-    )
-    return {
-        "success": True,
-        "message": f"Applied {rx.get('change_type')} for {rx.get('target_name')}",
-        "change_type": rx.get("change_type"),
-        "target_name": rx.get("target_name"),
     }
 
 

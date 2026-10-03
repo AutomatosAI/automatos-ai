@@ -1,5 +1,7 @@
 """Board task ActionDefinitions (create, list, get, assign, update status, summary)."""
 
+from typing import Any, Dict
+
 from .action_registry import ActionDefinition, ActionRegistry
 
 
@@ -397,34 +399,13 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "first (platform_assign_task). Moving to 'done' completes it. "
             "'blocked' requires blocked_reason. To cancel a ticket set 'cancelled', never 'done' "
             "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed. "
-            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop."
+            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop. "
+            "A ticket in review moved to 'done' is approved; moved to 'assigned' it is sent back for a redo "
+            "with its draft kept — put what to fix in 'note'. A ticket with no work on it can't go to "
+            "review or done, and a running one can only be cancelled: the refusal says what the owner can press."
         ),
         category="tasks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": _ticket_ref("The ticket (one ticket)"),
-                "task_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Several tickets (numbers like #0042) to move to the same status in one call "
-                        "(max 100). The result lists 'updated' and 'failed' ids — "
-                        "report both to the user."
-                    ),
-                },
-                "status": {
-                    "type": "string",
-                    "enum": _board_statuses(),
-                    "description": "New status",
-                },
-                "blocked_reason": {
-                    "type": "string",
-                    "description": "Why the task is blocked (required when status is 'blocked')",
-                },
-            },
-            "required": ["status"],
-        },
+        parameters=_status_tool_parameters(),
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "status", "trigger", "run"],
@@ -435,3 +416,40 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "run task 5 now",
         ],
     ))
+
+
+def _status_tool_parameters() -> Dict[str, Any]:
+    """platform_update_task_status's parameters: one ticket or many, the status, a
+    block's reason, and the owner's note (F259/F278)."""
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": _ticket_ref("The ticket (one ticket)"),
+            "task_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Several tickets (numbers like #0042) to move to the same status in one call "
+                    "(max 100). The result lists 'updated' and 'failed' ids — "
+                    "report both to the user."
+                ),
+            },
+            "status": {
+                "type": "string",
+                "enum": _board_statuses(),
+                "description": "New status",
+            },
+            "blocked_reason": {
+                "type": "string",
+                "description": "Why the task is blocked (required when status is 'blocked')",
+            },
+            "note": {
+                "type": "string",
+                "description": (
+                    "What the owner said with this move, kept on the ticket as theirs: their approval note "
+                    "on 'done', or what to fix on a send-back to 'assigned' (the redo works from it)."
+                ),
+            },
+        },
+        "required": ["status"],
+    }
