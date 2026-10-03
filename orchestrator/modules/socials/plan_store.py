@@ -60,6 +60,8 @@ def active_plans(db: Any) -> List[SocialCampaign]:
 
 
 def _apply(plan: SocialCampaign, fields: Mapping[str, Any], templates: Mapping[str, plans.TemplateInfo]) -> None:
+    if isinstance(fields.get("research"), Mapping):  # a save changes what it sends; the rest, and the last run, stay
+        fields = {**fields, "research": {**(plan.research or {}), **fields["research"]}}
     clean = plans.validate_fields(fields, templates)
     starts = fields.get("starts_on", plan.starts_on)
     ends = fields.get("ends_on", plan.ends_on)

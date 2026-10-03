@@ -39,6 +39,8 @@ MAX_VIDEO_DAYS_EARLY = 3
 # A post is made at least this long before its slot, or a day earlier.
 MIN_MAKE_LEAD = timedelta(hours=2)
 DEFAULT_RESEARCH = {"enabled": True, "day": "mon", "time": "06:00"}
+# What a research run records on the plan (services/socials_plan_research.py): a save keeps it.
+RESEARCH_RUN_KEYS = ("last_run_at", "last_run_id")
 DEFAULT_SOURCES = {"knowledge": True, "deliverables": True, "website": True, "github": False, "notes": "", "never_say": []}
 SOURCE_SWITCHES = ("knowledge", "deliverables", "website", "github")
 VISUAL_MIX_KEYS = ("templates", "library", "ai_images", "ai_footage")
@@ -213,10 +215,12 @@ def validate_make(value: Any) -> Dict[str, Any]:
 
 
 def validate_research(value: Any) -> Dict[str, Any]:
+    """The research settings, checked, and the last run's record when the value carries one."""
     raw = {**DEFAULT_RESEARCH, **(value if isinstance(value, Mapping) else {})}
     if raw["day"] not in WEEKDAYS:
         raise InvalidPlan(f"research.day must be one of {', '.join(WEEKDAYS)}")
-    return {"enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time")}
+    settings = {"enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time")}
+    return {**settings, **{key: raw[key] for key in RESEARCH_RUN_KEYS if raw.get(key)}}
 
 
 def validate_late_policy(value: Any) -> str:

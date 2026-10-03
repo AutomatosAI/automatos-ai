@@ -10,7 +10,7 @@ Pinned:
 * the cadence check: known formats and channels, a template of the right kind and a length
   it declares, days and times; the dates, the zone and the late policy;
 * the routes: create (the fields required), list with the bank's counts, get, update (an
-  ended plan is read-only), pause/resume/end (only the moves a status allows), delete (owners
+  ended plan is read-only; a save keeps when research last ran), pause/resume/end (only the moves a status allows), delete (owners
   and admins; its bank goes, its posts stay unlinked), the slots
   in a window (planned and made), a slot moved, put back or skipped (a made one is 409);
   another workspace's plan is a 404.
@@ -30,7 +30,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 import tests.test_prd251_api as api_harness  # noqa: E402
-from core.models.socials import SocialPost, SocialTopic  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialTopic  # noqa: E402
 from modules.socials import plans  # noqa: E402
 from tests.test_prd251_api import WS_A, WS_B, _ctx  # noqa: E402
 
@@ -215,6 +215,20 @@ def test_update_pause_resume_end(bank):
     assert bank.client.post(f"/api/socials/plans/{plan['id']}/end").json()["status"] == "ended"
     assert bank.client.put(f"/api/socials/plans/{plan['id']}", json={"goal": "x"}).status_code == 422
     assert bank.client.post(f"/api/socials/plans/{plan['id']}/resume").status_code == 422
+
+
+def test_a_save_keeps_when_research_last_ran_and_the_settings_it_did_not_send(bank):
+    """Every save of the Plan page sends research's day and time. It used to drop the last run's
+    record, so the weekly research ran again at the next tick after any save."""
+    plan = _create(bank)
+    row = bank.session.get(SocialCampaign, uuid.UUID(plan["id"]))
+    row.research = {**row.research, "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1"}
+    bank.session.commit()
+    saved = bank.client.put(f"/api/socials/plans/{plan['id']}", json={"research": {"day": "tue"}})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["research"] == {
+        "enabled": True, "day": "tue", "time": "06:00", "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1",
+    }
 
 
 def test_deleting_a_plan_takes_its_bank_and_keeps_its_posts_as_ordinary_posts(bank):
