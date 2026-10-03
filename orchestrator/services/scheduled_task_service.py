@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
-from services.schedule_util import is_valid_cron, next_run as _util_next_run, scheduler_cron_trigger
+from services.schedule_util import is_valid_cron, next_run as _util_next_run
 
 logger = logging.getLogger(__name__)
 
@@ -702,6 +702,7 @@ class ScheduledTaskService:
         """Register task with UnifiedScheduler (APScheduler)."""
         try:
             from services.scheduler import get_unified_scheduler
+            from services.schedule_util import scheduler_cron_trigger
             from apscheduler.triggers.date import DateTrigger
 
             scheduler = get_unified_scheduler()
