@@ -173,10 +173,12 @@ def test_the_route_limits_and_client_are_wired():
         assert name in surface
         assert isinstance(getattr(upload_api.config, name), int)
     client = API_CLIENT.read_text(encoding="utf-8")
-    call = re.search(r"async uploadSocialPostMedia\(postId: string, file: File\)[\s\S]*?\{([\s\S]*?)\n  \}", client)
+    call = re.search(r"async uploadSocialPostMedia\(postId: string, file: File, slot\?: string\)[\s\S]*?\{([\s\S]*?)\n  \}", client)
     assert call, "apiClient.uploadSocialPostMedia"
     assert "`/api/socials/posts/${postId}/media`" in call.group(1) and "method: 'POST'" in call.group(1)
     assert "FormData" in call.group(1)
+    # A photo spot rides along as the form's ``slot`` field, only when one is given.
+    assert "if (slot) form.append('slot', slot)" in call.group(1)
 
 
 def test_sniffing_reads_only_the_bytes():
