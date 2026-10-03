@@ -1,0 +1,40 @@
+{
+  "name": "Just the photo",
+  "description": "The picture itself, edge to edge, with your logo and an optional caption. For when the photo says it all: your own, one from the Library, or one AI makes in your brand's style.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "caption": {
+      "type": "text",
+      "label": "Caption",
+      "description": "A short line at the foot of the photo. Leave empty for none.",
+      "default": "",
+      "max_chars": 120
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "photo": {
+      "kind": "image",
+      "path": "assets/slots/photo.png",
+      "label": "Photo",
+      "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
+    }
+  },
+  "sample_data": {
+    "caption": "Fresh from the oven, every morning at 7.",
+    "handle": "@yourbrand"
+  }
+}

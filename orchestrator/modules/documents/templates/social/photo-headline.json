@@ -1,0 +1,71 @@
+{
+  "name": "Photo + headline",
+  "description": "Your photo behind a bold headline, a supporting line and a button. For a launch, a new service, an event or a seasonal message. Without a photo it shows your brand colours.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Label",
+      "description": "A short label above the headline, e.g. NEW THIS AUTUMN. Leave empty for none.",
+      "default": "",
+      "max_chars": 36
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. COLOUR|THAT LASTS.",
+      "max_chars": 70
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in your brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 36
+    },
+    "subline": {
+      "type": "text",
+      "label": "Supporting line",
+      "description": "One or two sentences under the headline. Leave empty for none.",
+      "default": "",
+      "max_chars": 200
+    },
+    "cta": {
+      "type": "text",
+      "label": "Button",
+      "description": "The button's words, e.g. Book now. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "photo": {
+      "kind": "image",
+      "path": "assets/slots/photo.png",
+      "label": "Photo",
+      "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
+    }
+  },
+  "sample_data": {
+    "eyebrow": "NEW THIS AUTUMN",
+    "headline": "COLOUR|THAT LASTS.",
+    "headline_accent": "LASTS.",
+    "subline": "Gloss treatments that keep your colour bright for weeks, not days.",
+    "cta": "Book a chair",
+    "handle": "@yourbrand"
+  }
+}

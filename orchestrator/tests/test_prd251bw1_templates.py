@@ -129,6 +129,15 @@ def test_the_gallery_lists_the_workspaces_social_templates_with_lengths_and_thum
     assert second["id"] == str(b) and second["durations"] == [15, 30, 45] and second["thumbnail_url"] is None
     assert second["is_starter"] is False
     assert third["id"] == str(c) and third["kind"] == "image" and third["durations"] == [] and third["sizes"] == ["1080x1080"]
+    # The fields' examples: the template's sample text, which the editor greys into each empty field.
+    assert third["sample_data"] == {"headline": "Three weeks to go"}
+
+
+def test_a_fields_examples_are_the_sample_values_of_the_templates_own_fields():
+    schema = {"headline": {"type": "text"}, "members": {"type": "number"}, "open": {"type": "boolean"}}
+    sample = {"headline": "Open late", "members": 1200, "open": True, "gone": "not a field", "rows": [{"a": 1}]}
+    assert template_gallery.examples_of(sample, schema) == {"headline": "Open late", "members": 1200, "open": True}
+    assert template_gallery.examples_of(None, schema) == {} and template_gallery.examples_of(sample, None) == {}
 
 
 def test_format_narrows_the_gallery_and_text_lists_none(gallery):

@@ -215,6 +215,8 @@ _VALID_BODY = {
     # PRD-251B US-B305: AI options for an image slot, and the one picked.
     ("POST", "/api/socials/posts/{post_id}/ai-options"): {"slot": "hero", "prompt": "A sunrise over the bay"},
     ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"): {"name": "hero_option_1.png"},
+    # A Library picture for a photo spot (the post is loaded before the spot or the picture).
+    ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"): {"deliverable_id": str(uuid.uuid4())},
     # US-210: putting a post in a campaign and taking it out take no body.
     ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
     ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
@@ -298,6 +300,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("PUT", "/api/socials/media-tools"),
             ("POST", "/api/socials/posts/{post_id}/ai-options"),
             ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"),
+            # A Library picture in a template's photo spot (api/socials_media_upload.py).
+            ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

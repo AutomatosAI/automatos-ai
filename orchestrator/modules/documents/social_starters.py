@@ -13,6 +13,11 @@ and a carousel, each at the four sizes of automatos-social's schema.json
 The infographic (US-113, S1.7) joins them: a chart of a report's top rows (a
 bar chart, a line or a number grid), its ``data`` block naming the variables a
 report fills (``core/chart_binding.py``).
+The photo cards (PRD-251B, Gerard's pass): Photo + headline, Offer, Review,
+Highlights, Before / after and Just the photo, for any business. Each shows a
+photo slot behind its words (an upload, a Library file or an AI image), with the
+words on the brand's ink so they read over any photo; with no photo, the brand's
+backdrop. Their sizes are the feed post, the story, the square and the link card.
 
 Each is two seed files under ``templates/social/``: ``<slug>.html``, the
 composition, and ``<slug>.json``: its name, description, format, category and
@@ -60,7 +65,18 @@ SOCIAL_IMAGE_STARTER_SLUGS: Tuple[str, ...] = (
     "carousel",
     "infographic",
 )
-SOCIAL_STARTER_SLUGS: Tuple[str, ...] = SOCIAL_VIDEO_STARTER_SLUGS + SOCIAL_IMAGE_STARTER_SLUGS
+# PRD-251B (Gerard's pass, 3 Oct 2026): photo-led cards for any business (a salon, a shop, an
+# accountant), each with a photo slot that the person's own picture, a Library file or an AI
+# image fills; without one, the brand's own backdrop shows. Square (1080x1080) replaces 16:9.
+SOCIAL_PHOTO_STARTER_SLUGS: Tuple[str, ...] = (
+    "photo-headline",
+    "photo-offer",
+    "photo-review",
+    "photo-highlights",
+    "before-after",
+    "photo-only",
+)
+SOCIAL_STARTER_SLUGS: Tuple[str, ...] = SOCIAL_VIDEO_STARTER_SLUGS + SOCIAL_IMAGE_STARTER_SLUGS + SOCIAL_PHOTO_STARTER_SLUGS
 # The composition's own keys in a seed file: every block the contract takes but
 # the html, which is the seed's .html file. The row fields describe the row, and
 # ``preview`` is the media-render CI job's. A seed file carries nothing else.
@@ -113,6 +129,7 @@ def social_starters(fmt: Optional[str] = None) -> List[Dict[str, Any]]:
 
 __all__ = [
     "SOCIAL_IMAGE_STARTER_SLUGS",
+    "SOCIAL_PHOTO_STARTER_SLUGS",
     "SOCIAL_STARTER_SLUGS",
     "SOCIAL_VIDEO_STARTER_SLUGS",
     "STARTERS_DIR",

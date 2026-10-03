@@ -7,6 +7,8 @@
  * one) and name. Upload: a file of the person's own. Library: one of the workspace's
  * image and video Deliverables. AI-made (US-B305): AI images for the template's image slots
  * (editor-look-ai.tsx); AI footage for the hook and b-roll is Format's switch.
+ * Each source says in one line what it does; a template that shows a picture is marked
+ * Photo, and "Let Auto pick" says what Auto does with it.
  */
 import { useState } from 'react'
 
@@ -15,6 +17,7 @@ import type { DeliverableSummary, SocialFootageKind, SocialPost, SocialTemplateS
 import { useSocialLibrary } from '@/hooks/use-socials-editor'
 import { EditorLookAi } from './editor-look-ai'
 import { LibraryGrid, UploadDrop } from './editor-look-sources'
+import { PhotoTargetPicker, WHOLE_POST, photoTarget, type PhotoSpot } from './editor-look-photo'
 import { EditorCard, Hint, Segmented } from './editor-ui'
 
 export type LookSource = 'template' | 'upload' | 'library' | 'ai'
@@ -24,7 +27,16 @@ export const LOOK_SOURCES: ReadonlyArray<{ value: LookSource; label: string }> =
   { value: 'library', label: 'Library' },
   { value: 'ai', label: 'AI-made' },
 ]
+/** What each source does, in one line under the switch. */
+export const LOOK_HINTS: Record<LookSource, string> = {
+  template: 'Your words set in a designed card. A template marked Photo also shows a picture behind them.',
+  upload: 'Your own photo or video. With a Photo template it goes behind the words; otherwise it is the whole post, cropped for each channel.',
+  library: 'A picture or video you already have in Deliverables, used just like an upload.',
+  ai: "Pictures made by AI for a Photo template, in your brand kit's style.",
+}
 export const AUTO_PICK = 'Let Auto pick'
+export const AUTO_PICK_NOTE = 'Auto picks a template and writes its words from your brief when you render.'
+export const PHOTO_BADGE = 'Photo'
 
 interface TemplateCardProps {
   name: string
@@ -32,9 +44,13 @@ interface TemplateCardProps {
   kind: string
   chosen: boolean
   onPick: () => void
+  /** The template shows a picture (it has an image slot). */
+  photo?: boolean
+  /** A line under the name. */
+  note?: string
 }
 
-function TemplateCard({ name, thumbnail, kind, chosen, onPick }: TemplateCardProps) {
+function TemplateCard({ name, thumbnail, kind, chosen, onPick, photo = false, note }: TemplateCardProps) {
   return (
     <li>
       <button
@@ -46,15 +62,23 @@ function TemplateCard({ name, thumbnail, kind, chosen, onPick }: TemplateCardPro
           chosen ? 'border-accent' : 'border-transparent',
         )}
       >
-        {thumbnail ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={thumbnail} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
-        ) : (
-          <span className="flex aspect-[4/3] w-full items-end rounded-lg bg-[#141210] p-2.5 font-serif text-base leading-[1.1] text-foreground">
-            {kind}
-          </span>
-        )}
+        <span className="relative block">
+          {thumbnail ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={thumbnail} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+          ) : (
+            <span className="flex aspect-[4/3] w-full items-end rounded-lg bg-[#141210] p-2.5 font-serif text-base leading-[1.1] text-foreground">
+              {kind}
+            </span>
+          )}
+          {photo && (
+            <span className="absolute left-2 top-2 rounded-full bg-background/85 px-2 py-0.5 text-[11px] font-medium text-foreground">
+              {PHOTO_BADGE}
+            </span>
+          )}
+        </span>
         <span className="text-[13px] font-medium text-foreground">{name}</span>
+        {note && <span className="text-[12px] leading-snug text-muted-foreground">{note}</span>}
       </button>
     </li>
   )
@@ -71,9 +95,12 @@ function TemplateGallery({ templates, loading, chosen, onPick }: TemplateGallery
   if (loading) return <Hint>Loading templates…</Hint>
   return (
     <ul aria-label="Templates" className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-      <TemplateCard name={AUTO_PICK} thumbnail={null} kind="Auto" chosen={chosen === null} onPick={() => onPick(null)} />
+      <TemplateCard name={AUTO_PICK} thumbnail={null} kind="Auto" chosen={chosen === null} onPick={() => onPick(null)} note={AUTO_PICK_NOTE} />
       {templates.map((t) => (
-        <TemplateCard key={t.id} name={t.name} thumbnail={t.thumbnail_url} kind={t.kind} chosen={chosen === t.id} onPick={() => onPick(t.id)} />
+        <TemplateCard
+          key={t.id} name={t.name} thumbnail={t.thumbnail_url} kind={t.kind} chosen={chosen === t.id} onPick={() => onPick(t.id)}
+          photo={(t.image_slots ?? []).length > 0}
+        />
       ))}
     </ul>
   )
@@ -91,20 +118,31 @@ export interface LookAiProps {
 
 interface EditorLookCardProps extends TemplateGalleryProps {
   busy: boolean
-  onUpload: (file: File) => void
-  onLibrary: (item: DeliverableSummary) => void
+  /** The chosen template's photo spots (PRD-251B): an upload or a Library pick fills one. */
+  photoSpots: ReadonlyArray<PhotoSpot>
+  /** `spot`: the photo spot (the template's slot) the file fills; none, the whole post. */
+  onUpload: (file: File, spot?: string) => void
+  onLibrary: (item: DeliverableSummary, spot?: string) => void
   ai: LookAiProps
 }
 
-export function EditorLookCard({ templates, loading, chosen, onPick, busy, onUpload, onLibrary, ai }: EditorLookCardProps) {
+export function EditorLookCard({ templates, loading, chosen, onPick, busy, photoSpots, onUpload, onLibrary, ai }: EditorLookCardProps) {
   const [source, setSource] = useState<LookSource>('template')
+  const [asked, setAsked] = useState<string | null>(null)
   const library = useSocialLibrary(source === 'library')
+  const target = photoTarget(photoSpots, asked)
+  const spot = target === WHOLE_POST ? undefined : target
+  const items = spot ? library.data?.filter((item) => item.artifact_type === 'image') : library.data
   return (
     <EditorCard label="Look">
       <Segmented label="Where the visual comes from" choices={LOOK_SOURCES} value={source} onChange={setSource} />
+      <Hint>{LOOK_HINTS[source]}</Hint>
       {source === 'template' && <TemplateGallery templates={templates} loading={loading} chosen={chosen} onPick={onPick} />}
-      {source === 'upload' && <UploadDrop busy={busy} onFile={onUpload} />}
-      {source === 'library' && <LibraryGrid items={library.data} loading={library.isLoading} busy={busy} onPick={onLibrary} />}
+      {(source === 'upload' || source === 'library') && (
+        <PhotoTargetPicker spots={photoSpots} target={target} post={ai.post} onTarget={setAsked} />
+      )}
+      {source === 'upload' && <UploadDrop busy={busy} pictureOnly={!!spot} onFile={(file) => onUpload(file, spot)} />}
+      {source === 'library' && <LibraryGrid items={items} loading={library.isLoading} busy={busy} onPick={(item) => onLibrary(item, spot)} />}
       {source === 'ai' && (
         <EditorLookAi post={ai.post} imageSlots={ai.imageSlots} images={ai.images} busy={ai.aiBusy} onMake={ai.onAiMake} onPick={ai.onAiPick} />
       )}

@@ -95,6 +95,13 @@ class MediaStore:
             get_s3_client().put_object(Bucket=self.bucket, Key=key, Body=handle, ContentType=content_type)
         logger.info("[Socials] stored s3://%s/%s (%d bytes)", self.bucket, key, path.stat().st_size)
 
+    def copy(self, source_key: str, key: str) -> None:
+        """A copy of ``source_key`` at ``key``, both in this bucket (PRD-251B: a Library picture
+        put in a post's photo slot lives under the post's own prefix, like an upload)."""
+        ensure_bucket(self.bucket)
+        get_s3_client().copy_object(Bucket=self.bucket, Key=key, CopySource={"Bucket": self.bucket, "Key": source_key})
+        logger.info("[Socials] copied s3://%s/%s to %s", self.bucket, source_key, key)
+
     def presigned_get(self, key: str, ttl_seconds: int) -> str:
         """A GET link to ``key`` for media-render, which fetches a render's inputs
         from our storage (a voice toolkit's lines, S1.5). It is minted against the

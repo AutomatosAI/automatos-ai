@@ -1,0 +1,63 @@
+{
+  "name": "Review",
+  "description": "A customer's words on a card over your photo, with their stars and name. For a review, a testimonial or a thank-you.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "rating": {
+      "type": "number",
+      "label": "Stars",
+      "description": "The stars they gave, 1 to 5. 0 shows none.",
+      "default": 5,
+      "min": 0,
+      "max": 5
+    },
+    "quote": {
+      "type": "text",
+      "label": "Their words",
+      "description": "What they said, without quotation marks: the card adds them.",
+      "max_chars": 220
+    },
+    "name": {
+      "type": "text",
+      "label": "Name",
+      "description": "Who said it, e.g. Sarah M.",
+      "max_chars": 40
+    },
+    "detail": {
+      "type": "text",
+      "label": "About them",
+      "description": "A line about them, e.g. Customer since 2021. Leave empty for none.",
+      "default": "",
+      "max_chars": 60
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "photo": {
+      "kind": "image",
+      "path": "assets/slots/photo.png",
+      "label": "Photo",
+      "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
+    }
+  },
+  "sample_data": {
+    "rating": 5,
+    "quote": "Best haircut I've had in years. Friendly, on time, and they actually listened.",
+    "name": "Sarah M.",
+    "detail": "Customer since 2021",
+    "handle": "@yourbrand"
+  }
+}
