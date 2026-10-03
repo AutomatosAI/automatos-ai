@@ -22,9 +22,15 @@ from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState
 from services import coordinator_service as cs
 from services.orchestration_board_bridge import create_mission_board_task, create_task_board_task
-from tests.test_f094_a_step_card_ends_on_its_sessions_outcome import _session_working, quiet  # noqa: F401
+from tests.helpers_mission_lane import quiet_board, session_working as _session_working
 
 STATES = (TaskState.PENDING, TaskState.QUEUED, TaskState.RUNNING, TaskState.COMPLETED, TaskState.VERIFIED)
+
+
+@pytest.fixture
+def quiet(monkeypatch):
+    """The board's fan-out is its own suites' business (tests/helpers_mission_lane.py)."""
+    return quiet_board(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
@@ -177,7 +183,7 @@ def test_a_step_left_open_by_an_ended_mission_can_be_cancelled(db_session, seed_
     assert (out["applied"], out["status"]) == (True, "cancelled")
 
 
-def test_a_claude_code_step_stops_with_its_mission(db_session, seed_workspace, quiet):  # noqa: F811
+def test_a_claude_code_step_stops_with_its_mission(db_session, seed_workspace, quiet):
     """Its card is cancelled, so the host's next event batch tells the session to
     stop, and the session's late result never reopens the card."""
     from services import cli_host_service as svc

@@ -40,9 +40,9 @@ MISSION_CANCELLED_REASON = "the mission was cancelled"
 def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[int]:
     """Skip every unfinished step of the mission and cancel its card. Returns the
     cards cancelled. Nothing is committed: the caller commits the mission's
-    cancel and its cards as one, or rolls them all back (a cancel half done would
-    leave the mission terminal and its open cards beyond a second cancel)."""
-    from services.board_cancel import stage_ticket_cancel
+    cancel with its cards. Each card stops in a savepoint of its own (as F224's
+    stop_mission_sessions does): a card the database refuses is logged and left
+    open, never costing the mission its cancel."""
 
     steps = (
         db.query(OrchestrationTask)
@@ -62,7 +62,18 @@ def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[
         .order_by(BoardTask.id)
         .all()
     )
-    return [card.id for card in cards if stage_ticket_cancel(db, card, by=by, reason=reason)]
+    return [card.id for card in cards if _stopped(db, card, by=by, reason=reason)]
+
+
+def _stopped(db: Session, card: Any, *, by: str, reason: str) -> bool:
+    import services.board_cancel as board_cancel
+
+    try:
+        with db.begin_nested():
+            return board_cancel.stop_ticket_run(db, card, by=by, reason=reason)
+    except Exception:  # noqa: BLE001 -- one card never costs the mission its cancel; it is logged
+        logger.exception("[MissionCancel] could not cancel step card %s", card.id)
+        return False
 
 
 async def until_mission_cancelled(work: Awaitable[Any], run_id: Any,

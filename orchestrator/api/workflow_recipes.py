@@ -1171,7 +1171,8 @@ async def cancel_execution(
 
         # F245: the run stops (its executor checks before every step and model
         # call; on this worker its task is cancelled at once), and its card and
-        # its session step tickets (F116) end Cancelled, saying who.
+        # its session step tickets (F116; their sessions stop, F224) end
+        # Cancelled, saying who.
         from services.board_consent import actor_ref
         from services.run_cancel import cancel_playbook_run
 

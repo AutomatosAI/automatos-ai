@@ -3810,9 +3810,11 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
     ) -> OrchestrationRun:
-        """Cancel a mission: its unfinished steps are skipped and their cards
-        cancelled, and a step already running stops (F245: the running steps of
-        #0119 finished after its cancel and stayed In progress)."""
+        """Cancel a mission. Nothing new is dispatched; a step run by a Claude Code
+        session stops with it (F224: the run's state change ends the session and
+        cancels the step's card); every other unfinished step is skipped and its
+        card cancelled, and a step running in process stops within seconds (F245:
+        the running steps of #0119 finished after its cancel and stayed In progress)."""
         run = self._get_run(db, run_id)
 
         transition_run(
@@ -3833,8 +3835,8 @@ class CoordinatorService:
             actor_id=actor_id,
         )
 
-        # F245: every unfinished step is skipped and its card cancelled, a Claude
-        # Code session's with it (its host is told to stop, as for any cancel).
+        # F245: every unfinished step is skipped and its card cancelled. A Claude
+        # Code session's card was stopped by the run's state change (F224).
         from modules.coordination.mission_cancel import MISSION_CANCELLED_REASON, close_open_steps
         from services.board_consent import actor_from_user_id
 
