@@ -70,7 +70,7 @@ actions:
     source: example
   - text: send an approval request notification
     source: example
-  - text: notify Gerard that the daily brief is ready
+  - text: notify the owner that the daily brief is ready
     source: example
   - text: send a notification when the mission completes
     source: authored
