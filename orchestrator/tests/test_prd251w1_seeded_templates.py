@@ -92,6 +92,7 @@ from media_render.music import load_library  # noqa: E402
 from modules.documents import seed_templates  # noqa: E402
 from modules.documents.social_starters import (  # noqa: E402
     SOCIAL_IMAGE_STARTER_SLUGS,
+    SOCIAL_PHOTO_STARTER_SLUGS,
     SOCIAL_STARTER_SLUGS,
     SOCIAL_VIDEO_STARTER_SLUGS,
     social_starters,
@@ -104,7 +105,9 @@ STARTER_NAMES = ["UI story promo", "Cinematic product promo", "App promo", "Data
 IMAGE_STARTER_NAMES = [
     "Title card", "Definition card", "Stats card", "Quote card", "Announcement card", "Fact card", "Carousel", "Infographic",
 ]
-ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES
+# PRD-251B (Gerard's pass): the photo cards, after the eight.
+PHOTO_STARTER_NAMES = ["Photo + headline", "Offer", "Review", "Highlights", "Before / after", "Just the photo"]
+ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES + PHOTO_STARTER_NAMES
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
 REFERENCE_OF = {
     "ui-story-promo": "v1-ui-story.html",
@@ -170,7 +173,9 @@ def test_the_four_reference_videos_are_seeded_as_social_video_starters():
     starters = social_starters("social_video")
     assert [s["name"] for s in starters] == STARTER_NAMES
     assert [s["slug"] for s in starters] == list(SOCIAL_VIDEO_STARTER_SLUGS) == list(REFERENCE_OF)
-    assert list(SOCIAL_STARTER_SLUGS) == list(SOCIAL_VIDEO_STARTER_SLUGS) + list(SOCIAL_IMAGE_STARTER_SLUGS)
+    assert list(SOCIAL_STARTER_SLUGS) == (
+        list(SOCIAL_VIDEO_STARTER_SLUGS) + list(SOCIAL_IMAGE_STARTER_SLUGS) + list(SOCIAL_PHOTO_STARTER_SLUGS)
+    )
     for starter in starters:
         blocks = starter["blocks"]
         assert (starter["format"], starter["category"], blocks["sizes"]) == ("social_video", "social", ["1080x1920"])
@@ -284,14 +289,14 @@ def test_the_social_starters_seed_through_the_starter_path_once():
     assert seed_templates.seed_social_starters(db, WS) == {"created": len(ALL_STARTER_NAMES), "refreshed": 0}
     assert [row.name for row in db.rows] == ALL_STARTER_NAMES and db.commits == 1
     starters = social_starters()
-    assert len(starters) == len(db.rows) == 12
+    assert len(starters) == len(db.rows) == 18
     for row, starter in zip(db.rows, starters):
         assert (row.workspace_id, row.format, row.category, row.created_by) == (WS, starter["format"], "social", STARTER_CREATOR)
         assert row.blocks == starter["blocks"] and row.sample_data == starter["sample_data"]
-    assert [row.format for row in db.rows] == ["social_video"] * 4 + ["social_image"] * 8
+    assert [row.format for row in db.rows] == ["social_video"] * 4 + ["social_image"] * 14
     # Twice is the same rows: nothing added, nothing refreshed, nothing committed.
     assert seed_templates.seed_social_starters(db, WS) == {"created": 0, "refreshed": 0}
-    assert len(db.rows) == 12 and db.commits == 1
+    assert len(db.rows) == 18 and db.commits == 1
 
 
 def test_a_drifted_starter_is_refreshed_and_a_persons_own_is_never_touched():

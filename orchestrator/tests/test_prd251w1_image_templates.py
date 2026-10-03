@@ -111,7 +111,9 @@ KITS = [
 
 
 def _images():
-    return social_starters("social_image")
+    """The eight image families (US-107, US-113); the photo cards have their own pins
+    (test_socials_photo_starters.py)."""
+    return [s for s in social_starters("social_image") if s["slug"] in SOCIAL_IMAGE_STARTER_SLUGS]
 
 
 def _starter(slug):

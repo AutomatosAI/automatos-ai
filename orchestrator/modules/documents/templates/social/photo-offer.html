@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width={{ size.width }}, height={{ size.height }}" />
+    <title>Offer</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-251B photo cards: "Offer", a deal over a photo: the offer big, what it is for, the terms and a button.
+         Every colour and font reads the brand kit; the var() fallbacks are the platform's defaults.
+         Words sit on the brand's ink (a panel, a chip or a card) so they read over any photo, and
+         with no photo the brand's own backdrop shows instead. */
+      :root {
+        --ink: var(--brand-ink, #1a1714);
+        --on-ink: var(--brand-on-ink, #f0e8db);
+        --muted: var(--brand-on-ink-muted, #b0a38d);
+        --accent: var(--brand-primary-on-ink, #e96235);
+        --brand: var(--brand-primary, #ff6932);
+        --display: var(--brand-heading-font, sans-serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+        /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
+        --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--ink); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--on-ink); background: var(--ink); }
+      .clip { position: absolute; inset: 0; }
+      /* The backdrop: the brand's ink with two glows of its colour, what shows where no photo is given. */
+      .backdrop { position: absolute; inset: 0; background:
+        radial-gradient(80% 55% at 92% 6%, color-mix(in srgb, var(--brand) 58%, var(--ink)) 0%, transparent 72%),
+        radial-gradient(70% 45% at 0% 100%, color-mix(in srgb, var(--brand) 28%, var(--ink)) 0%, transparent 78%),
+        var(--ink); }
+      .photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+      /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
+      /* The page has no padding of its own: its blocks carry their spacing, so a panel runs to the card's edges. */
+      .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
+        justify-content: space-between; gap: calc(28 * var(--s)); }
+      .page.wrap-words * { overflow-wrap: anywhere; }
+      .top { display: flex; align-items: center; justify-content: space-between; gap: calc(20 * var(--s));
+        margin: calc(56 * var(--u)) calc(60 * var(--u)) 0; }
+      .brand, .chip { display: inline-flex; align-items: center; gap: calc(12 * var(--s)); max-width: 100%;
+        background: color-mix(in srgb, var(--ink) 82%, transparent); color: var(--on-ink); border-radius: calc(999 * var(--s));
+        padding: calc(10 * var(--s)) calc(20 * var(--s)); font-size: calc(26 * var(--s)); font-weight: 600; line-height: 1.2; }
+      .chip.handle { font-family: var(--mono); font-weight: 500; margin-left: auto; }
+      .logo { flex: none; width: calc(40 * var(--s)); height: calc(40 * var(--s)); object-fit: contain; }
+      .logo[src^="data:image/gif"] { display: none; }
+      .pill { display: inline-flex; align-self: flex-start; max-width: 100%; background: var(--accent); color: var(--ink);
+        border-radius: calc(10 * var(--s)); padding: calc(10 * var(--s)) calc(20 * var(--s)); font-family: var(--mono);
+        font-size: calc(24 * var(--s)); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
+      /* Display type sets tighter than its glyphs: the padding holds their ink, so the fit never reads it as overflow. */
+      .headline { width: 100%; font-family: var(--display); font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; color: var(--on-ink);
+        padding-bottom: 0.08em; }
+      .headline .line { display: block; }
+      .hot { color: var(--accent); }
+      .lede { font-size: calc(34 * var(--s)); line-height: 1.38; color: var(--on-ink); }
+      .note { font-size: calc(28 * var(--s)); line-height: 1.4; color: var(--muted); }
+      .button { display: inline-flex; align-self: flex-start; align-items: center; max-width: 100%; background: var(--accent); color: var(--ink);
+        border-radius: calc(14 * var(--s)); padding: calc(18 * var(--s)) calc(30 * var(--s)); font-size: calc(30 * var(--s));
+        font-weight: 700; line-height: 1.15; }
+
+      .panel { display: flex; flex-direction: column; gap: calc(22 * var(--s));
+        padding: calc(150 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u));
+        background: linear-gradient(to top, color-mix(in srgb, var(--ink) 95%, transparent) 0%,
+          color-mix(in srgb, var(--ink) 90%, transparent) 72%, transparent 100%); }
+      .offer { font-family: var(--display); font-weight: 900; font-size: calc(190 * var(--s)); line-height: 0.92;
+        letter-spacing: -0.03em; color: var(--accent); padding-bottom: 0.1em; }
+      .item { font-family: var(--display); font-weight: 700; font-size: calc(58 * var(--s)); line-height: 1.08; color: var(--on-ink); }
+      @media (min-aspect-ratio: 3/2) {
+        .page { justify-content: flex-start; }
+        .page { background: linear-gradient(to right, color-mix(in srgb, var(--ink) 95%, transparent) 0%,
+          color-mix(in srgb, var(--ink) 90%, transparent) 46%, transparent 64%); }
+        .panel { flex: 1 1 auto; justify-content: flex-end; width: 58%; background: none;
+          padding: calc(40 * var(--u)) calc(40 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u)); }
+        .offer { font-size: calc(160 * var(--s)); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="1" data-width="{{ size.width }}" data-height="{{ size.height }}">
+      <section id="card" class="clip" data-start="0" data-duration="1" data-track-index="0">
+        <div class="backdrop"></div>
+        <img class="photo" data-slot="photo" data-layout-allow-overflow src="assets/slots/photo.png" alt="" />
+        <div class="page">
+          <div class="top fit"><div class="chip brand" data-optional><img class="logo" src="{{ brand.logo_mark }}" alt="" /><span class="v">{{ brand.name }}</span></div><span class="chip handle v">{{ handle }}</span></div>
+          <div class="panel fit">
+            <span class="pill v">{{ tag }}</span>
+            <p class="offer fit">{{ offer }}</p>
+            <p class="item">{{ item }}</p>
+            <p class="note v">{{ detail }}</p>
+            <span class="button v">{{ cta }}</span>
+          </div>
+        </div>
+      </section>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="1" data-track-index="1" data-volume="1"></audio>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the card's own words, dressed and fitted before anything is sampled ----------
+      const MIN_FIT = 0.5;
+      const FIT_STEP = 0.04;
+      // No photo given: the slot's element was taken out, and the backdrop shows (a template may say more).
+      if (!document.querySelector("img[data-slot]")) document.getElementById("root").classList.add("no-photo");
+      // Stars: a rating of 1 to 5 as filled and empty stars.
+      document.querySelectorAll("[data-stars]").forEach((el) => {
+        const rating = Math.max(0, Math.min(5, Math.round(Number(el.getAttribute("data-stars")) || 0)));
+        el.textContent = rating ? "\u2605".repeat(rating) + "\u2606".repeat(5 - rating) : "";
+      });
+      // A block whose every value is empty is taken out (an unused eyebrow, a third card),
+      // and so is any empty value, so it leaves no gap.
+      document.querySelectorAll("[data-optional]").forEach((block) => {
+        const values = block.querySelectorAll(".v");
+        const filled = Array.from(values.length ? values : [block]).some((el) => el.textContent.trim());
+        if (!filled) block.remove();
+      });
+      document.querySelectorAll(".v").forEach((el) => {
+        if (!el.textContent.trim()) el.remove();
+      });
+      // The display text: "|" breaks the line, and its accent words take the brand colour.
+      function dress(el) {
+        const accent = (el.getAttribute("data-accent") || "").trim();
+        const quoted = el.getAttribute("data-dress") === "quote";
+        const text = quoted ? "\u201c" + el.textContent.trim() + "\u201d" : el.textContent;
+        const lines = text.split("|").map((line) => line.trim()).filter(Boolean);
+        let marked = !accent;
+        el.textContent = "";
+        lines.forEach((line) => {
+          const row = document.createElement("span");
+          row.className = "line";
+          const at = marked ? -1 : line.indexOf(accent);
+          if (at < 0) {
+            row.textContent = line;
+          } else {
+            marked = true;
+            const hot = document.createElement("span");
+            hot.className = "hot";
+            hot.textContent = accent;
+            row.append(line.slice(0, at), hot, line.slice(at + accent.length));
+          }
+          el.appendChild(row);
+        });
+      }
+      document.querySelectorAll("[data-dress]").forEach(dress);
+      // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function overflowing(page) {
+        const box = page.getBoundingClientRect();
+        const style = getComputedStyle(page);
+        const bottom = box.bottom - parseFloat(style.paddingBottom) + 1;
+        const right = box.right - parseFloat(style.paddingRight) + 1;
+        for (const child of page.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.bottom > bottom || rect.right > right) return true;
+        }
+        return Array.from(page.querySelectorAll(".fit")).some(
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+        );
+      }
+      function fit(page) {
+        // A page taken out of the layout (display: none) measures nothing: it keeps the fit it had.
+        if (!page.getClientRects().length) return;
+        page.classList.remove("wrap-words");
+        for (let step = 0; ; step += 1) {
+          const scale = Math.max(MIN_FIT, 1 - step * FIT_STEP);
+          page.style.setProperty("--fit", scale.toFixed(2));
+          if (!overflowing(page) || scale === MIN_FIT) break;
+        }
+        if (overflowing(page)) page.classList.add("wrap-words");
+      }
+      function fitAll() {
+        document.querySelectorAll(".page").forEach(fit);
+      }
+      fitAll();
+      // A brand font file loads after this script: the card fits again once it has.
+      document.fonts.addEventListener("loadingdone", fitAll);
+      document.fonts.ready.then(fitAll);
+
+      // A still: nothing moves. The timeline only spans the card's one second.
+      const tl = gsap.timeline({ paused: true });
+      tl.set({}, {}, 1);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

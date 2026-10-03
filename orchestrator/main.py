@@ -295,6 +295,17 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("Socials package seed: %s", e)
 
+        # PRD-251B: a social starter that shipped after a workspace turned Socials on
+        # (the photo cards) reaches it too. Turning Socials on seeds them; this covers the rest.
+        try:
+            from modules.documents.seed_templates import seed_social_starters_where_on
+            from modules.socials.settings import parse_workspace_socials
+            with get_db_session() as db:
+                starters = seed_social_starters_where_on(db, lambda settings: parse_workspace_socials(settings).enabled)
+            logger.info("Social starters seed: %s", starters)
+        except Exception as e:
+            logger.warning("Social starters seed: %s", e)
+
         # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
         # manual script, so prod carried ZERO packages — the Packages tab was
         # empty and onboarding's proposal silently fell back to custom-design
