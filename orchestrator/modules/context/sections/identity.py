@@ -151,7 +151,6 @@ class IdentitySection(BaseSection):
             agent_name = getattr(ctx.agent, "name", "Agent") if ctx.agent else "Agent"
 
         user_name = ctx.kwargs.get("_user_name") or ctx.kwargs.get("user_name")
-        msg_count = len(ctx.messages or [])
 
         orch_settings: Dict[str, Any] = ctx.kwargs.get("orchestrator_settings", {})
         if not orch_settings:
@@ -171,7 +170,6 @@ class IdentitySection(BaseSection):
             AutomatosPersonality.get_base_system_prompt(
                 user_name=user_name,
                 agent_name=agent_name,
-                msg_count=msg_count,
                 orchestrator_settings=orch_settings or None,
             ),
             *([] if visitor else [AutomatosPersonality.get_platform_skill()]),

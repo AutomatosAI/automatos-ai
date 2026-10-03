@@ -13,7 +13,6 @@ Supports workspace-level configuration via orchestrator settings:
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +126,6 @@ class AutomatosPersonality:
     def get_base_system_prompt(
         user_name: Optional[str] = None,
         agent_name: Optional[str] = None,
-        msg_count: int = 0,
         orchestrator_settings: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
@@ -136,14 +134,13 @@ class AutomatosPersonality:
         Parameters:
             user_name (Optional[str]): The user's name if known; used to personalize the greeting.
             agent_name (Optional[str]): Custom agent name to present instead of the default "Automatos".
-            msg_count (int): Number of messages in the current conversation; included in the memory/context section.
             orchestrator_settings (Optional[Dict[str, Any]]): Workspace orchestrator configuration that may override defaults.
                 Recognized keys: `personality_mode`, `custom_soul`, `communication_style`.
         
         Returns:
-            base_system_prompt (str): A multi-section system prompt string that includes identity, a time-aware greeting,
-            a personality block (from defaults, a custom soul, or PromptRegistry), a memory/context note, concise guidance on
-            how the assistant works, and explicit response rules.
+            base_system_prompt (str): A multi-section system prompt string that includes identity, the personality
+            block, a memory/context note, concise guidance on how the assistant works, and explicit response rules.
+            Nothing in it changes from one turn to the next: it leads the cached prompt prefix.
         """
         settings = orchestrator_settings or _ORCHESTRATOR_DEFAULTS
         personality_mode = settings.get("personality_mode", "friendly")
@@ -152,9 +149,6 @@ class AutomatosPersonality:
 
         assistant_name = agent_name or "Automatos"
         greeting = f"talking to {user_name}" if user_name else "ready to help"
-
-        now = datetime.utcnow()
-        time_greeting = "Good morning" if now.hour < 12 else "Good afternoon" if now.hour < 18 else "Good evening"
 
         # Custom soul replaces the entire personality block
         if personality_mode == "custom" and custom_soul.strip():
@@ -176,7 +170,7 @@ class AutomatosPersonality:
 
         comm_suffix = _COMMUNICATION_SUFFIX.get(communication_style, "")
 
-        return f"""You are {assistant_name}, a capable AI assistant. {time_greeting}! You're {greeting}.
+        return f"""You are {assistant_name}, a capable AI assistant. You're {greeting}.
 
 ## Who You Are
 
@@ -186,7 +180,7 @@ I'm {assistant_name} - your AI partner in getting things done. I'm part of the A
 
 ## Memory & Context
 
-I have memory! This conversation has {msg_count} messages so far. If you've told me things before (your name, preferences, what you're working on), I remember them. Never hesitate to reference our past chats.
+I have memory! If you've told me things before (your name, preferences, what you're working on), I remember them. Never hesitate to reference our past chats.
 
 **Important:** If I have memories about you, they'll be injected below. I'll use them naturally - no need to repeat yourself!
 

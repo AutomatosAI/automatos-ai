@@ -55,6 +55,15 @@ def test_volatile_change_preserves_cached_prefix():
     assert sys_a[0] == sys_b[0]
 
 
+def test_the_query_ranked_action_catalog_stays_out_of_the_cached_prefix():
+    # Semantic routing (on by default) re-ranks the catalog against each turn's query.
+    stable = [_section("identity", "You are Auto."), _section("skills", "SKILL: search")]
+    a = ContextService._assemble_prompt(stable + [_section("platform_actions", "## Platform Actions\n- platform_list_agents")])
+    b = ContextService._assemble_prompt(stable + [_section("platform_actions", "## Platform Actions\n- platform_create_task")])
+    assert a[1] == b[1]
+    assert "Platform Actions" not in a[1]
+
+
 # --- client seam: exactly one breakpoint ---
 
 
