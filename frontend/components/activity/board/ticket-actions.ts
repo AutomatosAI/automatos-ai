@@ -12,7 +12,8 @@ import { isLocal } from '@/lib/auth-edition'
 
 type TicketRef = Pick<BoardTask, 'type' | 'status'>
 
-const FINISHED = new Set(['done', 'failed', 'cancelled', 'closed'])
+// F245: a failed ticket can be cancelled, which closes it; it waits in Needs you until then (F246).
+const UNCANCELLABLE = new Set(['done', 'cancelled', 'closed'])
 const ASSIGNABLE = new Set(['inbox', 'assigned', 'blocked', 'failed'])
 
 /** A mission's own card, or one of its steps. */
@@ -25,7 +26,7 @@ export function canAssign(task: TicketRef): boolean {
 }
 
 export function canCancel(task: TicketRef): boolean {
-  return !isMissionTicket(task) && !FINISHED.has(task.status)
+  return !isMissionTicket(task) && !UNCANCELLABLE.has(task.status)
 }
 
 export interface Stopped {

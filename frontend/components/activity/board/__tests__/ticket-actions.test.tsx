@@ -38,6 +38,9 @@ describe('what the board offers', () => {
   it('an Inbox ticket can be assigned and cancelled; a finished one neither', () => {
     expect([canAssign(ticket()), canCancel(ticket())]).toEqual([true, true])
     expect([canAssign(ticket({ status: 'done' })), canCancel(ticket({ status: 'done' }))]).toEqual([false, false])
+    // F245: Cancel closes a failed ticket (night 7: the button refused one without a word).
+    expect([canAssign(ticket({ status: 'failed' })), canCancel(ticket({ status: 'failed' }))]).toEqual([true, true])
+    expect(canCancel(ticket({ status: 'cancelled' }))).toBe(false)
   })
 
   it("a mission's ticket is the mission's to run: no assign or cancel, a link to the mission", () => {

@@ -2507,20 +2507,25 @@ class CoordinatorService:
         task runs as a ticket the Claude Code session works (its own DB
         session, the same timeout). F155: a widget-born mission's task runs
         under the widget key's restrictions, and never on a Claude Code
-        session, which those restrictions cannot reach."""
+        session, which those restrictions cannot reach. F245: it stops when
+        the mission is cancelled."""
         from core.security.surface import widget_born
+        from modules.coordination.mission_cancel import until_mission_cancelled
 
         if p.get("cli_agent"):
             if widget_born(p.get("origin")):
                 return _refuse_widget_session_task()
-            return self._run_cli_ticket(
+            work = self._run_cli_ticket(
                 p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
                 (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
                 Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
             )
-        return self._run_agent_io(p["factory"], p["agent_id"], p["prompt"], p["task"], p["attachment_ids"],
-                                  mode_caps=p["mode_caps"], agent_runtime=p.get("agent_runtime"),
-                                  field_context=p.get("field_context"), origin=p.get("origin"))
+        else:
+            work = self._run_agent_io(p["factory"], p["agent_id"], p["prompt"], p["task"], p["attachment_ids"],
+                                      mode_caps=p["mode_caps"], agent_runtime=p.get("agent_runtime"),
+                                      field_context=p.get("field_context"), origin=p.get("origin"))
+        # F245: a step stops when its mission is cancelled, from whichever worker.
+        return until_mission_cancelled(work, getattr(p["task"], "run_id", None))
 
     async def _run_agent_io(
         self,
@@ -2642,11 +2647,22 @@ class CoordinatorService:
         agent_id: int,
         result: Dict[str, Any],
     ) -> None:
-        """Record task completion/failure — runs serially on shared session."""
+        """Record task completion/failure — runs serially on shared session.
+        F245: a step whose mission was cancelled while it ran is not recorded:
+        the cancel skipped it and cancelled its card."""
+        from modules.coordination.mission_cancel import cancelled_while_it_ran
+
+        if cancelled_while_it_ran(db, run):
+            logger.info("Task %s finished after mission %s was cancelled: not recorded", task.id, run.id)
+            return
         await _park_if_the_step_asked(db, run, task, agent_id, result)
         MissionDispatcher.record_task_completion(db, task, result)
+        await self._remember_task_failure(db, run, task)
+        await self._announce_task_result(db, run, task, agent_id, result)
+        self._count_task_tokens(db, run, result)
 
-        # PRD-131d Phase 2: capture permanent agent-error failures into memory.
+    async def _remember_task_failure(self, db: Session, run: OrchestrationRun, task: OrchestrationTask) -> None:
+        """PRD-131d Phase 2: a step that failed for good goes into mission memory."""
         # record_task_completion transitions to FAILED only when retries are
         # exhausted; re-queued retries stay in QUEUED and should not fire here.
         try:
@@ -2661,6 +2677,11 @@ class CoordinatorService:
                 task.id, exc_info=True,
             )
 
+    async def _announce_task_result(
+        self, db: Session, run: OrchestrationRun, task: OrchestrationTask, agent_id: int, result: Dict[str, Any],
+    ) -> None:
+        """The step's outcome told: its event, its line in the launching thread,
+        and its output into the mission's field."""
         # PRD-128: dispatch mission_step_complete (default pref is 'silent'
         # so this is opt-in per workspace/user)
         try:
@@ -2694,6 +2715,8 @@ class CoordinatorService:
             db.refresh(task)
             await self._inject_task_output_into_field(run, task, agent_id)
 
+    def _count_task_tokens(self, db: Session, run: OrchestrationRun, result: Dict[str, Any]) -> None:
+        """The run's token count, and a budget warning once it runs over."""
         # Update run-level token tracking (PRD-82A Section 9)
         task_tokens = result.get("execution", {}).get("tokens_used", 0)
         if task_tokens:
@@ -3785,7 +3808,9 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
     ) -> OrchestrationRun:
-        """Cancel a mission. Running tasks continue to completion; no new dispatches."""
+        """Cancel a mission: its unfinished steps are skipped and their cards
+        cancelled, and a step already running stops (F245: the running steps of
+        #0119 finished after its cancel and stayed In progress)."""
         run = self._get_run(db, run_id)
 
         transition_run(
@@ -3806,17 +3831,12 @@ class CoordinatorService:
             actor_id=actor_id,
         )
 
-        # Skip all pending/queued tasks
-        MissionReconciler._skip_remaining_tasks(
-            db=db,
-            run_id=run.id,
-            reason="Mission cancelled",
-        )
-        # F094: a step whose Claude Code session is still working keeps its card
-        # (the session's); the card says the mission was cancelled.
-        from services.cli_ticket_lane import cancelled_note, note_open_step_cards
+        # F245: every unfinished step is skipped and its card cancelled, a Claude
+        # Code session's with it (its host is told to stop, as for any cancel).
+        from modules.coordination.mission_cancel import MISSION_CANCELLED_REASON, close_open_steps
+        from services.board_consent import actor_from_user_id
 
-        note_open_step_cards(db, run_id=run.id, note_for=cancelled_note)
+        close_open_steps(db, run.id, by=actor_from_user_id(actor_id), reason=MISSION_CANCELLED_REASON)
 
         VerificationService.clear_cache(run.id)
         # PRD-227 US-002: narrate the cancel into the launching thread (run-level).
