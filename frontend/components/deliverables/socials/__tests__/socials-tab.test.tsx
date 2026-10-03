@@ -149,6 +149,9 @@ function seedPost(overrides: Record<string, unknown>) {
   return post
 }
 
+/** F256: a post with no channel cannot be approved; the posts these tests approve go to LinkedIn. */
+const CHANNEL = { id: 't-linkedin', toolkit: 'linkedin', post_kind: 'text', options: {}, status: 'pending' }
+
 /** Marks the moment the provider has the workspace, so "renders nothing" is not vacuous. */
 function WorkspaceLoaded() {
   const { workspace } = useWorkspace()
@@ -263,7 +266,7 @@ describe('Socials on', () => {
   })
 
   it('approving moves it to Approved; editing its copy afterwards moves it to Needs approval', async () => {
-    const post = seedPost({ title: 'Launch week teaser', copy: { base: 'v1' } })
+    const post = seedPost({ title: 'Launch week teaser', copy: { base: 'v1' }, targets: [CHANNEL] })
     renderTab()
 
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
@@ -288,7 +291,7 @@ describe('Socials on', () => {
   })
 
   it('Approve sends the hash of the version on screen; a 409 (changed while reviewed) says so and reloads the post', async () => {
-    const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' } })
+    const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' }, targets: [CHANNEL] })
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
     expect(within(detail('Launch week teaser')).getByLabelText('Copy')).toHaveValue('v1')

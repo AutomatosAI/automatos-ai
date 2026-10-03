@@ -54,7 +54,8 @@ function post(overrides: Partial<SocialPost> = {}): SocialPost {
     format: 'image', template_id: null, variables: {}, sources: {}, media: {},
     status: 'needs_approval', content_hash: HASH, approved_hash: null, approved_by: null, approved_at: null,
     override_unsourced: false, review_log: [], scheduled_for: null, timezone: null,
-    targets: [], created_at: '2026-09-29T09:00:00Z', updated_at: '2026-09-29T09:00:00Z',
+    // F256: a post with no channel cannot be approved, so the post under review goes to X.
+    targets: [target('x', 'text')], created_at: '2026-09-29T09:00:00Z', updated_at: '2026-09-29T09:00:00Z',
     ...overrides,
   }
 }
