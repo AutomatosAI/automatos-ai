@@ -1239,53 +1239,66 @@ async def readiness_probe(request: Request):
     return {"status": "ready"}
 
 
+def _health_database() -> str:
+    """The database probe of GET /health (a SELECT 1): healthy, or unhealthy and logged."""
+    from sqlalchemy import text as _text
+
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(_text("SELECT 1"))
+            return "healthy"
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Health: database check failed")
+        return "unhealthy"
+
+
+def _health_metrics() -> dict:
+    """The process host's CPU and memory for GET /health (F229: the CPU reading never
+    sleeps; ``interval=None`` is the use since the previous reading). Empty when psutil
+    cannot read them."""
+    import psutil
+
+    try:
+        cpu_pct = psutil.cpu_percent(interval=None)
+        mem = psutil.virtual_memory()
+        return {
+            "cpu_percent": round(cpu_pct, 1),
+            "memory_used_percent": round(mem.percent, 1),
+            "memory_available_mb": round(mem.available / (1024 * 1024), 0),
+        }
+    except Exception:  # noqa: BLE001 — the health answer goes out without metrics
+        return {}
+
+
 # Health check endpoint
 @app.get("/health",
          summary="🏥 System Health Check",
          description="Get comprehensive system health status including all components and services",
          tags=["🏥 System Health"],
          response_description="Detailed system health information")
-async def health_check():
+def health_check():
     """
     System health check with real probes for database, config, and resources.
+
+    A plain ``def`` (F229, F105): its database probe and its /proc reads run in the
+    threadpool, never on the event loop, and the CPU reading never sleeps
+    (``interval=None``: the use since the previous reading).
 
     **Status Values:**
     - `healthy`: All systems operational
     - `degraded`: Some issues but functional
     - `unhealthy`: Critical issues detected
     """
-    import psutil
-    from sqlalchemy import text as _text
-
-    components = {"api_server": "healthy"}
-
-    # Database probe
-    try:
-        db = SessionLocal()
-        try:
-            db.execute(_text("SELECT 1"))
-            components["database"] = "healthy"
-        finally:
-            db.close()
-    except Exception as e:
-        logger.error(f"Health: database check failed: {e}")
-        components["database"] = "unhealthy"
+    components = {"api_server": "healthy", "database": _health_database()}
 
     # Critical config check
     has_db_url = bool(config.DATABASE_URL)
     components["config"] = "healthy" if has_db_url else "degraded"
 
-    # Real system metrics via psutil
-    try:
-        cpu_pct = psutil.cpu_percent(interval=0.1)
-        mem = psutil.virtual_memory()
-        metrics = {
-            "cpu_percent": round(cpu_pct, 1),
-            "memory_used_percent": round(mem.percent, 1),
-            "memory_available_mb": round(mem.available / (1024 * 1024), 0),
-        }
-    except Exception:
-        metrics = {}
+    metrics = _health_metrics()
 
     # Derive overall status
     statuses = list(components.values())
