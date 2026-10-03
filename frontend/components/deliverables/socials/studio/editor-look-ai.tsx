@@ -20,7 +20,7 @@ import { BRAND_KIT_HREF } from '@/lib/deliverables/tabs'
 import { useAuthedImage } from '@/hooks/use-authed-image'
 import { Hint } from './editor-ui'
 
-export const NO_IMAGE_SLOT = 'This template has no image slot for an AI image. AI footage fills the hook and b-roll: switch it on in Format.'
+export const NO_IMAGE_SLOT = 'This template shows no picture. Pick a template marked Photo, and AI makes its pictures here. For a video, AI footage fills the hook and b-roll: switch it on in Format.'
 export const WORDS_NOTE = 'Describe the picture only: every word on screen is template text.'
 const PROMPT_MAX = 1000
 

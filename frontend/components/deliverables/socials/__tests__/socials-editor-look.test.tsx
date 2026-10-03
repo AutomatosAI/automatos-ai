@@ -24,6 +24,7 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
 
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { DROP_HINT, DROP_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
+import { AUTO_PICK_NOTE } from '@/components/deliverables/socials/studio/editor-look-card'
 import { api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
@@ -44,7 +45,8 @@ describe('the Look card', () => {
     renderWith(<SocialsEditor role="owner" post={null} go={go} />)
     const gallery = await within(look()).findByRole('list', { name: 'Templates' })
     const cards = within(gallery).getAllByRole('button')
-    expect(cards.map((b) => b.textContent)).toEqual(['AutoLet Auto pick', 'Fact card'])
+    // The Auto card says what Auto does with it (AUTO_PICK_NOTE).
+    expect(cards.map((b) => b.textContent)).toEqual([`AutoLet Auto pick${AUTO_PICK_NOTE}`, 'Fact card'])
     expect(cards[0]).toHaveAttribute('aria-pressed', 'true')
     expect(cards[1].querySelector('img')).toHaveAttribute('src', 'https://cdn.test/fact-card.png')
     fireEvent.click(cards[1])

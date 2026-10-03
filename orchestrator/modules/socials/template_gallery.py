@@ -11,7 +11,9 @@ inline for the configured TTL (D9), so a link never outlives the storage policy.
 (``template_thumbnails.py``).
 
 Columns are selected one by one (never the whole row), as the composer's own
-selection does: a gallery entry needs no sample data and no tags.
+selection does: a gallery entry needs no tags. It carries the template's sample text
+(``sample_data``, what its thumbnail shows): the editor greys it into each empty field
+as an example of what goes there.
 """
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ TEXT_FORMAT = "text"
 GALLERY_COLUMNS = (
     DocumentTemplate.id, DocumentTemplate.name, DocumentTemplate.description, DocumentTemplate.format,
     DocumentTemplate.blocks, DocumentTemplate.thumbnail_url, DocumentTemplate.created_by, DocumentTemplate.updated_at,
+    DocumentTemplate.sample_data,
 )
 
 
@@ -63,6 +66,13 @@ def image_slots(blocks: Any) -> List[str]:
     images fill them; the rest are the hook and b-roll its AI footage switch fills."""
     slots = blocks.get("slots") if isinstance(blocks, dict) and isinstance(blocks.get("slots"), dict) else {}
     return [name for name in footage_slots(blocks) if slots[name].get("kind") == IMAGE_SLOT]
+
+
+def examples_of(sample: Any, schema: Any) -> Dict[str, Any]:
+    """The sample value of each of the template's fields that has one: text, a number or a switch."""
+    if not isinstance(sample, dict) or not isinstance(schema, dict):
+        return {}
+    return {name: value for name, value in sample.items() if name in schema and isinstance(value, (str, int, float, bool))}
 
 
 def thumbnail_link(store: MediaStore, raw: Optional[str]) -> Optional[str]:
@@ -95,6 +105,8 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "image_slots": image_slots(blocks),
         # The template's fields: the editor's Claims and sources card fills them (US-B109).
         "variables_schema": blocks.get("variables_schema") if isinstance(blocks.get("variables_schema"), dict) else {},
+        # The fields' examples: the sample text of the template's own fields (its thumbnail's).
+        "sample_data": examples_of(row.sample_data, blocks.get("variables_schema")),
         "thumbnail_url": thumbnail_link(store, row.thumbnail_url),
         "is_starter": (row.created_by or "") == STARTER_CREATOR,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,

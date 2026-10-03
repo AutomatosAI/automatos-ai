@@ -776,8 +776,10 @@ export interface SocialTemplateSummary {
   footage_slots: string[]
   /** PRD-251B US-B305: those of them that take a still: the Look card's AI-made images. */
   image_slots?: string[]
-  /** The template's fields, some of them claims (D7): the editor's Claims and sources card. */
+  /** The template's fields, some of them claims (D7): the editor's Text on the image card. */
   variables_schema: Record<string, SocialTemplateVariable>
+  /** The sample text of those fields (what the thumbnail shows): greyed in as each empty field's example. */
+  sample_data?: Record<string, string | number | boolean>
 }
 
 /** GET /api/socials/footage (D12, D15): the generation toolkit a render would use per kind, or why none. */
