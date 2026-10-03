@@ -113,7 +113,8 @@ def test_a_second_drag_to_in_progress_leaves_the_running_ticket_alone(monkeypatc
 def test_a_repeat_patch_to_in_progress_launches_nothing(monkeypatch):
     task = _running_ticket()
 
-    assert _patch(monkeypatch, task, {"status": "in_progress"}) == []   # before: a second run
+    seen = _patch(monkeypatch, task, {"status": "in_progress"})
+    assert (seen.launched, seen.woken, seen.consent) == ([], [], [])   # before: a second run
 
 
 def test_a_drag_into_in_progress_still_starts_a_clean_run(monkeypatch):
