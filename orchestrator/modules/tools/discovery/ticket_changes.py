@@ -76,7 +76,7 @@ def _snapshot(db: Session, workspace_id: Any, ids: List[int]) -> Dict[int, Dict[
     rows = db.query(BoardTask.id, BoardTask.status, BoardTask.assigned_agent_id, BoardTask.title,
                     BoardTask.runtime_ref).filter(BoardTask.id.in_(ids), BoardTask.workspace_id == workspace_id).all()
     return {r.id: {"id": r.id, "status": r.status, "agent": r.assigned_agent_id, "title": r.title,
-                   "notes": _notes_on(r.runtime_ref)} for r in rows}
+                   "notes": _notes_on(getattr(r, "runtime_ref", None))} for r in rows}
 
 
 def _notes_on(runtime_ref: Any) -> int:

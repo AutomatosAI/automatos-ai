@@ -112,6 +112,21 @@ def _notes(shop):
     return (shop.card.runtime_ref or {}).get("session_notes") or []
 
 
+@pytest.fixture
+def notes_in_this_session(shop, monkeypatch):
+    """The ticket notes are written in a session of their own (ticket_changes._append);
+    here, in the test's own, whose rows another session can't see before teardown."""
+    from contextlib import contextmanager
+
+    import core.database.database as database
+
+    @contextmanager
+    def this_session():
+        yield shop.db
+
+    monkeypatch.setattr(database, "get_db_session", this_session)
+
+
 def test_a_note_auto_writes_in_a_chat_the_owner_drives_is_the_owners(shop):
     out = asyncio.run(shop.handlers.update_board_task(shop.db, shop.ws, {
         "task_id": shop.number, "note": "Right, 204 bags a sack. Thanks.", "_user_id": "user_owner"}))
@@ -168,7 +183,7 @@ NEW_BRIEF = ("About 80 words, plain, first person plural: fresh coffee gives off
              "shots steadier. Mention Sam our head roaster. No line before the paragraph, no quote marks.")
 
 
-def test_a_new_brief_with_send_back_goes_back_to_its_agent_on_the_same_card(in_review):
+def test_a_new_brief_with_send_back_goes_back_to_its_agent_on_the_same_card(in_review, notes_in_this_session):
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
         "task_id": in_review.number, "description": NEW_BRIEF, "send_back": True, "_user_id": "user_owner"}))
 
@@ -234,11 +249,11 @@ def _cancel_with(note_written):
     return cancel
 
 
-def test_a_cancel_that_notes_itself_gets_no_second_note(shop):
+def test_a_cancel_that_notes_itself_gets_no_second_note(shop, notes_in_this_session):
     asyncio.run(_cancel_with(True)(shop.db, shop.ws, {"task_id": shop.card.id, "status": "cancelled"}))
     assert [n["note"] for n in _notes(shop)] == ["Cancelled the playbook run, in chat."]
 
 
-def test_a_cancel_that_writes_no_note_is_noted_as_a_move(shop):
+def test_a_cancel_that_writes_no_note_is_noted_as_a_move(shop, notes_in_this_session):
     asyncio.run(_cancel_with(False)(shop.db, shop.ws, {"task_id": shop.card.id, "status": "cancelled"}))
     assert [n["note"].split(",")[0] for n in _notes(shop)] == ["Moved this from Inbox to Cancelled"]
