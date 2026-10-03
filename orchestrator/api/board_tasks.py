@@ -320,6 +320,11 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
         terminal_state="completed",
         summary=(str(task.result)[:500] if task.result else None),
     )
+    # F235: done (approved, or finished with review off) is when the round's report
+    # becomes a Document — only approved work is knowledge Auto quotes.
+    from services.report_knowledge import file_done_ticket
+
+    await file_done_ticket(db, workspace_id, task)
 
 
 async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> None:

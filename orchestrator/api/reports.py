@@ -150,7 +150,11 @@ async def grade_report(
 
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error", "Report not found"))
+    # F235: a report the owner rates 4 or 5 is approved work: it becomes a Document.
+    from services.report_knowledge import APPROVING_GRADE, file_owner_approved
 
+    if body.grade >= APPROVING_GRADE:
+        await file_owner_approved(db, ctx.workspace_id, report_id)
     return result
 
 
