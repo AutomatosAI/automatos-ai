@@ -10,6 +10,7 @@ let mockPath = '/command-center'
 vi.mock('next/navigation', () => ({ usePathname: () => mockPath }))
 
 import { usePageContext } from '@/lib/page-context'
+import { useDiscussionStore } from '@/stores/discussion-store'
 
 describe('usePageContext', () => {
   it('resolves the manifest key and route from the pathname', () => {
@@ -38,6 +39,27 @@ describe('usePageContext', () => {
     )
     expect(result.current.tab).toBe('watchlist')
     expect(result.current.selected).toEqual({ type: 'watch', id: 'w_1' })
+  })
+})
+
+describe('a discussion (PRD-252 R2)', () => {
+  const discussion = { ticketId: '612', number: '#0042', title: 'Welcome email', agentName: 'Words', missionId: null }
+
+  it('selects the ticket on the chat page, over the code folder', () => {
+    mockPath = '/chat'
+    useDiscussionStore.getState().start(discussion)
+    const { result } = renderHook(() => usePageContext({ selected: { type: 'repo', id: 'projects/site' } }))
+    expect(result.current.selected).toEqual({ type: 'board_task', id: '612' })
+    useDiscussionStore.getState().end()
+  })
+
+  it('selects nothing on another page, or once it ends', () => {
+    useDiscussionStore.getState().start(discussion)
+    mockPath = '/command-center'
+    expect(renderHook(() => usePageContext()).result.current.selected).toBeUndefined()
+    useDiscussionStore.getState().end()
+    mockPath = '/chat'
+    expect(renderHook(() => usePageContext()).result.current.selected).toBeUndefined()
   })
 })
 

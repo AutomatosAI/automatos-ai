@@ -211,6 +211,26 @@ export function useRejectTask() {
 }
 
 /**
+ * PRD-252 R2: Discuss's "Update ticket and re-queue" — the brief agreed in the
+ * chat becomes the ticket's brief, and the ticket goes back to its agent.
+ */
+export function useRebriefTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ taskId, brief }: { taskId: string; brief: string }) => {
+      return apiClient.request<{ task_id: number; status: string }>(`/api/v1/tasks/${taskId}/rebrief`, {
+        method: 'POST',
+        body: JSON.stringify({ brief }),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
+/**
  * PRD-161 S5: Run a task now — re-dispatch it immediately through the board loop.
  */
 export function useRunTask() {
@@ -276,6 +296,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     blocked_code: item.blocked_code ?? null,
     source_type: item.source_type ?? undefined,
     number: item.number ?? null,  // PRD-252 R4
+    times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
   }
 }
 

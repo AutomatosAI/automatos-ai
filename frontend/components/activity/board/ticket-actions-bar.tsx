@@ -3,13 +3,14 @@
 /**
  * PRD-252 R7 in the ticket's viewer: Assign and Cancel under the ticket's
  * header, and, on a cancelled or closed ticket, who stopped it and when (it
- * opened to an empty viewer).
+ * opened to an empty viewer). R2 (D4): every ticket can be discussed with Auto.
  */
 
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
-import { Target, XCircle } from 'lucide-react'
+import { MessagesSquare, Target, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { discussHref } from '@/lib/discussion'
 import { missionHref } from '@/lib/ticket-links'
 import type { BoardTask } from '@/types/board'
 import { canAssign, canCancel, isMissionTicket, whoStopped } from './ticket-actions'
@@ -19,16 +20,18 @@ export function TicketActionsBar({ task }: { task: BoardTask }) {
   const agents = useAgentChoices()
   const actions = useTicketActions(task)
   if (isMissionTicket(task)) {
-    return task.mission_id ? (
+    return (
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="ticket-actions">
         <span>The mission runs this ticket.</span>
-        <Link href={missionHref(task.mission_id) as any} className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline">
-          <Target className="w-3 h-3" /> Open the mission
-        </Link>
+        {task.mission_id && (
+          <Link href={missionHref(task.mission_id) as any} className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline">
+            <Target className="w-3 h-3" /> Open the mission
+          </Link>
+        )}
+        <DiscussLink task={task} />
       </div>
-    ) : null
+    )
   }
-  if (!canAssign(task) && !canCancel(task)) return null
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="ticket-actions">
       {canAssign(task) && (
@@ -53,7 +56,21 @@ export function TicketActionsBar({ task }: { task: BoardTask }) {
           <XCircle className="w-3.5 h-3.5 mr-1.5" /> Cancel ticket
         </Button>
       )}
+      <DiscussLink task={task} />
     </div>
+  )
+}
+
+/** Talk the ticket through with Auto, which reads it first (PRD-252 R2). */
+export function DiscussLink({ task }: { task: BoardTask }) {
+  return (
+    <Link
+      href={discussHref(task.id) as any}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-foreground hover:bg-secondary/60"
+      data-testid="discuss-ticket"
+    >
+      <MessagesSquare className="w-3.5 h-3.5" /> Discuss with Auto
+    </Link>
   )
 }
 

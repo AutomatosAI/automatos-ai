@@ -9,14 +9,17 @@
  * optional note kept on the ticket (F038: the API threw it away), and its button
  * names its effect from `planning_data.approval_action`. Before, "Approve &
  * Publish" was the only hint that an approval runs anything. Both confirm what
- * happened in a toast, and say why when they fail (they said nothing).
+ * happened in a toast, and say why when they fail (they said nothing). After
+ * DISCUSS_AFTER_REJECTS send-backs on one brief, it suggests Discuss (D3).
  */
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
+import { DISCUSS_AFTER_REJECTS, discussHref } from '@/lib/discussion'
 import type { BoardTask } from '@/types/board'
 import { approveEffect, approveLabel, approvedMessage } from './approval-effect'
 
@@ -69,6 +72,14 @@ export function ReviewVerdict({ task, onDecided }: { task: BoardTask; onDecided:
 
   return (
     <div className="space-y-3 pt-2 border-t border-border/30" data-testid="review-verdict">
+      {(task.times_sent_back ?? 0) >= DISCUSS_AFTER_REJECTS && (
+        <p className="text-xs" data-testid="discuss-hint">
+          Sent back {task.times_sent_back} times. Talking it through may be quicker:{' '}
+          <Link href={discussHref(task.id) as any} className="text-primary underline-offset-2 hover:underline">
+            Discuss with Auto →
+          </Link>
+        </p>
+      )}
       <p className="text-xs text-muted-foreground" data-testid="approve-effect">
         <CheckCircle2 className="inline w-3.5 h-3.5 mr-1 text-primary align-[-2px]" />
         {approveEffect(action)}

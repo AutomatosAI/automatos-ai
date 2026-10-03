@@ -46,6 +46,14 @@ describe('what the board offers', () => {
     render(<TicketActionsBar task={step} />)
     expect(screen.getByText('Open the mission').closest('a')).toHaveAttribute('href', '/missions/run-1')
   })
+
+  it('every ticket can be discussed with Auto, a finished one and a mission\'s too (PRD-252 R2, D4)', () => {
+    for (const task of [ticket(), ticket({ status: 'done' }), ticket({ type: 'mission', mission_id: 'run-1' })]) {
+      render(<TicketActionsBar task={task} />)
+      expect(screen.getByTestId('discuss-ticket')).toHaveAttribute('href', '/chat?ticket=1139')
+      cleanup()
+    }
+  })
 })
 
 describe('in the viewer', () => {
