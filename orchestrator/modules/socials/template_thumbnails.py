@@ -76,12 +76,14 @@ def still_moment(blocks: Any) -> float:
 
 def thumbnail_bundle(template: Any, workspace: Any, brand_kit_of: BrandKitOf) -> Dict[str, Any]:
     """The render bundle for the thumbnail: the first size at half resolution; a video
-    as one still."""
+    as one still. A still has no sound, so the template's audio plan stays out of it:
+    media-render refuses a still that carries audio (F237: a video template with a voice
+    or music never got a thumbnail)."""
     half = preview.preview_template(template)
-    bundle = dict(render.bundle_for(_stub_post(template, workspace.id), half, brand_kit_of(workspace.settings), fallback_name=workspace.name or ""))
+    bundle = render.bundle_for(_stub_post(template, workspace.id), half, brand_kit_of(workspace.settings), fallback_name=workspace.name or "")
     if template.format == SOCIAL_VIDEO:
-        bundle["still"] = {"at": [still_moment(template.blocks)]}
-    return bundle
+        bundle = {**bundle, "still": {"at": [still_moment(template.blocks)]}}
+    return {key: value for key, value in bundle.items() if key != "audio"}
 
 
 def _job(template: Any, workspace_id: UUID, bundle: Dict[str, Any]) -> render.RenderJob:

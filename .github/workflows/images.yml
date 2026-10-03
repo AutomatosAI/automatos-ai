@@ -86,6 +86,7 @@ jobs:
               NEXT_PUBLIC_AUTH_EDITION=local
               NEXT_PUBLIC_API_URL=http://localhost:8000
               NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+              NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000
           - name: workspace-worker
             context: services/workspace-worker
             target: ""

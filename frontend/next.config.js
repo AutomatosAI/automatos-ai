@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
+const { mediaOrigins } = require('./csp-sources')
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
 const apiOrigin = (() => {
@@ -9,6 +10,9 @@ const apiOrigin = (() => {
     return ''
   }
 })()
+
+// F237: presigned media (Socials thumbnails, a post's files) loads from object storage's public origin.
+const mediaSources = mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
 
 const nextConfig = {
   output: 'standalone',
@@ -101,7 +105,8 @@ const nextConfig = {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://cdn.jsdelivr.net",
               "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-              "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
+              `img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev ${mediaSources}`.trim(),
+              `media-src 'self' blob: ${mediaSources}`.trim(),
               "font-src 'self' data: https://cdn.jsdelivr.net",
               // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
               // (http://localhost:8000) is allowed too — without it the browser refuses
