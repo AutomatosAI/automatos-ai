@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
 from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
+from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
@@ -150,15 +151,6 @@ class AgentMetadata:
             "max_tokens": mc.max_tokens,
             "context_window": self.context_window or 8192,
         }
-
-
-@dataclass
-class ResolvedKey:
-    """Result of API key resolution with source metadata."""
-    api_key: str
-    source: str  # "byok", "platform", "env"
-    is_byok: bool
-    provider: str = ""
 
 
 @dataclass
@@ -468,91 +460,10 @@ class AgentFactory:
         return provider_str, model_id
 
     async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
-        """
-        Resolve API key: BYOK → credential store → env vars.
-        """
-        from core.credentials.resolver import get_credential_resolver
-
-        resolver = get_credential_resolver()
-
-        # 1. Check BYOK
-        if workspace_id:
-            try:
-                from core.models.workspaces import Workspace
-                from core.models.core import UserApiKey
-                from core.credentials.encryption import get_encryption_service
-
-                workspace = self.db_session.query(Workspace).get(workspace_id)
-                byok_overrides = (workspace.settings or {}).get("byok_overrides", {}) if workspace else {}
-
-                if byok_overrides.get(provider_name, False):
-                    byok_key = (
-                        self.db_session.query(UserApiKey)
-                        .filter(
-                            UserApiKey.workspace_id == workspace_id,
-                            UserApiKey.provider == provider_name,
-                            UserApiKey.is_active == True,
-                        )
-                        .order_by(UserApiKey.last_used_at.desc().nullslast())
-                        .first()
-                    )
-                    if byok_key:
-                        encryption = get_encryption_service()
-                        decrypted = encryption.decrypt(byok_key.encrypted_key)
-                        self.logger.info(f"Resolved BYOK API key for '{provider_name}' workspace={workspace_id}")
-                        return ResolvedKey(api_key=decrypted, source="byok", is_byok=True, provider=provider_name)
-                    else:
-                        self.logger.info(f"BYOK enabled but no active key for '{provider_name}', falling through")
-            except Exception as e:
-                self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
-
-        # PRD-236 §Terms: a byok_only provider (NVIDIA's trial endpoint) never
-        # resolves from the platform tiers in the saas edition — the platform
-        # must not serve customers on a trial key. Locally the operator IS the
-        # user, so their env/credential key is their own and the tiers apply.
-        from core.llm.providers import platform_key_allowed, env_api_key
-        if not platform_key_allowed(provider_name):
-            self.logger.info(
-                f"No platform key lane for '{provider_name}' in this edition (BYO key only) — {agent_name}"
-            )
-            return None
-
-        # 1.5 Operator workspace key (PLATFORM_KEY_WORKSPACE_ID) — the pilot
-        # "platform key" lane, read live from user_api_keys instead of a
-        # duplicated credential-store copy that can drift (2026-07-30).
-        from core.llm.workspace_keys import get_platform_workspace_key
-        ws_key = get_platform_workspace_key(provider_name)
-        if ws_key:
-            self.logger.info(
-                f"Resolved platform key from operator workspace store for '{provider_name}' ({agent_name})"
-            )
-            return ResolvedKey(api_key=ws_key, source="platform_workspace", is_byok=False, provider=provider_name)
-
-        # 2. Credential store (platform keys)
-        cred_names = [
-            f"development_{provider_name}_api",
-            f"development_{provider_name}",
-            f"{provider_name}_api",
-            provider_name,
-        ]
-        for cred_name in cred_names:
-            try:
-                key = resolver.get_credential_field(cred_name, "api_key")
-                if not key:
-                    key = resolver.get_credential_field(cred_name, "api_token")
-                if key:
-                    self.logger.info(f"Resolved platform API key from credential '{cred_name}' for {agent_name}")
-                    return ResolvedKey(api_key=key, source="platform", is_byok=False, provider=provider_name)
-            except Exception:
-                continue
-
-        # 3. Config env vars (the registry knows each provider's config attribute)
-        key = env_api_key(provider_name)
-        if key:
-            self.logger.info(f"Using config API key for {provider_name} for {agent_name}")
-            return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
-
-        return None
+        """The key that pays for ``provider_name``'s calls: BYOK, the operator workspace's,
+        the credential store's, the env's (``core.llm.key_resolver``, which the
+        Analytics credit card reads too, F244)."""
+        return resolve_provider_key(self.db_session, provider_name, workspace_id=workspace_id, agent_name=agent_name)
 
     def _resolve_trial_decision(self, workspace_id, model_id: str, is_byok: bool) -> bool:
         """PRD-222 US-005 / PRD-230 US-001 — the trial routing decision at the

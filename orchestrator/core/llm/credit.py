@@ -45,14 +45,16 @@ OUT_OF_CREDIT = "out_of_credit"
 SCHEDULED_TRIGGERS = frozenset({"cron_scheduler", "credit_back"})
 MARK_KEY = "out_of_credit"          # recipe_executions.execution_metadata
 
-OUT_OF_CREDIT_TEXT = ("The AI provider's account ran out of credit, so this stopped before it finished. "
-                      "Top up the provider account, then run it again.")
-OUT_OF_CREDIT_SCHEDULED_TEXT = ("The AI provider's account ran out of credit, so this stopped before it finished. "
-                                "It runs again by itself once credit is back.")
+# F244 (night 7): read as "the AI provider's account" (whose?), Auto told the owner a café
+# had gone over its credit limit and to call the café. The sentence says whose credit it is.
+_WHOSE = ("Your AI credit ran out: the AI provider account that pays for the agents' model calls has no credit "
+          "left, so this stopped before it finished. It is not a customer's or a supplier's credit. ")
+OUT_OF_CREDIT_TEXT = _WHOSE + "Top up the AI provider account, then run it again."
+OUT_OF_CREDIT_SCHEDULED_TEXT = _WHOSE + "It runs again by itself once the credit is topped up."
 OUTAGE_TITLE = "Out of AI credit"
-OUTAGE_NOTICE = ("The AI provider's account ran out of credit, so tasks and playbooks stop until it is topped up. "
-                 "This is the only notice until credit is back. Scheduled reports that stopped run again by "
-                 "themselves then.")
+OUTAGE_NOTICE = ("Your AI credit ran out: the AI provider account that pays for the agents' model calls has no "
+                 "credit left, so tasks and playbooks stop until it is topped up. This is the only notice until "
+                 "credit is back. Scheduled reports that stopped run again by themselves then.")
 CREDIT_BACK_EVENT = "credit_restored"
 CREDIT_BACK_TITLE = "AI credit is back"
 CREDIT_BACK_NOTICE = "The AI provider's account has credit again: Auto, tasks and playbooks work again."
@@ -64,7 +66,7 @@ CREDIT_BACK_RERUNS = " {count} scheduled reports that stopped are running again.
 # ("two orders bounced for insufficient funds") counts.
 _CREDIT = re.compile(r"Error code: 402\b|\b402 Payment Required\b|requires more credits|exceed your available "
                      r"credits|credit balance is too low|exceeded your current quota|insufficient_quota"
-                     r"|The AI provider's account ran out of credit", re.I)
+                     r"|The AI provider's account ran out of credit|Your AI credit ran out", re.I)
 _PROVIDER_STATUS = re.compile(r"Error code: (\d{3}) - \{")
 _ACCOUNT_ID = re.compile(r"\buser_[A-Za-z0-9]{8,}\b")
 PROVIDER_REFUSED_TEXT = ("The AI provider refused the request (HTTP {status}), so this stopped. "

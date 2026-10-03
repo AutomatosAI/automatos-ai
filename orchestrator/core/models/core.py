@@ -783,6 +783,8 @@ class AgentResponse(BaseModel):
     # skills' tools all work. The agent form says this so the operator learns it
     # from the form, not from a report that came back thin.
     session_tool_gaps: Optional[List[Dict[str, Any]]] = None
+    # F244: why the agent can't run now (the AI credit ran out, no CLI host online); None when it can.
+    unavailable: Optional[str] = None
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

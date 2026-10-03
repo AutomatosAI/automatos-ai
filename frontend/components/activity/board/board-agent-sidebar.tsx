@@ -3,6 +3,7 @@
 import { Bot } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
+import { cantRunLine } from '@/lib/agent-constants'
 import { cn } from '@/lib/utils'
 
 interface BoardAgentSidebarProps {
@@ -25,6 +26,24 @@ function getRoleBadge(role: string | undefined): { label: string; color: string 
   if (lower.includes('intern') || lower.includes('junior'))
     return { label: 'INT', color: BADGE_COLORS.int }
   return { label: 'SPC', color: BADGE_COLORS.spc }
+}
+
+/**
+ * Working or idle. F244 (night 7): all eight agents read as working while every run
+ * failed for the AI credit; an agent that can't run now says so, with why on hover.
+ */
+export function AgentRunState({ agent }: { agent: any }) {
+  const cantRun = cantRunLine(agent)
+  const isWorking = agent.status === 'active' || agent.last_heartbeat_status === 'working'
+  const dot = cantRun ? 'bg-warning' : isWorking ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/30'
+  return (
+    <div className="flex items-center gap-1" title={cantRun ? agent.unavailable : undefined}>
+      <div className={cn('w-1.5 h-1.5 rounded-full', dot)} />
+      <span className={cn('text-[10px] uppercase', cantRun ? 'text-warning' : 'text-muted-foreground')}>
+        {cantRun ? "Can't run" : isWorking ? 'Working' : 'Idle'}
+      </span>
+    </div>
+  )
 }
 
 export function BoardAgentSidebar({ selectedAgentId, onSelectAgent, className }: BoardAgentSidebarProps) {
@@ -61,7 +80,6 @@ export function BoardAgentSidebar({ selectedAgentId, onSelectAgent, className }:
           agents.map((agent: any) => {
             const isSelected = selectedAgentId === agent.id
             const badge = getRoleBadge(agent.role)
-            const isWorking = agent.status === 'active' || agent.last_heartbeat_status === 'working'
 
             return (
               <button
@@ -90,15 +108,7 @@ export function BoardAgentSidebar({ selectedAgentId, onSelectAgent, className }:
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <div className={cn(
-                      'w-1.5 h-1.5 rounded-full',
-                      isWorking ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/30',
-                    )} />
-                    <span className="text-[10px] text-muted-foreground uppercase">
-                      {isWorking ? 'Working' : 'Idle'}
-                    </span>
-                  </div>
+                  <AgentRunState agent={agent} />
                 </div>
               </button>
             )

@@ -8,6 +8,7 @@ import time
 import logging
 
 from core.database.database import get_db
+from services.agent_availability import with_unavailable
 from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
 # New cache tables (rewrite)
@@ -576,6 +577,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/", response_model=List[AgentResponse])
+@with_unavailable  # F244: an agent that can't run now says why
 async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
