@@ -73,6 +73,8 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # F132: a scheduled run that did not start (missed its grace, or the
         # workspace was at its run limit) -- it used to leave no trace at all.
         "playbook_schedule_skipped",
+        # F197: the AI provider's account has credit again (the bell said it ran out).
+        "credit_restored",
         # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
         # actions S7/S8, escalations).
         "watch_verdict",

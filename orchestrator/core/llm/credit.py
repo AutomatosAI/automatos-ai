@@ -24,6 +24,11 @@ reserved, and only a success that reserved as much ends it. Otherwise the bell
 would ring again after every digest, and a marked report would run again too
 early, fail, and lose its mark. With nothing recorded, after a restart, the bar
 is an agent run's budget. A rerun that fails on credit again is marked again.
+
+2 Oct (night 6 final, the persona's #1): "during the outage nothing told me, and
+nothing said when it was back." So the end of an outage is said too: once, on
+the bell, with how many stopped reports are running again (``credit_restored``).
+The chat's own failure says it in plain words as well (consumers/chatbot/turn_errors).
 """
 from __future__ import annotations
 
@@ -50,6 +55,11 @@ OUTAGE_TITLE = "Out of AI credit"
 OUTAGE_NOTICE = ("Your AI credit ran out: the AI provider account that pays for the agents' model calls has no "
                  "credit left, so tasks and playbooks stop until it is topped up. This is the only notice until "
                  "credit is back. Scheduled reports that stopped run again by themselves then.")
+CREDIT_BACK_EVENT = "credit_restored"
+CREDIT_BACK_TITLE = "AI credit is back"
+CREDIT_BACK_NOTICE = "The AI provider's account has credit again: Auto, tasks and playbooks work again."
+CREDIT_BACK_ONE_RERUN = " One scheduled report that stopped is running again."
+CREDIT_BACK_RERUNS = " {count} scheduled reports that stopped are running again."
 
 # The providers' own refusals (OpenRouter's 402 bodies, Anthropic's and OpenAI's
 # quota errors) and our own sentence above. Nothing a business report might say
@@ -70,6 +80,8 @@ _lock = threading.Lock()
 # workspace -> {"needs": the most a refused call reserved, "noticed": the bell has rung}
 _outage: Dict[str, Dict[str, Any]] = {}
 _seen_since_start: Set[str] = set()
+# Workspaces whose outage just ended: the bell says so once (F197, 2 Oct).
+_back_to_tell: Set[str] = set()
 _running: Set["asyncio.Task[None]"] = set()
 
 
@@ -135,6 +147,7 @@ def _credit_is_back(workspace_id: str, reserved: Optional[int]) -> bool:
                 return False
             _outage.pop(workspace_id)
             _seen_since_start.add(workspace_id)
+            _back_to_tell.add(workspace_id)     # an outage someone met ends: it is said
             return True
         if workspace_id in _seen_since_start or reserved < _default_need():
             return False
@@ -195,12 +208,47 @@ def _stage_reruns(workspace_id: str) -> List[Any]:
 async def _rerun_marked(workspace_id: str) -> None:
     from services.watch_rerun import launch_execution
 
-    for rerun in await asyncio.to_thread(_stage_reruns, workspace_id):
+    reruns = await asyncio.to_thread(_stage_reruns, workspace_id)
+    for rerun in reruns:
         logger.info(f"[F197] credit is back: {rerun.retry_of} runs again as {rerun.execution_id}")
         try:
             launch_execution(rerun)
         except Exception:
             logger.warning("[F197] could not launch rerun %s", rerun.execution_id, exc_info=True)
+    await _tell_credit_back(workspace_id, len(reruns))
+
+
+def credit_back_notice(reruns: int) -> str:
+    """The bell's words when credit is back, with the reports running again."""
+    if reruns == 1:
+        return CREDIT_BACK_NOTICE + CREDIT_BACK_ONE_RERUN
+    return CREDIT_BACK_NOTICE + (CREDIT_BACK_RERUNS.format(count=reruns) if reruns else "")
+
+
+def _take_back_to_tell(workspace_id: str) -> bool:
+    with _lock:
+        if workspace_id not in _back_to_tell:
+            return False
+        _back_to_tell.discard(workspace_id)
+        return True
+
+
+async def _tell_credit_back(workspace_id: str, reruns: int) -> None:
+    """The bell said credit ran out; it says when it is back, once per outage."""
+    if not _take_back_to_tell(workspace_id):
+        return
+    from core.database.database import SessionLocal
+    from core.services.notification_dispatcher import NotificationDispatcher
+
+    db = SessionLocal()
+    try:
+        await NotificationDispatcher(db, workspace_id).dispatch(
+            event_type=CREDIT_BACK_EVENT, title=CREDIT_BACK_TITLE, message=credit_back_notice(reruns),
+        )
+    except Exception:
+        logger.exception("[F197] could not say that credit is back for %s", workspace_id)
+    finally:
+        db.close()
 
 
 def note_model_success(workspace_id: Any, reserved: Optional[int] = None) -> None:
@@ -228,3 +276,4 @@ def reset() -> None:
     with _lock:
         _outage.clear()
         _seen_since_start.clear()
+        _back_to_tell.clear()
