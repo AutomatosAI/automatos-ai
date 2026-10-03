@@ -473,6 +473,143 @@ def _copy_tool_assignments(
 # Recipe dependency cascade
 # ---------------------------------------------------------------------------
 
+# F223 (night 6): a step whose helper was not installed (the plan's agent limit
+# refused the clone) kept the marketplace agent, so the installed playbook showed
+# a helper the workspace does not have, as if it were there.
+HELPER_NOT_INSTALLED = (
+    "Step {number} has no helper: '{helper}' was not installed in this workspace. "
+    "Put one of your helpers on it before the playbook runs."
+)
+A_HELPER = "a helper"
+
+
+@dataclass
+class _Clones:
+    """The workspace's agents a recipe's install cloned or reused, by the marketplace
+    agent's name and id; the tools their cascades installed; the helpers refused."""
+    by_name: Dict[str, int] = field(default_factory=dict)
+    by_marketplace_id: Dict[int, int] = field(default_factory=dict)
+    tools: List[str] = field(default_factory=list)
+    refused: Dict[int, str] = field(default_factory=dict)
+
+    def workspace_ids(self) -> set:
+        return set(self.by_name.values()) | set(self.by_marketplace_id.values())
+
+
+def _recommended_agent_names(marketplace_recipe) -> List[str]:
+    """The agents a marketplace recipe asks for: ``recommended_agents``, else its
+    template definition's suggested or recommended agents (seed data), else its metadata's."""
+    recommended = marketplace_recipe.recommended_agents or []
+    if not recommended and hasattr(marketplace_recipe, 'template_definition'):
+        tmpl_def = marketplace_recipe.template_definition
+        if isinstance(tmpl_def, dict):
+            recommended = tmpl_def.get("suggested_agents", []) or tmpl_def.get("recommended_agents", [])
+    if not recommended:
+        metadata = getattr(marketplace_recipe, 'metadata', None)
+        if isinstance(metadata, dict):
+            recommended = metadata.get("suggested_agents", []) or metadata.get("recommended_agents", [])
+    return [name for name in recommended if name and isinstance(name, str)]
+
+
+def _marketplace_agent_named(db: Session, agent_name: str):
+    """The approved marketplace agent called ``agent_name`` (case-insensitive), if any."""
+    from core.models.core import Agent
+
+    return (
+        db.query(Agent)
+        .filter(
+            func.lower(Agent.name) == agent_name.lower(),
+            Agent.owner_type == 'marketplace',
+            Agent.is_approved == True,  # noqa: E712 -- SQL comparison
+        )
+        .first()
+    )
+
+
+async def _install_recommended_agent(
+    db: Session, workspace_id: UUID, agent_name: str, user_id_int: Optional[int],
+    result: CascadeResult, clones: _Clones,
+) -> None:
+    """Clone one recommended agent (or reuse the workspace's clone of it, as a package
+    installs its agents first) and cascade its own dependencies. A refusal (the plan's
+    agent limit) is a warning, and the helper is remembered as refused."""
+    marketplace_agent = _marketplace_agent_named(db, agent_name)
+    if not marketplace_agent:
+        result.warnings.append(f"Recommended agent '{agent_name}' not found in marketplace — skipped.")
+        return
+    try:
+        cloned_agent = workspace_clone_of(db, workspace_id, marketplace_agent)
+        if cloned_agent is None:
+            cloned_agent, final_name = clone_agent_to_workspace(db, workspace_id, marketplace_agent, user_id_int)
+            result.cloned_items.append({"type": "agent", "name": final_name, "id": cloned_agent.id})
+            # Increment install count on marketplace agent
+            marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
+        clones.by_name[marketplace_agent.name] = cloned_agent.id
+        clones.by_marketplace_id[marketplace_agent.id] = cloned_agent.id
+        agent_cascade = await cascade_agent_dependencies(db, workspace_id, marketplace_agent, cloned_agent)
+        result.merge(agent_cascade)
+        clones.tools.extend(dep["name"] for dep in agent_cascade.installed_dependencies if dep.get("type") == "tool")
+    except Exception as e:
+        logger.exception("Cascade: failed to clone agent '%s'", agent_name)
+        clones.refused[marketplace_agent.id] = marketplace_agent.name
+        result.warnings.append(f"Failed to install agent '{agent_name}': {e}")
+
+
+def _step_agent_id(step: Any) -> Optional[int]:
+    if not isinstance(step, dict) or step.get("agent_id") in (None, ""):
+        return None
+    try:
+        return int(step["agent_id"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _unpin_foreign_helpers(db: Session, cloned_recipe, clones: _Clones) -> List[str]:
+    """F223: after the clones and the remap, a fresh install's steps may only name
+    this workspace's agents: the ones its install cloned or reused. A step still
+    naming another (the marketplace agent whose clone was refused) is left with no
+    helper, saying which one it needs, and the install warns which step needs one."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    steps = cloned_recipe.steps if isinstance(cloned_recipe.steps, list) else []
+    ours = clones.workspace_ids()
+    new_steps, warnings = [], []
+    for number, step in enumerate(steps, start=1):
+        agent_id = _step_agent_id(step)
+        if agent_id is None or agent_id in ours:
+            new_steps.append(step)
+            continue
+        helper = clones.refused.get(agent_id) or step.get("agent_name") or A_HELPER
+        new_steps.append({**step, "agent_id": None, "needs_helper": helper})
+        warnings.append(HELPER_NOT_INSTALLED.format(number=number, helper=helper))
+    if warnings:
+        cloned_recipe.steps = new_steps
+        flag_modified(cloned_recipe, "steps")
+        db.flush()
+    return warnings
+
+
+def _recipe_oauth_warnings(db: Session, marketplace_recipe, cascaded_tools: List[str], result: CascadeResult) -> None:
+    """Warn about OAuth connections the recipe's required tools need and its agents' cascades did not cover."""
+    recipe_tools = marketplace_recipe.required_tools or []
+    if not recipe_tools:
+        metadata = getattr(marketplace_recipe, 'metadata', None)
+        if isinstance(metadata, dict):
+            recipe_tools = metadata.get("required_tools", [])
+
+    uncovered_tools = [t.upper() for t in recipe_tools if t.upper() not in cascaded_tools]
+    if not uncovered_tools:
+        return
+    oauth_map = check_oauth_requirements(db, uncovered_tools)
+    for tool_name, needs_oauth in oauth_map.items():
+        # Only warn if not already warned by agent cascade
+        existing_warnings = {w.split(" requires")[0] for w in result.warnings if "requires" in w}
+        if needs_oauth and tool_name not in existing_warnings:
+            result.warnings.append(
+                f"{tool_name} requires an OAuth connection. Connect it at Settings \u2192 Integrations."
+            )
+
+
 async def cascade_recipe_dependencies(
     db: Session,
     workspace_id: UUID,
@@ -487,120 +624,25 @@ async def cascade_recipe_dependencies(
          workspace's clone of it (a package installs its agents first)
       2. Cascade each agent's dependencies (model, skills, tools)
       3. Remap recipe steps to point to the workspace's agent IDs; a re-install
-         passes remap_steps=False, so the workspace's own copy is left as it is
+         passes remap_steps=False, so the workspace's own copy is left as it is.
+         A step still naming an agent the workspace does not have (its clone was
+         refused) is left with no helper (F223)
       4. Warn about OAuth connections for required_tools
     """
-    from core.models.core import Agent
-
     result = CascadeResult()
+    clones = _Clones()
+    for agent_name in _recommended_agent_names(marketplace_recipe):
+        await _install_recommended_agent(db, workspace_id, agent_name, user_id_int, result, clones)
 
-    # --- 1. Clone recommended agents ---
-    agent_name_to_cloned_id: Dict[str, int] = {}
-    marketplace_id_to_cloned_id: Dict[int, int] = {}
-    recommended = marketplace_recipe.recommended_agents or []
+    if remap_steps and (clones.by_name or clones.by_marketplace_id) and cloned_recipe.steps:
+        _remap_recipe_steps(db, cloned_recipe, clones.by_name, clones.by_marketplace_id)
+    if remap_steps:
+        result.warnings.extend(_unpin_foreign_helpers(db, cloned_recipe, clones))
 
-    # Also check metadata for suggested_agents (seed data uses this)
-    if not recommended and hasattr(marketplace_recipe, 'template_definition'):
-        tmpl_def = marketplace_recipe.template_definition
-        if isinstance(tmpl_def, dict):
-            recommended = tmpl_def.get("suggested_agents", [])
-            if not recommended:
-                recommended = tmpl_def.get("recommended_agents", [])
-
-    # Also check the metadata field on the recipe
-    if not recommended:
-        metadata = getattr(marketplace_recipe, 'metadata', None)
-        if isinstance(metadata, dict):
-            recommended = metadata.get("suggested_agents", []) or metadata.get("recommended_agents", [])
-
-    all_cascaded_tools: List[str] = []
-
-    for agent_name in recommended:
-        if not agent_name or not isinstance(agent_name, str):
-            continue
-
-        # Find marketplace agent by exact name (case-insensitive)
-        from sqlalchemy import func as sa_func
-        marketplace_agent = (
-            db.query(Agent)
-            .filter(
-                sa_func.lower(Agent.name) == agent_name.lower(),
-                Agent.owner_type == 'marketplace',
-                Agent.is_approved == True,
-            )
-            .first()
-        )
-
-        if not marketplace_agent:
-            result.warnings.append(
-                f"Recommended agent '{agent_name}' not found in marketplace — skipped."
-            )
-            continue
-
-        try:
-            cloned_agent = workspace_clone_of(db, workspace_id, marketplace_agent)
-            if cloned_agent is None:
-                cloned_agent, final_name = clone_agent_to_workspace(
-                    db, workspace_id, marketplace_agent, user_id_int,
-                )
-                result.cloned_items.append({
-                    "type": "agent",
-                    "name": final_name,
-                    "id": cloned_agent.id,
-                })
-                # Increment install count on marketplace agent
-                marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
-            agent_name_to_cloned_id[marketplace_agent.name] = cloned_agent.id
-            marketplace_id_to_cloned_id[marketplace_agent.id] = cloned_agent.id
-
-            # Cascade agent's own dependencies
-            agent_cascade = await cascade_agent_dependencies(
-                db, workspace_id, marketplace_agent, cloned_agent,
-            )
-            result.merge(agent_cascade)
-
-            # Track tools for OAuth dedup
-            for dep in agent_cascade.installed_dependencies:
-                if dep.get("type") == "tool":
-                    all_cascaded_tools.append(dep["name"])
-
-        except Exception as e:
-            logger.warning("Cascade: failed to clone agent '%s': %s", agent_name, e)
-            result.warnings.append(f"Failed to install agent '{agent_name}': {e}")
-
-    # --- 2. Remap recipe steps ---
-    if remap_steps and (agent_name_to_cloned_id or marketplace_id_to_cloned_id) and cloned_recipe.steps:
-        _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id, marketplace_id_to_cloned_id)
-
-    # --- 3. OAuth warnings for recipe-level required_tools not covered by agents ---
-    recipe_tools = marketplace_recipe.required_tools or []
-
-    # Also check metadata
-    if not recipe_tools:
-        metadata = getattr(marketplace_recipe, 'metadata', None)
-        if isinstance(metadata, dict):
-            recipe_tools = metadata.get("required_tools", [])
-
-    uncovered_tools = [
-        t.upper() for t in recipe_tools
-        if t.upper() not in all_cascaded_tools
-    ]
-    if uncovered_tools:
-        oauth_map = check_oauth_requirements(db, uncovered_tools)
-        for tool_name, needs_oauth in oauth_map.items():
-            if needs_oauth:
-                # Only warn if not already warned by agent cascade
-                existing_warnings = {w.split(" requires")[0] for w in result.warnings if "requires" in w}
-                if tool_name not in existing_warnings:
-                    result.warnings.append(
-                        f"{tool_name} requires an OAuth connection. "
-                        f"Connect it at Settings \u2192 Integrations."
-                    )
-
+    _recipe_oauth_warnings(db, marketplace_recipe, clones.tools, result)
     logger.info(
         "[CascadeInstaller] Recipe '%s' → %d agents cloned, %d deps, %d warnings",
-        cloned_recipe.name, len(agent_name_to_cloned_id),
-        len(result.installed_dependencies), len(result.warnings),
+        cloned_recipe.name, len(clones.by_name), len(result.installed_dependencies), len(result.warnings),
     )
     return result
 
