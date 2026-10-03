@@ -97,7 +97,7 @@ from core.social_cuts import cut_to_length, slots_cut_out
 from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
 from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
-from modules.socials import notify, service
+from modules.socials import channel_sizes, notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -236,6 +236,16 @@ def template_sizes(template: Any) -> List[str]:
     """The sizes a social template declares, its default first (``core/social_templates.py``)."""
     sizes = (composition_of(template) or {}).get("sizes")
     return [str(size) for size in sizes] if isinstance(sizes, list) else []
+
+
+def sizes_for(post: Any, template: Any) -> List[Optional[str]]:
+    """The sizes a render makes: a still post each size its channels need (``channel_sizes``);
+    a video one, its template's default, as before: a video's render minutes, its quota hold
+    and its wait are one render's. ``[None]`` (the default) when the template names none."""
+    sizes = template_sizes(template)
+    if getattr(template, "format", None) == SOCIAL_VIDEO:
+        return list(sizes[:1]) or [None]
+    return list(channel_sizes.render_sizes(sizes, post.targets)) or [None]
 
 
 def at_chosen_length(blocks: Mapping[str, Any], post: Any) -> Dict[str, Any]:
@@ -437,17 +447,17 @@ async def _dressed(job: RenderJob, store: MediaStore, session_factory: Callable[
 async def _render_sizes(
     job: RenderJob, client: MediaRenderClient, store: MediaStore, session_factory: Callable[[], Any], deadline: float,
 ) -> Tuple[Dict[str, Any], Optional[MusicCredit], Dict[str, List[Dict[str, Any]]]]:
-    """Render each size in turn: the first one's record and music, and every size's files by aspect."""
-    first: Optional[Dict[str, Any]] = None
-    music: Optional[MusicCredit] = None
+    """Render every size first, then store each one's files: a later size that fails leaves
+    nothing of an earlier one in storage or in Deliverables. The first size's record and
+    music; every size's files by aspect."""
+    finished = [await _wait(client, job, await _submit(client, bundle, deadline), deadline)
+                for bundle in await _dressed(job, store, session_factory)]
+    music = _music_of(job, finished[0])
     media: Dict[str, List[Dict[str, Any]]] = {}
-    for bundle in await _dressed(job, store, session_factory):
-        finished = await _wait(client, job, await _submit(client, bundle, deadline), deadline)
-        if first is None:
-            first, music = finished, _music_of(job, finished)
-        stored = await _store_outputs(client, store, session_factory, job, finished, music)
+    for record in finished:
+        stored = await _store_outputs(client, store, session_factory, job, record, music)
         media = {**media, **{aspect: [*media.get(aspect, []), *files] for aspect, files in stored.items()}}
-    return first or {}, music, media
+    return finished[0], music, media
 
 
 async def _submit(client: MediaRenderClient, bundle: Mapping[str, Any], deadline: float) -> Dict[str, Any]:

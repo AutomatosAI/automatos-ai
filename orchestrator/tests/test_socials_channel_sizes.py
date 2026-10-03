@@ -8,8 +8,11 @@ and sizes ... we need multiple for the different formats").
 * Publishing gives each channel only its own size's files; a carousel's slides stay
   together; with one size, every file as before.
 * The render makes every size, the footage and the voice ONCE for all of them (each is
-  paid), and the files of every size join ``media`` by aspect.
-* ``POST /render`` hands the job one bundle per size the post's channels need.
+  paid), and stores files only once every size rendered (a later size that fails leaves
+  nothing behind); the files of every size join ``media`` by aspect.
+* ``POST /render`` hands a still post's job one bundle per size its channels need, and a
+  video's one bundle, its default size, as before (a video's minutes, quota hold and wait
+  are one render's).
 """
 from __future__ import annotations
 
@@ -80,6 +83,8 @@ def test_a_post_renders_each_channels_size_once_else_the_default():
     assert channel_sizes.render_sizes(TEXT_CARD, [_target("instagram", "reel")]) == ["1080x1920"]
     assert channel_sizes.render_sizes(TEXT_CARD, []) == ["1080x1350"]
     assert channel_sizes.render_sizes(TEXT_CARD, [_target("twitter", "text")]) == ["1080x1350"]
+    # two sizes of one shape would write one file name: the first is kept
+    assert channel_sizes.render_sizes(["1080x1350", "1920x1080", "3840x2160"], channels) == ["1080x1350", "1920x1080"]
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +119,7 @@ def _bundle(width, height):
 
 def test_every_size_is_rendered_with_the_footage_and_voice_made_once(monkeypatch):
     made = {"footage": 0, "voice": 0}
-    submitted = []
+    submitted, stored = [], []
 
     async def footage_links(job, store, factory):
         made["footage"] += 1
@@ -132,8 +137,8 @@ def test_every_size_is_rendered_with_the_footage_and_voice_made_once(monkeypatch
         return {"id": accepted["id"], "report": {"check": {"ok": True}}}
 
     async def store_outputs(client, store, factory, job, finished, music):
-        width = submitted[-1]["variables"]["size.width"]
-        return {"4:5" if width == 1080 else "16:9": [{"name": f"image-{width}.png"}]}
+        stored.append(finished["id"])
+        return {"4:5": [{"name": "image-1080.png"}]} if finished["id"] == "job-1" else {"16:9": [{"name": "image-1600.png"}]}
 
     for name, fake in (("_footage_links", footage_links), ("_voice_links", voice_links), ("_submit", submit),
                        ("_wait", wait), ("_store_outputs", store_outputs)):
@@ -150,7 +155,37 @@ def test_every_size_is_rendered_with_the_footage_and_voice_made_once(monkeypatch
     assert [b["variables"]["size.width"] for b in submitted] == [1080, 1600]
     assert all(b["media"] == [{"path": "assets/slots/photo.png", "url": "https://storage.test/photo.png"}] for b in submitted)
     assert media == {"4:5": [{"name": "image-1080.png"}], "16:9": [{"name": "image-1600.png"}]}
-    assert first["id"] == "job-1" and music is None
+    assert first["id"] == "job-1" and music is None and stored == ["job-1", "job-2"]
+
+
+def test_a_later_size_that_fails_leaves_nothing_of_an_earlier_one(monkeypatch):
+    stored = []
+
+    async def no_links(*args):
+        return {}
+
+    async def submit(client, bundle, deadline):
+        return {"id": f"job-{bundle['variables']['size.width']}"}
+
+    async def wait(client, job, accepted, deadline):
+        if accepted["id"] == "job-1600":
+            raise render.RenderFailure("timed_out", "The render did not finish.")
+        return {"id": accepted["id"]}
+
+    async def store_outputs(*args):
+        stored.append(args)
+        return {}
+
+    for name, fake in (("_footage_links", no_links), ("_voice_links", no_links), ("_submit", submit),
+                       ("_wait", wait), ("_store_outputs", store_outputs)):
+        monkeypatch.setattr(render, name, fake)
+    job = render.RenderJob(
+        post_id=uuid.uuid4(), workspace_id=uuid.uuid4(), actor="owner-1", content_hash="h", title="t", format="image",
+        bundle=_bundle(1080, 1350), extra_bundles=(_bundle(1600, 900),),
+    )
+    with pytest.raises(render.RenderFailure):
+        asyncio.run(render._render_sizes(job, None, None, None, 0.0))
+    assert stored == []  # the 1080x1350 file was never stored or registered
 
 
 # ---------------------------------------------------------------------------
@@ -158,20 +193,45 @@ def test_every_size_is_rendered_with_the_footage_and_voice_made_once(monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_the_render_route_hands_the_job_one_bundle_per_channel_size(env):
-    blocks = {**lifecycle.COMPOSITION, "sizes": ["1080x1920", "1920x1080"]}
-    post = lifecycle._create(env, template_id=str(lifecycle._template(env, blocks=blocks)))
-    for toolkit, kind in (("instagram", "reel"), ("youtube", "video"), ("tiktok", "video")):
+def _targets(env, post, channels):
+    for toolkit, kind in channels:
         env.session.add(SocialPostTarget(
             post_id=uuid.UUID(post["id"]), toolkit=toolkit, post_kind=kind, action_plan={},
             idempotency_key=f"{post['id']}:{toolkit}", status="pending",
         ))
     env.session.commit()
 
+
+def _sizes(job):
+    return [(b["variables"]["size.width"], b["variables"]["size.height"]) for b in (job.bundle, *job.extra_bundles)]
+
+
+def _title_card():
+    from modules.documents.social_starters import social_starters
+
+    (title_card,) = [s for s in social_starters("social_image") if s["slug"] == "title-card"]
+    return title_card["blocks"]
+
+
+def test_a_still_post_hands_the_job_one_bundle_per_channel_size(env):
+    template = lifecycle._template(env, blocks=_title_card(), fmt="social_image")
+    post = lifecycle._create(env, template_id=str(template), format="image",
+                             variables={"headline": {"value": "MEET|AUTO.", "claim": False}})
+    _targets(env, post, [("instagram", "image"), ("twitter", "image"), ("linkedin", "image")])
+
     _, job = lifecycle._start(env, post)
 
-    sizes = [(b["variables"]["size.width"], b["variables"]["size.height"]) for b in (job.bundle, *job.extra_bundles)]
-    assert sizes == [(1080, 1920), (1920, 1080)]
+    assert _sizes(job) == [(1080, 1350), (1600, 900)]
+
+
+def test_a_video_renders_one_size_as_before(env):
+    blocks = {**lifecycle.COMPOSITION, "sizes": ["1080x1920", "1920x1080"]}
+    post = lifecycle._create(env, template_id=str(lifecycle._template(env, blocks=blocks)))
+    _targets(env, post, [("instagram", "reel"), ("youtube", "video")])
+
+    _, job = lifecycle._start(env, post)
+
+    assert _sizes(job) == [(1080, 1920)]
 
 
 def test_a_post_with_no_channel_renders_the_default_size_alone(env):

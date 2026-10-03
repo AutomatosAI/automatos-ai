@@ -59,12 +59,14 @@ def closest(candidates: Iterable[str], aspect: str) -> Optional[str]:
 
 def render_sizes(template_sizes: Sequence[str], targets: Iterable[object]) -> List[str]:
     """The template sizes the post renders: each channel's closest, in channel order, once
-    each; the template's default (first) size when no channel needs one."""
-    chosen = []
+    each (and once per shape: two sizes of one shape would write one file name, the
+    renderer naming a file by its aspect); the template's default (first) size when no
+    channel needs one."""
+    chosen: List[str] = []
     for target in targets:
         aspect = aspect_of(getattr(target, "toolkit", ""), getattr(target, "post_kind", ""))
         size = closest(template_sizes, aspect) if aspect else None
-        if size and size not in chosen:
+        if size and all(not math.isclose(ratio(size), ratio(kept)) for kept in chosen):
             chosen.append(size)
     return chosen or list(template_sizes[:1])
 
