@@ -43,7 +43,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign, SocialPost
-from modules.socials import campaigns, service
+from modules.socials import campaigns, service, workspace_copies
 
 router = APIRouter()
 
@@ -227,6 +227,12 @@ def approve_social_campaign(
     ]
     try:
         campaigns.assert_series_allowed(posts_api._workspace(db, ctx).settings, campaign)
-        return campaigns.approve_series(db, campaign, actor, shown, comment=body.comment)
+        approved = campaigns.approve_series(db, campaign, actor, shown, comment=body.comment)
     except service.SocialsError as exc:
         _raise_for(exc)
+    # The files of each post it approved (not those it left) go to the workspace's socials folders.
+    for saved in approved.get("approved") or []:
+        post = db.get(SocialPost, UUID(str(saved["id"])))
+        if post is not None and post.workspace_id == ctx.workspace_id:
+            workspace_copies.copy_when_approved(db, post)
+    return approved

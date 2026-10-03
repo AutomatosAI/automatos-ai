@@ -17,6 +17,8 @@ This is the security boundary for agent code execution on the worker.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import re
@@ -24,6 +26,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from worker_config import max_binary_write_bytes
 from workspace_manager import SecurityError, WorkspaceManager
 
 logger = logging.getLogger(__name__)
@@ -259,8 +262,11 @@ class WorkspaceToolExecutor:
         except Exception as e:
             return {"error": f"Read error: {e}"}
 
-    async def write_file(self, path: str, content: str) -> Dict[str, Any]:
-        """Write a file to the workspace."""
+    async def write_file(self, path: str, content: Any) -> Dict[str, Any]:
+        """Write a file to the workspace: text as given, or a piece of a binary file
+        (``{"base64": ...}``, ``_write_chunk``) the platform sends a piece at a time."""
+        if isinstance(content, dict):
+            return self._write_chunk(path, content)
         try:
             safe_path = self.ws.resolve_safe_path(path)
         except SecurityError as e:
@@ -275,6 +281,35 @@ class WorkspaceToolExecutor:
                 "size_bytes": len(content.encode()),
             }
         except Exception as e:
+            return {"error": f"Write error: {e}"}
+
+    def _write_chunk(self, path: str, chunk: Dict[str, Any]) -> Dict[str, Any]:
+        """One piece of a binary file (a Socials picture or video): written over ``path``,
+        or after what it holds when ``append`` is true, then moved to ``rename_to`` when
+        that is given (the last piece), so the file is never seen half-written. Both
+        paths stay inside the workspace; the file may not pass ``max_binary_write_bytes``."""
+        try:
+            safe_path = self.ws.resolve_safe_path(path)
+            final = self.ws.resolve_safe_path(chunk["rename_to"]) if chunk.get("rename_to") else None
+            data = base64.b64decode(chunk.get("base64") or "", validate=True)
+        except SecurityError as e:
+            return {"error": str(e)}
+        except (binascii.Error, ValueError, TypeError) as e:
+            return {"error": f"Not a base64 piece: {e}"}
+        append = chunk.get("append") is True
+        size = (safe_path.stat().st_size if append and safe_path.exists() else 0) + len(data)
+        if size > max_binary_write_bytes():
+            return {"error": f"File too large (max {max_binary_write_bytes()} bytes)"}
+        try:
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
+            with safe_path.open("ab" if append else "wb") as handle:
+                handle.write(data)
+            if final is not None:
+                final.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(safe_path, final)
+            done = final or safe_path
+            return {"written": True, "path": str(done.relative_to(self.ws.root)), "size_bytes": size}
+        except OSError as e:
             return {"error": f"Write error: {e}"}
 
     async def list_directory(self, path: str = ".") -> Dict[str, Any]:
