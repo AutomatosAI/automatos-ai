@@ -81,6 +81,19 @@ def test_a_scheduled_task_id_is_looked_up_as_a_scheduled_task(db):
     assert [t.noun for t in missing] == ["ticket"]
 
 
+def test_a_ticket_is_taken_and_named_by_its_number(db):
+    """PRD-252 R4: Auto's ticket tools take #0042, so a gated call's card takes it
+    too (it was refused as "no ticket ##0042"), and names the ticket by it."""
+    ws = str(uuid4())
+    _seed(db, ws)
+    db.execute(text("UPDATE board_tasks SET workspace_seq = 42 WHERE id = 484"))
+    found, missing = resolve_targets(db, ws, {"task_id": "#0042"})
+    assert [(t.ident, t.called) for t in found] == [(484, "ticket #0042")] and not missing
+    assert named_subject(found) == " on 'Brand voice summary' (ticket #0042)"
+    _, missing = resolve_targets(db, ws, {"task_id": "#0099"})
+    assert missing_targets_error("platform_update_task", missing)["error"].startswith("No ticket #0099 in this workspace")
+
+
 def test_what_the_owner_and_the_model_are_told():
     assert named_subject([Target("document_id", 716, "document", "christmas-box-2026.csv")]) == (
         " on 'christmas-box-2026.csv' (document #716)")

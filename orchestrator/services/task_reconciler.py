@@ -211,53 +211,20 @@ class TaskReconciler:
     async def _handle_stalled(self, row, db, *, reason: str, timeout: int):
         """Mark execution as failed and optionally schedule a retry."""
         from config import config as app_config
-        from sqlalchemy import text
 
         execution_id = row.execution_id
-        recipe_id = row.recipe_id
-        workspace_id = row.workspace_id
-        input_data = row.input_data or {}
         attempt_count = row.attempt_count
         metadata = row.execution_metadata or {}
         max_retries = _get_max_retries(metadata, app_config.TASK_MAX_RETRIES)
-
-        error_msg = f"Stalled: no progress for {timeout}s (status was '{reason}')"
 
         # F114 (run 4): a run whose session steps already ran keeps them — the
         # failure names each step ticket (their results are on the board) and
         # the run is not retried from step 1, which would run them again.
         step_tickets = _step_tickets(db, execution_id)
+        error_msg = _stalled_error(timeout, reason, step_tickets)
         if step_tickets:
-            error_msg += (
-                " — nothing was driving the run any more. Its step tickets: "
-                + ", ".join(f"#{t['id']} step {t['step']} {t['status']}" for t in step_tickets[:12])
-                + "; their results are on the board."
-            )
             metadata = {**metadata, "step_tickets": step_tickets}
-
-        # Mark failed
-        db.execute(
-            text("""
-                UPDATE recipe_executions
-                SET status = 'failed',
-                    error_message = :error,
-                    completed_at = :now,
-                    execution_metadata = CAST(:meta AS jsonb)
-                WHERE execution_id = :eid
-            """),
-            {"error": error_msg, "now": datetime.now(timezone.utc), "eid": execution_id,
-             "meta": _json_dumps(metadata)},
-        )
-        logger.warning(
-            "[TaskReconciler] Marked execution %s as failed — %s", execution_id, error_msg,
-        )
-
-        # Sync linked board task so it doesn't stay stuck in_progress
-        try:
-            from services.board_task_bridge import complete_recipe_board_task
-            complete_recipe_board_task(db, execution_id, success=False, error_message=error_msg)
-        except Exception as bt_err:
-            logger.warning("[TaskReconciler] Board task sync failed for %s: %s", execution_id, bt_err)
+        _mark_failed(db, execution_id, error_msg, metadata)
 
         # Check retry eligibility
         if step_tickets:
@@ -272,9 +239,14 @@ class TaskReconciler:
                 execution_id, attempt_count, max_retries,
             )
             return
+        self._schedule_retry(db, row, metadata, attempt_count + 1, max_retries)
 
-        # Schedule retry with backoff
-        next_attempt = attempt_count + 1
+    def _schedule_retry(self, db, row, metadata: dict, next_attempt: int, max_retries: int) -> None:
+        """Insert the retry's execution record and fire it after its backoff."""
+        from sqlalchemy import text
+
+        execution_id, recipe_id, workspace_id = row.execution_id, row.recipe_id, row.workspace_id
+        input_data = row.input_data or {}
         backoff_ms = self._calculate_backoff_ms(next_attempt)
         backoff_seconds = backoff_ms / 1000.0
 
@@ -374,14 +346,53 @@ class TaskReconciler:
 # Helpers
 # ------------------------------------------------------------------
 
+def _stalled_error(timeout: int, reason: str, step_tickets: List[Dict[str, Any]]) -> str:
+    """The failure a stalled run records. PRD-252 R4: its step tickets by number."""
+    error_msg = f"Stalled: no progress for {timeout}s (status was '{reason}')"
+    if not step_tickets:
+        return error_msg
+    named = ", ".join(f"{t.get('number') or 'ticket ' + str(t['id'])} step {t['step']} {t['status']}"
+                      for t in step_tickets[:12])
+    return (error_msg + " — nothing was driving the run any more. Its step tickets: " + named
+            + "; their results are on the board.")
+
+
+def _mark_failed(db, execution_id: str, error_msg: str, metadata: dict) -> None:
+    """Fail the stalled run, and its board ticket with it so it never stays in_progress."""
+    from sqlalchemy import text
+
+    db.execute(
+        text("""
+            UPDATE recipe_executions
+            SET status = 'failed',
+                error_message = :error,
+                completed_at = :now,
+                execution_metadata = CAST(:meta AS jsonb)
+            WHERE execution_id = :eid
+        """),
+        {"error": error_msg, "now": datetime.now(timezone.utc), "eid": execution_id,
+         "meta": _json_dumps(metadata)},
+    )
+    logger.warning(
+        "[TaskReconciler] Marked execution %s as failed — %s", execution_id, error_msg,
+    )
+    try:
+        from services.board_task_bridge import complete_recipe_board_task
+        complete_recipe_board_task(db, execution_id, success=False, error_message=error_msg)
+    except Exception as bt_err:  # noqa: BLE001 — the run is failed either way
+        logger.warning("[TaskReconciler] Board task sync failed for %s: %s", execution_id, bt_err)
+
+
 def _step_tickets(db, execution_id: str) -> List[Dict[str, Any]]:
     """The session step tickets a playbook run filed (source 'recipe:<run>:<step>'),
     with their status — what a stalled run already has on the board."""
     from sqlalchemy import text
 
+    from services.ticket_numbers import format_number
+
     try:
         rows = db.execute(
-            text("SELECT id, status, source_id FROM board_tasks WHERE source_type = 'recipe' "
+            text("SELECT id, status, source_id, workspace_seq FROM board_tasks WHERE source_type = 'recipe' "
                  "AND source_id LIKE :prefix ORDER BY id"),
             {"prefix": f"recipe:{execution_id}:%"},
         ).fetchall()
@@ -391,7 +402,8 @@ def _step_tickets(db, execution_id: str) -> List[Dict[str, Any]]:
     tickets = []
     for row in rows:
         step = str(row.source_id).rsplit(":", 1)[-1]
-        tickets.append({"id": int(row.id), "step": int(step) if step.isdigit() else step, "status": row.status})
+        tickets.append({"id": int(row.id), "number": format_number(row.workspace_seq),  # PRD-252 R4
+                        "step": int(step) if step.isdigit() else step, "status": row.status})
     return tickets
 
 

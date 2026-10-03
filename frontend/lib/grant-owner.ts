@@ -13,10 +13,12 @@ export function agentLabel(owner?: GrantOwner | null, fallbackId?: number | null
   return id ? `Agent #${id}` : 'An agent'
 }
 
+/** "Ticket #0042 · title" (PRD-252 R4); "Ticket 612" for one with no number: a '#' means a number. */
 export function ticketLabel(owner?: GrantOwner | null): string | null {
   const ticket = owner?.ticket
   if (!ticket) return null
-  return ticket.title ? `Ticket #${ticket.id} · ${ticket.title}` : `Ticket #${ticket.id}`
+  const name = `Ticket ${ticket.number ?? ticket.id}`
+  return ticket.title ? `${name} · ${ticket.title}` : name
 }
 
 export function ownerLine(owner?: GrantOwner | null): string | null {

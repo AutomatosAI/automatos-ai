@@ -47,7 +47,7 @@ export function useUpdateScheduledTaskStatus() {
       ),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: SCHEDULE_FEED_KEY })
-      toast.success(`Scheduled task #${data.task_id} ${STATUS_VERB[data.status]}`)
+      toast.success(`Scheduled task ${data.task_id} ${STATUS_VERB[data.status]}`)  // PRD-252 R4: '#' means a ticket's number
     },
     onError: (error) => {
       toast.error(error.message || 'Could not update the scheduled task')

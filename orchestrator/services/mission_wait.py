@@ -98,10 +98,21 @@ class Blocker:
     since: Optional[datetime]
     same_workspace: bool
     certain: bool          # from the tick's record, not inferred
+    ticket: str = ""       # PRD-252 R4: "ticket #0042"
 
 
 def blocker_for(db: Session, run: OrchestrationRun) -> Optional[Blocker]:
-    """A Claude Code step of ANOTHER mission that ``run``'s steps wait behind."""
+    """A Claude Code step of ANOTHER mission that ``run``'s steps wait behind,
+    its ticket named by its number when it is this workspace's."""
+    from services.ticket_numbers import ticket_label_for
+
+    found = _find_blocker(db, run)
+    if found is None or not found.same_workspace or found.ticket_id is None:
+        return found
+    return replace(found, ticket=ticket_label_for(db, run.workspace_id, found.ticket_id))
+
+
+def _find_blocker(db: Session, run: OrchestrationRun) -> Optional[Blocker]:
     others = sorted((s for s in awaited_steps() if s.run_id != str(run.id)), key=lambda s: s.since)
     if others:
         step = others[0]
@@ -140,7 +151,7 @@ def wait_sentence(blocker: Blocker, *, at_approval: bool) -> str:
     if not blocker.same_workspace:
         return f"{lead} {ANOTHER_MISSION} finishes{WAIT_TAIL}."
     who = f"'{_clip(blocker.step_title)}' of mission '{_clip(blocker.goal)}'"
-    detail = [f"ticket #{blocker.ticket_id}"] if blocker.ticket_id else []
+    detail = [blocker.ticket or f"ticket {blocker.ticket_id}"] if blocker.ticket_id else []
     if blocker.since is not None:
         detail.append(f"since {blocker.since.astimezone(timezone.utc):%H:%M} UTC")
     return f"{lead} {who} finishes{WAIT_TAIL}" + (f" ({', '.join(detail)})." if detail else ".")

@@ -58,7 +58,7 @@ export function ReviewVerdict({ task, onDecided }: { task: BoardTask; onDecided:
   const approveNow = () => {
     approve.mutate({ taskId: task.id, note: mode === 'approve-note' ? note || undefined : undefined }, {
       onSuccess: (result) => {
-        toast.success(approvedMessage(result, task.id))
+        toast.success(approvedMessage(result, task.number ?? task.id))
         onDecided()
       },
       onError: (err) => toast.error(failure(err, 'Could not approve the ticket')),

@@ -34,10 +34,10 @@ export function approveEffect(action?: ApprovalAction | null): string {
   return 'Approving marks the ticket done. Nothing else runs.'
 }
 
-/** The toast after an approval: what happened. */
-export function approvedMessage(result: ApproveResult | undefined, taskId: string): string {
+/** The toast after an approval: what happened. ``ticket`` is its number (#0042), else its id. */
+export function approvedMessage(result: ApproveResult | undefined, ticket: string): string {
   const done = result?.action_result
   if (done?.type === 'publish_blog') return done.title ? `Approved. "${done.title}" is published.` : 'Approved. The post is published.'
   if (done?.type === 'create_blog') return done.topic ? `Approved. The blog post on "${done.topic}" has started.` : 'Approved. The blog post has started.'
-  return `Approved. Ticket #${taskId} is done.`
+  return `Approved. Ticket ${ticket} is done.`
 }

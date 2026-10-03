@@ -85,6 +85,7 @@ def test_wait_returns_the_ended_tickets_result(monkeypatch):
 
 def test_wait_times_out_and_names_the_still_running_ticket(monkeypatch):
     task = _ticket()
+    task.workspace_seq = 7                                   # PRD-252 R4: named by its number
     monkeypatch.setattr(lane, "file_cli_ticket", lambda db, **kw: task)
 
     async def never(seconds):
@@ -95,7 +96,7 @@ def test_wait_times_out_and_names_the_still_running_ticket(monkeypatch):
         _DB(task), workspace_id=WS, agent_id=15, title="t", prompt="p", source_type="mission", source_id="m:1", timeout_s=0,
     ))
     assert res["status"] == "error" and res["timed_out"] is True
-    assert "ticket #7 is still running" in res["error"] and "carries on" in res["error"]
+    assert "ticket #0007 is still running" in res["error"] and "carries on" in res["error"]
 
 
 def test_wait_reads_failed_and_cancelled_endings(monkeypatch):

@@ -31,6 +31,8 @@ _ACTION_TARGETS: Dict[str, Dict[str, Tuple[str, str, str]]] = {
     "platform_cancel_scheduled_task": {"task_id": ("agent_scheduled_tasks", "description", "scheduled task")},
 }
 NAME_CHARS = 80
+TICKETS = "board_tasks"
+TICKET = "ticket"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,16 @@ class Target:
     ident: Any
     noun: str
     name: Optional[str] = None
+    # PRD-252 R4: a ticket as messages name it, "ticket #0042".
+    label: Optional[str] = None
+
+    @property
+    def called(self) -> str:
+        """"ticket #0042"; "ticket 612" for a ticket known only by its id (a '#'
+        means a ticket's number); "document #716" for anything else."""
+        if self.label:
+            return self.label
+        return f"{self.noun} {self.ident}" if self.noun == TICKET else f"{self.noun} #{self.ident}"
 
 
 def resolve_targets(db: Any, workspace_id: Any, params: Any,
@@ -55,9 +67,8 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
         raw = params.get(param)
         if raw in (None, ""):
             continue
-        try:
-            ident = int(raw)
-        except (TypeError, ValueError):
+        ident = _row_id(db, workspace_id, table, raw)
+        if ident is None:
             missing.append(Target(param, raw, noun))
             continue
         try:
@@ -72,19 +83,41 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
         if row is None:
             missing.append(Target(param, ident, noun))
         else:
-            found.append(Target(param, ident, noun, str(row[0])[:NAME_CHARS] if row[0] is not None else None))
+            name = str(row[0])[:NAME_CHARS] if row[0] is not None else None
+            found.append(Target(param, ident, noun, name, _ticket_called(db, workspace_id, table, ident)))
     return found, missing
+
+
+def _row_id(db: Any, workspace_id: Any, table: str, raw: Any) -> Optional[int]:
+    """The row a parameter names: its id, or for a ticket its number (#0042,
+    PRD-252 R4), which Auto's ticket tools take. None when it names no row."""
+    from services.ticket_numbers import is_number_ref, resolve_ticket_ref
+
+    if table == TICKETS and is_number_ref(raw):
+        return resolve_ticket_ref(db, workspace_id, raw)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_called(db: Any, workspace_id: Any, table: str, ident: int) -> Optional[str]:
+    if table != TICKETS:
+        return None
+    from services.ticket_numbers import ticket_label_for
+
+    return ticket_label_for(db, workspace_id, ident)
 
 
 def named_subject(found: List[Target]) -> str:
     """ " on 'christmas-box-2026.csv' (document #716)", or "" when nothing is named."""
-    parts = [f"'{t.name}' ({t.noun} #{t.ident})" if t.name else f"{t.noun} #{t.ident}" for t in found]
+    parts = [f"'{t.name}' ({t.called})" if t.name else t.called for t in found]
     return f" on {', '.join(parts)}" if parts else ""
 
 
 def missing_targets_error(action: str, missing: List[Target]) -> Dict[str, Any]:
     """The call's result when it names something that is not in the workspace."""
-    what = ", ".join(f"no {t.noun} #{t.ident}" for t in missing)
+    what = ", ".join(f"no {t.called}" for t in missing)
     return {
         "success": False,
         "error": (

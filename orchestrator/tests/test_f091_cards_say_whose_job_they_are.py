@@ -56,7 +56,8 @@ def test_a_question_and_a_gated_call_name_their_agent_and_ticket(db):
         _grant(2, agent_id=294, details={"board_task_id": 612}),
         _grant(3),
     ])
-    named = {"agent": {"id": 294, "name": "Scout"}, "ticket": {"id": 612, "title": "Cafe questions"}}
+    # PRD-252 R4: the ticket's number rides with its title (none here: a raw insert gives none)
+    named = {"agent": {"id": 294, "name": "Scout"}, "ticket": {"id": 612, "title": "Cafe questions", "number": None}}
     assert owners[1] == named and owners[2] == named
     assert owners[3] == {"agent": None, "ticket": None}
 
@@ -66,7 +67,7 @@ def test_another_workspaces_rows_are_never_named(db):
     _seed(db, ws)
     owners = grant_owners(db, str(uuid4()), [_grant(1, subject_type="board_task", subject_id="612",
                                                     asked_by_agent_id=294)])
-    assert owners[1] == {"agent": {"id": 294, "name": None}, "ticket": {"id": 612, "title": None}}
+    assert owners[1] == {"agent": {"id": 294, "name": None}, "ticket": {"id": 612, "title": None, "number": None}}
 
 
 def test_the_list_route_carries_the_owner():

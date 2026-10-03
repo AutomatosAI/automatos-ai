@@ -77,10 +77,10 @@ describe('Approve', () => {
   it('is one click without a note, and confirms what happened', () => {
     const onDecided = vi.fn()
     verdict.approve.mutate.mockImplementation((_vars, opts) => opts.onSuccess({ action_result: null }))
-    render(<ReviewVerdict task={ticket()} onDecided={onDecided} />)
+    render(<ReviewVerdict task={ticket({ number: '#0042' })} onDecided={onDecided} />)
     fireEvent.click(screen.getByRole('button', { name: 'Approve and mark done' }))
     expect(verdict.approve.mutate).toHaveBeenCalledWith({ taskId: '5', note: undefined }, expect.anything())
-    expect(toast.success).toHaveBeenCalledWith('Approved. Ticket #5 is done.')
+    expect(toast.success).toHaveBeenCalledWith('Approved. Ticket #0042 is done.')   // PRD-252 R4: its number
     expect(onDecided).toHaveBeenCalled()
   })
 

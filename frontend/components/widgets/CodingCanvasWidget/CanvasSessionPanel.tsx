@@ -78,7 +78,7 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         </div>
         {session.external ? (
           <span className="text-xs text-muted-foreground" data-testid="session-external-label">
-            Ticket #{String(session.taskId)} on your machine — talk to the agent in the chat; take over from the ticket card.
+            Ticket {String(session.taskId)} on your machine — talk to the agent in the chat; take over from the ticket card.
           </span>
         ) : isLive ? (
           <Button size="sm" variant="outline" onClick={() => void session.stop()} data-testid="session-stop">
