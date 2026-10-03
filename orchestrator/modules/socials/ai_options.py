@@ -34,6 +34,7 @@ OPTIONS_KEY = "options"
 STATE_KEY = "options_state"
 ERROR_KEY = "options_error"
 MAKING, READY, FAILED = "making", "ready", "failed"
+OPTIONS_FAILED = "The options could not be made. Try again."
 CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 
 
@@ -69,7 +70,7 @@ def plan_options(spec: Mapping[str, Any], slot: str, prompt: str, route: Route, 
     ratio = aspect_ratio(width, height)
     shots = tuple(
         (Shot(slot=option_slot(slot, n), kind=IMAGE_SLOT, path=str(spec["path"]), label=f"{label} option {n}", prompt=prompt,
-              aspect_ratio=ratio, style=style, references=references), route)
+              aspect_ratio=ratio, style=style, references=references, record=False), route)
         for n in range(1, OPTIONS + 1)
     )
     return footage_recipes.FootagePlan(shots=shots)
@@ -97,12 +98,14 @@ def ask(post: Any, slot: str, prompt: str) -> None:
 
 
 def settle(post: Any, slot: str, prompt: str, options: List[Dict[str, Any]], error: Optional[str]) -> bool:
-    """The options made for ``prompt`` (or why none were), while the slot still asks for them."""
+    """The options made for ``prompt``, and why any were not, while the slot still asks for them:
+    ready with every option made (some may have failed: the error says which), else failed."""
     footage = dict(post.footage) if isinstance(post.footage, dict) else {}
     asked = footage.get(slot)
     if not isinstance(asked, dict) or asked.get("prompt") != prompt or asked.get(STATE_KEY) != MAKING:
         return False
-    footage[slot] = {"prompt": prompt, OPTIONS_KEY: options, STATE_KEY: FAILED if error else READY, **({ERROR_KEY: error} if error else {})}
+    state = READY if options else FAILED
+    footage[slot] = {"prompt": prompt, OPTIONS_KEY: options, STATE_KEY: state, **({ERROR_KEY: error} if error else {})}
     post.footage = footage
     return True
 
@@ -122,11 +125,15 @@ def pick(post: Any, slot: str, name: str) -> bool:
 
 async def make(plan: footage_recipes.FootagePlan, *, workspace_id: UUID, post_id: UUID, title: str, slot: str, prompt: str,
                session_factory: Callable[[], Any], store: Any) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """Make the options (priced, capped, booked); the records, or why none were made."""
+    """Make the options (priced, capped, booked); the records of those made, and why any were not.
+    Never raises: whatever happens, the slot is settled and leaves "making"."""
     try:
         made = await footage_recipes.generate(plan, workspace_id=workspace_id, post_id=post_id, title=title,
                                               session_factory=session_factory, store=store)
     except footage_recipes.FootageError as exc:
         logger.warning("[SocialsAIOptions] post %s slot %s: %s", post_id, slot, exc)
-        return [], str(exc)
+        return option_records(exc.made, prompt), str(exc)  # the ones made are kept and booked: offer them
+    except Exception:  # any other failure still settles the slot, saying so
+        logger.exception("[SocialsAIOptions] post %s slot %s: the options could not be made", post_id, slot)
+        return [], OPTIONS_FAILED
     return option_records(made, prompt), None

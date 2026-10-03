@@ -89,6 +89,7 @@ function AiSlot({ slot, post, asked, busy, onMake, onPick }: AiSlotProps) {
       </div>
       {post && chosenName && <ChosenImage postId={post.id} name={chosenName} />}
       {asked?.options_state === 'failed' && <p role="alert" className="text-xs text-destructive">{asked.options_error || 'No options were made.'}</p>}
+      {asked?.options_state === 'ready' && asked.options_error && <p className="text-xs text-muted-foreground">Some options were not made: {asked.options_error}</p>}
       {post && options.length > 0 && (
         <ul aria-label={`Options for ${slot}`} className="grid grid-cols-4 gap-2">
           {options.map((option, index) => (

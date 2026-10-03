@@ -399,3 +399,53 @@ def test_the_brand_kit_tool_gives_agents_the_profile(monkeypatch):
     db.get.return_value = workspace
     result = asyncio.run(handlers_documents.get_brand_kit_tool(db, WS, {}))
     assert result["success"] is True and result["style_profile"] == STYLE_TEXT
+
+
+class _Session:
+    """A session holding one workspace, as SessionLocal() gives it (the store's only reads)."""
+
+    def __init__(self, workspace):
+        self.workspace, self.commits, self.rollbacks = workspace, 0, 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def query(self, model):
+        return self
+
+    def filter(self, *conditions):
+        return self
+
+    def with_for_update(self):
+        return self
+
+    def first(self):
+        return self.workspace
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def test_a_read_is_stored_only_for_the_references_it_covered(monkeypatch):
+    import core.database.database as database
+
+    references = [{"id": "r1", "stance": "like", "note": "Warm"}, {"id": "r2", "stance": "avoid", "note": ""}]
+    workspace = SimpleNamespace(id=WS, settings={"brand_style": {"references": references}})
+    session = _Session(workspace)
+    monkeypatch.setattr(database, "SessionLocal", lambda: session)
+    assert brand_style.same_references(references, [dict(r) for r in references])
+    assert not brand_style.same_references(references, [{**references[0], "stance": "avoid"}, references[1]])
+
+    assert brand_style._store_profile(WS, PROFILE, references) is True
+    assert refs.style_of(workspace.settings)["profile"]["reference_ids"] == ["r1", "r2"]
+    # A slower read launched before a change finds the references changed: it stores nothing.
+    workspace.settings = {"brand_style": {"references": references[:1]}}
+    assert brand_style._store_profile(WS, {**PROFILE, "mood": ["stale"]}, references) is False
+    assert refs.style_of(workspace.settings)["profile"] is None and session.rollbacks == 1
+

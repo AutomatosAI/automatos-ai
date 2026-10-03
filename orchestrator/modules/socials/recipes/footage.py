@@ -334,12 +334,14 @@ def _register(session_factory: Callable[[], Any], *, workspace_id: UUID, post_id
     return str(result["deliverable_id"])
 
 
-def _locked_post(db: Any, workspace_id: UUID, post_id: UUID) -> Optional[SocialPost]:
-    """The post, its row locked until the transaction ends (footage is written whole)."""
+def locked_post(db: Any, workspace_id: UUID, post_id: UUID) -> Optional[SocialPost]:
+    """The post as its row stands now, locked until the transaction ends (footage is written whole,
+    so every writer of it reads it this way first)."""
     return (
         db.query(SocialPost)
         .filter(SocialPost.workspace_id == workspace_id, SocialPost.id == post_id)
         .with_for_update()
+        .populate_existing()
         .first()
     )
 
@@ -348,7 +350,7 @@ def _record(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUI
     """Mark the slot done on the post with its file; ``False`` when the post no longer asks for it."""
     db = session_factory()
     try:
-        post = _locked_post(db, workspace_id, post_id)
+        post = locked_post(db, workspace_id, post_id)
         if post is None or not service.record_footage(post, slot, record):
             db.rollback()
             return False
@@ -365,7 +367,7 @@ def _record_costs(session_factory: Callable[[], Any], workspace_id: UUID, post_i
     """A credit-billed toolkit's cost per slot, once its balance difference is known."""
     db = session_factory()
     try:
-        post = _locked_post(db, workspace_id, post_id)
+        post = locked_post(db, workspace_id, post_id)
         footage = dict(post.footage) if post is not None and isinstance(post.footage, dict) else {}
         changed = False
         for slot, usd in costs.items():
@@ -449,7 +451,7 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
         bytes=len(data), sha256=digest, estimate_usd=estimate_usd, deliverable_id=deliverable_id,
     )
     record = _footage_record(shot, route, made, content_type)
-    if not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
+    if shot.record and not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
         logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
     return made
 
@@ -779,5 +781,7 @@ async def generate(plan: FootagePlan, *, workspace_id: UUID, post_id: UUID, titl
         db.close()
     if failed:
         labels = {shot.slot: shot.label for shot, _ in plan.shots}
-        raise FootageError("; ".join(f"{labels.get(slot, slot)}: {why}" for slot, why in failed.items()))
+        error = FootageError("; ".join(f"{labels.get(slot, slot)}: {why}" for slot, why in failed.items()))
+        error.made = dict(made)  # kept and booked: an AI option's caller still offers them (US-B305)
+        raise error
     return made

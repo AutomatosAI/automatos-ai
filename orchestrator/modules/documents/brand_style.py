@@ -172,14 +172,28 @@ def _load_references(workspace_id: UUID) -> Optional[List[Dict[str, Any]]]:
         return None if workspace is None else refs.style_of(workspace.settings)["references"]
 
 
-def _store_profile(workspace_id: UUID, profile: Optional[Dict[str, Any]], references: List[Dict[str, Any]]) -> None:
+def same_references(current: List[Dict[str, Any]], read: List[Dict[str, Any]]) -> bool:
+    """Whether the references are still the ones a read covered (each id, stance and note)."""
+    def shape(found: List[Dict[str, Any]]) -> List[Tuple[Any, Any, Any]]:
+        return [(ref.get("id"), ref.get("stance"), ref.get("note")) for ref in found]
+
+    return shape(current) == shape(read)
+
+
+def _store_profile(workspace_id: UUID, profile: Optional[Dict[str, Any]], references: List[Dict[str, Any]]) -> bool:
+    """Store the profile read from ``references``, the workspace row locked; nothing when the
+    references changed meanwhile (the change launched a read of its own, which stores)."""
     from core.database.database import SessionLocal
     from core.models.workspaces import Workspace
 
     with SessionLocal() as db:
-        workspace = db.get(Workspace, workspace_id)
-        if workspace is not None:
-            refs.save_style(db, workspace, with_profile(refs.style_of(workspace.settings), profile, references))
+        workspace = db.query(Workspace).filter(Workspace.id == workspace_id).with_for_update().first()
+        style = refs.style_of(workspace.settings) if workspace is not None else None
+        if style is None or not same_references(style["references"], references):
+            db.rollback()
+            return False
+        refs.save_style(db, workspace, with_profile(style, profile, references))
+        return True
 
 
 async def refresh_profile(workspace_id: UUID) -> Optional[Dict[str, Any]]:

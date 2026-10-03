@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 
 from config import config
@@ -68,7 +69,10 @@ URL_FIELDS = ("url", "video_url", "image_url", "file_url", "download_url", "uri"
 
 
 class FootageError(Exception):
-    """Footage could not be generated or kept; the render fails saying why."""
+    """Footage could not be generated or kept; the render fails saying why. ``made``: the
+    shots made and kept before the failure (already booked), by slot."""
+
+    made: Mapping[str, Any] = MappingProxyType({})
 
 
 class FootageRefused(FootageError):
@@ -100,6 +104,8 @@ class Shot:
     # PRD-251B (US-B305): links to the brand kit's liked style references, newest first; sent
     # only by a recipe whose generate action the registry flags as taking one.
     references: Tuple[str, ...] = ()
+    # False for an AI option: kept as a Deliverable only; the slot records the one picked.
+    record: bool = True
 
 
 @dataclass(frozen=True)

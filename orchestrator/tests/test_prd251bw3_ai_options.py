@@ -109,6 +109,7 @@ def test_asking_answers_at_once_and_plans_four_styled_shots(options):
     shots = [shot for shot, _route in plan.shots]
     assert [shot.slot for shot in shots] == [f"still_1_option_{n}" for n in range(1, ai_options.OPTIONS + 1)]
     assert {(shot.kind, shot.prompt, shot.references) for shot in shots} == {("image", PROMPT, (REFERENCE,))}
+    assert {shot.record for shot in shots} == {False}  # kept as Deliverables; the slot records the one picked
     assert shots[0].style == "Brand style (from the brand kit's references): mood: calm."
     assert {route.recipe.toolkit for _shot, route in plan.shots} == {"fal_ai"}
     assert options.started == [{"subsystem": "socials", "operation": "ai_options", "workspace_id": WS_A}]
@@ -223,3 +224,41 @@ def test_an_editor_echoing_the_stored_options_keeps_them(options):
     echoed = options.client.patch(f"/api/socials/posts/{post['id']}", json={"footage": stored})
     assert echoed.status_code == 200, echoed.text
     assert _footage(options, post["id"])["still_1"] == {"prompt": PROMPT, "options": [], "options_state": "making"}
+
+
+def test_options_made_before_a_failure_are_still_offered(options, monkeypatch):
+    post = _video_post(options)
+    assert _ask(options, post["id"]).status_code == 202
+    monkeypatch.setattr(media_tools_api, "SessionLocal", sessionmaker(bind=options.session.get_bind()))
+
+    async def partly(plan, **kwargs):
+        error = footage_recipes.FootageError("Still option 3: the job failed; Still option 4: the job failed")
+        error.made = {shot.slot: _made(shot.slot, n) for n, (shot, _route) in enumerate(plan.shots[:2], start=1)}
+        raise error
+
+    monkeypatch.setattr(footage_recipes, "generate", partly)
+    ((plan, *_rest),) = options.made
+    records, error = asyncio.run(ai_options.make(plan, workspace_id=WS_A, post_id=uuid.UUID(post["id"]), title="T",
+                                                 slot="still_1", prompt=PROMPT, session_factory=None, store=None))
+    assert len(records) == 2 and "option 3" in error  # made and booked: offered all the same
+    media_tools_api._settle(WS_A, uuid.UUID(post["id"]), "still_1", PROMPT, records, error)
+    settled = _footage(options, post["id"])["still_1"]
+    assert (settled["options_state"], len(settled["options"]), settled["options_error"]) == ("ready", 2, error)
+
+
+def test_any_other_failure_still_settles_the_slot(options, monkeypatch):
+    post = _video_post(options)
+    assert _ask(options, post["id"]).status_code == 202
+    monkeypatch.setattr(media_tools_api, "SessionLocal", sessionmaker(bind=options.session.get_bind()))
+
+    async def broken(plan, **kwargs):
+        raise RuntimeError("the database went away")
+
+    monkeypatch.setattr(footage_recipes, "generate", broken)
+    ((plan, *_rest),) = options.made
+    records, error = asyncio.run(ai_options.make(plan, workspace_id=WS_A, post_id=uuid.UUID(post["id"]), title="T",
+                                                 slot="still_1", prompt=PROMPT, session_factory=None, store=None))
+    assert (records, error) == ([], ai_options.OPTIONS_FAILED)  # never left "making", never the internals
+    media_tools_api._settle(WS_A, uuid.UUID(post["id"]), "still_1", PROMPT, records, error)
+    assert _footage(options, post["id"])["still_1"]["options_state"] == "failed"
+

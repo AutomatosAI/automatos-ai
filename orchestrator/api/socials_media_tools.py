@@ -39,7 +39,7 @@ from core.social_templates import IMAGE_SLOT, SocialTemplateError, validate_soci
 from modules.socials import ai_options, media_caps, media_tools, render, service
 from modules.socials.capabilities import media_capabilities
 from modules.socials.media_store import MediaStore
-from modules.socials.recipes.footage import route_for
+from modules.socials.recipes.footage import locked_post, route_for
 from modules.socials.settings import KEY_MEDIA_MONTHLY_CAP, KEY_MEDIA_POST_CAP, WORKSPACE_SOCIALS_SETTINGS_KEY
 
 logger = logging.getLogger(__name__)
@@ -143,10 +143,23 @@ async def _make_options(plan: Any, workspace_id: UUID, post_id: UUID, title: str
 
 
 def _settle(workspace_id: UUID, post_id: UUID, slot: str, prompt: str, records: Any, error: Optional[str]) -> None:
+    """Record the options on the post, its row locked: footage is written whole, and another
+    slot's options may be settling at the same time."""
     with SessionLocal() as db:
-        post = service.get_post(db, workspace_id, post_id)
+        post = locked_post(db, workspace_id, post_id)
         if post is not None and ai_options.settle(post, slot, prompt, records, error):
             db.commit()
+        else:
+            db.rollback()
+
+
+def _locked(db: Session, post: Any) -> Any:
+    """The post as its row stands now, locked until the commit: footage is written whole, and a
+    slot's options may be settling in the background at the same time."""
+    locked = locked_post(db, post.workspace_id, post.id)
+    if locked is None:
+        raise HTTPException(status_code=404, detail=_posts_api().POST_NOT_FOUND)
+    return locked
 
 
 @router.post("/posts/{post_id}/ai-options", status_code=202, dependencies=[CAN_UPDATE])
@@ -159,6 +172,8 @@ def make_ai_options(post_id: UUID, body: OptionsRequest, db: Session = Depends(g
     try:
         ai_options.assert_editable(post)
         plan = _options_plan(db, workspace, post, body)
+        post = _locked(db, post)
+        ai_options.assert_editable(post)  # as the row stands now
     except service.SocialsError as exc:
         posts_api._raise_for(exc)
     status, content_hash = post.status, post.content_hash
@@ -173,7 +188,7 @@ def make_ai_options(post_id: UUID, body: OptionsRequest, db: Session = Depends(g
 def pick_ai_option(post_id: UUID, slot: str, body: PickRequest, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     """The option picked becomes the slot's file (a render setting: an approval stands)."""
     posts_api = _posts_api()
-    post = posts_api._load(db, ctx, post_id)
+    post = _locked(db, posts_api._load(db, ctx, post_id))
     try:
         ai_options.assert_editable(post)
     except service.SocialsError as exc:
