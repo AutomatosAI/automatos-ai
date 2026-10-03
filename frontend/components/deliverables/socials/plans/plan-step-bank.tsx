@@ -11,8 +11,9 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { SocialTopic } from '@/lib/socials-plan-types'
+import type { SocialPlanAutoTopic, SocialTopic } from '@/lib/socials-plan-types'
 import { useResearchSocialPlan, useSocialPlanTopics, useWriteSocialTopic } from '@/hooks/use-socials-plans'
+import { PlanAutoSuggestions } from './plan-auto-notes'
 import { PlanTopicForm } from './plan-topic-form'
 import { PlanStepHeading } from './plan-ui'
 
@@ -53,7 +54,14 @@ function TopicCard({ topic, onPin, onDelete }: { topic: SocialTopic; onPin: (day
   )
 }
 
-export function PlanStepBank({ planId }: { planId: string | null }) {
+interface PlanStepBankProps {
+  planId: string | null
+  /** A new plan's ideas from Auto: they join the bank when it is saved. */
+  ideas?: ReadonlyArray<SocialPlanAutoTopic>
+  onLeaveOut?: (title: string) => void
+}
+
+export function PlanStepBank({ planId, ideas = [], onLeaveOut = () => undefined }: PlanStepBankProps) {
   const [adding, setAdding] = useState(false)
   const [all, setAll] = useState(false)
   const { data } = useSocialPlanTopics(planId)
@@ -64,6 +72,7 @@ export function PlanStepBank({ planId }: { planId: string | null }) {
       <div className="flex flex-col gap-4">
         <PlanStepHeading title="Content bank" lead="The topics each post is made from." />
         <p className="m-0 text-sm text-muted-foreground">{SAVE_FIRST}</p>
+        {ideas.length > 0 && <PlanAutoSuggestions topics={ideas} onLeaveOut={onLeaveOut} />}
       </div>
     )
   }

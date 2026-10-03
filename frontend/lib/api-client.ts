@@ -18,6 +18,8 @@ import type {
 import type {
   SocialMusicResponse,
   SocialPlan,
+  SocialPlanAutoDraft,
+  SocialPlanAutoRequest,
   SocialPlanInput,
   SocialPlansResponse,
   SocialPlanSlotsResponse,
@@ -3230,6 +3232,11 @@ class ApiClient {
 
   async createSocialPlan(input: SocialPlanInput): Promise<SocialPlan> {
     return this.request<SocialPlan>('/api/socials/plans', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  /** Plan with Auto: a plan drafted from what the person says, not saved. */
+  async draftSocialPlan(input: SocialPlanAutoRequest): Promise<SocialPlanAutoDraft> {
+    return this.request<SocialPlanAutoDraft>('/api/socials/plans/draft', { method: 'POST', body: JSON.stringify(input) })
   }
 
   async getSocialPlan(planId: string): Promise<SocialPlan> {
