@@ -1,4 +1,4 @@
-"""PRD-234 S2 — the "Claude Code session" section of a task report.
+"""PRD-234 S2 — the session section of a task report, titled with the CLI's own name.
 
 Kept apart from ``api.board_tasks`` so it stays a pure function: what ran, where,
 what it produced, what was refused and how to take it over. Empty for an API run,
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from core.cli_presets import session_heading, takeover_line
 from core.cli_runtime import RUNTIME_CLI
 from services.session_denials import denial_kind_label, group_denials_by_kind
 
@@ -68,7 +69,7 @@ def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
         return []
     session = exec_result.get("session") or {}
     usage = exec_result.get("usage") or {}
-    lines: List[str] = ["## Claude Code session"]
+    lines: List[str] = [session_heading(session.get("provider"))]
     sid = session.get("session_id") or exec_result.get("session_id") or "unknown"
     lines.append(f"- Session: {sid}")
     model = usage.get("model") or session.get("model") or "the CLI's default model"
@@ -106,8 +107,8 @@ def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
     if session.get("transcript_path"):
         lines.append("")
         lines.append(f"- Transcript: `{session['transcript_path']}`")
-    if session.get("session_id"):
-        cd = f"cd {session['cwd']} && " if session.get("cwd") else ""
-        lines.append(f"- Take over in your terminal: `{cd}claude --resume {session['session_id']}`")
+    takeover = takeover_line(session.get("provider"), session.get("session_id"), session.get("cwd"))
+    if takeover:
+        lines.append(takeover)
     lines.append("")
     return lines

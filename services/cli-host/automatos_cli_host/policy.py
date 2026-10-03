@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from . import secret_reach
+from . import secret_reach, shell_words
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
     DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED,
@@ -50,7 +50,8 @@ from .permission_modes import (
 NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)git\s+push\b"),
     re.compile(r"(^|[;&|(]\s*)git\s+remote\s+(add|set-url)\b"),
-    re.compile(r"(^|[;&|(]\s*)gh\s+(pr|release)\s+(create|merge|edit)\b"),
+    # ``gh`` is not here: in a session it reads, and every subcommand not known to
+    # be a read is refused per simple command (``shell_words.gh_writes``, PRD-253 S0.3).
     re.compile(r"(^|[;&|(]\s*)(sudo|su)\b"),
     re.compile(r"(^|[;&|(]\s*)rm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+/(\s|$)"),
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
@@ -86,7 +87,7 @@ ALWAYS_ASK_BASH = (
 # ``find``'s exec options are here for the orphan case: a second ``-exec`` after
 # a ``;`` is a simple command of its own whose first word is the option.
 COMMAND_WRAPPERS = frozenset({
-    "xargs", "env", "command", "builtin", "exec", "time", "timeout", "nice", "ionice",
+    "xargs", "env", "command", "builtin", "exec", "time", "timeout", "nice", "ionice", "busybox",
     "nohup", "stdbuf", "caffeinate", "chronic", "watch", "-exec", "-execdir", "-ok", "-okdir",
 })
 _WRAPPER_VALUE_RE = re.compile(r"^\d+[smhd]?$")      # ``timeout 5``, ``timeout 30s``, ``nice -n 10``
@@ -241,6 +242,11 @@ ALLOWED_UNLISTED_BASH = ("{command!r} is not on this ticket's Bash allowlist; th
 ALLOWED_FILES = "inside the session's folders"
 ALLOWED_SESSION_TOOL = "an Automatos tool this ticket may call"
 ALLOWED_NO_APPROVAL = "a tool that needs no approval"
+# PRD-253 S0.1: a write the gate cannot place. A patch keeps its paths in its
+# text (Codex's and Copilot's ``apply_patch``); when the adapter cannot read
+# them, the call names no file — and "no path" used to fall through to the
+# mode's verdict, which allows an edit in Edit automatically and Auto.
+WRITE_NAMES_NO_FILE = "a write that names no file — the gate cannot tell where it lands"
 
 Bindings = Mapping[str, Tuple[str, ...]]
 
@@ -865,6 +871,27 @@ def _runs_own_code(words: Sequence[str]) -> bool:
     return not args[0].startswith("-")  # an unknown interpreter flag is not a plain "run this file"
 
 
+def _never_allowed(words: Sequence[str], bindings: Bindings, ctx: "PolicyContext",
+                   roots: Sequence[Path], depth: int, floor: Decision) -> Optional[Decision]:
+    """The hard lines for one simple command (PRD-253 S0.3, ``shell_words``): the
+    never-allowed list on its words and any ``gh`` that is not a read are refused;
+    for a shell's ``-c`` or an ``eval``, what the gate says of the line it runs
+    whenever that is not a plain allow; and a command the gate cannot see through
+    is a card, in Auto mode too. ``floor`` is the verdict on the command's own
+    redirections, kept in every case. ``None`` = judge it as the verb it is."""
+    joined = " ".join(words)
+    if any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or shell_words.gh_writes(words):
+        return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
+    for text in shell_words.inline_commands(words):
+        if any(pattern.search(text) for pattern in NEVER_ALLOWED_BASH):    # the line nets, as on a raw line
+            return Decision("deny", f"never allowed in a session: {_first_words(text)!r} (sessions do not push or escalate)")
+        within = _judge_command(text, bindings, ctx, roots, depth + 1)
+        if within.behavior != "allow":
+            return _worst([within, floor])
+    opaque = shell_words.opaque_reason(words)
+    return _worst([Decision("ask", opaque), floor]) if opaque else None
+
+
 def _judge_cd(words: Sequence[str], bindings: Bindings, roots: Sequence[Path]) -> Decision:
     """``cd`` only to a directory the gate can resolve, inside the roots."""
     if len(words) != 2:
@@ -987,9 +1014,9 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     if on_globals.behavior == "deny":
         return on_globals
     joined = " ".join(words)
-    for pattern in NEVER_ALLOWED_BASH:
-        if pattern.search(joined):
-            return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
+    refused = _never_allowed(words, bindings, ctx, roots, depth, on_targets)
+    if refused is not None:
+        return refused
     for pattern, why in ALWAYS_ASK_BASH:
         if pattern.search(joined):
             # Not a refusal — the operator decides. It just never happens silently.
@@ -999,10 +1026,9 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the
         # wrapper is off the allowlist and would be HELD — an operator can
         # approve a hold, and approving it runs the push. Refuse it here.
-        joined_inner = " ".join(inner)
-        for pattern in NEVER_ALLOWED_BASH:
-            if pattern.search(joined_inner):
-                return Decision("deny", f"never allowed in a session: {_first_words(joined_inner)!r} (sessions do not push or escalate)")
+        refused = _never_allowed(inner, bindings, ctx, roots, depth, on_targets)
+        if refused is not None:
+            return refused
         if words[0] in FIND_EXEC_OPTIONS:
             # an orphan ``-exec cmd ;`` (a second exec clause the ``;`` split off)
             # is judged as the command it runs, like the first clause is
@@ -1328,6 +1354,8 @@ def _decide_files(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     guards = [g for g in guards if g is not None]
     if any(g.behavior == "deny" for g in guards):
         return _worst(guards)
+    if not intent.paths and intent.cls is ToolClass.FILE_WRITE:
+        return Decision("deny", WRITE_NAMES_NO_FILE)   # refused in every mode: it could land anywhere
     if not intent.paths:
         return _worst([*guards, _write_in_mode(intent, ctx)])  # a search without a path works in cwd
     for target in intent.paths:

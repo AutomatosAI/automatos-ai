@@ -16,11 +16,12 @@ if str(ROOT) not in sys.path:
 
 FAKE_CLAUDE = Path(__file__).with_name("fake_claude.py")
 FAKE_CODEX = Path(__file__).with_name("fake_codex.py")
+FAKE_PRINT = Path(__file__).with_name("fake_print_cli.py")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _fake_claude_executable():
-    for fake in (FAKE_CLAUDE, FAKE_CODEX):
+    for fake in (FAKE_CLAUDE, FAKE_CODEX, FAKE_PRINT):
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 

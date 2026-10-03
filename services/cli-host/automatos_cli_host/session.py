@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__
-from . import usage_limit
+from . import turn_end, usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
@@ -650,28 +650,35 @@ class Session:
                  f" worktree={worktree}" if worktree else "")
 
     def _wait_for_turn(self, preset: Any) -> str:
-        """5. wait for the turn's end / exit / cancel / timeout — the preset says how a turn ends."""
+        """5. wait for the turn's end / exit / cancel / timeout — the preset says how a
+        turn ends (``turn_end.py``). A gated CLI proves its gate loaded (SessionStart)
+        whatever ends its turn (PRD-253 S0.2)."""
         deadline = self.started_at + self.cfg.session_timeout_seconds
-        exit_reason = "completed"
         hook_driven = preset.turn_end == TURN_END_STOP_HOOK
+        proof_window = turn_end.startup_timeout(preset, self.cfg.startup_timeout_seconds)
+        ended_at: Optional[float] = None
         while True:
+            now = time.time()
             if hook_driven and self.stopped.is_set():
                 self.ended.wait(STOP_GRACE_SECONDS)
-                break
+                return turn_end.COMPLETED
             if self.proc.poll() is not None:
-                exit_reason = "exited_before_stop" if hook_driven else "completed"
-                break
+                return self._exit_reason(preset)
             if self.cancel_requested.is_set():
-                exit_reason = "cancelled"
-                break
-            if time.time() > deadline:
-                exit_reason = "timeout"
-                break
-            if hook_driven and not self.session_started.is_set() and time.time() - self.started_at > self.cfg.startup_timeout_seconds:
-                exit_reason = "no_session_start"
-                break
+                return "cancelled"
+            if now > deadline:
+                return "timeout"
+            if turn_end.is_gated(preset) and not self.session_started.is_set() and now - self.started_at > proof_window:
+                return "no_session_start"
+            if not hook_driven and self.ended.is_set():
+                ended_at = ended_at or now     # a print-mode CLI said goodbye; give it a moment to exit
+                if now - ended_at > turn_end.EXIT_GRACE_AFTER_SESSION_END_SECONDS:
+                    return self._exit_reason(preset)
             time.sleep(0.25)
-        return exit_reason
+
+    def _exit_reason(self, preset: Any) -> str:
+        return turn_end.exit_reason(preset, returncode=self.proc.poll() if self.proc else None,
+                                    session_started=self.session_started.is_set(), stopped=self.stopped.is_set())
 
     def _drain(self, master: int) -> None:
         try:
@@ -734,27 +741,15 @@ class Session:
         text = self.last_assistant_message or (self.adapter.last_text(transcript) if transcript and transcript.exists() else None) or ""
         if not text and preset.turn_end == TURN_END_PROCESS_EXIT:
             text = bytes(self.output_tail).decode("utf-8", "replace").strip()   # print mode: stdout IS the answer
-        name = os.path.basename(binary)
-        if exit_reason == "completed":
-            status = "success"
-            error = None
-        elif exit_reason == "cancelled" and self.stopped_by_host:
-            status, error = "host_stopped", self.stopped_by_host
-        elif exit_reason == "cancelled":
-            status, error = "cancelled", "cancelled by the operator"
-        elif exit_reason == "timeout":
-            status, error = "error", f"session exceeded {int(self.cfg.session_timeout_seconds)} s"
-        elif exit_reason == "no_session_start":
-            tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
-            status, error = "error", (
-                f"{name} did not start a session within {int(self.cfg.startup_timeout_seconds)} s — "
-                f"it is probably showing a login screen or a dialog. Run `{name}` in that directory once "
-                f"and log in, then retry. Last output:\n{tail}"
-            )
-        else:
-            tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
-            code = self.proc.returncode if self.proc else None
-            status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
+        ungated = exit_reason == turn_end.UNGATED_EXIT
+        if ungated:
+            text = ""                       # PRD-253 S0.2: nothing a run without the gate produced is reported
+        status, error = turn_end.describe(
+            exit_reason, cli=os.path.basename(binary), returncode=self.proc.returncode if self.proc else None,
+            tail=bytes(self.output_tail).decode("utf-8", "replace")[-1500:],
+            startup_window=turn_end.startup_timeout(preset, self.cfg.startup_timeout_seconds),
+            session_timeout=self.cfg.session_timeout_seconds, stopped_by_host=self.stopped_by_host,
+        )
         resets = None
         if status == "error":
             # F083: the CLI's plan window closed. That is a pause — the ticket goes
@@ -764,7 +759,7 @@ class Session:
             if usage_limit.is_usage_limit(said):
                 until, known = usage_limit.pause(said, _local_now())
                 status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
-        files = [*self.files_touched, *self._land_deliverables(cwd)]
+        files = [] if ungated else [*self.files_touched, *self._land_deliverables(cwd)]
         self._shred_session_credentials()
         outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
                                 files_touched=files)
