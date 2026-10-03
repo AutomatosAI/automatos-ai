@@ -41,6 +41,8 @@ const FORMAT_KINDS: Record<string, SocialPostKind[]> = {
   carousel: ['carousel', 'image'],
   fact_card: ['image'],
   infographic: ['image'],
+  // PRD-251B US-B109: a text-only post (X and LinkedIn take one).
+  text: ['text'],
 }
 
 /** The kind a channel posts a post of `format` as: the first available that fits, else its first available. */
@@ -92,7 +94,7 @@ export function postInput(draft: ComposerDraft): CreateSocialPostInput {
 }
 
 /** Where the draft publishes (PUT /api/socials/posts/{id}/targets): one target per chosen channel. */
-export function draftTargets(draft: ComposerDraft): SocialPostTargetInput[] {
+export function draftTargets(draft: Pick<ComposerDraft, 'kinds' | 'options'>): SocialPostTargetInput[] {
   return Object.entries(draft.kinds).map(([toolkit, post_kind]) => {
     const options = draft.options[toolkit]
     return options && Object.keys(options).length > 0 ? { toolkit, post_kind, options } : { toolkit, post_kind }
@@ -124,7 +126,10 @@ export function copyCount(text: string, limits: SocialCopyLimits | null | undefi
 }
 
 /** The chosen channels whose copy is over their limits: submit waits until there are none. */
-export function channelsOverLimit(draft: ComposerDraft, channels: ReadonlyArray<SocialChannel>): string[] {
+export function channelsOverLimit(
+  draft: Pick<ComposerDraft, 'kinds' | 'perChannel' | 'base'>,
+  channels: ReadonlyArray<SocialChannel>,
+): string[] {
   return Object.keys(draft.kinds).filter((toolkit) => {
     const channel = channels.find((c) => c.toolkit === toolkit)
     return copyCount(draft.perChannel[toolkit] ?? draft.base, channel?.copy_limits).over

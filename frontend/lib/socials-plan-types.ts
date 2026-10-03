@@ -1,0 +1,176 @@
+/**
+ * PRD-251B Wave 2 — the shapes of a Socials plan, its slots and its content bank, as
+ * /api/socials/plans answers them (orchestrator/api/socials_plans.py, socials_topics.py),
+ * and the music library (GET /api/socials/music). apiClient (lib/api-client.ts) calls the
+ * routes; this file only names what they carry.
+ */
+
+export type SocialPlanStatus = 'active' | 'paused' | 'ended'
+export type SocialLatePolicy = 'skip' | 'next_slot'
+export type SocialWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+/** One cadence row: a channel group posting one format on some days at one time. */
+export interface SocialPlanCadenceRow {
+  id: string
+  channels: string[]
+  format: string
+  length_seconds: number | null
+  /** null lets Auto pick the template when the post is made. */
+  template_id: string | null
+  days: SocialWeekday[]
+  /** HH:MM in the plan's timezone. */
+  time: string
+}
+
+export interface SocialPlanSources {
+  knowledge: boolean
+  deliverables: boolean
+  website: boolean
+  github: boolean
+  notes: string
+  never_say: string[]
+}
+
+export interface SocialPlanMake {
+  time: string
+  video_days_early: number
+  image_days_early: number
+  max_per_day: number | null
+  /** Shares of 100 among templates, library, ai_images and ai_footage. */
+  visual_mix: Record<string, number>
+}
+
+export interface SocialPlanResearch {
+  enabled: boolean
+  day: SocialWeekday
+  time: string
+  last_run_at?: string | null
+  last_run_id?: string | null
+}
+
+export interface SocialPlan {
+  id: string
+  workspace_id: string
+  name: string
+  kind: 'plan'
+  status: SocialPlanStatus
+  goal: string | null
+  audience: string | null
+  starts_on: string | null
+  ends_on: string | null
+  timezone: string | null
+  cadence: SocialPlanCadenceRow[]
+  sources: SocialPlanSources
+  make: SocialPlanMake
+  research: SocialPlanResearch
+  late_policy: SocialLatePolicy
+  approval_mode: 'per_post' | 'series'
+  slot_overrides: Record<string, { skip?: boolean; to?: string }>
+  created_by: string
+  created_at: string | null
+  updated_at: string | null
+  /** The content bank's counts. */
+  bank: { topics: number; unused: number }
+}
+
+export interface SocialPlansResponse {
+  plans: SocialPlan[]
+  total: number
+}
+
+/** What a create or an update sends: every field a plan's form edits; a new row has no id yet. */
+export interface SocialPlanInput {
+  name?: string
+  goal?: string | null
+  audience?: string | null
+  starts_on?: string
+  ends_on?: string
+  timezone?: string
+  cadence?: Array<Omit<SocialPlanCadenceRow, 'id'> & { id?: string }>
+  sources?: Partial<SocialPlanSources>
+  make?: Partial<SocialPlanMake>
+  research?: Partial<Pick<SocialPlanResearch, 'enabled' | 'day' | 'time'>>
+  late_policy?: SocialLatePolicy
+  approval_mode?: 'per_post' | 'series'
+}
+
+export interface SocialPlanSlot {
+  key: string
+  row_id: string
+  channels: string[]
+  format: string
+  length_seconds: number | null
+  template_id: string | null
+  local_date: string
+  local_time: string
+  /** UTC ISO. */
+  at: string
+  moved: boolean
+  state: 'planned' | 'made'
+  post: { id: string; title: string; status: string; at: string | null } | null
+  /** The topic pinned to the slot's day, while the slot is not made. */
+  topic: { id: string; title: string } | null
+}
+
+export interface SocialPlanSlotsResponse {
+  plan_id: string
+  slots: SocialPlanSlot[]
+}
+
+export type SocialFactSourceKind = 'knowledge' | 'deliverable' | 'web' | 'github' | 'note'
+
+export interface SocialTopicFact {
+  text: string
+  source: { kind: SocialFactSourceKind; ref: string; label: string }
+}
+
+export interface SocialTopic {
+  id: string
+  workspace_id: string
+  plan_id: string
+  title: string
+  angle: string | null
+  facts: SocialTopicFact[]
+  formats: string[]
+  pinned_on: string | null
+  used_post_id: string | null
+  used_at: string | null
+  origin: 'research' | 'person'
+  created_by: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface SocialTopicsResponse {
+  topics: SocialTopic[]
+  total: number
+  unused: number
+}
+
+export interface SocialTopicInput {
+  title?: string
+  angle?: string | null
+  facts?: SocialTopicFact[]
+  formats?: string[]
+  pinned_on?: string | null
+}
+
+/** A track of media-render's music library: a post may pick it over its template's own. */
+export interface SocialMusicTrack {
+  id: string
+  title: string
+  artist: string
+  style: string
+  duration: number | null
+  licence: string
+  credit_required: boolean
+}
+
+export interface SocialMusicResponse {
+  tracks: SocialMusicTrack[]
+  /** false when the workspace has no renderer to read the library from. */
+  available: boolean
+}
+
+/** A post's music: null is the template's own track; {track: null} none. */
+export type SocialPostMusic = { track: string | null } | null

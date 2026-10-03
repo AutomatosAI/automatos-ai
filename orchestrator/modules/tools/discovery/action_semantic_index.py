@@ -14,11 +14,11 @@ import logging
 import threading
 import time
 from contextvars import ContextVar
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from .action_registry import ActionDefinition, action_is_available, get_action_registry
+from .action_registry import ActionDefinition, action_is_available, get_action_registry, hidden_categories_now
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +203,7 @@ class ActionSemanticIndex:
         exclude_promoted: bool,
         include_super_admin: bool = False,
         available_only: bool = True,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> List[ActionDefinition]:
         # PRD-143: fail-closed — super_admin_only actions are eligible ONLY
         # when include_super_admin=True is passed explicitly.
@@ -210,11 +211,15 @@ class ActionSemanticIndex:
         # — the narrowed enum is built from this set, and an unconfigured
         # Prometheus / Loki kept taking slots in it. The embedding build passes
         # available_only=False so a tool configured later is ready to rank.
+        # PRD-251B US-B106: a hidden category (Socials while it is off for the
+        # workspace) is not eligible for any shortlist.
+        hidden = hidden_categories_now(exclude_categories)
         return [
             a for a in self._registry.get_all()
             if not (exclude_admin and a.admin_only)
             and not (exclude_promoted and a.promoted)
             and (include_super_admin or not a.super_admin_only)
+            and a.category not in hidden
             and (not available_only or action_is_available(a))
         ]
 
@@ -225,6 +230,7 @@ class ActionSemanticIndex:
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
         include_super_admin: bool = False,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> List[str]:
         """PRD-238 S11: the no-embedding shortlist — plain token overlap over the
         same su-gated eligible set ``rank_actions`` uses. Used when the live
@@ -232,7 +238,9 @@ class ActionSemanticIndex:
         shortlist instead of the full enum. Sync and I/O-free."""
         from .lexical_rank import lexical_rank as _lexical
 
-        eligible = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+        eligible = self._eligible_actions(
+            exclude_admin, exclude_promoted, include_super_admin, exclude_categories=exclude_categories
+        )
         return [name for name, _score in _lexical(query, eligible, top_k=top_k)]
 
     async def ensure_indexed(
@@ -392,8 +400,12 @@ class ActionSemanticIndex:
         embed_timeout_s: Optional[float] = None,
         workspace_id: Optional[str] = None,
         agent_id: Optional[int] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> List[Tuple[str, float]]:
         """Rank eligible actions by cosine similarity to ``query``.
+
+        PRD-251B US-B106: ``exclude_categories`` leaves a hidden category (Socials while
+        it is off for the workspace) out of the slice; the shared ranking is untouched.
 
         PRD-232 US-003: the expensive work — indexing, the query embed, and the
         cosine pass over the su-gated candidate set — is computed ONCE per turn
@@ -427,7 +439,9 @@ class ActionSemanticIndex:
             return []
         eligible = {
             a.name
-            for a in self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+            for a in self._eligible_actions(
+                exclude_admin, exclude_promoted, include_super_admin, exclude_categories=exclude_categories
+            )
         }
         scored = [(n, s) for (n, s) in full if n in eligible]
         scored = _apply_relevance_floor(scored, *_relevance_floor_config())

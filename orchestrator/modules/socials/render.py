@@ -68,7 +68,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 from config import config
@@ -93,7 +93,10 @@ from core.media_render_quota import (
     sessions_for,
 )
 from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
-from core.social_templates import SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
+from core.social_cuts import cut_to_length, slots_cut_out
+from modules.socials.kokoro_voices import with_kokoro_voice
+from modules.socials.music import with_music
+from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
 from modules.socials import notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
@@ -201,6 +204,9 @@ def bundle_for(
         blocks = validate_social_blocks(blocks, template.format)
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
+    blocks = at_chosen_length(blocks, post)
+    if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
+        blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
     supplied = {
         name: spec.get("value")
         for name, spec in (getattr(post, "variables", None) or {}).items()
@@ -223,22 +229,38 @@ def bundle_for(
     )
 
 
+def at_chosen_length(blocks: Mapping[str, Any], post: Any) -> Dict[str, Any]:
+    """PRD-251B (B5, US-B103/B104): a post that chose a length renders that cut of the
+    template's timeline (``core/social_cuts.py``); without a choice, the template as authored."""
+    length = getattr(post, "length_seconds", None)
+    if isinstance(length, int) and not isinstance(length, bool) and length > 0:
+        return cut_to_length(blocks, length)
+    return dict(blocks)
+
+
 async def reserve_seconds(db: Any, workspace: Any, post: Any, template: Any) -> RenderReservation:
     """Hold the post's render against the month's quota, before anything reaches
     media-render (P251W1-RVW-3): its template's declared duration, in a session of
-    its own on ``db``'s database. ``RenderQuotaExceeded`` when the minutes used and
-    those renders in progress hold leave none."""
+    its own on ``db``'s database; the post's chosen length when it has one (US-B104).
+    ``RenderQuotaExceeded`` when the minutes used and those renders in progress hold leave none."""
+    blocks = composition_of(template)
     return await reserve_render(
         sessions_for(db),
         workspace,
-        declared_seconds(composition_of(template), getattr(template, "format", None)),
+        declared_seconds(at_chosen_length(blocks, post) if blocks is not None else None, getattr(template, "format", None)),
         execution_id=f"{EXECUTION_PREFIX}{post.id}",
     )
 
 
-def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_recipes.FootagePlan]:
+def footage_plan_for(
+    post: Any, template: Any, caps: Any, *, style: str = "", prefer: Optional[Mapping[str, str]] = None,
+    references: Tuple[str, ...] = (),
+) -> Optional[footage_recipes.FootagePlan]:
     """The footage the post asks for (US-114), planned over its template's slots
-    with the workspace's media capabilities ``caps``; ``None`` when it asks for none."""
+    with the workspace's media capabilities ``caps``; ``None`` when it asks for none.
+    ``style`` (the brand kit's style profile, US-B303) follows every shot's prompt; ``prefer``
+    names the workspace's default toolkit per slot kind (US-B304), tried first; ``references``
+    links the kit's liked style references (US-B305)."""
     if not getattr(post, "footage", None):
         return None
     blocks = composition_of(template)
@@ -249,7 +271,13 @@ def footage_plan_for(post: Any, template: Any, caps: Any) -> Optional[footage_re
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
     width, height = render_size(blocks)
-    return footage_recipes.plan_for(post.footage, blocks.get("slots"), caps, width=width, height=height)
+    length = getattr(post, "length_seconds", None)
+    # US-B104: a slot the chosen cut never shows gets no footage made.
+    hidden = slots_cut_out(blocks, length) if isinstance(length, int) and not isinstance(length, bool) and length > 0 else set()
+    footage = post.footage if isinstance(post.footage, Mapping) else {}
+    asked = {slot: record for slot, record in footage.items() if slot not in hidden}
+    return footage_recipes.plan_for(asked, blocks.get("slots"), caps, width=width, height=height, style=style, prefer=prefer,
+                                    references=references)
 
 
 @dataclass(frozen=True)

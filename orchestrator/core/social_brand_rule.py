@@ -91,12 +91,13 @@ COLOUR_SHORTHANDS = frozenset(
 # The attributes that paint (SVG's, and HTML's old colour attributes).
 COLOUR_ATTRIBUTES = frozenset({"fill", "stroke", "stop-color", "flood-color", "lighting-color", "color", "bgcolor"})
 
-_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 _INNERMOST_BLOCK = re.compile(r"\{([^{}]*)\}")
 # A {{ … }} is filled at render time (its grammar is core.social_templates'); blanked,
 # its braces cannot hide its rule from the innermost-block scan.
 _PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
-_CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
+# url(…) with its argument quoted, bare or empty. Its spaces go to the argument or to the
+# close, never both, and a bare argument stops at a parenthesis, so a scan stays linear.
+_CSS_URL = re.compile(r"url\((?:\s*(?:\"([^\"]*)\"|'([^']*)'|([^()\s]+)))?\s*\)", re.IGNORECASE)
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A script's colour or font is a value: after ':' or '=' ("color: '#fff'", "el.style.color = '#fff'").
@@ -104,11 +105,12 @@ _SCRIPT_HEX = re.compile(r"""[:=]\s*(["'`])(#[0-9a-fA-F]{3,8})\1""")
 _SCRIPT_STRING = re.compile(r"""[:=]\s*(["'`])([^"'`\n]{1,80})\1""")
 _SCRIPT_FONT = re.compile(r"""fontFamily\s*[:=]\s*(["'`])(.*?)\1""")
 # A font shorthand's family list follows its size: "500 42px/1.2 Geist, sans-serif".
+# A number reads one way only and the list starts at a non-space, so a scan stays linear.
 _FONT_SIZE_THEN_FAMILY = re.compile(
-    r"(?:^|\s)(?:\d*\.?\d+(?:px|em|rem|%|pt|pc|vh|vw|vmin|vmax|ch|ex|cm|mm|in|q|lh|rlh)"
+    r"(?:^|\s)(?:(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%|pt|pc|vh|vw|vmin|vmax|ch|ex|cm|mm|in|q|lh|rlh)"
     r"|xx-small|x-small|small|medium|large|x-large|xx-large|xxx-large|larger|smaller)"
-    r"(?:\s*/\s*\S+)?\s+(.+)$",
-    re.IGNORECASE,
+    r"(?:\s*/\s*\S+)?\s+(\S.*)\Z",
+    re.IGNORECASE | re.DOTALL,
 )
 GENERIC_FAMILIES = frozenset(
     {
@@ -249,14 +251,26 @@ def _declaration_findings(prop: str, value: str) -> List[str]:
     findings = _font_findings(prop, value)
     bare = strip_var_calls(value)
     for match in _CSS_URL.finditer(bare):
-        finding = _reference_finding(next(g for g in match.groups() if g is not None))
+        finding = _reference_finding(next((g for g in match.groups() if g is not None), ""))
         if finding:
             findings.append(finding)
     return findings + _colour_findings(prop, _QUOTED.sub("", _CSS_URL.sub("", bare)))
 
 
+def _without_comments(css: str) -> str:
+    """``css`` with each closed ``/* … */`` cut out (an unclosed one stays), in one pass."""
+    kept, pos = [], 0
+    while True:
+        start = css.find("/*", pos)
+        end = css.find("*/", start + 2) if start >= 0 else -1
+        if end < 0:
+            return "".join(kept + [css[pos:]])
+        kept.append(css[pos:start])
+        pos = end + 2
+
+
 def _stylesheet_findings(css: str) -> List[str]:
-    text = _PLACEHOLDER.sub("0", _CSS_COMMENT.sub("", css or ""))
+    text = _PLACEHOLDER.sub("0", _without_comments(css or ""))
     return [
         finding
         for block in _INNERMOST_BLOCK.findall(text)

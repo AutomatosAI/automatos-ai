@@ -12,6 +12,7 @@ vi.mock('@/components/workspace-provider', () => ({ useWorkspace: () => ws }))
 vi.mock('@/components/deliverables/outputs-feed', () => ({ OutputsFeed: () => <div data-testid="body-outputs" /> }))
 vi.mock('@/components/deliverables/deliverables-blogs', () => ({ DeliverablesBlog: ({ variant }: { variant?: string }) => <div data-testid="body-blogs" data-variant={variant} /> }))
 vi.mock('@/components/documents/blocks/TemplateStudio', () => ({ TemplateStudio: () => <div data-testid="body-templates" /> }))
+vi.mock('@/components/deliverables/brand/brand-kit-tab', () => ({ BrandKitTab: () => <div data-testid="body-brand" /> }))
 vi.mock('@/components/workspace/gallery-view', () => ({ GalleryView: () => <div data-testid="gallery" /> }))
 vi.mock('@/components/icons/deliverable-icon', () => ({ isDeliverableType: (t: string) => t === 'report', deliverableLabel: () => 'Reports' }))
 vi.mock('@/hooks/use-deliverables-api', () => ({ DEFAULT_FILTERS: {}, FEED_DEFAULT_FILTERS: {} }))
@@ -22,10 +23,10 @@ beforeEach(() => { nav.replace.mockClear(); nav.push.mockClear(); nav.search = '
 afterEach(cleanup)
 
 describe('DeliverablesStudio', () => {
-  it('renders the head, four tabs (Explorer last) and the outputs feed by default', () => {
+  it('renders the head, five tabs (Brand kit after Templates, Explorer last) and the outputs feed by default', () => {
     const { container } = render(<DeliverablesStudio />)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Deliverables')
-    expect(container.querySelectorAll('nav.cc-tabs button.cc-tab')).toHaveLength(4)
+    expect(container.querySelectorAll('nav.cc-tabs button.cc-tab')).toHaveLength(5)
     expect(screen.getByTestId('body-outputs')).toBeInTheDocument()
   })
 

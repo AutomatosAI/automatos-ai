@@ -1042,8 +1042,27 @@ class PackageOut(BaseModel):
     showcase: bool = False
 
 
+def _socials_package_hidden(db: Session, workspace_id: Any) -> bool:
+    """PRD-251B US-B106 (B3, off means invisible): the Socials package is shown only while
+    Socials is on for the workspace. The seeder is unchanged, so turning Socials on later
+    needs no boot: the next request lists it."""
+    from core.models.workspaces import Workspace
+    from modules.socials.settings import socials_actions_hidden
+
+    return socials_actions_hidden(db.get(Workspace, workspace_id))
+
+
+def _visible_packages(db: Session, workspace_id: Any, packages: List[Any]) -> List[Any]:
+    """``packages`` less the Socials package while it is hidden for the workspace."""
+    from modules.socials.settings import SOCIALS_PACKAGE_SLUG
+
+    if not _socials_package_hidden(db, workspace_id):
+        return list(packages)
+    return [package for package in packages if package.slug != SOCIALS_PACKAGE_SLUG]
+
+
 @router.get("/packages", response_model=List[PackageOut])
-async def list_marketplace_packages(
+def list_marketplace_packages(
     showcase: Optional[bool] = Query(None, description="Filter to showcased packages only"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1052,12 +1071,15 @@ async def list_marketplace_packages(
 
     Each package carries full detail (members + setup_manifest) so the Packages
     tab's detail popup renders without a second fetch. All tiers see all packages
-    (D9) — nothing is hidden here; plan gating is a UI chip, never a filter.
+    (D9) — plan gating is a UI chip, never a filter. The one exception is a feature
+    that is switched off: the Socials package is left out while Socials is off for
+    the workspace (PRD-251B US-B106), and back on the next request once it is on.
     """
     from services.marketplace_packages import list_packages, list_showcased
 
     try:
         packages = list_showcased(db) if showcase else list_packages(db)
+        packages = _visible_packages(db, ctx.workspace_id, packages)
         # Showcased first, then name — a stable default order for the tab.
         packages = sorted(
             packages, key=lambda p: (not bool(p.showcase), (p.name or "").lower())
@@ -1069,16 +1091,20 @@ async def list_marketplace_packages(
 
 
 @router.get("/packages/{slug}", response_model=PackageOut)
-async def get_marketplace_package(
+def get_marketplace_package(
     slug: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Fetch a single package by slug (deep-link / refresh support for the popup)."""
+    """Fetch a single package by slug (deep-link / refresh support for the popup).
+
+    The Socials package is not found while Socials is off for the workspace (PRD-251B
+    US-B106): a deep link shows no more than the list does.
+    """
     from services.marketplace_packages import get_by_slug
 
     package = get_by_slug(db, slug)
-    if package is None:
+    if package is None or not _visible_packages(db, ctx.workspace_id, [package]):
         raise HTTPException(status_code=404, detail="Package not found")
     return package.to_dict()
 

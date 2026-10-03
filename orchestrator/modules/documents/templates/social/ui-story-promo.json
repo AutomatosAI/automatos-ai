@@ -1,11 +1,42 @@
 {
   "name": "UI story promo",
-  "description": "A 39.5 s vertical product story told with animated product screens and no footage: the hook on a clock, the reveal on the kick, a request in chat, the board taking it, a question for you, the work done by morning, what landed, the team, and the end card. Ported from the v1 reference video (PRD-251A). Its music is \"Where the Night Begins\" by Sascha Ende (CC BY 4.0) from 190.1 s, as in the reference; the post's copy carries its credit.",
+  "description": "A 39.5 s vertical product story told with animated product screens and no footage: the hook on a clock, the reveal on the kick, a request in chat, the board taking it, a question for you, the work done by morning, what landed, the team, and the end card. Ported from the v1 reference video (PRD-251A). Its music is \"Where the Night Begins\" by Sascha Ende (CC BY 4.0) from 190.1 s, as in the reference; the post's copy carries its credit. Also cut to 15 s (the hook, the board taking the work, the end card) and 30 s (without the outputs and the team).",
   "format": "social_video",
   "category": "social",
   "sizes": [
     "1080x1920"
   ],
+  "durations": [
+    15,
+    30,
+    40
+  ],
+  "cuts": {
+    "15": [
+      [
+        0,
+        4.0
+      ],
+      [
+        12.59,
+        18.0
+      ],
+      [
+        31.85,
+        37.44
+      ]
+    ],
+    "30": [
+      [
+        0,
+        24.35
+      ],
+      [
+        31.85,
+        37.5
+      ]
+    ]
+  },
   "variables_schema": {
     "hook_eyebrow": {
       "type": "text",

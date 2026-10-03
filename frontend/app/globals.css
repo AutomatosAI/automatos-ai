@@ -3231,6 +3231,13 @@
     :is(.studio, .socials-tab) .socials-board { scroll-snap-type: x mandatory; }
     :is(.studio, .socials-tab) .socials-board-col { width: 84%; scroll-snap-align: start; }
     :is(.studio, .socials-tab) :is(.socials-back, .socials-view-toggle button) { min-height: 44px; }
+
+    /* ── Socials Studio · PRD-251B US-B107 ─────────────────────────────
+       The sub-navigation wraps (its items are 44 px tall already); the two
+       header actions take the width under it, as thumb targets. The
+       Studio renders in both shells, so it hangs off its own root too. */
+    :is(.studio, .socials-studio) .socials-studio-actions { width: 100%; }
+    :is(.studio, .socials-studio) .socials-studio-actions > * { flex-grow: 1; min-height: 44px; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */

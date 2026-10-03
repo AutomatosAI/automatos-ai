@@ -226,7 +226,20 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # 2026-10-02: prd252_ticket_numbers merges the two heads #852 left (PRD-252 R4).
     numbers = (versions / "prd252_ticket_numbers.py").read_text()
     assert 'down_revision = ("prd251_wave2", "document_chunks_ingestion_columns")' in numbers
-    assert 'EXPECTED_HEAD = "prd252_ticket_numbers"' in guard
+    # 2026-10-02 (PRD-251B Wave 1): prd251b_wave1 chains onto that merge — the ONE
+    # migration of the Studio wave (social_posts.planned_for, length_seconds, the
+    # text format); the guard follows it.
+    studio = (versions / "prd251b_wave1.py").read_text()
+    assert 'down_revision = "prd252_ticket_numbers"' in studio
+    # 2026-10-03 (PRD-251B Wave 2): prd251b_wave2 chains onto it — the ONE migration of
+    # the plans wave (the plan columns, slot_key, music, social_topics); the guard follows it.
+    plans = (versions / "prd251b_wave2.py").read_text()
+    assert 'down_revision = "prd251b_wave1"' in plans
+    # 2026-10-03 (PRD-251B Wave 3): prd251b_wave3 chains onto it — the ONE migration of the
+    # brand kit wave (the reference_image flag in the media allowlist); the guard follows it.
+    brand = (versions / "prd251b_wave3.py").read_text()
+    assert 'down_revision = "prd251b_wave2"' in brand
+    assert 'EXPECTED_HEAD = "prd251b_wave3"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

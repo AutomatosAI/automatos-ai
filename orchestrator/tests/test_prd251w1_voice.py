@@ -945,7 +945,8 @@ def test_without_a_voice_toolkit_only_kokoro_is_offered_and_the_others_link_to_c
     body = _sources(env)
     assert body["problem"] is None
     assert body["sources"] == [
-        {"toolkit": "kokoro", "label": "Kokoro (built in)", "status": "available", "builtin": True, "lists_voices": False},
+        # PRD-251B (US-B306): Kokoro lists its voices (test_prd251bw3_kokoro.py).
+        {"toolkit": "kokoro", "label": "Kokoro (built in)", "status": "available", "builtin": True, "lists_voices": True},
         {"toolkit": "elevenlabs", "label": "ElevenLabs", "status": "connect", "builtin": False, "lists_voices": False},
         {"toolkit": "fish_audio", "label": "Fish Audio", "status": "connect", "builtin": False, "lists_voices": False},
     ]

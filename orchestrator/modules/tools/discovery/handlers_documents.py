@@ -120,10 +120,15 @@ async def get_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[str, 
     workspace = _workspace(db, workspace_id)
     if workspace is None:
         return {"success": False, "error": "Workspace not found"}
+    from modules.documents.brand_style import style_prompt
+
     return {
         "success": True,
         "brand_kit": brand_kit.get_brand_kit(workspace.settings),
         "suggestions": brand_kit.brand_kit_suggestions(db, workspace),
+        # PRD-251B (US-B303): the style profile read from the kit's references; every image
+        # and footage prompt an agent writes follows it. Empty while there is none.
+        "style_profile": style_prompt(workspace.settings),
     }
 
 

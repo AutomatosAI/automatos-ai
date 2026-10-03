@@ -1,8 +1,8 @@
 /**
  * PRD-251 S2.4 (US-210, D6) — the Campaigns view and the "Approve series" confirmation.
  *
- * * A third view beside List and Board: the workspace's campaigns, and the selected
- *   one with its posts and their statuses.
+ * * The Studio's Plans view (PRD-251B US-B107; B6, a plan is a campaign): the
+ *   workspace's campaigns, and the selected one with its posts and their statuses.
  * * "Approve series" is offered only when the workspace's series approval is on and
  *   the campaign approves as a series; otherwise it says why.
  * * The confirmation lists the posts it will approve (those waiting for approval)
@@ -25,6 +25,13 @@ const state = vi.hoisted(() => ({
   } as any,
 }))
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // US-B108: the calendar's List is the post list these tests drive.
+  useSearchParams: () => new URLSearchParams('tab=socials&cal=list'),
+}))
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsTabletOrBelow: () => false }))
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: state.workspace, isLoading: false, refreshWorkspace: vi.fn(async () => {}) }),
@@ -89,7 +96,7 @@ function renderTab() {
 
 async function openCampaigns() {
   renderTab()
-  fireEvent.click(await screen.findByRole('button', { name: 'Campaigns' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Plans' }))
   return screen.findByRole('region', { name: 'Campaign Web Summit countdown' })
 }
 
@@ -104,9 +111,9 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the Campaigns view', () => {
-  it('is a third view: the campaigns, and the selected one with its posts and their statuses', async () => {
+  it('is the Plans view: the campaigns, and the selected one with its posts and their statuses', async () => {
     const detail = await openCampaigns()
-    expect(screen.getByRole('button', { name: 'Campaigns' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Plans' })).toHaveAttribute('aria-current', 'page')
     const list = screen.getByRole('list', { name: 'Campaigns' })
     expect(within(list).getByRole('button', { name: /Web Summit countdown/ })).toHaveTextContent('As a series · 3 posts')
 

@@ -16,6 +16,7 @@ import { useWorkspace } from '@/components/workspace-provider'
 import { DEFAULT_FILTERS, FEED_DEFAULT_FILTERS, type FilterState } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
+import { BrandKitTab } from '@/components/deliverables/brand/brand-kit-tab'
 import { resolveDeliverableTab, visibleDeliverableTabs, type DeliverableTab } from '@/lib/deliverables/tabs'
 import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 
@@ -23,6 +24,7 @@ const TAB_LABELS: Record<DeliverableTab, string> = {
   outputs: 'Outputs',
   blogs: 'Blogs',
   templates: 'Templates',
+  brand: 'Brand kit',
   socials: 'Socials',
 }
 /** The file explorer is its own route; it sits on the strip as the last tab. */
@@ -111,6 +113,7 @@ export function DeliverablesStudio() {
         ))}
       {tab === 'blogs' && <DeliverablesBlog variant="studio" />}
       {tab === 'templates' && <TemplateStudio />}
+      {tab === 'brand' && <BrandKitTab />}
       {tab === 'socials' && <SocialsTab postId={searchParams?.get('post') ?? null} />}
     </div>
   )

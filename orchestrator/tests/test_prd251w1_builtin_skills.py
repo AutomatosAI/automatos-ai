@@ -9,7 +9,8 @@ ONLY the seed files it is told to. Pins:
 1. platform-management is created and refreshed exactly as before: the same
    row, at the same path, under the same lock key, through Auto's seeding.
 2. A fixture built-in skill in a test manifest is created at seed time and
-   refreshed at load after its file changes; an entry not synced yet is skipped.
+   refreshed at load after its file changes, and at boot too (F239: Auto's prompt
+   reads the row, never the loader); an entry not synced yet is skipped.
 3. sync-skills.py syncs only the named fixture skills into the seeds folder with
    the banner, never touches an unnamed entry (platform-management included),
    and refuses a source with no frontmatter (pure file IO).
@@ -325,6 +326,51 @@ def test_a_fixture_builtin_is_refreshed_at_load_after_its_file_changes(db, fixtu
     db.expire_all()
     row = db.query(Skill).one()
     assert (row.prompt_template, row.content_hash) == (changed.body, changed.content_hash)
+
+
+def test_a_stale_builtin_row_is_refreshed_at_boot_and_autos_prompt_reads_it(db, fixture_manifest):
+    """F239 (build 6): the v2.3.1 seed sat in the image while Auto's prompt read the old
+    row for 29 turns. SkillsSection reads the row's prompt_template itself and never
+    goes through the loader's refresh, so the boot seeder refreshes it."""
+    from modules.context.sections.skills import SkillsSection
+
+    seed_path = fixture_manifest.parent / "fixture-skill.md"
+    seeder.seed_builtin_skills(db, manifest_path=fixture_manifest)
+    db.query(Skill).one().description = "the owner's own words"
+    db.commit()
+    _write(seed_path, _seed("fixture-skill", version="1.3.0", body="Draft five posts, each with its source."))
+
+    outcome = seeder.seed_builtin_skills(db, manifest_path=fixture_manifest)
+    db.commit()
+    changed = read_seed(seed_path)
+    assert outcome["refreshed"] == ["fixture-skill"] and outcome["present"] == []
+    row = db.query(Skill).one()
+    assert (row.prompt_template, row.content_hash, row.skill_version) == (changed.body, changed.content_hash, "1.3.0")
+    assert row.description == "the owner's own words"                    # only the body, its hash and version
+    assert SkillsSection._core_skill_body(row, SimpleNamespace(db_session=None)) == changed.body.strip()
+    assert seeder.seed_builtin_skills(db, manifest_path=fixture_manifest)["present"] == ["fixture-skill"]
+
+
+def test_our_row_is_refreshed_beside_a_git_import_of_the_same_name(db, fixture_manifest):
+    """F239: build 6's database (built by create_all, without the partial unique index)
+    holds row 130, a git import named platform-management, beside the built-in row. An
+    unordered first() that returns the import leaves the built-in row stale."""
+    db.execute(sa.text("DROP INDEX IF EXISTS uq_skills_marketplace_name"))
+    db.add(_git_row(id=1))
+    db.add(Skill(id=2, name="fixture-skill", description="the built-in", skill_type="technical",
+                 category="agent-role", skill_version="1.0.0", skill_source="builtin:fixture-skill",
+                 prompt_template="AN OLDER BODY", content_hash="0" * 64, is_active=True, workspace_id=None))
+    db.commit()
+    git_before = _snapshot(db.get(Skill, 1))
+
+    outcome = seeder.seed_builtin_skills(db, manifest_path=fixture_manifest)
+    db.commit()
+
+    seed = read_seed(fixture_manifest.parent / "fixture-skill.md")
+    assert outcome["refreshed"] == ["fixture-skill"] and outcome["left_alone"] == []
+    db.expire_all()
+    assert (db.get(Skill, 2).prompt_template, db.get(Skill, 2).content_hash) == (seed.body, seed.content_hash)
+    assert _snapshot(db.get(Skill, 1)) == git_before
 
 
 def test_a_seed_without_a_description_is_not_seeded(db, tmp_path):

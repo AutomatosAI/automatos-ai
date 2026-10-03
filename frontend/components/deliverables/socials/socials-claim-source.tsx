@@ -17,10 +17,12 @@ interface ClaimSourceProps {
   name: string
   source: SocialClaimSource | null
   onChange: (source: SocialClaimSource | null) => void
+  /** PRD-251B US-B109: the editor's "Add a source" opens this claim's search. */
+  initiallyPicking?: boolean
 }
 
-export function ClaimSource({ name, source, onChange }: ClaimSourceProps) {
-  const [picking, setPicking] = useState(false)
+export function ClaimSource({ name, source, onChange, initiallyPicking = false }: ClaimSourceProps) {
+  const [picking, setPicking] = useState(initiallyPicking)
   const [q, setQ] = useState('')
   const search = useSocialSourceSearch(q.trim(), picking)
   const candidates = search.data?.candidates ?? []
@@ -32,7 +34,7 @@ export function ClaimSource({ name, source, onChange }: ClaimSourceProps) {
   }
 
   return (
-    <div className="space-y-1.5" data-testid={`socials-claim-source-${name}`}>
+    <div className="space-y-1.5" id={`socials-claim-source-${name}`} data-testid={`socials-claim-source-${name}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         {source ? (
           <span className="text-muted-foreground">

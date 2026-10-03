@@ -146,7 +146,9 @@ export interface BrandKit {
   logo_mark_url: string
   logo_mark_path: string
   // The brand's handle per Composio toolkit (linkedin, twitter, ...), without the "@".
-  social_handles: Record<string, string>
+  // Absent while Socials is off for the workspace (PRD-251B US-B106): the server keeps
+  // the stored handles and answers without them, and the dialog shows no handles editor.
+  social_handles?: Record<string, string>
   voice: BrandVoice
 }
 

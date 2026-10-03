@@ -141,6 +141,10 @@ class DocumentTemplateService:
                 **kwargs,
                 "blocks": checked_blocks(kwargs.get("format", template.format), kwargs.get("blocks", template.blocks)),
             }
+        # PRD-251B (US-B102): a changed composition, format or sample invalidates the
+        # gallery thumbnail; the next gallery list renders it again.
+        if "thumbnail_url" not in kwargs and any(k in kwargs for k in ("blocks", "format", "template_content", "sample_data")):
+            kwargs = {**kwargs, "thumbnail_url": None}
         for key, value in kwargs.items():
             if hasattr(template, key) and key not in ("id", "workspace_id", "created_at"):
                 setattr(template, key, value)

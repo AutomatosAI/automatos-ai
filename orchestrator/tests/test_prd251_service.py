@@ -177,9 +177,14 @@ PUBLISH_MOVES = {
 }
 
 
+# PRD-251B (B11, US-B105): a planned slot that passes unapproved ends missed; a missed post
+# without an approval restarts as a draft with a new slot.
+SLOT_MOVES = {(DRAFT, "missed"), (NEEDS_APPROVAL, "missed"), (CHANGES_REQUESTED, "missed"), ("missed", DRAFT)}
+
+
 def test_the_table_is_exactly_the_machine_through_wave_3():
     table = {(src, dst) for src, dsts in service.ALLOWED_TRANSITIONS.items() for dst in dsts}
-    assert table == set(ALLOWED) | PUBLISH_MOVES
+    assert table == set(ALLOWED) | PUBLISH_MOVES | SLOT_MOVES
     assert service.TRANSITIONS == {
         "submit": {DRAFT: NEEDS_APPROVAL, CHANGES_REQUESTED: NEEDS_APPROVAL},
         "approve": {NEEDS_APPROVAL: APPROVED},
@@ -197,6 +202,8 @@ def test_the_table_is_exactly_the_machine_through_wave_3():
         "partially_published": {"publishing": "partially_published"},
         "publish_failed": {"publishing": FAILED},
         "missed": {SCHEDULED: "missed"},
+        "slot_passed": {DRAFT: "missed", NEEDS_APPROVAL: "missed", CHANGES_REQUESTED: "missed"},
+        "reslot": {"missed": DRAFT},
     }
 
 

@@ -6,6 +6,27 @@
  * Base URL: NEXT_PUBLIC_API_URL.
  */
 
+import type {
+  BrandReferenceChange,
+  BrandReferenceStance,
+  BrandStyleResponse,
+  SocialAiOption,
+  SocialAiOptionsState,
+  SocialMediaToolsInput,
+  SocialMediaToolsResponse,
+} from './brand-style-types'
+import type {
+  SocialMusicResponse,
+  SocialPlan,
+  SocialPlanInput,
+  SocialPlansResponse,
+  SocialPlanSlotsResponse,
+  SocialPostMusic,
+  SocialTopic,
+  SocialTopicInput,
+  SocialTopicsResponse,
+} from './socials-plan-types'
+
 interface ApiResponse<T = any> {
   data: T
   success: boolean
@@ -453,7 +474,10 @@ export interface SocialReviewEntry {
   comment: string | null
 }
 
-/** D11 (S1.5): the voice toolkit a post is spoken with; `null` on the post is Kokoro, the template's own voice. */
+/**
+ * D11 (S1.5): the voice a post is spoken with; `null` on the post is Kokoro with the template's
+ * own voice. PRD-251B US-B306: `{ toolkit: 'kokoro', voice_id }` is one of Kokoro's voices.
+ */
 export interface SocialPostVoice {
   toolkit: string
   voice_id: string
@@ -478,6 +502,10 @@ export interface SocialPostFootage {
   estimate_usd?: number
   cost_usd?: number
   generated_at?: string
+  /** PRD-251B US-B305: the AI options made for an image slot, until one is picked. */
+  options?: SocialAiOption[]
+  options_state?: SocialAiOptionsState
+  options_error?: string
 }
 
 export interface SocialPost {
@@ -504,10 +532,19 @@ export interface SocialPost {
   review_log: SocialReviewEntry[]
   scheduled_for: string | null
   timezone: string | null
+  /** PRD-251B (B11): the slot the post is planned for, UTC; moving it never voids an approval. */
+  planned_for: string | null
+  /** PRD-251B (B5): the chosen video length in seconds, one the template declares. */
+  length_seconds: number | null
+  /** US-210: the campaign (a plan, B6) the post belongs to, if any. */
+  campaign_id?: string | null
   /** Where the post publishes (US-204): approved content, so changing them resets an approval. */
   targets?: SocialPostTarget[]
   /** US-208: the composer's last preview render (half resolution), outside the hash and `media`. */
   preview?: SocialPostPreview | null
+  /** PRD-251B Wave 2: the plan slot the post was made for, and its music (null: the template's). */
+  slot_key?: string | null
+  music?: SocialPostMusic
   created_at: string
   updated_at: string
 }
@@ -609,6 +646,10 @@ export interface CreateSocialPostInput {
   template_id?: string | null
   variables?: Record<string, SocialPostVariable>
   sources?: Record<string, SocialClaimSource>
+  /** PRD-251B (B5): the chosen video length, one the template declares. */
+  length_seconds?: number | null
+  /** Slot name → `{ prompt }`; `null` asks for no footage. */
+  footage?: Record<string, { prompt: string }> | null
 }
 
 /** POST /api/socials/compose (US-207): what the composer asks for. */
@@ -617,6 +658,9 @@ export interface SocialComposeInput {
   /** The channels (toolkits) to write for; every connected one when omitted. */
   channels?: string[]
   format?: string | null
+  /** PRD-251B (US-B103): the editor's chosen template and length, honoured by the proposal. */
+  template_id?: string | null
+  length_seconds?: number | null
 }
 
 /** The composer's draft proposal: checked by the server, never saved until "Save draft". */
@@ -646,6 +690,12 @@ export interface UpdateSocialPostInput {
   template_id?: string | null
   variables?: Record<string, SocialPostVariable>
   sources?: Record<string, SocialClaimSource>
+  /** PRD-251B (B5): the chosen video length; null for none. */
+  length_seconds?: number | null
+  /** The post's files, `{aspect: [Deliverable ids]}`: the editor's Library picks one (US-B109). */
+  media?: Record<string, string[]>
+  /** PRD-251B: the music (a render setting): null the template's track, {track: null} none. */
+  music?: SocialPostMusic
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -707,6 +757,58 @@ export interface SocialsUsageResponse {
  * a presigned link served inline (it expires; fetch the list again for a fresh one).
  * `url` is null when the file has no stored object, and `error` says why.
  */
+/** One of the workspace's social templates, for the editor's Look gallery (PRD-251B US-B102). */
+export interface SocialTemplateSummary {
+  id: string
+  name: string
+  description: string | null
+  /** The template format: social_image | social_video. */
+  format: string
+  kind: 'image' | 'video'
+  sizes: string[]
+  /** The lengths a video template offers, in seconds (US-B104); an image offers none. */
+  durations: number[]
+  /** A presigned inline link to the rendered thumbnail, or null until the backfill made one. */
+  thumbnail_url: string | null
+  is_starter: boolean
+  updated_at: string | null
+  /** The slots a generation toolkit may fill (S1.8): the hook and b-roll the AI footage switch asks for, and the stills. */
+  footage_slots: string[]
+  /** PRD-251B US-B305: those of them that take a still: the Look card's AI-made images. */
+  image_slots?: string[]
+  /** The template's fields, some of them claims (D7): the editor's Claims and sources card. */
+  variables_schema: Record<string, SocialTemplateVariable>
+}
+
+/** GET /api/socials/footage (D12, D15): the generation toolkit a render would use per kind, or why none. */
+export interface SocialFootageKind {
+  available: boolean
+  toolkit?: string
+  label?: string
+  model?: string
+  reason?: string
+}
+
+export interface SocialFootageSources {
+  kinds: { video?: SocialFootageKind; image?: SocialFootageKind }
+  problem?: string | null
+}
+
+/** GET /api/deliverables: the fields the editor's Library shows (PRD-251B US-B109). */
+export interface DeliverableSummary {
+  id: string
+  title: string
+  artifact_type: string
+  file_name: string | null
+  preview_url: string | null
+  created_at: string
+}
+
+export interface DeliverableSummaryList {
+  deliverables: DeliverableSummary[]
+  total: number
+}
+
 export interface SocialPostMediaLink {
   aspect: string
   deliverable_id: string
@@ -770,6 +872,8 @@ export interface SocialCampaign {
   updated_at: string
   /** GET /api/socials/campaigns: how many posts the campaign holds. */
   post_count?: number
+  /** PRD-251B (B6): a plan is a campaign of kind "plan". */
+  kind?: 'campaign' | 'plan'
 }
 
 /** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
@@ -2833,6 +2937,36 @@ class ApiClient {
   }
 
   // ===== PRD-251 Socials: the workspace switch and the post lifecycle =====
+  /** PRD-251B US-B111: Auto makes another take of a post in the Queue (the reviewer's guidance, if any). */
+  async retakeSocialPost(postId: string, guidance?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retake`, {
+      method: 'POST',
+      body: JSON.stringify(guidance ? { guidance } : {}),
+    })
+  }
+
+  /** PRD-251B US-B109: the post's visual becomes an uploaded file (PNG, JPEG, WebP or MP4; the server sniffs it). */
+  async uploadSocialPostMedia(postId: string, file: File): Promise<SocialPost> {
+    const form = new FormData()
+    form.append('file', file)
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/media`, { method: 'POST', body: form })
+  }
+
+  /** GET /api/deliverables of one artifact type, newest first (the editor's Library, US-B109). */
+  async listDeliverables(params: { artifact_type?: string; limit?: number; offset?: number } = {}): Promise<DeliverableSummaryList> {
+    const query = new URLSearchParams()
+    if (params.artifact_type) query.set('artifact_type', params.artifact_type)
+    if (params.limit) query.set('limit', String(params.limit))
+    if (params.offset) query.set('offset', String(params.offset))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return this.request<DeliverableSummaryList>(`/api/deliverables${suffix}`)
+  }
+
+  /** GET /api/socials/footage (D12): what a template's slots can be filled with here. */
+  async getSocialFootageSources(): Promise<SocialFootageSources> {
+    return this.request<SocialFootageSources>('/api/socials/footage')
+  }
+
   async setWorkspaceSocialsEnabled(enabled: boolean): Promise<{ status: string; socials: WorkspaceSocialsState }> {
     return this.request('/api/workspaces/current/socials', {
       method: 'PUT',
@@ -2962,6 +3096,23 @@ class ApiClient {
     return this.request<SocialPostMediaLink[]>(`/api/socials/posts/${postId}/media`)
   }
 
+  /** PUT /api/socials/posts/{id}/slot (PRD-251B US-B105): the slot the post is planned for, in its zone.
+   * Before approval it is set alone (never a content change); an approved or scheduled post is
+   * rescheduled; a missed post without an approval restarts as a draft at the new slot. */
+  async setSocialPostSlot(postId: string, plannedFor: string | null, timezone?: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/slot`, {
+      method: 'PUT',
+      body: JSON.stringify({ planned_for: plannedFor, timezone }),
+    })
+  }
+
+  /** GET /api/socials/templates (PRD-251B US-B102): the workspace's social templates for the
+   * gallery, with their declared lengths and thumbnails; `format` narrows to one post format's kind. */
+  async listSocialTemplates(format?: string): Promise<SocialTemplateSummary[]> {
+    const query = format ? `?format=${encodeURIComponent(format)}` : ''
+    return this.request<SocialTemplateSummary[]>(`/api/socials/templates${query}`)
+  }
+
   /** The workspace's connected social channels and the post kinds each can publish (D8). */
   /** POST /api/socials/compose (US-207): a brief becomes a draft proposal, not saved.
    * 502 when the model's answer cannot be read; 504 when it is too slow. */
@@ -3055,6 +3206,145 @@ class ApiClient {
     return this.request<SocialSeriesApproval>(`/api/socials/campaigns/${campaignId}/approve`, {
       method: 'POST',
       body: JSON.stringify({ posts, comment: comment || null }),
+    })
+  }
+
+  // PRD-251B Wave 2: plans (a campaign of kind plan), their slots and their content bank.
+  async listSocialPlans(): Promise<SocialPlansResponse> {
+    return this.request<SocialPlansResponse>('/api/socials/plans')
+  }
+
+  async createSocialPlan(input: SocialPlanInput): Promise<SocialPlan> {
+    return this.request<SocialPlan>('/api/socials/plans', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  async getSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}`)
+  }
+
+  async updateSocialPlan(planId: string, input: SocialPlanInput): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async pauseSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/pause`, { method: 'POST' })
+  }
+
+  async resumeSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/resume`, { method: 'POST' })
+  }
+
+  async endSocialPlan(planId: string): Promise<SocialPlan> {
+    return this.request<SocialPlan>(`/api/socials/plans/${planId}/end`, { method: 'POST' })
+  }
+
+  /** Research again (US-B204): 409 while the Socials package's research playbook is missing. */
+  async researchSocialPlan(planId: string): Promise<{ plan_id: string; execution_id: string }> {
+    return this.request<{ plan_id: string; execution_id: string }>(`/api/socials/plans/${planId}/research`, { method: 'POST' })
+  }
+
+  /** The plan's planned and made slots in [start, end) (ISO with a zone; at most 62 days). */
+  async listSocialPlanSlots(planId: string, start: string, end: string): Promise<SocialPlanSlotsResponse> {
+    const query = `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    return this.request<SocialPlanSlotsResponse>(`/api/socials/plans/${planId}/slots${query}`)
+  }
+
+  /** Move a planned slot (`to`), put it back (`to: null`) or skip it (B208): the cadence stays. */
+  async moveSocialPlanSlot(planId: string, slotKey: string, move: { to?: string | null; skip?: boolean }): Promise<unknown> {
+    return this.request<unknown>(`/api/socials/plans/${planId}/slots/${encodeURIComponent(slotKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify(move),
+    })
+  }
+
+  async listSocialPlanTopics(planId: string): Promise<SocialTopicsResponse> {
+    return this.request<SocialTopicsResponse>(`/api/socials/plans/${planId}/topics`)
+  }
+
+  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  async updateSocialPlanTopic(planId: string, topicId: string, input: SocialTopicInput): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics/${topicId}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async pinSocialPlanTopic(planId: string, topicId: string, pinnedOn: string | null): Promise<SocialTopic> {
+    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics/${topicId}/pin`, {
+      method: 'PUT',
+      body: JSON.stringify({ pinned_on: pinnedOn }),
+    })
+  }
+
+  async deleteSocialPlanTopic(planId: string, topicId: string): Promise<void> {
+    await this.request<void>(`/api/socials/plans/${planId}/topics/${topicId}`, { method: 'DELETE' })
+  }
+
+  /** The music library a post may pick from instead of its template's track. */
+  async listSocialMusic(): Promise<SocialMusicResponse> {
+    return this.request<SocialMusicResponse>('/api/socials/music')
+  }
+
+  // ===== PRD-251B Wave 3: the brand kit's style references, the AI tools, AI-made visuals =====
+  /** The style references, the profile Auto read from them, and whether liked images go to AI tools (US-B302, US-B303). */
+  async getBrandStyle(): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/references')
+  }
+
+  /** A PNG, JPEG or WebP the brand likes or avoids, with a note on why (the server checks the type and size). */
+  async uploadBrandReference(file: File, note: string, stance: BrandReferenceStance): Promise<BrandStyleResponse> {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('note', note)
+    form.append('stance', stance)
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/references', { method: 'POST', body: form })
+  }
+
+  async updateBrandReference(refId: string, changes: BrandReferenceChange): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>(`/api/documents/brand-kit/references/${encodeURIComponent(refId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(changes),
+    })
+  }
+
+  async deleteBrandReference(refId: string): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>(`/api/documents/brand-kit/references/${encodeURIComponent(refId)}`, { method: 'DELETE' })
+  }
+
+  /** Read the references again now: 502 when the model's answer is not a profile, 504 when it is too slow. */
+  async readBrandStyle(): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/style/read', { method: 'POST' })
+  }
+
+  async setBrandStyleSendLiked(sendLiked: boolean): Promise<BrandStyleResponse> {
+    return this.request<BrandStyleResponse>('/api/documents/brand-kit/style', {
+      method: 'PUT',
+      body: JSON.stringify({ send_liked: sendLiked }),
+    })
+  }
+
+  /** The AI tools section: toolkit rows, the choices and defaults per media type, both caps and the spend (US-B304). */
+  async getSocialMediaTools(): Promise<SocialMediaToolsResponse> {
+    return this.request<SocialMediaToolsResponse>('/api/socials/media-tools')
+  }
+
+  async updateSocialMediaTools(input: SocialMediaToolsInput): Promise<SocialMediaToolsResponse> {
+    return this.request<SocialMediaToolsResponse>('/api/socials/media-tools', { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  /** Four AI options for one of the post's template image slots, made in the background (US-B305). */
+  async makeSocialAiOptions(postId: string, slot: string, prompt: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/ai-options`, {
+      method: 'POST',
+      body: JSON.stringify({ slot, prompt }),
+    })
+  }
+
+  /** The option picked becomes the slot's file, as a render's would; an approval stands. */
+  async pickSocialAiOption(postId: string, slot: string, name: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/ai-options/${encodeURIComponent(slot)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
     })
   }
 }

@@ -103,7 +103,13 @@ from api.socials_channels import router as channels_router
 from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
+from api import socials_brand
+from api.socials_media_upload import router as media_upload_router
+from api.socials_plans import router as plans_router
+from api.socials_retake import router as retake_router
+from api.socials_slots import router as slots_router
 from api.socials_targets import router as targets_router
+from api.socials_templates import router as templates_router
 from config import config
 from core import media_render_quota as render_quota
 from core.auth.dependencies import RequestContext
@@ -119,7 +125,7 @@ from core.storage import StorageNotConfigured
 from core.utils.background_tasks import launch_guarded
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service
+from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
 from modules.socials import report_charts, text_search
 from modules.socials import sources as post_sources
@@ -130,12 +136,18 @@ from modules.socials.settings import require_socials_enabled
 
 logger = logging.getLogger(__name__)
 
+TEXT_FORMAT = "text"  # PRD-251B: a post of copy alone, no template, no media
+
 router = APIRouter(
     prefix="/api/socials",
     tags=["Socials"],
     dependencies=[Depends(require_socials_enabled)],
 )
-for sub_router in (channels_router, targets_router, compose_router, campaigns_router, publish_router):
+for sub_router in (
+    channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router,
+    slots_router, media_upload_router,  # PRD-251B: planned slots (US-B105), an uploaded visual (US-B109)
+    retake_router, plans_router,  # PRD-251B: another take (US-B111); plans and their bank (US-B202, US-B203)
+):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
@@ -179,6 +191,9 @@ class CreateSocialPostRequest(_Strict):
     voice: Optional[Dict[str, Any]] = None
     # D12: {slot: {"prompt"}}, footage or stills from a connected generation toolkit.
     footage: Optional[Dict[str, Any]] = None
+    music: Optional[Dict[str, Any]] = None  # PRD-251B: the template's track (null), another, or none
+    # PRD-251B (B5): the chosen video length, one the template declares (US-B103 checks).
+    length_seconds: Optional[int] = Field(None, ge=1)
 
 
 class UpdateSocialPostRequest(_Strict):
@@ -192,6 +207,9 @@ class UpdateSocialPostRequest(_Strict):
     media: Optional[Dict[str, Any]] = None
     voice: Optional[Dict[str, Any]] = None
     footage: Optional[Dict[str, Any]] = None
+    music: Optional[Dict[str, Any]] = None  # PRD-251B: the template's track (null), another, or none
+    # PRD-251B (B5): the chosen video length, one the template declares (US-B103 checks).
+    length_seconds: Optional[int] = Field(None, ge=1)
 
 
 class ApproveRequest(_Strict):
@@ -281,6 +299,33 @@ def _check_template(db: Session, workspace_id: UUID, template_id: Optional[UUID]
         raise service.InvalidPost("template_id is not a template in this workspace")
 
 
+def _declared_lengths(db: Session, workspace_id: UUID, template_id: UUID) -> List[int]:
+    """The lengths the workspace's template declares (``blocks.durations``, else its root
+    duration; an image template declares none) — PRD-251B B5."""
+    row = (
+        db.query(DocumentTemplate.blocks, DocumentTemplate.format)
+        .filter(DocumentTemplate.id == template_id, DocumentTemplate.workspace_id == workspace_id)
+        .first()
+    )
+    if row is None:
+        return []
+    return template_gallery.durations_of(row.blocks if isinstance(row.blocks, dict) else {}, row.format)
+
+
+def _check_choices(db: Session, workspace_id: UUID, post_format: Any, template_id: Any, length_seconds: Any) -> None:
+    """PRD-251B (B5, US-B103): a text post has no template; a chosen length is one the
+    chosen template declares."""
+    if post_format == TEXT_FORMAT and template_id is not None:
+        raise service.InvalidPost("a text post has no template")
+    if length_seconds is None or template_id is None:
+        return
+    declared = _declared_lengths(db, workspace_id, template_id)
+    if length_seconds not in declared:
+        raise service.InvalidPost(
+            f"length_seconds must be a length this template declares ({declared or 'none'}), got {length_seconds}"
+        )
+
+
 def _save(db: Session, post: SocialPost) -> Dict[str, Any]:
     db.commit()
     db.refresh(post)
@@ -350,7 +395,7 @@ async def _capabilities(db: Session, workspace_id: UUID):
 async def _check_voice(db: Session, workspace_id: UUID, voice: Any) -> None:
     """A voice toolkit a save names must be one the workspace can speak with now (D11)."""
     clean = service.validate_voice(voice)
-    if clean is not None:
+    if clean is not None and clean["toolkit"] != service.KOKORO:  # PRD-251B US-B306: Kokoro is built in
         voice_recipes.plan_for(clean, await _capabilities(db, workspace_id))
 
 
@@ -427,6 +472,7 @@ async def create_post(
     the credit lines its media's music asks for (S1.6).
     """
     _check_template(db, workspace_id, fields.get("template_id"))
+    _check_choices(db, workspace_id, fields.get("format"), fields.get("template_id"), fields.get("length_seconds"))
     await _check_voice(db, workspace_id, fields.get("voice"))
     _check_footage(db, workspace_id, fields.get("footage"), fields.get("template_id"))
     if fields.get("sources"):
@@ -457,6 +503,11 @@ async def edit_post(
         raise service.InvalidPost("title cannot be empty")
     workspace_id = post.workspace_id
     _check_template(db, workspace_id, changes.get("template_id"))
+    if any(key in changes for key in ("format", "template_id", "length_seconds")):
+        _check_choices(
+            db, workspace_id, changes.get("format", post.format), changes.get("template_id", post.template_id),
+            changes.get("length_seconds", post.length_seconds),
+        )
     if "voice" in changes:
         await _check_voice(db, workspace_id, changes["voice"])
     if "footage" in changes:
@@ -499,7 +550,9 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # D12: the footage the post asks for, planned now over the template's slots;
     # a slot no connected toolkit can make plays the template's motion graphics.
     caps = await _capabilities(db, workspace.id) if post.footage else None
-    footage_plan = render.footage_plan_for(post, template, caps) if caps is not None else None
+    # PRD-251B (US-B303..B305): the brand kit's style and liked references, the default toolkits.
+    brand = await asyncio.to_thread(socials_brand.generation_inputs, db, workspace) if caps is not None else {}
+    footage_plan = render.footage_plan_for(post, template, caps, **brand) if caps is not None else None
     bundle = render.bundle_for(
         post, template, brand_kit, fallback_name=workspace.name or "",
         footage_slots=footage_plan.shown if footage_plan is not None else (),
@@ -511,7 +564,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # D11: a voice toolkit speaks the script before the render; resolved now,
     # so a toolkit the workspace cannot use is refused with nothing changed.
     voice_plan = None
-    if voice and voice_script(bundle):
+    if voice and voice.get("toolkit") != service.KOKORO and voice_script(bundle):  # Kokoro: media-render speaks
         voice_plan = voice_recipes.plan_for(voice, caps or await _capabilities(db, workspace.id))
     reservation = await render.reserve_seconds(db, workspace, post, template)
     try:

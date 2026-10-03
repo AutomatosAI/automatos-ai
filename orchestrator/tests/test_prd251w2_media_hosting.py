@@ -477,7 +477,8 @@ def test_with_no_storage_configured_the_route_answers_503(api, monkeypatch):
 
 
 def test_the_route_is_a_plain_def_in_the_committed_manifest_and_apiclient_calls_it():
-    (route,) = [r for r in socials_api.router.routes if isinstance(r, APIRoute) and r.path == MEDIA_ROUTE]
+    # PRD-251B US-B109: POST on the same path uploads a file; this is the GET.
+    (route,) = [r for r in socials_api.router.routes if isinstance(r, APIRoute) and r.path == MEDIA_ROUTE and "GET" in r.methods]
     assert route.methods == {"GET"}
     assert not inspect.iscoroutinefunction(route.endpoint), "a route over a sync Session is a plain def (F105)"
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

@@ -43,6 +43,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import api.document_brand_kit as brand_kit_routes  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
+import modules.socials.settings as socials_settings  # noqa: E402
 import modules.documents.brand_kit as brand_kit  # noqa: E402
 import modules.tools.discovery.handlers_documents as handlers_documents  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
@@ -86,7 +87,12 @@ def api(monkeypatch):
 
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: "owner")
     monkeypatch.setattr(brand_kit_routes, "resolve_user_pk", lambda db, ctx: None)
-    workspace = SimpleNamespace(id=WS, name="Acme Workspace", settings={"brand_kit": json.loads(json.dumps(STORED_KIT))})
+    # PRD-251B US-B106: the social handles show only while Socials is on (master and workspace).
+    monkeypatch.setattr(socials_settings, "read_system_setting", lambda category, key: "true")
+    workspace = SimpleNamespace(
+        id=WS, name="Acme Workspace",
+        settings={"brand_kit": json.loads(json.dumps(STORED_KIT)), "socials": {"enabled": True}},
+    )
     db = MagicMock()
     # Workspace lookups: query(Workspace).filter(...).first()
     db.query.return_value.filter.return_value.first.return_value = workspace

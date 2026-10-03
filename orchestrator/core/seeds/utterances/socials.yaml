@@ -205,3 +205,71 @@ actions:
     source: authored
   - text: list recent social media posts
     source: authored
+  # PRD-251B US-B204: a plan's research reads the plan and its content bank, and adds
+  # topics to it (draft-only: no post is made, approved or published).
+  platform_get_social_plan:
+  - text: read the Socials plan
+    source: example
+  - text: what's in our content bank?
+    source: example
+  - text: show the social media plan's cadence
+    source: example
+  - text: open the posting plan for this month
+    source: authored
+  - text: what does the Socials plan post each week?
+    source: authored
+  - text: which topics are still unused in the bank?
+    source: authored
+  - text: show the plan's goal and audience
+    source: authored
+  - text: list the topics in the content bank
+    source: authored
+  - text: what is the social plan's never-say list?
+    source: authored
+  - text: get the Lisbon countdown plan
+    source: authored
+  - text: what sources does the plan's research use?
+    source: authored
+  - text: show me the content plan before you research
+    source: authored
+  - text: how many topics are left for the plan?
+    source: authored
+  - text: which channels does the posting plan cover?
+    source: authored
+  - text: read the social media calendar plan
+    source: authored
+  - text: what dates does the Socials plan run?
+    source: authored
+  platform_add_social_topics:
+  - text: add these topics to the content bank
+    source: example
+  - text: save the researched ideas to the Socials plan
+    source: example
+  - text: put these post ideas in the content bank
+    source: authored
+  - text: add topics for next week's posts
+    source: authored
+  - text: store the facts you found as topics, with their sources
+    source: authored
+  - text: fill the content bank from the research
+    source: authored
+  - text: add three topics about the launch to the plan
+    source: authored
+  - text: save these angles for the social plan
+    source: authored
+  - text: queue up topics for the posting plan
+    source: authored
+  - text: add the release notes as content bank topics
+    source: authored
+  - text: put the website features into the Socials bank
+    source: authored
+  - text: add sourced topics for the Lisbon countdown
+    source: authored
+  - text: record these story ideas in the plan's bank
+    source: authored
+  - text: add topics for the video slots
+    source: authored
+  - text: bank these talking points for upcoming posts
+    source: authored
+  - text: add topics from the docs to the content bank
+    source: authored

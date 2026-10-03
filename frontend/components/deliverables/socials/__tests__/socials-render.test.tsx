@@ -22,7 +22,13 @@ const server = vi.hoisted(() => ({
   renderError: null as null | { status: number; message: string },
 }))
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/deliverables' }))
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // US-B108: the calendar's List is the post list these tests drive.
+  useSearchParams: () => new URLSearchParams('tab=socials&cal=list'),
+}))
 vi.mock('@/lib/auth-hooks', () => {
   const organization = { id: 'org-1' }
   return {

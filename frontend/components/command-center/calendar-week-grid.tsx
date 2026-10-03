@@ -5,7 +5,13 @@
  * a column per day, each event at its time with overlapping events sharing the
  * column, a crowded slot as one stacked card, deadlines with a DUE tag. A social
  * post's event is draggable and a day column takes the drop (US-307).
+ *
+ * PRD-251B US-B108: the Socials calendar reuses this grid. `social` is optional (no
+ * drag without it) and `renderEvent`, when given, draws each single event in its box
+ * (`eventBox`); a crowded slot stays one stacked card.
  */
+import { Fragment, type CSSProperties, type ReactNode } from 'react'
+
 import { toneFor } from './agent-tones'
 import { buildEventActions, type EventActionDeps } from './calendar-actions'
 import { EventMenu } from './calendar-event-menu'
@@ -94,12 +100,22 @@ interface GridEventProps {
   lane: number
   lanes: number
   actionDeps: EventActionDeps
-  social: SocialReschedule
+  social?: SocialReschedule
+}
+
+/** Where an event's box sits in its day column: its time, its length, its lane. */
+export function eventBox(evt: CalEvent, lane: number, lanes: number): CSSProperties {
+  return {
+    top: (evt.hour - START_HR) * HOUR_PX + (evt.min / 60) * HOUR_PX,
+    height: Math.max((evt.durMin / 60) * HOUR_PX, MIN_EVENT_PX),
+    // overlapping events share the column instead of stacking
+    left: `calc(${(lane / lanes) * 100}% + 3px)`,
+    width: `calc(${100 / lanes}% - 6px)`,
+    right: 'auto',
+  }
 }
 
 function GridEvent({ evt, lane, lanes, actionDeps, social }: GridEventProps) {
-  const top = (evt.hour - START_HR) * HOUR_PX + (evt.min / 60) * HOUR_PX
-  const height = Math.max((evt.durMin / 60) * HOUR_PX, MIN_EVENT_PX)
   const tone = toneFor(evt.agent)
   const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
   const kind = KIND_META[evt.item.type]?.label ?? evt.item.type
@@ -107,18 +123,13 @@ function GridEvent({ evt, lane, lanes, actionDeps, social }: GridEventProps) {
     <EventMenu actions={buildEventActions(evt.item, actionDeps)}>
       <button
         type="button"
-        {...social.dragProps(evt.item)}
+        {...social?.dragProps(evt.item)}
         className="cc-cal-event"
         data-kind={evt.item.type}
         data-lane={lane}
         data-lanes={lanes}
         style={{
-          top,
-          height,
-          // overlapping events share the column instead of stacking
-          left: `calc(${(lane / lanes) * 100}% + 3px)`,
-          width: `calc(${100 / lanes}% - 6px)`,
-          right: 'auto',
+          ...eventBox(evt, lane, lanes),
           borderLeftColor: overdue ? OVERDUE_TONE : kindTone(evt.item.type),
           background: 'hsl(var(--secondary))',
         }}
@@ -147,21 +158,24 @@ interface DayColumnProps {
   mode: ViewMode
   nowHourPos: number
   actionDeps: EventActionDeps
-  social: SocialReschedule
+  social?: SocialReschedule
+  renderEvent?: (evt: CalEvent, lane: number, lanes: number) => ReactNode
 }
 
-function DayColumn({ day, column, events, mode, nowHourPos, actionDeps, social }: DayColumnProps) {
+function DayColumn({ day, column, events, mode, nowHourPos, actionDeps, social, renderEvent }: DayColumnProps) {
   const dayEvents = events.filter((e) => e.dayKey === day.date.toDateString())
   const placed = collapseCrowded(layoutLanes(dayEvents, eventSpan), MAX_LANES[mode], eventSpan)
   return (
     <div
-      {...social.dropProps(day.date, START_HR, HOUR_PX)}
+      {...social?.dropProps(day.date, START_HR, HOUR_PX)}
       className={`cc-cal-daycol${day.today ? ' today' : ''}`}
       style={{ gridColumn: column + 2, gridRow: `1 / span ${HOURS.length}`, height: HOURS.length * HOUR_PX }}
     >
       {placed.map((p) =>
         p.kind === 'group' ? (
           <GroupCard key={`group-${p.start}`} members={p.members} start={p.start} end={p.end} actionDeps={actionDeps} />
+        ) : renderEvent ? (
+          <Fragment key={p.evt.id}>{renderEvent(p.evt, p.lane, p.lanes)}</Fragment>
         ) : (
           <GridEvent key={p.evt.id} evt={p.evt} lane={p.lane} lanes={p.lanes} actionDeps={actionDeps} social={social} />
         ),
@@ -188,12 +202,13 @@ interface WeekGridProps {
   days: DayCell[]
   events: CalEvent[]
   actionDeps: EventActionDeps
-  social: SocialReschedule
+  social?: SocialReschedule
   /** Nothing to show: loading, or an empty window (and no 24/7 band). */
   empty: 'loading' | 'none' | null
+  renderEvent?: (evt: CalEvent, lane: number, lanes: number) => ReactNode
 }
 
-export function WeekGrid({ mode, days, events, actionDeps, social, empty }: WeekGridProps) {
+export function WeekGrid({ mode, days, events, actionDeps, social, empty, renderEvent }: WeekGridProps) {
   const columns = mode === 'day' ? '60px 1fr' : '60px repeat(7, 1fr)'
   const now = new Date()
   const nowHourPos = (now.getHours() - START_HR) * HOUR_PX + (now.getMinutes() / 60) * HOUR_PX
@@ -219,7 +234,17 @@ export function WeekGrid({ mode, days, events, actionDeps, social, empty }: Week
       >
         <HourLabels />
         {days.map((d, di) => (
-          <DayColumn key={d.iso} day={d} column={di} events={events} mode={mode} nowHourPos={nowHourPos} actionDeps={actionDeps} social={social} />
+          <DayColumn
+            key={d.iso}
+            day={d}
+            column={di}
+            events={events}
+            mode={mode}
+            nowHourPos={nowHourPos}
+            actionDeps={actionDeps}
+            social={social}
+            renderEvent={renderEvent}
+          />
         ))}
       </div>
       {empty === 'loading' && <div className="cc-panel-empty">Loading schedule…</div>}

@@ -176,18 +176,20 @@ export function useSocialToolkitVoices(toolkit: string | null, query: string) {
 
 // ============= MUTATION HOOKS =============
 
-/** Turn Socials on for this workspace, then refetch the workspace so the tab
- * switches to the list without a page reload. */
-export function useEnableSocials() {
+/** Turn Socials on or off for this workspace (PRD-251 D1; PRD-251B US-B106), then
+ * refetch the workspace so every gate reads the new state without a page reload:
+ * the Socials tab switches between the list and the turn-on card, and off means
+ * invisible (the Socials calendar, Auto's Socials tools, the marketplace package). */
+export function useSetWorkspaceSocials() {
   const { refreshWorkspace } = useWorkspace()
-  return useMutation<unknown, Error, void>({
-    mutationFn: () => apiClient.setWorkspaceSocialsEnabled(true),
-    onSuccess: async () => {
+  return useMutation<unknown, Error, boolean>({
+    mutationFn: (enabled) => apiClient.setWorkspaceSocialsEnabled(enabled),
+    onSuccess: async (_result, enabled) => {
       await refreshWorkspace()
-      toast.success('Socials is on for this workspace')
+      toast.success(enabled ? 'Socials is on for this workspace' : 'Socials is off for this workspace')
     },
-    onError: (error) => {
-      toast.error(error.message || 'Could not turn on Socials')
+    onError: (error, enabled) => {
+      toast.error(error.message || (enabled ? 'Could not turn on Socials' : 'Could not turn off Socials'))
     },
   })
 }
