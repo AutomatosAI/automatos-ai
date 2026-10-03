@@ -117,7 +117,7 @@ def create_mission_board_task(
         created_by_id="coordinator",
         source_type="orchestration",
         orchestration_run_id=run.id,
-        tags=["mission", "orchestration"],
+        tags=["mission", "orchestration", *_owner_tags(run)],
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get("medium", 24)),
     )
     db.add(board_task)
@@ -129,6 +129,13 @@ def create_mission_board_task(
         run.id,
     )
     return board_task
+
+
+def _owner_tags(run: OrchestrationRun) -> list:
+    """The tags the owner asked for on the mission's card (F262, night 7b:
+    ``config.card_tags``, from platform_create_mission's tags)."""
+    tags = (run.config or {}).get("card_tags") if isinstance(run.config, dict) else None
+    return [str(t) for t in tags if str(t).strip()] if isinstance(tags, list) else []
 
 
 # ---------------------------------------------------------------------------

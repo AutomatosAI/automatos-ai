@@ -14,6 +14,7 @@ from .action_registry import ActionRegistry
 from .actions_agents import register_agents_actions
 from .actions_playbooks import register_playbooks_actions
 from .actions_playbook_runs import register_playbook_run_actions  # F242: create/update/execute take wait_for_me
+from .actions_playbook_schedule import register_playbook_schedule_action  # F266: the owner's zone
 from .actions_analytics import register_analytics_actions
 from .actions_documents import register_documents_actions
 from .actions_workspace import register_workspace_actions_defs
@@ -65,6 +66,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_agents_actions(registry)
     register_playbooks_actions(registry)
     register_playbook_run_actions(registry)
+    register_playbook_schedule_action(registry)  # F266: left actions_playbooks.py
     register_analytics_actions(registry)
     register_documents_actions(registry)
     register_workspace_actions_defs(registry)
