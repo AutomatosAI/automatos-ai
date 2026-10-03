@@ -7,8 +7,9 @@ actions_missions.py, whose one register function is past the length rule.
 """
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_missions import MISSION_REF_TEXT
 
-_MISSION_ID = {"mission_id": {"type": "string", "description": "The mission/run UUID."}}
+_MISSION_ID = {"mission_id": {"type": "string", "description": MISSION_REF_TEXT}}
 
 
 def register_mission_resume_action(registry: ActionRegistry) -> None:
