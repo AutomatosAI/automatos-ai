@@ -33,8 +33,8 @@ from modules.tools.execution.tool_loop import (
     ToolLoopExecutor,
     ToolLoopResult,
     ToolPostResult,
-    claimed_action_not_done,
 )
+from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
@@ -129,7 +129,7 @@ def unexecuted_claims_notice(
     do. Both reply paths ask this: a turn whose first reply calls no tool never
     enters the tool loop, and that is exactly where night 3's replayed answer was."""
     from modules.tools.execution.tool_loop import (
-        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run, claimed_action_not_done,
+        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run,
         looks_like_narrated_action, offered_tool_names,
     )
 
