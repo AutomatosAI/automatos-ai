@@ -372,33 +372,42 @@ class ScheduledTaskService:
             return {"success": False, "error": f"Task {task_id} not found"}
 
         self.db.commit()
-
-        # Update scheduler
-        job_id = f"scheduled_task_{task_id}"
-        try:
-            from services.scheduler import get_unified_scheduler
-            scheduler = get_unified_scheduler()
-            if scheduler.apscheduler:
-                if new_status in ("cancelled", "paused"):
-                    try:
-                        scheduler.apscheduler.remove_job(job_id)
-                    except Exception:
-                        pass  # Job may not exist yet
-                elif new_status == "active":
-                    # Re-read task and re-register
-                    task = self.db.execute(
-                        text("SELECT * FROM agent_scheduled_tasks WHERE id = :id"),
-                        {"id": task_id},
-                    ).fetchone()
-                    if task:
-                        self._register_with_scheduler(
-                            task.id, task.task_type, task.schedule, task.target_agent_id,
-                        )
-        except Exception as e:
-            logger.warning("[ScheduledTask] Failed to update scheduler for task %d: %s", task_id, e)
-
+        # F224: a routine cancelled or paused stops the firing in flight, too.
+        from services.board_cancel import stop_scheduled_task_sessions
+        stop_scheduled_task_sessions(self.db, self.workspace_id, task_id, new_status)
+        self._reschedule(task_id, new_status)
         logger.info("[ScheduledTask] Task %d → %s", task_id, new_status)
         return {"success": True, "task_id": task_id, "status": new_status}
+
+    def _reschedule(self, task_id: int, new_status: str) -> None:
+        """The scheduler follows the task's status: a cancelled or paused task's job
+        is removed, an active one's is registered again."""
+        job_id = f"scheduled_task_{task_id}"
+        try:
+            from apscheduler.jobstores.base import JobLookupError
+
+            from services.scheduler import get_unified_scheduler
+            scheduler = get_unified_scheduler()
+            if not scheduler.apscheduler:
+                return
+            if new_status in ("cancelled", "paused"):
+                try:
+                    scheduler.apscheduler.remove_job(job_id)
+                except JobLookupError:
+                    pass  # Job may not exist yet
+                return
+            if new_status == "active":
+                # Re-read task and re-register
+                task = self.db.execute(
+                    text("SELECT * FROM agent_scheduled_tasks WHERE id = :id"),
+                    {"id": task_id},
+                ).fetchone()
+                if task:
+                    self._register_with_scheduler(
+                        task.id, task.task_type, task.schedule, task.target_agent_id,
+                    )
+        except Exception as e:
+            logger.warning("[ScheduledTask] Failed to update scheduler for task %d: %s", task_id, e)
 
     # ------------------------------------------------------------------
     # Execution (called by APScheduler when job fires)

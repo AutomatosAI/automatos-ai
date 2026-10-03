@@ -7,9 +7,12 @@ session may still be working. Whatever the mission does meanwhile — retries th
 step, recovers it from a stall, or stops waiting for it — the session's result
 lands on the card and the card ends on that outcome. When the mission stopped
 waiting, the card also says so, in a note, and its status stays the session's.
-On the real schema, through the host's own claim and result. (A cancelled
-mission stops its sessions and cancels their cards: F245,
-test_f245_cancel_stops_a_mission.)
+On the real schema, through the host's own claim and result.
+
+A mission that ENDS without finishing (cancelled, failed) is F224's: it stops the
+step's session and cancels the card (test_f224_a_parent_that_ends_stops_its_sessions).
+A cancel also skips and cancels the mission's other steps (F245,
+test_f245_cancel_stops_a_mission).
 """
 from __future__ import annotations
 
@@ -18,15 +21,11 @@ from uuid import UUID
 
 import pytest
 
-from core.models import Agent
-from core.models.orchestration import OrchestrationRun, OrchestrationTask
-from core.models.orchestration_enums import RunState, TaskState
+from core.models.orchestration_enums import TaskState
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.reconciler import MissionReconciler
 from services import cli_host_service as svc
-from services import cli_ticket_lane as lane
-from services import coordinator_service as cs
-from services.orchestration_board_bridge import create_mission_board_task, create_task_board_task
+from tests.helpers_mission_lane import quiet_board, session_working as _session_working
 
 STOPPED_WAITING = ("The mission stopped waiting for this step after 60 minutes. The session is still working, "
                    "and its result will land here.")
@@ -35,48 +34,7 @@ STOPPED_WAITING = ("The mission stopped waiting for this step after 60 minutes. 
 @pytest.fixture
 def quiet(monkeypatch):
     """The board's fan-out (approvals, notices, reports, the Canvas) is its own suites' business."""
-    import api.board_tasks as bt
-
-    async def _noop(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(bt, "_board_task_blocked_pending_approval", lambda *a, **k: False)
-    monkeypatch.setattr(bt, "_dispatch_task_complete", _noop)
-    monkeypatch.setattr(bt, "_dispatch_task_failed", _noop)
-    monkeypatch.setattr(bt, "_auto_create_task_report", _noop)
-    published = []
-    monkeypatch.setattr(svc, "publish_canvas_events", lambda ws, events: published.extend(events))
-    monkeypatch.setattr(lane, "_notify", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cs, "_narrate_mission", lambda *args, **kwargs: None)
-    return published
-
-
-def _session_working(db, ws):
-    """A mission step on a Claude Code agent, its card claimed by the lane and by a host."""
-    agent = Agent(name="NEWSROOM", agent_type="chatbot", description="", status="active",
-                  configuration={"runtime": "cli", "provider": "claude", "model": "sonnet"}, model_config=None,
-                  workspace_id=ws, created_by="test", owner_type="workspace", owner_id=str(ws))
-    db.add(agent)
-    db.flush()
-    run = OrchestrationRun(workspace_id=ws, goal="A Christmas box offer for the cafés", state=RunState.RUNNING.value,
-                           created_by="user_test", config={})
-    db.add(run)
-    db.flush()
-    task = OrchestrationTask(run_id=run.id, title="Synthesize Christmas Box Offer Details", description="Do it.",
-                             sequence_number=2, state=TaskState.RUNNING.value, state_type="active",
-                             assigned_agent_id=agent.id, max_retries=3)
-    db.add(task)
-    db.flush()
-    create_mission_board_task(db, run)
-    create_task_board_task(db, run, task)
-    card = lane.file_cli_ticket(db, workspace_id=ws, agent_id=agent.id, title=task.title, prompt="Work on it.",
-                                source_type="mission", source_id=f"mission:{run.id}:{task.id}", tags=["mission"],
-                                orchestration_run_id=run.id, orchestration_task_id=task.id)
-    host, code, _ = svc.create_pairing_code(db, ws, "laptop")
-    host, _token = svc.pair_host(db, code)
-    (ticket,) = svc.claim_for_host(db, host, 1)["tasks"]
-    assert ticket["task_id"] == card.id and card.status == "in_progress"
-    return run, task, card, host, ticket
+    return quiet_board(monkeypatch)
 
 
 def _retry(db, run, task):
@@ -134,4 +92,3 @@ def test_the_notes_on_a_card_survive_the_claim_that_resumes_its_run(db_session, 
 
     assert again["task_id"] == card.id
     assert [n["note"] for n in card.runtime_ref["session_notes"]] == [STOPPED_WAITING]
-

@@ -1448,15 +1448,24 @@ def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
     lease live and the token hash on the row, so a credential whose plaintext is
     still in that session's transcript and config file kept working with no
     session running. Nothing here touches a ticket that was not running.
+
+    F224: and the CLI host is told to end that session at its next event batch
+    (``cancel_requested_at``, as a cancel does). Before, only its next heartbeat
+    noticed the status, up to half a minute later. A later claim starts a fresh
+    ``runtime_ref``, so the request never reaches the next session.
     """
+    from services.board_cancel import CANCEL_REQUESTED_KEY
     from services.cli_host_service import SESSION_TOKEN_HASH_KEY
 
     if str(old_status) != "in_progress" or str(new_status) == "in_progress":
         return
     task.lease_until = None
     ref = dict(task.runtime_ref or {})
-    if SESSION_TOKEN_HASH_KEY in ref:
-        ref.pop(SESSION_TOKEN_HASH_KEY, None)
+    changed = ref.pop(SESSION_TOKEN_HASH_KEY, None) is not None
+    if ref.get("host_id"):                 # a CLI host claimed it: its session stops
+        ref[CANCEL_REQUESTED_KEY] = datetime.now(timezone.utc).isoformat()
+        changed = True
+    if changed:
         task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
 
 
