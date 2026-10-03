@@ -184,7 +184,10 @@ def test_the_reconciler_leaves_a_live_session_step_and_stalls_a_dead_run(workspa
     status, error, _meta = _state(new_session, dead)
     assert status == "failed" and error == "Stalled: no progress for 300s (status was 'running')"
     status, error, meta = _state(new_session, stranded)
-    assert status == "failed" and f"#{done_id} step 1 done" in error and f"#{review_id} step 2 review" in error
+    seq = dict(new_session().execute(text("SELECT id, workspace_seq FROM board_tasks WHERE id IN (:a, :b)"),
+                                     {"a": done_id, "b": review_id}).all())
+    # PRD-252 R4: each step ticket by its number
+    assert status == "failed" and f"#{seq[done_id]:04d} step 1 done" in error and f"#{seq[review_id]:04d} step 2 review" in error
     assert [t["id"] for t in meta["step_tickets"]] == [done_id, review_id]
     retries = new_session().execute(
         text("SELECT count(*) FROM recipe_executions WHERE retry_of = :e"), {"e": stranded}).scalar()

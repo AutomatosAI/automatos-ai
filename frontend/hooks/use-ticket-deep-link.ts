@@ -48,7 +48,7 @@ export function useTicketDeepLink(onOpen: OpenTicket): () => void {
       onOpen(ticket.data, questionParam ? Number(questionParam) : null)
     } else if (ticket.isError) {
       opened.current = key
-      toast.error(`Ticket #${taskId} could not be opened. It may have been deleted.`)
+      toast.error(`Ticket ${taskId} could not be opened. It may have been deleted.`)  // PRD-252 R4: '#' means a number
     }
   }, [key, ticket.data, ticket.isError, taskId, questionParam, onOpen])
 

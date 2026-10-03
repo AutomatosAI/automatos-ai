@@ -45,12 +45,12 @@ export function useTicketActions(task: BoardTask) {
   const cancel = useCancelTask()
   const assignTo = (agent: AgentChoice) =>
     update.mutate({ taskId: task.id, payload: { assigned_agent_id: agent.id } }, {
-      onSuccess: () => toast.success(`Ticket #${task.id} is assigned to ${agent.name}.`),
+      onSuccess: () => toast.success(`Ticket ${task.number ?? task.id} is assigned to ${agent.name}.`),
       onError: (err) => toast.error(failure(err, 'Could not assign the ticket')),
     })
   const cancelIt = () =>
     cancel.mutate(task.id, {
-      onSuccess: () => toast.success(`Ticket #${task.id} is cancelled.`),
+      onSuccess: () => toast.success(`Ticket ${task.number ?? task.id} is cancelled.`),
       onError: (err) => toast.error(failure(err, 'Could not cancel the ticket')),
     })
   return { assignTo, cancelIt, busy: update.isLoading || cancel.isLoading }

@@ -69,6 +69,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.reports"),
     RouterSpec("api.deliverables"),
     RouterSpec("api.board_tasks"),
+    RouterSpec("api.board_task_rebrief"),  # PRD-252 R2 — Discuss: "Update ticket and re-queue"
     RouterSpec("api.missions"),
     RouterSpec("api.missions", attr="agent_telemetry_router"),
     RouterSpec("api.assignments"),

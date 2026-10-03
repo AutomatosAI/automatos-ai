@@ -98,12 +98,12 @@ describe('QuestionsTab — PRD-225', () => {
     setQuestions([
       question({
         id: 5, subject_id: '612', asked_by_agent_id: 294,
-        owner: { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions' } },
+        owner: { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions', number: '#0042' } },
       }),
     ])
     render(<QuestionsTab />)
     expect(screen.getByText('Scout (agent #294)')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ticket #612 · Cafe questions' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ticket #0042 · Cafe questions' })).toBeInTheDocument()   // PRD-252 R4
     expect(screen.queryByText(/board_task:612/)).not.toBeInTheDocument()
   })
 

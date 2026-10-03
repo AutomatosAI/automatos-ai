@@ -78,7 +78,7 @@ describe('useTicketDeepLink', () => {
     board.failing = new Set(['404'])
     renderHook(() => useTicketDeepLink(vi.fn()))
     expect(toastError).toHaveBeenCalledTimes(1)
-    expect(toastError.mock.calls[0][0]).toContain('#404')
+    expect(toastError.mock.calls[0][0]).toContain('Ticket 404 could not be opened')   // PRD-252 R4: never '#404', a number
   })
 
   it('clear() drops the link, so a tab switch never reopens the ticket', () => {

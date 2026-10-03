@@ -19,6 +19,7 @@ the last line of a list under the draft.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
@@ -30,6 +31,20 @@ SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
 MAX_CORRECTIONS_KEPT = 20
 # What opens a redo whose owner said what is wrong (PRD-252 R2).
 OWNER_WORDS_LEAD = "The owner sent it back with these words:"
+# PRD-252 R2 (Discuss): a discussion ends with a brief the owner agreed, which
+# "Update ticket and re-queue" writes onto the ticket (api.board_tasks.rebrief_task).
+REBRIEFED = "re-briefed in a discussion"
+BRIEF_AGREED = ("The owner agreed a new brief in a discussion; it is now this ticket's description. "
+                "Work from it.")
+# What a re-briefed ticket's next run is told. The drafts and notes before the
+# agreed brief are what the discussion settled, so none of them is carried.
+AGREED_BRIEF_BLOCK = ("## Redo: the owner agreed a new brief\n"
+                      "The owner talked this ticket through and agreed the brief above. It replaces "
+                      "the earlier brief, drafts and notes: work from it as written.")
+MAX_BRIEF_CHARS = 8000
+PREVIOUS_BRIEFS_KEPT = 5
+# After this many Rejects the review panel suggests talking it through (Discuss).
+DISCUSS_AFTER_REJECTS = 3
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -42,6 +57,40 @@ def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[
     return data
 
 
+def with_new_brief(planning_data: Any, old_description: Optional[str], *, by: str, at: str) -> Dict[str, Any]:
+    """``planning_data`` with the brief being replaced kept in ``previous_briefs``
+    (rebuilt, never mutated in place), so a re-brief loses nothing."""
+    data = dict(planning_data) if isinstance(planning_data, dict) else {}
+    briefs = list(data.get("previous_briefs") or [])
+    briefs.append({"description": old_description or "", "by": by, "at": at})
+    data["previous_briefs"] = briefs[-PREVIOUS_BRIEFS_KEPT:]
+    return data
+
+
+def times_sent_back(task: Any) -> int:
+    """How many times the owner sent this ticket back with Reject since its brief
+    was last agreed in Discuss. From DISCUSS_AFTER_REJECTS on, the review panel
+    suggests Discuss (D3)."""
+    data = getattr(task, "planning_data", None) or {}
+    since = _brief_agreed_at(data)
+    return sum(1 for run in data.get("previous_runs") or []
+               if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since))
+
+
+def _parsed(at: Any) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(at) if isinstance(at, str) else None
+    except ValueError:
+        return None
+
+
+def _after(at: Any, since: Optional[datetime]) -> bool:
+    if since is None:
+        return True
+    when = _parsed(at)
+    return when is not None and when > since
+
+
 def redo_block(task: Any) -> Optional[str]:
     """What a redo is told: the draft that was sent back and every correction on
     the ticket, oldest first. None when this run is not a redo (no review_feedback
@@ -49,11 +98,14 @@ def redo_block(task: Any) -> Optional[str]:
     latest = getattr(task, "review_feedback", None)
     if not latest:
         return None
+    if latest == BRIEF_AGREED:
+        return AGREED_BRIEF_BLOCK
     data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
-    notes = _corrections(data)
+    since = _brief_agreed_at(data)   # PRD-252 R2: what came before an agreed brief is settled
+    notes = _corrections(data, since)
     if latest != SENT_BACK_WITHOUT_A_NOTE and (not notes or notes[-1] != latest):
         notes.append(latest)  # a note set another way (the PATCH, a stop) applies to this run too
-    draft = _sent_back_draft(data)
+    draft = _sent_back_draft(data, since)
     lines = ["## Redo: your last attempt was sent back"]
     if latest != SENT_BACK_WITHOUT_A_NOTE:
         lines += [OWNER_WORDS_LEAD, latest, ""]
@@ -69,12 +121,19 @@ def redo_block(task: Any) -> Optional[str]:
     return "\n".join(lines)
 
 
-def _corrections(data: Dict[str, Any]) -> List[str]:
-    return [c["note"] for c in data.get("owner_corrections") or [] if isinstance(c, dict) and c.get("note")]
+def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
+    """When the ticket's brief was last agreed in a discussion; None if never."""
+    briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
+    return _parsed(briefs[-1].get("at")) if briefs else None
 
 
-def _sent_back_draft(data: Dict[str, Any]) -> Optional[str]:
+def _corrections(data: Dict[str, Any], since: Optional[datetime] = None) -> List[str]:
+    return [c["note"] for c in data.get("owner_corrections") or []
+            if isinstance(c, dict) and c.get("note") and _after(c.get("at"), since)]
+
+
+def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> Optional[str]:
     for run in reversed(data.get("previous_runs") or []):
-        if isinstance(run, dict) and run.get("why") == SENT_BACK:
+        if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since):
             return run.get("result") or None
     return None

@@ -104,14 +104,26 @@ def watch_auto_create_enabled(db: Session, workspace_id: UUID | str) -> bool:
 
 
 def cancelled_report_text(
-    watch: Any, target_type: str, target_id: str, summary: Optional[str]
+    watch: Any, target_type: str, target_id: str, summary: Optional[str], *, number: Optional[str] = None,
 ) -> str:
-    """PRD-238 S5: the one-paragraph report for a cancelled target."""
+    """PRD-238 S5: the one-paragraph report for a cancelled target. PRD-252 R4: a
+    ticket by its ``number`` (#0042); an id never follows a '#' ("ticket 612")."""
     title = (getattr(watch, "title", None) or f"{target_type} {target_id}").strip()
     head = f"{title} ended: cancelled."
     if target_type == "board_task":
-        head = f"{title} (#{target_id}) ended: cancelled."
+        head = f"{title} ({number or f'ticket {target_id}'}) ended: cancelled."
     return f"{head} {summary}".strip() if summary else head
+
+
+def _ticket_number(db: Session, workspace_id: Any, target_id: Any) -> Optional[str]:
+    """A watched ticket's number, #0042; None when it has none here."""
+    from core.models.core import BoardTask
+    from services.ticket_numbers import ticket_number
+
+    if not str(target_id).isdigit():
+        return None
+    task = db.query(BoardTask).filter(BoardTask.id == int(target_id), BoardTask.workspace_id == workspace_id).first()
+    return ticket_number(db, task) if task is not None else None
 
 
 def _say_cancelled_in_chat(
@@ -124,7 +136,10 @@ def _say_cancelled_in_chat(
         deliver_background_message(
             db,
             workspace_id=watch.workspace_id,
-            text=cancelled_report_text(watch, target_type, target_id, summary),
+            text=cancelled_report_text(
+                watch, target_type, target_id, summary,
+                number=_ticket_number(db, watch.workspace_id, target_id) if target_type == "board_task" else None,
+            ),
             source={"origin": "watcher", "event": "watch_cancelled"},
             chat_id=str(origin_chat) if origin_chat else None,
             clerk_user_id=getattr(watch, "created_by", None),

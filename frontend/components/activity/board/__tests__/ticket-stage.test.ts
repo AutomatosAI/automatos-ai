@@ -47,7 +47,8 @@ describe('stageReason', () => {
     expect(stageReason({ status: 'review', review_reason: 'mission_plan', blocked_code: null })!.stage).toBe('Plan to approve')
     const viewer = read('components/activity/board/board-task-viewer.tsx')
     expect(viewer).toContain('const missionDecides = isMissionTicket(task)')
-    expect(viewer).toContain('data-testid="review-on-mission"')
+    // 3b: the mission's own Approve and Reject (mission-verdict.test.tsx)
+    expect(viewer).toContain('<MissionVerdict task={task} onDecided={onDecided} />')
   })
 
   it('offers no LLM review mode when creating a ticket', () => {

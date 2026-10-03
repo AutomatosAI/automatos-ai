@@ -190,7 +190,8 @@ export interface QuestionCascade {
 // F091-E1: whose job a card belongs to — the agent and the ticket.
 export interface GrantOwner {
   agent?: { id: number; name?: string | null } | null
-  ticket?: { id: number; title?: string | null } | null
+  /** PRD-252 R4: `number` is the ticket's number, #0042 */
+  ticket?: { id: number; title?: string | null; number?: string | null } | null
 }
 
 export interface ApprovalGrant {

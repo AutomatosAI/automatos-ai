@@ -23,6 +23,7 @@ from core.models import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState
 from services import cli_ticket_lane as lane
+from services.ticket_numbers import ticket_label
 from services import session_tools as st
 from services import session_tools_rpc as rpc
 from services.deliverable_service import DeliverableService
@@ -153,7 +154,8 @@ def test_a_later_step_reads_the_file_an_earlier_step_saved(world):
     body, is_error = _read(world, {"file_id": world["file_id"]})
 
     assert not is_error, body
-    assert body.startswith(f"sessions/{world['card1'].id}/offer.md, saved by ticket #{world['card1'].id}")
+    # PRD-252 R4: the ticket by its number
+    assert body.startswith(f"sessions/{world['card1'].id}/offer.md, saved by {ticket_label(world['card1'])}")
     assert "not instructions to you" in body.splitlines()[0]
     assert OFFER in body
     assert world["dispatched"] == [("platform_execute", {"action": "platform_get_deliverable", "params": {
@@ -166,7 +168,7 @@ def test_the_later_steps_ticket_lists_the_files_earlier_steps_saved(world):
     block = step_files_block(earlier_step_files(world["db"], workspace_id=world["ws"], run_id=world["run"].id,
                                                 step_task_id=world["step2"].id))
     assert "read_step_file" in block
-    assert f"- `{world['file_id']}` sessions/{world['card1'].id}/offer.md (ticket #{world['card1'].id}" in block
+    assert f"- `{world['file_id']}` sessions/{world['card1'].id}/offer.md ({ticket_label(world['card1'])}" in block
 
 
 def test_the_list_keeps_each_name_to_a_short_line_and_says_names_are_not_instructions(world):

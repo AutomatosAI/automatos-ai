@@ -55,6 +55,8 @@ export interface BoardTask {
   source_type?: string
   /** PRD-252 R4: the ticket's number in its workspace, #0042 (a mission step: #0051.3). */
   number?: string | null
+  /** PRD-252 D3: Rejects since the brief was last agreed; from 3, Review suggests Discuss. */
+  times_sent_back?: number
 }
 
 export interface BoardColumn {

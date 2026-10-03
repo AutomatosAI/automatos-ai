@@ -18,6 +18,7 @@ vi.mock('@/hooks/use-board-tasks', () => ({
   useRejectTask: () => verdict.reject,
 }))
 vi.mock('sonner', () => ({ toast }))
+vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 
 import { ReviewVerdict } from '../review-verdict'
 import { approveEffect, approveLabel, approvedMessage } from '../approval-effect'
@@ -76,10 +77,10 @@ describe('Approve', () => {
   it('is one click without a note, and confirms what happened', () => {
     const onDecided = vi.fn()
     verdict.approve.mutate.mockImplementation((_vars, opts) => opts.onSuccess({ action_result: null }))
-    render(<ReviewVerdict task={ticket()} onDecided={onDecided} />)
+    render(<ReviewVerdict task={ticket({ number: '#0042' })} onDecided={onDecided} />)
     fireEvent.click(screen.getByRole('button', { name: 'Approve and mark done' }))
     expect(verdict.approve.mutate).toHaveBeenCalledWith({ taskId: '5', note: undefined }, expect.anything())
-    expect(toast.success).toHaveBeenCalledWith('Approved. Ticket #5 is done.')
+    expect(toast.success).toHaveBeenCalledWith('Approved. Ticket #0042 is done.')   // PRD-252 R4: its number
     expect(onDecided).toHaveBeenCalled()
   })
 
@@ -101,5 +102,18 @@ describe('Approve', () => {
   it('confirms what an approval action did', () => {
     expect(approvedMessage({ action_result: { type: 'publish_blog', title: 'Oat milk' } }, '5')).toBe('Approved. "Oat milk" is published.')
     expect(approvedMessage({ action_result: { type: 'create_blog', topic: 'Oat milk' } }, '5')).toBe('Approved. The blog post on "Oat milk" has started.')
+  })
+})
+
+describe('after three send-backs (D3)', () => {
+  it('suggests talking it through with Auto', () => {
+    render(<ReviewVerdict task={ticket({ times_sent_back: 3 })} onDecided={vi.fn()} />)
+    expect(screen.getByTestId('discuss-hint')).toHaveTextContent('Sent back 3 times')
+    expect(screen.getByText('Discuss with Auto →').closest('a')).toHaveAttribute('href', '/chat?ticket=5')
+  })
+
+  it('says nothing before that', () => {
+    render(<ReviewVerdict task={ticket({ times_sent_back: 2 })} onDecided={vi.fn()} />)
+    expect(screen.queryByTestId('discuss-hint')).toBeNull()
   })
 })
