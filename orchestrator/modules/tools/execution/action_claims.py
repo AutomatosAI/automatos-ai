@@ -26,6 +26,10 @@ F187 (night 6: 102 unbacked claims in nine persona days), what the families miss
   schedule, an install) is still going. Only Auto's own words in a chat turn make
   this claim (``promises``; by default, the turn's lane is chat): an agent's
   draft promises in its writer's voice, and so does a draft Auto quotes.
+
+F261 (night 7b): "I will now send this updated brief to the agent", "Let me try
+creating the mission one more time" and "Here's what I'll do: 1. Assign the Analyst…"
+ended replies that called nothing. Each is work said to be under way now.
 """
 from __future__ import annotations
 
@@ -47,7 +51,7 @@ _NAMED = r"(?:(?:\*\*|[\"'“‘])[^\"'”’*\n]{1,60}(?:\*\*|[\"'”’])\s+)?
 # Work that outlives the turn: a ticket, a run, a schedule, an install. The bell
 # reports its end, so "I'll let you know" after one of these is kept.
 _STARTS_WORK = ("create_task", "assign_task", "update_task", "execute_", "run_", "start_", "trigger",
-                "approve_", "resume_", "schedule_", "install_")
+                "approve_", "resume_", "schedule_", "install_", "create_mission")  # F261: a mission runs on
 # Reads, never a write that shares a stem: "_get_" (not update_widget_config), no
 # bare "status" (update_task_status) or "heartbeat" (configure_agent_heartbeat).
 _READS = ("_list", "_get_", "search", "browse", "board_", "read", "grep", "query", "summary", "snapshot",
@@ -72,7 +76,13 @@ _UNDER_WAY = re.compile(
     r"|\bi(?:'m|’m| am) (?:now |still |currently )?(?:working on (?:it|that|this|them|getting|fixing)|processing|"
     r"analy[sz]ing|preparing|drafting|setting up|correcting|fixing|initiating|triggering|investigating|"
     r"re-?processing|taking action|starting on)\b"
-    r"|" + _I_WILL + r"[^.!?\n]{0,80}\b(?:right away|right now|straight away|immediately)\b",
+    r"|" + _I_WILL + r"[^.!?\n]{0,80}\b(?:right away|right now|straight away|immediately)\b"
+    # F261 (night 7b), with no call behind them: "I will now send this updated brief to the
+    # agent", "Let me try creating the mission one more time", "Here's what I'll do: 1. …".
+    r"|" + _I_WILL + r"\s+now\s+(?:send|create|update|try|run|start|approve|assign|cancel|re-?brief|set|schedule|"
+    r"launch|make|move|give|put|add|fix|correct|change)\b"
+    r"|" + _I_WILL + r"[^.!?\n]{0,60}\b(?:one more time|once more|again)\b"
+    r"|\bhere(?:'s|’s| is) what i(?:'ll|’ll| will) do\b",
     re.I)
 # An offer or a question promises nothing: "Would you like me to create it right now?"
 _ASKING = re.compile(r"\?|\b(?:if you|would you|do you want|shall i|should i|want me to|could you|can you)\b", re.I)
