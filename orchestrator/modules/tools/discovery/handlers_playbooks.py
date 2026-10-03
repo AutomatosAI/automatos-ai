@@ -4,11 +4,10 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
-from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
 
 logger = logging.getLogger(__name__)
 
@@ -689,7 +688,6 @@ def _sync_schedule(playbook) -> tuple:
     return None, notes.get(outcome, "Active now.")
 
 
-@says_the_run_card  # F241: the run's card is made now and named by number
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution
@@ -839,6 +837,11 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
         "message": (f"Playbook '{playbook.name}' triggered with inputs: {_inputs_text(input_data)}. "
                     f"Track with execution_id: {execution_id}"),
     }
+
+
+# F241: the run's card is made when the run starts, so the answer can name it by number.
+# Wrapped after the definition, around any decorators it carries.
+execute_playbook = says_the_run_card(execute_playbook)
 
 
 @names_the_run_cards  # F241: each run's card, by number
