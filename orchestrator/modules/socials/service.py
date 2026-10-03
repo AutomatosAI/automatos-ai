@@ -209,6 +209,10 @@ FOOTAGE_RECORD_KEYS = (
     "options", "options_state", "options_error",
 )
 FOOTAGE_DONE = "done"
+# PRD-251B: a template's photo slot holds the person's own picture too (an upload or a Library
+# file, modules/socials/slot_photos.py); its record names where it came from, and no AI made it.
+OWN_FILE_UPLOAD, OWN_FILE_LIBRARY = "upload", "library"
+OWN_FILE_TOOLKITS = frozenset({OWN_FILE_UPLOAD, OWN_FILE_LIBRARY})
 FOOTAGE_PROMPT_MAX_CHARS = 1500
 
 # D7: where a claim's source may come from.
@@ -328,9 +332,13 @@ def _content_of(post: Any) -> Dict[str, Any]:
 
 def footage_generated(footage: Any) -> bool:
     """Whether a render recorded footage an AI toolkit made for one of the post's
-    slots (D12): what a channel's AI label says (``$generated``)."""
+    slots (D12): what a channel's AI label says (``$generated``). The person's own
+    picture in a photo slot (an upload or a Library file) is not AI-made."""
     slots = footage.values() if isinstance(footage, Mapping) else ()
-    return any(isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE for slot in slots)
+    return any(
+        isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE and slot.get("toolkit") not in OWN_FILE_TOOLKITS
+        for slot in slots
+    )
 
 
 def compute_content_hash(post: Any) -> str:

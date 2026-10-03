@@ -1,0 +1,70 @@
+{
+  "name": "Offer",
+  "description": "A deal over your photo: the offer in big type, what it is for, the small print and a button. For a sale, a discount, a bundle or an opening offer.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "tag": {
+      "type": "text",
+      "label": "Label",
+      "description": "A short label above the offer, e.g. THIS WEEK ONLY. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "offer": {
+      "type": "text",
+      "label": "Offer",
+      "description": "The deal in a few characters, e.g. 20% OFF or 2 FOR 1.",
+      "max_chars": 24
+    },
+    "item": {
+      "type": "text",
+      "label": "What it is for",
+      "description": "What the offer is on, e.g. Every cut and colour.",
+      "max_chars": 70
+    },
+    "detail": {
+      "type": "text",
+      "label": "Small print",
+      "description": "When and how, e.g. Mon to Thu, book online or call in. Leave empty for none.",
+      "default": "",
+      "max_chars": 160
+    },
+    "cta": {
+      "type": "text",
+      "label": "Button",
+      "description": "The button's words, e.g. Book now. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "photo": {
+      "kind": "image",
+      "path": "assets/slots/photo.png",
+      "label": "Photo",
+      "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
+    }
+  },
+  "sample_data": {
+    "tag": "THIS WEEK ONLY",
+    "offer": "20% OFF",
+    "item": "Every cut and colour",
+    "detail": "Monday to Thursday, 9am to 4pm. Book online or call in.",
+    "cta": "Book now",
+    "handle": "@yourbrand"
+  }
+}

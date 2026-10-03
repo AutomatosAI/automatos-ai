@@ -179,7 +179,7 @@ def _dispatch(db, action, params):
 def test_an_agent_reading_a_seeded_templates_schema_sees_no_automatos_copy():
     db = _Templates()
     assert seed_templates.seed_social_starters(db, WS) == {"created": len(SOCIAL_STARTER_SLUGS), "refreshed": 0}
-    assert len(db.rows) == 12
+    assert len(db.rows) == len(SOCIAL_STARTER_SLUGS) == 18  # the six photo starters too
     for row in db.rows:
         schema = _dispatch(db, "platform_get_template_schema", {"template_id": str(row.id)})
         assert schema["success"] is True, (row.name, schema)

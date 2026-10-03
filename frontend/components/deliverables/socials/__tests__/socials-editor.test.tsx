@@ -27,9 +27,11 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   inferPreviewType: () => 'image',
 }))
 
-import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
+import { NEW_POST_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
+import { AUTO_PICK_NOTE, LOOK_HINTS } from '@/components/deliverables/socials/studio/editor-look-card'
+import { FIELDS_LEGEND } from '@/components/deliverables/socials/socials-variables-form'
 import { TEXT_ONLY_NOTE } from '@/components/deliverables/socials/studio/editor-format-card'
-import { api, post, renderWith, resetApi } from './socials-editor-harness'
+import { IMAGE_TEMPLATE, api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
 const card = (name: string) => screen.getByRole('region', { name })
@@ -52,8 +54,9 @@ describe('the post editor', () => {
     renderEditor()
     await screen.findByText('Fact card')
     const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))
-    const cards = names.filter((n) => ['Brief', 'Format', 'Channels and sizes', 'Look', 'Claims and sources', 'When'].includes(n ?? ''))
-    expect(cards).toEqual(['Brief', 'Format', 'Channels and sizes', 'Look', 'Claims and sources', 'When'])
+    const cards = names.filter((n) => ['Brief', 'Format', 'Channels and sizes', 'Look', 'Text on the image', 'When'].includes(n ?? ''))
+    expect(cards).toEqual(['Brief', 'Format', 'Channels and sizes', 'Look', 'Text on the image', 'When'])
+    expect(screen.getByText(NEW_POST_STEPS)).toBeInTheDocument()
     for (const name of ['Save draft', 'Render preview', 'Submit for approval']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
@@ -211,11 +214,46 @@ describe('the post editor', () => {
   it('a claim shows Unsourced until it has a source, and Add a source opens its search', async () => {
     renderEditor()
     fireEvent.click(await within(card('Look')).findByRole('button', { name: /Fact card/ }))
-    const claims = card('Claims and sources')
+    const claims = card('Text on the image')
     expect(within(claims).getByText(/Unsourced/)).toBeInTheDocument()
     expect(within(claims).getByText('A claim without a source needs a second confirmation from whoever approves.')).toBeInTheDocument()
     fireEvent.click(within(claims).getByRole('button', { name: 'Add a source' }))
     expect(await within(claims).findByRole('textbox', { name: 'Search sources for members' })).toBeInTheDocument()
+  })
+
+  it("each field shows the template's example, what goes in it, a * when the render needs it, and its count", async () => {
+    api.listSocialTemplates.mockResolvedValue([{
+      ...IMAGE_TEMPLATE,
+      variables_schema: {
+        headline: { type: 'text', label: 'Headline', description: 'The big statement. Use | to break the line.', max_chars: 60 },
+        cta: { type: 'text', label: 'Call to action', description: 'e.g. Book now. Leave empty for none.', default: '', max_chars: 40 },
+      },
+      sample_data: { headline: 'AUTUMN|COLOUR WEEK', cta: 'Book now' },
+    }])
+    renderEditor()
+    fireEvent.click(await within(card('Look')).findByRole('button', { name: /Fact card/ }))
+    const text = card('Text on the image')
+    expect(within(text).getByText(FIELDS_LEGEND)).toBeInTheDocument()
+    const headline = within(text).getByLabelText(/Headline/)
+    expect(headline).toHaveAttribute('placeholder', 'e.g. AUTUMN|COLOUR WEEK')
+    expect(headline).toHaveAccessibleDescription('The big statement. Use | to break the line.')
+    expect(within(text).getByText('(needed to render)')).toBeInTheDocument() // headline has no default
+    expect(within(text).getByLabelText('Call to action')).toHaveAttribute('placeholder', 'e.g. Book now') // optional: no *
+    fireEvent.change(headline, { target: { value: 'OPEN LATE' } })
+    expect(within(text).getByText('9/60')).toBeInTheDocument()
+  })
+
+  it('the Look says what each source does, what Let Auto pick does, and marks a template that shows a photo', async () => {
+    api.listSocialTemplates.mockResolvedValue([IMAGE_TEMPLATE, { ...IMAGE_TEMPLATE, id: 'tpl-photo', name: 'Photo + headline', image_slots: ['photo'], footage_slots: ['photo'] }])
+    renderEditor()
+    const look = card('Look')
+    expect(await within(look).findByText(LOOK_HINTS.template)).toBeInTheDocument()
+    expect(within(look).getByText(AUTO_PICK_NOTE)).toBeInTheDocument()
+    const photo = within(look).getByRole('button', { name: /Photo \+ headline/ })
+    expect(within(photo).getByText('Photo')).toBeInTheDocument()
+    expect(within(within(look).getByRole('button', { name: /Fact card/ })).queryByText('Photo')).toBeNull()
+    fireEvent.click(within(look).getByRole('button', { name: 'Upload' }))
+    expect(within(look).getByText(LOOK_HINTS.upload)).toBeInTheDocument()
   })
 
   it('submit waits while a ticked channel is over its limit', async () => {

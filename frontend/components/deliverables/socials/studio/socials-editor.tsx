@@ -25,6 +25,7 @@ import { EditorChannelsCard } from './editor-channels-card'
 import { EditorClaimsCard } from './editor-claims-card'
 import { EditorFormatCard } from './editor-format-card'
 import { EditorLookCard } from './editor-look-card'
+import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
@@ -34,6 +35,10 @@ import { SocialsEditorActivity } from './socials-editor-activity'
 import { SocialsEditorHeader } from './socials-editor-header'
 import type { GoTo } from './studio-route'
 import { useEditorDraft } from './use-editor-draft'
+import { Hint } from './editor-ui'
+
+/** A new post's four steps, in one line under its header. */
+export const NEW_POST_STEPS = 'Write a brief (or let Auto redraft it), choose the look, tick the channels, then Render preview and Submit for approval.'
 
 interface SocialsEditorProps {
   role: Workspace['role']
@@ -58,6 +63,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const footage = useSocialFootageSources(draft.format !== 'text')
   const chosen = templates.data?.find((t) => t.id === draft.templateId) ?? null
   const imageSlots = chosen?.image_slots ?? []
+  const photoSpots = useMemo(() => photoSpotsOf(chosen), [chosen])
   const calls = useEditorCalls()
   // F254: the post a Save, Render or Submit created, kept even when a later step fails, so
   // the next try edits it instead of creating another.
@@ -99,6 +105,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
         onRender={() => calls.render.mutate({ ...payload(), video: draft.format === 'video' }, opened)}
         onSubmit={() => calls.submit.mutate(payload(), opened)}
       />
+      {!post && <Hint>{NEW_POST_STEPS}</Hint>}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />
@@ -116,8 +123,9 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
           {draft.format !== 'text' && (
             <EditorLookCard
               templates={templates.data ?? []} loading={templates.isLoading} chosen={draft.templateId} onPick={pickTemplate} busy={mediaBusy}
-              onUpload={(file) => calls.upload.mutate({ ...payload(), file }, opened)}
-              onLibrary={(item) => calls.pick.mutate({ ...payload(), item }, opened)}
+              photoSpots={photoSpots}
+              onUpload={(file, spot) => calls.upload.mutate({ ...payload(), file, spot }, opened)}
+              onLibrary={(item, spot) => calls.pick.mutate({ ...payload(), item, spot }, opened)}
               ai={{
                 post, imageSlots, images: footage.data?.kinds.image, aiBusy: calls.aiMake.isLoading || calls.aiPick.isLoading,
                 onAiMake: (imageSlot, prompt) => calls.aiMake.mutate({ ...payload(), imageSlot, prompt }, opened),
@@ -126,7 +134,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             />
           )}
           <EditorClaimsCard
-            schema={chosen?.variables_schema ?? null} variables={draft.variables} sources={draft.sources}
+            schema={chosen?.variables_schema ?? null} variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
           <EditorWhenCard slot={draft.slot} onChange={(slot) => setDraft((d) => ({ ...d, slot }))} />

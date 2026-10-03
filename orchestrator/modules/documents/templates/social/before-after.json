@@ -1,0 +1,85 @@
+{
+  "name": "Before / after",
+  "description": "Two photos side by side, labelled, with a headline and a button under them. For a makeover, a repair, a clean-up, a renovation or a result.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "before_label": {
+      "type": "text",
+      "label": "Before label",
+      "description": "The first photo's label.",
+      "default": "Before",
+      "max_chars": 20
+    },
+    "after_label": {
+      "type": "text",
+      "label": "After label",
+      "description": "The second photo's label.",
+      "default": "After",
+      "max_chars": 20
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The statement under the photos. Use | to break the line, e.g. SAME CHAIR.|NEW YOU.",
+      "max_chars": 60
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in your brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 30
+    },
+    "caption": {
+      "type": "text",
+      "label": "Caption",
+      "description": "A line about the work, e.g. Balayage and cut by Mia, 2 hours. Leave empty for none.",
+      "default": "",
+      "max_chars": 120
+    },
+    "cta": {
+      "type": "text",
+      "label": "Button",
+      "description": "The button's words, e.g. Book now. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "before": {
+      "kind": "image",
+      "path": "assets/slots/before.png",
+      "label": "Before photo",
+      "description": "The before shot, no words in it: the same subject and framing as the after. Upload one or pick one from the Library."
+    },
+    "after": {
+      "kind": "image",
+      "path": "assets/slots/after.png",
+      "label": "After photo",
+      "description": "The after shot, no words in it: the same subject and framing as the before. Upload one or pick one from the Library."
+    }
+  },
+  "sample_data": {
+    "before_label": "Before",
+    "after_label": "After",
+    "headline": "SAME CHAIR.|NEW YOU.",
+    "headline_accent": "NEW YOU.",
+    "caption": "Balayage and cut by Mia, 2 hours.",
+    "cta": "Book Mia",
+    "handle": "@yourbrand"
+  }
+}

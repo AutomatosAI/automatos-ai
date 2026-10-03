@@ -33,6 +33,12 @@ export const VIDEO_TEMPLATE: SocialTemplateSummary = {
   updated_at: null, footage_slots: ['broll', 'hook'], variables_schema: {},
 }
 
+/** PRD-251B: a template with a photo spot (the photo cards). */
+export const PHOTO_TEMPLATE: SocialTemplateSummary = {
+  ...IMAGE_TEMPLATE, id: 'tpl-photo', name: 'Photo + headline', thumbnail_url: null,
+  footage_slots: ['photo'], image_slots: ['photo'], image_slot_labels: { photo: 'Photo' },
+}
+
 export const api = {
   listSocialChannels: vi.fn(),
   listSocialTemplates: vi.fn(),
@@ -53,6 +59,8 @@ export const api = {
   // PRD-251B US-B305: AI options for an image slot.
   makeSocialAiOptions: vi.fn(),
   pickSocialAiOption: vi.fn(),
+  // PRD-251B: a Library picture in a template's photo spot.
+  setSocialPostPhoto: vi.fn(),
 }
 export const apiModule = { apiClient: api, default: api }
 
@@ -100,6 +108,9 @@ export function resetApi() {
     post({ id, footage: { [slot]: { prompt, options: [], options_state: 'making' } } }),
   )
   api.pickSocialAiOption.mockImplementation(async (id: string) => post({ id }))
+  api.setSocialPostPhoto.mockImplementation(async (id: string, slot: string) =>
+    post({ id, footage: { [slot]: { prompt: 'Photo: your own picture (library-1.png)', status: 'done', toolkit: 'library', name: 'library-1.png' } } }),
+  )
 }
 
 export function renderWith(ui: React.ReactElement) {

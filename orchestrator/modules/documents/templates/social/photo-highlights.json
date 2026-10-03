@@ -1,0 +1,109 @@
+{
+  "name": "Highlights",
+  "description": "A headline and two or three short cards over your photo: what you offer, why people choose you, or what is new. For a service, opening hours or a quick list.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920",
+    "1080x1080",
+    "1200x628"
+  ],
+  "variables_schema": {
+    "eyebrow": {
+      "type": "text",
+      "label": "Label",
+      "description": "A short label above the headline, e.g. WHY LOCALS CHOOSE US. Leave empty for none.",
+      "default": "",
+      "max_chars": 36
+    },
+    "headline": {
+      "type": "text",
+      "label": "Headline",
+      "description": "The big statement. Use | to break the line, e.g. YOUR LOCAL|ACCOUNTANT.",
+      "max_chars": 60
+    },
+    "headline_accent": {
+      "type": "text",
+      "label": "Accent words",
+      "description": "Words of the headline shown in your brand colour, exactly as they appear in it. Leave empty for none.",
+      "default": "",
+      "max_chars": 36
+    },
+    "card_1_title": {
+      "type": "text",
+      "label": "Card 1 title",
+      "description": "A few words, e.g. Fixed fees.",
+      "max_chars": 32
+    },
+    "card_1_text": {
+      "type": "text",
+      "label": "Card 1 text",
+      "description": "One line, e.g. One price, agreed up front. Leave empty for none.",
+      "default": "",
+      "max_chars": 90
+    },
+    "card_2_title": {
+      "type": "text",
+      "label": "Card 2 title",
+      "description": "A few words, e.g. Tax return ready.",
+      "max_chars": 32
+    },
+    "card_2_text": {
+      "type": "text",
+      "label": "Card 2 text",
+      "description": "One line. Leave empty for none.",
+      "default": "",
+      "max_chars": 90
+    },
+    "card_3_title": {
+      "type": "text",
+      "label": "Card 3 title",
+      "description": "A third card. Leave it and its text empty for two cards.",
+      "default": "",
+      "max_chars": 32
+    },
+    "card_3_text": {
+      "type": "text",
+      "label": "Card 3 text",
+      "description": "One line. Leave empty for none.",
+      "default": "",
+      "max_chars": 90
+    },
+    "cta": {
+      "type": "text",
+      "label": "Button",
+      "description": "The button's words, e.g. Book now. Leave empty for none.",
+      "default": "",
+      "max_chars": 32
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "Your account handle, top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    }
+  },
+  "slots": {
+    "photo": {
+      "kind": "image",
+      "path": "assets/slots/photo.png",
+      "label": "Photo",
+      "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
+    }
+  },
+  "sample_data": {
+    "eyebrow": "WHY LOCALS CHOOSE US",
+    "headline": "YOUR LOCAL|ACCOUNTANT.",
+    "headline_accent": "ACCOUNTANT.",
+    "card_1_title": "Fixed fees",
+    "card_1_text": "One price, agreed up front.",
+    "card_2_title": "Tax return ready",
+    "card_2_text": "Filed before the deadline, every year.",
+    "card_3_title": "Free first chat",
+    "card_3_text": "30 minutes, no obligation.",
+    "cta": "Book a call",
+    "handle": "@yourbrand"
+  }
+}

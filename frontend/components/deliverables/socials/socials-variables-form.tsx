@@ -5,6 +5,10 @@
  * template's variables_schema (text, number or a switch), with a Form ⇄ JSON
  * toggle like the Template Studio's PreviewDataForm. A claim variable (D7) shows
  * its source, or the red Unsourced chip until one is picked.
+ *
+ * Each field says what goes in it: the template's sample text greyed in as an example,
+ * the field's own description under it, a * on a field the render needs (one with no
+ * default), and a count against its limit.
  */
 import { useState } from 'react'
 import { Braces } from 'lucide-react'
@@ -19,6 +23,18 @@ import { ClaimSource } from './socials-claim-source'
 type Variables = Record<string, SocialPostVariable>
 type Sources = Record<string, SocialClaimSource>
 const LONG_TEXT_CHARS = 120
+export const FIELDS_LEGEND = 'Fields marked * are needed before the post can render. Grey text in a field is an example.'
+
+/** Whether the render needs a value: a text or number field with no default (core/social_templates.py). */
+export function isRequired(spec: SocialTemplateVariable): boolean {
+  return spec.type !== 'boolean' && spec.default === undefined
+}
+
+/** The grey text in an empty field: the template's sample value as an example, else its default. */
+export function exampleOf(spec: SocialTemplateVariable, example: unknown): string {
+  if (typeof example === 'string' ? example.trim() : example !== undefined && example !== null) return `e.g. ${String(example)}`
+  return spec.default === undefined ? '' : String(spec.default)
+}
 
 /** `variables` with `name` set to `raw` as its type reads it, or without it when empty. */
 export function withValue(variables: Variables, name: string, spec: SocialTemplateVariable, raw: string | boolean): Variables {
@@ -33,10 +49,37 @@ interface VariableFieldProps {
   name: string
   spec: SocialTemplateVariable
   variables: Variables
+  /** The template's sample value for this field: greyed in as an example. */
+  example?: unknown
   onChange: (variables: Variables) => void
 }
 
-function VariableField({ name, spec, variables, onChange }: VariableFieldProps) {
+function FieldLabel({ id, label, required }: { id: string; label: string; required: boolean }) {
+  return (
+    <Label htmlFor={id}>
+      {label}
+      {required && (
+        <>
+          <span aria-hidden className="ml-0.5 text-destructive">*</span>
+          <span className="sr-only"> (needed to render)</span>
+        </>
+      )}
+    </Label>
+  )
+}
+
+/** Under the field: what goes in it, and how much of its limit is used. */
+function FieldHelp({ id, description, used, limit }: { id: string; description?: string; used: number; limit?: number }) {
+  if (!description && !limit) return null
+  return (
+    <div className="flex items-start justify-between gap-3 text-xs text-muted-foreground">
+      <p id={id}>{description}</p>
+      {limit ? <span className="shrink-0 tabular-nums">{used}/{limit}</span> : null}
+    </div>
+  )
+}
+
+function VariableField({ name, spec, variables, example, onChange }: VariableFieldProps) {
   const id = `socials-variable-${name}`
   const value = variables[name]?.value
   const label = spec.label || name
@@ -51,23 +94,19 @@ function VariableField({ name, spec, variables, onChange }: VariableFieldProps) 
   const text = value == null ? '' : String(value)
   const long = spec.type === 'text' && (spec.max_chars ?? LONG_TEXT_CHARS * 2) > LONG_TEXT_CHARS
   const set = (raw: string) => onChange(withValue(variables, name, spec, raw))
+  const field = {
+    id, value: text, maxLength: spec.max_chars, placeholder: exampleOf(spec, example),
+    'aria-describedby': spec.description ? `${id}-help` : undefined,
+  }
   return (
     <div className="space-y-1">
-      <Label htmlFor={id}>{label}</Label>
+      <FieldLabel id={id} label={label} required={isRequired(spec)} />
       {long ? (
-        <Textarea id={id} value={text} rows={2} maxLength={spec.max_chars} placeholder={String(spec.default ?? '')} onChange={(e) => set(e.target.value)} />
+        <Textarea {...field} rows={2} onChange={(e) => set(e.target.value)} />
       ) : (
-        <Input
-          id={id}
-          type={spec.type === 'number' ? 'number' : 'text'}
-          value={text}
-          maxLength={spec.max_chars}
-          min={spec.min}
-          max={spec.max}
-          placeholder={String(spec.default ?? '')}
-          onChange={(e) => set(e.target.value)}
-        />
+        <Input {...field} type={spec.type === 'number' ? 'number' : 'text'} min={spec.min} max={spec.max} onChange={(e) => set(e.target.value)} />
       )}
+      <FieldHelp id={`${id}-help`} description={spec.description} used={text.length} limit={spec.max_chars} />
     </div>
   )
 }
@@ -101,9 +140,11 @@ interface SocialsVariablesFormProps {
   onChange: (variables: Variables, sources: Sources) => void
   /** PRD-251B US-B109: open the search of the first claim with no source ("Add a source"). */
   openFirstUnsourced?: boolean
+  /** The template's sample text per field: each empty field's grey example. */
+  examples?: Record<string, unknown>
 }
 
-export function SocialsVariablesForm({ schema, variables, sources, onChange, openFirstUnsourced = false }: SocialsVariablesFormProps) {
+export function SocialsVariablesForm({ schema, variables, sources, onChange, openFirstUnsourced = false, examples = {} }: SocialsVariablesFormProps) {
   const [json, setJson] = useState(false)
   const names = Object.keys(schema)
   const firstUnsourced = openFirstUnsourced ? names.find((name) => schema[name].claim && !sources[name]) : undefined
@@ -112,20 +153,21 @@ export function SocialsVariablesForm({ schema, variables, sources, onChange, ope
     onChange(variables, source ? { ...rest, [name]: source } : rest)
   }
   return (
-    <section aria-label="Variables" className="space-y-3">
+    <section aria-label="Fields" className="space-y-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium text-foreground">Variables</h4>
+        <h4 className="text-sm font-medium text-foreground">Fields</h4>
         <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setJson(!json)}>
           <Braces className="h-3.5 w-3.5" aria-hidden /> {json ? 'Form view' : 'JSON view'}
         </Button>
       </div>
-      {names.length === 0 && <p className="text-sm text-muted-foreground">This template has no variables.</p>}
+      {names.length === 0 && <p className="text-sm text-muted-foreground">This template has no fields.</p>}
+      {names.length > 0 && !json && <p className="text-xs text-muted-foreground">{FIELDS_LEGEND}</p>}
       {json ? (
         <JsonView variables={variables} onChange={(next) => onChange(next, sources)} />
       ) : (
         names.map((name) => (
           <div key={name} className="space-y-1">
-            <VariableField name={name} spec={schema[name]} variables={variables} onChange={(next) => onChange(next, sources)} />
+            <VariableField name={name} spec={schema[name]} variables={variables} example={examples[name]} onChange={(next) => onChange(next, sources)} />
             {schema[name].claim && (
               <ClaimSource
                 name={name}

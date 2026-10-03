@@ -3,7 +3,8 @@
 /**
  * PRD-251B US-B109 — where a post's visual comes from, beside a template: a file the
  * person drops (POST /api/socials/posts/{id}/media; the server sniffs the type and holds
- * the limits) or one of the workspace's image and video Deliverables (the Library).
+ * the limits) or one of the workspace's image and video Deliverables (the Library). For a
+ * template's photo spot (editor-look-photo.tsx) both take pictures only.
  */
 import { useDropzone } from 'react-dropzone'
 import { Loader2, Upload } from 'lucide-react'
@@ -15,11 +16,21 @@ import { HINT, Hint } from './editor-ui'
 
 export const DROP_TITLE = 'Drop an image or video here'
 export const DROP_HINT = 'PNG, JPG or MP4. It is cropped for each channel, and you check each crop in the preview.'
-const ACCEPT = { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/webp': ['.webp'], 'video/mp4': ['.mp4'] }
+export const DROP_PHOTO_TITLE = 'Drop a photo here'
+export const DROP_PHOTO_HINT = 'PNG, JPEG or WebP. The template fits it behind its words.'
+const PICTURES = { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/webp': ['.webp'] }
+const ACCEPT = { ...PICTURES, 'video/mp4': ['.mp4'] }
 
-export function UploadDrop({ busy, onFile }: { busy: boolean; onFile: (file: File) => void }) {
+interface UploadDropProps {
+  busy: boolean
+  onFile: (file: File) => void
+  /** PRD-251B: the file fills a template's photo spot, which takes a picture only. */
+  pictureOnly?: boolean
+}
+
+export function UploadDrop({ busy, onFile, pictureOnly = false }: UploadDropProps) {
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
-    accept: ACCEPT,
+    accept: pictureOnly ? PICTURES : ACCEPT,
     multiple: false,
     noClick: true,
     disabled: busy,
@@ -36,8 +47,8 @@ export function UploadDrop({ busy, onFile }: { busy: boolean; onFile: (file: Fil
     >
       <input {...getInputProps()} aria-label="File to upload" />
       {busy ? <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" aria-hidden /> : <Upload className="h-7 w-7 text-muted-foreground" aria-hidden />}
-      <span className="font-medium text-foreground">{DROP_TITLE}</span>
-      <span className={HINT}>{DROP_HINT}</span>
+      <span className="font-medium text-foreground">{pictureOnly ? DROP_PHOTO_TITLE : DROP_TITLE}</span>
+      <span className={HINT}>{pictureOnly ? DROP_PHOTO_HINT : DROP_HINT}</span>
       <Button type="button" size="sm" variant="secondary" onClick={open} disabled={busy}>
         Browse files
       </Button>
