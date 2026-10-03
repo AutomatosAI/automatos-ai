@@ -30,7 +30,7 @@ describe('Classic Command Centre tabs', () => {
 
   it('the tab bodies carry no Studio class of their own (they must render in either style)', () => {
     const dir = path.resolve(__dirname, '..', '..', 'command-center')
-    for (const f of ['questions-tab.tsx', 'watchlist-tab.tsx']) {
+    for (const f of ['questions-tab.tsx', 'question-card.tsx', 'watchlist-tab.tsx']) {
       expect(readFileSync(path.join(dir, f), 'utf8')).not.toMatch(/className="[^"]*\bcc-/)
     }
   })

@@ -29,6 +29,7 @@ import {
   useMarkAllNotificationsRead,
   useDismissNotification,
 } from '@/hooks/use-notifications-api'
+import { BOARD_HREF, QUESTIONS_HREF, questionIdHref, ticketHref } from '@/lib/ticket-links'
 
 // ---------------------------------------------------------------------------
 // Route mapping
@@ -50,8 +51,9 @@ export function linkFor(row: NotificationRow): string | null {
   if (!link_type) return null
 
   switch (link_type) {
+    // PRD-252 R1: a ticket's notice opens that ticket.
     case 'task':
-      return '/command-center?tab=board'
+      return link_id ? ticketHref(link_id) : BOARD_HREF
     case 'mission':
       return link_id ? `/assignments?tab=missions&mission=${link_id}` : '/assignments?tab=missions'
     case 'playbook':
@@ -70,9 +72,10 @@ export function linkFor(row: NotificationRow): string | null {
       return '/command-center?tab=governance'
     case 'watch':
       return '/command-center?tab=watchlist'
-    // PRD-225: an agent question → the Questions tab (answer resumes the work).
+    // PRD-225: an agent question → answering resumes the work. PRD-252 R1: the
+    // board opens the ticket it was asked on, at the question.
     case 'question':
-      return '/command-center?tab=questions'
+      return link_id ? questionIdHref(link_id) : QUESTIONS_HREF
     // PRD-251 US-206: a social post waiting for approval → that post in the Socials tab.
     case 'social_post':
       return link_id ? `/deliverables?tab=socials&post=${link_id}` : '/deliverables?tab=socials'

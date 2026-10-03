@@ -38,6 +38,8 @@ export interface BoardTask {
   source_id: string
   project_id?: number
   mission_name?: string
+  /** A mission ticket's run (orchestration_run_id): its actions live on /missions/<id> (PRD-252 D6). */
+  mission_id?: string
   parent_task_id?: string
   child_count?: number
   sla_deadline?: string
@@ -47,6 +49,14 @@ export interface BoardTask {
   result?: any
   // PRD-234: the session reference a `runtime: cli` ticket carries once a CLI host claims it
   runtime_ref?: Record<string, any> | null
+  /** PRD-252 R3: why it waits in Review / Blocked (core/services/ticket_reasons.py codes). */
+  review_reason?: string | null
+  blocked_code?: string | null
+  source_type?: string
+  /** PRD-252 R4: the ticket's number in its workspace, #0042 (a mission step: #0051.3). */
+  number?: string | null
+  /** PRD-252 D3: Rejects since the brief was last agreed; from 3, Review suggests Discuss. */
+  times_sent_back?: number
 }
 
 export interface BoardColumn {
@@ -73,8 +83,9 @@ export const BOARD_COLUMNS: { status: BoardStatus; label: string }[] = [
   { status: 'blocked', label: 'Blocked' },
   { status: 'done', label: 'Done' },
   { status: 'failed', label: 'Failed' },
+  // PRD-252 R7 (D1): Cancelled and Closed are one stage; a closed ticket
+  // stays 'closed' and sits in the Cancelled column.
   { status: 'cancelled', label: 'Cancelled' }, // PRD-234 S1a
-  { status: 'closed', label: 'Closed' },
 ]
 
 export const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string; cssVar: string }> = {

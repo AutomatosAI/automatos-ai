@@ -1677,13 +1677,22 @@ class BoardTask(Base):
     sla_breach_notified = Column(Boolean, nullable=False, default=False, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    # PRD-252 R4: the ticket's number in its workspace (#0042), given on insert
+    # (core/models/ticket_numbers.py). None for a mission step, which shows its
+    # mission card's number and its step (#0051.3).
+    workspace_seq = Column(Integer, nullable=True)
 
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = (
+        Index('uq_board_tasks_workspace_seq', 'workspace_id', 'workspace_seq', unique=True,
+              postgresql_where=text('workspace_seq IS NOT NULL')),
+        {'extend_existing': True},
+    )
 
     def to_dict(self):
         return {
             "id": self.id,
             "workspace_id": str(self.workspace_id) if self.workspace_id else None,
+            "workspace_seq": self.workspace_seq,
             "title": self.title,
             "description": self.description,
             "raw_prompt": self.raw_prompt,

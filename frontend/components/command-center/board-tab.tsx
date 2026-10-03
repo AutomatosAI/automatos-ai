@@ -19,32 +19,26 @@
  * lives in /chat?mode=plan and routine creation in /agents.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useCallback, useMemo, useState } from 'react'
 import {
   DragDropContext,
   Droppable,
   Draggable,
+  type DraggableProvided,
   type DropResult,
 } from '@hello-pangea/dnd'
-import {
-  Columns,
-  LayoutList,
-  Rows,
-  AlignJustify,
-  Search,
-  BookMarked,
-  CheckSquare,
-} from 'lucide-react'
-import { useBoardTasks, useBoardTask, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { BookMarked, CheckSquare, RefreshCw, Target } from 'lucide-react'
+import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
+import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
+import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-menu'
+import { stageReason } from '@/components/activity/board/ticket-stage'
+import { runsInSession, ticketKind } from '@/components/activity/board/ticket-kind'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
-
-type Mode = 'column' | 'lane'
-type Density = 'comfortable' | 'compact'
+import { BoardToolbar, type BoardDensity as Density, type BoardMode as Mode } from './board-toolbar'
 
 const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   inbox:       { label: 'Inbox',       color: 'hsl(30 14% 12%)' },
@@ -58,8 +52,9 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   // Tidied away without a claim about the work (night 1, 2026-09-18).
   closed:      { label: 'Closed',      color: 'hsl(30 8% 30%)' },
 }
+// PRD-252 R7 (D1): Closed tickets sit in the Cancelled column.
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled', 'closed',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -70,6 +65,7 @@ export function BoardTab() {
   const [agentFilter, setAgentFilter] = useState<number | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
   const [openTask, setOpenTask] = useState<BoardTask | null>(null)
+  const [focusQuestion, setFocusQuestion] = useState<number | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
 
   const { columns, isLoading } = useBoardTasks({
@@ -82,18 +78,14 @@ export function BoardTab() {
 
   const allTasks = useMemo(() => columns.flatMap((c) => c.tasks), [columns])
 
-  // Deep link: ?task_id=123 (the calendar's "Open on board", notifications).
-  // Fetched by id so the search/agent/priority filters can't hide the card
-  // from the link. Opens once per id.
-  const deepLinkTaskId = useSearchParams().get('task_id')
-  const { data: deepLinkedTask } = useBoardTask(deepLinkTaskId)
-  const openedDeepLink = useRef<string | null>(null)
-  useEffect(() => {
-    if (!deepLinkTaskId || !deepLinkedTask || openedDeepLink.current === deepLinkTaskId) return
-    openedDeepLink.current = deepLinkTaskId
-    setOpenTask(deepLinkedTask)
+  const openTicket = useCallback((task: BoardTask, questionId: number | null = null) => {
+    setOpenTask(task)
+    setFocusQuestion(questionId)
     setViewerOpen(true)
-  }, [deepLinkTaskId, deepLinkedTask])
+  }, [])
+  // PRD-252 R1: ?task_id= (and &question=) open that ticket, fetched by id so
+  // the filters below can't hide it from the link.
+  const clearDeepLink = useTicketDeepLink(openTicket)
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return
@@ -107,121 +99,25 @@ export function BoardTab() {
     updateStatus.mutate({ taskId: draggableId, status: nextStatus })
   }
 
-  const handleCardClick = (task: BoardTask) => {
-    setOpenTask(task)
-    setViewerOpen(true)
-  }
+  const handleCardClick = (task: BoardTask) => openTicket(task)
 
   return (
     <>
       {/* PRD-235 W3: Claude Code agents need the paired host — say so once, at the top */}
       <HostOfflineBanner />
-      <div className="cc-toolbar">
-        <div className="cc-seg" role="group" aria-label="Board mode">
-          <button
-            type="button"
-            className={mode === 'column' ? 'on' : ''}
-            onClick={() => setMode('column')}
-          >
-            <Columns style={{ width: 12, height: 12 }} /> Columns
-          </button>
-          <button
-            type="button"
-            className={mode === 'lane' ? 'on' : ''}
-            onClick={() => setMode('lane')}
-          >
-            <LayoutList style={{ width: 12, height: 12 }} /> By agent
-          </button>
-        </div>
-
-        <div className="cc-seg" role="group" aria-label="Density">
-          <button
-            type="button"
-            className={density === 'comfortable' ? 'on' : ''}
-            onClick={() => setDensity('comfortable')}
-          >
-            <Rows style={{ width: 11, height: 11 }} /> Comfortable
-          </button>
-          <button
-            type="button"
-            className={density === 'compact' ? 'on' : ''}
-            onClick={() => setDensity('compact')}
-          >
-            <AlignJustify style={{ width: 11, height: 11 }} /> Compact
-          </button>
-        </div>
-
-        <div style={{ display: 'inline-flex', gap: 6 }}>
-          <select
-            className="cc-btn"
-            value={priorityFilter ?? ''}
-            onChange={(e) => setPriorityFilter(e.target.value || null)}
-            aria-label="Filter by priority"
-            style={{ height: 28, fontSize: 11.5, paddingRight: 24 }}
-          >
-            <option value="">All priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <select
-            className="cc-btn"
-            value={agentFilter ?? ''}
-            onChange={(e) =>
-              setAgentFilter(e.target.value ? Number(e.target.value) : null)
-            }
-            aria-label="Filter by agent"
-            style={{ height: 28, fontSize: 11.5, paddingRight: 24 }}
-          >
-            <option value="">All agents</option>
-            {Array.isArray(agents) &&
-              agents.map((a: any) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        <div style={{ marginLeft: 'auto' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '0 10px',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: 6,
-              background: 'hsl(var(--card))',
-              minWidth: 220,
-            }}
-          >
-            <Search
-              style={{
-                width: 12,
-                height: 12,
-                color: 'hsl(var(--muted-foreground))',
-              }}
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tasks…"
-              style={{
-                background: 'transparent',
-                border: 0,
-                outline: 'none',
-                fontSize: 12,
-                height: 28,
-                flex: 1,
-                color: 'hsl(var(--foreground))',
-              }}
-            />
-          </div>
-        </div>
-      </div>
+      <BoardToolbar
+        mode={mode}
+        onMode={setMode}
+        density={density}
+        onDensity={setDensity}
+        priority={priorityFilter}
+        onPriority={setPriorityFilter}
+        agentId={agentFilter}
+        onAgentId={setAgentFilter}
+        agents={agents}
+        search={search}
+        onSearch={setSearch}
+      />
 
       {isLoading ? (
         <div className="cc-panel-empty">Loading tasks…</div>
@@ -246,9 +142,13 @@ export function BoardTab() {
       <BoardTaskViewer
         task={openTask}
         open={viewerOpen}
+        focusQuestionId={focusQuestion}
         onOpenChange={(o) => {
           setViewerOpen(o)
-          if (!o) setOpenTask(null)
+          if (!o) {
+            setOpenTask(null)
+            clearDeepLink()
+          }
         }}
       />
     </>
@@ -266,82 +166,113 @@ function KanbanCard({
   index: number
   onOpen: () => void
 }) {
-  const tone = toneFor(task.assignee?.agent_name)
-  const isCompact = density === 'compact'
-  const isPlaybook = task.type === 'playbook'
-  const Icon = isPlaybook ? BookMarked : CheckSquare
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          className={`cc-kb-card${isCompact ? ' compact' : ''}${
-            snapshot.isDragging ? ' dragging' : ''
-          }`}
-          onClick={onOpen}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              onOpen()
-            }
-          }}
-          style={provided.draggableProps.style}
-        >
-          <div className="kind">
-            <Icon style={{ width: 11, height: 11 }} />
-            {(task.type ?? 'task').toUpperCase()}
-            {(task.priority === 'urgent' || task.priority === 'high') && (
-              <span className="high">· {task.priority.toUpperCase()}</span>
-            )}
-            {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
-                47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
-                A requeue is only evidence of a missed ack from the second
-                attempt on. */}
-            {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
-              <span
-                className="high"
-                style={{ color: 'hsl(0 72% 60%)' }}
-                title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
-              >
-                · UNRESPONSIVE
-              </span>
-            )}
-            {task.sla_deadline &&
-              task.status !== 'done' &&
-              task.status !== 'failed' &&
-              task.status !== 'cancelled' &&
-              new Date(task.sla_deadline).getTime() < Date.now() && (
-                <span
-                  className="high"
-                  style={{ color: 'hsl(0 72% 60%)' }}
-                  title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
-                >
-                  · OVERDUE
-                </span>
-              )}
-          </div>
-          <div className="ttl">{task.name}</div>
-          {!isCompact && task.description && (
-            <div className="body">{task.description}</div>
-          )}
-          <div className="row">
-            {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
-              <span key={tg} className="tag">
-                {tg}
-              </span>
-            ))}
-            <span className="ag">
-              <span className="swatch" style={{ background: tone.bg }} />
-              {task.assignee?.agent_name ?? 'Unassigned'}
-            </span>
-          </div>
-        </div>
+        <KanbanCardFace task={task} density={density} onOpen={onOpen} provided={provided} isDragging={snapshot.isDragging} />
       )}
     </Draggable>
+  )
+}
+
+/** The card itself; its Draggable hands it the drag props. */
+function KanbanCardFace({
+  task,
+  density,
+  onOpen,
+  provided,
+  isDragging,
+}: {
+  task: BoardTask
+  density: Density
+  onOpen: () => void
+  provided: DraggableProvided
+  isDragging: boolean
+}) {
+  const tone = toneFor(task.assignee?.agent_name)
+  const isCompact = density === 'compact'
+  const reason = stageReason(task)
+  return (
+    <div
+      ref={provided.innerRef}
+      {...provided.draggableProps}
+      {...provided.dragHandleProps}
+      className={`cc-kb-card${isCompact ? ' compact' : ''}${isDragging ? ' dragging' : ''}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      style={provided.draggableProps.style}
+    >
+      <KanbanKindRow task={task} />
+      <div className="ttl">{task.name}</div>
+      {/* PRD-252 R3: why it waits in Review or Blocked */}
+      {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
+      {!isCompact && task.description && (
+        <div className="body">{task.description}</div>
+      )}
+      <div className="row">
+        {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
+          <span key={tg} className="tag">
+            {tg}
+          </span>
+        ))}
+        <span className="ag">
+          <span className="swatch" style={{ background: tone.bg }} />
+          {task.assignee?.agent_name ?? 'Unassigned'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/** The card's top line: its number and type, priority, the flags that say it needs a look, and its actions. */
+function KanbanKindRow({ task }: { task: BoardTask }) {
+  const kind = ticketKind(task.source_type)  // PRD-252 R4: the type a person reads
+  const Icon = kind === 'Playbook' ? BookMarked : kind === 'Mission' ? Target : kind === 'Routine' ? RefreshCw : CheckSquare
+  return (
+    <div className="kind">
+      {task.number && <span className="num">{task.number}</span>}
+      <Icon style={{ width: 11, height: 11 }} />
+      {kind.toUpperCase()}
+      {runsInSession(task) && <span className="session" title="A Claude Code session runs this ticket">· &gt;_ SESSION</span>}
+      {(task.priority === 'urgent' || task.priority === 'high') && (
+        <span className="high">· {task.priority.toUpperCase()}</span>
+      )}
+      {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
+          47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
+          A requeue is only evidence of a missed ack from the second
+          attempt on. */}
+      {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
+        <span
+          className="high"
+          style={{ color: 'hsl(0 72% 60%)' }}
+          title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
+        >
+          · UNRESPONSIVE
+        </span>
+      )}
+      {task.sla_deadline &&
+        task.status !== 'done' &&
+        task.status !== 'failed' &&
+        task.status !== 'cancelled' &&
+        new Date(task.sla_deadline).getTime() < Date.now() && (
+          <span
+            className="high"
+            style={{ color: 'hsl(0 72% 60%)' }}
+            title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
+          >
+            · OVERDUE
+          </span>
+        )}
+      {/* PRD-252 R7: assign and cancel from the card */}
+      <TicketActionsMenu task={task} />
+    </div>
   )
 }
 

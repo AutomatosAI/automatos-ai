@@ -23,6 +23,7 @@ from core.models.orchestration_enums import RunState, TaskState
 from services import cli_ticket_lane as lane
 from services import coordinator_service as cs
 from services.orchestration_board_bridge import create_mission_board_task, create_task_board_task
+from services.ticket_numbers import ticket_label
 
 BLOCKING_STEP = "Synthesize all pending items for Monday morning"
 BLOCKING_GOAL = "three loose ends from tonight, then one page for me to pick up on Monday"
@@ -94,7 +95,7 @@ def test_an_approved_mission_behind_a_claude_code_step_says_what_it_waits_for(db
     (event,) = _waiting_events(db_session, waiting)                     # old: nothing until the step ran
     said = event["stop_detail"]
     assert said.startswith("Approved. It probably starts when")         # inferred: no record in this process
-    assert f"'{BLOCKING_STEP}' of mission '{BLOCKING_GOAL}'" in said and f"ticket #{card.id}" in said
+    assert f"'{BLOCKING_STEP}' of mission '{BLOCKING_GOAL}'" in said and f"({ticket_label(card)}," in said  # PRD-252 R4
     assert "since 17:39 UTC" in said
     assert (str(waiting.id), said) in narrated                          # the chat it came from hears it too
 
@@ -113,7 +114,7 @@ def test_the_tick_record_names_the_exact_step_and_the_reply_says_it(db_session, 
 
     (event,) = _waiting_events(db_session, waiting)
     assert event["stop_detail"].startswith(f"Approved. It starts when '{BLOCKING_STEP}'")   # certain: no "probably"
-    assert f"ticket #{card.id}" in event["stop_detail"]
+    assert f"({ticket_label(card)}," in event["stop_detail"]                                  # PRD-252 R4: its number
     assert reply["success"] and event["stop_detail"] in reply["message"] and reply["waiting"] == event["stop_detail"]
 
 

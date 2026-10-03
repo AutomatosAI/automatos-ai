@@ -87,7 +87,8 @@ describe('QuestionsTab — PRD-225', () => {
     // Asker badge + subject link.
     expect(screen.getByText('Agent #3')).toBeInTheDocument()
     const link = screen.getAllByRole('link', { name: /board_task:42/ })[0]
-    expect(link).toHaveAttribute('href', '/command-center?tab=board')
+    // PRD-252 R1: the subject link opens that ticket, at this question.
+    expect(link).toHaveAttribute('href', '/command-center?tab=board&task_id=42&question=1')
     // Order preserved (newest-first is the backend's job; the tab keeps order).
     const asked = screen.getAllByText(/Agent #/).map((n) => n.textContent)
     expect(asked).toEqual(['Agent #3', 'Agent #4'])
@@ -97,12 +98,12 @@ describe('QuestionsTab — PRD-225', () => {
     setQuestions([
       question({
         id: 5, subject_id: '612', asked_by_agent_id: 294,
-        owner: { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions' } },
+        owner: { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions', number: '#0042' } },
       }),
     ])
     render(<QuestionsTab />)
     expect(screen.getByText('Scout (agent #294)')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ticket #612 · Cafe questions' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ticket #0042 · Cafe questions' })).toBeInTheDocument()   // PRD-252 R4
     expect(screen.queryByText(/board_task:612/)).not.toBeInTheDocument()
   })
 

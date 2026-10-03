@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
 }))
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WorkspaceProvider, useWorkspace } from '../workspace-provider'
 
 function Probe() {
@@ -76,9 +77,11 @@ describe('WorkspaceProvider — exposure snapshot (US-024)', () => {
     })
 
     render(
-      <WorkspaceProvider>
-        <Probe />
-      </WorkspaceProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider>
+          <Probe />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
     )
 
     await waitFor(() => expect(screen.getByTestId('plan')).toHaveTextContent('basic'))
@@ -91,9 +94,11 @@ describe('WorkspaceProvider — exposure snapshot (US-024)', () => {
     mockFetch({ ...BASE_RESPONSE })
 
     render(
-      <WorkspaceProvider>
-        <Probe />
-      </WorkspaceProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider>
+          <Probe />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
     )
 
     await waitFor(() => expect(screen.getByTestId('plan')).toHaveTextContent('basic'))

@@ -1,5 +1,5 @@
 {
-  "route_count": 851,
+  "route_count": 853,
   "routes": [
     {
       "method": "GET",
@@ -32,6 +32,10 @@
     {
       "method": "GET",
       "path": "/api/activity/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/needs-you"
     },
     {
       "method": "GET",
@@ -2708,6 +2712,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/rebrief"
     },
     {
       "method": "POST",

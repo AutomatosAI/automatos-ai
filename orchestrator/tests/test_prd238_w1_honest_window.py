@@ -141,8 +141,10 @@ def test_cancelled_watch_says_so_in_the_originating_chat(monkeypatch):
     import services.chat_messenger as messenger
     monkeypatch.setattr(messenger, "deliver_background_message", lambda db, **kw: delivered.append(kw))
 
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None       # a ticket with no number here
     event = ws.WatchService.ingest_terminal(
-        MagicMock(), workspace_id=watch.workspace_id, target_type="board_task", target_id="92",
+        db, workspace_id=watch.workspace_id, target_type="board_task", target_id="92",
         terminal_state="cancelled", summary="exit: cancelled; 1 permission denial",
     )
     assert event is not None
@@ -151,7 +153,8 @@ def test_cancelled_watch_says_so_in_the_originating_chat(monkeypatch):
     msg = delivered[0]
     assert msg["chat_id"] == str(watch.origin_chat_id)
     assert msg["source"] == {"origin": "watcher", "event": "watch_cancelled"}
-    assert msg["text"] == "Ticket: Write basic webpage (#92) ended: cancelled. exit: cancelled; 1 permission denial"
+    # PRD-252 R4: never "#92", which would name ticket number 92
+    assert msg["text"] == "Ticket: Write basic webpage (ticket 92) ended: cancelled. exit: cancelled; 1 permission denial"
 
 
 def test_cancelled_report_text_shapes():
@@ -162,7 +165,9 @@ def test_cancelled_report_text_shapes():
 
     w = SimpleNamespace(title="Mission: launch")
     assert cancelled_report_text(w, "mission", "m1", None) == "Mission: launch ended: cancelled."
-    assert cancelled_report_text(SimpleNamespace(title=""), "board_task", "7", "why") == "board_task 7 (#7) ended: cancelled. why"
+    assert cancelled_report_text(SimpleNamespace(title=""), "board_task", "7", "why") == "board_task 7 (ticket 7) ended: cancelled. why"
+    assert cancelled_report_text(SimpleNamespace(title="Ticket: Rota"), "board_task", "7", None, number="#0042") == \
+        "Ticket: Rota (#0042) ended: cancelled."
 
 
 # ---------------------------------------------------------------------------

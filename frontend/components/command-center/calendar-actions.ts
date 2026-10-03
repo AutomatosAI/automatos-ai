@@ -14,6 +14,7 @@
 
 import type { ScheduleItem } from '@/hooks/use-activity-api'
 import type { ScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
+import { missionHref, ticketHref } from '@/lib/ticket-links'
 
 export interface EventAction {
   label: string
@@ -38,16 +39,8 @@ export function agentHref(agentId: number): string {
   return `/agents?agent=${agentId}`
 }
 
-export function boardTaskHref(boardTaskId: number): string {
-  return `/command-center?tab=board&task_id=${boardTaskId}`
-}
-
 export function playbookHref(playbookId: number): string {
   return `/assignments?tab=playbooks&id=${playbookId}`
-}
-
-export function missionHref(missionId: number): string {
-  return `/missions/${missionId}`
 }
 
 export function socialPostHref(postId: string): string {
@@ -88,7 +81,7 @@ const missionActions: KindActions = (item, deps) => {
 
 const taskDueActions: KindActions = (item, deps, openAgent) => {
   const boardTaskId = item.board_task_id
-  const open = boardTaskId != null ? [{ label: 'Open on board', run: () => deps.navigate(boardTaskHref(boardTaskId)) }] : []
+  const open = boardTaskId != null ? [{ label: 'Open on board', run: () => deps.navigate(ticketHref(boardTaskId)) }] : []
   return [...open, ...(openAgent ? [openAgent] : [])]
 }
 

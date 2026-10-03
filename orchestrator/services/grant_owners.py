@@ -9,7 +9,8 @@ for the whole list, never one per card.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from types import SimpleNamespace
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 
@@ -26,8 +27,9 @@ def _ticket_of(grant: Any) -> Optional[int]:
 
 
 def grant_owners(db: Any, workspace_id: Any, grants: Iterable[Any]) -> Dict[int, Dict[str, Any]]:
-    """``{grant id: {"agent": {id, name} | None, "ticket": {id, title} | None}}``."""
-    from core.models.core import Agent, BoardTask
+    """``{grant id: {"agent": {id, name} | None, "ticket": {id, title, number} | None}}``.
+    PRD-252 R4: the ticket's ``number`` (#0042) is read with its title."""
+    from core.models.core import Agent
 
     rows: List[Any] = list(grants)
     agent_ids = {a for a in (_agent_of(g) for g in rows) if a}
@@ -35,15 +37,30 @@ def grant_owners(db: Any, workspace_id: Any, grants: Iterable[Any]) -> Dict[int,
     names = dict(
         db.query(Agent.id, Agent.name).filter(Agent.id.in_(agent_ids), Agent.workspace_id == workspace_id).all()
     ) if agent_ids else {}
-    titles = dict(
-        db.query(BoardTask.id, BoardTask.title)
-        .filter(BoardTask.id.in_(ticket_ids), BoardTask.workspace_id == workspace_id).all()
-    ) if ticket_ids else {}
+    tickets = _tickets(db, workspace_id, ticket_ids)
     owners: Dict[int, Dict[str, Any]] = {}
     for g in rows:
         agent, ticket = _agent_of(g), _ticket_of(g)
+        known = tickets.get(ticket, {})
         owners[g.id] = {
             "agent": {"id": agent, "name": names.get(agent)} if agent else None,
-            "ticket": {"id": ticket, "title": titles.get(ticket)} if ticket else None,
+            "ticket": {"id": ticket, "title": known.get("title"), "number": known.get("number")} if ticket else None,
         }
     return owners
+
+
+def _tickets(db: Any, workspace_id: Any, ticket_ids: Set[int]) -> Dict[int, Dict[str, Any]]:
+    """Each ticket's title and number, in one read (a mission step's number needs its card's)."""
+    from core.models.core import BoardTask
+    from services.ticket_numbers import ticket_numbers
+
+    if not ticket_ids:
+        return {}
+    rows = [
+        SimpleNamespace(id=r[0], title=r[1], workspace_seq=r[2], source_type=r[3], parent_task_id=r[4])
+        for r in db.query(BoardTask.id, BoardTask.title, BoardTask.workspace_seq, BoardTask.source_type,
+                          BoardTask.parent_task_id)
+        .filter(BoardTask.id.in_(ticket_ids), BoardTask.workspace_id == workspace_id).all()
+    ]
+    numbers = ticket_numbers(db, workspace_id, rows)
+    return {r.id: {"title": r.title, "number": numbers.get(r.id)} for r in rows}

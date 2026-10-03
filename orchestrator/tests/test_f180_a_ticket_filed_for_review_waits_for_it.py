@@ -77,13 +77,16 @@ def test_updating_takes_the_same_words(board):
 
 
 def test_both_tools_offer_the_boards_words():
-    from api.board_tasks import VALID_REVIEW_MODES
+    """PRD-252 D7: the tools offer the words the board offers. 'llm' is hidden (it
+    had no reviewer), not removed: a ticket that already has it still loads."""
+    from api.board_tasks import OFFERED_REVIEW_MODES, VALID_REVIEW_MODES
     from modules.tools.discovery import get_action_registry
 
     registry = get_action_registry()
-    for name in ("platform_create_task", "platform_update_task"):
+    for name in ("platform_create_task", "platform_update_task", "platform_schedule_task"):
         offered = registry.get(name).parameters["properties"]["review_mode"]["enum"]
-        assert sorted(offered) == sorted(VALID_REVIEW_MODES), name
+        assert sorted(offered) == sorted(OFFERED_REVIEW_MODES), name
+    assert set(OFFERED_REVIEW_MODES) < set(VALID_REVIEW_MODES)
 
 
 def test_a_session_ticket_speaks_the_boards_word():

@@ -55,6 +55,8 @@ export interface ToolCall {
 /** PRD-238 S6: the compact, live-updatable card for a board ticket in the chat. */
 export interface TaskCardData {
   id: number
+  /** PRD-252 R4: the ticket's number, #0042; the card names the ticket by it. */
+  number?: string | null
   title: string
   status: string
   assigned_agent: string

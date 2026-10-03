@@ -66,14 +66,16 @@ def test_run_now_never_sends_a_missions_step_through_the_board(mission, status):
     mission.db.refresh(mission.child)
     assert mission.child.status == status and mission.woken == []
     assert refused.status_code == 409
-    assert f"Ticket #{mission.child.id} is a step of the mission “{GOAL}”" in refused.detail
+    # PRD-252 R4: a step is named by its mission card's number and its place (#0042.1)
+    step = f"#{mission.parent.workspace_seq:04d}.1"
+    assert f"Ticket {step} is a step of the mission “{GOAL}”" in refused.detail
     assert f"(/missions/{mission.run.id})" in refused.detail
 
 
 def test_run_now_points_the_missions_own_ticket_to_the_mission(mission):
     refused = _run_now(mission, mission.parent)
     assert refused.status_code == 409
-    assert f"Ticket #{mission.parent.id} is the mission “{GOAL}”" in refused.detail
+    assert f"Ticket #{mission.parent.workspace_seq:04d} is the mission “{GOAL}”" in refused.detail
 
 
 def test_a_watch_never_re_runs_a_missions_step(mission, monkeypatch):

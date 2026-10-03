@@ -76,6 +76,13 @@ describe('PRD-227 US-003 — bell deep-link drift guard', () => {
     expect(linkFor(row('question'))).toBe('/command-center?tab=questions')
   })
 
+  it('PRD-252 R1: a notice that names its ticket or question opens it on the board', () => {
+    expect(linkFor(row('task', '1169'))).toBe('/command-center?tab=board&task_id=1169')
+    // A question notice carries only the question; the board finds its ticket.
+    expect(linkFor(row('question', '41'))).toBe('/command-center?tab=board&question=41')
+    expect(linkFor(row('task'))).toBe('/command-center?tab=board')
+  })
+
   it('the new routes use tab params the Command Center shell actually reads', () => {
     // Cross-file guard: a tab rename in the shell must break this, not just
     // dead-link the bell. Extract each new route's ?tab= value and assert the

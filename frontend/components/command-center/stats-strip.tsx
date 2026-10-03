@@ -5,7 +5,8 @@
  * sparklines, mono numerals and semantic tones. The cells:
  *   WORKING · AGENTS · QUEUE · ATTENTION · CACHE-HIT · $ / REQ
  *
- * Live values come from `useActivityStats('1d')` for the workforce four,
+ * Live values come from `useActivityStats('1d')` for the workforce three and
+ * `useNeedsYou(period)` for ATTENTION (PRD-252 R5: the one Needs-you number),
  * `useCostAnalyticsUnified(7)` for CACHE-HIT (the share of input tokens the
  * providers served from prompt cache, PRD-231/#745) and $/REQ, and
  * `useHeartbeats()` for the scheduled count. The strip always renders — no
@@ -15,6 +16,7 @@
 
 import { useHeartbeats } from '@/hooks/use-heartbeats-api'
 import { useActivityStats } from '@/hooks/use-activity-api'
+import { useNeedsYou } from '@/hooks/use-needs-you'
 import { useCostAnalyticsUnified } from '@/hooks/use-unified-analytics'
 import { Sparkline, type SparklineTone } from './sparkline'
 
@@ -26,15 +28,16 @@ interface Cell {
   spark?: number[]
 }
 
-export function StatsStrip() {
+export function StatsStrip({ period = '1d' }: { period?: string } = {}) {
   const { data: stats } = useActivityStats('1d')
+  const { data: needsYou } = useNeedsYou(period)
   const { data: cost } = useCostAnalyticsUnified(7)
   const { data: heartbeats } = useHeartbeats()
 
   const working = stats?.working_now ?? 0
   const agents = stats?.agents_active ?? 0
   const queue = stats?.tasks_in_queue ?? 0
-  const attn = stats?.needs_attention ?? 0
+  const attn = needsYou?.total ?? 0
 
   const scheduled = heartbeats?.heartbeats?.filter((h) => h.enabled).length ?? 0
 

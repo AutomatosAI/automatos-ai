@@ -67,6 +67,7 @@ describe('Markdown typography', () => {
   })
 
   it('the question ask body uses the same typography', () => {
-    expect(read('components/command-center/questions-tab.tsx')).toContain('className="md-view md-view-compact"')
+    // PRD-252 R1: the card moved out of the Questions tab, which the ticket viewer now shares.
+    expect(read('components/command-center/question-card.tsx')).toContain('className="md-view md-view-compact"')
   })
 })

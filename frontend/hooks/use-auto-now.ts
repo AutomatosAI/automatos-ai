@@ -2,15 +2,17 @@
 
 /**
  * PRD-244 D5 — "Auto now": the floor's live objects, read from the hooks the
- * Command Centre already polls (no new endpoint, each read keeps its own
- * cadence). One snapshot for the chat rail (both styles) and the header pill.
+ * Command Centre already polls (each read keeps its own cadence). One snapshot
+ * for the chat rail (both styles) and the header pill. PRD-252 R5: what needs
+ * the owner is the one Needs-you number (useNeedsYou), not questions plus
+ * "decisions" from a super-admin-only endpoint.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useActivityStats, type ActivityStats } from '@/hooks/use-activity-api'
 import { useFleetState } from '@/hooks/use-agent-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
 import { useWatches } from '@/hooks/use-watches-api'
-import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
+import { useNeedsYou, type NeedsYou } from '@/hooks/use-needs-you'
 import type { ApprovalGrant, FleetAgentRow, WatchRow } from '@/lib/api-client'
 
 export const AUTO_NOW_ROWS = 3
@@ -27,7 +29,9 @@ export interface AutoNowSnapshot {
   /** Live watches; `nextWatch` is the one due soonest. */
   watches: WatchRow[]
   nextWatch: WatchRow | null
-  decisionsTotal: number
+  /** The Needs-you number for today and the kinds behind it. */
+  needsYou: NeedsYou | undefined
+  needsYouTotal: number
   loading: boolean
 }
 
@@ -38,7 +42,7 @@ export function useAutoNow(): AutoNowSnapshot {
   const fleet = useFleetState()
   const questions = useQuestions()
   const watches = useWatches()
-  const decisions = useDecisionsNeeded()
+  const needs = useNeedsYou('1d')
 
   return useMemo(() => {
     const working = [...(fleet.data?.agents ?? [])]
@@ -58,10 +62,11 @@ export function useAutoNow(): AutoNowSnapshot {
       questionCount: grants.length,
       watches: live,
       nextWatch,
-      decisionsTotal: decisions.data?.total ?? 0,
-      loading: stats.isLoading || fleet.isLoading || questions.isLoading || watches.isLoading || decisions.isLoading,
+      needsYou: needs.data,
+      needsYouTotal: needs.data?.total ?? 0,
+      loading: stats.isLoading || fleet.isLoading || questions.isLoading || watches.isLoading || needs.isLoading,
     }
-  }, [stats.data, stats.isLoading, fleet.data, fleet.isLoading, questions.data, questions.isLoading, watches.data, watches.isLoading, decisions.data, decisions.isLoading])
+  }, [stats.data, stats.isLoading, fleet.data, fleet.isLoading, questions.data, questions.isLoading, watches.data, watches.isLoading, needs.data, needs.isLoading])
 }
 
 /**

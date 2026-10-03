@@ -14,6 +14,7 @@ import { apiClient } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
 import type { TaskCardData } from '@/types'
 import { STATUS_CONFIG, type BoardStatus } from '@/types/board'
+import { ticketHref } from '@/lib/ticket-links'
 
 export interface TaskCardProps {
   card: TaskCardData
@@ -40,6 +41,7 @@ function cardFromTask(task: Record<string, any>, previous: TaskCardData): TaskCa
   return {
     ...previous,
     title: task.title ?? previous.title,
+    number: task.number ?? previous.number,
     status: task.status ?? previous.status,
     assigned_agent: task.assigned_agent_name ?? task.assigned_agent ?? previous.assigned_agent,
     // F168: the backend's entries carry `tool`; `name` is the older shape.
@@ -93,7 +95,7 @@ export function TaskCard({ card: initial }: TaskCardProps) {
     <div className="max-w-md space-y-2 rounded-xl border border-border bg-card/50 p-3 backdrop-blur" data-testid="task-card">
       <div className="flex items-center gap-2">
         <ClipboardList className="h-4 w-4 text-primary" />
-        <span className="text-xs font-medium text-primary">Ticket #{card.id}</span>
+        <span className="text-xs font-medium text-primary">Ticket {card.number ?? card.id}</span>
         <span
           className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground"
           data-testid="task-card-status"
@@ -108,7 +110,7 @@ export function TaskCard({ card: initial }: TaskCardProps) {
         variant="outline"
         size="sm"
         className="border-primary/30 text-primary hover:bg-primary/10"
-        onClick={() => router.push(`/command-center?tab=board&task_id=${card.id}` as any)}
+        onClick={() => router.push(ticketHref(card.id) as any)}
       >
         Open on the board
         <ArrowRight className="ml-1.5 h-3.5 w-3.5" />

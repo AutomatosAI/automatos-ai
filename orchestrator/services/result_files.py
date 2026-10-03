@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from core.services.ticket_reasons import FILE_MISSING_NOTE_PREFIX
+
 logger = logging.getLogger(__name__)
 
 MAX_NAMED_FILES = 10
@@ -199,7 +201,7 @@ async def check_named_files(task: Any, text: str, workspace_id: Any, *, db: Any 
     saved_as_documents = [n for n in missing if n in in_knowledge_base]
     lines: List[str] = []
     if nowhere:
-        lines.append(f"Not found when this ticket closed: {_shown(nowhere)} — the result names "
+        lines.append(f"{FILE_MISSING_NOTE_PREFIX} {_shown(nowhere)} — the result names "
                      f"{'it' if len(nowhere) == 1 else 'them'}, but the workspace has no such "
                      f"{'file' if len(nowhere) == 1 else 'files'}. Sent to review instead of done.")
     if saved_as_documents:

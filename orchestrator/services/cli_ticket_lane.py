@@ -24,6 +24,7 @@ from core.cli_runtime import (
     runtime_kind_of,
 )
 from core.models.core import Agent, BoardTask
+from services.ticket_numbers import ticket_label  # PRD-252 R4
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 # work awaiting sign-off; the next fire files a new ticket (agent 15's #93 absorbed
 # 236 heartbeats while it sat in review).
 REUSABLE_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked")
-QUEUED_LINE = "queued for your Claude Code session as ticket #{task_id}"
+QUEUED_LINE = "queued for your Claude Code session as {ticket}"  # PRD-252 R4: its number
 NO_HOST_REASON = (
     "Waiting for a CLI host — none is online. Start it with `make cli-host`; "
     "the ticket is claimed on its first poll."
@@ -220,7 +221,7 @@ def _waiting_line(db: Session, workspace_id: Any, agent_id: int) -> Optional[str
 
 def queued_line(task: BoardTask) -> str:
     """The one line a lane replies with."""
-    line = QUEUED_LINE.format(task_id=task.id)
+    line = QUEUED_LINE.format(ticket=ticket_label(task))
     reason = getattr(task, "blocked_reason", None)
     if is_no_cli_host_reason(reason):
         head = reason.split(" — ")[0]                      # "Waiting for a CLI host that runs codex"
@@ -597,12 +598,12 @@ def exec_result_for(task: Any) -> dict:
         result = getattr(task, "result", None) or ""
         if status == "review":
             result = (result + "\n\n" if result else "") + (
-                f"(ticket #{task.id} is held for review on the board)"
+                f"({ticket_label(task)} is held for review on the board)"
             )
         return {"status": "success", "result": result, **base}
     if status == "cancelled":
-        return {"status": "cancelled", "result": "", "error": f"ticket #{task.id} was cancelled", **base}
-    error = getattr(task, "error_message", None) or f"ticket #{task.id} failed"
+        return {"status": "cancelled", "result": "", "error": f"{ticket_label(task)} was cancelled", **base}
+    error = getattr(task, "error_message", None) or f"{ticket_label(task)} failed"
     return {"status": "error", "result": "", "error": error, **base}
 
 
@@ -678,14 +679,18 @@ async def run_cli_ticket_and_wait(
     progress on its own record so a stall watchdog does not mistake a long
     session for a dead run. Its failures are logged, never raised.
     """
-    import asyncio
-    import time
-
     task = file_cli_ticket(
         db, workspace_id=workspace_id, agent_id=agent_id, title=title, prompt=prompt,
         source_type=source_type, source_id=source_id, **file_kwargs,
     )
-    task_id = task.id
+    return await _wait_for_ticket(
+        db, task.id, ticket_label(task), timeout_s=timeout_s, hard_timeout_s=hard_timeout_s,
+        poll_s=_lane_poll_seconds(poll_s), on_poll=on_poll,
+    )
+
+
+def _lane_poll_seconds(poll_s: Optional[float]) -> float:
+    """How often the wait looks at the ticket: the caller's, else the configured, at least 0.5 s."""
     if poll_s is None:
         try:
             from config import config
@@ -693,67 +698,116 @@ async def run_cli_ticket_and_wait(
             poll_s = float(getattr(config, "CLI_LANE_POLL_SECONDS", DEFAULT_LANE_POLL_SECONDS))
         except Exception:  # noqa: BLE001
             poll_s = float(DEFAULT_LANE_POLL_SECONDS)
-    poll_s = max(0.5, float(poll_s))
+    return max(0.5, float(poll_s))
+
+
+async def _wait_for_ticket(
+    db: Session, task_id: int, label: str, *, timeout_s: Optional[float], hard_timeout_s: Optional[float],
+    poll_s: float, on_poll: Optional[Callable[[Any], None]],
+) -> dict:
+    """``run_cli_ticket_and_wait``'s wait, ticket ``task_id`` named ``label`` (PRD-252 R4)."""
+    import asyncio
+    import time
+
     started = time.monotonic()
     extended = False
     outage_since: Optional[float] = None
     while True:
-        try:
-            db.expire_all()  # see the host's writes, not this session's cache
-            current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
-        except Exception as exc:  # noqa: BLE001 — only a lost database is waited out
-            if not is_database_unreachable(exc):
-                raise
-            # F114 (run 4): Postgres crash-restarted mid-wait and every run waiting
-            # on a session died in the same second while its ticket worked on.
-            # The session is not the database: roll back, wait, poll again.
-            outage_since = outage_since if outage_since is not None else time.monotonic()
-            if time.monotonic() - outage_since > _db_outage_grace_s():
-                raise
-            logger.warning("[CliTicketLane] database unreachable while waiting on ticket #%s — polling again: %s",
-                           task_id, str(exc).splitlines()[0][:160])
-            try:
-                db.rollback()
-            except Exception:  # noqa: BLE001 — the pool replaces the dead connection
-                pass
-            await asyncio.sleep(min(poll_s, 5.0))
+        read, current, outage_since = await _read_ticket(db, task_id, outage_since, poll_s)
+        if not read:
             continue
-        if outage_since is not None:
-            logger.info("[CliTicketLane] database back after %d s — still waiting on ticket #%s",
-                        int(time.monotonic() - outage_since), task_id)
-            outage_since = None
         if current is None:
-            return {"status": "error", "error": f"ticket #{task_id} disappeared while the session ran",
+            return {"status": "error", "error": f"{label} disappeared while the session ran",
                     "runtime": RUNTIME_CLI, "task_id": task_id}
         if current.status in TERMINAL_STATUSES:
             return exec_result_for(current)
-        if on_poll is not None:
-            try:
-                on_poll(current)
-            except Exception:  # noqa: BLE001 — progress marking must never end the wait
-                logger.debug("[CliTicketLane] on_poll failed for ticket #%s", task_id, exc_info=True)
+        _mark_progress(on_poll, current, task_id)
         waited = time.monotonic() - started
-        if timeout_s is not None and waited >= timeout_s:
-            ceiling = hard_timeout_s if hard_timeout_s is not None else timeout_s
-            if _ticket_is_alive(current) and waited < float(ceiling):
-                if not extended:
-                    extended = True
-                    logger.info(
-                        "[CliTicketLane] ticket #%s is %s past its %ss deadline — the session is "
-                        "alive, waiting up to %ss rather than re-queuing it",
-                        task_id, current.status, int(timeout_s), int(ceiling),
-                    )
-            else:
-                return {
-                    "status": "error",
-                    "error": (
-                        f"ticket #{task_id} is still running after {int(waited)} s — the Claude Code "
-                        "session carries on and its result lands on the board"
-                    ),
-                    "runtime": RUNTIME_CLI,
-                    "task_id": task_id,
-                    "timed_out": True,
-                    "still_running": _ticket_is_alive(current),
-                    "waited_s": int(waited),
-                }
+        verdict = _past_deadline(current, waited, timeout_s, hard_timeout_s)
+        if verdict == GIVE_UP:
+            return _still_running(task_id, label, current, waited)
+        if verdict == WAIT_LONGER and not extended:
+            extended = True
+            logger.info(
+                "[CliTicketLane] ticket #%s is %s past its %ss deadline — the session is "
+                "alive, waiting up to %ss rather than re-queuing it",
+                task_id, current.status, int(timeout_s), int(_ceiling(timeout_s, hard_timeout_s)),
+            )
         await asyncio.sleep(poll_s)
+
+
+async def _read_ticket(
+    db: Session, task_id: int, outage_since: Optional[float], poll_s: float,
+) -> Tuple[bool, Any, Optional[float]]:
+    """``(read, ticket, outage_since)``: the ticket as the database has it now.
+
+    F114 (run 4): Postgres crash-restarted mid-wait and every run waiting on a
+    session died in the same second while its ticket worked on. The session is
+    not the database: a lost database is rolled back and waited out for
+    ``_db_outage_grace_s``, and ``read`` is False until it answers again.
+    """
+    import asyncio
+    import time
+
+    try:
+        db.expire_all()  # see the host's writes, not this session's cache
+        current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+    except Exception as exc:  # noqa: BLE001 — only a lost database is waited out
+        if not is_database_unreachable(exc):
+            raise
+        outage_since = outage_since if outage_since is not None else time.monotonic()
+        if time.monotonic() - outage_since > _db_outage_grace_s():
+            raise
+        logger.warning("[CliTicketLane] database unreachable while waiting on ticket #%s — polling again: %s",
+                       task_id, str(exc).splitlines()[0][:160])
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001 — the pool replaces the dead connection
+            pass
+        await asyncio.sleep(min(poll_s, 5.0))
+        return False, None, outage_since
+    if outage_since is not None:
+        logger.info("[CliTicketLane] database back after %d s — still waiting on ticket #%s",
+                    int(time.monotonic() - outage_since), task_id)
+    return True, current, None
+
+
+def _mark_progress(on_poll: Optional[Callable[[Any], None]], current: Any, task_id: int) -> None:
+    if on_poll is None:
+        return
+    try:
+        on_poll(current)
+    except Exception:  # noqa: BLE001 — progress marking must never end the wait
+        logger.debug("[CliTicketLane] on_poll failed for ticket #%s", task_id, exc_info=True)
+
+
+# What the deadlines say about a ticket still open after a poll.
+WAITING, WAIT_LONGER, GIVE_UP = "waiting", "wait_longer", "give_up"
+
+
+def _ceiling(timeout_s: float, hard_timeout_s: Optional[float]) -> float:
+    return float(hard_timeout_s if hard_timeout_s is not None else timeout_s)
+
+
+def _past_deadline(current: Any, waited: float, timeout_s: Optional[float], hard_timeout_s: Optional[float]) -> str:
+    """WAITING before the soft deadline; WAIT_LONGER past it while the ticket is
+    alive and under the hard ceiling (night 1, finding 21); else GIVE_UP."""
+    if timeout_s is None or waited < timeout_s:
+        return WAITING
+    alive = _ticket_is_alive(current) and waited < _ceiling(timeout_s, hard_timeout_s)
+    return WAIT_LONGER if alive else GIVE_UP
+
+
+def _still_running(task_id: int, label: str, current: Any, waited: float) -> dict:
+    return {
+        "status": "error",
+        "error": (
+            f"{label} is still running after {int(waited)} s — the Claude Code "
+            "session carries on and its result lands on the board"
+        ),
+        "runtime": RUNTIME_CLI,
+        "task_id": task_id,
+        "timed_out": True,
+        "still_running": _ticket_is_alive(current),
+        "waited_s": int(waited),
+    }

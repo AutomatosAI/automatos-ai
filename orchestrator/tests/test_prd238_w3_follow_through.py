@@ -66,7 +66,7 @@ def test_progress_frame_shape():
 
 def _task(status="in_progress", **ref):
     return SimpleNamespace(
-        id=92, title="Write basic webpage", status=status, assigned_agent_id=15,
+        id=92, workspace_seq=42, source_type="user", title="Write basic webpage", status=status, assigned_agent_id=15,
         started_at="2026-09-08T10:00:00", completed_at=None,
         runtime_ref={"runtime": "cli", "recent_tools": [{"name": "Read"}, {"name": "Bash"}],
                      "files_touched": ["a.py", "b.py"], "exit_reason": None, "denials": 1, **ref},
@@ -81,12 +81,13 @@ def test_task_card_carries_counters_never_content():
 
     card = task_card(_task(), "Bob")
     assert card == {
-        "id": 92, "title": "Write basic webpage", "status": "in_progress", "assigned_agent": "Bob",
+        "id": 92, "number": "#0042", "title": "Write basic webpage", "status": "in_progress", "assigned_agent": "Bob",
         "runtime": "cli", "last_tool": "Bash", "files_touched": 2, "exit_reason": None, "denials": 1,
         "started_at": "2026-09-08T10:00:00", "completed_at": None,
     }
     assert "description" not in card and "transcript" not in str(card)
-    assert _progress_line(card, 20) == "Bob is working on #92 · 20 s · last tool: Bash · 2 files touched"
+    # PRD-252 R4: the ticket's number, never its id behind a '#'
+    assert _progress_line(card, 20) == "Bob is working on ticket #0042 · 20 s · last tool: Bash · 2 files touched"
     bare = task_card(SimpleNamespace(id=1, title="t", status="inbox", runtime_ref=None, started_at=None, completed_at=None))
     assert bare["assigned_agent"] == "unassigned" and bare["files_touched"] == 0
 
@@ -156,11 +157,27 @@ def test_wait_returns_when_the_ticket_ends_and_narrates_meanwhile(monkeypatch):
     assert result["success"] is True and result["terminal"] is True
     assert result["status"] == "done" and result["waited_seconds"] == 10
     assert result["frontend_data"]["task_card"]["status"] == "done"
-    assert result["message"] == "Task #92 ended: done."
+    assert result["message"] == "Ticket #0042 ended: done."
     assert lines == [
-        "Bob is working on #92 · 0 s · last tool: Bash · 2 files touched",
-        "Bob is working on #92 · 5 s · last tool: Bash · 2 files touched",
+        "Bob is working on ticket #0042 · 0 s · last tool: Bash · 2 files touched",
+        "Bob is working on ticket #0042 · 5 s · last tool: Bash · 2 files touched",
     ]
+
+
+def test_a_widget_visitor_waits_without_seeing_the_tickets_number(monkeypatch):
+    """PRD-252 R4 / F155: a number would tell a public visitor how many tickets the
+    business has, so the wait's words name no number for a widget turn."""
+    try:
+        import modules.tools.discovery.handlers_board_tasks  # noqa: F401
+    except Exception as e:
+        pytest.skip(f"handlers not importable here: {e}")
+    from core.security.surface import WIDGET, turn_surface
+
+    with turn_surface(WIDGET, ("chat", "tasks:read"), None):
+        result, lines, _ = _run_wait(monkeypatch, ["in_progress", "done"], {"task_id": 92})
+
+    assert result["message"] == "The ticket ended: done."
+    assert lines == ["The ticket is still running · 0 s"] and "#0042" not in str(result)
 
 
 def test_wait_respects_the_budget_and_says_still_running(monkeypatch):

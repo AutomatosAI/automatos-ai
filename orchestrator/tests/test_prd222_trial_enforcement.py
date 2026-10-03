@@ -279,8 +279,10 @@ def test_accrual_wired_at_usage_seam():
 def test_no_background_burn_guards_present():
     for rel in [
         "services/heartbeat_service.py",
-        "services/scheduled_task_service.py",
+        "services/scheduled_task_steps.py",   # the scheduler's guard (PRD-252 3c moved it here)
         "services/playbook_scheduler.py",
     ]:
         src = (REPO / rel).read_text()
         assert "is_trial_active_workspace" in src, f"missing trial skip guard in {rel}"
+    # ...and the scheduler still runs it before every firing
+    assert "if skipped_for_trial(db, task, task_id):" in (REPO / "services/scheduled_task_service.py").read_text()
