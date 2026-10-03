@@ -103,7 +103,9 @@ def test_a_bare_number_that_is_two_tickets_is_refused_naming_both(shop, new_sess
 
 
 def test_a_list_is_read_as_ids_or_as_numbers_whichever_names_its_tickets(shop, new_session):
-    """One call's refs are all ids or all numbers without their '#'."""
+    """A ref only one reading names is that ticket. A ref that is one ticket's id and
+    another's number goes the way the rest of the call reads: one call's refs are all
+    ids or all numbers."""
     from services.ticket_refs import by_ticket_number
 
     @by_ticket_number
@@ -112,16 +114,19 @@ def test_a_list_is_read_as_ids_or_as_numbers_whichever_names_its_tickets(shop, n
 
     one = _file(new_session, shop.ws, "Price list")
     two = _file(new_session, shop.ws, "Roast schedule")
+    three = _file(new_session, shop.ws, "Supplier check")
     s = new_session()
-    s.execute(text("UPDATE board_tasks SET workspace_seq = :n WHERE id = :i"), {"n": one.id, "i": two.id})
-    s.commit()
+    s.execute(text("UPDATE board_tasks SET workspace_seq = :n WHERE id = :i"), {"n": one.id, "i": three.id})
+    s.commit()                                     # one.id is now #0001's id and ticket three's number
 
     as_ids = _call(given, new_session, shop.ws, {"task_ids": [one.id, two.id]})
-    as_numbers = _call(given, new_session, shop.ws, {"task_ids": [1, one.id]})
+    as_numbers = _call(given, new_session, shop.ws, {"task_ids": [2, one.id]})
+    mixed = _call(given, new_session, shop.ws, {"task_ids": [two.id, 1]})      # an id, and a number
     tied = _call(given, new_session, shop.ws, {"task_ids": [one.id, 10 ** 9]})
 
-    assert as_ids["task_ids"] == [one.id, two.id] and as_numbers["task_ids"] == [one.id, two.id]
-    assert tied["success"] is False and "could be ids or numbers without their '#'" in tied["error"]
+    assert as_ids["task_ids"] == [one.id, two.id] and as_numbers["task_ids"] == [two.id, three.id]
+    assert mixed["task_ids"] == [two.id, one.id]
+    assert tied["success"] is False and f"{one.id} is both the id of" in tied["error"]
 
 
 def test_a_ticket_that_is_neither_says_its_number(shop, new_session):

@@ -146,9 +146,11 @@ def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple
     """The ticket ids that bare refs (175, "175") name in this workspace, by ref, or
     the refusal when that can't be told. A ref that names no ticket is left out.
 
-    One call's refs are all ids or all numbers without their '#', so the reading
-    that names more of them is the one meant. When the two readings name as many,
-    and not the same tickets, nothing is guessed: the refusal names both."""
+    A ref that only one reading names (an id, or a number without its '#') is that
+    ticket. A ref that is the id of one ticket and the number of another is torn: one
+    call's refs are all ids or all numbers, so the reading that names more of the
+    call's refs settles it. When both name as many, nothing is guessed: the refusal
+    names both tickets of each torn ref."""
     wanted = {int(str(r).strip()) for r in refs}
     if not wanted:
         return {}, None
@@ -158,11 +160,11 @@ def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple
     ).all()
     as_ids = {r.id: r for r in rows if r.id in wanted}
     as_numbers = {r.workspace_seq: r for r in rows if getattr(r, "workspace_seq", None) in wanted}
-    if len(as_numbers) > len(as_ids):
-        return _ids(as_numbers), None
-    if len(as_ids) > len(as_numbers) or _ids(as_ids) == _ids(as_numbers):
-        return _ids(as_ids), None
-    return {}, _both_readings(db, workspace_id, sorted(wanted), as_ids, as_numbers)
+    torn = sorted(n for n in as_ids.keys() & as_numbers.keys() if as_ids[n].id != as_numbers[n].id)
+    if torn and len(as_ids) == len(as_numbers):
+        return {}, _both_readings(db, workspace_id, torn, as_ids, as_numbers)
+    meant, other = (as_numbers, as_ids) if len(as_numbers) > len(as_ids) else (as_ids, as_numbers)
+    return {**_ids(other), **_ids(meant)}, None
 
 
 def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
@@ -171,10 +173,10 @@ def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
 
 def _both_readings(db: Session, workspace_id: Any, said: List[int], as_ids: Dict[int, Any],
                    as_numbers: Dict[int, Any]) -> str:
-    """The refusal for refs that name as many tickets read as ids as read as numbers."""
+    """The refusal for torn refs (``said``), naming the ticket each reading gives."""
     def named(reading: Dict[int, Any]) -> str:
         return ", ".join(f"{ticket_label_for(db, workspace_id, reading[n].id)} ('{reading[n].title}')"
-                         for n in sorted(reading))
+                         for n in said)
 
     template = AMBIGUOUS_REF if len(said) == 1 else AMBIGUOUS_REFS
     return template.format(said=", ".join(str(n) for n in said), as_ids=named(as_ids), as_numbers=named(as_numbers))
