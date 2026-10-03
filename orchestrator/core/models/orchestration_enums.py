@@ -205,6 +205,7 @@ class StopReason(str, Enum):
     NO_CAPABLE_AGENT = "no_capable_agent"      # No agent matched task requirements
     DEPENDENCY_FAILED = "dependency_failed"    # Upstream task failed, downstream can't run
     STALLED = "stalled"                        # PRD-164 S4: joiner halt — loop without progress, replans exhausted
+    OUT_OF_CREDIT = "out_of_credit"            # F247: paused (never failed) when the AI credit ran out; Resume carries on
 
 
 # ---------------------------------------------------------------------------

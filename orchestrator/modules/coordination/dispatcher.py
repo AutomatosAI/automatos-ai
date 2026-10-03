@@ -40,6 +40,7 @@ from core.models.orchestration_enums import (
     TaskType,
 )
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
+from modules.coordination.credit_pause import pauses_when_credit_runs_out
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
@@ -815,6 +816,7 @@ class MissionDispatcher:
         ]
 
     @staticmethod
+    @pauses_when_credit_runs_out  # F247: a step stopped by the credit pauses its mission, attempt unspent
     def record_task_completion(
         db: Session,
         task: OrchestrationTask,
