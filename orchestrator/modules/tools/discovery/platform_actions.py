@@ -29,6 +29,7 @@ from .actions_field import register_field_actions
 from .actions_blog import register_blog_actions
 from .actions_missions import register_mission_actions
 from .actions_analytics_enhanced import register_analytics_enhanced_actions
+from .actions_mission_resume import register_mission_resume_action  # F247: Resume retries a failed mission
 from .actions_governance import register_governance_actions
 from .actions_asks import register_asks_actions  # PRD-225: platform_ask_human
 from .actions_clarify import register_clarify_actions  # PRD-229: ask_orchestrator
@@ -76,6 +77,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_blog_actions(registry)
     register_mission_actions(registry)
     register_analytics_enhanced_actions(registry)
+    register_mission_resume_action(registry)  # F247: left actions_missions.py
     register_governance_actions(registry)
     register_asks_actions(registry)  # PRD-225: platform_ask_human
     register_clarify_actions(registry)  # PRD-229: ask_orchestrator (mid-run clarification)
