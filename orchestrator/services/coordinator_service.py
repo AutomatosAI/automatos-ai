@@ -59,8 +59,8 @@ from modules.coordination.planner import (
     PlanValidationError,
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
-from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.step_inputs import builds_on_whole_results
+from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
     create_mission_board_task,
