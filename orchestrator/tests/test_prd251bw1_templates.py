@@ -152,7 +152,7 @@ def test_format_narrows_the_gallery_and_text_lists_none(gallery):
 
 def test_a_socials_off_workspace_gets_404_and_the_route_is_a_plain_def_in_the_manifest(gallery):
     gallery.session.add(Workspace(
-        id=WS_OFF, name="ws-off", plan="basic", plan_limits={}, settings={}, onboarding={},
+        id=WS_OFF, name="ws-off", plan="basic", plan_limits={}, settings={"socials": {"enabled": False}}, onboarding={},
         created_at=CREATED, updated_at=CREATED,
     ))
     gallery.session.commit()

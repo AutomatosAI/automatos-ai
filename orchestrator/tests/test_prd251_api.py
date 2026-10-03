@@ -126,7 +126,7 @@ def api(monkeypatch):
     for ws_id, settings in (
         (WS_A, {"socials": {"enabled": True}}),
         (WS_B, {"socials": {"enabled": True}}),
-        (WS_OFF, {}),
+        (WS_OFF, {"socials": {"enabled": False}}),
     ):
         session.add(
             Workspace(
