@@ -40,7 +40,10 @@ interface StudioBodyProps {
 function StudioBody({ route, go, role, posts, loading }: StudioBodyProps) {
   if (route.post === NEW_POST) return <SocialsPostPage role={role} posts={posts} postId={NEW_POST} loading={loading} go={go} />
   if (route.view === 'queue') {
-    return <SocialsQueue role={role} posts={posts} selectedId={route.post} onSelect={(id) => go({ post: id })} />
+    return (
+      <SocialsQueue role={role} posts={posts} selectedId={route.post} onSelect={(id) => go({ post: id })}
+        onEdit={(id) => go({ view: 'calendar', post: id })} />
+    )
   }
   if (route.view === 'plans') return <SocialsPlansView role={role} posts={posts} planId={route.plan} go={go} />
   if (route.post) return <SocialsPostPage role={role} posts={posts} postId={route.post} loading={loading} go={go} />

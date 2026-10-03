@@ -103,6 +103,16 @@ const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
   'draft', 'changes_requested', 'needs_approval', 'failed',
 ])
 
+// 3 Oct 2026: deleting a post is documents:delete (owner and admin hold documents:*); one
+// rendering or publishing waits, and one that went out on a channel stays (api/socials_delete.py).
+const DELETABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
+  'draft', 'needs_approval', 'changes_requested', 'approved', 'scheduled', 'missed', 'failed', 'archived',
+])
+
+export function canDeletePost(role: WorkspaceRole | undefined, post: Pick<SocialPost, 'status'>): boolean {
+  return !!role && MANAGE_ROLES.has(role) && DELETABLE.has(post.status)
+}
+
 export function canTurnOnSocials(role: WorkspaceRole | undefined): boolean {
   return !!role && MANAGE_ROLES.has(role)
 }

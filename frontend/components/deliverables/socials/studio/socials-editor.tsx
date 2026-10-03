@@ -32,6 +32,7 @@ import {
   editorTargets, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal, withSlides,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
+import { DeletePostButton } from './delete-post-button'
 import { SocialsEditorHeader } from './socials-editor-header'
 import type { GoTo } from './studio-route'
 import { useEditorDraft } from './use-editor-draft'
@@ -104,6 +105,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
         onSave={() => calls.save.mutate(payload(), opened)}
         onRender={() => calls.render.mutate({ ...payload(), video: draft.format === 'video' }, opened)}
         onSubmit={() => calls.submit.mutate(payload(), opened)}
+        extra={post && <DeletePostButton post={post} role={role} onDeleted={() => go({ view: 'calendar', post: null })} />}
       />
       {!post && <Hint>{NEW_POST_STEPS}</Hint>}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">

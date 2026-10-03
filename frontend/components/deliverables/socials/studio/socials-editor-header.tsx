@@ -3,8 +3,10 @@
 /**
  * PRD-251B US-B109 — the editor's header (Editor.dc.html): Back to calendar, the title
  * with the post's status, when it publishes, and the three actions: Save draft, Render
- * preview, Submit for approval (orange, owner choice 2).
+ * preview, Submit for approval (orange, owner choice 2). ``extra`` goes before them (the
+ * post's Delete, 3 Oct 2026).
  */
+import type { ReactNode } from 'react'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -27,6 +29,8 @@ interface SocialsEditorHeaderProps {
   onSave: () => void
   onRender: () => void
   onSubmit: () => void
+  /** More actions before Save draft (the post's Delete). */
+  extra?: ReactNode
 }
 
 function publishesLine(draft: EditorDraft): string | null {
@@ -35,7 +39,7 @@ function publishesLine(draft: EditorDraft): string | null {
 }
 
 export function SocialsEditorHeader(props: SocialsEditorHeaderProps) {
-  const { post, draft, busy, overLimit, onTitle, onBack, onSave, onRender, onSubmit } = props
+  const { post, draft, busy, overLimit, onTitle, onBack, onSave, onRender, onSubmit, extra } = props
   const status = post ? SOCIAL_STATUS_LABELS[post.status] : 'New'
   const canSubmit = !post || SUBMITTABLE_STATUSES.has(post.status)
   const line = publishesLine(draft)
@@ -62,6 +66,7 @@ export function SocialsEditorHeader(props: SocialsEditorHeaderProps) {
         {line && <p className="m-0 text-[12.5px] text-muted-foreground">{line}</p>}
       </div>
       <div className="socials-editor-actions flex flex-wrap gap-2">
+        {extra}
         <Button type="button" variant="secondary" onClick={onSave} disabled={busy !== null}>
           {spinner('save')}Save draft
         </Button>

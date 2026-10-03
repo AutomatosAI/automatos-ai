@@ -235,6 +235,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/posts"),
             ("GET", "/api/socials/posts/{post_id}"),
             ("PATCH", "/api/socials/posts/{post_id}"),
+            # Deleting a post that has not gone out (api/socials_delete.py).
+            ("DELETE", "/api/socials/posts/{post_id}"),
             # Wave 1 (S1.1c): rendering, the rendered files, the render minutes.
             ("POST", "/api/socials/posts/{post_id}/render"),
             ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),

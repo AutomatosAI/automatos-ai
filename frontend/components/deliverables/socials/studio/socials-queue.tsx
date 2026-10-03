@@ -32,9 +32,11 @@ interface SocialsQueueProps {
   posts: ReadonlyArray<SocialPost>
   selectedId: string | null
   onSelect: (postId: string) => void
+  /** Opens a post in the editor (its channels, words and look). */
+  onEdit?: (postId: string) => void
 }
 
-export function SocialsQueue({ role, posts, selectedId, onSelect }: SocialsQueueProps) {
+export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: SocialsQueueProps) {
   const { workspace } = useWorkspace()
   const { data: campaignData } = useSocialCampaigns()
   const campaigns = useMemo(() => campaignData?.campaigns ?? [], [campaignData])
@@ -76,7 +78,8 @@ export function SocialsQueue({ role, posts, selectedId, onSelect }: SocialsQueue
         <div className="grid items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <QueueList groups={groups} selectedId={selected?.id ?? null} onSelect={onSelect} />
           {selected && (reviewer
-            ? <QueuePane post={selected} campaignName={campaignName} now={now} />
+            ? <QueuePane post={selected} campaignName={campaignName} now={now} role={role}
+                onEdit={onEdit ? () => onEdit(selected.id) : undefined} />
             : <SocialsPostDetail post={selected} role={role} />)}
         </div>
       )}

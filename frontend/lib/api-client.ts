@@ -3016,6 +3016,11 @@ class ApiClient {
     })
   }
 
+  /** Delete a post that has not gone out (owner or admin); 409 while it renders or publishes. */
+  async deleteSocialPost(postId: string): Promise<void> {
+    await this.request<void>(`/api/socials/posts/${postId}`, { method: 'DELETE' })
+  }
+
   async submitSocialPost(postId: string): Promise<SocialPost> {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/submit`, { method: 'POST' })
   }
