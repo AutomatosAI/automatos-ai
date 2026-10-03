@@ -182,10 +182,19 @@ def ends_with_a_question(text: Any) -> bool:
     return _is_question(text.splitlines()[-1])
 
 
+# F242: a step whose job is writing to someone ("Draft a reply to Rosa", "Write the
+# newsletter"), not one that only mentions emails or posts ("Summarize this week's
+# customer emails"; review of #887).
+_WRITES_TO_SOMEONE = re.compile(
+    r"^\s*(?:please\s+)?(?:draft|write|compose|reply|prepare)\b[^.\n]{0,80}?"
+    r"\b(?:drafts?|reply|replies|caption|post|tweet|message|email|e-mail|sms|letter|newsletter|announcement)\b",
+    re.IGNORECASE | re.MULTILINE)
+
+
 def writes_to_someone(prompt_template: Any) -> bool:
     """Whether a step's job is writing to someone: then a question its answer ends
     on is the deliverable ("Could you confirm Thursday?"), not one for the owner."""
-    return bool(_DRAFTING_STEP.search(str(prompt_template or "")))
+    return bool(_WRITES_TO_SOMEONE.search(str(prompt_template or "")))
 
 
 def _defers_to_the_owner(text: str) -> bool:

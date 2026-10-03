@@ -24,7 +24,7 @@ from core.models.core import BoardTask
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import ActorType, RunState, TaskState
 from core.services.ticket_reasons import WAITING_FOR_YOUR_CHECK
-from services.orchestration_state import transition_run, transition_task
+from services.orchestration_state import ConflictError, transition_run, transition_task
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,17 @@ OWNER_REVIEWS = "human"
 # On a step's input_context while it waits for the owner.
 WAITING_KEY = "waiting_for_owner"
 STEP_CARD = "orchestration_task"
+
+
+class WaitsForTheOwnersCheck(ConflictError, ValueError):
+    """Resume refused: the mission paused for the owner's check of a step, and only
+    that step's Approve or Reject lets it go on (review of #887: Resume skipped it).
+    A conflict to the missions API (409), a ValueError to Auto's tool (a refusal)."""
+
+    def __init__(self, run_id: Any, step: str):
+        self.entity_type, self.entity_id = "run", run_id
+        Exception.__init__(self, f"This mission waits for your check of {step}: approve that step to go on, "
+                                 "or reject it to have it redone.")
 
 
 def checks_each_step(config: Any) -> bool:
@@ -110,15 +121,29 @@ def carry_on(db: Session, run_id: Any, *, by: str) -> None:
     """The mission resumes once no step waits for the owner. A mission paused for
     anything else (its budget, the owner's own Pause) stays paused."""
     run = db.get(OrchestrationRun, run_id)
-    if run is None or run.state != RunState.PAUSED.value or not (run.stop_detail or "").startswith(WAITING_FOR_YOUR_CHECK):
+    if run is None or run.state != RunState.PAUSED.value or not _paused_for_a_check(run):
         return
-    still_waiting = [step for step in db.query(OrchestrationTask).filter(
-        OrchestrationTask.run_id == run_id, OrchestrationTask.state == TaskState.VERIFYING.value).all()
-        if (step.input_context or {}).get(WAITING_KEY)]
-    if still_waiting:
+    if _steps_waiting(db, run_id):
         return
     transition_run(db=db, run=run, new_state=RunState.RUNNING, actor_type=ActorType.HUMAN, actor_id=by,
                    reason="the owner checked the step it waited for")
+
+
+def refuse_resume_while_waiting(db: Session, run: Any) -> None:
+    """Resume (the mission page, Auto's tool) on a mission paused for the owner's
+    check of a step: refused while the step still waits."""
+    if _paused_for_a_check(run) and _steps_waiting(db, run.id):
+        raise WaitsForTheOwnersCheck(run.id, run.stop_detail[len(WAITING_FOR_YOUR_CHECK):])
+
+
+def _paused_for_a_check(run: Any) -> bool:
+    return (getattr(run, "stop_detail", None) or "").startswith(WAITING_FOR_YOUR_CHECK)
+
+
+def _steps_waiting(db: Session, run_id: Any) -> list:
+    return [step for step in db.query(OrchestrationTask).filter(
+        OrchestrationTask.run_id == run_id, OrchestrationTask.state == TaskState.VERIFYING.value).all()
+        if (step.input_context or {}).get(WAITING_KEY)]
 
 
 def sent_back(db: Session, step: OrchestrationTask, *, by: str) -> None:

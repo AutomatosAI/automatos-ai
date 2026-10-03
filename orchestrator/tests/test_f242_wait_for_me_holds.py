@@ -114,6 +114,15 @@ def test_a_run_that_closes_itself_still_does(db_session, seed_workspace):
     assert _ended(db_session, ws, result=drafted).status == "done"                             # a draft's question
 
 
+def test_a_step_that_only_mentions_emails_still_asks_the_owner():
+    """Review of #887: only a step whose job is writing to someone keeps its question."""
+    from services.playbook_owner_ask import writes_to_someone
+
+    assert writes_to_someone("Draft a one-line text message to the café.")
+    assert writes_to_someone("You are the support agent.\nWrite the reply to Rosa's email.")
+    assert not writes_to_someone("Summarize this week's customer emails; is there anything urgent?")
+
+
 def test_a_step_that_asks_for_what_it_needs_without_a_question_mark_stops():
     """#0123 ended Done with "Please provide this information" in it."""
     from services.playbook_owner_ask import owner_question
@@ -245,3 +254,19 @@ def test_reject_sends_the_held_step_back_and_the_mission_carries_on(db_session, 
     db_session.refresh(run)
     assert (task.state, run.state) == (TaskState.RETRYING.value, RunState.RUNNING.value)
     assert "waiting_for_owner" not in task.input_context
+
+
+def test_resume_cannot_skip_a_step_waiting_for_the_owners_check(db_session, seed_workspace):
+    """Review of #887: Resume (the mission page, Auto's tool) put a held mission back
+    to running with its step still unchecked."""
+    from modules.coordination.owner_checks import WaitsForTheOwnersCheck
+    from services import coordinator_service as cs
+
+    run, _card, task, _step_card = _held(db_session, UUID(seed_workspace()), config={"check_each_step": True})
+
+    with pytest.raises(WaitsForTheOwnersCheck) as refused:
+        cs.CoordinatorService().resume_mission(db_session, run.id, "user_test")
+
+    assert isinstance(refused.value, ValueError) and "approve that step" in str(refused.value)
+    db_session.refresh(run)
+    assert run.state == RunState.PAUSED.value

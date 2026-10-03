@@ -45,17 +45,19 @@ def why_it_waits(db: Any, card: Any, execution_id: str, result: Any) -> Optional
 
     if getattr(card, "review_mode", None) == OWNER_REVIEWS:
         return ASKED
-    if ends_with_a_question(result) and not writes_to_someone(last_step_prompt(db, execution_id)):
+    if ends_with_a_question(result) and not writes_to_someone(
+            last_step_prompt(db, execution_id, getattr(card, "workspace_id", None))):
         return ENDS_ON_A_QUESTION
     return None
 
 
-def last_step_prompt(db: Any, execution_id: str) -> str:
+def last_step_prompt(db: Any, execution_id: str, workspace_id: Any) -> str:
     """The prompt of the run's last step (an answer that ends on a question is the
     deliverable when that step writes to someone: F140's rule)."""
     from core.models.core import RecipeExecution, WorkflowTemplate
 
-    run = db.query(RecipeExecution).filter(RecipeExecution.execution_id == execution_id).first()
+    run = db.query(RecipeExecution).filter(RecipeExecution.execution_id == execution_id,
+                                           RecipeExecution.workspace_id == workspace_id).first()
     recipe_id = getattr(run, "recipe_id", None)
     playbook = db.query(WorkflowTemplate).filter(
         WorkflowTemplate.id == recipe_id, WorkflowTemplate.workspace_id == run.workspace_id).first() if recipe_id else None
