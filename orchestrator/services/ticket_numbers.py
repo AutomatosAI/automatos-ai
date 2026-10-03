@@ -10,7 +10,7 @@ replies) formats it here, and Auto's ticket tools take it back here
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.exc import UnmappedInstanceError
@@ -19,8 +19,13 @@ from core.models.core import BoardTask
 from core.models.ticket_numbers import STEP_SOURCE
 
 NUMBER_DIGITS = 4
-# "#0042", "#42", "#0051.3"; a leading '#' says it is a number, not an id.
-_NUMBER_REF = re.compile(r"^#(\d+)(?:\.(\d+))?$")
+# "#0042", "#42", "#0051.3"; a leading '#' says it is a number, not an id. So do a
+# leading zero ("0175") and a step ("105.4"): an id has neither (F241).
+_DIGITS = re.compile(r"^(\d+)(?:\.(\d+))?$")
+# F241 (night 7): Auto's tools were called with "#0175" as 175 (a number with its
+# '#' and zeros gone) as often as with an id. A bare number is read in the workspace.
+AMBIGUOUS_REF = ("{n} is both ticket {number} ('{number_title}') and the id of ticket {other} "
+                 "('{id_title}'). Give the number with its '#', as the board shows it.")
 
 
 def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[str]:
@@ -108,18 +113,55 @@ def ticket_label_for(db: Session, workspace_id: Any, task_id: Any, *, capital: b
     return ticket_label(task, ticket_number(db, task), capital=capital)
 
 
+def _number_parts(ref: Any) -> Optional[Tuple[int, Optional[int]]]:
+    """(number, step) for a ticket named by its number: "#0042", "#0051.3", "0175"
+    or "105.4". None for anything else, an id ("42", 42) included."""
+    text = str(ref).strip()
+    hashed = text.startswith("#")
+    match = _DIGITS.match(text[1:] if hashed else text)
+    if not match or isinstance(ref, (int, float)):
+        return None
+    seq, step = match.group(1), match.group(2)
+    if hashed or step is not None or (len(seq) > 1 and seq.startswith("0")):
+        return int(seq), (int(step) if step is not None else None)
+    return None
+
+
 def is_number_ref(ref: Any) -> bool:
-    """True for "#0042" or "#0051.3": a number, not an id."""
-    return isinstance(ref, str) and bool(_NUMBER_REF.match(ref.strip()))
+    """True for "#0042", "#0051.3", "0175" or "105.4": a number, not an id."""
+    return isinstance(ref, str) and _number_parts(ref) is not None
+
+
+def is_bare_ref(ref: Any) -> bool:
+    """True for 175 or "175": a number without its '#', or an id."""
+    if isinstance(ref, bool):
+        return False
+    return isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit() and not is_number_ref(ref))
+
+
+def resolve_bare_ref(db: Session, workspace_id: Any, ref: Any) -> Tuple[Optional[int], Optional[str]]:
+    """The ticket a bare 175 names in this workspace, and the refusal when it is
+    two tickets: the id of one and the number of another. (None, None) when it
+    names neither."""
+    n = int(str(ref).strip())
+    by_id = db.query(BoardTask.id, BoardTask.title, BoardTask.workspace_seq).filter(
+        BoardTask.id == n, BoardTask.workspace_id == workspace_id).first()
+    by_number = resolve_ticket_ref(db, workspace_id, f"#{n}")
+    if by_id is None or by_number in (None, by_id.id):
+        return (by_number if by_id is None else by_id.id), None
+    numbered = db.query(BoardTask.title).filter(BoardTask.id == by_number).first()
+    return None, AMBIGUOUS_REF.format(n=n, number=format_number(n), number_title=numbered.title if numbered else "",
+                                      other=format_number(by_id.workspace_seq) or f"id {by_id.id}",
+                                      id_title=by_id.title)
 
 
 def resolve_ticket_ref(db: Session, workspace_id: Any, ref: Any) -> Optional[int]:
-    """The id of the ticket ``ref`` names in this workspace: "#0042", or "#0051.3"
-    for a mission step. None when no ticket has that number."""
-    match = _NUMBER_REF.match(str(ref).strip())
-    if not match:
+    """The id of the ticket ``ref`` names in this workspace: "#0042" (or "0042"),
+    or "#0051.3" for a mission step. None when no ticket has that number."""
+    parts = _number_parts(ref)
+    if parts is None:
         return None
-    seq, step = int(match.group(1)), match.group(2)
+    seq, step = parts
     numbered = db.query(BoardTask.id).filter(
         BoardTask.workspace_id == workspace_id, BoardTask.workspace_seq == seq,
     ).first()

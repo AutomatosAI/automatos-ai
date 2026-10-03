@@ -374,7 +374,8 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "never loop one call per task). Moving to 'in_progress' starts the "
             "assigned agent at once; a task with no agent is refused, so assign one "
             "first (platform_assign_task). Moving to 'done' completes it. "
-            "'blocked' requires blocked_reason."
+            "'blocked' requires blocked_reason. To cancel a ticket set 'cancelled', never 'done' "
+            "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed."
         ),
         category="tasks",
         parameters={

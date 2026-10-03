@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
 from services.ticket_refs import by_ticket_number
+from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
@@ -602,6 +603,7 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(ASSIGN)  # F241: never a closed ticket; each change noted on its ticket
 async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a board task to an agent by name."""
     from core.models.core import BoardTask
@@ -705,6 +707,7 @@ async def _update_many_board_task_statuses(
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(EDIT)  # F241: never a closed ticket; each change noted on its ticket
 async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Edit a board task's FIELDS — title, description, priority, tags, review_mode.
 
@@ -791,6 +794,7 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(STATUS)  # F241: never a closed ticket; each change noted on its ticket
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Update a board task's status. Moving to in_progress triggers execution.
     With ``task_ids`` (a list) every id is updated to the same status — see
