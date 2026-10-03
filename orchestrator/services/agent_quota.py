@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import text
 
 DEFAULT_PLAN = "basic"
+# A ``max_agents`` of 0 means no limit (the plan tiers' own convention).
+UNLIMITED = 0
 # The HTTP status a create past the plan's limit gets (the plan must change first).
 AGENT_LIMIT_STATUS = 402
 # ...and one that meets another create in the same workspace (retry shortly).
@@ -46,11 +48,19 @@ def workspace_agent_count(db: Any, workspace_id: Any) -> int:
 
 
 def plan_agent_limit(workspace: Any) -> Tuple[str, int]:
-    """The workspace's plan and its ``max_agents`` (0 = unlimited)."""
+    """The workspace's plan and its ``max_agents`` (0 = unlimited).
+
+    F230: plans are the hosted edition's. The local edition has none, so it is
+    always unlimited: c1 (49 agents, plan 'basic') refused every new agent with
+    "Your basic plan includes 5 agents", and so would any self-hoster past five.
+    Every create path reads its limit here, so this one gate covers them all."""
+    from config import config
     from services.plan_tiers import get_tier
 
     plan = (getattr(workspace, "plan", None) or DEFAULT_PLAN) if workspace is not None else DEFAULT_PLAN
-    return plan, int((get_tier(plan) or {}).get("max_agents", 0) or 0)
+    if config.IS_LOCAL_EDITION:
+        return plan, UNLIMITED
+    return plan, int((get_tier(plan) or {}).get("max_agents", 0) or UNLIMITED)
 
 
 def _count_is_ours(db: Any, workspace_id: Any) -> bool:

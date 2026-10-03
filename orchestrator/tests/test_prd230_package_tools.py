@@ -164,7 +164,10 @@ def test_post_onboarding_install_is_unrestricted(monkeypatch):
 
 
 def test_over_quota_returns_plan_conversation_with_zero_installs(monkeypatch):
-    # basic tier max_agents=5; a 6-agent package is over quota.
+    # basic tier max_agents=5; a 6-agent package is over quota (hosted: the local edition has no plan limit, F230).
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     ws = FakeWS(stage="proposal", plan="basic")
     monkeypatch.setattr(hp, "_load_workspace", lambda db, wid: ws)
     monkeypatch.setattr(hp, "_workspace_agent_count", lambda db, wid: 0)

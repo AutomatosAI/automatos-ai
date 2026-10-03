@@ -17,6 +17,14 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 
+@pytest.fixture(autouse=True)
+def hosted(monkeypatch):
+    """F230: a plan's agent limit is the hosted edition's; the local edition has none."""
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+
+
 @pytest.fixture
 def cafe(db_session, seed_workspace):
     from core.models.workspaces import Workspace
