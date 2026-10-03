@@ -95,6 +95,156 @@ function saveState(state: DashboardState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
+// ── Parts ───────────────────────────────────────────────────
+
+interface WidgetBodyProps {
+  widgetId: string
+  period: string
+  onViewAllActivity?: () => void
+  onViewCalendar?: () => void
+}
+
+/** One widget by its registry id. Needs you has no period (F246). */
+function WidgetBody({ widgetId, period, onViewAllActivity, onViewCalendar }: WidgetBodyProps) {
+  switch (widgetId) {
+    case 'needs-you':
+      return <NeedsYouWidget />
+    case 'activity':
+      return <ActivityWidget period={period} onViewAll={onViewAllActivity} />
+    case 'board-glance':
+      return <BoardGlanceWidget period={period} onViewAll={onViewAllActivity} />
+    case 'schedule':
+      return <ScheduleWidget onViewAll={onViewCalendar} />
+    case 'agent-reports':
+      return <AgentReportsWidget />
+    case 'cost-tracker':
+      return <CostTrackerWidget period={period} />
+    case 'agent-performance':
+      return <AgentPerformanceWidget period={period} />
+    case 'playbook-metrics':
+      return <PlaybookMetricsWidget period={period} />
+    case 'self-learning':
+      return <SelfLearningHealthWidget />
+    default:
+      return null
+  }
+}
+
+interface CustomizeControlsProps {
+  isCustomizing: boolean
+  visibleCount: number
+  hiddenWidgets: string[]
+  onToggleWidget: (widgetId: string) => void
+  onReset: () => void
+  onToggleCustomize: () => void
+}
+
+/** Customize, and while customising: the widget picker and Reset. */
+function CustomizeControls({
+  isCustomizing, visibleCount, hiddenWidgets, onToggleWidget, onReset, onToggleCustomize,
+}: CustomizeControlsProps) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      {isCustomizing && (
+        <>
+          {/* Widget Picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-xs h-7">
+                <Eye className="w-3 h-3 mr-1" />
+                Widgets ({visibleCount}/{WIDGET_REGISTRY.length})
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 p-2">
+              <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                Show / Hide Widgets
+              </p>
+              <div className="space-y-0.5 mt-1 max-h-[320px] overflow-y-auto">
+                {WIDGET_REGISTRY.map((w) => {
+                  const isHidden = hiddenWidgets.includes(w.id)
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => onToggleWidget(w.id)}
+                      className={cn(
+                        'flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors',
+                        isHidden
+                          ? 'text-muted-foreground hover:bg-secondary/50'
+                          : 'text-foreground hover:bg-secondary/50',
+                      )}
+                    >
+                      <span className={cn('shrink-0', isHidden && 'opacity-40')}>
+                        {w.icon}
+                      </span>
+                      <span className={cn('flex-1 text-left', isHidden && 'line-through opacity-50')}>
+                        {w.label}
+                      </span>
+                      {isHidden ? (
+                        <EyeOff className="w-3 h-3 text-muted-foreground" />
+                      ) : (
+                        <Eye className="w-3 h-3 text-success" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReset}
+            className="text-xs h-7"
+          >
+            <RotateCcw className="w-3 h-3 mr-1" />
+            Reset
+          </Button>
+        </>
+      )}
+      <Button
+        variant={isCustomizing ? 'secondary' : 'ghost'}
+        size="sm"
+        onClick={onToggleCustomize}
+        className="text-xs h-7"
+      >
+        <Settings2 className="w-3 h-3 mr-1" />
+        {isCustomizing ? 'Done' : 'Customize'}
+      </Button>
+    </div>
+  )
+}
+
+/** While customising, a widget's drag handle and its width buttons. */
+function WidgetFrameControls({ size, onSize }: { size: WidgetSize; onSize: (size: WidgetSize) => void }) {
+  return (
+    <>
+      <div className="absolute top-2 left-2 z-10 cursor-grab active:cursor-grabbing p-1 rounded bg-background/80 backdrop-blur-sm border border-border/50">
+        <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+      </div>
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 p-0.5 rounded-md bg-background/80 backdrop-blur-sm border border-border/50 text-[10px]">
+        {(['third', 'half', 'two-thirds', 'full'] as WidgetSize[]).map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onSize(opt)}
+            className={cn(
+              'px-1.5 py-0.5 rounded-sm font-medium transition-colors',
+              size === opt
+                ? 'bg-primary/20 text-primary'
+                : 'text-muted-foreground hover:bg-secondary/50',
+            )}
+            title={`${SIZE_LABEL[opt]} width`}
+          >
+            {SIZE_LABEL[opt]}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
 // ── Dashboard Component ─────────────────────────────────────
 
 interface CommandCentreDashboardProps {
@@ -225,104 +375,16 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
     [widgetOrder, hiddenWidgets],
   )
 
-  // Render widget by ID
-  const renderWidget = (widgetId: string) => {
-    switch (widgetId) {
-      case 'needs-you':
-        return <NeedsYouWidget />
-      case 'activity':
-        return <ActivityWidget period={period} onViewAll={onViewAllActivity} />
-      case 'board-glance':
-        return <BoardGlanceWidget period={period} onViewAll={onViewAllActivity} />
-      case 'schedule':
-        return <ScheduleWidget onViewAll={onViewCalendar} />
-      case 'agent-reports':
-        return <AgentReportsWidget />
-      case 'cost-tracker':
-        return <CostTrackerWidget period={period} />
-      case 'agent-performance':
-        return <AgentPerformanceWidget period={period} />
-      case 'playbook-metrics':
-        return <PlaybookMetricsWidget period={period} />
-      case 'self-learning':
-        return <SelfLearningHealthWidget />
-      default:
-        return null
-    }
-  }
-
   return (
     <div className="space-y-3">
-      {/* Customize Controls */}
-      <div className="flex items-center justify-end gap-2">
-        {isCustomizing && (
-          <>
-            {/* Widget Picker */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="sm" className="text-xs h-7">
-                  <Eye className="w-3 h-3 mr-1" />
-                  Widgets ({visibleWidgets.length}/{WIDGET_REGISTRY.length})
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-64 p-2">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1">
-                  Show / Hide Widgets
-                </p>
-                <div className="space-y-0.5 mt-1 max-h-[320px] overflow-y-auto">
-                  {WIDGET_REGISTRY.map((w) => {
-                    const isHidden = hiddenWidgets.includes(w.id)
-                    return (
-                      <button
-                        key={w.id}
-                        type="button"
-                        onClick={() => toggleWidget(w.id)}
-                        className={cn(
-                          'flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors',
-                          isHidden
-                            ? 'text-muted-foreground hover:bg-secondary/50'
-                            : 'text-foreground hover:bg-secondary/50',
-                        )}
-                      >
-                        <span className={cn('shrink-0', isHidden && 'opacity-40')}>
-                          {w.icon}
-                        </span>
-                        <span className={cn('flex-1 text-left', isHidden && 'line-through opacity-50')}>
-                          {w.label}
-                        </span>
-                        {isHidden ? (
-                          <EyeOff className="w-3 h-3 text-muted-foreground" />
-                        ) : (
-                          <Eye className="w-3 h-3 text-success" />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleReset}
-              className="text-xs h-7"
-            >
-              <RotateCcw className="w-3 h-3 mr-1" />
-              Reset
-            </Button>
-          </>
-        )}
-        <Button
-          variant={isCustomizing ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={toggleCustomize}
-          className="text-xs h-7"
-        >
-          <Settings2 className="w-3 h-3 mr-1" />
-          {isCustomizing ? 'Done' : 'Customize'}
-        </Button>
-      </div>
+      <CustomizeControls
+        isCustomizing={isCustomizing}
+        visibleCount={visibleWidgets.length}
+        hiddenWidgets={hiddenWidgets}
+        onToggleWidget={toggleWidget}
+        onReset={handleReset}
+        onToggleCustomize={toggleCustomize}
+      />
 
       {/* Widget Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -346,32 +408,13 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
                 isCustomizing && draggedWidget === widgetId && 'opacity-50',
               )}
             >
-              {isCustomizing && (
-                <>
-                  <div className="absolute top-2 left-2 z-10 cursor-grab active:cursor-grabbing p-1 rounded bg-background/80 backdrop-blur-sm border border-border/50">
-                    <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
-                  </div>
-                  <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 p-0.5 rounded-md bg-background/80 backdrop-blur-sm border border-border/50 text-[10px]">
-                    {(['third', 'half', 'two-thirds', 'full'] as WidgetSize[]).map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setWidgetSize(widgetId, opt)}
-                        className={cn(
-                          'px-1.5 py-0.5 rounded-sm font-medium transition-colors',
-                          size === opt
-                            ? 'bg-primary/20 text-primary'
-                            : 'text-muted-foreground hover:bg-secondary/50',
-                        )}
-                        title={`${SIZE_LABEL[opt]} width`}
-                      >
-                        {SIZE_LABEL[opt]}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-              {renderWidget(widgetId)}
+              {isCustomizing && <WidgetFrameControls size={size} onSize={(opt) => setWidgetSize(widgetId, opt)} />}
+              <WidgetBody
+                widgetId={widgetId}
+                period={period}
+                onViewAllActivity={onViewAllActivity}
+                onViewCalendar={onViewCalendar}
+              />
             </div>
           )
         })}
