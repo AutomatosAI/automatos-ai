@@ -21,6 +21,7 @@ from uuid import UUID
 
 from config import config
 from core.composio import lookup_cache
+from core.composio.auth_schemes import custom_auth_fallback_scheme
 from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
@@ -342,14 +343,12 @@ class ComposioClient:
             return config.id
         except Exception as e:
             if "DefaultAuthConfigNotFound" in str(e) and options.get("type") == "use_composio_managed_auth":
-                logger.warning(f"Managed auth unavailable for {app_slug}, falling back to custom OAUTH2")
+                scheme = custom_auth_fallback_scheme(schemes)  # F251: one the toolkit offers
+                logger.warning(f"Managed auth unavailable for {app_slug}, falling back to custom {scheme}")
                 try:
-                    fallback = {"type": "use_custom_auth", "authScheme": "OAUTH2"}
-                    config = self.composio.auth_configs.create(
-                        toolkit=app_slug,
-                        options=fallback
-                    )
-                    self._remember_auth_config(app_slug, config.id, "OAUTH2", preferred_scheme)
+                    fallback = {"type": "use_custom_auth", "authScheme": scheme}
+                    config = self.composio.auth_configs.create(toolkit=app_slug, options=fallback)
+                    self._remember_auth_config(app_slug, config.id, scheme, preferred_scheme)
                     return config.id
                 except Exception as e2:
                     logger.error(f"Custom auth fallback also failed for {app_slug}: {e2}")
