@@ -184,8 +184,8 @@ def test_autos_agent_list_says_which_can_run(shop):
 
     shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
     listed = {a["name"]: a for a in asyncio.run(list_agents(shop.db, shop.ws, {}))["agents"]}
-    assert (listed["Shopify Business Analyst"]["can_run"], listed["Shopify Business Analyst"]["why"]) == (False,
-                                                                                                         CREDIT_OUT)
+    analyst = listed["Shopify Business Analyst"]
+    assert (analyst["can_run"], analyst["why"]) == (False, CREDIT_OUT)
     assert listed["Numbers (on my Mac)"]["can_run"] is False
 
 
