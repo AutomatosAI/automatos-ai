@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from config import Config
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
+from modules.coordination.one_step_at_a_time import one_step_at_a_time
 from core.models.orchestration_enums import (
     ActorType,
     BudgetStatus,
@@ -622,6 +623,7 @@ class MissionDispatcher:
         return "block"
 
     @staticmethod
+    @one_step_at_a_time  # F267 (7b): a mission that checks each step runs one at a time
     def dispatch_ready(
         db: Session,
         run: OrchestrationRun,
