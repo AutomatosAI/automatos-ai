@@ -268,7 +268,7 @@ The `CliHost` model stores `capabilities` (e.g., available CLIs, models) and `st
 | `AWS_SECRET_ACCESS_KEY` | AWS Secret Access Key | (none) |
 | `AWS_REGION` | AWS region for S3 | `us-east-1` |
 | `PLUGIN_MAX_UPLOAD_SIZE_MB` | Max size for plugin uploads | `10` |
-| `PLUGIN_LLM_SCAN_MODEL` | LLM used for scanning plugins | `claude-haiku-4-20250414` |
+| `PLUGIN_LLM_SCAN_MODEL` | LLM used for scanning plugins | `claude-haiku-4-5` |
 | `PLUGIN_CACHE_TTL_SECONDS` | TTL for plugin metadata cache | `3600` |
 
 **Sources:** [orchestrator/.env.example:48-55]()

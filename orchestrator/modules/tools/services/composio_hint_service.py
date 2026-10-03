@@ -83,6 +83,41 @@ class ComposioHintResult:
     strategy_used: str = "none"  # "capability", "token_filtered", "fallback", "none"
 
 
+def _header_lines(allowed_apps: List[str]) -> List[str]:
+    """Step 3: which apps are connected and how composio_execute takes an action."""
+    return [
+        "You have these external apps connected (via Composio): "
+        + ", ".join(sorted(set(allowed_apps))) + ".",
+        "To act in these apps, call `composio_execute` with an exact action name: one "
+        "listed below, or one your skill instructions give for a connected app. A name "
+        "that appears in neither place doesn't exist.",
+        "The action's own fields (issue_key, channel, text, ...) go inside `params`, "
+        "not beside `action`.",
+    ]
+
+
+def _match_lines(app_matches: List[tuple], top_action_params: Dict[str, str]) -> tuple:
+    """Step 5: the hint lines for the matched actions, and the actions they name."""
+    lines: List[str] = []
+    named: List[str] = []
+    for app, actions in sorted(app_matches, key=lambda x: (-len(x[1]), x[0]))[:6]:
+        lines.append(f"- {app} available actions: {', '.join(actions)}")
+        named.extend(actions)
+
+    if top_action_params:
+        lines.append("\nParameter hints (pass these inside `params`):")
+        for action_name, params in list(top_action_params.items())[:5]:
+            lines.append(f"\n{action_name}:")
+            lines.append(params)
+
+    if named:
+        lines.append(
+            "\nWhen the request needs one of these apps, carry it out by calling "
+            "`composio_execute`: describing the action does not perform it."
+        )
+    return lines, named
+
+
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -133,78 +168,12 @@ class ComposioHintService:
             # Step 2: Analyse prompt
             analysis = self._analyze_prompt(prompt)
 
-            # Step 3: Build hint header
-            hint_lines = [
-                "You have these external apps connected (via Composio): "
-                + ", ".join(sorted(set(allowed_apps))) + ".",
-                "IMPORTANT: To interact with these apps, call `composio_execute` with "
-                "the EXACT action name. The most relevant actions are listed below, but you may "
-                "also use any action from your skill instructions for connected apps. "
-                "Do NOT guess or invent action names. Do NOT use search_codebase to look for code "
-                "when your task is to interact with external apps.",
-                "Usage: composio_execute({\"action\": \"ACTION_NAME\", \"params\": {<action-specific fields>}}). "
-                "All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.",
-            ]
-
-            # Step 4: Resolve actions
-            app_matches: List[tuple] = []
-            top_action_params: Dict[str, str] = {}
-
-            if recipe_mode and analysis.tokens:
-                # Recipe mode: skip taxonomy, use prompt tokens directly.
-                # Scales to any number of tools — no manual keyword→capability curation.
-                self._recipe_token_hints(
-                    allowed_apps, analysis, app_matches, top_action_params
-                )
-                if app_matches:
-                    result.strategy_used = "recipe_token"
-            else:
-                # Chatbot mode: 3-tier resolution (capability → token_filtered → fallback)
-                tier1_matched = self._capability_based_hints(
-                    allowed_apps, analysis, app_matches, top_action_params
-                )
-                if tier1_matched:
-                    result.strategy_used = "capability"
-                elif analysis.tokens:
-                    self._token_filtered_hints(
-                        allowed_apps, analysis, app_matches, top_action_params
-                    )
-                    if app_matches:
-                        result.strategy_used = "token_filtered"
-
-            # Tier 3: Top-N fallback (chatbot only — recipe mode never falls back to random actions)
-            if not app_matches and not recipe_mode:
-                self._top_n_fallback(allowed_apps, app_matches, top_action_params)
-                if app_matches:
-                    result.strategy_used = "fallback"
-
-            # Step 4b: Enrich params from SDK for actions missing cache schemas.
-            # The cache (marketplace UI) often has empty params; the SDK returns full
-            # OpenAI function-calling schemas at runtime.
-            if app_matches:
-                self._enrich_params_from_sdk(app_matches, top_action_params)
-
-            # Step 5: Format output
-            app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
-            for app, actions in app_matches[:6]:
-                hint_lines.append(f"- {app} available actions: {', '.join(actions)}")
-                result.matched_actions.extend(actions)
-
-            if top_action_params:
-                hint_lines.append("\nParameter hints (pass these inside `params`):")
-                for action_name, params in list(top_action_params.items())[:5]:
-                    hint_lines.append(f"\n{action_name}:")
-                    hint_lines.append(params)
-
-            # When matched actions exist, add a strong directive that triggers
-            # tool_choice="required" in the OpenAI client (it checks for "You MUST call").
-            if result.matched_actions:
-                hint_lines.append(
-                    "\nYou MUST call `composio_execute` to fulfill the user's request. "
-                    "Do NOT describe the action in text — actually invoke the tool."
-                )
-
-            result.hint_lines = hint_lines
+            # Steps 3-5: the header, the actions worth hinting, their parameter hints
+            app_matches, top_action_params, result.strategy_used = self._resolve_matches(
+                allowed_apps, analysis, recipe_mode
+            )
+            match_lines, result.matched_actions = _match_lines(app_matches, top_action_params)
+            result.hint_lines = _header_lines(allowed_apps) + match_lines
             result.param_hint_count = len(top_action_params)
 
             logger.info(
@@ -217,6 +186,39 @@ class ComposioHintService:
             logger.warning(f"[ComposioHintService] Failed for agent {agent_id}: {e}", exc_info=True)
 
         return result
+
+    def _resolve_matches(self, allowed_apps: List[str], analysis: "PromptAnalysis", recipe_mode: bool) -> tuple:
+        """Step 4: the (app, actions) matches, their parameter hints, and the tier that found them."""
+        app_matches: List[tuple] = []
+        top_action_params: Dict[str, str] = {}
+        strategy = "none"
+
+        if recipe_mode and analysis.tokens:
+            # Recipe mode: skip taxonomy, use prompt tokens directly.
+            # Scales to any number of tools — no manual keyword→capability curation.
+            self._recipe_token_hints(allowed_apps, analysis, app_matches, top_action_params)
+            if app_matches:
+                strategy = "recipe_token"
+        # Chatbot mode: 3-tier resolution (capability → token_filtered → fallback)
+        elif self._capability_based_hints(allowed_apps, analysis, app_matches, top_action_params):
+            strategy = "capability"
+        elif analysis.tokens:
+            self._token_filtered_hints(allowed_apps, analysis, app_matches, top_action_params)
+            if app_matches:
+                strategy = "token_filtered"
+
+        # Tier 3: Top-N fallback (chatbot only — recipe mode never falls back to random actions)
+        if not app_matches and not recipe_mode:
+            self._top_n_fallback(allowed_apps, app_matches, top_action_params)
+            if app_matches:
+                strategy = "fallback"
+
+        # Step 4b: Enrich params from SDK for actions missing cache schemas.
+        # The cache (marketplace UI) often has empty params; the SDK returns full
+        # OpenAI function-calling schemas at runtime.
+        if app_matches:
+            self._enrich_params_from_sdk(app_matches, top_action_params)
+        return app_matches, top_action_params, strategy
 
     # ------------------------------------------------------------------
     # Step 1: Resolve allowed apps

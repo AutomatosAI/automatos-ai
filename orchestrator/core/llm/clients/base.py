@@ -10,6 +10,7 @@ import asyncio
 import contextvars
 import functools
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -92,6 +93,16 @@ def request_max_tokens(config: Any) -> int:
     from core.llm.output_budget import current_call_budget
 
     return current_call_budget() or config.max_tokens
+
+
+# Claude models that answer temperature/top_p/top_k with a 400: Opus 4.7 and
+# later, Sonnet 5, Fable, Mythos. Matches API, Bedrock and OpenRouter ids.
+_REJECTS_SAMPLING = re.compile(r"claude-(opus-4[.-][78]|opus-5|sonnet-5|fable|mythos)")
+
+
+def accepts_sampling_params(model: Optional[str]) -> bool:
+    """Whether a request to ``model`` may carry temperature, top_p or top_k."""
+    return not _REJECTS_SAMPLING.search(model or "")
 
 
 _T = TypeVar("_T")
