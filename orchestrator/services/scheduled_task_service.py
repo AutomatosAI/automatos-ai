@@ -615,7 +615,7 @@ class ScheduledTaskService:
         """Register task with UnifiedScheduler (APScheduler)."""
         try:
             from services.scheduler import get_unified_scheduler
-            from apscheduler.triggers.cron import CronTrigger
+            from services.schedule_util import scheduler_cron_trigger
             from apscheduler.triggers.date import DateTrigger
 
             scheduler = get_unified_scheduler()
@@ -638,8 +638,8 @@ class ScheduledTaskService:
                 job_kwargs["misfire_grace_time"] = ONE_SHOT_MISFIRE_GRACE_SECONDS
             else:
                 # Standard crontab semantics so firing matches the calendar's
-                # croniter next_run (PRD-162 — one schedule truth).
-                trigger = CronTrigger.from_crontab(schedule)
+                # croniter next_run (PRD-162 — one schedule truth; F240: the weekday too).
+                trigger = scheduler_cron_trigger(schedule)
 
             # APScheduler needs a sync wrapper for async execute_task
             import asyncio

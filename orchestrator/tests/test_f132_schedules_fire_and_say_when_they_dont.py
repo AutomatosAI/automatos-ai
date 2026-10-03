@@ -25,7 +25,6 @@ import pytest
 pytest.importorskip("apscheduler")
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # noqa: E402
 from apscheduler.schedulers.background import BackgroundScheduler  # noqa: E402
-from apscheduler.triggers.cron import CronTrigger as RealCronTrigger  # noqa: E402
 
 import services.playbook_scheduler as sched_mod  # noqa: E402
 from config import config  # noqa: E402
@@ -92,12 +91,6 @@ def _playbook(schedule_config=None, pid=86):
 
 def _cron(expression="20 18 23 9 *", zone="Europe/London", enabled=True):
     return {"type": "cron", "cron_expression": expression, "timezone": zone, "enabled": enabled}
-
-
-@pytest.fixture(autouse=True)
-def _real_trigger(monkeypatch):
-    # test_playbook_scheduler swaps a fake CronTrigger into the module for the whole process.
-    monkeypatch.setattr(sched_mod, "CronTrigger", RealCronTrigger)
 
 
 def _paused_scheduler():

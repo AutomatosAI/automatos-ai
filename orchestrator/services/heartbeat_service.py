@@ -420,9 +420,9 @@ class HeartbeatService:
             15→``0,15,30,45 * * * *``  30→``0,30 * * * *``  60→``0 * * * *``
             120→``0 */2 * * *``  1440→``0 9 * * *``  10080→``0 9 * * 1`` (Mon 9am)
         """
-        from services.schedule_util import interval_to_cron
+        from services.schedule_util import interval_to_cron, scheduler_cron_trigger
 
-        return CronTrigger.from_crontab(interval_to_cron(minutes))
+        return scheduler_cron_trigger(interval_to_cron(minutes))  # F240: Monday's weekly fires Monday
 
     def schedule_orchestrator_heartbeat(
         self, workspace_id: str, hb_config: dict

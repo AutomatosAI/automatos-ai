@@ -20,6 +20,7 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.cron import CronTrigger
 
 from config import config
+from services.schedule_util import scheduler_cron_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def cron_trigger(expression: str, zone: str) -> CronTrigger:
     """The trigger for a cron schedule in ``zone``. A cron or zone the scheduler
     cannot use raises ValueError naming it (F132: both used to be swallowed)."""
     try:
-        return CronTrigger.from_crontab(expression, timezone=zone)
+        return scheduler_cron_trigger(expression, timezone=zone)  # F240: the weekday as cron counts it
     except KeyError as exc:  # pytz and zoneinfo raise KeyError subclasses for an unknown zone
         raise ValueError(f"unknown timezone '{zone}'") from exc
     except ValueError as exc:

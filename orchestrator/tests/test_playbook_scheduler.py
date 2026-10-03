@@ -85,10 +85,16 @@ import services.playbook_breaker  # noqa: E402,F401
 import services.playbook_engine  # noqa: E402,F401
 import services.trial_ledger  # noqa: E402,F401
 
-# Replace the (real-or-stub) CronTrigger with our fake so cron validation is
-# deterministic regardless of whether apscheduler is installed.
-sched_mod.CronTrigger = _FakeCronTrigger
 _restore_apscheduler_stubs()
+
+
+@pytest.fixture(autouse=True)
+def _fake_cron_builder(monkeypatch):
+    """This module's tests build triggers with the fake, so cron validation is
+    deterministic whether or not apscheduler is installed. Scoped to this module:
+    set at import, the fake also replaced the real builder for every other test
+    in the run (F240's own test read a MagicMock for Friday's trigger)."""
+    monkeypatch.setattr(sched_mod, "scheduler_cron_trigger", _FakeCronTrigger.from_crontab)
 
 
 # ---------------------------------------------------------------------------
