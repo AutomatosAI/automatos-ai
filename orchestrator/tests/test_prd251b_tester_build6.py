@@ -121,7 +121,7 @@ def test_an_older_git_import_of_the_skills_repo_is_refreshed_from_the_seed(db, f
     seed = read_seed(fixture_manifest.parent / "fixture-skill.md")  # version 1.2.0
     assert row.skill_source == SKILLS_REPO_SOURCE  # provenance kept: the git source still owns the row
     if refreshed:
-        assert outcome["left_alone"] == [] and outcome["present"] == ["fixture-skill"]
+        assert outcome["left_alone"] == [] and outcome["refreshed"] == ["fixture-skill"]
         assert (row.prompt_template, row.content_hash, row.skill_version) == (seed.body, seed.content_hash, "1.2.0")
     else:
         assert outcome["left_alone"] == ["fixture-skill"] and row.prompt_template == "GIT BODY"
