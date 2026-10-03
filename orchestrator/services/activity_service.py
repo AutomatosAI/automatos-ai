@@ -29,6 +29,7 @@ from core.models.core import (
 )
 from services.activity_social_items import social_post_items
 from services.needs_you import needs_you_counts
+from services.ticket_numbers import ticket_label, ticket_numbers
 from services.needs_you import period_start as needs_you_period_start
 from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
@@ -466,14 +467,16 @@ class ActivityService:
                 rows = self.db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
                 agents_by_id = {a.id: a for a in rows}
 
-            return [self._board_feed_item(t, agents_by_id) for t in tasks]
+            numbers = ticket_numbers(self.db, self.workspace_id, tasks)  # PRD-252 R4
+            return [self._board_feed_item(t, agents_by_id, numbers.get(t.id)) for t in tasks]
         except Exception as e:
             logger.error("Failed to fetch board tasks for activity feed: %s", e, exc_info=True)
             self.db.rollback()
             return []
 
-    def _board_feed_item(self, t: BoardTask, agents_by_id: Dict[int, Agent]) -> Dict[str, Any]:
-        """One board ticket as a feed item."""
+    def _board_feed_item(self, t: BoardTask, agents_by_id: Dict[int, Agent],
+                         number: Optional[str] = None) -> Dict[str, Any]:
+        """One board ticket as a feed item, with its number (PRD-252 R4)."""
         # Map kanban statuses to the activity feed's internal status
         # vocabulary (running/completed/failed/pending) — same shape
         # heartbeats and recipes use, so STATUS_MAP / STATUS_VARIANT_MAP
@@ -500,7 +503,7 @@ class ActivityService:
         board_item = self._build_feed_item(
             id=f"task-{t.id}",
             item_type="task",
-            name=t.title or f"Task #{t.id}",
+            name=t.title or ticket_label(t, number),
             status=feed_status,
             started_at=t.started_at or t.created_at,
             completed_at=t.completed_at,
@@ -520,6 +523,7 @@ class ActivityService:
         # PRD-252 R5: the feed names a ticket's stage in the board's words; the
         # mapped status above stays for the feed's filters.
         board_item["board_status"] = t.status
+        board_item["number"] = number
         return board_item
 
     # ── Stats Helpers ─────────────────────────────────────────────

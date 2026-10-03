@@ -16,6 +16,7 @@ import type { TaskCardData } from '@/types'
 
 const card: TaskCardData = {
   id: 92,
+  number: '#0042',
   title: 'Write basic webpage for AI workflow business',
   status: 'in_progress',
   assigned_agent: 'Bob',
@@ -33,7 +34,8 @@ afterEach(cleanup)
 describe('TaskCard', () => {
   it('shows the ticket, its status, who has it and what it touched', () => {
     render(<TaskCard card={card} />)
-    expect(screen.getByText('Ticket #92')).toBeInTheDocument()
+    // PRD-252 R4: the card names the ticket by its number, never its id behind a '#'
+    expect(screen.getByText('Ticket #0042')).toBeInTheDocument()
     expect(screen.getByText(card.title)).toBeInTheDocument()
     expect(screen.getByTestId('task-card-status')).toHaveTextContent('In Progress')
     expect(screen.getByText(/Bob · 1 min so far · last tool: Bash · 2 files touched/)).toBeInTheDocument()

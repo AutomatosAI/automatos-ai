@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { feedItemHref } from '@/lib/ticket-links'
 import { boardStatusWord } from '@/components/activity/board-status-word'
+import { numberedTitle } from '@/components/activity/board/ticket-kind'
 import { cn } from '@/lib/utils'
 
 const RUNNING_ROWS = 5
@@ -109,7 +110,7 @@ export function ActivityWidget({ period, onViewAll, className }: ActivityWidgetP
                     <div className="flex items-center gap-2">
                       <div className={cn('w-2 h-2 rounded-full shrink-0', item.status === 'running' ? 'bg-[hsl(var(--info))] animate-pulse' : 'bg-muted-foreground/30')} />
                       {item.type === 'recipe' ? <ChefHat className="w-3 h-3 text-[hsl(var(--info))] shrink-0" /> : <RefreshCw className="w-3 h-3 text-[hsl(var(--agent))] shrink-0" />}
-                      <span className="text-sm font-medium truncate flex-1">{item.name}</span>
+                      <span className="text-sm font-medium truncate flex-1">{numberedTitle(item.number, item.name)}</span>
                       <span className="text-[10px] text-muted-foreground shrink-0">{item.status === 'running' ? formatElapsed(item.started_at) : boardStatusWord(item) ?? 'Pending'}</span>
                     </div>
                     {item.step_progress && (
@@ -138,7 +139,7 @@ export function ActivityWidget({ period, onViewAll, className }: ActivityWidgetP
                       <div key={item.id} className="flex items-center gap-3 px-4 py-2 hover:bg-secondary/20 transition-colors">
                         <StatusIcon className={cn('w-4 h-4 shrink-0', conf.color)} />
                         {item.type === 'recipe' ? <ChefHat className="w-3 h-3 text-[hsl(var(--info))] shrink-0" /> : <RefreshCw className="w-3 h-3 text-[hsl(var(--agent))] shrink-0" />}
-                        <span className="text-sm truncate flex-1">{item.name}</span>
+                        <span className="text-sm truncate flex-1">{numberedTitle(item.number, item.name)}</span>
                         <span className="text-[10px] text-muted-foreground font-mono shrink-0 w-14 text-right">{formatDuration(item.duration_seconds)}</span>
                         <span className="text-[10px] text-muted-foreground shrink-0 w-16 text-right hidden sm:block">
                           {item.started_at ? formatDistanceToNow(new Date(item.started_at), { addSuffix: true }) : ''}

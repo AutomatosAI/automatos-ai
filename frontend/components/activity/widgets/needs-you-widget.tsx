@@ -20,6 +20,7 @@ import { useNeedsYou, type NeedsYou, type NeedsYouAskRow, type NeedsYouTicketRow
 import { AUTO_NOW_LINKS, questionPreview } from '@/components/chatbot/auto-now-rail'
 import { cn } from '@/lib/utils'
 import { QUESTIONS_HREF, missionHref, ticketHref } from '@/lib/ticket-links'
+import { numberedTitle } from '@/components/activity/board/ticket-kind'
 
 export function formatAge(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -55,8 +56,12 @@ interface ShownRow {
 
 const by = (who: string | null, at: string | null) => [who ?? 'An agent', at && `${formatAge(at)} ago`].filter(Boolean).join(' · ')
 
+// PRD-252 R4: a ticket is named by its number and title, so two alike can be told apart.
 function ticketRows(rows: NeedsYouTicketRow[]): ShownRow[] {
-  return rows.map((r) => ({ key: `t${r.ticket_id}`, href: ticketRowHref(r), title: r.title ?? `Ticket #${r.ticket_id}`, meta: by(r.agent_name, r.at) }))
+  return rows.map((r) => ({
+    key: `t${r.ticket_id}`, href: ticketRowHref(r),
+    title: numberedTitle(r.number, r.title ?? `Ticket ${r.ticket_id}`), meta: by(r.agent_name, r.at),
+  }))
 }
 
 function askRows(rows: NeedsYouAskRow[], fallback: string): ShownRow[] {
@@ -64,7 +69,8 @@ function askRows(rows: NeedsYouAskRow[], fallback: string): ShownRow[] {
     key: `${r.source}${r.id}`,
     href: askRowHref(r, fallback),
     title: r.source === 'mission' ? r.title ?? 'A mission plan' : questionPreview(r.title ?? ''),
-    meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}` : by(r.agent_name, r.at),
+    meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}`
+      : [r.ticket_number, by(r.agent_name, r.at)].filter(Boolean).join(' · '),
   }))
 }
 

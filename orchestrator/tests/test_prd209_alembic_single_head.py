@@ -79,7 +79,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # prd251_wave1 into the single head (a merge revision, no operations).
 # 2026-09-29: document_chunks_ingestion_columns chains onto that — the columns
 # document ingestion writes, which fresh-built databases lacked (#825).
-EXPECTED_HEAD = "document_chunks_ingestion_columns"
+# 2026-10-02: #852 left two heads (prd251_wave2 beside it); prd252_ticket_numbers
+# merges them and adds the per-workspace ticket number (PRD-252 R4).
+EXPECTED_HEAD = "prd252_ticket_numbers"
 
 
 def _literal(node: ast.AST):

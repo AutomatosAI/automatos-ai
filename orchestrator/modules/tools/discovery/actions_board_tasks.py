@@ -45,6 +45,12 @@ def _review_mode(default_note: str) -> dict:
     }
 
 
+def _ticket_ref(what: str) -> dict:
+    """PRD-252 R4: a ticket by its number as the board shows it; its id still works."""
+    return {"type": "string",
+            "description": f"{what}: its number as the board shows it, e.g. #0042 (a mission step: #0051.3)."}
+
+
 def _register_create_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_task",
@@ -94,10 +100,7 @@ def _create_task_properties() -> dict:
             "items": {"type": "string"},
             "description": "Tags for categorization",
         },
-        "parent_task_id": {
-            "type": "integer",
-            "description": "Parent task ID if this is a sub-task",
-        },
+        "parent_task_id": _ticket_ref("The parent ticket, if this is a sub-task"),
         "review_mode": _review_mode(" (default)"),
         "sla_deadline": {
             "type": "string",
@@ -127,7 +130,8 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
         description=(
             "List tasks on the board with optional filters. Returns task titles, "
             "statuses, priorities, assigned agents, and dates. Use when the user asks "
-            "about their tasks, board status, what's in progress, or what's in the queue."
+            "about their tasks, board status, what's in progress, or what's in the queue. "
+            "Each ticket has a number (#0042): name tickets by it, never by their place in a list."
         ),
         category="tasks",
         parameters={
@@ -240,10 +244,7 @@ def _register_get_task(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to look up",
-                },
+                "task_id": _ticket_ref("The ticket to look up"),
             },
             "required": ["task_id"],
         },
@@ -271,10 +272,7 @@ def _register_wait_for_task(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to wait for",
-                },
+                "task_id": _ticket_ref("The ticket to wait for"),
                 "max_wait_seconds": {
                     "type": "integer",
                     "description": "Upper bound on the wait in seconds (capped by the workspace budget)",
@@ -305,10 +303,7 @@ def _register_assign_task(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to assign",
-                },
+                "task_id": _ticket_ref("The ticket to assign"),
                 "agent_name": {
                     "type": "string",
                     "description": "Name of the agent to assign",
@@ -339,7 +334,7 @@ def _register_update_task(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {"type": "integer", "description": "The task to edit."},
+                "task_id": _ticket_ref("The ticket to edit"),
                 "title": {"type": "string", "description": "New title."},
                 "description": {"type": "string", "description": "New description."},
                 "priority": {
@@ -385,15 +380,12 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID (single task)",
-                },
+                "task_id": _ticket_ref("The ticket (one ticket)"),
                 "task_ids": {
                     "type": "array",
-                    "items": {"type": "integer"},
+                    "items": {"type": "string"},
                     "description": (
-                        "Several task IDs to move to the same status in one call "
+                        "Several tickets (numbers like #0042) to move to the same status in one call "
                         "(max 100). The result lists 'updated' and 'failed' ids — "
                         "report both to the user."
                     ),

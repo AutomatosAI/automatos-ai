@@ -15,6 +15,8 @@ import { apiClient } from '@/lib/api-client'
 /** A ticket in Review, or one that failed in the period. */
 export interface NeedsYouTicketRow {
   ticket_id: number
+  /** PRD-252 R4: #0042 */
+  number?: string | null
   title: string | null
   agent_name: string | null
   /** Set on a mission's own card: the row opens the mission. */
@@ -28,6 +30,8 @@ export interface NeedsYouAskRow {
   id: string
   title: string | null
   ticket_id: number | null
+  /** PRD-252 R4: the number of the ticket it opens in */
+  ticket_number?: string | null
   agent_name: string | null
   at: string | null
 }

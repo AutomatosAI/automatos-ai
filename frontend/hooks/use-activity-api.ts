@@ -57,6 +57,8 @@ export interface ActivityFeedItem {
   orchestration_run_id?: string | null
   /** PRD-252 R5: a ticket's board status, for the board's word ("Blocked", not "failed"). */
   board_status?: string | null
+  /** PRD-252 R4: a ticket's number, #0042 */
+  number?: string | null
 }
 
 export interface ActivityFeedResponse {

@@ -63,7 +63,8 @@ def test_1115_a_ticket_no_host_can_claim_is_queued_and_says_it_cannot_start(boar
 def test_a_ticket_the_dispatcher_can_run_says_started(board):
     task = _ticket(board, board.api_agent)
     reply = _run_now(board, task)
-    assert reply["started"] is True and reply["message"] == f"Ticket #{task.id} started."
+    # PRD-252 R4: named by its number, never its id behind a '#'
+    assert reply["started"] is True and reply["message"] == f"Ticket #{task.workspace_seq:04d} started."
 
 
 def test_an_agent_whose_model_cannot_run_is_not_handed_the_ticket(board, monkeypatch):

@@ -53,6 +53,8 @@ export interface BoardTask {
   review_reason?: string | null
   blocked_code?: string | null
   source_type?: string
+  /** PRD-252 R4: the ticket's number in its workspace, #0042 (a mission step: #0051.3). */
+  number?: string | null
 }
 
 export interface BoardColumn {

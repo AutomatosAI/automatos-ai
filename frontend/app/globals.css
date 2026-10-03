@@ -1979,6 +1979,12 @@
   :is(.studio, .cc-page) .cc-kb-card .kind .high {
     margin-left: auto; color: hsl(var(--accent)); font-weight: 700;
   }
+  /* PRD-252 R4: the ticket's number leads its kind row; a session ticket says so. */
+  :is(.studio, .cc-page) .cc-kb-card .kind .num {
+    color: hsl(var(--foreground)); font-weight: 700; letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  :is(.studio, .cc-page) .cc-kb-card .kind .session { color: hsl(var(--info)); text-transform: none; }
   /* PRD-252 R7: the card's actions menu (assign, cancel) ends its kind row. */
   :is(.studio, .cc-page) .cc-kb-card .kind .cc-kb-menu {
     margin-left: auto; display: inline-flex; align-items: center; justify-content: center;

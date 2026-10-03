@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable, type DraggableProvided } from '@hello-pangea/dnd'
-import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban, Target, Clock, ShieldAlert, Layers } from 'lucide-react'
+import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, RefreshCw, Target, Clock, ShieldAlert, Layers } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -9,6 +9,7 @@ import { PRIORITY_CONFIG } from '@/types/board'
 import { cn } from '@/lib/utils'
 import { TicketActionsMenu } from './ticket-actions-menu'
 import { stageReason } from './ticket-stage'
+import { runsInSession, ticketKind } from './ticket-kind'
 
 interface BoardCardProps {
   task: BoardTask
@@ -234,35 +235,24 @@ function CardFooter({ task }: { task: BoardTask }) {
 }
 
 /** The card's kind: Mission (and its name), Playbook, Project or Task. */
+/** PRD-252 R4: the ticket's number, its type (from what filed it) and its session mark. */
 function CardKindBadge({ task }: { task: BoardTask }) {
+  const kind = ticketKind(task.source_type)
+  const Icon = kind === 'Mission' ? Target : kind === 'Playbook' ? Workflow : kind === 'Routine' ? RefreshCw : ClipboardList
+  const tone = kind === 'Mission' ? 'text-primary' : kind === 'Playbook' ? 'text-[hsl(var(--warning))]' : 'text-muted-foreground'
   return (
-    task.type === 'mission' ? (
-      <div className="flex items-center gap-1 min-w-0">
-        <Target className="w-3 h-3 text-primary shrink-0" />
-        <span className="text-[10px] font-medium text-primary uppercase tracking-wider shrink-0">Mission</span>
-        {task.mission_name && (
-          <span className="text-[10px] text-primary/60 truncate" title={task.mission_name}>
-            · {task.mission_name}
-          </span>
-        )}
-      </div>
-    ) : task.type === 'playbook' ? (
-      <div className="flex items-center gap-1">
-        <Workflow className="w-3 h-3 text-[hsl(var(--warning))]" />
-        <span className="text-[10px] font-medium text-[hsl(var(--warning))] uppercase tracking-wider">Playbook</span>
-      </div>
-    ) : (task.type as string) === 'project' ? (
-      <div className="flex items-center gap-1">
-        <FolderKanban className="w-3 h-3 text-[hsl(var(--info))]" />
-        <span className="text-[10px] font-medium text-[hsl(var(--info))] uppercase tracking-wider">
-          Project{task.project_id ? ` ${task.project_id}` : ''}
+    <div className="flex items-center gap-1 min-w-0">
+      {task.number && <span className="text-[10px] font-semibold text-foreground tabular-nums shrink-0">{task.number}</span>}
+      <Icon className={cn('w-3 h-3 shrink-0', tone)} />
+      <span className={cn('text-[10px] font-medium uppercase tracking-wider shrink-0', tone)}>{kind}</span>
+      {kind === 'Mission' && task.mission_name && (
+        <span className="text-[10px] text-primary/60 truncate" title={task.mission_name}>
+          · {task.mission_name}
         </span>
-      </div>
-    ) : (
-      <div className="flex items-center gap-1">
-        <ClipboardList className="w-3 h-3 text-muted-foreground" />
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Task</span>
-      </div>
-    )
+      )}
+      {runsInSession(task) && (
+        <span className="text-[10px] text-[hsl(var(--info))] shrink-0" title="A Claude Code session runs this ticket">· &gt;_ session</span>
+      )}
+    </div>
   )
 }

@@ -32,6 +32,7 @@ import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity
 import { ExecutionDetail } from './execution-detail'
 import { feedItemHref } from '@/lib/ticket-links'
 import { boardStatusWord } from './board-status-word'
+import { numberedTitle } from './board/ticket-kind'
 import dynamic from 'next/dynamic'
 import { cn } from '@/lib/utils'
 
@@ -529,7 +530,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
+            <h4 className="font-semibold text-sm sm:text-base truncate">{numberedTitle(item.number, item.name)}</h4>
             <FeedRowBadges item={item} />
           </div>
 
