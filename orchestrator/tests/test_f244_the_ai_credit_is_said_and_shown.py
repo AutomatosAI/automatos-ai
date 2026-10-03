@@ -207,3 +207,67 @@ def test_the_agents_page_list_carries_why_each_agent_cannot_run(shop):
     shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
     rows = asyncio.run(endpoint(ctx=NS(workspace_id=shop.ws), db=shop.db))
     assert rows[0].unavailable == CREDIT_OUT and rows[1].unavailable is not None
+
+
+# ── the credit warns before a night's work would run past it ────────────────
+
+@pytest.fixture
+def watch(monkeypatch):
+    """The credit watch with the provider's balance and the bell stubbed."""
+    from services import credit_watch
+
+    rang = []
+    seen = {"credits": {"total_credits": 18.69, "total_usage": 17.49}}
+
+    class _Analytics:
+        async def get_credits(self, api_key):
+            return seen["credits"]
+
+    async def ring(workspace_id, left, day):
+        rang.append((workspace_id, round(left, 2), day))
+
+    monkeypatch.setattr(credit_watch, "_key_and_last_day", lambda ws: ("sk-or-operator", 9.10))
+    monkeypatch.setattr("core.llm.openrouter_analytics.OpenRouterAnalyticsService", _Analytics)
+    monkeypatch.setattr(credit_watch, "_ring", ring)
+    monkeypatch.setattr(credit_watch, "_noticed_on", {})
+    monkeypatch.setattr(credit_watch, "_last_check", {})
+    return NS(module=credit_watch, rang=rang, seen=seen)
+
+
+def test_the_bell_says_the_credit_is_low_once_a_day(watch):
+    """Night 7: $18.69 at the start, $18.24 spent, and no warning before 06:53."""
+    assert round(asyncio.run(watch.module.check_credit("ws-7")), 2) == 1.20
+    asyncio.run(watch.module.check_credit("ws-7"))
+    assert watch.rang == [("ws-7", 1.20, 9.10)]
+    assert watch.module.LOW_NOTICE.format(left=1.20, day=9.10).startswith("Your AI credit has $1.20 left")
+
+
+def test_enough_credit_for_a_day_of_work_rings_nothing(watch):
+    watch.seen["credits"] = {"total_credits": 60.0, "total_usage": 22.65}
+    assert asyncio.run(watch.module.check_credit("ws-7")) == pytest.approx(37.35)
+    assert watch.rang == []
+
+
+def test_new_work_has_the_credit_looked_at_at_most_every_quarter_hour(watch, monkeypatch):
+    from config import config
+
+    checked = []
+
+    async def check(workspace_id):
+        checked.append(workspace_id)
+
+    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", True)
+    monkeypatch.setattr(watch.module, "check_credit", check)
+    guard = watch.module.watches_the_credit(lambda db, ws, what: "over the day's ceiling")
+
+    async def starts():
+        answers = [guard(None, "ws-7", "board task 1"), guard(None, "ws-7", "board task 2")]
+        await asyncio.sleep(0)
+        return answers
+
+    assert asyncio.run(starts()) == ["over the day's ceiling"] * 2       # the guard's answer is unchanged
+    assert checked == ["ws-7"]
+    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", False)
+    monkeypatch.setattr(watch.module, "_last_check", {})
+    asyncio.run(starts())
+    assert checked == ["ws-7"]                                            # the hosted edition never looks

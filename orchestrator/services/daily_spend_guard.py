@@ -26,6 +26,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
+from services.credit_watch import watches_the_credit
+
 logger = logging.getLogger(__name__)
 
 SPEND_CATEGORY = "llm_cost_audit"
@@ -134,6 +136,7 @@ def spend_state(db: Session, workspace_id: Any) -> SpendState:
     return SpendState(spent_usd=spent, ceiling_usd=limit, over=spent >= limit, since=since)
 
 
+@watches_the_credit  # F244: new work also has the AI credit looked at (local edition)
 def refuse_new_work(db: Session, workspace_id: Any, what: str) -> Optional[str]:
     """The reason to refuse starting ``what``, or ``None`` to go ahead.
 
