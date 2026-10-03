@@ -5,6 +5,11 @@ and clears its error, result and finish time when a ticket goes in progress. The
 general PATCH only set started_at, so a re-run's card kept the old run's error
 ("Stalled: …") and result beside the new work. It now does what PATCH /status
 does. (F190's other half, a send-back kept from review, came with F198.)
+
+F259: what PATCH /status does for a move to in progress is Run now (PRD-252 R6),
+so the general PATCH starts a ticket that way too: a fresh claim the dispatch
+loop picks up, with the owner's consent on record, never the bare brief launched
+directly.
 """
 from __future__ import annotations
 
@@ -29,11 +34,13 @@ def _patch(monkeypatch, task, body):
     from api import board_tasks as bt
     from tests.test_board_task_handlers import _FakeSession
 
-    launched = []
-    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launched.append(kw["task_id"]))
+    seen = NS(launched=[], woken=[], consent=[])
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: seen.launched.append(kw["task_id"]))
+    monkeypatch.setattr(bt, "record_operator_consent", lambda *a, **kw: seen.consent.append(kw.get("why")))
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: seen.woken.append(kw["task_id"]))
     monkeypatch.setattr(bt, "notify_board_event", lambda *a, **k: None)
     asyncio.run(bt.update_task(task.id, _Req(body), ctx=CTX, db=_FakeSession(agent=NS(id=5), task=task)))
-    return launched
+    return seen
 
 
 def _failed_ticket():
@@ -46,15 +53,17 @@ def _failed_ticket():
 
 
 def test_a_rerun_moved_to_in_progress_starts_clean_and_keeps_the_last_run(monkeypatch):
+    from services.board_consent import WHY_MOVED_TO_IN_PROGRESS
+
     task = _failed_ticket()
 
-    launched = _patch(monkeypatch, task, {"status": "in_progress"})
+    seen = _patch(monkeypatch, task, {"status": "in_progress"})
 
-    assert (task.status, task.error_message, task.result, task.completed_at) == ("in_progress", None, None, None)
+    # Run now's fresh claim (F259): the dispatch loop starts it, corrections and answers in
+    assert (task.status, task.error_message, task.result, task.completed_at) == ("assigned", None, None, None)
     kept = task.planning_data["previous_runs"][-1]                              # night: the error stayed on the card
-    assert (kept["status"], kept["result"], kept["why"]) == ("failed", "Revenue: £4,210 (partial)",
-                                                            "moved to in progress")
-    assert launched == [41]
+    assert (kept["status"], kept["result"], kept["why"]) == ("failed", "Revenue: £4,210 (partial)", "run now")
+    assert seen.woken == [41] and seen.launched == [] and seen.consent == [WHY_MOVED_TO_IN_PROGRESS]
 
 
 def test_a_patch_that_sets_its_own_result_keeps_it(monkeypatch):

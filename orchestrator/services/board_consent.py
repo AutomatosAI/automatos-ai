@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
 WHY_RUN_NOW = "the operator pressed Run Now"
 WHY_CREATED_AND_ASSIGNED = "the operator created the ticket and assigned it"
+WHY_ASSIGNED_BY_HAND = "the operator assigned the ticket on the board"  # F275
 WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
 WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
 WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"

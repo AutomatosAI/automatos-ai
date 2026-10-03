@@ -649,7 +649,8 @@ def test_agent_update_status_notifies_board_event(monkeypatch):
     """platform_update_task_status fires status_changed — the same event name the
     human drag-and-drop PATCH emits (api/board_tasks.py:912)."""
     calls = _patch_notify(monkeypatch)
-    db = _FakeSession(task=_fresh_task(id=3, status="assigned"))
+    # F259: Review needs work on the card, as a drag to Review does
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", result="A first draft."))
 
     result = asyncio.run(
         _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "review"})
@@ -697,7 +698,7 @@ def test_agent_unblock_clears_blocked_fields(monkeypatch):
     (api/board_tasks.py:551-553, 900-902)."""
     _patch_notify(monkeypatch)
     task = _fresh_task(id=3, status="blocked", blocked_at="2026-08-27T00:00:00Z",
-                       blocked_reason="was waiting")
+                       blocked_reason="was waiting", result="A first draft.")  # F259: Review needs work on it
     db = _FakeSession(task=task)
 
     result = asyncio.run(
@@ -757,7 +758,7 @@ def test_agent_notify_failure_is_fail_soft(monkeypatch):
         raise RuntimeError("pg_notify down")
 
     monkeypatch.setattr(be, "notify_board_event", _boom)
-    task = _fresh_task(id=3, status="assigned")
+    task = _fresh_task(id=3, status="assigned", result="A first draft.")  # F259: Review needs work on it
     db = _FakeSession(task=task)
 
     result = asyncio.run(
@@ -1557,7 +1558,8 @@ class _MultiSession:
 
 def test_bulk_status_update_closes_every_id_in_one_call(monkeypatch):
     calls = _patch_notify(monkeypatch)
-    tasks = [_fresh_task(id=i, status="blocked", blocked_at=1, blocked_reason="x") for i in (11, 12, 13)]
+    tasks = [_fresh_task(id=i, status="blocked", blocked_at=1, blocked_reason="x", result="Done by hand.")  # F259
+             for i in (11, 12, 13)]
     db = _MultiSession(tasks)
 
     result = asyncio.run(
@@ -1574,7 +1576,7 @@ def test_bulk_status_update_closes_every_id_in_one_call(monkeypatch):
 
 def test_bulk_status_update_reports_the_ids_it_could_not_update(monkeypatch):
     _patch_notify(monkeypatch)
-    db = _MultiSession([_fresh_task(id=11, status="blocked", blocked_reason="x")])
+    db = _MultiSession([_fresh_task(id=11, status="blocked", blocked_reason="x", result="Done by hand.")])  # F259
 
     result = asyncio.run(
         _HANDLER.update_board_task_status(db, _WS_ID, {"task_ids": [11, 999, "nope"], "status": "done"})

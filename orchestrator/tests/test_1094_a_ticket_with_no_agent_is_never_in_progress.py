@@ -108,9 +108,12 @@ def test_an_agents_redo_starts_clean(board):
 def test_a_redo_that_succeeds_does_not_render_failed(board):
     task = _redo(board)
     _status_by_tool(board, task_id=task.id)
+    board.db.refresh(task)
+    task.result = "The full descriptions, all twelve."   # the redo's answer, which F259's Done needs on the card
+    board.db.flush()
     _status_by_tool(board, task_id=task.id, status="done")
     board.db.refresh(task)
-    assert (task.status, task.error_message, task.result) == ("done", None, None) and task.completed_at
+    assert (task.status, task.error_message) == ("done", None) and task.completed_at
 
 
 # ── the board ───────────────────────────────────────────────────────────────
@@ -139,12 +142,19 @@ def test_a_patch_setting_in_progress_with_no_agent_changes_nothing(board):
 
 
 def test_a_patch_that_assigns_an_agent_may_start_the_ticket(board):
+    """F259: the start is Run now's, as a drag's is (PRD-252 R6): a fresh claim the
+    dispatch loop picks up, with the owner's consent on record."""
     import api.board_tasks as bt
+    from core.models.approval_grants import SUBJECT_BOARD_TASK
+    from core.services.approval_grants import find_active_grant
 
     task = _ticket(board)
     reply = asyncio.run(bt.update_task(task.id, _Request({"status": "in_progress", "assigned_agent_id": board.agent}),
                                        ctx=board.ctx, db=board.db))
-    assert reply["status"] == "in_progress" and board.launched == [task.id]
+    board.db.refresh(task)
+    assert (reply["status"], task.assigned_agent_id, board.launched) == ("assigned", board.agent, [])
+    assert reply["message"].endswith("started.")
+    assert find_active_grant(board.db, board.ws, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id))
 
 
 # ── review fixups ───────────────────────────────────────────────────────────
