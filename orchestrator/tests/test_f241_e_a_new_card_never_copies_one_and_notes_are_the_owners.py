@@ -256,4 +256,4 @@ def test_a_cancel_that_notes_itself_gets_no_second_note(shop, notes_in_this_sess
 
 def test_a_cancel_that_writes_no_note_is_noted_as_a_move(shop, notes_in_this_session):
     asyncio.run(_cancel_with(False)(shop.db, shop.ws, {"task_id": shop.card.id, "status": "cancelled"}))
-    assert [n["note"].split(",")[0] for n in _notes(shop)] == ["Moved this from Inbox to Cancelled"]
+    assert [(n["note"], n["by"]) for n in _notes(shop)] == [("Moved this from Inbox to Cancelled.", "An agent")]
