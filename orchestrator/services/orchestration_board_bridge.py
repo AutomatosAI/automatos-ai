@@ -271,6 +271,24 @@ def sync_board_status(
 
     old_status = board_task.status
     board_task.status = new_status
+    _copy_step_onto_card(board_task, task, task_state, old_status)
+    db.flush()
+
+    logger.info(
+        "Synced board task %s status: %s → %s (orchestration task %s state=%s)",
+        board_task.id,
+        old_status,
+        new_status,
+        task.id,
+        task_state.value,
+    )
+
+
+def _copy_step_onto_card(board_task: BoardTask, task: OrchestrationTask, task_state: TaskState,
+                         old_status: str) -> None:
+    """The step's agent, times, output and failure onto its card, after its
+    status moved from ``old_status`` to ``board_task.status``."""
+    new_status = board_task.status
 
     # Sync agent assignment if it changed
     if task.assigned_agent_id and board_task.assigned_agent_id != task.assigned_agent_id:
@@ -299,17 +317,6 @@ def sync_board_status(
     if new_status != "blocked" and old_status == "blocked":
         board_task.blocked_at = None
         board_task.blocked_reason = None
-
-    db.flush()
-
-    logger.info(
-        "Synced board task %s status: %s → %s (orchestration task %s state=%s)",
-        board_task.id,
-        old_status,
-        new_status,
-        task.id,
-        task_state.value,
-    )
 
 
 # ---------------------------------------------------------------------------
