@@ -18,12 +18,17 @@ caller inside a larger transaction (a mission's state change) keeps it whole.
 
 F245 (night 7): a failed ticket can be cancelled too, which closes it: it
 waits in Needs you until the owner deals with it (F246).
+
+F273 (night 7b): a stopped ticket also says who and when among its notes, the
+list the ticket view shows (services/cancel_notes.py).
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from typing import Any, List
+
+from services.cancel_notes import CANCELLED_THIS, WITH_ITS_RUN, with_cancel_recorded
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +56,13 @@ HEARTBEAT_OFF_REASON = "the heartbeat was switched off"
 ROUTINE_BY = "the routine"
 
 
-def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
+def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str, note: str = CANCELLED_THIS) -> bool:
     """End ``task``'s run unless it is done or already closed: terminal
     ``cancelled``, the lease and the session credential gone,
     ``cancel_requested_at`` so the CLI host stops the session at its next event
-    batch, the board told. Does NOT commit. True when the ticket was stopped here."""
+    batch, the board told. The cancel goes on record with its note (F273): who,
+    why and when; ``note`` is what a person or an agent did (services/cancel_notes).
+    Does NOT commit. True when the ticket was stopped here."""
     if task.status in UNCANCELLABLE:
         return False
     from services.board_events import notify_board_event
@@ -69,9 +76,8 @@ def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
     if previous == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
-    ref = dict(task.runtime_ref or {})
+    ref = with_cancel_recorded(db, task, by=by, reason=reason, at=now, note=note)
     ref[CANCEL_REQUESTED_KEY] = now.isoformat()
-    ref["cancelled"] = {"by": by, "reason": reason, "at": now.isoformat()}
     # PRD-245: the run is over, so its session credential is destroyed here too.
     clear_session_token(ref)
     task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
@@ -116,7 +122,7 @@ def stop_run_step_tickets(db: Any, execution_id: str, *, by: str, reason: str) -
     for a run that failed or died). Does NOT commit. Returns the tickets
     stopped; a step that already finished keeps its result."""
     return [task.id for task in run_step_tickets(db, execution_id)
-            if stop_ticket_run(db, task, by=by, reason=reason)]
+            if stop_ticket_run(db, task, by=by, reason=reason, note=WITH_ITS_RUN)]
 
 
 def live_mission_step_cards(db: Any, run_id: Any) -> List[Any]:
