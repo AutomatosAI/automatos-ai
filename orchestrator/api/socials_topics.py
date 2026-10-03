@@ -11,7 +11,9 @@ A plan's topics (``modules/socials/topics.py``):
   ``PUT .../topics/{topic_id}/pin`` pins it to a day (or unpins it).
 
 A fact without a source, a title the bank already holds, or a "never say" phrase of the
-plan is refused with 422 and the reason. Plain ``def`` routes (F105), scoped to the
+plan is refused with 422 and the reason. A person's topic close to one in any of the
+workspace's banks, or to a recent post, is added with a ``warning`` naming it (PRD-251C
+US-C104: research's would be refused). Plain ``def`` routes (F105), scoped to the
 caller's workspace through the plan. ``api/socials_plans.py`` includes this router, so
 it takes the Socials router's prefix and gate.
 """
@@ -30,7 +32,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.socials import service, topics
+from modules.socials import repeats, service, topics
 from services import socials_research_setup
 
 router = APIRouter()
@@ -100,15 +102,17 @@ def list_social_plan_topics(plan_id: UUID, db: Session = Depends(get_db), ctx: R
 def add_social_plan_topic(
     plan_id: UUID, body: TopicFields, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
-    """A person's topic in the bank, checked (the module docstring)."""
+    """A person's topic in the bank, checked (the module docstring), with a ``warning`` when it is
+    close to what the workspace has: they may repeat on purpose."""
     plans_api = _plans_api()
     plan = plans_api.load_plan(db, ctx, plan_id)
+    warning = repeats.warning_for(db, plan, body.title)
     try:
         topic = topics.add_topic(db, plan, body.model_dump(exclude_unset=True), created_by=plans_api._posts_api()._actor(ctx))
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
-    return _commit(db, topic)
+    return {**_commit(db, topic), "warning": warning}
 
 
 @router.put("/plans/{plan_id}/topics/{topic_id}", dependencies=[CAN_UPDATE])

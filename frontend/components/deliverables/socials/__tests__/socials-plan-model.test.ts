@@ -7,12 +7,13 @@
  *   minutes its videos need; the status line says where the plan is.
  * * A planned slot's id names its plan and key; only slots not made become chips.
  * * The music picker's three choices map to the post's music and back.
+ * * PRD-251C: the repeat window round-trips, and the form keeps it within what the server takes.
  */
 import { describe, expect, it } from 'vitest'
 
 import type { SocialPlan } from '@/lib/socials-plan-types'
 import {
-  cadenceSummary, daysFor, draftFromPlan, emptyDraft, inputFromDraft, missingFields, mixOf, oftenOf, statusLine,
+  cadenceSummary, daysFor, draftFromPlan, emptyDraft, inputFromDraft, missingFields, mixOf, oftenOf, repeatDays, statusLine,
 } from '@/components/deliverables/socials/plans/plan-model'
 import {
   parsePlannedId, plannedEvents, plannedId, plannedSlots, planRailLine,
@@ -60,6 +61,13 @@ describe('the draft', () => {
     })
     expect(input.cadence?.[1]).toEqual({ id: 'r2', channels: ['instagram', 'tiktok'], format: 'video', length_seconds: 30, template_id: null, days: ['fri'], time: '17:00' })
     expect(mixOf({ templates: 50, ai_images: 50 })).toBe('mixed')
+  })
+
+  it('carries the repeat window: the plan's, else the server's default of 60 days (PRD-251C)', () => {
+    expect(inputFromDraft(draftFromPlan(plan())).research?.repeat_after_days).toBe(60)
+    const kept = plan({ research: { enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 } })
+    expect(inputFromDraft(draftFromPlan(kept)).research?.repeat_after_days).toBe(45)
+    expect([repeatDays('0'), repeatDays('90'), repeatDays('9999'), repeatDays('x')]).toEqual([1, 90, 365, 1])
   })
 
   it('a new plan runs 35 days from today and needs a name and a channel', () => {

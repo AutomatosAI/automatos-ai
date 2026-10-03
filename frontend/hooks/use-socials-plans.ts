@@ -148,13 +148,22 @@ function writeTopic(planId: string, write: TopicWrite): Promise<unknown> {
   return apiClient.deleteSocialPlanTopic(planId, write.topicId)
 }
 
-/** Add, edit, pin or delete one of the plan's topics; the bank and its counts refresh. */
+/** The warning an added topic came back with (PRD-251C: the workspace already has one close to it). */
+function warningOf(answer: unknown): string | null {
+  const warning = (answer as { warning?: unknown } | null)?.warning
+  return typeof warning === 'string' && warning.trim() ? warning : null
+}
+
+/** Add, edit, pin or delete one of the plan's topics; the bank and its counts refresh. A topic
+ * close to one the workspace has is added, and the person told which (they may repeat on purpose). */
 export function useWriteSocialTopic(planId: string) {
   const ws = useWorkspaceId()
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (write: TopicWrite) => writeTopic(planId, write),
-    onSuccess: () => {
+    onSuccess: (answer) => {
+      const warning = warningOf(answer)
+      if (warning) toast.warning(`Added. ${warning}`)
       void queryClient.invalidateQueries({ queryKey: planQueryKeys.topics(ws, planId) })
       void queryClient.invalidateQueries({ queryKey: planQueryKeys.plans(ws) })
     },

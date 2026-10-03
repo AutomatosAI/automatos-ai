@@ -38,7 +38,10 @@ DEFAULT_VIDEO_DAYS_EARLY = 1
 MAX_VIDEO_DAYS_EARLY = 3
 # A post is made at least this long before its slot, or a day earlier.
 MIN_MAKE_LEAD = timedelta(hours=2)
-DEFAULT_RESEARCH = {"enabled": True, "day": "mon", "time": "06:00"}
+# PRD-251C (C5, O5): research adds no topic close to a post of the last this-many days.
+DEFAULT_REPEAT_AFTER_DAYS = 60
+MAX_REPEAT_AFTER_DAYS = 365
+DEFAULT_RESEARCH = {"enabled": True, "day": "mon", "time": "06:00", "repeat_after_days": DEFAULT_REPEAT_AFTER_DAYS}
 # What a research run records on the plan (services/socials_plan_research.py): a save keeps it.
 RESEARCH_RUN_KEYS = ("last_run_at", "last_run_id")
 DEFAULT_SOURCES = {"knowledge": True, "deliverables": True, "website": True, "github": False, "notes": "", "never_say": []}
@@ -219,7 +222,13 @@ def validate_research(value: Any) -> Dict[str, Any]:
     raw = {**DEFAULT_RESEARCH, **(value if isinstance(value, Mapping) else {})}
     if raw["day"] not in WEEKDAYS:
         raise InvalidPlan(f"research.day must be one of {', '.join(WEEKDAYS)}")
-    settings = {"enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time")}
+    repeat_days = raw["repeat_after_days"]
+    if isinstance(repeat_days, bool) or not isinstance(repeat_days, int) or not 1 <= repeat_days <= MAX_REPEAT_AFTER_DAYS:
+        raise InvalidPlan(f"research.repeat_after_days must be a whole number of days from 1 to {MAX_REPEAT_AFTER_DAYS}")
+    settings = {
+        "enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time"),
+        "repeat_after_days": repeat_days,
+    }
     return {**settings, **{key: raw[key] for key in RESEARCH_RUN_KEYS if raw.get(key)}}
 
 

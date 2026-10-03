@@ -9,7 +9,10 @@ and the formats it suits. Research (the seeded playbook, through
   for claims, carried into the bank);
 * a title the plan's bank already holds (case and spacing aside);
 * anything on the plan's "never say" list (``sources.never_say``), in the title, the
-  angle or a fact.
+  angle or a fact;
+* from research only (PRD-251C US-C104): a title too close to a topic in any of the
+  workspace's banks, or to a post of its history within the plan's repeat window
+  (``modules/socials/repeats.py``). A person's topic is added, with a warning.
 
 The make tick takes the next unused topic that suits a slot's format, a topic pinned
 to the slot's day first, and records the post that used it. Nothing here commits.
@@ -23,6 +26,7 @@ from uuid import UUID
 from sqlalchemy import func, or_
 
 from core.models.socials import SOCIAL_POST_FORMATS, SOCIAL_TOPIC_ORIGINS, SocialCampaign, SocialPost, SocialTopic
+from modules.socials import repeats
 from modules.socials.service import InvalidPost, SocialsError
 
 FACT_SOURCE_KINDS = ("knowledge", "deliverable", "web", "github", "note")
@@ -138,19 +142,32 @@ def add_topic(db: Any, plan: SocialCampaign, fields: Mapping[str, Any], *, creat
     return topic
 
 
+def _refuse_a_repeat(title: Any, earlier: Sequence[repeats.Earlier]) -> None:
+    found = repeats.closest(title, earlier) if earlier else None
+    if found is not None:
+        raise InvalidTopic(repeats.refusal(found))
+
+
 def add_topics(
     db: Any, plan: SocialCampaign, topics: Sequence[Any], *, created_by: str, origin: str = RESEARCH
 ) -> Tuple[List[SocialTopic], List[Dict[str, str]]]:
-    """Each of ``topics`` added or refused with its reason (the research tool's write)."""
+    """Each of ``topics`` added or refused with its reason (the research tool's write). Research's
+    are held against everything the workspace has, the ones this call adds included (US-C104)."""
     if not isinstance(topics, (list, tuple)) or not 0 < len(topics) <= MAX_ADDED_AT_ONCE:
         raise InvalidTopic(f"topics must list 1 to {MAX_ADDED_AT_ONCE} topics")
+    earlier = repeats.earlier_for(db, plan) if origin == RESEARCH else ()
     added, refused = [], []
     for i, item in enumerate(topics):
-        title = item.get("title") if isinstance(item, Mapping) else None
+        fields = item if isinstance(item, Mapping) else {}
         try:  # every refusal comes before the topic's write, so nothing is left to undo
-            added.append(add_topic(db, plan, item if isinstance(item, Mapping) else {}, created_by=created_by, origin=origin))
+            _refuse_a_repeat(fields.get("title"), earlier)
+            topic = add_topic(db, plan, fields, created_by=created_by, origin=origin)
         except InvalidTopic as exc:
-            refused.append({"index": str(i), "title": str(title or ""), "reason": str(exc)})
+            refused.append({"index": str(i), "title": str(fields.get("title") or ""), "reason": str(exc)})
+            continue
+        added.append(topic)
+        if origin == RESEARCH:
+            earlier = (*earlier, repeats.of_topic(topic.title, topic.created_at, plan.name))
     return added, refused
 
 

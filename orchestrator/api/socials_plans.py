@@ -99,6 +99,8 @@ class PlanResearch(_Strict):
     enabled: bool = True
     day: str = "mon"
     time: str = "06:00"
+    # PRD-251C US-C104: research adds no topic close to a post of the last this-many days.
+    repeat_after_days: int = Field(plans.DEFAULT_REPEAT_AFTER_DAYS, ge=1, le=plans.MAX_REPEAT_AFTER_DAYS)
 
 
 class PlanFields(_Strict):

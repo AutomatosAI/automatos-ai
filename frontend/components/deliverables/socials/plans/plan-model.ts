@@ -18,6 +18,15 @@ export const WEEKDAY_LABELS: Record<SocialWeekday, string> = {
   mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
 }
 export const DEFAULT_PLAN_DAYS = 35
+/** PRD-251C (C5): the server's default repeat window, and the most it takes. */
+export const DEFAULT_REPEAT_AFTER_DAYS = 60
+export const MAX_REPEAT_AFTER_DAYS = 365
+
+/** What the repeat window's field says, as a whole number of days the server takes. */
+export function repeatDays(value: string): number {
+  const days = Math.round(Number(value))
+  return Number.isFinite(days) ? Math.min(MAX_REPEAT_AFTER_DAYS, Math.max(1, days)) : 1
+}
 const MS_PER_DAY = 86_400_000
 const SECONDS_PER_MINUTE = 60
 
@@ -69,6 +78,8 @@ export interface PlanDraft {
   researchEnabled: boolean
   researchDay: SocialWeekday
   researchTime: string
+  /** PRD-251C: research adds no topic close to a post of the last this-many days. */
+  repeatAfterDays: number
   makeTime: string
   imagesEarly: number
   videosEarly: number
@@ -106,7 +117,7 @@ export function emptyDraft(timezone: string, today: Date = new Date()): PlanDraf
     startsOn: isoDay(today), endsOn: isoDay(new Date(today.getTime() + (DEFAULT_PLAN_DAYS - 1) * MS_PER_DAY)),
     cadence: [newRow()],
     sources: { knowledge: true, deliverables: true, website: true, github: false, notes: '' },
-    neverSay: '', researchEnabled: true, researchDay: 'mon', researchTime: '06:00',
+    neverSay: '', researchEnabled: true, researchDay: 'mon', researchTime: '06:00', repeatAfterDays: DEFAULT_REPEAT_AFTER_DAYS,
     makeTime: '07:00', imagesEarly: 0, videosEarly: 1, mix: 'templates', latePolicy: 'skip',
   }
 }
@@ -129,6 +140,7 @@ export function draftFromPlan(plan: SocialPlan): PlanDraft {
     sources: { knowledge: plan.sources.knowledge, deliverables: plan.sources.deliverables, website: plan.sources.website, github: plan.sources.github, notes: plan.sources.notes ?? '' },
     neverSay: (plan.sources.never_say ?? []).join(', '),
     researchEnabled: plan.research.enabled, researchDay: plan.research.day, researchTime: plan.research.time,
+    repeatAfterDays: plan.research.repeat_after_days ?? DEFAULT_REPEAT_AFTER_DAYS,
     makeTime: plan.make.time, imagesEarly: plan.make.image_days_early ?? 0, videosEarly: plan.make.video_days_early,
     mix: mixOf(plan.make.visual_mix), latePolicy: plan.late_policy,
   }
@@ -151,7 +163,7 @@ export function inputFromDraft(draft: PlanDraft): SocialPlanInput {
       time: draft.makeTime, image_days_early: draft.imagesEarly, video_days_early: draft.videosEarly,
       visual_mix: MIX_PRESETS.find((preset) => preset.key === draft.mix)?.mix ?? { templates: 100 },
     },
-    research: { enabled: draft.researchEnabled, day: draft.researchDay, time: draft.researchTime },
+    research: { enabled: draft.researchEnabled, day: draft.researchDay, time: draft.researchTime, repeat_after_days: draft.repeatAfterDays },
     late_policy: draft.latePolicy,
   }
 }

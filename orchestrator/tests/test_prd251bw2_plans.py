@@ -190,7 +190,8 @@ def _create(api, **overrides):
 def test_a_plan_is_created_listed_and_read(bank):
     plan = _create(bank)
     assert (plan["kind"], plan["status"], plan["late_policy"], plan["approval_mode"]) == ("plan", "active", "skip", "per_post")
-    assert plan["make"]["time"] == "07:00" and plan["research"] == {"enabled": True, "day": "mon", "time": "06:00"}
+    assert plan["make"]["time"] == "07:00"
+    assert plan["research"] == {"enabled": True, "day": "mon", "time": "06:00", "repeat_after_days": 60}  # PRD-251C US-C104
     assert plan["cadence"][0]["id"] == "r1" and plan["bank"] == {"topics": 0, "unused": 0}
     listed = bank.client.get("/api/socials/plans").json()
     assert [p["id"] for p in listed["plans"]] == [plan["id"]]
@@ -227,7 +228,8 @@ def test_a_save_keeps_when_research_last_ran_and_the_settings_it_did_not_send(ba
     saved = bank.client.put(f"/api/socials/plans/{plan['id']}", json={"research": {"day": "tue"}})
     assert saved.status_code == 200, saved.text
     assert saved.json()["research"] == {
-        "enabled": True, "day": "tue", "time": "06:00", "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1",
+        "enabled": True, "day": "tue", "time": "06:00", "repeat_after_days": 60,
+        "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1",
     }
 
 

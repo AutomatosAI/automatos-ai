@@ -3292,8 +3292,8 @@ class ApiClient {
     return this.request<SocialTopicsResponse>(`/api/socials/plans/${planId}/topics`)
   }
 
-  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic> {
-    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
+  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic & { warning?: string | null }> {
+    return this.request<SocialTopic & { warning?: string | null }>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
   }
 
   async updateSocialPlanTopic(planId: string, topicId: string, input: SocialTopicInput): Promise<SocialTopic> {

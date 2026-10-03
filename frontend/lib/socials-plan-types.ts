@@ -44,6 +44,8 @@ export interface SocialPlanResearch {
   enabled: boolean
   day: SocialWeekday
   time: string
+  /** PRD-251C: research adds no topic close to a post of the last this-many days (60 unless set). */
+  repeat_after_days?: number
   last_run_at?: string | null
   last_run_id?: string | null
 }
@@ -89,7 +91,7 @@ export interface SocialPlanInput {
   cadence?: Array<Omit<SocialPlanCadenceRow, 'id'> & { id?: string }>
   sources?: Partial<SocialPlanSources>
   make?: Partial<SocialPlanMake>
-  research?: Partial<Pick<SocialPlanResearch, 'enabled' | 'day' | 'time'>>
+  research?: Partial<Pick<SocialPlanResearch, 'enabled' | 'day' | 'time' | 'repeat_after_days'>>
   late_policy?: SocialLatePolicy
   approval_mode?: 'per_post' | 'series'
 }

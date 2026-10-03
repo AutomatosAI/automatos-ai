@@ -1958,6 +1958,9 @@ class Config:
     # days back and at most this many posts, newest first, unless the caller asks for others.
     SOCIALS_HISTORY_DAYS: int = int(os.getenv("SOCIALS_HISTORY_DAYS", "90"))
     SOCIALS_HISTORY_LIMIT: int = int(os.getenv("SOCIALS_HISTORY_LIMIT", "50"))
+    # PRD-251C US-C104 (C5): two titles whose content words overlap this much (shared over all,
+    # 0 to 1) are one topic: research may not add the second (modules/socials/repeats.py).
+    SOCIALS_REPEAT_OVERLAP: float = float(os.getenv("SOCIALS_REPEAT_OVERLAP", "0.75"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")

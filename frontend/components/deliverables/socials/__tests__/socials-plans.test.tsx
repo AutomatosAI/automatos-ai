@@ -6,7 +6,8 @@
  *   plan with what the form says, then opens the plan as itself.
  * * The content bank says to save first on a new plan; on a saved one it lists the topics and
  *   adds one through the bank (the server refuses with its reason), and says when research
- *   cannot run (PRD-251C US-C101).
+ *   cannot run (PRD-251C US-C101). A topic close to one the workspace has is added with the
+ *   server's warning, and the plan saves its repeat window (US-C104).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
@@ -17,7 +18,7 @@ import type { ReactElement } from 'react'
 
 const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null }))
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: { id: 'w1', name: 'Acme', role: 'owner', socials: { available: true, enabled: true } } }),
 }))
@@ -44,6 +45,7 @@ vi.mock('@/lib/api-client', () => {
   return { apiClient, default: apiClient }
 })
 
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { SocialsPlansView } from '@/components/deliverables/socials/plans/socials-plans-view'
 import { SAVE_FIRST } from '@/components/deliverables/socials/plans/plan-step-bank'
@@ -133,6 +135,26 @@ describe('a saved plan', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Research again' }))
     await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
     expect(screen.queryByRole('status', { name: 'Research' })).not.toBeInTheDocument()  // research can run: nothing to say
+  })
+
+  it('a topic close to one the workspace has is added, with the server\'s warning', async () => {
+    api.addSocialPlanTopic.mockResolvedValueOnce({ id: 't-new', title: 'What is a mission', warning: 'Posted 5 Oct 2026 as "What is a Mission?".' })
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a topic' }))
+    const form = screen.getByRole('form', { name: 'Add a topic' })
+    fireEvent.change(within(form).getByLabelText('Title'), { target: { value: 'What is a mission' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Add to the bank' }))
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Added. Posted 5 Oct 2026 as "What is a Mission?".'))
+  })
+
+  it('saves how long a posted idea stays off research\'s list', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'What to research' }))
+    fireEvent.change(screen.getByLabelText('Not again for (days)'), { target: { value: '45' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].research).toEqual({ enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 })
   })
 
   it('its bank says when research cannot run, in the server\'s words', async () => {
