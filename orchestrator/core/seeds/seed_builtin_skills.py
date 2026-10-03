@@ -8,10 +8,12 @@ seed file: a global row (``workspace_id`` NULL) with the manifest's
 ``skill_source``. It runs at boot for every entry (``main.py``, leader worker)
 and for ``platform-management`` whenever a workspace's Auto is seeded.
 
-Create-only, as Auto's platform-management always was: an existing row is
-never rewritten here. The loader refreshes a builtin row whose content hash
-differs from its seed file when the skill is loaded
-(``SkillLoader._refresh_builtin_if_stale``).
+An existing built-in row whose content hash differs from its seed file is
+refreshed here: its body, hash and version, nothing else (F239, build 6). The
+loader refreshes one too when it loads the skill
+(``SkillLoader._refresh_builtin_if_stale``), but Auto's prompt never goes through
+the loader: ``SkillsSection`` reads the row's ``prompt_template`` itself. So a
+deployed seed (v2.3.1, F232) never reached Auto, after 29 turns on build 6.
 
 * An entry whose seed file has not been synced yet is skipped, the way a
   Shopify agent's missing skill is (``seed_shopify_agents._lookup_skill_ids``):
@@ -38,11 +40,12 @@ from core.models.core import Skill
 logger = logging.getLogger(__name__)
 
 CREATED = "created"
+REFRESHED = "refreshed"
 PRESENT = "present"
 NOT_SYNCED = "not_synced"
 LEFT_ALONE = "left_alone"
 INVALID = "invalid"
-OUTCOMES = (CREATED, PRESENT, NOT_SYNCED, LEFT_ALONE, INVALID)
+OUTCOMES = (CREATED, REFRESHED, PRESENT, NOT_SYNCED, LEFT_ALONE, INVALID)
 
 # Frontmatter defaults: the same ones a spec-conformant import uses (skill_portability).
 DEFAULT_SKILL_TYPE = "technical"
@@ -55,7 +58,8 @@ _SEED_LOCK = text("SELECT pg_advisory_xact_lock(hashtext(:key))")
 
 
 def seed_builtin_skills(db: Session, manifest_path: Path = MANIFEST_PATH) -> Dict[str, List[str]]:
-    """Create every missing built-in skill row. Returns the skill names by outcome."""
+    """Create every missing built-in skill row and refresh every stale one. Returns
+    the skill names by outcome."""
     results = [(entry.name, _ensure(db, entry)[0]) for entry in load_manifest(manifest_path).values()]
     return {outcome: [name for name, got in results if got == outcome] for outcome in OUTCOMES}
 
@@ -71,13 +75,17 @@ def ensure_builtin_skill(db: Session, name: str, manifest_path: Path = MANIFEST_
 
 def _ensure(db: Session, entry: BuiltinSkill) -> Tuple[str, Optional[Skill]]:
     _lock(db, entry.name)
-    row = db.query(Skill).filter(Skill.name == entry.name, Skill.workspace_id.is_(None)).first()
-    if row is not None:
-        if row.skill_source == entry.skill_source:
-            return PRESENT, row
+    # Our own row first: beside it a git import can hold the same name (build 6:
+    # row 130 'github:AutomatosAI/automatos-skills'), and an unordered first() could
+    # return that one and leave ours stale.
+    rows = db.query(Skill).filter(Skill.name == entry.name, Skill.workspace_id.is_(None)).order_by(Skill.id).all()
+    ours = next((row for row in rows if row.skill_source == entry.skill_source), None)
+    if ours is not None:
+        return _refresh(ours, entry), ours
+    if rows:
         logger.warning(
             "Built-in skill '%s' not seeded: the global row id=%s from '%s' has that name and is left untouched",
-            entry.name, row.id, row.skill_source,
+            entry.name, rows[0].id, rows[0].skill_source,
         )
         return LEFT_ALONE, None
 
@@ -105,6 +113,20 @@ def _ensure(db: Session, entry: BuiltinSkill) -> Tuple[str, Optional[Skill]]:
         return (PRESENT if existing is not None else LEFT_ALONE), existing
     logger.info("Built-in skill '%s' created (id=%s)", entry.name, skill.id)
     return CREATED, skill
+
+
+def _refresh(row: Skill, entry: BuiltinSkill) -> str:
+    """REFRESHED when the row's content hash differs from its seed file's, after
+    taking the seed's body, hash and version; PRESENT when it matches or there is no
+    seed file to compare. The row's other columns are the owner's and stay."""
+    seed = read_seed(entry.seed_path)
+    if seed is None or row.content_hash == seed.content_hash:
+        return PRESENT
+    row.prompt_template = seed.body
+    row.content_hash = seed.content_hash
+    row.skill_version = seed.version or row.skill_version
+    logger.info("Refreshed builtin skill '%s' from disk (hash=%s…)", entry.name, seed.content_hash[:12])
+    return REFRESHED
 
 
 def _lock(db: Session, name: str) -> None:
