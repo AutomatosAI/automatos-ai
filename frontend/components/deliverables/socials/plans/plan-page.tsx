@@ -2,12 +2,12 @@
 
 /**
  * PRD-251B US-B207 — the Plan page (Plan.dc.html): the plan's name and state, its dates and
- * timezone, Pause (or Resume) and Save; the five steps on the left (Goal and dates, Cadence,
- * What to research, Making and approving, Content bank) and the chosen one on the right,
- * with Back and Next. A new plan is created on Save, then opens as itself; the content bank
- * fills once the plan exists. A new plan starts with Plan with Auto: Auto drafts the steps
- * from what the person says, and saving that draft also adds Auto's ideas to the bank and
- * starts research.
+ * timezone, Delete (owners and admins, 3 Oct 2026), Pause (or Resume) and Save; the five
+ * steps on the left (Goal and dates, Cadence, What to research, Making and approving, Content
+ * bank) and the chosen one on the right, with Back and Next. A new plan is created on Save,
+ * then opens as itself; the content bank fills once the plan exists. A new plan starts with
+ * Plan with Auto: Auto drafts the steps from what the person says, and saving that draft also
+ * adds Auto's ideas to the bank and starts research.
  */
 import { useEffect, useState } from 'react'
 
@@ -16,7 +16,8 @@ import type { SocialPlan, SocialPlanAutoDraft } from '@/lib/socials-plan-types'
 import { browserTimezone } from '@/lib/social-time'
 import { cn } from '@/lib/utils'
 import { useSaveDraftedPlan } from '@/hooks/use-socials-plan-draft'
-import { useSaveSocialPlan, useSetSocialPlanStatus, useSocialPlan } from '@/hooks/use-socials-plans'
+import { useDeleteSocialPlan, useSaveSocialPlan, useSetSocialPlanStatus, useSocialPlan } from '@/hooks/use-socials-plans'
+import { DeleteAskedFirst } from '../studio/delete-asked-first'
 import { PlanAutoNotes } from './plan-auto-notes'
 import { autoChanges, researchAsked, topicInputs } from './plan-auto-model'
 import { PLAN_STEPS, draftFromPlan, emptyDraft, inputFromDraft, missingFields, statusLine, type PlanDraft } from './plan-model'
@@ -27,6 +28,8 @@ import { PlanStepMaking } from './plan-step-making'
 import { PlanStepResearch } from './plan-step-research'
 import { PlanWithAuto } from './plan-with-auto'
 
+export const PLAN_DELETE_CONFIRM =
+  'Delete this plan? Its content bank goes with it, and it cannot be undone. The posts it made stay, as ordinary posts.'
 const STEP_BUTTON = 'flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 text-left text-sm font-medium'
 
 interface PlanPageProps {
@@ -34,6 +37,17 @@ interface PlanPageProps {
   planId: string | null
   canEdit: boolean
   onSaved: (plan: SocialPlan) => void
+  /** An owner or admin: the plan's page offers Delete. */
+  canDelete?: boolean
+  onDeleted?: () => void
+}
+
+function DeletePlan({ planId, onDeleted }: { planId: string; onDeleted?: () => void }) {
+  const remove = useDeleteSocialPlan()
+  return (
+    <DeleteAskedFirst noun="plan" question={PLAN_DELETE_CONFIRM} busy={remove.isLoading}
+      onConfirm={() => remove.mutate({ planId }, { onSuccess: () => onDeleted?.() })} />
+  )
 }
 
 interface StepBodyProps {
@@ -112,7 +126,7 @@ function usePlanSave(planId: string | null, draft: PlanDraft, auto: SocialPlanAu
   return { run, busy: save.isLoading || adopt.isLoading }
 }
 
-export function SocialsPlanPage({ planId, canEdit, onSaved }: PlanPageProps) {
+export function SocialsPlanPage({ planId, canEdit, onSaved, canDelete = false, onDeleted }: PlanPageProps) {
   const { data: plan } = useSocialPlan(planId)
   const [draft, set] = usePlanDraft(plan)
   const [step, setStep] = useState(planId ? 1 : 0)
@@ -138,7 +152,8 @@ export function SocialsPlanPage({ planId, canEdit, onSaved }: PlanPageProps) {
             {draft.startsOn} – {draft.endsOn} · {draft.timezone} · the plan sets the rhythm and the topics; each post is made on its day.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {plan && canDelete && <DeletePlan planId={plan.id} onDeleted={onDeleted} />}
           {plan && plan.status !== 'ended' && canEdit && (
             <Button type="button" variant="outline" disabled={status.isLoading}
               onClick={() => status.mutate({ planId: plan.id, action: plan.status === 'paused' ? 'resume' : 'pause' })}>

@@ -113,6 +113,11 @@ export function canDeletePost(role: WorkspaceRole | undefined, post: Pick<Social
   return !!role && MANAGE_ROLES.has(role) && DELETABLE.has(post.status)
 }
 
+/** Deleting a plan is an owner's or admin's, as deleting a post is (documents:delete). */
+export function canDeletePlan(role: WorkspaceRole | undefined): boolean {
+  return !!role && MANAGE_ROLES.has(role)
+}
+
 export function canTurnOnSocials(role: WorkspaceRole | undefined): boolean {
   return !!role && MANAGE_ROLES.has(role)
 }

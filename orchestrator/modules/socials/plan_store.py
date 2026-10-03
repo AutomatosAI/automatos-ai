@@ -106,6 +106,20 @@ def set_status(plan: SocialCampaign, status: str) -> SocialCampaign:
     return plan
 
 
+def delete_plan(db: Any, plan: SocialCampaign) -> int:
+    """Delete ``plan`` and its content bank (3 Oct 2026, Gerard: "no way to delete plans").
+    The posts it made stay as ordinary posts, unlinked from it (no plan, no slot) and each
+    deleted on its own, as the posts of a deleted campaign stay. How many posts it kept."""
+    kept = (
+        db.query(SocialPost)
+        .filter(SocialPost.campaign_id == plan.id)
+        .update({SocialPost.campaign_id: None, SocialPost.slot_key: None}, synchronize_session=False)
+    )
+    db.query(SocialTopic).filter(SocialTopic.campaign_id == plan.id).delete(synchronize_session=False)
+    db.delete(plan)
+    return int(kept or 0)
+
+
 def made_posts(db: Any, plan: SocialCampaign, keys: Optional[Sequence[str]] = None) -> Dict[str, SocialPost]:
     """The plan's posts made for a slot, by slot key (``keys`` narrows the read)."""
     query = db.query(SocialPost).filter(SocialPost.campaign_id == plan.id, SocialPost.slot_key.isnot(None))

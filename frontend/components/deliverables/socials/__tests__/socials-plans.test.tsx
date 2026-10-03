@@ -7,6 +7,7 @@
  * * The content bank says to save first on a new plan; on a saved one it lists the topics and
  *   adds one through the bank (the server refuses with its reason).
  * * The editor's Music picker saves the post's music (a render setting).
+ * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -35,6 +36,7 @@ vi.mock('@/lib/api-client', () => {
     listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length })),
     addSocialPlanTopic: vi.fn(async (_id: string, input: any) => ({ ...input, id: 't-new' })),
     researchSocialPlan: vi.fn(async () => ({ execution_id: 'research-1' })),
+    deleteSocialPlan: vi.fn(async () => undefined),
     listSocialMusic: vi.fn(async () => ({ available: true, tracks: [{ id: 'spring-of-2026', title: 'Spring of 2026', artist: 'S', style: 'tropical house', duration: 120, licence: 'CC BY 4.0', credit_required: true }] })),
     updateSocialPost: vi.fn(async (id: string, changes: any) => ({ id, ...changes })),
   }
@@ -44,6 +46,7 @@ vi.mock('@/lib/api-client', () => {
 import { apiClient } from '@/lib/api-client'
 import { SocialsPlansView } from '@/components/deliverables/socials/plans/socials-plans-view'
 import { SAVE_FIRST } from '@/components/deliverables/socials/plans/plan-step-bank'
+import { PLAN_DELETE_CONFIRM } from '@/components/deliverables/socials/plans/plan-page'
 import { SocialsMusicPicker } from '@/components/deliverables/socials/socials-music-picker'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -127,6 +130,25 @@ describe('a saved plan', () => {
     await waitFor(() => expect(api.addSocialPlanTopic).toHaveBeenCalledWith('p1', { title: 'The roadmap', angle: null, formats: [], facts: [] }))
     fireEvent.click(screen.getByRole('button', { name: 'Research again' }))
     await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
+  })
+})
+
+describe('deleting a plan', () => {
+  it('an owner deletes it from its page after one question, then the plans list opens', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    const ask = screen.getByRole('alertdialog', { name: 'Delete plan' })
+    expect(ask).toHaveTextContent(PLAN_DELETE_CONFIRM)
+    expect(api.deleteSocialPlan).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Delete plan' }))
+    await waitFor(() => expect(api.deleteSocialPlan).toHaveBeenCalledWith('p1'))
+    await waitFor(() => expect(state.go).toHaveBeenCalledWith({ view: 'plans', plan: null, post: null }))
+  })
+
+  it('an editor sees no Delete', async () => {
+    renderWithClient(<SocialsPlansView role="editor" posts={[]} planId="p1" go={state.go} />)
+    await screen.findByRole('button', { name: 'Pause plan' })
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   })
 })
 

@@ -10,7 +10,8 @@ Pinned:
 * the cadence check: known formats and channels, a template of the right kind and a length
   it declares, days and times; the dates, the zone and the late policy;
 * the routes: create (the fields required), list with the bank's counts, get, update (an
-  ended plan is read-only), pause/resume/end (only the moves a status allows), the slots
+  ended plan is read-only), pause/resume/end (only the moves a status allows), delete (owners
+  and admins; its bank goes, its posts stay unlinked), the slots
   in a window (planned and made), a slot moved, put back or skipped (a made one is 409);
   another workspace's plan is a 404.
 """
@@ -216,6 +217,31 @@ def test_update_pause_resume_end(bank):
     assert bank.client.post(f"/api/socials/plans/{plan['id']}/resume").status_code == 422
 
 
+def test_deleting_a_plan_takes_its_bank_and_keeps_its_posts_as_ordinary_posts(bank):
+    """3 Oct 2026 (Gerard: "no way to delete plans"): an owner or admin deletes a plan; an editor
+    cannot (403). Its content bank goes; the posts it made stay, with no plan and no slot."""
+    plan = _create(bank)
+    plan_id = uuid.UUID(plan["id"])
+    fact = {"text": "We demo on stand B12.", "source": {"kind": "web", "ref": "https://example.com/launch", "label": "Launch page"}}
+    assert bank.client.post(f"/api/socials/plans/{plan['id']}/topics", json={"title": "An idea", "facts": [fact]}).status_code == 201
+    post = SocialPost(id=uuid.uuid4(), workspace_id=WS_A, created_by="u", title="Made", content_hash="0" * 64,
+                      campaign_id=plan_id, slot_key="r1|2026-10-12|09:00", status="needs_approval")
+    bank.session.add(post)
+    bank.session.commit()
+
+    bank.role = "editor"
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 403
+    bank.role = "owner"
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 204
+
+    assert bank.client.get(f"/api/socials/plans/{plan['id']}").status_code == 404
+    assert bank.client.get("/api/socials/plans").json()["plans"] == []
+    bank.session.expire_all()
+    kept = bank.session.get(SocialPost, post.id)
+    assert (kept.status, kept.campaign_id, kept.slot_key) == ("needs_approval", None, None)
+    assert bank.session.query(SocialTopic).filter(SocialTopic.campaign_id == plan_id).count() == 0
+
+
 def test_the_slots_of_a_window_and_a_slot_moved_put_back_and_skipped(bank):
     plan = _create(bank)
     window = {"start": "2026-10-12T00:00:00Z", "end": "2026-10-19T00:00:00Z"}
@@ -258,4 +284,5 @@ def test_another_workspaces_plan_is_not_found(bank):
     bank.ctx = _ctx(WS_B)
     assert bank.client.get(f"/api/socials/plans/{plan['id']}").status_code == 404
     assert bank.client.put(f"/api/socials/plans/{plan['id']}", json={"goal": "x"}).status_code == 404
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 404
     assert bank.client.get("/api/socials/plans").json()["plans"] == []

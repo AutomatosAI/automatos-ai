@@ -10,6 +10,8 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
   any of its fields, each checked (known channels and formats, lengths the chosen
   template declares, times and days); an ended plan is read-only.
 * ``POST /api/socials/plans/{plan_id}/pause`` · ``/resume`` · ``/end``.
+* ``DELETE /api/socials/plans/{plan_id}``: the plan and its content bank are deleted (owners
+  and admins, ``documents:delete``); the posts it made stay as ordinary posts, unlinked.
 * ``POST /api/socials/plans/draft``: **Plan with Auto**, a plan drafted from what the person
   says, not saved (``api/socials_plan_draft.py``).
 * ``POST /api/socials/plans/{plan_id}/research``: **Research again** (US-B204): the
@@ -32,7 +34,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, NoReturn, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -53,6 +55,7 @@ router.include_router(plan_draft_router)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
+CAN_DELETE = Depends(require_workspace_permission("documents:delete"))
 PLAN_NOT_FOUND = "Plan not found"
 SLOT_KEY_MAX_CHARS = 160
 
@@ -221,6 +224,16 @@ def resume_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: Reques
 def end_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     """End the plan for good: no more posts are made; it stays readable."""
     return _set_status(db, ctx, plan_id, plans.ENDED)
+
+
+@router.delete("/plans/{plan_id}", status_code=204, dependencies=[CAN_DELETE])
+def delete_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Response:
+    """Delete the plan and its content bank; the posts it made stay as ordinary posts, unlinked
+    (``plan_store.delete_plan``). No more posts are made for it from the next make tick."""
+    plan = load_plan(db, ctx, plan_id)
+    plan_store.delete_plan(db, plan)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/plans/{plan_id}/slots")

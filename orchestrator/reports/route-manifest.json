@@ -1,5 +1,5 @@
 {
-  "route_count": 887,
+  "route_count": 888,
   "routes": [
     {
       "method": "GET",
@@ -2156,6 +2156,10 @@
     {
       "method": "POST",
       "path": "/api/socials/plans/draft"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/plans/{plan_id}"
     },
     {
       "method": "GET",

@@ -3264,6 +3264,11 @@ class ApiClient {
     return this.request<SocialPlan>(`/api/socials/plans/${planId}/end`, { method: 'POST' })
   }
 
+  /** Delete the plan and its content bank (owners and admins); the posts it made stay, unlinked. */
+  async deleteSocialPlan(planId: string): Promise<void> {
+    await this.request<void>(`/api/socials/plans/${planId}`, { method: 'DELETE' })
+  }
+
   /** Research again (US-B204): 409 while the Socials package's research playbook is missing. */
   async researchSocialPlan(planId: string): Promise<{ plan_id: string; execution_id: string }> {
     return this.request<{ plan_id: string; execution_id: string }>(`/api/socials/plans/${planId}/research`, { method: 'POST' })

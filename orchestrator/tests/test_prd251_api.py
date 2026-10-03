@@ -285,6 +285,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/plans/draft"),
             ("GET", "/api/socials/plans/{plan_id}"),
             ("PUT", "/api/socials/plans/{plan_id}"),
+            # Deleting a plan and its content bank; its posts stay, unlinked (3 Oct 2026).
+            ("DELETE", "/api/socials/plans/{plan_id}"),
             ("POST", "/api/socials/plans/{plan_id}/pause"),
             ("POST", "/api/socials/plans/{plan_id}/resume"),
             ("POST", "/api/socials/plans/{plan_id}/end"),

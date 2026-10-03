@@ -83,6 +83,22 @@ export function useSetSocialPlanStatus() {
   })
 }
 
+export const PLAN_DELETED = 'Plan deleted. The posts it made stay in the calendar.'
+
+/** Delete a plan (owners and admins): the plans and the posts (now unlinked) refresh. */
+export function useDeleteSocialPlan() {
+  const ws = useWorkspaceId()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ planId }: { planId: string }) => apiClient.deleteSocialPlan(planId),
+    onSuccess: () => {
+      toast.success(PLAN_DELETED)
+      void queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(ws) })
+    },
+    onError: (error) => toast.error(reasonOf(error, 'The plan could not be deleted.')),
+  })
+}
+
 export const RESEARCH_STARTED = 'Research started: new topics join the bank as Auto finds them.'
 
 export function useResearchSocialPlan() {
