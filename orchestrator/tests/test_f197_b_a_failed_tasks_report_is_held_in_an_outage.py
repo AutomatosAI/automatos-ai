@@ -103,5 +103,6 @@ def test_a_failed_tasks_report_says_why_it_failed(night, monkeypatch):
 
     monkeypatch.setattr(report_service.ReportService, "create_report", keep)
     night.fail(1170, "F197 probe 1/2: reply with the word hello")
-    assert summaries == ["The AI provider's account ran out of credit, so this stopped before it finished. "
-                         "Top up the provider account, then run it again."]
+    assert summaries == ["Your AI credit ran out: the AI provider account that pays for the agents' model calls has no "
+                         "credit left, so this stopped before it finished. It is not a customer's or a supplier's credit. "
+                         "Top up the AI provider account, then run it again."]

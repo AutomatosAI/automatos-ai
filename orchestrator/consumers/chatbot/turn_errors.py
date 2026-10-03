@@ -76,8 +76,9 @@ def _provider_error(status: int, text: str, who: str) -> TurnError:
         tool = server_tool.group("tool").replace("_", " ")
         return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider's {tool} failed on its side. {ASK_AGAIN}")
     if status == 402:
-        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider refused it because the account is out of "
-                                               "credits. Top up the provider account, then ask again.")
+        # F244: whose credit, so it is never read as a customer's or a supplier's.
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} your AI credit ran out (the AI provider account that pays "
+                                               "for the model calls is out of credits). Top it up, then ask again.")
     if status in (401, 403):
         return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider rejected its API key. Check the provider's "
                                                "key in Settings, then ask again.")

@@ -72,8 +72,9 @@ def test_a_ticket_that_ran_out_of_credit_says_so_in_plain_words(monkeypatch, raw
         exec_result={"status": "error", "error": f"Task execution failed after 2 attempts: {raw}"}))
 
     assert task.status == "failed"
-    assert task.error_message == ("The AI provider's account ran out of credit, so this stopped before it finished. "
-                                  "Top up the provider account, then run it again.")
+    assert task.error_message == ("Your AI credit ran out: the AI provider account that pays for the agents' model calls has no "
+                                  "credit left, so this stopped before it finished. It is not a customer's or a supplier's credit. "
+                                  "Top up the AI provider account, then run it again.")  # F244: whose credit
 
 
 def test_another_provider_refusal_gives_its_status_not_its_payload():
@@ -114,8 +115,9 @@ def test_a_scheduled_report_that_ran_out_of_credit_is_marked_to_run_again(fail_r
     execution = fail_run("cron_scheduler")
 
     assert execution.status == "failed"
-    assert execution.error_message == ("The AI provider's account ran out of credit, so this stopped before it "
-                                       "finished. It runs again by itself once credit is back.")
+    assert execution.error_message == ("Your AI credit ran out: the AI provider account that pays for the agents' model calls has no "
+                                       "credit left, so this stopped before it finished. It is not a customer's or a supplier's credit. "
+                                       "It runs again by itself once the credit is topped up.")
     assert execution.execution_metadata == {"total_steps": 1, "out_of_credit": True}
 
 
@@ -123,7 +125,7 @@ def test_a_run_someone_started_is_not_run_again_by_itself(fail_run):
     """Night 6's Monday Stock Report run was started by Auto (platform_action)."""
     execution = fail_run("platform_action")
 
-    assert "Top up the provider account, then run it again." in execution.error_message
+    assert "Top up the AI provider account, then run it again." in execution.error_message
     assert "out_of_credit" not in execution.execution_metadata
 
 

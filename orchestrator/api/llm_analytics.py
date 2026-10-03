@@ -829,7 +829,19 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
     Priority: BYOK key in user_api_keys → env OPENROUTER_API_KEY.
     If byok_only=True, only returns workspace BYOK keys (blocks env fallback).
     Raises HTTPException 404 if not found.
+
+    F244 (night 7): in the local edition the owner pays for every call, so the
+    balance is the one on the key the calls use (core.llm.key_resolver). Night 7's
+    calls ran on the operator workspace's key, and the card said "No OpenRouter API
+    key configured" beside $22.65 of OpenRouter spend. The hosted edition keeps the
+    rule above: a tenant never reads the operator's balance.
     """
+    if config.IS_LOCAL_EDITION and not byok_only:
+        from core.llm.key_resolver import resolve_provider_key
+
+        resolved = resolve_provider_key(db, "openrouter", workspace_id=workspace_id)
+        if resolved is not None:
+            return resolved.api_key
     row = (
         db.query(UserApiKey)
         .filter(
