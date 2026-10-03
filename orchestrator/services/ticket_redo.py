@@ -145,6 +145,24 @@ def _redo(task: Any) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
+    """When the ticket's brief was last agreed in a discussion; None if never."""
+    briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
+    return _parsed(briefs[-1].get("at")) if briefs else None
+
+
+def _corrections(data: Dict[str, Any], since: Optional[datetime] = None) -> List[str]:
+    return [c["note"] for c in data.get("owner_corrections") or []
+            if isinstance(c, dict) and c.get("note") and _after(c.get("at"), since)]
+
+
+def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> Optional[str]:
+    for run in reversed(data.get("previous_runs") or []):
+        if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since):
+            return run.get("result") or None
+    return None
+
+
 def standing_corrections(task: Any) -> Optional[str]:
     """The owner's notes on this ticket's agent's other tickets, newest first and
     each once: what one Reject taught applies to the agent's next card."""
@@ -194,21 +212,3 @@ def _session_of(task: Any) -> Any:
         return object_session(task)
     except UnmappedInstanceError:    # a plain object standing in for a ticket
         return None
-
-
-def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
-    """When the ticket's brief was last agreed in a discussion; None if never."""
-    briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
-    return _parsed(briefs[-1].get("at")) if briefs else None
-
-
-def _corrections(data: Dict[str, Any], since: Optional[datetime] = None) -> List[str]:
-    return [c["note"] for c in data.get("owner_corrections") or []
-            if isinstance(c, dict) and c.get("note") and _after(c.get("at"), since)]
-
-
-def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> Optional[str]:
-    for run in reversed(data.get("previous_runs") or []):
-        if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since):
-            return run.get("result") or None
-    return None
