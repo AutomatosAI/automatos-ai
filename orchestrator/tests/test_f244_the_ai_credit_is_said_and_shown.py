@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 import types
 from types import SimpleNamespace as NS
@@ -118,3 +120,90 @@ def test_a_failed_runs_report_is_failed_not_published():
     done = NS(artifact_type="report", extra={"task_status": "done", "trigger": "task"}, status="published")
     post = NS(artifact_type="blog_post", extra={}, status="draft")
     assert (shown_status(failed), shown_status(done), shown_status(post)) == ("failed", "published", "draft")
+
+
+# ── an agent that can't run says so ─────────────────────────────────────────
+
+@pytest.fixture
+def shop(db_session, seed_workspace):
+    """Night 7 at 07:30: an API agent, a CLI session agent with no host, and the credit out."""
+    from datetime import datetime, timedelta, timezone
+    from uuid import UUID
+
+    from sqlalchemy import text
+
+    ws = UUID(seed_workspace())
+
+    def agent(name, configuration):
+        return db_session.execute(text(
+            "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, owner_type) "
+            "VALUES (:n, 'custom', :w, 'active', CAST(:c AS json), 'workspace') RETURNING id"),
+            {"n": name, "w": str(ws), "c": json.dumps(configuration)}).scalar()
+
+    now = datetime.now(timezone.utc)
+    analyst = agent("Shopify Business Analyst", {"model": "anthropic/claude-sonnet-4"})
+    mac = agent("Numbers (on my Mac)", {"runtime": "cli", "provider": "claude"})
+    db_session.execute(text(
+        "INSERT INTO llm_usage (workspace_id, model_id, provider, tier, request_type, input_tokens, output_tokens, "
+        "total_tokens, input_cost, output_cost, total_cost, created_at) VALUES (CAST(:w AS uuid), 'm', 'openrouter', "
+        "'direct', 'board_task', 10, 5, 15, 0, 0, 0, :at)"), {"w": str(ws), "at": now - timedelta(minutes=40)})
+
+    def failed_for_credit(minutes_ago, words):
+        db_session.execute(text(
+            "INSERT INTO board_tasks (workspace_id, title, status, error_message, completed_at) "
+            "VALUES (CAST(:w AS uuid), 'Break-even on the gift box', 'failed', :e, :at)"),
+            {"w": str(ws), "e": words, "at": now - timedelta(minutes=minutes_ago)})
+    return NS(db=db_session, ws=ws, analyst=analyst, mac=mac, now=now, failed_for_credit=failed_for_credit)
+
+
+def test_the_credit_is_out_after_a_credit_failure_newer_than_the_last_call_that_went_through(shop):
+    from core.llm.credit import OUT_OF_CREDIT_TEXT
+    from services.agent_availability import ai_credit_out
+
+    assert ai_credit_out(shop.db, shop.ws) is False
+    shop.failed_for_credit(50, OUT_OF_CREDIT_TEXT)               # before the last call that went through
+    assert ai_credit_out(shop.db, shop.ws) is False
+    shop.failed_for_credit(10, "The AI provider's account ran out of credit, so this stopped before it finished.")
+    assert ai_credit_out(shop.db, shop.ws) is True
+
+
+def test_each_agent_says_why_it_cannot_run(shop):
+    from core.llm.credit import OUT_OF_CREDIT_TEXT
+    from services.agent_availability import CREDIT_OUT, NO_HOST, why_unavailable
+    from core.models import Agent
+
+    shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
+    agents = shop.db.query(Agent).filter(Agent.id.in_([shop.analyst, shop.mac])).all()
+    assert why_unavailable(shop.db, shop.ws, agents) == {shop.analyst: CREDIT_OUT, shop.mac: NO_HOST}
+
+
+def test_autos_agent_list_says_which_can_run(shop):
+    from core.llm.credit import OUT_OF_CREDIT_TEXT
+    from modules.tools.discovery.handlers_agents import list_agents
+    from services.agent_availability import CREDIT_OUT
+
+    shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
+    listed = {a["name"]: a for a in asyncio.run(list_agents(shop.db, shop.ws, {}))["agents"]}
+    assert (listed["Shopify Business Analyst"]["can_run"], listed["Shopify Business Analyst"]["why"]) == (False,
+                                                                                                         CREDIT_OUT)
+    assert listed["Numbers (on my Mac)"]["can_run"] is False
+
+
+def test_the_agents_page_list_carries_why_each_agent_cannot_run(shop):
+    from pydantic import BaseModel
+
+    from core.llm.credit import OUT_OF_CREDIT_TEXT
+    from services.agent_availability import CREDIT_OUT, with_unavailable
+
+    class Row(BaseModel):
+        id: int
+        configuration: dict
+        unavailable: str | None = None
+
+    @with_unavailable
+    async def endpoint(ctx=None, db=None):
+        return [Row(id=shop.analyst, configuration={}), Row(id=999999, configuration={"runtime": "cli"})]
+
+    shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
+    rows = asyncio.run(endpoint(ctx=NS(workspace_id=shop.ws), db=shop.db))
+    assert rows[0].unavailable == CREDIT_OUT and rows[1].unavailable is not None
