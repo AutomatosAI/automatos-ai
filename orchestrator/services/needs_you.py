@@ -53,9 +53,12 @@ STUCK_MISSION_ENDED = "mission_ended"    # a step whose mission ended without it
 # #0050 and #0052 drop out though nobody had dealt with them).
 _COUNTS = text("""
     SELECT
-      (SELECT COUNT(*) FROM board_tasks
-        WHERE workspace_id = CAST(:ws AS uuid) AND status = 'review'
-          AND source_type NOT IN ('orchestration_task', 'orchestration')) AS review,
+      (SELECT COUNT(*) FROM board_tasks bt
+        WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
+          AND (bt.source_type NOT IN ('orchestration_task', 'orchestration')
+               OR (bt.source_type = 'orchestration_task' AND bt.review_mode = 'human' AND NOT EXISTS (
+                   SELECT 1 FROM orchestration_tasks ot JOIN orchestration_runs r ON r.id = ot.run_id
+                    WHERE ot.id = bt.orchestration_task_id AND r.state = ANY(:ended))))) AS review,
       (SELECT COUNT(*) FROM orchestration_runs
         WHERE workspace_id = CAST(:ws AS uuid) AND state = 'awaiting_approval') AS mission_approval,
       (SELECT COUNT(*) FROM board_tasks
@@ -84,12 +87,18 @@ _ASKS = text("""
   ORDER BY g.requested_at DESC NULLS LAST LIMIT :limit
 """)
 
+# A mission step in Review is its mission's to check, unless the owner asked to
+# check it (F242: review_mode human, a step held for the owner while its mission
+# waits). A step whose mission ended can no longer be let through: it is stuck.
 _REVIEW_ROWS = text("""
-    SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.orchestration_run_id, a.name AS agent_name,
-           COALESCE(bt.completed_at, bt.updated_at) AS at
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.parent_task_id, bt.orchestration_run_id,
+           a.name AS agent_name, COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
-       AND bt.source_type NOT IN ('orchestration_task', 'orchestration')
+       AND (bt.source_type NOT IN ('orchestration_task', 'orchestration')
+            OR (bt.source_type = 'orchestration_task' AND bt.review_mode = 'human' AND NOT EXISTS (
+                SELECT 1 FROM orchestration_tasks ot JOIN orchestration_runs r ON r.id = ot.run_id
+                 WHERE ot.id = bt.orchestration_task_id AND r.state = ANY(:ended))))
   ORDER BY at DESC NULLS LAST LIMIT :limit
 """)
 # A failed mission card opens its mission: its run id rides along.
@@ -151,9 +160,9 @@ def needs_you_counts(db: Session, workspace_id: Any, *, may_answer: bool = True)
 def needs_you(db: Session, workspace_id: Any, *, may_answer: bool = True) -> Dict[str, Any]:
     """The number and the rows behind it, newest first in each kind."""
     counts, listed = _counted(db, workspace_id, may_answer=may_answer, limit=ROWS_PER_KIND)
-    params = {"ws": str(workspace_id), "limit": ROWS_PER_KIND}
+    params = {"ws": str(workspace_id), "limit": ROWS_PER_KIND, "ended": _ended_states()}
     rows: Dict[str, List[Dict[str, Any]]] = {
-        "review": [_ticket_row(r) for r in db.execute(_REVIEW_ROWS, params)],
+        "review": _numbered_rows(db, workspace_id, db.execute(_REVIEW_ROWS, params).all()),
         "question": _grant_rows(db, workspace_id, _grants_by_id(db, workspace_id, listed["question"])),
         "approval": _approval_rows(db, workspace_id, _grants_by_id(db, workspace_id, listed["approval"]), params),
         "stuck": _stuck_rows(db, workspace_id, listed["stuck"]),
@@ -167,7 +176,7 @@ def _counted(
 ) -> Tuple[Dict[str, int], Dict[str, List[Any]]]:
     """Every kind's exact count with ``total``, and the newest ``limit`` of the
     questions, approval grants and stuck tickets (one read gives both)."""
-    row = db.execute(_COUNTS, {"ws": str(workspace_id)}).first()
+    row = db.execute(_COUNTS, {"ws": str(workspace_id), "ended": _ended_states()}).first()
     questions = _asks(db, workspace_id, questions=True, limit=limit) if may_answer else (0, [])
     approvals = _asks(db, workspace_id, questions=False, limit=limit) if may_answer else (0, [])
     stuck = _stuck(db, workspace_id, limit=limit)
@@ -196,17 +205,22 @@ def _asks(db: Session, workspace_id: Any, *, questions: bool, limit: int) -> Tup
 
 def _stuck(db: Session, workspace_id: Any, *, limit: int) -> Tuple[int, List[Any]]:
     """How many tickets are stuck, and the newest ``limit`` of them."""
-    from core.models.orchestration_enums import TERMINAL_RUN_STATES
     from services.cli_ticket_lane import NO_CLI_HOST_PREFIX, NO_HOST_REASON
 
     found = db.execute(_STUCK_ROWS, {
-        "ws": str(workspace_id), "limit": limit, "open_step": OPEN_STEP_STATUSES,
-        "ended": sorted(state.value for state in TERMINAL_RUN_STATES),
+        "ws": str(workspace_id), "limit": limit, "open_step": OPEN_STEP_STATUSES, "ended": _ended_states(),
         "no_host_line": NO_HOST_REASON, "no_cli_host_prefix": NO_CLI_HOST_PREFIX,
         "why_no_host": STUCK_NO_HOST, "why_no_agent": STUCK_NO_AGENT,
         "why_not_picked_up": STUCK_NOT_PICKED_UP, "why_mission_ended": STUCK_MISSION_ENDED,
     }).all()
     return (int(found[0].of_all) if found else 0), found
+
+
+def _ended_states() -> List[str]:
+    """A mission's ended states: it runs none of its steps again."""
+    from core.models.orchestration_enums import TERMINAL_RUN_STATES
+
+    return sorted(state.value for state in TERMINAL_RUN_STATES)
 
 
 def _grants_by_id(db: Session, workspace_id: Any, ids: List[int]) -> List[Any]:
@@ -271,10 +285,15 @@ def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Di
 def _stuck_rows(db: Session, workspace_id: Any, rows: List[Any]) -> List[Dict[str, Any]]:
     """A stuck ticket opens itself, named by its number (a mission step's is its
     card's: #0176.9), with why it is stuck."""
+    return [{**row, "why": r.why} for row, r in zip(_numbered_rows(db, workspace_id, rows), rows)]
+
+
+def _numbered_rows(db: Session, workspace_id: Any, rows: List[Any]) -> List[Dict[str, Any]]:
+    """Ticket rows named by their numbers, a mission step's being its card's (#0139.2)."""
     from services.ticket_numbers import ticket_numbers
 
     numbers = ticket_numbers(db, workspace_id, rows)
-    return [{**_ticket_row(r), "number": numbers.get(r.id), "why": r.why} for r in rows]
+    return [{**_ticket_row(r), "number": numbers.get(r.id)} for r in rows]
 
 
 def _iso(value: Any) -> Any:

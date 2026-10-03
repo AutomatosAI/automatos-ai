@@ -80,11 +80,12 @@ def _missions(s, ws, writer):
     _card(s, ws, None, "Chase the late payers", "inbox", source="orchestration_task", parent=card, step_of=unassigned_task)
     live = _run(s, ws, "Autumn menu", "running", "active")
     live_card = _card(s, ws, 180, "Mission: autumn menu", "in_progress", source="orchestration", run=live)
-    _card(s, ws, None, "Draft the menu", "inbox", source="orchestration_task", agent=writer, parent=live_card,
-          step_of=_task(s, live, "Draft the menu", 1, "queued"))
+    live_step = _card(s, ws, None, "Draft the menu", "inbox", source="orchestration_task", agent=writer,
+                      parent=live_card, step_of=_task(s, live, "Draft the menu", 1, "queued"))
     plan = _run(s, ws, "Winter blend launch", "awaiting_approval", "blocked")
     plan_card = _card(s, ws, 31, "Mission: winter blend launch", "review", source="orchestration", run=plan)
-    return NS(card=card, stranded=stranded, done_task=done_task, plan=plan, plan_card=plan_card)
+    return NS(card=card, stranded=stranded, done_task=done_task, plan=plan, plan_card=plan_card,
+              live=live, live_step=live_step)
 
 
 def _cards(s, ws, writer, mac):
@@ -199,6 +200,23 @@ def test_a_mission_plan_and_a_steps_question_carry_their_card_numbers(night, new
         night.missions.plan, night.missions.plan_card, "#0031")
     asked = next(r for r in rows["question"] if r["id"] == str(night.grants.step_question))
     assert asked["ticket_number"] == "#0176.1"                         # night: question #1178 had none
+
+
+def test_a_mission_step_held_for_the_owners_check_is_in_review(night, new_session):
+    """F242: a step the owner asked to check waits for them in Review while its
+    mission waits; one whose mission ended is stuck, never both."""
+    from services.needs_you import needs_you
+
+    s = new_session()
+    s.execute(text("UPDATE board_tasks SET status = 'review', review_mode = 'human' WHERE id IN (:held, :ended)"),
+              {"held": night.missions.live_step, "ended": night.missions.stranded})
+    s.execute(text("UPDATE orchestration_runs SET state = 'paused' WHERE id = CAST(:r AS uuid)"),
+              {"r": night.missions.live})
+    s.commit()
+    out = needs_you(new_session(), UUID(night.ws))
+
+    assert (out["counts"]["review"], out["counts"]["stuck"]) == (2, 6)
+    assert {r["number"] for r in out["rows"]["review"]} == {"#0172", "#0180.1"}
 
 
 def test_a_member_who_cannot_answer_still_sees_what_is_stuck(night, new_session):
