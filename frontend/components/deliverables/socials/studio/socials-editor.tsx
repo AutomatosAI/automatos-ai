@@ -25,6 +25,7 @@ import { EditorChannelsCard } from './editor-channels-card'
 import { EditorClaimsCard } from './editor-claims-card'
 import { EditorFormatCard } from './editor-format-card'
 import { EditorLookCard } from './editor-look-card'
+import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
@@ -62,6 +63,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const footage = useSocialFootageSources(draft.format !== 'text')
   const chosen = templates.data?.find((t) => t.id === draft.templateId) ?? null
   const imageSlots = chosen?.image_slots ?? []
+  const photoSpots = useMemo(() => photoSpotsOf(chosen), [chosen])
   const calls = useEditorCalls()
   // F254: the post a Save, Render or Submit created, kept even when a later step fails, so
   // the next try edits it instead of creating another.
@@ -121,8 +123,9 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
           {draft.format !== 'text' && (
             <EditorLookCard
               templates={templates.data ?? []} loading={templates.isLoading} chosen={draft.templateId} onPick={pickTemplate} busy={mediaBusy}
-              onUpload={(file) => calls.upload.mutate({ ...payload(), file }, opened)}
-              onLibrary={(item) => calls.pick.mutate({ ...payload(), item }, opened)}
+              photoSpots={photoSpots}
+              onUpload={(file, spot) => calls.upload.mutate({ ...payload(), file, spot }, opened)}
+              onLibrary={(item, spot) => calls.pick.mutate({ ...payload(), item, spot }, opened)}
               ai={{
                 post, imageSlots, images: footage.data?.kinds.image, aiBusy: calls.aiMake.isLoading || calls.aiPick.isLoading,
                 onAiMake: (imageSlot, prompt) => calls.aiMake.mutate({ ...payload(), imageSlot, prompt }, opened),

@@ -178,6 +178,18 @@ def _media_file(aspect: str, ident: str, row: Any, workspace_id: Any) -> MediaFi
     )
 
 
+def deliverable_file(db: Any, workspace_id: Any, deliverable_id: Any, aspect: str = "") -> Optional[MediaFile]:
+    """One of the workspace's Deliverables as a file (its object in the documents bucket,
+    ``key`` None and why when it has none), or ``None`` when the workspace has no such
+    Deliverable, a deleted one or another workspace's included."""
+    try:
+        ident = _canonical(deliverable_id)
+    except (TypeError, ValueError):
+        return None
+    row = db.execute(_FILES, {"workspace_id": str(workspace_id), "ids": [ident]}).first()
+    return _media_file(aspect, ident, row, workspace_id) if row is not None else None
+
+
 def resolve_post_media(db: Any, post: Any) -> List[MediaFile]:
     """Each file the post's media names, in media order, found through the
     ``deliverables`` rows of the post's own workspace (deleted ones excluded)."""

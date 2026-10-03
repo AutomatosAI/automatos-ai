@@ -5,6 +5,8 @@
  * * Upload: the dropped file goes to POST /posts/{id}/media (a new post is saved first) and
  *   the post's media follows.
  * * Library: the workspace's image and video Deliverables; picking one sets the post's media.
+ * * PRD-251B: with a template marked Photo, an upload or a Library picture fills its photo spot
+ *   (the template's words over it), or the whole post when asked; the spot shows its picture.
  * * AI-made (PRD-251B US-B305) has its own tests: socials-editor-ai.test.tsx.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
@@ -17,6 +19,7 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 vi.mock('@/components/deliverables/socials/socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
 vi.mock('@/components/deliverables/socials/studio/socials-editor-activity', () => ({ SocialsEditorActivity: () => null }))
+vi.mock('@/hooks/use-authed-image', () => ({ useAuthedImage: (path: string | null) => (path ? `blob:${path}` : null) }))
 vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   FilePreview: ({ url }: { url: string }) => <div data-testid="file-preview" data-url={url} />,
   inferPreviewType: () => 'image',
@@ -25,7 +28,10 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { DROP_HINT, DROP_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
 import { AUTO_PICK_NOTE } from '@/components/deliverables/socials/studio/editor-look-card'
-import { api, post, renderWith, resetApi } from './socials-editor-harness'
+import { DROP_PHOTO_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
+import { PHOTO_SPOT_HINT, PHOTO_TARGET, WHOLE_POST_HINT } from '@/components/deliverables/socials/studio/editor-look-photo'
+import { OWN_PICTURE } from '@/components/deliverables/socials/studio/editor-look-ai'
+import { IMAGE_TEMPLATE, PHOTO_TEMPLATE, api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
 const look = () => screen.getByRole('region', { name: 'Look' })
@@ -80,5 +86,46 @@ describe('the Look card', () => {
         media: { original: ['d-video'] }, template_id: null, length_seconds: null, format: 'video',
       }),
     )
+  })
+
+  it('with a Photo template, Upload fills its photo spot, or the whole post when asked', async () => {
+    api.listSocialTemplates.mockResolvedValue([IMAGE_TEMPLATE, PHOTO_TEMPLATE])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-photo' })} go={go} />)
+    source('Upload')
+    const where = await within(look()).findByRole('group', { name: PHOTO_TARGET })
+    expect(within(where).getAllByRole('button').map((b) => b.textContent)).toEqual(['Photo', 'The whole post'])
+    expect(within(where).getByRole('button', { name: 'Photo' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(look()).getByText(PHOTO_SPOT_HINT)).toBeInTheDocument()
+    expect(within(look()).getByText(DROP_PHOTO_TITLE)).toBeInTheDocument()
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'salon.png', { type: 'image/png' })
+    fireEvent.change(within(look()).getByLabelText('File to upload'), { target: { files: [file] } })
+    await waitFor(() => expect(api.uploadSocialPostMedia).toHaveBeenCalledWith('post-1', file, 'photo'))
+
+    fireEvent.click(within(where).getByRole('button', { name: 'The whole post' }))
+    expect(within(look()).getByText(WHOLE_POST_HINT)).toBeInTheDocument()
+    fireEvent.change(within(look()).getByLabelText('File to upload'), { target: { files: [file] } })
+    await waitFor(() => expect(api.uploadSocialPostMedia).toHaveBeenLastCalledWith('post-1', file))
+  })
+
+  it('with a Photo template, the Library lists pictures only and the pick fills the photo spot', async () => {
+    api.listSocialTemplates.mockResolvedValue([IMAGE_TEMPLATE, PHOTO_TEMPLATE])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-photo' })} go={go} />)
+    source('Library')
+    await within(look()).findByRole('group', { name: PHOTO_TARGET })
+    const library = await within(look()).findByRole('list', { name: 'Library' })
+    const items = within(library).getAllByRole('button')
+    expect(items.map((b) => b.textContent)).toEqual(['A imageImage']) // the video is no photo
+    fireEvent.click(items[0])
+    await waitFor(() => expect(api.setSocialPostPhoto).toHaveBeenCalledWith('post-1', 'photo', 'd-image'))
+    expect(api.updateSocialPost).not.toHaveBeenCalledWith('post-1', expect.objectContaining({ media: expect.anything() }))
+  })
+
+  it('a photo spot that holds your picture shows it', async () => {
+    api.listSocialTemplates.mockResolvedValue([IMAGE_TEMPLATE, PHOTO_TEMPLATE])
+    const own = { prompt: 'Photo: your own picture (upload-1.png)', status: 'done' as const, toolkit: 'upload', name: 'upload-1.png' }
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-photo', footage: { photo: own } })} go={go} />)
+    source('Upload')
+    expect(await within(look()).findByText(OWN_PICTURE)).toBeInTheDocument()
+    expect(within(look()).getByRole('img', { name: OWN_PICTURE })).toHaveAttribute('src', 'blob:/api/socials/posts/post-1/media/upload-1.png')
   })
 })

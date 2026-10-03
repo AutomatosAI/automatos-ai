@@ -48,17 +48,26 @@ function OptionThumb({ postId, option, index, disabled, onPick }: {
   )
 }
 
-function ChosenImage({ postId, name }: { postId: string; name: string }) {
+export const OPTION_CHOSEN = 'Option chosen: the next render uses it.'
+export const OWN_PICTURE = 'Your picture: the next render uses it.'
+
+/** Whether a slot's file is the person's own (an upload or a Library picture), not an AI option. */
+export function isOwnPicture(asked: SocialPostFootage | undefined): boolean {
+  return asked?.toolkit === 'upload' || asked?.toolkit === 'library'
+}
+
+/** The picture a slot holds now, with what it is. */
+export function SlotPicture({ postId, name, caption }: { postId: string; name: string; caption: string }) {
   const image = useAuthedImage(mediaPath(postId, name))
   return (
     <div className="flex items-center gap-2">
       <div className="h-16 w-16 overflow-hidden rounded-md border-2 border-accent bg-muted">
         {image && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={image} alt="The chosen option" className="h-full w-full object-cover" />
+          <img src={image} alt={caption} className="h-full w-full object-cover" />
         )}
       </div>
-      <span className="text-xs text-muted-foreground">Option chosen: the next render uses it.</span>
+      <span className="text-xs text-muted-foreground">{caption}</span>
     </div>
   )
 }
@@ -73,7 +82,9 @@ interface AiSlotProps {
 }
 
 function AiSlot({ slot, post, asked, busy, onMake, onPick }: AiSlotProps) {
-  const [prompt, setPrompt] = useState(asked?.prompt ?? '')
+  const own = isOwnPicture(asked)
+  // The person's own picture has no prompt to make options from: theirs starts empty.
+  const [prompt, setPrompt] = useState(own ? '' : asked?.prompt ?? '')
   const making = asked?.options_state === 'making'
   const options = asked?.options ?? []
   const chosenName = asked?.status === 'done' ? asked.name : null
@@ -87,7 +98,7 @@ function AiSlot({ slot, post, asked, busy, onMake, onPick }: AiSlotProps) {
           {making ? 'Making four options…' : 'Make 4 options'}
         </Button>
       </div>
-      {post && chosenName && <ChosenImage postId={post.id} name={chosenName} />}
+      {post && chosenName && <SlotPicture postId={post.id} name={chosenName} caption={own ? OWN_PICTURE : OPTION_CHOSEN} />}
       {asked?.options_state === 'failed' && <p role="alert" className="text-xs text-destructive">{asked.options_error || 'No options were made.'}</p>}
       {asked?.options_state === 'ready' && asked.options_error && <p className="text-xs text-muted-foreground">Some options were not made: {asked.options_error}</p>}
       {post && options.length > 0 && (

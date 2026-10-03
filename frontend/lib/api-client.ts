@@ -776,6 +776,8 @@ export interface SocialTemplateSummary {
   footage_slots: string[]
   /** PRD-251B US-B305: those of them that take a still: the Look card's AI-made images. */
   image_slots?: string[]
+  /** Each of image_slots with its label ("Photo", "Before photo"): the Look's photo spots. */
+  image_slot_labels?: Record<string, string>
   /** The template's fields, some of them claims (D7): the editor's Text on the image card. */
   variables_schema: Record<string, SocialTemplateVariable>
   /** The sample text of those fields (what the thumbnail shows): greyed in as each empty field's example. */
@@ -2948,10 +2950,20 @@ class ApiClient {
   }
 
   /** PRD-251B US-B109: the post's visual becomes an uploaded file (PNG, JPEG, WebP or MP4; the server sniffs it). */
-  async uploadSocialPostMedia(postId: string, file: File): Promise<SocialPost> {
+  async uploadSocialPostMedia(postId: string, file: File, slot?: string): Promise<SocialPost> {
     const form = new FormData()
     form.append('file', file)
+    // PRD-251B: with a slot, the picture fills that photo spot of the template instead of the whole post.
+    if (slot) form.append('slot', slot)
     return this.request<SocialPost>(`/api/socials/posts/${postId}/media`, { method: 'POST', body: form })
+  }
+
+  /** PRD-251B: a Library picture (an image Deliverable) fills the template's photo spot `slot`. */
+  async setSocialPostPhoto(postId: string, slot: string, deliverableId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/photos/${encodeURIComponent(slot)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ deliverable_id: deliverableId }),
+    })
   }
 
   /** GET /api/deliverables of one artifact type, newest first (the editor's Library, US-B109). */

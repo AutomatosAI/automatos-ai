@@ -75,6 +75,12 @@ def examples_of(sample: Any, schema: Any) -> Dict[str, Any]:
     return {name: value for name, value in sample.items() if name in schema and isinstance(value, (str, int, float, bool))}
 
 
+def image_slot_labels(blocks: Any) -> Dict[str, str]:
+    """Each of :func:`image_slots` with its label (the editor's photo spots: "Photo", "Before photo")."""
+    slots = blocks.get("slots") if isinstance(blocks, dict) and isinstance(blocks.get("slots"), dict) else {}
+    return {name: str(slots[name].get("label") or name) for name in image_slots(blocks)}
+
+
 def thumbnail_link(store: MediaStore, raw: Optional[str]) -> Optional[str]:
     """A presigned inline link to the stored thumbnail; an http(s) value as it is;
     ``None`` without one or without storage."""
@@ -103,6 +109,7 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "durations": durations_of(blocks, row.format),
         "footage_slots": footage_slots(blocks),
         "image_slots": image_slots(blocks),
+        "image_slot_labels": image_slot_labels(blocks),
         # The template's fields: the editor's Claims and sources card fills them (US-B109).
         "variables_schema": blocks.get("variables_schema") if isinstance(blocks.get("variables_schema"), dict) else {},
         # The fields' examples: the sample text of the template's own fields (its thumbnail's).

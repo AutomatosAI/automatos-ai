@@ -144,10 +144,14 @@ export function useSubmitEditor() {
   )
 }
 
-/** The post's visual from a file: a new post is saved first. */
+/** The post's visual from a file, or with `spot` the template's photo spot (its slot): a new post is saved first.
+ * (`spot`, never `slot`: EditorSave's slot is when the post publishes.) */
 export function useUploadEditorMedia() {
-  return useEditorMutation<EditorSave & { file: File }>(
-    async ({ file, ...save }) => apiClient.uploadSocialPostMedia((await saveEditor(save)).id, file),
+  return useEditorMutation<EditorSave & { file: File; spot?: string }>(
+    async ({ file, spot, ...save }) => {
+      const saved = await saveEditor(save)
+      return spot ? apiClient.uploadSocialPostMedia(saved.id, file, spot) : apiClient.uploadSocialPostMedia(saved.id, file)
+    },
     'File uploaded',
     'Could not upload the file',
   )
@@ -171,11 +175,13 @@ export function usePickAiOption() {
   )
 }
 
-/** The post's visual from the Library: one of the workspace's Deliverables. */
+/** The post's visual from the Library: one of the workspace's Deliverables, as the whole post or,
+ * with `spot`, in the template's photo spot. */
 export function usePickLibraryMedia() {
-  return useEditorMutation<EditorSave & { item: DeliverableSummary }>(
-    async ({ item, ...save }) => {
+  return useEditorMutation<EditorSave & { item: DeliverableSummary; spot?: string }>(
+    async ({ item, spot, ...save }) => {
       const saved = await saveEditor(save)
+      if (spot) return apiClient.setSocialPostPhoto(saved.id, spot, item.id)
       const format = item.artifact_type === 'video' ? 'video' : 'image'
       return apiClient.updateSocialPost(saved.id, { media: { original: [item.id] }, template_id: null, length_seconds: null, format })
     },

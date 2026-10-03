@@ -93,6 +93,7 @@ def test_every_photo_slot_is_an_image_the_editor_fills(slug):
     assert all(spec["label"] and spec["description"] for spec in slots.values())
     # The gallery's image slots: what AI-made, Upload and Library fill, and what marks the card Photo.
     assert sorted(template_gallery.image_slots(blocks)) == sorted(slots)
+    assert template_gallery.image_slot_labels(blocks) == {name: slots[name]["label"] for name in template_gallery.image_slots(blocks)}
 
 
 @pytest.mark.parametrize("slug", list(PHOTO_NAMES))

@@ -17,6 +17,7 @@ import type { DeliverableSummary, SocialFootageKind, SocialPost, SocialTemplateS
 import { useSocialLibrary } from '@/hooks/use-socials-editor'
 import { EditorLookAi } from './editor-look-ai'
 import { LibraryGrid, UploadDrop } from './editor-look-sources'
+import { PhotoTargetPicker, WHOLE_POST, photoTarget, type PhotoSpot } from './editor-look-photo'
 import { EditorCard, Hint, Segmented } from './editor-ui'
 
 export type LookSource = 'template' | 'upload' | 'library' | 'ai'
@@ -117,21 +118,31 @@ export interface LookAiProps {
 
 interface EditorLookCardProps extends TemplateGalleryProps {
   busy: boolean
-  onUpload: (file: File) => void
-  onLibrary: (item: DeliverableSummary) => void
+  /** The chosen template's photo spots (PRD-251B): an upload or a Library pick fills one. */
+  photoSpots: ReadonlyArray<PhotoSpot>
+  /** `spot`: the photo spot (the template's slot) the file fills; none, the whole post. */
+  onUpload: (file: File, spot?: string) => void
+  onLibrary: (item: DeliverableSummary, spot?: string) => void
   ai: LookAiProps
 }
 
-export function EditorLookCard({ templates, loading, chosen, onPick, busy, onUpload, onLibrary, ai }: EditorLookCardProps) {
+export function EditorLookCard({ templates, loading, chosen, onPick, busy, photoSpots, onUpload, onLibrary, ai }: EditorLookCardProps) {
   const [source, setSource] = useState<LookSource>('template')
+  const [asked, setAsked] = useState<string | null>(null)
   const library = useSocialLibrary(source === 'library')
+  const target = photoTarget(photoSpots, asked)
+  const spot = target === WHOLE_POST ? undefined : target
+  const items = spot ? library.data?.filter((item) => item.artifact_type === 'image') : library.data
   return (
     <EditorCard label="Look">
       <Segmented label="Where the visual comes from" choices={LOOK_SOURCES} value={source} onChange={setSource} />
       <Hint>{LOOK_HINTS[source]}</Hint>
       {source === 'template' && <TemplateGallery templates={templates} loading={loading} chosen={chosen} onPick={onPick} />}
-      {source === 'upload' && <UploadDrop busy={busy} onFile={onUpload} />}
-      {source === 'library' && <LibraryGrid items={library.data} loading={library.isLoading} busy={busy} onPick={onLibrary} />}
+      {(source === 'upload' || source === 'library') && (
+        <PhotoTargetPicker spots={photoSpots} target={target} post={ai.post} onTarget={setAsked} />
+      )}
+      {source === 'upload' && <UploadDrop busy={busy} pictureOnly={!!spot} onFile={(file) => onUpload(file, spot)} />}
+      {source === 'library' && <LibraryGrid items={items} loading={library.isLoading} busy={busy} onPick={(item) => onLibrary(item, spot)} />}
       {source === 'ai' && (
         <EditorLookAi post={ai.post} imageSlots={ai.imageSlots} images={ai.images} busy={ai.aiBusy} onMake={ai.onAiMake} onPick={ai.onAiPick} />
       )}
