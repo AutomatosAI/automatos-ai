@@ -9,6 +9,7 @@
  *   which approves with override_unsourced. The server may name claims whose
  *   source has since gone (a 422), which asks the same way.
  * - Request changes needs a comment; reject takes an optional reason.
+ * - F256: a post with no channel publishes nothing, so Approve waits for one and says why.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
@@ -23,7 +24,7 @@ import {
   type SocialPostAction,
 } from '@/hooks/use-socials-api'
 import { SOCIAL_COMMENT_MAX_CHARS } from './socials-status'
-import { unsourcedClaims } from './socials-review'
+import { hasChannels, unsourcedClaims } from './socials-review'
 
 type Asking = 'changes' | 'reject' | null
 
@@ -106,6 +107,9 @@ interface SocialsPostReviewProps {
   extra?: ReactNode
 }
 
+/** F256: a post with no channel publishes nothing, so Approve waits for one. */
+export const NO_CHANNEL_HINT = 'Nothing would post: no channel is chosen. Open the post, tick a channel, then approve it.'
+
 export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra }: SocialsPostReviewProps) {
   const [asking, setAsking] = useState<Asking>(null)
   const [confirmClaims, setConfirmClaims] = useState<string[] | null>(null)
@@ -113,6 +117,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
   const act = useSocialPostAction()
   const approve = useApproveSocialPost({ onStale: () => setStale(true), onUnsourced: setConfirmClaims })
   const busy = act.isLoading || approve.isLoading
+  const goesNowhere = !hasChannels(post)
 
   // A new version on screen is the one to review: a confirmation for the old one goes.
   useEffect(() => {
@@ -138,7 +143,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={startApprove} disabled={busy || dirty || confirmClaims !== null}>
+        <Button size="sm" onClick={startApprove} disabled={busy || dirty || confirmClaims !== null || goesNowhere}>
           {approveLabel}
         </Button>
         <Button size="sm" variant="outline" onClick={() => setAsking('changes')} disabled={busy}>
@@ -155,6 +160,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
           Reject
         </Button>
       </div>
+      {goesNowhere && <p className="text-xs text-muted-foreground">{NO_CHANNEL_HINT}</p>}
       {confirmClaims && (
         <UnsourcedConfirmation
           claims={confirmClaims}

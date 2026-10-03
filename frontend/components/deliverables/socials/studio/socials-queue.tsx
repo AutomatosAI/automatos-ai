@@ -15,6 +15,7 @@ import { useWorkspace, type Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialCampaigns } from '@/hooks/use-socials-api'
 import { useApproveShown } from '@/hooks/use-socials-queue'
+import { hasChannels } from '../socials-review'
 import { postActions } from '../socials-status'
 import { QueueList } from './queue-list'
 import { QueuePane } from './queue-pane'
@@ -41,6 +42,8 @@ export function SocialsQueue({ role, posts, selectedId, onSelect }: SocialsQueue
   const now = new Date()
   const groups = useMemo(() => queueGroups(posts, new Date()), [posts])
   const shown = groups.flatMap((group) => group.posts)
+  // F256: a post with no channel publishes nothing: Approve all shown leaves it out.
+  const approvable = shown.filter(hasChannels)
   const selected = shown.find((post) => post.id === selectedId) ?? shown[0] ?? null
   const today = groups.find((group) => group.today)?.posts.length ?? 0
   const seriesOn = workspace?.socials?.series_approval === true
@@ -57,8 +60,8 @@ export function SocialsQueue({ role, posts, selectedId, onSelect }: SocialsQueue
           </h1>
           <p className="m-0 max-w-[760px] text-[12.5px] text-muted-foreground">{QUEUE_HINT}</p>
         </div>
-        {seriesOn && reviewer && shown.length > 1 && (
-          <Button type="button" variant="secondary" onClick={() => approveAll.mutate(shown)} disabled={approveAll.isLoading}>
+        {seriesOn && reviewer && approvable.length > 1 && (
+          <Button type="button" variant="secondary" onClick={() => approveAll.mutate(approvable)} disabled={approveAll.isLoading}>
             {approveAll.isLoading && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />}
             {APPROVE_ALL}
           </Button>

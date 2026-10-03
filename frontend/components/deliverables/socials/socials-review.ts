@@ -60,6 +60,11 @@ export function unsourcedClaims(post: Pick<SocialPost, 'variables' | 'sources'>)
 }
 
 /** Whether the newest history entry is an approval an edit voided (D6). */
+/** F256: whether the post goes anywhere. With no channel nothing would post, so it is not approved. */
+export function hasChannels(post: Pick<SocialPost, 'targets'>): boolean {
+  return (post.targets ?? []).length > 0
+}
+
 export function approvalWasVoided(post: Pick<SocialPost, 'review_log'>): boolean {
   const log = post.review_log ?? []
   return log.length > 0 && log[log.length - 1].action === 'approval_voided'
