@@ -40,7 +40,7 @@ from services.board_dispatcher import RUN_ID_KEY, notify_task_available
 from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
-from services.board_task_view import enrich_with_agents
+from services.board_task_view import board_dict, enrich_with_agents
 from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
@@ -727,7 +727,8 @@ async def update_task(
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     said = moved.get("message") if moved else None
-    return {**task.to_dict(), **({"message": said} if said else {})}
+    # F276: the ticket as the board lists it, its number included
+    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {})}
 
 
 @router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])

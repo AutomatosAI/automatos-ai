@@ -101,6 +101,7 @@ def test_a_patch_that_brings_the_work_may_file_it(board):
 
     assert (reply["status"], task.result) == ("done", "Filed by hand: the June price list.")
     assert task.completed_at is not None and board.completed == [task.id]   # PRD-128's task_complete
+    assert reply["number"] == "#0044"                                      # F276: the answer names it as the board does
 
 
 def test_a_patch_to_in_progress_is_run_now_and_says_it_gave_the_approval(board, monkeypatch):
