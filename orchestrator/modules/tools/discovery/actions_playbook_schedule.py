@@ -15,6 +15,44 @@ _SCHEDULE_MISPLACED = {"frequency": _ONE_CRON, "time": _ONE_CRON, "at": _ONE_CRO
                        "schedule": _ONE_CRON, "interval": _ONE_CRON}
 
 
+_SCHEDULE_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "playbook_id": {
+            "type": "integer",
+            "description": "ID of the playbook to schedule.",
+        },
+        "playbook_name": {
+            "type": "string",
+            "description": "Name of the playbook to schedule (alternative to ID).",
+        },
+        "cron_expression": {
+            "type": "string",
+            "description": "5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every Monday at 09:00).",
+        },
+        "timezone": {
+            "type": "string",
+            "description": (
+                "The owner's IANA timezone, which the cron is read in (UK time is "
+                "'Europe/London'). Ask the owner when you do not know it; never assume "
+                "UTC. Left out, the workspace's zone (its heartbeat setting, else the zone "
+                "its other timers use) is used, else UTC."
+            ),
+        },
+        "enabled": {
+            "type": "boolean",
+            "description": "Whether to activate the schedule immediately. Defaults to true.",
+        },
+        "wait_for_me": {
+            "type": "boolean",
+            "description": ("True when the owner wants every run's card to wait for their check in "
+                            "Review: the playbook's own wait-for-me, set in the same call."),
+        },
+    },
+    "required": ["cron_expression"],
+}
+
+
 def register_playbook_schedule_action(registry: ActionRegistry) -> None:
     """Register platform_schedule_playbook."""
     registry.register(ActionDefinition(
@@ -31,42 +69,7 @@ def register_playbook_schedule_action(registry: ActionRegistry) -> None:
             "Calling it again on a playbook with a timer changes that timer."
         ),
         category="playbooks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "playbook_id": {
-                    "type": "integer",
-                    "description": "ID of the playbook to schedule.",
-                },
-                "playbook_name": {
-                    "type": "string",
-                    "description": "Name of the playbook to schedule (alternative to ID).",
-                },
-                "cron_expression": {
-                    "type": "string",
-                    "description": "5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every Monday at 09:00).",
-                },
-                "timezone": {
-                    "type": "string",
-                    "description": (
-                        "The owner's IANA timezone, which the cron is read in (UK time is "
-                        "'Europe/London'). Ask the owner when you do not know it; never assume "
-                        "UTC. Left out, the workspace's zone (its heartbeat setting, else the zone "
-                        "its other timers use) is used, else UTC."
-                    ),
-                },
-                "enabled": {
-                    "type": "boolean",
-                    "description": "Whether to activate the schedule immediately. Defaults to true.",
-                },
-                "wait_for_me": {
-                    "type": "boolean",
-                    "description": ("True when the owner wants every run's card to wait for their check in "
-                                    "Review: the playbook's own wait-for-me, set in the same call."),
-                },
-            },
-            "required": ["cron_expression"],
-        },
+        parameters=_SCHEDULE_PARAMETERS,
         misplaced=_SCHEDULE_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
