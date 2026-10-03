@@ -308,6 +308,7 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"),
             # A Library picture in a template's photo spot (api/socials_media_upload.py).
             ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"),
+            ("GET", "/api/socials/history"),  # PRD-251C US-C103: what the workspace posted (api/socials_history.py)
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

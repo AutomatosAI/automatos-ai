@@ -1,5 +1,5 @@
 {
-  "route_count": 888,
+  "route_count": 889,
   "routes": [
     {
       "method": "GET",
@@ -2132,6 +2132,10 @@
     {
       "method": "GET",
       "path": "/api/socials/footage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/history"
     },
     {
       "method": "GET",

@@ -1954,6 +1954,10 @@ class Config:
     # most this many slots a tick (the rest wait for the next).
     SOCIALS_PLAN_TICK_SECONDS: int = int(os.getenv("SOCIALS_PLAN_TICK_SECONDS", "300"))
     SOCIALS_PLAN_MAX_SLOTS_PER_TICK: int = int(os.getenv("SOCIALS_PLAN_MAX_SLOTS_PER_TICK", "12"))
+    # PRD-251C US-C103 (C5): the workspace's Socials history, as research reads it: this many
+    # days back and at most this many posts, newest first, unless the caller asks for others.
+    SOCIALS_HISTORY_DAYS: int = int(os.getenv("SOCIALS_HISTORY_DAYS", "90"))
+    SOCIALS_HISTORY_LIMIT: int = int(os.getenv("SOCIALS_HISTORY_LIMIT", "50"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")
