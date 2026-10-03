@@ -407,7 +407,7 @@ def test_railway_host_still_settable_via_env(monkeypatch, attr, env_name, saas_v
 # ---------------------------------------------------------------------------
 
 _SOCIALS_DEFAULTS = {
-    "SOCIALS_ENABLED_DEFAULT": False,
+    "SOCIALS_ENABLED_DEFAULT": True,
     "SOCIALS_MEDIA_URL_TTL_SECONDS": 86400,
     "SOCIALS_MISFIRE_GRACE_SECONDS": 1800,
     "SOCIALS_MAX_TARGET_ATTEMPTS": 3,
