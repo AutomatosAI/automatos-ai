@@ -192,6 +192,15 @@ def _follow_with_the_watch(db: Any, original: Any, rerun: Any) -> None:
                             reason="the owner sent the run back")
 
 
+def _starts_clean(card: Any) -> None:
+    """F267 (night 7b): a step sent back showed In progress with no start time and the
+    draft the owner had just rejected, for minutes. Its card starts clean, as a
+    playbook's redo does: started now, the old draft off the card (Reject keeps it
+    in the card's history)."""
+    card.started_at = datetime.now(timezone.utc)
+    card.completed_at = card.result = None
+
+
 def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     """The step goes back to its mission for revision, with the owner's words and
     the output they sent back (the dispatcher's revision prompt reads both)."""
@@ -218,6 +227,7 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     transition_task(db=db, task=step, new_state=TaskState.RETRYING, actor_type=ActorType.HUMAN, actor_id=by,
                     reason="the owner sent it back")
     card.review_feedback = None  # the step carries the owner's words now
+    _starts_clean(card)
     sync_board_status(db, step)
     db.commit()
     return f"{ticket_label(card, capital=True)} went back to its mission to be redone."
