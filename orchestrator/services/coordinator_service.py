@@ -3785,7 +3785,9 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
     ) -> OrchestrationRun:
-        """Cancel a mission. Running tasks continue to completion; no new dispatches."""
+        """Cancel a mission. Nothing new is dispatched; a step run by a Claude Code
+        session stops with it (F224: the run's state change ends the session and
+        cancels the step's card); an in-process step finishes its current call."""
         run = self._get_run(db, run_id)
 
         transition_run(
@@ -3812,12 +3814,6 @@ class CoordinatorService:
             run_id=run.id,
             reason="Mission cancelled",
         )
-        # F094: a step whose Claude Code session is still working keeps its card
-        # (the session's); the card says the mission was cancelled.
-        from services.cli_ticket_lane import cancelled_note, note_open_step_cards
-
-        note_open_step_cards(db, run_id=run.id, note_for=cancelled_note)
-
         VerificationService.clear_cache(run.id)
         # PRD-227 US-002: narrate the cancel into the launching thread (run-level).
         # cancel_mission is an out-of-tick API path, so the tick observer never

@@ -102,7 +102,14 @@ def complete_recipe_board_task(
     review: bool = False,
 ) -> None:
     """Move the linked BoardTask to done (success) or failed (failure), or to
-    review when a human must look at finished work (``review=True``)."""
+    review when a human must look at finished work (``review=True``).
+
+    F224: a run that ended without finishing (failed, or stopped after some
+    finished work) leaves no session working one of its steps."""
+    from services.board_cancel import PLAYBOOK_RUN_BY, RUN_FAILED_REASON, stop_run_step_tickets
+
+    if not success and stop_run_step_tickets(db, execution_id, by=PLAYBOOK_RUN_BY, reason=RUN_FAILED_REASON):
+        db.commit()
     task = db.query(BoardTask).filter(
         BoardTask.source_type == 'recipe',
         BoardTask.source_id == execution_id,

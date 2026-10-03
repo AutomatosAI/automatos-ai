@@ -503,6 +503,9 @@ async def toggle_heartbeat(
     agent.configuration = updated_cfg
     db.commit()
     db.refresh(agent)
+    if not new_enabled:   # F224: the firing in flight stops with its heartbeat
+        from services.board_cancel import stop_heartbeat_sessions
+        stop_heartbeat_sessions(db, agent.workspace_id, agent.id)
 
     # Schedule or unschedule in the heartbeat service
     try:
