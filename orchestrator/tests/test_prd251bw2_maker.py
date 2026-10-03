@@ -17,7 +17,8 @@ notifications faked. Pinned:
   is scheduled into the next free slot under ``next_slot`` and stays approved under
   ``skip``;
 * research is due once a week from a week before the plan starts; Research again starts
-  the workspace's installed playbook now, and is 409 without it.
+  the workspace's installed playbook now, and is 409 when there is none and the marketplace
+  has none to put back (PRD-251C US-C102).
 """
 from __future__ import annotations
 
@@ -278,10 +279,10 @@ def _install(api, workspace_id):
                                              workspace_id=workspace_id, cloned_from_id=1, steps=[{"step_id": "research"}]))
 
 
-def test_research_again_starts_the_installed_playbook_and_is_409_without_it(playbooks):
+def test_research_again_starts_the_installed_playbook_and_is_409_without_one_to_put_back(playbooks):
     plan = _text_plan(playbooks)
     missing = playbooks.client.post(f"/api/socials/plans/{plan['id']}/research")
-    assert missing.status_code == 409 and "Socials package" in missing.text
+    assert missing.status_code == 409 and "the Marketplace does not have it" in missing.text
     _install(playbooks, WS_A)
     started = playbooks.client.post(f"/api/socials/plans/{plan['id']}/research")
     assert started.status_code == 202, started.text

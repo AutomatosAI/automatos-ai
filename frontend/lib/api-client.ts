@@ -3269,7 +3269,7 @@ class ApiClient {
     await this.request<void>(`/api/socials/plans/${planId}`, { method: 'DELETE' })
   }
 
-  /** Research again (US-B204): 409 while the Socials package's research playbook is missing. */
+  /** Research again (US-B204): a missing research playbook is put back first; 409, with why, when it cannot be (PRD-251C US-C102). */
   async researchSocialPlan(planId: string): Promise<{ plan_id: string; execution_id: string }> {
     return this.request<{ plan_id: string; execution_id: string }>(`/api/socials/plans/${planId}/research`, { method: 'POST' })
   }

@@ -1,4 +1,4 @@
-"""PRD-251C Wave 1, US-C101 — research comes with the first plan.
+"""PRD-251C Wave 1, US-C101 and US-C102 — research comes with the first plan, and comes back.
 
 On the S0.3b API harness (SQLite), with the real package installer: only its agent cascade
 is faked, so a plan's save clones the marketplace **Content bank research** row into the
@@ -13,19 +13,27 @@ workspace as the installer does. Pinned:
 * a failing installer never fails the save: nothing is installed and no flag is set;
 * the installed copy is what ``installed_playbook`` finds, so research runs it;
 * the content bank says why research cannot run (not set up, or its playbook removed);
-* an install that meets another one in the workspace (the lock taken) installs nothing.
+* an install that meets another one in the workspace (the lock taken) installs nothing;
+* Research again puts a missing playbook back and runs it (a deleted one too); it is 409,
+  with why, only when it cannot: no marketplace playbook, a plan full of agents, another
+  install under way;
+* the weekly run never installs: it says why research is off, once a day; a trial
+  workspace on the hosted edition gets no weekly run.
 """
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import anyio
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker
 
 _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
@@ -33,16 +41,21 @@ if str(_ORCH) not in sys.path:
 
 import modules.tools.discovery.cascade_installer as ci  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
-from core.models.core import WorkflowTemplate  # noqa: E402
+from config import config  # noqa: E402
+from core.models.core import RecipeExecution, WorkflowTemplate  # noqa: E402
 from core.models.socials import SocialPost, SocialTopic  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from core.seeds.seed_socials_package import RESEARCH_PLAYBOOK_TEMPLATE_ID  # noqa: E402
+from modules.socials import plan_notify  # noqa: E402
 from services import package_installer, socials_plan_research  # noqa: E402
+from services.agent_quota import AgentLimitReached  # noqa: E402
 from services import socials_research_setup as setup  # noqa: E402
 from tests.test_prd251_api import WS_A, WS_B  # noqa: E402
 from tests.test_prd251bw2_plans import _create as _create_plan  # noqa: E402
 
 api = api_harness.api
+UTC = timezone.utc
+NOW = datetime(2026, 10, 14, 7, 30, tzinfo=UTC)  # a Wednesday: the plans' Monday research is due
 MARKETPLACE_ID = 1
 EDITED_STEPS = [{"step_id": "research", "prompt_template": "The owner's own research prompt"}]
 
@@ -53,6 +66,9 @@ def research(api, monkeypatch):
     installer's agent cascade faked (the Director's clone is PRD-230's, tested there)."""
     engine = api.session.get_bind()
     SocialPost.metadata.create_all(engine, tables=[SocialTopic.__table__])
+    copies = sa.MetaData()
+    api_harness._sqlite_copy(RecipeExecution.__table__, copies)
+    copies.create_all(engine)
     with engine.begin() as conn:
         conn.execute(sa.insert(WorkflowTemplate.__table__).values(
             id=MARKETPLACE_ID, template_id=RESEARCH_PLAYBOOK_TEMPLATE_ID, name="Content bank research",
@@ -66,7 +82,12 @@ def research(api, monkeypatch):
         return ci.CascadeResult()
 
     monkeypatch.setattr(ci, "cascade_recipe_dependencies", cascade)
-    api.cascades = cascades
+    launched, told = [], []
+    engine_fake = SimpleNamespace(launch=lambda **kwargs: launched.append(kwargs))
+    monkeypatch.setattr("services.playbook_engine.get_playbook_engine", lambda: engine_fake)
+    monkeypatch.setattr(plan_notify, "notify_plan", lambda ws, plan_id, event, title: told.append((event[0], title)))
+    monkeypatch.setattr("core.database.database.SessionLocal", sessionmaker(bind=engine))
+    api.cascades, api.launched, api.told = cascades, launched, told
     return api
 
 
@@ -203,3 +224,84 @@ def test_the_flag_is_written_into_a_new_settings_object():
     assert settings == {"socials": {"enabled": True}, "other": {"kept": 1}}  # unchanged
     assert setup.research_installed_at(written) == "2026-10-04T09:00:00+00:00"
     assert setup.research_installed_at({"socials": "not an object"}) is None and setup.research_installed_at(None) is None
+
+
+# ── US-C102: Research again puts it back; the weekly run never does ─────────
+
+
+def _research_again(api, plan):
+    return api.client.post(f"/api/socials/plans/{plan['id']}/research")
+
+
+def _delete_copies(api, workspace_id):
+    table = WorkflowTemplate.__table__
+    with api.session.get_bind().begin() as conn:
+        conn.execute(sa.delete(table).where(table.c.workspace_id == workspace_id, table.c.cloned_from_id == MARKETPLACE_ID))
+
+
+def _weekly(now=NOW):
+    return anyio.run(functools.partial(anyio.to_thread.run_sync, socials_plan_research.launch_due, now))
+
+
+@pytest.mark.parametrize("had_it", [False, True], ids=["never-installed", "deleted-by-the-owner"])
+def test_research_again_puts_a_missing_playbook_back_and_runs_it(research, monkeypatch, had_it):
+    with monkeypatch.context() as saves:
+        if not had_it:
+            saves.setattr(setup, "after_plan_save", lambda *args: None)
+        plan = _create_plan(research)
+    _delete_copies(research, WS_A)
+    started = _research_again(research, plan)
+    assert started.status_code == 202, started.text
+    (copy,) = _copies(research, WS_A)
+    (launch,) = research.launched
+    assert launch["recipe_id"] == copy.id and launch["recipe_execution_id"] == started.json()["execution_id"]
+    assert _flag(research, WS_A) is not None and _note(research, plan) is None
+    again = _research_again(research, plan)
+    assert again.status_code == 202 and len(_copies(research, WS_A)) == 1  # nothing to put back now
+
+
+def test_research_again_is_409_only_when_the_marketplace_has_no_playbook(research):
+    plan = _create_plan(research)
+    _delete_copies(research, WS_A)
+    table = WorkflowTemplate.__table__
+    with research.session.get_bind().begin() as conn:  # the seed never ran on this platform
+        conn.execute(sa.delete(table).where(table.c.id == MARKETPLACE_ID))
+    refused = _research_again(research, plan)
+    assert (refused.status_code, refused.json()["detail"]) == (409, setup.NO_MARKETPLACE_PLAYBOOK)
+    assert research.launched == []
+
+
+def test_research_again_says_why_it_cannot_set_research_up(research, monkeypatch):
+    plan = _create_plan(research)
+    _delete_copies(research, WS_A)
+
+    async def full(*args, **kwargs):
+        raise AgentLimitReached({"message": "Your basic plan includes 5 agents and this workspace has 5."})
+
+    with monkeypatch.context() as plan_full:
+        plan_full.setattr(package_installer, "install_playbook", full)
+        refused = _research_again(research, plan)
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "Research could not be set up: Your basic plan includes 5 agents and this workspace has 5."
+    monkeypatch.setattr(setup, "_lock_is_ours", lambda db, workspace_id: False)
+    busy = _research_again(research, plan)
+    assert (busy.status_code, busy.json()["detail"]) == (409, setup.SETTING_UP)
+    assert research.launched == [] and _copies(research, WS_A) == []
+
+
+def test_the_weekly_run_never_puts_the_playbook_back_and_says_why_once_a_day(research, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    plan = _create_plan(research, starts_on="2026-10-12")
+    _delete_copies(research, WS_A)
+    assert _weekly() == 0 and _weekly() == 0
+    assert _copies(research, WS_A) == [] and research.launched == [] and len(research.cascades) == 1
+    assert research.told == [("social_plan_research_unavailable", f"{plan['name']}: {setup.REMOVED}")]
+
+
+def test_a_hosted_trial_gets_no_weekly_run(research, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr("services.trial_ledger.is_trial_active_workspace", lambda workspace: True)
+    _create_plan(research, starts_on="2026-10-12")
+    assert _weekly() == 0 and research.launched == [] and research.told == []
+    monkeypatch.setattr("services.trial_ledger.is_trial_active_workspace", lambda workspace: False)
+    assert _weekly() == 1 and len(research.launched) == 1  # a paid workspace's research comes round

@@ -136,10 +136,10 @@ describe('a saved plan', () => {
   })
 
   it('its bank says when research cannot run, in the server\'s words', async () => {
-    state.researchNote = 'Research is not set up in this workspace yet.'
+    state.researchNote = 'Research is not set up in this workspace yet. Research again sets it up and runs it.'
     renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
-    expect(await screen.findByRole('status', { name: 'Research' })).toHaveTextContent('Research is not set up in this workspace yet.')
+    expect(await screen.findByRole('status', { name: 'Research' })).toHaveTextContent('Research is not set up in this workspace yet. Research again sets it up and runs it.')
   })
 })
 

@@ -1,4 +1,4 @@
-"""PRD-251C Wave 1 (C4; US-C101): research comes with the first plan.
+"""PRD-251C Wave 1 (C4; US-C101, US-C102): research comes with the first plan.
 
 A plan's research runs the workspace's own copy of the marketplace playbook **Content bank
 research** (``services/socials_plan_research.py``). A workspace that never installed the
@@ -18,6 +18,12 @@ is async, so it runs on the event loop through ``anyio.from_thread`` (never ``as
 in a threadpool thread). Not fire-and-forget: Plan with Auto starts research right after
 the save, and must find the copy. A failure is logged and leaves the plan saved; the
 content bank then says research is not set up (``research_note``).
+
+**Research again** (``POST /api/socials/plans/{id}/research``) puts a missing copy back from
+the marketplace before it runs (``restore``, US-C102), whatever the flag says: the owner asked
+for research. It answers 409 only when it cannot: the marketplace has no research playbook
+(its seed did not run), the plan is full of agents, or another install is under way. The
+weekly run never installs: it tells the owner instead (``socials_plan_research.launch_due``).
 
 Two installs in one workspace never both clone: each takes the workspace's research lock,
 a transaction-scoped advisory lock that is never waited for (a blocking wait from sync
@@ -54,9 +60,15 @@ PRESENT = "present"  # the workspace had a copy already: left as it is
 SKIPPED = "skipped"  # the workspace had research before (the flag): a save puts nothing back
 BUSY = "busy"  # another install in this workspace holds the lock
 
-# What the content bank says while research cannot run.
-NOT_SET_UP = "Research is not set up in this workspace yet."
-REMOVED = "Research is off: its playbook was removed."
+# What the content bank, and the weekly run's notice, say while research cannot run.
+NOT_SET_UP = "Research is not set up in this workspace yet. Research again sets it up and runs it."
+REMOVED = "Research is off: its playbook was removed. Research again restores it."
+# Why Research again cannot put the playbook back (409).
+NO_MARKETPLACE_PLAYBOOK = (
+    "Research needs the Content bank research playbook, and the Marketplace does not have it: it is "
+    "added when the platform starts. Restart the platform, or ask its admin."
+)
+SETTING_UP = "Research is being set up in this workspace right now: try Research again in a moment."
 
 
 def research_installed_at(settings: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -127,6 +139,24 @@ def after_plan_save(db: Any, workspace_id: UUID, now: datetime) -> None:
         logger.exception("[Socials] workspace %s: research could not be set up with a plan's save", workspace_id)
         return
     logger.info("[Socials] workspace %s: research set up with a plan's save (%s)", workspace_id, outcome)
+
+
+def restore(db: Any, workspace_id: UUID, now: datetime) -> str:
+    """US-C102, on the Research again route's worker thread: a workspace without its research
+    playbook gets it back from the marketplace before research runs. Raises
+    ``ResearchUnavailable`` (409) when it cannot, with why."""
+    if socials_plan_research.installed_playbook(db, workspace_id) is not None:
+        return PRESENT
+    try:
+        outcome = anyio.from_thread.run(functools.partial(install, db, workspace_id, now=now, first_only=False))
+    except package_installer.PackageInstallError as exc:
+        raise socials_plan_research.ResearchUnavailable(NO_MARKETPLACE_PLAYBOOK) from exc
+    except AgentLimitReached as exc:
+        raise socials_plan_research.ResearchUnavailable(f"Research could not be set up: {exc}") from exc
+    if outcome == BUSY:
+        raise socials_plan_research.ResearchUnavailable(SETTING_UP)
+    logger.info("[Socials] workspace %s: research's playbook put back by Research again (%s)", workspace_id, outcome)
+    return outcome
 
 
 def research_note(db: Any, workspace_id: UUID) -> Optional[str]:

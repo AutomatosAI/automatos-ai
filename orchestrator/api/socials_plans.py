@@ -19,7 +19,8 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
   says, not saved (``api/socials_plan_draft.py``).
 * ``POST /api/socials/plans/{plan_id}/research``: **Research again** (US-B204): the
   workspace's Content bank research playbook runs for the plan now (202 with its
-  execution id); 409 when the Socials package that carries it is not installed.
+  execution id). A missing copy is put back from the marketplace first (PRD-251C US-C102);
+  409, with why, only when it cannot be.
 * ``GET /api/socials/plans/{plan_id}/slots?start&end``: the planned and made slots in a
   window of at most 62 days; ``PUT .../slots/{slot_key}`` moves a planned slot or skips
   it (``slot_overrides``), the cadence untouched.
@@ -289,14 +290,15 @@ def move_social_plan_slot(
 
 @router.post("/plans/{plan_id}/research", status_code=202, dependencies=[CAN_UPDATE])
 def research_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
-    """Research again (US-B204): the plan's research run starts now; its execution id."""
+    """Research again (US-B204): the plan's research run starts now; its execution id. A missing
+    research playbook is put back first (US-C102)."""
     plan = load_plan(db, ctx, plan_id)
     if plan.status == plans.ENDED:
         raise HTTPException(status_code=422, detail="An ended plan is not researched")
+    now = datetime.now(timezone.utc)
     try:
-        execution_id = socials_plan_research.launch(
-            db, plan, triggered_by=f"user:{_posts_api()._actor(ctx)}", now=datetime.now(timezone.utc)
-        )
+        socials_research_setup.restore(db, plan.workspace_id, now)
+        execution_id = socials_plan_research.launch(db, plan, triggered_by=f"user:{_posts_api()._actor(ctx)}", now=now)
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
