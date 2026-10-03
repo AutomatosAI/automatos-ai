@@ -16,7 +16,7 @@ from config import config as app_config
 from core.models import Agent
 from core.models.core import BoardTask, RecipeExecution, WorkflowTemplate
 from core.models.workspaces import Workspace
-from services import board_task_bridge, playbook_engine_heartbeat
+from services import board_cancel, board_task_bridge, playbook_engine_heartbeat
 
 WS = UUID("00000000-0000-0000-0000-0000000000c1")
 TOKENS = 107_543
@@ -184,4 +184,7 @@ def patch_edges(monkeypatch, *, session, step, pad=_Pad, clock=None):
     monkeypatch.setattr(rex, "_update_agent_performance_metrics", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "create_recipe_board_task", lambda *a, **k: None)
     monkeypatch.setattr(board_task_bridge, "update_recipe_board_task_progress", lambda *a, **k: None)
+    # No step is a session step here, so the run filed no step tickets for a stop
+    # to find (F224): the fake session cannot filter a query to say so itself.
+    monkeypatch.setattr(board_cancel, "run_step_tickets", lambda db, execution_id: [])
     monkeypatch.setattr(playbook_engine_heartbeat, "_emit_playbooks_primitive", lambda *a, **k: None)

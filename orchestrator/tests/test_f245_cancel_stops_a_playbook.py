@@ -141,14 +141,14 @@ def test_a_cancel_that_fails_part_way_changes_nothing(workspace, new_session, st
     from api.board_tasks import cancel_task
 
     pb = _running_playbook(new_session, workspace)
-    staged = board_cancel.stage_ticket_cancel
+    stopped = board_cancel.stop_ticket_run
 
     def _step_fails(db, task, **kwargs):
         if task.id == pb.step:
             raise RuntimeError("the step ticket could not be written")
-        return staged(db, task, **kwargs)
+        return stopped(db, task, **kwargs)
 
-    monkeypatch.setattr(board_cancel, "stage_ticket_cancel", _step_fails)
+    monkeypatch.setattr(board_cancel, "stop_ticket_run", _step_fails)
     with pytest.raises(RuntimeError):
         asyncio.run(cancel_task(pb.card, ctx=_owner(workspace), db=new_session()))
 

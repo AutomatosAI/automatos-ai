@@ -1,0 +1,33 @@
+name: Checkout line endings
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, studio]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-style-checkout:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Enable Windows Git defaults before checkout
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install existing test dependencies
+        run: python -m pip install pytest==7.4.3 pytest-asyncio==0.21.1
+      - name: Check runtime file line endings
+        working-directory: orchestrator
+        run: python -m pytest tests/test_repo_line_endings.py tests/test_checkout_line_endings.py -q

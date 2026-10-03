@@ -4,8 +4,10 @@ The owner cancelled two runs at 06:54; their session step tickets carried on —
 #725 was still in progress on a playbook nobody was running. Now the run's
 cancel closes each live ``recipe:<run>:<step>`` ticket through the board's own
 cancel (the host's next event batch gets ``control: cancel``), saying who
-cancelled and that it went with the run. A finished step keeps its result; a
-backend restart still does not kill the sessions.
+cancelled and that it went with the run. A finished step keeps its result.
+
+F224 (Gerard, 2 Oct): a run that failed, or that died with the backend, stops
+its sessions too. They used to carry on for a run that would never use them.
 """
 from __future__ import annotations
 
@@ -132,10 +134,63 @@ def test_the_boards_own_cancel_now_says_who_and_why(workspace, new_session):
     assert ref["cancelled"]["by"] == "user:2" and ref["cancelled"]["reason"] == "cancelled on the board"
 
 
-def test_a_backend_restart_does_not_kill_the_sessions(workspace, new_session):
-    """The executor marks its run cancelled on any CancelledError — a shutdown
-    included. It cannot tell that from the owner, so it leaves the sessions."""
+def test_a_run_that_died_with_the_backend_stops_its_sessions_too(workspace, new_session):
+    """F224: the executor marks its run cancelled on any CancelledError, a
+    shutdown included. The run will not resume, so the sessions working its
+    steps stop with it (F116 left them working)."""
     from api.recipe_executor import _mark_execution_cancelled
+    from services.board_cancel import PLAYBOOK_RUN_BY, RUN_DIED_REASON
+
+    s = new_session()
+    recipe = _recipe(s, workspace)
+    run = _run(s, workspace, recipe.id)
+    working = _step(s, workspace, run, 1, "in_progress")
+    finished = _step(s, workspace, run, 2, "done")
+    s.commit()
+
+    asyncio.run(_mark_execution_cancelled(run, None))
+    status = new_session().execute(
+        text("SELECT status FROM recipe_executions WHERE execution_id = :e"), {"e": run}).scalar()
+    rows = _tickets(new_session, [working, finished])
+
+    assert status == "cancelled"
+    assert rows[working].status == "cancelled"                          # old: in_progress, still spending
+    ref = rows[working].runtime_ref
+    assert (ref["cancelled"]["by"], ref["cancelled"]["reason"]) == (PLAYBOOK_RUN_BY, RUN_DIED_REASON)
+    assert ref.get("cancel_requested_at") and TOKEN_KEY not in ref       # the host stops it; it can't act
+    assert rows[finished].status == "done"
+
+
+def test_a_failed_run_stops_its_sessions(workspace, new_session):
+    """F224: a run that failed (the executor's _fail_execution, the stalled-run
+    reconciler) closes its board card through complete_recipe_board_task, which
+    stops the session steps it left working, queued ones included."""
+    from services.board_cancel import PLAYBOOK_RUN_BY, RUN_FAILED_REASON
+    from services.board_task_bridge import complete_recipe_board_task
+
+    s = new_session()
+    recipe = _recipe(s, workspace)
+    run = _run(s, workspace, recipe.id)
+    working = _step(s, workspace, run, 1, "in_progress")
+    queued = _step(s, workspace, run, 2, "assigned")
+    finished = _step(s, workspace, run, 3, "done")
+    other_run = _run(s, workspace, recipe.id)
+    elsewhere = _step(s, workspace, other_run, 1, "in_progress")
+    s.commit()
+
+    complete_recipe_board_task(new_session(), run, success=False, error_message="the model refused")
+    rows = _tickets(new_session, [working, queued, finished, elsewhere])
+
+    for ticket in (working, queued):
+        ref = rows[ticket].runtime_ref
+        assert rows[ticket].status == "cancelled" and ref.get("cancel_requested_at")
+        assert (ref["cancelled"]["by"], ref["cancelled"]["reason"]) == (PLAYBOOK_RUN_BY, RUN_FAILED_REASON)
+    assert TOKEN_KEY not in rows[working].runtime_ref
+    assert (rows[finished].status, rows[elsewhere].status) == ("done", "in_progress")
+
+
+def test_a_run_that_succeeded_touches_no_step(workspace, new_session):
+    from services.board_task_bridge import complete_recipe_board_task
 
     s = new_session()
     recipe = _recipe(s, workspace)
@@ -143,7 +198,5 @@ def test_a_backend_restart_does_not_kill_the_sessions(workspace, new_session):
     working = _step(s, workspace, run, 1, "in_progress")
     s.commit()
 
-    asyncio.run(_mark_execution_cancelled(run, None))
-    status = new_session().execute(
-        text("SELECT status FROM recipe_executions WHERE execution_id = :e"), {"e": run}).scalar()
-    assert status == "cancelled" and _tickets(new_session, [working])[working].status == "in_progress"
+    complete_recipe_board_task(new_session(), run, success=True, result="all done")
+    assert _tickets(new_session, [working])[working].status == "in_progress"
