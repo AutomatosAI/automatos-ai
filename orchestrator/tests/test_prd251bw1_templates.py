@@ -198,6 +198,9 @@ def test_the_backfill_renders_each_missing_template_once_and_writes_its_key(env)
     image_bundle = by_reference[f"{render_harness.render.EXECUTION_PREFIX}{image}"]
     # A video is one still at its still moment; an image is its own still, at 0.
     assert video_bundle["still"] == {"at": [1.0]} and image_bundle["still"] == {"at": [0.0]}
+    # F237: a still has no sound. media-render refuses a still bundle with audio, so the video's
+    # voice (COMPOSITION's audio_plan) stays out, or the template never gets a thumbnail.
+    assert "audio" not in video_bundle and "audio" not in image_bundle
     assert video_bundle["variables"]["size.width"] == 540 and video_bundle["variables"]["size.height"] == 960
     assert image_bundle["variables"]["size.width"] == 540 and image_bundle["variables"]["size.height"] == 540
     assert sorted(store.objects) == sorted([video_key, image_key])

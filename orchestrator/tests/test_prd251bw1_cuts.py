@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import uuid
+from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -100,15 +101,28 @@ def _attr(tag, name):
     return found.group(1) if found else None
 
 
+class _StartTags(HTMLParser):
+    """Every element's attributes, in order. A script's text is data to the parser, never markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.found = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "script":
+            self.found.append(dict(attrs))
+
+
 def _clips(html):
     """(start, duration) of every timed element but the root, outside the scripts."""
-    body = re.sub(r"<script\b.*?</script>", "", html, flags=re.DOTALL)
-    spans = []
-    for tag in re.findall(r"<[a-z]+\b[^<>]*>", body):
-        if "data-composition-id" in tag or _attr(tag, "data-start") is None:
-            continue
-        spans.append((float(_attr(tag, "data-start")), float(_attr(tag, "data-duration"))))
-    return spans
+    parser = _StartTags()
+    parser.feed(html)
+    parser.close()
+    return [
+        (float(attrs["data-start"]), float(attrs["data-duration"]))
+        for attrs in parser.found
+        if "data-composition-id" not in attrs and attrs.get("data-start") is not None
+    ]
 
 
 # ── the contract ───────────────────────────────────────────────────────────
