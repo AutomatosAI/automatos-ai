@@ -73,6 +73,7 @@ _budget_manager = TokenBudgetManager()
 VOLATILE_SECTIONS = frozenset(
     {
         "datetime_context",
+        "platform_actions",      # semantic routing re-ranks the catalog against each turn's query
         "documents_inventory",   # F085-B: counts move every time an agent saves a report
         "memory",
         "business_graph",
@@ -603,9 +604,9 @@ class ContextService:
         """Concatenate rendered sections into the system prompt, cache-stable.
 
         PRD-201 S4 — the reordering is the design work: the static, high-value
-        blocks (identity, skills, the action catalog, the run's task context)
-        render FIRST, and the volatile blocks (memory excerpts, KG snippet,
-        datetime) render LAST. Section *content* is unchanged; only the order
+        blocks (identity, skills, the run's task context) render FIRST, and the
+        volatile blocks (the query-ranked action catalog, memory excerpts, KG
+        snippet, datetime) render LAST. Section *content* is unchanged; only the order
         moves, so a change in a volatile block never alters the leading bytes
         that an Anthropic ``cache_control`` breakpoint would cache.
 
