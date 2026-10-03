@@ -201,7 +201,10 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     from services.orchestration_state import transition_task
     from services.ticket_numbers import ticket_label
 
+    from modules.coordination.owner_checks import sent_back
+
     step = db.get(OrchestrationTask, card.orchestration_task_id)
+    sent_back(db, step, by=by)  # F242: a step held for the owner's check; its mission carries on
     attempt = (step.attempt_number or 0) + 1
     step.failure_reason_code = FailureReasonCode.VERIFICATION_REJECT.value
     step.attempt_number = attempt

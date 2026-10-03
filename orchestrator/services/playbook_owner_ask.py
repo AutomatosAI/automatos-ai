@@ -159,7 +159,9 @@ def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
         return True
     if len(text) > config.PLAYBOOK_OWNER_ASK_MAX_CHARS:
         return False
-    if not _is_question(text.splitlines()[-1]):
+    last = text.splitlines()[-1]
+    # F242: "Please provide this information." asks as plainly as a question mark (#0123).
+    if not (_is_question(last) or _REQUEST.search(last)):
         return False
     if _NEED.search(text):
         return True
@@ -168,6 +170,22 @@ def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
 
 def _is_question(line: str) -> bool:
     return line.strip().rstrip("*_) ").endswith("?")
+
+
+def ends_with_a_question(text: Any) -> bool:
+    """F242: whether a run's answer ends on a question: its last line asks, and it
+    is not a draft addressed to someone else. #0145 ended "Would you like me to
+    help draft the actual purchase orders…?" and went straight to Done."""
+    text = str(text or "").replace("\u2019", "'").strip()
+    if not text or _DRAFT.search(text):
+        return False
+    return _is_question(text.splitlines()[-1])
+
+
+def writes_to_someone(prompt_template: Any) -> bool:
+    """Whether a step's job is writing to someone: then a question its answer ends
+    on is the deliverable ("Could you confirm Thursday?"), not one for the owner."""
+    return bool(_DRAFTING_STEP.search(str(prompt_template or "")))
 
 
 def _defers_to_the_owner(text: str) -> bool:

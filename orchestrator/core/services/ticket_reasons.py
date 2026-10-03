@@ -46,6 +46,7 @@ APPROVAL_ACTION = "approval_action"     # filed for the owner's OK to run its ac
 STOPPED_WITH_WORK = "stopped_with_work"  # a playbook run stopped after finished work
 MOVED_BY_YOU = "moved_by_you"
 ASKED = "asked"                         # review_mode human (or llm, which has no reviewer)
+ENDS_ON_A_QUESTION = "ends_on_a_question"  # F242: a playbook run's answer asks the owner something
 UNEXPLAINED = "unexplained"
 
 # Blocked
@@ -56,6 +57,11 @@ MISSION_PAUSED = "mission_paused"
 STEP_FAILED = "step_failed"
 STOPPED_BY_YOU = "stopped_by_you"
 WAITING = "waiting"
+OWNER_CHECK = "owner_check"             # F242: a mission paused until the owner checks a step
+
+# F242: how a mission paused for the owner's check of a step says so (its stop
+# detail, so its card's blocked line), followed by the step's number.
+WAITING_FOR_YOUR_CHECK = "Waiting for your check of "
 
 
 def with_review_reason(runtime_ref: Any, code: str, completed_at: Optional[datetime]) -> Dict[str, Any]:
@@ -70,8 +76,8 @@ def review_reason(task: Any) -> Optional[str]:
     if getattr(task, "status", None) != "review":
         return None
     source = getattr(task, "source_type", None)
-    if source == "orchestration_task":
-        return MISSION_CHECKING
+    if source == "orchestration_task":  # F242: a step the owner asked to check waits for them
+        return ASKED if getattr(task, "review_mode", None) == "human" else MISSION_CHECKING
     if source == "orchestration":  # the card mirrors its run: in review = awaiting the plan's approval
         return MISSION_PLAN
     ref = _ref(task)
@@ -95,7 +101,7 @@ def blocked_code(task: Any) -> Optional[str]:
         return APPROVAL
     source = getattr(task, "source_type", None)
     if source == "orchestration":
-        return MISSION_PAUSED
+        return OWNER_CHECK if reason.startswith(WAITING_FOR_YOUR_CHECK) else MISSION_PAUSED
     if source == "orchestration_task":
         return STEP_FAILED
     return WAITING

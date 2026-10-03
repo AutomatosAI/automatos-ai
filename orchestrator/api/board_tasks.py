@@ -1078,6 +1078,10 @@ async def approve_task(
         logger.warning("[BoardTasks] Task %d: the approval's action ran, but the ticket was moved while it "
                        "ran (now: %s); its result was left as it is", task.id, task.status)
     else:
+        from modules.coordination.owner_checks import let_through
+
+        if let_through(db, task, by=_operator_ref(ctx)):  # F242: a step held for the owner; its mission goes on
+            db.commit()
         await _announce_approval(db, ctx.workspace_id, task)
         logger.info("[BoardTasks] Task %d approved and moved to done", task.id)
     return {

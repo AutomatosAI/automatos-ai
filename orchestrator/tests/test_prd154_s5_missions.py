@@ -239,8 +239,10 @@ def test_create_reply_running_when_auto_approved():
 
 
 def test_create_tool_schema_documents_auto_approve():
+    from modules.tools.discovery.actions_mission_create import register_mission_create_action
+
     reg = ActionRegistry()
-    register_mission_actions(reg)
+    register_mission_create_action(reg)  # F242: create moved out of register_mission_actions
     create = reg._actions["platform_create_mission"]
     cfg_desc = create.parameters["properties"]["config"]["description"]
     assert "auto_approve" in cfg_desc
