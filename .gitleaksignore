@@ -34,3 +34,9 @@ ea1df1ad2defdcbfc11a4cd9b139d218727a3a0a:orchestrator/tests/test_system_settings
 e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:429
 e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:451
 e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_hosting.py:generic-api-key:467
+
+# F258: the pending-connection tests named two Composio auth-config ids (references,
+# not credentials) as fixture arguments; generic-api-key matched their entropy after
+# the argument name. The fixtures use short fake ids now. Flagged by the #894 history scan.
+8cd87cb0567e1f274e16fc435462eb25050d072d:orchestrator/tests/test_f258_a_an_ended_sign_in_offers_connect_again.py:generic-api-key:153
+8cd87cb0567e1f274e16fc435462eb25050d072d:orchestrator/tests/test_f258_a_an_ended_sign_in_offers_connect_again.py:generic-api-key:189

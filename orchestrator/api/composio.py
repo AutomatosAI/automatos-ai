@@ -13,7 +13,7 @@ import asyncio
 import hmac
 import hashlib
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
 from datetime import datetime
 
@@ -27,6 +27,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
+from core.composio.pending_connections import PENDING, settle_pending
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.composio import AgentAppFeature, ComposioConnection, ComposioEntity, TriggerSubscription
 from core.models.core import WorkflowTemplate as WorkflowRecipe, RecipeExecution
@@ -214,63 +215,42 @@ async def list_app_actions(
 # Connection Management Endpoints
 # =============================================================================
 
+def _connection_response(entity_manager: EntityManager, client: ComposioClient, entity: Dict[str, Any], conn: Dict[str, Any]) -> ConnectionResponse:
+    """One connection for the listing, a pending one settled from Composio's record first (F258)."""
+    status, connection_id = conn["status"], conn.get("connection_id")
+    if status == PENDING:
+        try:
+            meta = entity_manager.get_connection_metadata(entity["id"], conn["app_name"]) or {}
+            settled = settle_pending(entity_manager, client, entity, conn["app_name"], meta.get("auth_config_id") or None)
+            status, connection_id = settled.status, settled.connection_id or connection_id
+        except Exception:
+            logger.exception(f"Failed to sync pending connection {conn['app_name']}")
+    return ConnectionResponse(
+        app_name=conn["app_name"], status=status, connected_at=conn.get("connected_at"), connection_id=connection_id,
+    )
+
+
 @router.get("/connections", response_model=List[ConnectionResponse])
-async def list_connections(
+def list_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
     List all app connections for the current workspace.
-    Syncs status with Composio API for pending connections.
+    Settles pending connections from Composio's record (F258). A plain ``def`` (F257):
+    those Composio calls run in FastAPI's threadpool, never on the event loop.
     """
     client = get_composio_client()
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
-    
+
     if not entity:
         return []
-    
-    all_connections = entity_manager.get_entity_connections(entity["id"])
 
     # Include all workspace connections: active, pending OAuth, and disconnected (added).
     # 'added' connections are shown so users can reconnect after disconnecting auth.
-    connections = [c for c in all_connections if c.get("status") in ("active", "pending", "added")]
-
-    result = []
-
-    for conn in connections:
-        status = conn["status"]
-
-        # For pending connections, check Composio API for actual status
-        if status == "pending":
-            try:
-                _meta = entity_manager.get_connection_metadata(entity["id"], conn["app_name"]) or {}
-                composio_status = client.get_connection_status(
-                    entity_id=entity["composio_entity_id"],
-                    app=conn["app_name"],
-                    auth_config_id=_meta.get("auth_config_id") or None,
-                )
-                if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
-                    # Connection completed on Composio side — upgrade to active
-                    entity_manager.update_connection_status(
-                        entity_id=entity["id"],
-                        app_name=conn["app_name"],
-                        status="active",
-                        connection_id=composio_status.get("id")
-                    )
-                    status = "active"
-                    logger.info(f"Connection {conn['app_name']} synced to active (was {composio_status.get('status')})")
-            except Exception as e:
-                logger.warning(f"Failed to sync pending connection {conn['app_name']}: {e}")
-        
-        result.append(ConnectionResponse(
-            app_name=conn["app_name"],
-            status=status,
-            connected_at=conn.get("connected_at"),
-            connection_id=conn.get("connection_id")
-        ))
-    
-    return result
+    shown = [c for c in entity_manager.get_entity_connections(entity["id"]) if c.get("status") in ("active", "pending", "added")]
+    return [_connection_response(entity_manager, client, entity, conn) for conn in shown]
 
 
 @router.get("/linkedin/test-upload-init", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
@@ -338,8 +318,27 @@ def _record_first_integration_if_first(
         )
 
 
+def _activate_no_auth_app(db: Session, entity_manager: EntityManager, entity: Dict[str, Any], app_name: str, workspace_id: Any) -> InitiateConnectionResponse:
+    """A NO_AUTH app (e.g. composio_search) needs no sign-in: it is active at once."""
+    entity_manager.add_connection(entity_id=entity["id"], app_name=app_name.upper(), status="active")
+    logger.info(f"[CONNECT] {app_name.upper()} is NO_AUTH — activated immediately")
+    _record_first_integration_if_first(db, entity_manager, workspace_id)
+    return InitiateConnectionResponse(redirect_url="", app_name=app_name.upper())
+
+
+def _sticky_auth_choice(request: Optional[InitiateConnectionRequest], entity_manager: EntityManager, entity_id: Any, app_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """The (auth_scheme, auth_config_id) to connect with: the caller's, else the ones a
+    prior connect stored for this app, so a reconnect sticks to the scheme that worked."""
+    explicit_scheme = request.auth_scheme if request else None
+    explicit_id = request.auth_config_id if request else None
+    if explicit_scheme or explicit_id:
+        return explicit_scheme, explicit_id
+    prior_meta = entity_manager.get_connection_metadata(entity_id=entity_id, app_name=app_name.upper()) or {}
+    return prior_meta.get("auth_scheme") or None, prior_meta.get("auth_config_id") or None
+
+
 @router.post("/connect/{app_name}", response_model=InitiateConnectionResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def initiate_connection(
+def initiate_connection(
     app_name: str,
     request: InitiateConnectionRequest = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -347,53 +346,28 @@ async def initiate_connection(
 ):
     """
     Initiate OAuth connection for an app.
-    
-    Returns a redirect URL for the Composio hosted OAuth flow.
+
+    Returns a redirect URL for the Composio hosted OAuth flow. A plain ``def``
+    (F257): the Composio SDK calls are synchronous, so FastAPI runs the route in its
+    threadpool and a click never stands the event loop still.
     """
     client = get_composio_client()
     entity_manager = EntityManager(db)
-    
-    # Get or create entity for workspace
     entity = entity_manager.get_or_create_entity(ctx.workspace_id)
-    composio_entity_id = entity["composio_entity_id"]
-    
-    # NO_AUTH apps (e.g. composio_search) don't need OAuth — activate immediately
-    if client.is_no_auth_app(app_name):
-        entity_manager.add_connection(
-            entity_id=entity["id"],
-            app_name=app_name.upper(),
-            status="active",
-        )
-        logger.info(f"[CONNECT] {app_name.upper()} is NO_AUTH — activated immediately")
-        _record_first_integration_if_first(db, entity_manager, ctx.workspace_id)
-        return InitiateConnectionResponse(
-            redirect_url="",
-            app_name=app_name.upper(),
-        )
 
-    # Default callback URL
+    if client.is_no_auth_app(app_name):
+        return _activate_no_auth_app(db, entity_manager, entity, app_name, ctx.workspace_id)
+
+    # Default callback URL: the frontend's popup callback page
     callback_url = request.callback_url if request else None
     if not callback_url:
-        # Use frontend callback URL (popup callback page)
         frontend_url = config.FRONTEND_URL or "http://localhost:3000"
         callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
 
-    # If the workspace already has a stored auth_config_id/scheme for this
-    # app (from a prior connect), reuse it unless the caller is explicitly
-    # overriding. This makes reconnects sticky to the scheme that worked.
-    explicit_scheme = request.auth_scheme if request else None
-    explicit_id = request.auth_config_id if request else None
-    if not explicit_scheme and not explicit_id:
-        prior_meta = entity_manager.get_connection_metadata(
-            entity_id=entity["id"], app_name=app_name.upper()
-        )
-        if prior_meta:
-            explicit_scheme = prior_meta.get("auth_scheme") or explicit_scheme
-            explicit_id = prior_meta.get("auth_config_id") or explicit_id
-
+    explicit_scheme, explicit_id = _sticky_auth_choice(request, entity_manager, entity["id"], app_name)
     try:
         link = client.initiate_connection(
-            entity_id=composio_entity_id,
+            entity_id=entity["composio_entity_id"],
             app=app_name.upper(),
             callback_url=callback_url,
             auth_config_id=explicit_id,
@@ -423,8 +397,42 @@ async def initiate_connection(
     )
 
 
+def _connection_id_from_composio(entity_manager: EntityManager, entity: Dict[str, Any], app_name: str) -> Optional[str]:
+    """The Composio account id for this app, looked up under the auth config the
+    connect flow stored; None when Composio can't say."""
+    try:
+        _meta = entity_manager.get_connection_metadata(entity["id"], app_name.upper()) or {}
+        composio_status = get_composio_client().get_connection_status(
+            entity_id=entity["composio_entity_id"],
+            app=app_name.upper(),
+            auth_config_id=_meta.get("auth_config_id") or None,
+        )
+    except Exception:
+        logger.exception(f"[CALLBACK] Could not resolve connection_id from Composio for {app_name.upper()}")
+        return None
+    resolved = composio_status.get("id") if composio_status else None
+    if resolved:
+        logger.info(f"[CALLBACK] Resolved connection_id from Composio API: {resolved}")
+    return resolved
+
+
+def _connection_id_from_rows(entity_manager: EntityManager, entity: Dict[str, Any], app_name: str) -> Optional[str]:
+    """The connection id already on the workspace's row for this app (covers API_KEY
+    apps whose Composio lookup misses)."""
+    try:
+        connections = entity_manager.get_entity_connections(str(entity["id"]))
+    except Exception:
+        logger.exception(f"[CALLBACK] Entity connections fallback failed for {app_name.upper()}")
+        return None
+    row = next((c for c in connections if (c.get("app_name") or "").upper() == app_name.upper()), None)
+    resolved = row.get("connection_id") if row else None
+    if resolved:
+        logger.info(f"[CALLBACK] Resolved connection_id from entity connections: {resolved}")
+    return resolved
+
+
 @router.post("/connect/{app_name}/callback", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def connection_callback(
+def connection_callback(
     app_name: str,
     connection_id: Optional[str] = Query(None, description="Composio connection ID"),
     status: str = Query("active", description="Connection status"),
@@ -436,7 +444,8 @@ async def connection_callback(
 
     Called after user completes OAuth flow to update connection status.
     The connection_id is optional — if not provided by the OAuth redirect,
-    we attempt to resolve it from the Composio API.
+    we attempt to resolve it from the Composio API. A plain ``def`` (F257): that
+    lookup is a synchronous SDK call, run in FastAPI's threadpool.
     """
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
@@ -444,37 +453,11 @@ async def connection_callback(
     if not entity:
         raise HTTPException(status_code=404, detail="Entity not found")
 
-    resolved_connection_id = connection_id
-
-    # If no connection_id from OAuth redirect, try to resolve from Composio API
-    if not resolved_connection_id:
-        try:
-            client = get_composio_client()
-            _meta = entity_manager.get_connection_metadata(entity["id"], app_name.upper()) or {}
-            composio_status = client.get_connection_status(
-                entity_id=entity["composio_entity_id"],
-                app=app_name.upper(),
-                auth_config_id=_meta.get("auth_config_id") or None,
-            )
-            if composio_status:
-                resolved_connection_id = composio_status.get("id")
-                logger.info(f"[CALLBACK] Resolved connection_id from Composio API: {resolved_connection_id}")
-        except Exception as e:
-            logger.warning(f"[CALLBACK] Could not resolve connection_id from Composio: {e}")
-
-    # Fallback: scan all entity connections for this app (covers API_KEY apps
-    # where get_connection_status fails due to missing auth_config_id cache)
-    if not resolved_connection_id:
-        try:
-            connections = entity_manager.get_entity_connections(str(entity["id"]))
-            for conn in connections:
-                if (conn.get("app_name") or "").upper() == app_name.upper():
-                    resolved_connection_id = conn.get("connection_id")
-                    if resolved_connection_id:
-                        logger.info(f"[CALLBACK] Resolved connection_id from entity connections: {resolved_connection_id}")
-                    break
-        except Exception as e:
-            logger.warning(f"[CALLBACK] Entity connections fallback failed: {e}")
+    resolved_connection_id = (
+        connection_id
+        or _connection_id_from_composio(entity_manager, entity, app_name)
+        or _connection_id_from_rows(entity_manager, entity, app_name)
+    )
 
     # Normalize status — treat "success" as "active"
     normalized_status = "active" if status in ("success", "active") else status
@@ -500,7 +483,7 @@ async def connection_callback(
 
 
 @router.delete("/connections/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def disconnect_app(
+def disconnect_app(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
