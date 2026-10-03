@@ -50,7 +50,7 @@ Run through this every tick:
 1. What changed in the last 24h? (`platform_get_activity_feed period=1d`)
 2. What's blocked? (`platform_list_tasks status=blocked`)
 3. What needs my call? (reports with requires_approval=true and not acknowledged; missions with escalation_level >= 2)
-4. What did I handle for Gerard? — surface the autonomous actions (auto-applied HARNESS prescriptions, etc.)
+4. What did I handle for the owner? — surface the autonomous actions (auto-applied HARNESS prescriptions, etc.)
 5. What am I watching? — heartbeats with objective_met=False, agents trending toward warning
 Reply with five short lines, one per item. If a section is empty, say "clear"."""
 
@@ -69,7 +69,7 @@ HARNESS runs Sunday 02:00 UTC. Review the audit:
 1. `platform_harness_status` — confirm status=completed and artifacts.audit_report=ok.
    If status is failed, dormant_*, or any artifact failed: surface as a platform issue (NOT agent issue).
 2. `platform_get_latest_report agent_name=Auto report_type=audit` — pull the audit.
-3. Summarise for Gerard: convergence trend, top 3 issues, applied count, queued-for-review count, any failed artifacts.
+3. Summarise for the owner: convergence trend, top 3 issues, applied count, queued-for-review count, any failed artifacts.
 4. `platform_list_tasks tag=harness status=todo` — list queued prescriptions with risk + rationale.
 5. Send via `platform_send_notification` with severity=approval (if asks present) or info (if green).
 Short message, not a wall of text."""
@@ -110,7 +110,7 @@ You manage a team. Today is your review day. Read first, recommend second, never
      - status:          ok|warning|critical
      - recommendations: structured list of suggested changes (target agent, change_type, reason, risk_tier)
      - action_items:    concrete next steps with owner agent_id
-     - escalation_level: 0..4 (use 2=APPROVAL when changes need Gerard, 0=FYI when team is healthy)
+     - escalation_level: 0..4 (use 2=APPROVAL when changes need the owner's call, 0=FYI when team is healthy)
      - requires_approval: true when any action_item is non-trivial
 7. For each action_item that maps to existing work, `platform_create_task` for the owning agent INSIDE YOUR SUBTREE only.
    Cross-team or out-of-subtree actions go in recommendations with escalation_target=auto.
