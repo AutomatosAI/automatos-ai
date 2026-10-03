@@ -43,7 +43,10 @@ vi.mock('@/components/deliverables/socials/plans/socials-plans-view', () => ({
   ),
 }))
 vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({
-  SocialsPostPage: ({ postId }: { postId: string }) => <div data-testid="post-page">{postId}</div>,
+  // The editor's own move once a save has made the post (socials-editor.tsx: go({ post })).
+  SocialsPostPage: ({ postId, go }: { postId: string; go: (next: { post: string }) => void }) => (
+    <div data-testid="post-page">{postId}<button type="button" onClick={() => go({ post: 'p-saved' })}>Saved</button></div>
+  ),
 }))
 vi.mock('@/components/deliverables/socials/studio/queue-pane', () => ({
   QueuePane: ({ post }: { post: any }) => <article aria-label={`Post to approve: ${post.title}`} />,
@@ -146,8 +149,19 @@ describe('the Socials Studio shell', () => {
     expect(screen.getByTestId('view-plans')).toHaveTextContent('plan form open')
 
     fireEvent.click(screen.getByRole('button', { name: /New post/ }))
-    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=plans&post=new')
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=new')
     expect(screen.getByTestId('post-page')).toHaveTextContent('new')
+  })
+
+  it('New post from the Queue opens the editor, and the post a save makes stays open there, not in the Queue', () => {
+    state.search = 'tab=socials&view=queue'
+    renderStudio()
+    fireEvent.click(screen.getByRole('button', { name: /New post/ }))
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=new')
+    // 3 Oct 2026: the upload saved the post, and the Queue (where a draft never shows) opened.
+    fireEvent.click(screen.getByRole('button', { name: 'Saved' }))
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=p-saved')
+    expect(screen.getByTestId('post-page')).toHaveTextContent('p-saved')
   })
 
   it('a viewer sees the views but neither action nor the brand kit', () => {

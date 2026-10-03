@@ -29,7 +29,8 @@ import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
-  editorTargets, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal, withSlides,
+  editorTargets, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal,
+  withSlides,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
 import { DeletePostButton } from './delete-post-button'
@@ -40,6 +41,8 @@ import { Hint } from './editor-ui'
 
 /** A new post's four steps, in one line under its header. */
 export const NEW_POST_STEPS = 'Write a brief (or let Auto redraft it), choose the look, tick the channels, then Render preview and Submit for approval.'
+/** A post that is the person's own file (an upload or a Library pick): its next steps. */
+export const OWN_FILE_STEPS = 'Your file is the post, so there is nothing to render: tick the channels, check each one in the preview, then Submit for approval.'
 
 interface SocialsEditorProps {
   role: Workspace['role']
@@ -95,11 +98,12 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
     )
   }
   const mediaBusy = calls.upload.isLoading || calls.pick.isLoading
+  const ownFile = isOwnFilePost(post, draft)
 
   return (
     <div className="socials-editor flex flex-col gap-5">
       <SocialsEditorHeader
-        post={post} draft={draft} busy={busy} overLimit={channelsOverLimit(draft, channels).length > 0}
+        post={post} draft={draft} busy={busy} overLimit={channelsOverLimit(draft, channels).length > 0} nothingToRender={ownFile}
         onTitle={(title) => setDraft((d) => ({ ...d, title }))}
         onBack={() => go({ view: 'calendar', post: null })}
         onSave={() => calls.save.mutate(payload(), opened)}
@@ -108,6 +112,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
         extra={post && <DeletePostButton post={post} role={role} onDeleted={() => go({ view: 'calendar', post: null })} />}
       />
       {!post && <Hint>{NEW_POST_STEPS}</Hint>}
+      {ownFile && <Hint>{OWN_FILE_STEPS}</Hint>}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />

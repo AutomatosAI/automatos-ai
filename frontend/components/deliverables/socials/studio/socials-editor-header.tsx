@@ -24,6 +24,8 @@ interface SocialsEditorHeaderProps {
   draft: EditorDraft
   busy: 'save' | 'render' | 'submit' | null
   overLimit: boolean
+  /** The post is the person's own file: nothing to render, so Render preview is off. */
+  nothingToRender?: boolean
   onTitle: (title: string) => void
   onBack: () => void
   onSave: () => void
@@ -39,7 +41,7 @@ function publishesLine(draft: EditorDraft): string | null {
 }
 
 export function SocialsEditorHeader(props: SocialsEditorHeaderProps) {
-  const { post, draft, busy, overLimit, onTitle, onBack, onSave, onRender, onSubmit, extra } = props
+  const { post, draft, busy, overLimit, nothingToRender = false, onTitle, onBack, onSave, onRender, onSubmit, extra } = props
   const status = post ? SOCIAL_STATUS_LABELS[post.status] : 'New'
   const canSubmit = !post || SUBMITTABLE_STATUSES.has(post.status)
   const line = publishesLine(draft)
@@ -70,7 +72,7 @@ export function SocialsEditorHeader(props: SocialsEditorHeaderProps) {
         <Button type="button" variant="secondary" onClick={onSave} disabled={busy !== null}>
           {spinner('save')}Save draft
         </Button>
-        <Button type="button" variant="secondary" onClick={onRender} disabled={busy !== null || draft.format === 'text'}>
+        <Button type="button" variant="secondary" onClick={onRender} disabled={busy !== null || draft.format === 'text' || nothingToRender}>
           {spinner('render')}Render preview
         </Button>
         {canSubmit && (

@@ -27,7 +27,7 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   inferPreviewType: () => 'image',
 }))
 
-import { NEW_POST_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
+import { NEW_POST_STEPS, OWN_FILE_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { AUTO_PICK_NOTE, LOOK_HINTS } from '@/components/deliverables/socials/studio/editor-look-card'
 import { FIELDS_LEGEND } from '@/components/deliverables/socials/socials-variables-form'
 import { TEXT_ONLY_NOTE } from '@/components/deliverables/socials/studio/editor-format-card'
@@ -195,6 +195,22 @@ describe('the post editor', () => {
     await screen.findByText('TikTok')
     fireEvent.click(screen.getByRole('button', { name: 'Render preview' }))
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', { preview: true }))
+  })
+
+  it('a post that is your own file has nothing to render: Render preview is off and it says to submit it', async () => {
+    renderEditor(post({ media: { original: ['d-1'] } }))
+    await screen.findByText('TikTok')
+    expect(screen.getByText(OWN_FILE_STEPS)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Render preview' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
+    await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-1'))
+    expect(api.renderSocialPost).not.toHaveBeenCalled()
+    cleanup()
+
+    renderEditor(post({ template_id: 'tpl-img', media: { original: ['d-1'] } })) // a template: it renders
+    await screen.findByText('TikTok')
+    expect(screen.queryByText(OWN_FILE_STEPS)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Render preview' })).toBeEnabled()
   })
 
   it('a try that fails after creating the post opens that post, and the next try edits it (F254)', async () => {

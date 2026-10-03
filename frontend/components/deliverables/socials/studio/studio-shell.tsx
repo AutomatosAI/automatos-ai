@@ -7,7 +7,8 @@
  * List), the Queue holds what waits for approval, and Plans lists the plans (B6: a plan is a
  * campaign; Wave 2) with the other campaigns below them. The brand kit is the Deliverables
  * Brand kit tab (PRD-251B US-B301; F250: no entry of its own here). New post opens the editor
- * at ?post=new; New plan opens the Plan page at
+ * at ?view=calendar&post=new from any view (3 Oct 2026: from the Queue, the post a save made
+ * opened in the Queue, where a draft never shows); New plan opens the Plan page at
  * ?view=plans&plan=new, and ?view=plans&plan=<id> a plan's own page (US-B207).
  * US-B108: the calendar view is the Socials calendar (Month · Week · List).
  * US-B109: ?post=<id> opens the post editor (studio/socials-post-page.tsx), and the old
@@ -76,7 +77,7 @@ export function SocialsStudio({ role, postId = null }: SocialsStudioProps) {
         canAuthor={canAuthorPosts(role)}
         onView={(view) => go({ view, post: null, plan: null })}
         onNewPlan={() => go({ view: 'plans', plan: NEW_PLAN, post: null })}
-        onNewPost={() => go({ post: NEW_POST, plan: null })}
+        onNewPost={() => go({ view: 'calendar', post: NEW_POST, plan: null })}
       />
       <StudioBody route={route} go={go} role={role} posts={posts} loading={isLoading || isFetching} />
     </div>

@@ -36,6 +36,9 @@ export const SLIDES_VARIABLE = 'slides'
 export const WORDS_PER_SECOND = 2.5
 export const NEW_POST_TITLE = 'Untitled post'
 
+/** The media key of the person's own file as the whole post: an upload or a Library pick. */
+export const OWN_FILE_ASPECT = 'original'
+
 export interface EditorSlot {
   /** YYYY-MM-DD and HH:mm, wall time in `timezone`. */
   date: string
@@ -158,6 +161,12 @@ export function slotChanged(post: SocialPost | null, slot: EditorSlot | null): b
   const had = post?.planned_for ?? null
   const same = wanted === had || (wanted !== null && had !== null && new Date(wanted).getTime() === new Date(had).getTime())
   return !same || (slot !== null && (post?.timezone ?? null) !== slot.timezone)
+}
+
+/** The post's visual is the person's own file, with no template (3 Oct 2026): there is nothing
+ * to render, so it goes for approval as it is (the server refuses to render it). */
+export function isOwnFilePost(post: Pick<SocialPost, 'media'> | null, draft: Pick<EditorDraft, 'templateId'>): boolean {
+  return !draft.templateId && !!post?.media && OWN_FILE_ASPECT in post.media
 }
 
 export function slidesOf(draft: Pick<EditorDraft, 'variables'>): number {
