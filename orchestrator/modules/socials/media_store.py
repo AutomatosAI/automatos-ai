@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from config import config
-from core.storage import ensure_bucket, get_s3_client, is_storage_configured
+from core.storage import ensure_bucket, get_public_s3_client, get_s3_client, is_storage_configured
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,22 @@ class MediaStore:
         public endpoint a browser reaches."""
         return get_s3_client().generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=ttl_seconds
+        )
+
+    def presigned_view(self, key: str, ttl_seconds: int) -> str:
+        """A GET link a BROWSER opens (a template's thumbnail, PRD-251B US-B102), served inline as
+        the file's type. Minted against the public endpoint (``S3_PUBLIC_ENDPOINT_URL``:
+        localhost:9000 locally, AWS in SaaS): :meth:`presigned_get`'s host is the compose
+        network's own, which no browser resolves (F237)."""
+        return get_public_s3_client().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentDisposition": "inline",
+                "ResponseContentType": content_type_for(key),
+            },
+            ExpiresIn=ttl_seconds,
         )
 
     def open(self, key: str) -> Optional[MediaObject]:

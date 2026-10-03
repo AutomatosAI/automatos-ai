@@ -18,7 +18,11 @@ differs from its seed file when the skill is loaded
   seed files arrive only from the owner's ``scripts/sync-skills.py`` run.
 * A global row of the same name from anywhere else (a git import, a plugin) is
   left untouched. Global skill names are unique (``uq_skills_marketplace_name``),
-  so the built-in row is not created while that row exists.
+  so the built-in row is not created while that row exists. One exception: a git
+  import of the automatos-skills repo itself (``SKILLS_REPO_SOURCE``) is the same
+  skill from the same source of truth, so when its version is below the seed's,
+  its content is refreshed from the seed (its provenance kept) and agents get the
+  version the platform ships (TESTER, build 6).
 """
 
 from __future__ import annotations
@@ -32,7 +36,15 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.builtin_skills import MANIFEST_PATH, ROW_FIELDS, BuiltinSkill, SeedFile, load_manifest, read_seed
+from core.builtin_skills import (
+    MANIFEST_PATH,
+    ROW_FIELDS,
+    SKILLS_REPO_SOURCE,
+    BuiltinSkill,
+    SeedFile,
+    load_manifest,
+    read_seed,
+)
 from core.models.core import Skill
 
 logger = logging.getLogger(__name__)
@@ -73,11 +85,11 @@ def _ensure(db: Session, entry: BuiltinSkill) -> Tuple[str, Optional[Skill]]:
     _lock(db, entry.name)
     row = db.query(Skill).filter(Skill.name == entry.name, Skill.workspace_id.is_(None)).first()
     if row is not None:
-        if row.skill_source == entry.skill_source:
+        if row.skill_source == entry.skill_source or _refreshed_repo_copy(row, entry):
             return PRESENT, row
         logger.warning(
-            "Built-in skill '%s' not seeded: the global row id=%s from '%s' has that name and is left untouched",
-            entry.name, row.id, row.skill_source,
+            "Built-in skill '%s' not seeded: the global row id=%s from '%s' (version %s) has that name and is left untouched",
+            entry.name, row.id, row.skill_source, row.skill_version,
         )
         return LEFT_ALONE, None
 
@@ -105,6 +117,30 @@ def _ensure(db: Session, entry: BuiltinSkill) -> Tuple[str, Optional[Skill]]:
         return (PRESENT if existing is not None else LEFT_ALONE), existing
     logger.info("Built-in skill '%s' created (id=%s)", entry.name, skill.id)
     return CREATED, skill
+
+
+def _version(value: Optional[str]) -> Optional[Tuple[int, ...]]:
+    try:
+        return tuple(int(part) for part in str(value).split("."))
+    except ValueError:
+        return None
+
+
+def _refreshed_repo_copy(row: Skill, entry: BuiltinSkill) -> bool:
+    """Refresh a git import of the automatos-skills repo whose version is below the seed's: the
+    same skill from the same source of truth, a newer version. Provenance is kept."""
+    if not str(row.skill_source or "").startswith(SKILLS_REPO_SOURCE):
+        return False
+    seed = read_seed(entry.seed_path)
+    newer, older = _version(seed.version if seed else None), _version(row.skill_version)
+    if seed is None or newer is None or older is None or newer <= older:
+        return False
+    logger.info(
+        "Built-in skill '%s': the skills-repo copy id=%s (version %s) refreshed from its seed (version %s)",
+        entry.name, row.id, row.skill_version, seed.version,
+    )
+    row.prompt_template, row.content_hash, row.skill_version = seed.body, seed.content_hash, seed.version
+    return True
 
 
 def _lock(db: Session, name: str) -> None:

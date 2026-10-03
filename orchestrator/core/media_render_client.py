@@ -100,20 +100,26 @@ class MediaRenderUnavailable(MediaRenderError):
     """No renderer is configured, or it cannot be reached."""
 
 
+def new_http_client() -> httpx.AsyncClient:
+    """An httpx client set up for media-render (its timeouts and token). The process shares one on
+    the server's event loop (:func:`_get_client`); code that runs an event loop of its own (the
+    thumbnail backfill's thread) makes its own and closes it: a pooled connection belongs to the
+    loop that opened it, and used from another fails ("the handler is closed", F238)."""
+    headers = {TOKEN_HEADER: config.SOCIALS_RENDER_TOKEN} if config.SOCIALS_RENDER_TOKEN else {}
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            float(config.SOCIALS_RENDER_TIMEOUT_SECONDS),
+            connect=float(config.SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS),
+        ),
+        headers=headers,
+    )
+
+
 def _get_client() -> httpx.AsyncClient:
-    """Get or create the shared httpx client."""
+    """Get or create the shared httpx client (the server's event loop only)."""
     global _client
     if _client is None or _client.is_closed:
-        headers = {}
-        if config.SOCIALS_RENDER_TOKEN:
-            headers[TOKEN_HEADER] = config.SOCIALS_RENDER_TOKEN
-        _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                float(config.SOCIALS_RENDER_TIMEOUT_SECONDS),
-                connect=float(config.SOCIALS_RENDER_CONNECT_TIMEOUT_SECONDS),
-            ),
-            headers=headers,
-        )
+        _client = new_http_client()
     return _client
 
 
@@ -190,6 +196,9 @@ class MediaRenderClient:
             return await self._client().request(method, url, **kwargs)
         except httpx.HTTPError as err:
             raise _transport_error(action, err) from err
+        except RuntimeError as err:  # a pooled connection whose transport is gone (uvloop: "the handler is closed")
+            logger.warning("MediaRenderClient %s: the connection failed", action, exc_info=True)
+            raise MediaRenderUnavailable(UNREACHABLE, f"media-render is unreachable ({action}): the connection failed") from err
 
     async def health(self) -> Dict[str, Any]:
         """``GET /health``: the image's versions and the render queue."""

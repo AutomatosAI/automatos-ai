@@ -36,7 +36,7 @@ from uuid import UUID
 import sqlalchemy as sa
 
 from config import config
-from core.media_render_client import MediaRenderClient
+from core.media_render_client import MediaRenderClient, new_http_client
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
 from core.social_templates import SOCIAL_VIDEO, root_duration
@@ -201,6 +201,13 @@ async def ensure_thumbnails(
     return made
 
 
+async def _backfill(workspace_id: UUID, ids: List[UUID], brand_kit_of: BrandKitOf) -> None:
+    """``ensure_thumbnails`` on this thread's own event loop, with a media-render client of this
+    loop, closed when it ends: the process's shared client belongs to the server's loop (F238)."""
+    async with new_http_client() as http:
+        await ensure_thumbnails(workspace_id, ids, brand_kit_of=brand_kit_of, client=MediaRenderClient(http))
+
+
 def start_backfill(workspace_id: UUID, template_ids: Iterable[UUID], *, brand_kit_of: BrandKitOf) -> bool:
     """Run ``ensure_thumbnails`` on its own thread and event loop (the list route runs
     off the loop), one run per workspace at a time. ``True`` when a run started."""
@@ -214,7 +221,7 @@ def start_backfill(workspace_id: UUID, template_ids: Iterable[UUID], *, brand_ki
 
     def run() -> None:
         try:
-            asyncio.run(ensure_thumbnails(workspace_id, ids, brand_kit_of=brand_kit_of))
+            asyncio.run(_backfill(workspace_id, ids, brand_kit_of))
         except Exception:  # noqa: BLE001 — a crashed backfill is logged; the next list starts another
             logger.exception("[Socials] thumbnail backfill for workspace %s crashed", workspace_id)
         finally:

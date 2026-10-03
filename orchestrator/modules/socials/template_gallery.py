@@ -75,7 +75,7 @@ def thumbnail_link(store: MediaStore, raw: Optional[str]) -> Optional[str]:
     if not store.configured():
         return None
     try:
-        return store.presigned_get(raw, config.SOCIALS_MEDIA_URL_TTL_SECONDS)
+        return store.presigned_view(raw, config.SOCIALS_MEDIA_URL_TTL_SECONDS)
     except Exception:  # noqa: BLE001 — a link that cannot be minted hides the thumbnail, never the template
         logger.warning("[Socials] could not presign the thumbnail %s", raw, exc_info=True)
         return None

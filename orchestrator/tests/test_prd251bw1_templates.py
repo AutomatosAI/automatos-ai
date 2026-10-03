@@ -95,7 +95,7 @@ def _thumbnail_of(env, template_id):
 def gallery(env, monkeypatch):
     """Storage configured and presigning deterministic; the backfill recorded, never started."""
     monkeypatch.setattr(MediaStore, "configured", staticmethod(lambda: True))
-    monkeypatch.setattr(MediaStore, "presigned_get", lambda self, key, ttl: f"https://signed/{key}?ttl={ttl}")
+    monkeypatch.setattr(MediaStore, "presigned_view", lambda self, key, ttl: f"https://signed/{key}?ttl={ttl}")
     env.backfills = []
     monkeypatch.setattr(template_thumbnails, "start_backfill", lambda ws, ids, *, brand_kit_of: env.backfills.append((ws, list(ids))))
     return env
