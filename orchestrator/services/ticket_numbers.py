@@ -10,8 +10,9 @@ replies) formats it here, and Auto's ticket tools take it back here
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
@@ -19,8 +20,15 @@ from core.models.core import BoardTask
 from core.models.ticket_numbers import STEP_SOURCE
 
 NUMBER_DIGITS = 4
-# "#0042", "#42", "#0051.3"; a leading '#' says it is a number, not an id.
-_NUMBER_REF = re.compile(r"^#(\d+)(?:\.(\d+))?$")
+# "#0042", "#42", "#0051.3"; a leading '#' says it is a number, not an id. So do a
+# leading zero ("0175") and a step ("105.4"): an id has neither (F241).
+_DIGITS = re.compile(r"^(\d+)(?:\.(\d+))?$")
+# F241 (night 7): Auto's tools were called with "#0175" as 175 (a number with its
+# '#' and zeros gone) as often as with an id. Bare digits are read in the workspace.
+AMBIGUOUS_REF = ("{said} is both the id of {as_ids} and the number of {as_numbers}. Nothing was done. "
+                 "Give the number with its '#', as the board shows it.")
+AMBIGUOUS_REFS = ("{said} could be ids or numbers without their '#'. As ids they are {as_ids}; as numbers, "
+                  "{as_numbers}. Nothing was done. Give each ticket's number with its '#', as the board shows it.")
 
 
 def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[str]:
@@ -108,18 +116,79 @@ def ticket_label_for(db: Session, workspace_id: Any, task_id: Any, *, capital: b
     return ticket_label(task, ticket_number(db, task), capital=capital)
 
 
+def _number_parts(ref: Any) -> Optional[Tuple[int, Optional[int]]]:
+    """(number, step) for a ticket named by its number: "#0042", "#0051.3", "0175"
+    or "105.4". None for anything else, an id ("42", 42) included."""
+    text = str(ref).strip()
+    hashed = text.startswith("#")
+    match = _DIGITS.match(text[1:] if hashed else text)
+    if not match or isinstance(ref, (int, float)):
+        return None
+    seq, step = match.group(1), match.group(2)
+    if hashed or step is not None or (len(seq) > 1 and seq.startswith("0")):
+        return int(seq), (int(step) if step is not None else None)
+    return None
+
+
 def is_number_ref(ref: Any) -> bool:
-    """True for "#0042" or "#0051.3": a number, not an id."""
-    return isinstance(ref, str) and bool(_NUMBER_REF.match(ref.strip()))
+    """True for "#0042", "#0051.3", "0175" or "105.4": a number, not an id."""
+    return isinstance(ref, str) and _number_parts(ref) is not None
+
+
+def is_bare_ref(ref: Any) -> bool:
+    """True for 175 or "175": a number without its '#', or an id."""
+    if isinstance(ref, bool):
+        return False
+    return isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit() and not is_number_ref(ref))
+
+
+def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple[Dict[int, int], Optional[str]]:
+    """The ticket ids that bare refs (175, "175") name in this workspace, by ref, or
+    the refusal when that can't be told. A ref that names no ticket is left out.
+
+    A ref that only one reading names (an id, or a number without its '#') is that
+    ticket. A ref that is the id of one ticket and the number of another is torn: one
+    call's refs are all ids or all numbers, so the reading that names more of the
+    call's refs settles it. When both name as many, nothing is guessed: the refusal
+    names both tickets of each torn ref."""
+    wanted = {int(str(r).strip()) for r in refs}
+    if not wanted:
+        return {}, None
+    rows = db.query(BoardTask.id, BoardTask.workspace_seq, BoardTask.title).filter(
+        BoardTask.workspace_id == workspace_id,
+        or_(BoardTask.id.in_(sorted(wanted)), BoardTask.workspace_seq.in_(sorted(wanted))),
+    ).all()
+    as_ids = {r.id: r for r in rows if r.id in wanted}
+    as_numbers = {r.workspace_seq: r for r in rows if getattr(r, "workspace_seq", None) in wanted}
+    torn = sorted(n for n in as_ids.keys() & as_numbers.keys() if as_ids[n].id != as_numbers[n].id)
+    if torn and len(as_ids) == len(as_numbers):
+        return {}, _both_readings(db, workspace_id, torn, as_ids, as_numbers)
+    meant, other = (as_numbers, as_ids) if len(as_numbers) > len(as_ids) else (as_ids, as_numbers)
+    return {**_ids(other), **_ids(meant)}, None
+
+
+def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
+    return {n: r.id for n, r in reading.items()}
+
+
+def _both_readings(db: Session, workspace_id: Any, said: List[int], as_ids: Dict[int, Any],
+                   as_numbers: Dict[int, Any]) -> str:
+    """The refusal for torn refs (``said``), naming the ticket each reading gives."""
+    def named(reading: Dict[int, Any]) -> str:
+        return ", ".join(f"{ticket_label_for(db, workspace_id, reading[n].id)} ('{reading[n].title}')"
+                         for n in said)
+
+    template = AMBIGUOUS_REF if len(said) == 1 else AMBIGUOUS_REFS
+    return template.format(said=", ".join(str(n) for n in said), as_ids=named(as_ids), as_numbers=named(as_numbers))
 
 
 def resolve_ticket_ref(db: Session, workspace_id: Any, ref: Any) -> Optional[int]:
-    """The id of the ticket ``ref`` names in this workspace: "#0042", or "#0051.3"
-    for a mission step. None when no ticket has that number."""
-    match = _NUMBER_REF.match(str(ref).strip())
-    if not match:
+    """The id of the ticket ``ref`` names in this workspace: "#0042" (or "0042"),
+    or "#0051.3" for a mission step. None when no ticket has that number."""
+    parts = _number_parts(ref)
+    if parts is None:
         return None
-    seq, step = int(match.group(1)), match.group(2)
+    seq, step = parts
     numbered = db.query(BoardTask.id).filter(
         BoardTask.workspace_id == workspace_id, BoardTask.workspace_seq == seq,
     ).first()

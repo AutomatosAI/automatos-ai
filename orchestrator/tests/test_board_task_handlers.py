@@ -1367,9 +1367,9 @@ class _RosterDB:
         self._task = task
         self.commits = 0
 
-    def query(self, model):
+    def query(self, *entities):  # a model, or F241's read of a ticket's columns
         from core.models import Agent
-        if model is Agent:
+        if entities[0] is Agent:
             return _RosterQ(self._agents)
         return _FakeQ(self._task)
 
@@ -1548,7 +1548,7 @@ class _MultiSession:
         self.tasks = {t.id: t for t in tasks}
         self.commits = 0
 
-    def query(self, model):
+    def query(self, *entities):  # a model, or F241's read of a ticket's columns
         return _MultiQ(self.tasks)
 
     def commit(self):

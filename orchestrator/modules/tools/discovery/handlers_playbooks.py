@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -840,6 +841,12 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
+# F241: the run's card is made when the run starts, so the answer can name it by number.
+# Wrapped after the definition, around any decorators it carries.
+execute_playbook = says_the_run_card(execute_playbook)
+
+
+@names_the_run_cards  # F241: each run's card, by number
 async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Check status/results of a playbook execution."""
     from core.models.core import RecipeExecution
