@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_LIST_LIMIT = 50
 _DEFAULT_LIST_LIMIT = 20
+# modules/socials/render.py DELIVERABLE_SOURCE_TYPE: the files a Socials post made or was given.
+SOCIAL_POST_SOURCE_TYPE = "social_post"
 
 
 def _compact_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,6 +69,9 @@ async def list_deliverables(
     result = svc.list_deliverables(
         artifact_type=params.get("artifact_type"),
         source_type=params.get("source_type"),
+        # PRD-251C US-C105: a Socials post's own files are its history, not new material; they
+        # are listed only when asked for by their source type.
+        source_type_exclude=None if params.get("source_type") else SOCIAL_POST_SOURCE_TYPE,
         source_id=params.get("source_id"),
         agent_id=agent_id,
         search=params.get("search"),

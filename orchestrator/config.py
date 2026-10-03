@@ -1961,6 +1961,8 @@ class Config:
     # PRD-251C US-C104 (C5): two titles whose content words overlap this much (shared over all,
     # 0 to 1) are one topic: research may not add the second (modules/socials/repeats.py).
     SOCIALS_REPEAT_OVERLAP: float = float(os.getenv("SOCIALS_REPEAT_OVERLAP", "0.75"))
+    # PRD-251C US-C105: the composer is given how this many of the workspace's last posts began.
+    SOCIALS_COMPOSE_RECENT_OPENINGS: int = int(os.getenv("SOCIALS_COMPOSE_RECENT_OPENINGS", "10"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")

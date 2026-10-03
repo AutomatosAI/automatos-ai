@@ -15,7 +15,9 @@ never more than ``MAX_DAYS`` and ``MAX_LIMIT``.
 
 Read by research (``platform_get_social_history``, and the ``history`` in
 ``platform_get_social_plan``'s answer, so a workspace copy of the research playbook made before
-PRD-251C sees it without a prompt change), and by ``GET /api/socials/history``.
+PRD-251C sees it without a prompt change), and by ``GET /api/socials/history``. The composer
+gets the opening lines of the last ``SOCIALS_COMPOSE_RECENT_OPENINGS`` posts (``recent_openings``,
+US-C105), so a new post does not reuse a hook.
 """
 from __future__ import annotations
 
@@ -89,6 +91,15 @@ def _item(post: SocialPost, topic: Optional[SocialTopic]) -> Dict[str, Any]:
     }
 
 
+def _posts(db: Any, workspace_id: UUID, limit: int, since: Optional[datetime] = None) -> List[SocialPost]:
+    """The workspace's posts in its history, newest first (scheduled, else planned, else made)."""
+    moment = func.coalesce(SocialPost.scheduled_for, SocialPost.planned_for, SocialPost.created_at)
+    query = db.query(SocialPost).filter(SocialPost.workspace_id == workspace_id, SocialPost.status.in_(HISTORY_STATUSES))
+    if since is not None:
+        query = query.filter(moment >= since)
+    return query.order_by(moment.desc(), SocialPost.id).limit(limit).all()
+
+
 def history(
     db: Any, workspace_id: UUID, *, days: Optional[int] = None, limit: Optional[int] = None,
     now: Optional[datetime] = None,
@@ -98,13 +109,12 @@ def history(
     days = _bounded(days, config.SOCIALS_HISTORY_DAYS, MAX_DAYS)
     limit = _bounded(limit, config.SOCIALS_HISTORY_LIMIT, MAX_LIMIT)
     since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
-    moment = func.coalesce(SocialPost.scheduled_for, SocialPost.planned_for, SocialPost.created_at)
-    posts = (
-        db.query(SocialPost)
-        .filter(SocialPost.workspace_id == workspace_id, SocialPost.status.in_(HISTORY_STATUSES), moment >= since)
-        .order_by(moment.desc(), SocialPost.id)
-        .limit(limit)
-        .all()
-    )
+    posts = _posts(db, workspace_id, limit, since)
     topics = _topics_by_post(db, workspace_id, [post.id for post in posts])
     return [_item(post, topics.get(post.id)) for post in posts]
+
+
+def recent_openings(db: Any, workspace_id: UUID, limit: Optional[int] = None) -> List[str]:
+    """How the workspace's last posts began, newest first: the composer opens a new one differently."""
+    count = _bounded(limit, config.SOCIALS_COMPOSE_RECENT_OPENINGS, MAX_LIMIT)
+    return [line for line in (opening(post) for post in _posts(db, workspace_id, count)) if line]

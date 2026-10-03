@@ -17,9 +17,10 @@ All data, on the PRD-230 machinery:
 ``seed_socials_marketplace`` runs at every boot (``main.py``, leader worker),
 after ``seed_builtin_skills`` and before ``seed_packages``. A row it finds is
 left as it is, so live curation survives a redeploy, except the agents' skill
-links and personas. Skill links are reconciled every time, so a built-in skill
-the owner syncs (``scripts/sync-skills.py``) after the first boot attaches on the
-next one. A persona is the seed's: every install copies it into the installing
+links and personas, and a Playbook prompt an earlier seed wrote and nobody
+curated since (``SEEDED_BEFORE``, PRD-251C: the research prompt). Skill links
+are reconciled every time, so a built-in skill the owner syncs
+(``scripts/sync-skills.py``) after the first boot attaches on the next one. A persona is the seed's: every install copies it into the installing
 workspace, so one that differs from the seed is put back (P251W1-RVW-1,
 ``core/seeds/marketplace_personas.py``), on the Shopify roster's rows too.
 A skill is linked only from a global row of a name its agent lists, and the
@@ -35,7 +36,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -55,6 +56,7 @@ RESEARCH_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-content-research"
 
 CREATED = "created"
 PRESENT = "present"
+UPDATED = "updated"  # a marketplace Playbook given the seed's new prompt (it was never curated)
 MISSING_AGENT = "missing_agent"
 HELD_ELSEWHERE = "held_elsewhere"
 
@@ -254,7 +256,8 @@ Channels: {{input.channels}}
 3. Answer with the post's id and status.
 {_NEVER_PUBLISH}"""
 
-_RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
+# PRD-251B's research prompt (6c5b68de3), as marketplace rows seeded before PRD-251C hold it.
+_RESEARCH_PROMPT_251B = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
 
 1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list) and the topics its bank already holds.
 2. Research only the sources the plan switches on:
@@ -268,6 +271,29 @@ _RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({
 6. Answer with how many topics were added, and their titles.
 
 You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
+
+# PRD-251C (C5, US-C105): research reads the history first and adds only what is new.
+_RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
+
+1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan. For further back, read platform_get_social_history.
+2. Research only the sources the plan switches on:
+   - knowledge: search_knowledge for the plan's goal and audience;
+   - deliverables: platform_list_deliverables for recent reports, blog posts and files (a Socials post's own images and videos are history, not new material, and are left out);
+   - website: platform_web_fetch on the brand kit's website (platform_get_brand_kit names it): its product, news and about pages;
+   - github: when the workspace has GitHub connected, its README, docs, latest releases and merged pull requests, through the GitHub tools.
+3. Pick 5 to 15 topics that neither the history nor any bank covers yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's). A new angle on an idea already posted is still that idea.
+4. Every fact names its source: kind knowledge (the document's id), deliverable (its id), web (the page's address), github (the page's address) or note; its ref; and a short label. Leave out a fact you cannot source, and anything on the plan's never-say list.
+5. Add them with platform_add_social_topics, in one call. Its answer lists what was added and what was refused, with why: a topic too close to an earlier post or topic is a repeat, so leave it out; fix and resend any other refused topic once, or leave it out.
+6. Answer with how many topics were added, and their titles.
+
+You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
+
+# The prompts earlier seeds wrote, by Playbook and step. A marketplace row that still holds one
+# was never curated, so every boot brings it up to date (PRD-251C US-C105); a curated prompt stays.
+# Workspace copies are never touched: history reaches them through platform_get_social_plan.
+SEEDED_BEFORE: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    RESEARCH_PLAYBOOK_TEMPLATE_ID: {"research": (_RESEARCH_PROMPT_251B,)},
+}
 
 SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
     {
@@ -609,7 +635,7 @@ def _ensure_playbook(db: Session, spec: Mapping[str, Any], agents: Mapping[str, 
     row = db.query(WorkflowTemplate).filter(WorkflowTemplate.template_id == spec["template_id"]).first()
     if row is not None:
         if row.owner_type == MARKETPLACE:
-            return PRESENT
+            return _refresh(row, spec)
         logger.warning("Socials package: template_id %s is held by a %s Playbook", spec["template_id"], row.owner_type)
         return HELD_ELSEWHERE
     if not set(playbook_agents(spec)) <= set(agents):
@@ -620,6 +646,33 @@ def _ensure_playbook(db: Session, spec: Mapping[str, Any], agents: Mapping[str, 
     db.flush()
     logger.info("Socials package: created marketplace Playbook %s (id=%s)", spec["template_id"], recipe.id)
     return CREATED
+
+
+def _refreshed_step(step: Any, before: Mapping[str, Tuple[str, ...]], current: Mapping[str, Any]) -> Any:
+    if isinstance(step, dict) and step.get("prompt_template") in before.get(step.get("step_id"), ()):
+        return {**step, "prompt_template": current[step["step_id"]]}
+    return step
+
+
+def refreshed_steps(spec: Mapping[str, Any], steps: Any) -> Optional[List[Dict[str, Any]]]:
+    """A marketplace row's ``steps`` with each prompt an earlier seed wrote (``SEEDED_BEFORE``)
+    replaced by the seed's own now, as new dicts; None when nothing is out of date. A curated
+    prompt is never touched."""
+    before = SEEDED_BEFORE.get(spec["template_id"])
+    if not before or not isinstance(steps, list):
+        return None
+    current = {step["step_id"]: step.get("prompt_template") for step in spec["steps"]}
+    out = [_refreshed_step(step, before, current) for step in steps]
+    return out if out != steps else None
+
+
+def _refresh(row: WorkflowTemplate, spec: Mapping[str, Any]) -> str:
+    steps = refreshed_steps(spec, row.steps)
+    if steps is None:
+        return PRESENT
+    row.steps = steps
+    logger.info("Socials package: marketplace Playbook %s takes the seed's new prompt", spec["template_id"])
+    return UPDATED
 
 
 def playbook_columns(spec: Mapping[str, Any], agents: Mapping[str, Any]) -> Dict[str, Any]:
