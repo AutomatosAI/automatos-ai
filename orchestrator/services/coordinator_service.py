@@ -60,6 +60,7 @@ from modules.coordination.planner import (
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
 from modules.coordination.reconciler import MissionReconciler
+from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
     create_mission_board_task,
@@ -3757,6 +3758,7 @@ class CoordinatorService:
         from modules.policy.pricing import flat_rate_tokens
 
         run = self._get_run(db, run_id)
+        refuse_resume_while_waiting(db, run)  # F242: a step waiting for the owner's check is let go by its Approve
 
         budget = run.token_budget_estimate or 0
         used = run.tokens_used or 0

@@ -26,6 +26,10 @@ const REVIEW: Record<string, StageReason> = {
   stopped_with_work: { chip: 'Stopped part-way', says: 'The playbook stopped after part of the work. What it finished is here.' },
   moved_by_you: { chip: 'Moved by you', says: 'You moved it to Review.' },
   asked: { chip: 'You asked', says: 'You asked to review it before it closes.' },
+  ends_on_a_question: {
+    chip: 'Question for you',
+    says: 'It ends on a question for you. Approve to close it, or Reject with your answer to run it again.',
+  },
   unexplained: { chip: 'Review', says: 'Waiting for your verdict.' },
 }
 
@@ -37,6 +41,10 @@ const BLOCKED: Record<string, StageReason> = {
     says: "Held: this window's spend is over its ceiling. It goes back to Assigned on its own when you raise the ceiling or the window rolls over.",
   },
   mission_paused: { chip: 'Mission paused', says: 'Its mission is paused. Resume it from the mission.' },
+  owner_check: {
+    chip: 'Your check',
+    says: 'Its mission waits for you to check a step: approve that step to go on, or reject it to have it redone.',
+  },
   step_failed: { chip: 'Step failed', says: 'This step failed. Its mission decides what happens next.' },
   stopped_by_you: { chip: 'Stopped by you', says: 'You stopped it. Move it to In progress, or press Run Now, to start it again.' },
   waiting: { chip: 'Blocked', says: 'Waiting: see the reason on the ticket.' },

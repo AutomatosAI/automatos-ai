@@ -1422,6 +1422,10 @@ class WorkflowTemplate(Base):
             if self.execution_config['mode'] not in ['sequential', 'parallel']:
                 return False, "mode must be 'sequential' or 'parallel'"
 
+        # F242: the owner's "wait for me" on every run of the playbook
+        if 'wait_for_me' in self.execution_config and not isinstance(self.execution_config['wait_for_me'], bool):
+            return False, "wait_for_me must be true or false"
+
         # Validate numeric fields
         numeric_fields = ['max_retries', 'timeout_per_step', 'total_timeout', 'parallel_limit']
         for field in numeric_fields:

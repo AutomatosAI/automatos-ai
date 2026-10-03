@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.wait_for_me import keeps_wait_for_me, updates_wait_for_me
+
 logger = logging.getLogger(__name__)
 
 # F182: how much of a run's stored inputs execute_playbook repeats back.
@@ -192,6 +194,7 @@ def _playbook_namesakes_refusal(namesakes: List[Any]) -> str:
             "of them, or give the new one a different name.")
 
 
+@keeps_wait_for_me  # F242: the owner's "wait for me"
 async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     import uuid
@@ -253,6 +256,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+@updates_wait_for_me  # F242: the owner's "wait for me"
 async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
@@ -684,6 +688,7 @@ def _sync_schedule(playbook) -> tuple:
     return None, notes.get(outcome, "Active now.")
 
 
+@keeps_wait_for_me  # F242: the owner's "wait for me"
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution

@@ -553,7 +553,12 @@ class MissionReconciler:
         db: Session,
         task: OrchestrationTask,
     ) -> None:
-        """Handle PASS verdict: transition task to VERIFIED."""
+        """Handle PASS verdict: transition task to VERIFIED, unless (F242) the
+        owner checks this step first: then it waits for them in Review."""
+        from modules.coordination.owner_checks import holds_for_the_owner
+
+        if holds_for_the_owner(db, task):
+            return
         try:
             transition_task(
                 db=db,

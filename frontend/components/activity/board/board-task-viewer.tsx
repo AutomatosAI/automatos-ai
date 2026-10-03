@@ -426,8 +426,9 @@ function InProgressContent({ task }: { task: BoardTask }) {
 
 function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => void }) {
   const reason = stageReason(task)  // PRD-252 R3: why it is in review
-  // D6: a mission's card and its steps are decided on the mission, never by ticket verdict
-  const missionDecides = isMissionTicket(task)
+  // D6: a mission's card and its steps are decided on the mission, never by ticket verdict;
+  // F242: except a step the owner asked to check, which waits for their Approve or Reject
+  const missionDecides = isMissionTicket(task) && task.review_reason !== 'asked'
   return (
     <div className="space-y-6">
       {/* Review banner */}

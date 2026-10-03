@@ -52,7 +52,7 @@ AGENT = dict(id=325, name="Analyst", workspace_id="ws-c1", configuration={}, mod
 
 @pytest.mark.parametrize("handler, params, found, can_change", [
     (handlers_playbooks.update_playbook, {"playbook_id": 102}, PLAYBOOK,
-     "name, description, tags, execution_config, schedule_config, inputs"),
+     "name, description, tags, execution_config, schedule_config, wait_for_me, inputs"),  # F242
     (handlers_playbooks.update_playbook_step, {"playbook_id": 102, "step_index": 0}, PLAYBOOK,
      "prompt_template, find, replace, agent_id, order, error_handling, output_key"),
     (handlers_agents.update_agent, {"agent_id": 325}, AGENT,
