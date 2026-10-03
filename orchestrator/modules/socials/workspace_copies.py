@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 
+from core.storage import is_storage_configured
 from core.utils.background_tasks import launch_guarded
 from core.workspace_client import WorkspaceClient
 from modules.socials import media_store
@@ -81,7 +82,7 @@ def copy_plan(post: Any, files: Sequence[MediaFile], now: datetime) -> List[Tupl
 
 
 async def _pieces(body: Iterator[bytes]) -> AsyncIterator[bytes]:
-    """A stored object's chunks, each read off the event loop (boto3 blocks)."""
+    """A stored object's chunks, each read off the event loop (the storage client blocks)."""
     while True:
         piece = await asyncio.to_thread(next, body, None)
         if piece is None:
@@ -120,14 +121,13 @@ def _start(workspace_id: Any, plan: Plan) -> None:
 
 def copy_when_approved(db: Any, post: Any, now: Optional[datetime] = None) -> None:
     """Start copying the approved ``post``'s files into the workspace. Never raises: a copy
-    that cannot even be planned is logged, and the approval stands."""
-    if not media_store.MediaStore.configured() or not post.media:
-        return
+    that cannot be planned or started is logged, and the approval stands."""
     try:
+        if not post.media or not is_storage_configured():
+            return
         plan = copy_plan(post, resolve_post_media(db, post), now or datetime.now(timezone.utc))
+        if plan:
+            _start(post.workspace_id, plan)
     except Exception:
         db.rollback()
-        logger.exception("[Socials] the files of post %s could not be listed for the workspace copy", post.id)
-        return
-    if plan:
-        _start(post.workspace_id, plan)
+        logger.exception("[Socials] the files of post %s could not be copied to the workspace", post.id)

@@ -289,28 +289,39 @@ class WorkspaceToolExecutor:
         that is given (the last piece), so the file is never seen half-written. Both
         paths stay inside the workspace; the file may not pass ``max_binary_write_bytes``."""
         try:
-            safe_path = self.ws.resolve_safe_path(path)
-            final = self.ws.resolve_safe_path(chunk["rename_to"]) if chunk.get("rename_to") else None
+            target = self._inside(path)
+            final = self._inside(chunk["rename_to"]) if chunk.get("rename_to") else None
             data = base64.b64decode(chunk.get("base64") or "", validate=True)
         except SecurityError as e:
             return {"error": str(e)}
         except (binascii.Error, ValueError, TypeError) as e:
             return {"error": f"Not a base64 piece: {e}"}
         append = chunk.get("append") is True
-        size = (safe_path.stat().st_size if append and safe_path.exists() else 0) + len(data)
+        size = (os.path.getsize(target) if append and os.path.exists(target) else 0) + len(data)
         if size > max_binary_write_bytes():
             return {"error": f"File too large (max {max_binary_write_bytes()} bytes)"}
         try:
-            safe_path.parent.mkdir(parents=True, exist_ok=True)
-            with safe_path.open("ab" if append else "wb") as handle:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "ab" if append else "wb") as handle:
                 handle.write(data)
             if final is not None:
-                final.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(safe_path, final)
-            done = final or safe_path
-            return {"written": True, "path": str(done.relative_to(self.ws.root)), "size_bytes": size}
+                os.makedirs(os.path.dirname(final), exist_ok=True)
+                os.replace(target, final)
+            done = final or target
+            return {"written": True, "path": os.path.relpath(done, os.path.realpath(self.ws.root)), "size_bytes": size}
         except OSError as e:
             return {"error": f"Write error: {e}"}
+
+    def _inside(self, relative: str) -> str:
+        """``relative`` as a real path inside the workspace: the workspace's own checks
+        (``resolve_safe_path``: null bytes, absolute paths, traversal, symlinks), then the
+        real path's prefix, the guard CodeQL's path-injection query recognises."""
+        self.ws.resolve_safe_path(relative)
+        root = os.path.realpath(self.ws.root)
+        target = os.path.realpath(os.path.join(root, relative))
+        if not target.startswith(root + os.sep):
+            raise SecurityError(f"Path traversal blocked: '{relative}' resolves outside the workspace")
+        return target
 
     async def list_directory(self, path: str = ".") -> Dict[str, Any]:
         """List directory contents within the workspace."""

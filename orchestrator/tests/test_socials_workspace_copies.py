@@ -157,7 +157,7 @@ class _Db:
 def started(monkeypatch):
     calls = []
     monkeypatch.setattr(workspace_copies, "_start", lambda workspace_id, plan: calls.append((workspace_id, list(plan))))
-    monkeypatch.setattr(workspace_copies.media_store.MediaStore, "configured", staticmethod(lambda: True))
+    monkeypatch.setattr(workspace_copies, "is_storage_configured", lambda: True)
     return calls
 
 
@@ -170,11 +170,11 @@ def test_a_post_with_files_starts_its_copy(started, monkeypatch):
 
 def test_no_storage_or_no_media_plans_nothing_and_a_failed_listing_is_logged(started, monkeypatch, caplog):
     workspace_copies.copy_when_approved(_Db(), _post_row(media={}), now=NOW)
-    monkeypatch.setattr(workspace_copies.media_store.MediaStore, "configured", staticmethod(lambda: False))
+    monkeypatch.setattr(workspace_copies, "is_storage_configured", lambda: False)
     workspace_copies.copy_when_approved(_Db(), _post_row(), now=NOW)
     assert started == []
 
-    monkeypatch.setattr(workspace_copies.media_store.MediaStore, "configured", staticmethod(lambda: True))
+    monkeypatch.setattr(workspace_copies, "is_storage_configured", lambda: True)
 
     def broken(db, post):
         raise RuntimeError("deliverables table is gone")
@@ -183,7 +183,7 @@ def test_no_storage_or_no_media_plans_nothing_and_a_failed_listing_is_logged(sta
     db = _Db()
     workspace_copies.copy_when_approved(db, _post_row(), now=NOW)  # never raises
     assert started == [] and db.rollbacks == 1
-    assert "could not be listed for the workspace copy" in caplog.text
+    assert "could not be copied to the workspace" in caplog.text
 
 
 @pytest.fixture
@@ -196,6 +196,17 @@ def launched(monkeypatch):
 
     monkeypatch.setattr(workspace_copies, "launch_guarded", launch)
     return calls
+
+
+def test_a_broken_storage_check_or_launch_never_fails_the_approval(started, monkeypatch, caplog):
+    """CI found it: a storage check outside the guard would have answered the approve with a 500."""
+    def broken():
+        raise AttributeError("the storage check is gone")
+
+    monkeypatch.setattr(workspace_copies, "is_storage_configured", broken)
+    db = _Db()
+    workspace_copies.copy_when_approved(db, _post_row(), now=NOW)  # never raises
+    assert started == [] and db.rollbacks == 1 and "could not be copied to the workspace" in caplog.text
 
 
 def test_the_copy_runs_in_the_background_from_the_loop_and_from_the_threadpool(launched):
