@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, List, Optional, Set
+from uuid import UUID
 
-from core.models.approval_grants import SUBJECT_BOARD_TASK
+from core.models.approval_grants import SUBJECT_BOARD_TASK, SUBJECT_TOOL_CALL
 
 
 def _agent_of(grant: Any) -> Optional[int]:
@@ -33,20 +34,47 @@ def grant_owners(db: Any, workspace_id: Any, grants: Iterable[Any]) -> Dict[int,
 
     rows: List[Any] = list(grants)
     agent_ids = {a for a in (_agent_of(g) for g in rows) if a}
-    ticket_ids = {t for t in (_ticket_of(g) for g in rows) if t}
+    step_cards = _step_cards(db, workspace_id, rows)
+    ticket_of = {g.id: _ticket_of(g) or step_cards.get(str(g.subject_id)) for g in rows}
+    ticket_ids = {t for t in ticket_of.values() if t}
     names = dict(
         db.query(Agent.id, Agent.name).filter(Agent.id.in_(agent_ids), Agent.workspace_id == workspace_id).all()
     ) if agent_ids else {}
     tickets = _tickets(db, workspace_id, ticket_ids)
     owners: Dict[int, Dict[str, Any]] = {}
     for g in rows:
-        agent, ticket = _agent_of(g), _ticket_of(g)
+        agent, ticket = _agent_of(g), ticket_of[g.id]
         known = tickets.get(ticket, {})
         owners[g.id] = {
             "agent": {"id": agent, "name": names.get(agent)} if agent else None,
             "ticket": {"id": ticket, "title": known.get("title"), "number": known.get("number")} if ticket else None,
         }
     return owners
+
+
+def _step_cards(db: Any, workspace_id: Any, grants: List[Any]) -> Dict[str, int]:
+    """A mission step's question is staged on its task (the clarification ladder:
+    subject ``tool_call``, the orchestration task's id); its ticket is the step's
+    card. F246: question #1178 from #0139.1 was listed with no card number."""
+    from core.models.core import BoardTask
+
+    task_ids = {_uuid(g.subject_id) for g in grants if getattr(g, "subject_type", None) == SUBJECT_TOOL_CALL}
+    task_ids.discard(None)
+    if not task_ids:
+        return {}
+    cards = (
+        db.query(BoardTask.id, BoardTask.orchestration_task_id)
+        .filter(BoardTask.orchestration_task_id.in_(task_ids), BoardTask.workspace_id == workspace_id).all()
+    )
+    return {str(task_id): card_id for card_id, task_id in cards}
+
+
+def _uuid(value: Any) -> Optional[UUID]:
+    """``value`` as a UUID, or None: a gated tool call's subject is a call hash."""
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
 
 
 def _tickets(db: Any, workspace_id: Any, ticket_ids: Set[int]) -> Dict[int, Dict[str, Any]]:

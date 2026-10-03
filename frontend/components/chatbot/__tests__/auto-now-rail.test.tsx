@@ -87,12 +87,12 @@ describe('AutoNowRail', () => {
 describe('AutoNowPill', () => {
   it('carries the one Needs-you number (PRD-252 R5) and toggles the rail', () => {
     data.questions.data = { grants: [question(), question({ id: 2 })] }
-    data.needsYou.data = { total: 4, counts: { review: 1, question: 2, approval: 0, failed: 1 } }
+    data.needsYou.data = { total: 6, counts: { review: 1, question: 2, approval: 0, stuck: 2, failed: 1 } }
     const onToggle = vi.fn()
     render(<AutoNowPill open={false} onToggle={onToggle} />)
     const btn = screen.getByRole('button', { name: 'Show Auto now rail' })
-    expect(btn).toHaveAttribute('title', 'Auto now · needs you: 1 in review · 2 questions · 1 failed')
-    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(btn).toHaveAttribute('title', 'Auto now · needs you: 1 in review · 2 questions · 2 stuck · 1 failed')
+    expect(screen.getByText('6')).toBeInTheDocument()
     fireEvent.click(btn)
     expect(onToggle).toHaveBeenCalled()
   })

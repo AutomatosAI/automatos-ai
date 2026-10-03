@@ -8,6 +8,7 @@ const WORDS: [keyof NeedsYouCounts, string, string][] = [
   ['review', 'in review', 'in review'],
   ['question', 'question', 'questions'],
   ['approval', 'approval', 'approvals'],
+  ['stuck', 'stuck', 'stuck'],
   ['failed', 'failed', 'failed'],
 ]
 

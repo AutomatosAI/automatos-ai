@@ -229,7 +229,7 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
   const renderWidget = (widgetId: string) => {
     switch (widgetId) {
       case 'needs-you':
-        return <NeedsYouWidget period={period} />
+        return <NeedsYouWidget />
       case 'activity':
         return <ActivityWidget period={period} onViewAll={onViewAllActivity} />
       case 'board-glance':

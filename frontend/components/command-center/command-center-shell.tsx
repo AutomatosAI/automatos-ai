@@ -100,7 +100,7 @@ export function CommandCenterShell() {
   // the stats, the Summary tab's read and the Activity stream.
   const [period, setPeriod] = useState<Period>('1d')
   const { data: stats } = useActivityStats(period)
-  const { data: needsYou } = useNeedsYou(period)
+  const { data: needsYou } = useNeedsYou()
   const { data: schedule } = useActivitySchedule('7d')
   // The backend caps `limit` at 100 (api/activity.py) — 200 was a 422 and an
   // empty Activity count; PR #397 found the same on the tab (harvested here).
@@ -201,7 +201,7 @@ export function CommandCenterShell() {
         </div>
       </div>
 
-      <StatsStrip period={period} />
+      <StatsStrip />
       <IsItWorkingStrip />
 
       {/* PRD-222 US-020: the post-setup checklist, dual-surfaced here from the

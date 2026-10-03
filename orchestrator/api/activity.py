@@ -328,7 +328,6 @@ NEEDS_YOU_NOT_LOADED = "What needs you could not be loaded. Try again shortly."
 
 @router.get("/needs-you")
 def get_needs_you(
-    period: str = Query("1d", description="Window for failed tickets: 1d, 7d, 30d, 90d"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -337,10 +336,11 @@ def get_needs_you(
     The Board tab badge, ATTENTION and Auto's pill show ``total``; the Needs
     you widget lists ``rows``. Questions and approval grants count only for a
     workspace admin, who alone can answer them. A failure is a 503 with a
-    message, never "nothing needs you" (F207).
+    message, never "nothing needs you" (F207). It has no period (F246): what
+    waits for the owner waits until it is dealt with.
     """
     try:
-        return needs_you(db, ctx.workspace_id, period, may_answer=may_see_own_workspace_health(db, ctx))
+        return needs_you(db, ctx.workspace_id, may_answer=may_see_own_workspace_health(db, ctx))
     except Exception as e:
         logger.exception("Needs-you read failed for workspace %s", ctx.workspace_id)
         raise HTTPException(status_code=503, detail=NEEDS_YOU_NOT_LOADED) from e

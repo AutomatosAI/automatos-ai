@@ -9,10 +9,17 @@ and "decisions", read from a super-admin-only endpoint. Needs you is now:
   waits for its mission's own check. A mission's card in Review is the mission
   waiting for its plan's approval, so it is counted once, as an approval;
 * open questions;
-* pending approvals: approval grants, and missions waiting for their plan's
-  approval;
-* tickets that failed in the selected period (a failed mission step is its
+* pending approvals that can still be given: approval grants that have not
+  lapsed, and missions waiting for their plan's approval (each with its card's
+  number);
+* stuck tickets: ones nothing will move until the owner does (F246);
+* failed tickets, until the owner deals with them (a failed mission step is its
   mission's to handle).
+
+F246 (night 7): Needs you missed whatever was not a plain Review or failed
+card. A failure dropped out after a day though nobody had dealt with it;
+approvals stayed after they lapsed or after their card was cancelled; mission
+plans had no card number; and stuck cards were never counted.
 
 Questions and approval grants are answered by workspace admins only (the
 grants API), so for anyone else they are neither counted nor listed: each
@@ -21,39 +28,61 @@ count and the rows; ATTENTION and every badge read the same count.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-PERIOD_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
-DEFAULT_PERIOD = "1d"
 # Rows listed per kind: every one, in practice (F225: 25 listed 35 rows for 43). A
 # kind with more says how many more; the count is always exact.
 ROWS_PER_KIND = 200
-KINDS = ("review", "question", "approval", "failed")
-# A mission's own card on the board (orchestration_board_bridge).
+KINDS = ("review", "question", "approval", "stuck", "failed")
+# A mission's own card on the board (orchestration_board_bridge), and a step's.
 MISSION_CARD = "orchestration"
+MISSION_STEP = "orchestration_task"
+# A step card still waiting for its mission to run it.
+OPEN_STEP_STATUSES = ["inbox", "assigned", "in_progress", "review", "blocked"]
+# Why a stuck ticket is stuck: the `why` _STUCK_ROWS gives each one.
+STUCK_NO_HOST = "no_host"                # a CLI agent's ticket, and no host that runs its CLI is online
+STUCK_NO_AGENT = "no_agent"              # Assigned to nobody
+STUCK_NOT_PICKED_UP = "not_picked_up"    # a playbook's card in Assigned: the board never runs one
+STUCK_MISSION_ENDED = "mission_ended"    # a step whose mission ended without it
 
-# Each kind's count, scoped to the workspace. A pending grant stays open until it
-# is answered, exactly as the Questions tab lists it.
+# Review, failed and mission-approval counts, scoped to the workspace. A failed
+# ticket counts until it leaves Failed (F246: a '1d' window let #0003, #0004,
+# #0050 and #0052 drop out though nobody had dealt with them).
 _COUNTS = text("""
     SELECT
       (SELECT COUNT(*) FROM board_tasks
         WHERE workspace_id = CAST(:ws AS uuid) AND status = 'review'
           AND source_type NOT IN ('orchestration_task', 'orchestration')) AS review,
-      (SELECT COUNT(*) FROM approval_grants
-        WHERE workspace_id = CAST(:ws AS uuid) AND status = 'pending' AND kind = 'question'
-          AND CAST(:asks AS boolean)) AS question,
-      (SELECT COUNT(*) FROM approval_grants
-        WHERE workspace_id = CAST(:ws AS uuid) AND status = 'pending' AND COALESCE(kind, 'approval') <> 'question'
-          AND CAST(:asks AS boolean))
-      + (SELECT COUNT(*) FROM orchestration_runs
-        WHERE workspace_id = CAST(:ws AS uuid) AND state = 'awaiting_approval') AS approval,
+      (SELECT COUNT(*) FROM orchestration_runs
+        WHERE workspace_id = CAST(:ws AS uuid) AND state = 'awaiting_approval') AS mission_approval,
       (SELECT COUNT(*) FROM board_tasks
-        WHERE workspace_id = CAST(:ws AS uuid) AND status = 'failed' AND source_type <> 'orchestration_task'
-          AND COALESCE(completed_at, updated_at) >= :since) AS failed
+        WHERE workspace_id = CAST(:ws AS uuid) AND status = 'failed' AND source_type <> 'orchestration_task') AS failed
+""")
+
+# Open questions, or approvals that can still be given (``:questions`` picks the
+# kind), newest first; ``of_all`` is the exact count whatever ``:limit`` lists.
+# A question stays open past its expiry, as the Questions tab lists it. An
+# approval past its expiry can no longer authorise anything (is_authorising), so
+# it is not waiting for anyone (F246: #999 and #1000, lapsed six days). Neither
+# counts once the ticket it is about is cancelled or closed (#1138 for #0093,
+# #0144, #0166): the ticket a grant belongs to is the one grant_owners names.
+_ASKS = text("""
+    SELECT g.id, COUNT(*) OVER () AS of_all
+      FROM approval_grants g
+     WHERE g.workspace_id = CAST(:ws AS uuid) AND g.status = 'pending'
+       AND (COALESCE(g.kind, 'approval') = 'question') = CAST(:questions AS boolean)
+       AND (COALESCE(g.kind, 'approval') = 'question' OR g.expires_at IS NULL OR g.expires_at > :now)
+       AND NOT EXISTS (
+         SELECT 1 FROM board_tasks gone
+          WHERE gone.workspace_id = g.workspace_id AND gone.status IN ('cancelled', 'closed')
+            AND ((g.subject_type = 'board_task' AND CAST(gone.id AS text) = g.subject_id)
+              OR CAST(gone.id AS text) = g.details->>'board_task_id'
+              OR (g.subject_type = 'tool_call' AND CAST(gone.orchestration_task_id AS text) = g.subject_id)))
+  ORDER BY g.requested_at DESC NULLS LAST LIMIT :limit
 """)
 
 _REVIEW_ROWS = text("""
@@ -70,67 +99,126 @@ _FAILED_ROWS = text("""
            COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'failed' AND bt.source_type <> 'orchestration_task'
-       AND COALESCE(bt.completed_at, bt.updated_at) >= :since
   ORDER BY at DESC NULLS LAST LIMIT :limit
 """)
+# F246: a mission waiting for its plan's approval carries its card (#0031, #0126, #0176).
 _MISSION_ROWS = text("""
-    SELECT id, goal, updated_at FROM orchestration_runs
-     WHERE workspace_id = CAST(:ws AS uuid) AND state = 'awaiting_approval'
-  ORDER BY updated_at DESC NULLS LAST LIMIT :limit
+    SELECT r.id, r.goal, r.updated_at, card.id AS card_id, card.workspace_seq
+      FROM orchestration_runs r
+      LEFT JOIN LATERAL (
+        SELECT bt.id, bt.workspace_seq FROM board_tasks bt
+         WHERE bt.workspace_id = r.workspace_id AND bt.orchestration_run_id = r.id AND bt.source_type = 'orchestration'
+      ORDER BY bt.id LIMIT 1) card ON true
+     WHERE r.workspace_id = CAST(:ws AS uuid) AND r.state = 'awaiting_approval'
+  ORDER BY r.updated_at DESC NULLS LAST LIMIT :limit
+""")
+# F246: tickets nothing will move until the owner does, newest first; ``of_all``
+# is the exact count. Assigned to nobody (#0067); a playbook's own card in
+# Assigned, which the board never runs (#0070, #0149: rejected or re-briefed); a
+# CLI agent's ticket while no host that runs its CLI is online (#0016, #0161,
+# #0177: the line the board writes on it); a mission step still open after its
+# mission ended (#0119.3, #0176.9-.12). A playbook step's session ticket
+# ('recipe:<run>:<step>') is claimed by a CLI host, so only a no-host line stalls it.
+_STUCK_ROWS = text("""
+    SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.parent_task_id, bt.orchestration_run_id,
+           a.name AS agent_name, bt.updated_at AS at, COUNT(*) OVER () AS of_all,
+           CASE WHEN bt.source_type = 'orchestration_task' THEN :why_mission_ended
+                WHEN bt.blocked_reason = :no_host_line OR starts_with(bt.blocked_reason, :no_cli_host_prefix)
+                  THEN :why_no_host
+                WHEN bt.assigned_agent_id IS NULL THEN :why_no_agent
+                ELSE :why_not_picked_up END AS why
+      FROM board_tasks bt
+      LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
+      LEFT JOIN orchestration_tasks ot ON ot.id = bt.orchestration_task_id
+      LEFT JOIN orchestration_runs r ON r.id = COALESCE(bt.orchestration_run_id, ot.run_id)
+                                    AND r.workspace_id = bt.workspace_id
+     WHERE bt.workspace_id = CAST(:ws AS uuid)
+       AND ((bt.status = 'assigned' AND bt.source_type NOT IN ('orchestration_task', 'orchestration')
+             AND (bt.assigned_agent_id IS NULL
+                  OR (bt.source_type = 'recipe' AND COALESCE(bt.source_id, '') NOT LIKE 'recipe:%')
+                  OR bt.blocked_reason = :no_host_line OR starts_with(bt.blocked_reason, :no_cli_host_prefix)))
+         OR (bt.source_type = 'orchestration_task' AND bt.status = ANY(:open_step) AND r.state = ANY(:ended)))
+  ORDER BY at DESC NULLS LAST LIMIT :limit
 """)
 
 
-def normal_period(period: str) -> str:
-    """``period`` when it is one the counters know, else the default (a day)."""
-    return period if period in PERIOD_DAYS else DEFAULT_PERIOD
-
-
-def period_start(period: str) -> datetime:
-    """The start of ``period`` ('1d', '7d', '30d', '90d'; anything else is a day)."""
-    return datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS[normal_period(period)])
-
-
-def needs_you_counts(db: Session, workspace_id: Any, since: datetime, *, may_answer: bool = True) -> Dict[str, int]:
+def needs_you_counts(db: Session, workspace_id: Any, *, may_answer: bool = True) -> Dict[str, int]:
     """Each kind's count and their ``total``: the one Needs-you number.
     ``may_answer`` False (not a workspace admin) leaves questions and approval
     grants out, since that viewer can neither open nor answer them."""
-    row = db.execute(_COUNTS, {"ws": str(workspace_id), "since": since, "asks": bool(may_answer)}).first()
-    counts = {kind: int(getattr(row, kind, 0) or 0) for kind in KINDS} if row else dict.fromkeys(KINDS, 0)
-    return {**counts, "total": sum(counts.values())}
+    return _counted(db, workspace_id, may_answer=may_answer, limit=1)[0]
 
 
-def needs_you(db: Session, workspace_id: Any, period: str = DEFAULT_PERIOD, *, may_answer: bool = True) -> Dict[str, Any]:
+def needs_you(db: Session, workspace_id: Any, *, may_answer: bool = True) -> Dict[str, Any]:
     """The number and the rows behind it, newest first in each kind."""
-    period = normal_period(period)
-    since = period_start(period)
-    params = {"ws": str(workspace_id), "since": since, "limit": ROWS_PER_KIND}
-    questions = _pending_grants(db, workspace_id, questions=True) if may_answer else []
-    approvals = _pending_grants(db, workspace_id, questions=False) if may_answer else []
+    counts, listed = _counted(db, workspace_id, may_answer=may_answer, limit=ROWS_PER_KIND)
+    params = {"ws": str(workspace_id), "limit": ROWS_PER_KIND}
     rows: Dict[str, List[Dict[str, Any]]] = {
         "review": [_ticket_row(r) for r in db.execute(_REVIEW_ROWS, params)],
-        "question": _grant_rows(db, workspace_id, questions),
-        "approval": _approval_rows(db, workspace_id, approvals, params),
+        "question": _grant_rows(db, workspace_id, _grants_by_id(db, workspace_id, listed["question"])),
+        "approval": _approval_rows(db, workspace_id, _grants_by_id(db, workspace_id, listed["approval"]), params),
+        "stuck": _stuck_rows(db, workspace_id, listed["stuck"]),
         "failed": [_ticket_row(r) for r in db.execute(_FAILED_ROWS, params)],
     }
-    counts = needs_you_counts(db, workspace_id, since, may_answer=may_answer)
-    return {"period": period, "total": counts.pop("total"), "counts": counts, "rows": rows}
+    return {"total": counts.pop("total"), "counts": counts, "rows": rows}
 
 
-def _pending_grants(db: Session, workspace_id: Any, *, questions: bool) -> List[Any]:
-    """The newest open questions (``questions``) or pending approval grants."""
-    from sqlalchemy import func
+def _counted(
+    db: Session, workspace_id: Any, *, may_answer: bool, limit: int,
+) -> Tuple[Dict[str, int], Dict[str, List[Any]]]:
+    """Every kind's exact count with ``total``, and the newest ``limit`` of the
+    questions, approval grants and stuck tickets (one read gives both)."""
+    row = db.execute(_COUNTS, {"ws": str(workspace_id)}).first()
+    questions = _asks(db, workspace_id, questions=True, limit=limit) if may_answer else (0, [])
+    approvals = _asks(db, workspace_id, questions=False, limit=limit) if may_answer else (0, [])
+    stuck = _stuck(db, workspace_id, limit=limit)
+    counts = {
+        "review": _count(row, "review"),
+        "question": questions[0],
+        "approval": approvals[0] + _count(row, "mission_approval"),
+        "stuck": stuck[0],
+        "failed": _count(row, "failed"),
+    }
+    listed = {"question": questions[1], "approval": approvals[1], "stuck": stuck[1]}
+    return {**counts, "total": sum(counts.values())}, listed
 
-    from core.models.approval_grants import KIND_APPROVAL, KIND_QUESTION, ApprovalGrant, GrantStatus
 
-    kind = func.coalesce(ApprovalGrant.kind, KIND_APPROVAL)
-    return (
-        db.query(ApprovalGrant)
-        .filter(ApprovalGrant.workspace_id == workspace_id, ApprovalGrant.status == GrantStatus.PENDING.value,
-                kind == KIND_QUESTION if questions else kind != KIND_QUESTION)
-        .order_by(ApprovalGrant.requested_at.desc())
-        .limit(ROWS_PER_KIND)
-        .all()
-    )
+def _count(row: Any, name: str) -> int:
+    return int(getattr(row, name, 0) or 0) if row is not None else 0
+
+
+def _asks(db: Session, workspace_id: Any, *, questions: bool, limit: int) -> Tuple[int, List[int]]:
+    """How many open questions (``questions``) or approvals that can still be
+    given there are, and the ids of the newest ``limit``."""
+    found = db.execute(_ASKS, {"ws": str(workspace_id), "questions": questions,
+                               "now": datetime.now(timezone.utc), "limit": limit}).all()
+    return (int(found[0].of_all) if found else 0), [r.id for r in found]
+
+
+def _stuck(db: Session, workspace_id: Any, *, limit: int) -> Tuple[int, List[Any]]:
+    """How many tickets are stuck, and the newest ``limit`` of them."""
+    from core.models.orchestration_enums import TERMINAL_RUN_STATES
+    from services.cli_ticket_lane import NO_CLI_HOST_PREFIX, NO_HOST_REASON
+
+    found = db.execute(_STUCK_ROWS, {
+        "ws": str(workspace_id), "limit": limit, "open_step": OPEN_STEP_STATUSES,
+        "ended": sorted(state.value for state in TERMINAL_RUN_STATES),
+        "no_host_line": NO_HOST_REASON, "no_cli_host_prefix": NO_CLI_HOST_PREFIX,
+        "why_no_host": STUCK_NO_HOST, "why_no_agent": STUCK_NO_AGENT,
+        "why_not_picked_up": STUCK_NOT_PICKED_UP, "why_mission_ended": STUCK_MISSION_ENDED,
+    }).all()
+    return (int(found[0].of_all) if found else 0), found
+
+
+def _grants_by_id(db: Session, workspace_id: Any, ids: List[int]) -> List[Any]:
+    """The grants ``ids`` names, in that order."""
+    from core.models.approval_grants import ApprovalGrant
+
+    if not ids:
+        return []
+    found = {g.id: g for g in db.query(ApprovalGrant).filter(
+        ApprovalGrant.workspace_id == workspace_id, ApprovalGrant.id.in_(ids)).all()}
+    return [found[i] for i in ids if i in found]
 
 
 def _grant_rows(db: Session, workspace_id: Any, grants: List[Any]) -> List[Dict[str, Any]]:
@@ -168,14 +256,26 @@ def _numbers_of(db: Session, workspace_id: Any, ticket_ids: set) -> Dict[int, Op
 
 
 def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Approval grants and missions waiting for their plan's approval, newest first."""
+    """Approval grants and missions waiting for their plan's approval, newest
+    first. A mission's row opens its plan and names its card by number (F246)."""
+    from services.ticket_numbers import format_number
+
     missions = [
-        {"source": "mission", "id": str(r.id), "title": r.goal, "ticket_id": None, "ticket_number": None,
-         "agent_name": None, "at": _iso(r.updated_at)}
+        {"source": "mission", "id": str(r.id), "title": r.goal, "ticket_id": r.card_id,
+         "ticket_number": format_number(r.workspace_seq), "agent_name": None, "at": _iso(r.updated_at)}
         for r in db.execute(_MISSION_ROWS, params)
     ]
     merged = _grant_rows(db, workspace_id, grants) + missions
     return sorted(merged, key=lambda row: row["at"] or "", reverse=True)[:ROWS_PER_KIND]
+
+
+def _stuck_rows(db: Session, workspace_id: Any, rows: List[Any]) -> List[Dict[str, Any]]:
+    """A stuck ticket opens itself, named by its number (a mission step's is its
+    card's: #0176.9), with why it is stuck."""
+    from services.ticket_numbers import ticket_numbers
+
+    numbers = ticket_numbers(db, workspace_id, rows)
+    return [{**_ticket_row(r), "number": numbers.get(r.id), "why": r.why} for r in rows]
 
 
 def _iso(value: Any) -> Any:
