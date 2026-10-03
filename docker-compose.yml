@@ -340,6 +340,8 @@ services:
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
         NEXT_PUBLIC_AUTH_EDITION: ${NEXT_PUBLIC_AUTH_EDITION:-local}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        # F237: the browser loads presigned media from MinIO's public origin (S3_PUBLIC_ENDPOINT_URL).
+        NEXT_PUBLIC_MEDIA_ORIGINS: ${NEXT_PUBLIC_MEDIA_ORIGINS:-http://localhost:9000}
     container_name: automatos_frontend
     restart: unless-stopped
     depends_on:
@@ -359,6 +361,8 @@ services:
       # An API-key principal would hit the workspace-permission gate instead (403).
       # SaaS-only; `:-` so its absence never blocks local `docker compose up`.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      # The dev server (docker-compose.dev.yml) reads next.config.js at start, from this env.
+      NEXT_PUBLIC_MEDIA_ORIGINS: ${NEXT_PUBLIC_MEDIA_ORIGINS:-http://localhost:9000}
       NODE_ENV: production
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
