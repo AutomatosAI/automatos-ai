@@ -201,16 +201,13 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     if not name or not description:
         return {"success": False, "error": "Missing required: name and description"}
 
-    # F185 (night 6): asked to run the playbook it had just made, Auto made
-    # another of the same name. F144's namesake rule, for playbooks.
-    namesakes = _playbooks_called(db, workspace_id, name)
-    if namesakes:
-        return {
-            "success": False,
-            "existing_playbook_id": namesakes[0].id,
-            "existing_playbook_ids": [playbook.id for playbook in namesakes],
-            "error": _playbook_namesakes_refusal(namesakes),
-        }
+    # F185: never a namesake of one of this workspace's; F222: never an empty copy
+    # of a marketplace playbook (playbook_names.py).
+    from modules.tools.discovery.playbook_names import name_refusal
+
+    refusal = name_refusal(db, workspace_id, name)
+    if refusal is not None:
+        return refusal
 
     tags = params.get("tags", [])
     inputs = params.get("inputs")
