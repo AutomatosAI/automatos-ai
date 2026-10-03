@@ -23,7 +23,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from services.run_cancel import MISSION_STEP, is_playbook_card, mission_run_of, playbook_run_of
+from services.run_cancel import GOAL_SHOWN_CHARS, MISSION_STEP, is_playbook_card, mission_run_of, playbook_run_of
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,14 @@ REDOING_MISSION_STATES = ("running", "paused")
 # The step states a revision can start from: checked or being checked (VERIFYING, VERIFIED),
 # or finished and about to be checked (COMPLETED goes through VERIFYING).
 REDOABLE_STEP_STATES = ("completed", "verifying", "verified")
+# What a redone step is shown as its last attempt when that attempt left no text: the
+# dispatcher's revision prompt, which carries the owner's words, needs one to show.
+NO_LAST_ATTEMPT = "(Your last attempt left no text.)"
+
+
+class RedoTaken(Exception):
+    """Another redo of the same card started first (a second click, a drag racing a
+    button): this one changed nothing."""
 
 
 def takes_its_own_redo(task: Any) -> bool:
@@ -72,7 +80,7 @@ def _mission_refusal(db: Any, task: Any) -> Optional[str]:
     label = ticket_label(task, capital=True)
     if run is None:
         return f"{label} belongs to a mission that can no longer be found, so it can't run again here."
-    goal = (run.goal or "")[:80]
+    goal = (run.goal or "")[:GOAL_SHOWN_CHARS]
     where = f"/missions/{run.id}"
     if task.source_type == SESSION_STEP:
         return (f"{label} is a step of the mission \"{goal}\" that a Claude Code session ran; the board "
@@ -133,6 +141,9 @@ def _redo_playbook(db: Any, card: Any) -> str:
     from services.watch_rerun import TRIGGERED_BY_HUMAN, create_rerun_execution, launch_execution
 
     original = playbook_run_of(db, card)
+    if not _hold_the_card(db, card, original.execution_id):
+        db.rollback()
+        raise RedoTaken(f"{ticket_label(card, capital=True)} is already being run again.")
     rerun = create_rerun_execution(db, _playbook_of(db, original), original, triggered_by=TRIGGERED_BY_HUMAN)
     words = owner_words(card)
     earlier = (original.execution_metadata or {}).get(ANSWERS_KEY)
@@ -146,6 +157,18 @@ def _redo_playbook(db: Any, card: Any) -> str:
     logger.info("[F243] %s: playbook run %s runs again as %s", ticket_label(card), original.execution_id,
                 rerun.execution_id)
     return f"{ticket_label(card, capital=True)}'s playbook is running again on this card."
+
+
+def _hold_the_card(db: Any, card: Any, run_id: str) -> bool:
+    """One redo of a card at a time (review of #886: two Run Now clicks launched
+    two reruns). The card's row is locked without waiting (a wait would hold the
+    event loop, F105) and must still show ``run_id``; a second request finds it
+    locked, or already showing the first one's rerun."""
+    from core.models.core import BoardTask
+
+    held = (db.query(BoardTask.source_id).filter(BoardTask.id == card.id)
+            .with_for_update(skip_locked=True).first())
+    return held is not None and held.source_id == run_id
 
 
 def _point_card_at(card: Any, execution_id: str) -> None:
@@ -182,7 +205,8 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     attempt = (step.attempt_number or 0) + 1
     step.failure_reason_code = FailureReasonCode.VERIFICATION_REJECT.value
     step.attempt_number = attempt
-    step.input_context = {**(step.input_context or {}), "previous_output": step.output or card.result or "",
+    step.input_context = {**(step.input_context or {}),
+                          "previous_output": step.output or card.result or NO_LAST_ATTEMPT,
                           "verification_feedback": {"attempt": attempt, "reasoning": owner_words(card) or "",
                                                     "scores": {}, "failures": []}}
     if step.state == TaskState.COMPLETED.value:

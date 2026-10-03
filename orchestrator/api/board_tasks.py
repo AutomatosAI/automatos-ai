@@ -46,7 +46,7 @@ from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
 from services.run_cancel import is_playbook_card
-from services.run_redo import redo_refusal, start_redo, takes_its_own_redo
+from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -1207,9 +1207,17 @@ def _redo(db: Session, ctx: RequestContext, task: BoardTask, feedback: str) -> N
     agent, or (F243) through its playbook or its mission. Committed."""
     if takes_its_own_redo(task):
         task.review_feedback = feedback
-        start_redo(db, task, by=_operator_ref(ctx))
+        _start_its_redo(db, ctx, task)
     else:
         _back_to_its_agent(db, ctx, task, feedback)
+
+
+def _start_its_redo(db: Session, ctx: RequestContext, task: BoardTask) -> str:
+    """``start_redo``, a redo another request started first being a 409 (F243)."""
+    try:
+        return start_redo(db, task, by=_operator_ref(ctx))
+    except RedoTaken as taken:
+        raise HTTPException(status_code=409, detail=str(taken)) from taken
 
 
 def _back_to_its_agent(db: Session, ctx: RequestContext, task: BoardTask, feedback: str) -> None:
@@ -1415,7 +1423,7 @@ def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -
         raise HTTPException(status_code=409, detail=refused)
     was = task.status
     keep_previous_run(task, why="run now", by=_operator_ref(ctx))
-    message = start_redo(db, task, by=_operator_ref(ctx))
+    message = _start_its_redo(db, ctx, task)
     return {"success": True, "task_id": task.id, "status": task.status,
             "rerun_of": was if was in FINISHED else None, "started": True, "message": message}
 

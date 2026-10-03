@@ -130,6 +130,28 @@ def test_a_playbook_still_running_is_refused_before_anything_changes(workspace, 
     assert (_card(new_session, pb.card).status, launched) == ("review", [])
 
 
+def test_a_redo_another_request_started_first_changes_nothing(workspace, new_session, launched):
+    """Review of #886: two Run Now clicks (or a drag racing one) launched two reruns.
+    A redo must find the card still showing the run it redoes."""
+    from core.models.core import BoardTask
+    from services.run_redo import RedoTaken, start_redo
+
+    pb = _finished_playbook(new_session, workspace, status="failed", run_status="failed")
+    mine = new_session()
+    card = mine.get(BoardTask, pb.card)
+    other = new_session()                                     # the first request's rerun landed
+    other.execute(text("UPDATE board_tasks SET source_id = 'rerun-first' WHERE id = :i"), {"i": pb.card})
+    other.commit()
+
+    with pytest.raises(RedoTaken):
+        start_redo(mine, card, by="user:2")
+
+    assert launched == [] and _card(new_session, pb.card).source_id == "rerun-first"
+    reruns = new_session().execute(text("SELECT count(*) FROM recipe_executions WHERE retry_of = :e"),
+                                   {"e": pb.run}).scalar()
+    assert reruns == 0
+
+
 def test_every_step_of_the_redo_is_told_the_owners_words():
     from services.playbook_owner_ask import ANSWERS_KEY, REDO_KEY, owner_answers_block
 
@@ -159,6 +181,24 @@ def test_a_rejected_step_of_a_running_mission_goes_back_to_its_mission(db_sessio
     db_session.refresh(card)
     assert (task.state, card.status) == (TaskState.RETRYING.value, "in_progress")  # night: never ran again
     assert task.input_context["previous_output"] == "The gift box page, drafted."
+    assert NOTE in task.input_context["verification_feedback"]["reasoning"]
+
+
+def test_a_step_that_left_no_text_still_carries_the_owners_words(db_session, seed_workspace):
+    """Review of #886: the revision prompt shows the owner's words only beside a
+    last attempt, so a step that left no text gets one to show."""
+    from api.board_tasks import reject_task
+    from services.run_redo import NO_LAST_ATTEMPT
+
+    ws = UUID(seed_workspace())
+    _run_row, _mission_card, steps = _mission(db_session, ws)
+    task, card = _step(steps, TaskState.VERIFIED, output=None)
+    db_session.flush()
+
+    asyncio.run(reject_task(card.id, _body({"feedback": NOTE}), ctx=_owner(ws), db=db_session))
+
+    db_session.refresh(task)
+    assert task.input_context["previous_output"] == NO_LAST_ATTEMPT
     assert NOTE in task.input_context["verification_feedback"]["reasoning"]
 
 
