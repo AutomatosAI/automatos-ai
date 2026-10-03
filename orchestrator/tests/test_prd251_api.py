@@ -279,6 +279,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             # content bank (US-B203; api/socials_topics.py).
             ("GET", "/api/socials/plans"),
             ("POST", "/api/socials/plans"),
+            # Plan with Auto: a plan drafted from what the person says, not saved (api/socials_plan_draft.py).
+            ("POST", "/api/socials/plans/draft"),
             ("GET", "/api/socials/plans/{plan_id}"),
             ("PUT", "/api/socials/plans/{plan_id}"),
             ("POST", "/api/socials/plans/{plan_id}/pause"),

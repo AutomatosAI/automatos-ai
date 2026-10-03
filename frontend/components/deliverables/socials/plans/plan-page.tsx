@@ -5,21 +5,27 @@
  * timezone, Pause (or Resume) and Save; the five steps on the left (Goal and dates, Cadence,
  * What to research, Making and approving, Content bank) and the chosen one on the right,
  * with Back and Next. A new plan is created on Save, then opens as itself; the content bank
- * fills once the plan exists.
+ * fills once the plan exists. A new plan starts with Plan with Auto: Auto drafts the steps
+ * from what the person says, and saving that draft also adds Auto's ideas to the bank and
+ * starts research.
  */
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import type { SocialPlan } from '@/lib/socials-plan-types'
+import type { SocialPlan, SocialPlanAutoDraft } from '@/lib/socials-plan-types'
 import { browserTimezone } from '@/lib/social-time'
 import { cn } from '@/lib/utils'
+import { useSaveDraftedPlan } from '@/hooks/use-socials-plan-draft'
 import { useSaveSocialPlan, useSetSocialPlanStatus, useSocialPlan } from '@/hooks/use-socials-plans'
+import { PlanAutoNotes } from './plan-auto-notes'
+import { autoChanges, researchAsked, topicInputs } from './plan-auto-model'
 import { PLAN_STEPS, draftFromPlan, emptyDraft, inputFromDraft, missingFields, statusLine, type PlanDraft } from './plan-model'
 import { PlanStepBank } from './plan-step-bank'
 import { PlanStepCadence } from './plan-step-cadence'
 import { PlanStepGoal } from './plan-step-goal'
 import { PlanStepMaking } from './plan-step-making'
 import { PlanStepResearch } from './plan-step-research'
+import { PlanWithAuto } from './plan-with-auto'
 
 const STEP_BUTTON = 'flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 text-left text-sm font-medium'
 
@@ -30,12 +36,20 @@ interface PlanPageProps {
   onSaved: (plan: SocialPlan) => void
 }
 
-function StepBody({ step, draft, set, planId }: { step: number; draft: PlanDraft; set: (c: Partial<PlanDraft>) => void; planId: string | null }) {
+interface StepBodyProps {
+  step: number
+  draft: PlanDraft
+  set: (c: Partial<PlanDraft>) => void
+  planId: string | null
+  auto: AutoState
+}
+
+function StepBody({ step, draft, set, planId, auto }: StepBodyProps) {
   if (step === 0) return <PlanStepGoal draft={draft} set={set} />
   if (step === 1) return <PlanStepCadence draft={draft} set={set} />
   if (step === 2) return <PlanStepResearch draft={draft} set={set} />
   if (step === 3) return <PlanStepMaking draft={draft} set={set} />
-  return <PlanStepBank planId={planId} />
+  return <PlanStepBank planId={planId} ideas={auto.draft?.topics} onLeaveOut={auto.leaveOut} />
 }
 
 function StepsNav({ step, onStep }: { step: number; onStep: (step: number) => void }) {
@@ -63,17 +77,52 @@ function usePlanDraft(plan: SocialPlan | undefined): [PlanDraft, (changes: Parti
   return [draft, (changes) => setDraft((current) => ({ ...current, ...changes }))]
 }
 
+interface AutoState {
+  /** Auto's last draft of this new plan, with the ideas the person has not left out. */
+  draft: SocialPlanAutoDraft | null
+  adopt: (draft: SocialPlanAutoDraft) => void
+  leaveOut: (title: string) => void
+}
+
+function useAutoDraft(set: (changes: Partial<PlanDraft>) => void, onAdopted: () => void): AutoState {
+  const [draft, setDraft] = useState<SocialPlanAutoDraft | null>(null)
+  return {
+    draft,
+    adopt: (drafted) => {
+      set(autoChanges(drafted))
+      setDraft(drafted)
+      onAdopted()
+    },
+    leaveOut: (title) => setDraft((current) => (current ? { ...current, topics: current.topics.filter((t) => t.title !== title) } : current)),
+  }
+}
+
+/** Save the plan: a new one drafted by Auto also takes its ideas into the bank and starts research. */
+function usePlanSave(planId: string | null, draft: PlanDraft, auto: SocialPlanAutoDraft | null, onSaved: (plan: SocialPlan) => void) {
+  const save = useSaveSocialPlan()
+  const adopt = useSaveDraftedPlan()
+  const run = () => {
+    const input = inputFromDraft(draft)
+    if (planId || !auto) {
+      save.mutate({ planId, input }, { onSuccess: onSaved })
+      return
+    }
+    adopt.mutate({ input, topics: topicInputs(auto.topics), research: researchAsked(draft.sources) }, { onSuccess: ({ plan }) => onSaved(plan) })
+  }
+  return { run, busy: save.isLoading || adopt.isLoading }
+}
+
 export function SocialsPlanPage({ planId, canEdit, onSaved }: PlanPageProps) {
   const { data: plan } = useSocialPlan(planId)
   const [draft, set] = usePlanDraft(plan)
   const [step, setStep] = useState(planId ? 1 : 0)
-  const save = useSaveSocialPlan()
+  const auto = useAutoDraft(set, () => setStep(0))
+  const save = usePlanSave(planId, draft, auto.draft, onSaved)
   const status = useSetSocialPlanStatus()
   const missing = missingFields(draft)
-  const onSave = () => save.mutate({ planId, input: inputFromDraft(draft) }, { onSuccess: onSaved })
   const last = step === PLAN_STEPS.length - 1
   const saveButton = (
-    <Button type="button" disabled={!canEdit || save.isLoading || missing.length > 0 || plan?.status === 'ended'} onClick={onSave}>
+    <Button type="button" disabled={!canEdit || save.busy || missing.length > 0 || plan?.status === 'ended'} onClick={save.run}>
       Save plan
     </Button>
   )
@@ -99,11 +148,13 @@ export function SocialsPlanPage({ planId, canEdit, onSaved }: PlanPageProps) {
           {saveButton}
         </div>
       </header>
+      {!planId && <PlanWithAuto canEdit={canEdit} drafted={!!auto.draft} onDrafted={auto.adopt} />}
+      {auto.draft && <PlanAutoNotes warnings={auto.draft.warnings} />}
       {missing.length > 0 && <p className="m-0 text-[12.5px] text-muted-foreground">Before saving, the plan needs {missing.join(', ')}.</p>}
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
         <StepsNav step={step} onStep={setStep} />
         <section aria-label={PLAN_STEPS[step]} className="flex min-h-[520px] flex-col gap-5 rounded-xl border border-border bg-background p-5">
-          <StepBody step={step} draft={draft} set={set} planId={planId} />
+          <StepBody step={step} draft={draft} set={set} planId={planId} auto={auto} />
           <footer className="mt-auto flex gap-2 border-t border-border pt-3.5">
             <Button type="button" variant="ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</Button>
             {last ? saveButton : <Button type="button" variant="outline" onClick={() => setStep(step + 1)}>Next</Button>}
