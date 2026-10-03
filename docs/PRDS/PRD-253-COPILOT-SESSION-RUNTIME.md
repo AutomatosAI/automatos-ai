@@ -1,6 +1,6 @@
 # PRD-253: GitHub Copilot as a session CLI, and all four permission modes on every session CLI
 
-> **Status:** DRAFT 2026-10-02. Not started.
+> **Status:** IN BUILD 2026-10-02 — W0 [#855](https://github.com/AutomatosAI/automatos-ai/pull/855), Wave P [#856](https://github.com/AutomatosAI/automatos-ai/pull/856), W1–W3 in one PR stacked on #856. Each is a draft until the owner's local test.
 >
 > **The owner's words:** "We wrote a pattern for loading runtime agents like claude code, codex, copilot and so on … I would like to look at adding copilot next as we have a possible bank poc which would be huge." The same day, on [#845](https://github.com/AutomatosAI/automatos-ai/pull/845) (Claude Code's four permission modes for sessions, merged 2026-09-30): "User should be able to do this for all runtime models."
 >
@@ -131,7 +131,7 @@ No migration, table, route or dependency is added. The CLI picker needs no chang
   |---|---|
   | `--disable-builtin-mcps` | GitHub's own MCP server. It would let a session write to GitHub with the operator's token, outside the shell gate (§9.3). |
   | `--no-remote` | Remote control from github.com |
-  | `--no-auto-login` | A device-code prompt nobody can answer |
+  | ~~`--no-auto-login`~~ | Not used (F233, 2 Oct): it switches off the stored login and the `gh` fallback, the only ways a session signs in, and `-p` never waits on a login prompt anyway |
   | `--no-auto-update` and `COPILOT_AUTO_UPDATE=false` | A version change mid-run; the host runs the version it announced |
   | `--no-ask-user` | Questions inside Copilot; they go through `ask_human` (PRD-245 W2) |
 
@@ -369,7 +369,7 @@ COPILOT = CliPreset(
     name_flag="--name",
     ungated_stance=(),                                        # nothing: our hook's allow is the only lift (D3)
     plan_stance=(),                                           # Plan = the plan turn (D9, Wave P); Copilot's own --plan is not used
-    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update", "--no-auto-login"),
+    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"),   # never --no-auto-login (F233)
     hook_events=BUS_EVENTS - {"PostCompact"},
     hook_timeouts={"*": 60, "PreToolUse": 600, "PermissionRequest": 600},   # SECONDS (timeoutSec); timeouts fail OPEN
     config_home_env="COPILOT_HOME", config_home_scope=SCOPE_PER_AGENT,
@@ -455,15 +455,17 @@ Until S1.2 lands, the host announces `copilot: served:false` with the reason. Co
 
 **S1.3 · Launch (S)**
 A new session:
-`copilot -p "<pointer>" --session-id <uuid> --add-dir <session dir> [--add-dir <deliverables folder>] [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json] --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update --no-auto-login`
+`copilot -p "<pointer>" --session-id <uuid> --add-dir <session dir> [--add-dir <deliverables folder>] [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json] --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update`
 
 A resumed session uses `--resume <cli_session_id>` in place of `--session-id`.
+
+**As built (F236, build 6):** 1.0.91's own parser refuses `--resume` beside `--name` or `--worktree`, and `--session-id` beside `--worktree` (probed against the binary). So a worktree session passes `--worktree automatos-N` and no `--session-id`: Copilot mints the id, SessionStart reports it, and a later resume uses it. A resumed session passes `--resume <id>` with neither `--name` nor `--worktree`, and keeps its name and folder.
 
 - **PTY:** it spawns on the host's PTY like every CLI. The drain and the terminal log are unchanged.
 - **`--add-dir`:** passed for every folder the gate grants: the session dir, and the deliverables folder when it is not the cwd. Copilot's own path check ("cwd + temp") then sees the same folders.
 - **The prompt:** the pointer is the same short line every CLI gets. The soul and the ticket ride `UserPromptSubmit` → `additionalContext`, which Copilot puts into the model-facing prompt (1.0.65).
 - **Telemetry:** `OTEL_*` is kept for Copilot's own export (O1). `OTEL_EXPORTER_OTLP_HEADERS`, when set, is also named in `--secret-env-vars`, so session shells never see its value.
-- **Resume:** if verify shows `--worktree` cannot combine with `--resume`, set `worktree_excludes_resume=True`. If `--name` fails on resume, the adapter drops it there.
+- **Resume:** `worktree_excludes_resume=True` and `name_excludes_resume=True`; `session_id_excludes_worktree=True` for a new worktree session (F236).
 **Files:** `adapters/copilot.py`; `tests/test_adapters.py`.
 **Acceptance:**
 - [ ] Golden argv for the new, resumed, worktree, model and Automatos-tools cases.
@@ -646,6 +648,91 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
 **The cli-host README:** how to install, `copilot login`, the refusal table, and what an organisation admin must allow.
 **Files:** `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`, `services/cli-host/README.md`.
 
+**As built (W1–W3, 2026-10-02).** One PR, stacked on Wave P. Where the build differs from the stories above, and why:
+- **The hooks file is Claude's own format.** Copilot 1.0.91 reads a Claude-format file in
+  `$COPILOT_HOME/hooks/` unmodified and answers it with Claude's snake_case payloads and Claude's
+  tool names. The decision is read from `hookSpecificOutput`, so the shim and the gate need no
+  translation.
+  - Every event is written under its PascalCase bus name, with `timeout` (not `timeoutSec`).
+  - The tool events carry `matcher: "*"`.
+  - `PermissionRequest` and `Notification` also name themselves with `--event` on the command line.
+- **`config.json` and `settings.json` are two files.** Since 1.0.91, `config.json` is Copilot's
+  state, and its settings are in `settings.json`. The agent's home gets:
+  - `config.json`: the account pointer and `trustedFolders: []`;
+  - `settings.json`: the fixed values, plus `askUser: false` and `disableAllHooks: false`, the
+    operator's co-author and proxy settings (from their `settings.json`, else the legacy
+    `config.json`), and the sandbox block.
+- **The sandbox is switched on by settings, not a flag.** 1.0.91 has no `--sandbox`. A saved
+  `sandbox.enabled`, with `experimental: true`, turns it on.
+  - The block uses 1.0.91's `userPolicy` schema (`adapters/copilot_sandbox.py`).
+  - A non-empty `allowedHosts` blocks every other host, so the package registries and
+    `--session-allow-domain` are the only outbound hosts.
+  - The prerequisites are checked on the login-shell `PATH`, plus `/dev/net/tun` on Linux.
+- **`permission_request="rejudge"` was built before the live check (verify 10).** Denying there
+  would refuse a call the gate had allowed. Copilot's re-ask gets an allow when the gate allowed the
+  identical call earlier in the turn (the last 64 calls) or would allow it now. Anything else is
+  denied, and it is never a card. Claude Code and Codex keep the deny.
+- **The soul reaches every CLI without a system-prompt flag.** Design §6.9 put the soul on
+  `UserPromptSubmit`, but only the ticket ever rode it, so Codex sessions never saw their system
+  prompt. `_turn_context` now puts the system prompt ahead of the ticket for any preset with no
+  `system_prompt_flag`. That covers Codex as well as Copilot.
+- **D4 holds for every preset, at both ends.**
+  - The held-hook timeouts were below the shim's 560 s wait: Claude Code at 540 s, Codex at 30 s.
+    With Codex's approvals off, a hook it timed out left the call to Codex. Every preset now uses
+    `HELD_HOOK_TIMEOUT_SECONDS` (600).
+  - The host's own hold is capped at `MAX_HOLD_SECONDS` (530) inside a turn. `--ask-timeout`
+    defaults to an hour (night 1). Every CLI's hook died first, so a hold never really lasted past
+    about nine minutes. An answer after that was recorded as approved for a call the CLI had
+    already been told was denied ("host is unreachable").
+  - One test pins the order for every preset: hook timeout > shim wait > host hold.
+- **The Canvas take-over opens the agent's own home** (W0's note on `codex resume` described this,
+  but the terminal opened the operator's home).
+  - The terminal launch now carries `agent_id`.
+  - For a per-agent CLI whose home exists, the host starts it with
+    `/usr/bin/env CODEX_HOME|COPILOT_HOME=<agent home> PYTHONPATH=<host package> …`, and reads the
+    turn's usage from that home.
+  - Our hooks are installed there, so the shim stands aside when `AUTOMATOS_TERMINAL` is set and
+    there is no host socket.
+  - Host contract 0.11.0.
+- **`session.py` was split** (`session_files.py`, unchanged code), so this wave keeps it under
+  800 lines.
+- **The login route is `copilot` or `gh`, not `keychain`.** The host's source guard rejects
+  the word "keychain" in the package's code (no credential handling). The one exempt literal
+  is the sandbox's `"keychainAccess": False`, which denies the keychain to sandboxed commands.
+  The guard asserts that the deny is present.
+- **Waiting on the live run (Verify at build):**
+  - the plaintext-token key: the probe checks `storeTokenPlaintext` and the presence of five
+    candidate keys, and never reads a value;
+  - the MCP tool-name spelling: six spellings are accepted;
+  - the `totalNanoAiu` unit (booked as `/1e9` AI credits);
+  - the version floor (1.0.70).
+- **Found by the first live runs (build 5, 2 Oct night):**
+  - **F233.** `--no-auto-login` switched off the stored login and the `gh` fallback, the only
+    ways a session can sign in, so every session failed "No authentication information found".
+    It was dropped. Copilot's `config.json` carries `//` header lines, and the account pointer
+    is now read past them.
+  - **F234.** Copilot runs its hooks inside its own sandbox. The seatbelt profile lets a process
+    reach a Unix socket only at a read-write path, so the shim could not reach the host and
+    every call was denied. The hook socket itself is now in `readwritePaths`; nothing else of
+    the host's state is. The live rerun (1269-1271) showed that the profile writes its
+    `deniedPaths` after its grants ("override broader allow rules"): the denied state dir beat
+    the socket's grant and the session dir's (`ticket.md`). So the state is now denied entry by
+    entry around this session's folder and the socket (`deny_all_but`). A read-write socket
+    path also lets a sandboxed command unlink it and bind its own, so the shim checks that
+    the peer is the host's PID (`AUTOMATOS_HOST_PID`; macOS
+    `LOCAL_PEERPID`, Linux `SO_PEERCRED`). Under Linux's bubblewrap the socket is a bind mount
+    that cannot be unlinked.
+- **Found by build 6 (3 Oct):**
+  - **F236.** Ticket 1273's Plan was approved, and the resumed run died at once:
+    `error: the argument '--resume [<value>]' cannot be used with '--name <name>'`. Its headline
+    blamed "a repository setting or an organisation policy". Probing the binary found two more
+    refused pairs: `--resume` with `--worktree`, and `--session-id` with `--worktree`. So every
+    Copilot ticket in a git repo would have failed at launch. The preset now says all three
+    (see S1.3), and the fake `copilot` refuses the same pairs in the same words. A CLI's own
+    usage error is now named as an Automatos bug. A non-zero exit before SessionStart says
+    so and no longer guesses at a policy; the policy sentence is kept for a CLI that ran a whole
+    turn and exited 0 with no hook fired.
+
 ## Bank PoC
 
 **What Copilot sessions give the PoC.** Automatos runs tickets on the Copilot seats the bank already licenses, as each developer's own session, behind Automatos' gate.
@@ -723,7 +810,7 @@ That is O1.
 5. **Hooks load.** Hooks load from `$COPILOT_HOME/hooks/` in `-p` for an untrusted folder, and SessionStart fires before the first model call.
 6. **Payload shape.** The PascalCase payload carries `session_id`, `cwd`, `transcript_path` (SessionStart), `last_assistant_message` (Stop), and `tool_input` with Copilot's keys. Hook commands inherit the CLI's environment (`AUTOMATOS_HOST_SOCK`, `AUTOMATOS_TASK_ID`, `PYTHONPATH`).
 7. **Resume.** `-p --resume <id>` continues the session and appends to the same `events.jsonl`. `--session-id <new uuid>` creates a new one.
-8. **Worktree.** Where `--worktree <name>` puts the worktree, and whether `--worktree` and `--name` combine with `--resume`.
+8. **Worktree.** Where `--worktree <name>` puts the worktree. (`--worktree` and `--name` do not combine with `--resume`, nor `--worktree` with `--session-id`: F236.)
 9. **MCP config.** `--additional-mcp-config` accepts the HTTP entry (does it need `tools`?), and MCP tool names arrive in one of the S1.4 spellings.
 10. **permissionRequest.** Does it fire after a PreToolUse `allow`, for a path outside the cwd or a URL? That decides `permission_request="rejudge"`. Also its camelCase output shape.
 11. **AI-credit unit.** The unit of `totalNanoAiu`.

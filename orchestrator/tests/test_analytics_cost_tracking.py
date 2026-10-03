@@ -282,6 +282,7 @@ def test_embedding_calls_inherit_the_enclosing_lane(fake_db):
         ("nvidia", "NVIDIA", "free"),
         ("claude_code", "Claude Code", "subscription"),
         ("codex", "Codex", "subscription"),
+        ("copilot_cli", "GitHub Copilot", "subscription"),   # PRD-253: the plan's AI credits, never a price
         ("aws_bedrock", "AWS Bedrock", "metered"),
         ("mystery", "mystery", "unknown"),
     ],

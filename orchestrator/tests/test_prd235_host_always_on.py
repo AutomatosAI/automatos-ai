@@ -23,7 +23,8 @@ def test_contract_fields_are_stable_and_versioned():
     # 0.7.0: the CLI is a parameter — capabilities.clis per CLI, providers = the served ids.
     # 0.8.0: the claim carries the ticket's Automatos tools + its session token (PRD-245).
     # 0.10.0: Plan on every CLI — the claim carries ``plan_approved`` (PRD-253 Wave P).
-    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.10.0"
+    # 0.11.0: GitHub Copilot is a session CLI; the terminal launch carries ``agent_id`` (PRD-253).
+    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.11.0"
     assert svc.contract_fields() == f
 
 
@@ -85,7 +86,7 @@ def test_health_and_the_lane_see_which_clis_the_online_hosts_run():
     assert svc.serving_providers(db, "ws") == ["claude", "codex"]
     health = svc.host_health(db, "ws")
     assert health["providers_online"] == ["claude", "codex"]
-    assert [e["id"] for e in health["registry"]] == ["claude", "codex"]           # the picker renders from here
+    assert [e["id"] for e in health["registry"]] == ["claude", "codex", "copilot"]   # the picker renders from here
     assert health["registry"][1]["label"] == "Codex" and "gpt-5.5" in health["registry"][1]["model_placeholder"]
     # What a host said, read strictly: never said → None (no filter); said none → [].
     assert svc.served_providers_of(SimpleNamespace(capabilities=None)) is None

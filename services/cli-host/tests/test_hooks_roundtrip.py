@@ -50,6 +50,33 @@ def test_shim_forwards_to_the_registered_session_and_prints_its_answer(short_tmp
         server.stop()
 
 
+def test_the_shim_talks_to_the_host_process_only(short_tmp):
+    """F234: under Copilot's sandbox the socket path is granted read-write so the
+    hooks can reach the host — a sandboxed command could then bind its own socket
+    there and answer its own calls. The shim checks the peer is the host's PID."""
+    server = HookServer(short_tmp / "h.sock")
+    server.start()
+    seen = []
+
+    def handler(payload):
+        seen.append(payload)
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+
+    server.register("42", handler)
+    try:
+        env = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "h.sock"), "AUTOMATOS_TASK_ID": "42"}
+        call = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
+        host = {**env, "AUTOMATOS_HOST_PID": str(os.getpid())}       # the server runs in this process
+        assert json.loads(_run_shim(call, host))["hookSpecificOutput"]["permissionDecision"] == "allow"
+        impostor = {**env, "AUTOMATOS_HOST_PID": str(os.getpid() + 100000)}
+        out = json.loads(_run_shim(call, impostor))["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and "not the host's" in out["permissionDecisionReason"]
+        assert _run_shim({"hook_event_name": "Stop"}, impostor) == ""
+        assert len(seen) == 1                                          # nothing was sent to the impostor
+    finally:
+        server.stop()
+
+
 def test_shim_fails_closed_when_the_host_is_unreachable(short_tmp):
     env = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TASK_ID": "1"}
     out = json.loads(_run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, env))
@@ -87,3 +114,16 @@ def test_an_event_named_on_the_command_line_reaches_the_host(short_tmp):
     gone = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TASK_ID": "1"}
     out = json.loads(_run_shim({"toolName": "bash"}, gone, ("--event", "PermissionRequest")))
     assert out["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
+def test_the_operators_own_terminal_is_not_gated_by_the_shim(short_tmp):
+    """PRD-253: the Canvas terminal opens a per-agent CLI (Codex, Copilot) in the
+    agent's own home, where these hooks are installed. Someone is at the keyboard
+    there, so with no host socket the shim stands aside and the CLI's own prompts
+    apply; a supervised session whose host is unreachable still fails closed."""
+    terminal = {"AUTOMATOS_HOST_SOCK": "", "AUTOMATOS_TERMINAL": "1"}
+    assert _run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, terminal) == ""
+    assert _run_shim({"hook_event_name": "PermissionRequest"}, terminal) == ""
+    gone = {"AUTOMATOS_HOST_SOCK": str(short_tmp / "missing.sock"), "AUTOMATOS_TERMINAL": "1"}
+    out = json.loads(_run_shim({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, gone))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -9,6 +9,8 @@
  * ``model_usage_stats`` blob, which ignores the time range.
  */
 
+import { sessionCli } from './session-clis'
+
 export type Billing = 'metered' | 'free' | 'subscription' | 'unknown'
 
 export interface UsageGroup {
@@ -124,21 +126,20 @@ export interface AgentRuntimeFacts {
 
 /**
  * Where an agent's calls go. A session agent (``configuration.runtime = cli``)
- * runs on the user's own Claude Code / Codex plan — its ``agent_model_config``
- * (an API route) is irrelevant and used to be shown as the model.
+ * runs on the user's own CLI plan (Claude Code, Codex, GitHub Copilot) — its
+ * ``agent_model_config`` (an API route) is irrelevant and used to be shown as the model.
  */
 export function agentRuntimeFacts(agent: any): AgentRuntimeFacts {
   const configuration = agent?.configuration || {}
   const runtime = String(configuration.runtime || '').toLowerCase() === 'cli' ? 'cli' : 'api'
   if (runtime === 'cli') {
-    const cli = String(configuration.provider || 'claude').toLowerCase()
-    const cliLabel = cli === 'codex' ? 'Codex' : 'Claude Code'
+    const known = sessionCli(configuration.provider)
     const model = configuration.model ? String(configuration.model) : null
     return {
       runtime,
-      provider: cli === 'codex' ? 'codex' : 'claude_code',
+      provider: known.usageSlug,
       model,
-      label: `${cliLabel}${model ? ` · ${model}` : ''}`,
+      label: `${known.label}${model ? ` · ${model}` : ''}`,
       billing: 'subscription',
     }
   }

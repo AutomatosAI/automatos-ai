@@ -99,6 +99,67 @@ def test_an_ungated_run_reports_nothing_it_produced():
     assert status == "error" and "without Automatos' gate" in error
 
 
+COPILOT_SIGNED_OUT = ("Error: No authentication information found.\n\nCopilot can be authenticated with GitHub "
+                      "using an OAuth Token or a Fine-Grained Personal Access Token.")
+
+
+def test_a_cli_that_could_not_sign_in_says_so_not_that_hooks_are_off():
+    """F233 (build 5): tickets 1263-1265 said a repository setting or an organisation
+    policy had switched the hooks off. Copilot had not signed in."""
+    from automatos_cli_host.presets import COPILOT
+
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=1, tail=COPILOT_SIGNED_OUT,
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith(COPILOT.auth_probe.refusal)
+    assert "without Automatos' gate" not in error and "No authentication information found" in error
+    unknown = turn_end.sign_in_failure("newcli", "Error: not logged in")
+    assert unknown.startswith("newcli could not sign in on this machine")
+
+
+@pytest.mark.parametrize("reason", ["no_session_start", "ungated_exit"])
+def test_hooks_that_could_not_reach_the_host_say_so(reason):
+    """F234: 1266 said "probably showing a login screen", 1267/1268 "a repository
+    setting or an organisation policy". Every call had been denied by the shim."""
+    tail = ("✗ Read ticket.md (sandbox policy) ~/.automatos/cli-host/sessions/1266/ticket.md\n"
+            "   Denied by preToolUse hook: Automatos CLI host is\n   unreachable — call denied")   # wrapped, as on 1266
+    status, error = turn_end.describe(reason, cli="copilot", returncode=None, tail=tail, startup_window=30,
+                                      session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot's hooks could not reach this Automatos host")
+    assert "login screen" not in error and "organisation policy" not in error
+
+
+COPILOT_REFUSED_ARGS = ("error: the argument '--resume [<value>]' cannot be used with '--name <name>'\n\n"
+                        "Usage: copilot --resume [<value>] --prompt <text>\n\nFor more information, try '--help'.")
+
+
+def test_a_command_line_the_cli_refuses_is_named_as_ours_not_a_policy():
+    """F236 (build 6): ticket 1273's resume died on Copilot's own usage error, and its
+    headline blamed "a repository setting or an organisation policy"."""
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=2, tail=COPILOT_REFUSED_ARGS,
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error"
+    assert error.startswith("copilot refused the command line this Automatos host started it with")
+    assert "cannot be used with '--name <name>'" in error and "Automatos bug" in error
+    assert "organisation policy" not in error and "could not sign in" not in error
+    assert turn_end.usage_error("error: unknown option '--yolo'") == "unknown option '--yolo'"   # commander's shape
+    assert turn_end.usage_error("Error: No session, task, or name matched 'x'.\n\nTo resume: copilot --resume=<id>") is None
+    assert turn_end.usage_error(COPILOT_SIGNED_OUT) is None
+
+
+def test_an_exit_before_the_session_started_names_no_cause_it_has_not_seen():
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=1, tail="Error: something else",
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot exited (code 1) before its session started")
+    assert "organisation policy" not in error
+
+
+def test_a_turn_that_ran_tools_is_never_read_as_a_sign_in_failure():
+    """Past the gate, the tail can be a tool's output ("gh: not logged in")."""
+    status, error = turn_end.describe("exited_before_stop", cli="copilot", returncode=1, tail="gh: not logged in",
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot exited (code 1) before finishing the turn")
+
+
 # ── the real loop against a stand-in print-mode CLI ─────────────────────────
 
 def test_a_print_mode_turn_that_proved_its_gate_succeeds(short_tmp, monkeypatch, print_cli, env_clean):

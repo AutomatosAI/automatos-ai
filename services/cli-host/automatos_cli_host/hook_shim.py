@@ -22,10 +22,21 @@ from __future__ import annotations
 import json
 import os
 import socket
+import struct
 import sys
 
 _GATED_EVENTS = ("PreToolUse", "PermissionRequest")
 _CONNECT_TIMEOUT = 3.0
+NOT_CONFIGURED = "Automatos CLI host socket is not configured"
+UNREACHABLE_MARK = "Automatos CLI host is unreachable"
+NOT_THE_HOST_MARK = "Automatos hook socket is not the host's"
+UNREACHABLE = f"{UNREACHABLE_MARK} — call denied"
+NOT_THE_HOST = f"the {NOT_THE_HOST_MARK} — call denied"
+# F234: a CLI that runs its hooks inside its own sandbox (Copilot) is granted the
+# socket path read-write so they can reach the host — which would also let a
+# sandboxed command unlink it and bind its own. So the process at the other end
+# must be the host (``AUTOMATOS_HOST_PID``, set in the session's environment).
+_SOL_LOCAL, _LOCAL_PEERPID = 0, 0x002          # macOS <sys/un.h>
 
 
 def _deny_claude_shaped(event: str, reason: str) -> dict:
@@ -44,6 +55,7 @@ def _deny_claude_shaped(event: str, reason: str) -> dict:
 _OFFLINE_DENY = {
     "claude": _deny_claude_shaped,
     "codex": _deny_claude_shaped,
+    "copilot": _deny_claude_shaped,   # Copilot reads Claude-format hook output (PRD-253)
 }
 
 
@@ -81,13 +93,38 @@ def _payload(raw: str, argv) -> dict:
     return payload
 
 
+def _peer_pid(s: socket.socket) -> int:
+    """The PID at the other end of ``s``; 0 when the platform cannot tell, or a PID
+    namespace hides it (Linux's sandbox bind-mounts the socket, which a sandboxed
+    command cannot unlink)."""
+    try:
+        if sys.platform == "darwin":
+            return int.from_bytes(s.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID, 4), sys.byteorder, signed=True)
+        if hasattr(socket, "SO_PEERCRED"):
+            return struct.unpack("3i", s.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[0]
+    except OSError:
+        return 0
+    return 0
+
+
+def _is_the_host(s: socket.socket) -> bool:
+    """The socket's peer is the host that started this session, when it said so."""
+    expected = (os.environ.get("AUTOMATOS_HOST_PID") or "").strip()
+    peer = _peer_pid(s) if expected else 0
+    return peer <= 0 or str(peer) == expected
+
+
 def main(argv=None) -> int:
     payload = _payload(sys.stdin.read(), sys.argv[1:] if argv is None else argv)
     event = payload.get("hook_event_name") or ""
     sock_path = os.environ.get("AUTOMATOS_HOST_SOCK")
     if not sock_path:
-        if event in _GATED_EVENTS:
-            sys.stdout.write(_deny(event, "Automatos CLI host socket is not configured"))
+        # The operator's own terminal (the Runtime Canvas, AUTOMATOS_TERMINAL) opens an
+        # agent's session in the agent's home, where these hooks are installed: someone
+        # is at the keyboard, so the CLI's own prompts apply. Anywhere else a missing
+        # socket is a misconfigured session: deny.
+        if event in _GATED_EVENTS and not os.environ.get("AUTOMATOS_TERMINAL"):
+            sys.stdout.write(_deny(event, NOT_CONFIGURED))
         return 0
 
     # The host may hold PreToolUse while the approvals inbox answers; wait as
@@ -97,6 +134,10 @@ def main(argv=None) -> int:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(_CONNECT_TIMEOUT)
             s.connect(sock_path)
+            if not _is_the_host(s):           # nothing is sent to an impostor
+                if event in _GATED_EVENTS:
+                    sys.stdout.write(_deny(event, NOT_THE_HOST))
+                return 0
             s.settimeout(wait)
             s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             buf = b""
@@ -111,7 +152,7 @@ def main(argv=None) -> int:
         return 0
     except (OSError, socket.timeout):
         if event in _GATED_EVENTS:
-            sys.stdout.write(_deny(event, "Automatos CLI host is unreachable — call denied"))
+            sys.stdout.write(_deny(event, UNREACHABLE))
         return 0
 
 

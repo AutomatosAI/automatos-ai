@@ -17,11 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Tuple
 
+from .permission_request import PERMISSION_REQUEST_MODES
+
 # ── vocabularies ─────────────────────────────────────────────────────────────
 TIER_NATIVE = "native"      # the CLI's own hooks + a real system-prompt flag (claude)
 TIER_HOOKS = "hooks"        # a config-file hook shim in a per-agent config home (codex, gemini, grok, …)
 TIER_PROXY = "proxy"        # no hook surface: a loopback proxy synthesizes the events (qwen, crush)
-TIER_SEED = "seed"          # no lifecycle at all: spawn, seed a prompt, read the end (copilot, cursor)
+TIER_SEED = "seed"          # no lifecycle at all: spawn, seed a prompt, read the end (cursor)
 TIERS = (TIER_NATIVE, TIER_HOOKS, TIER_PROXY, TIER_SEED)
 
 TURN_END_STOP_HOOK = "stop_hook"        # the turn ends on the Stop hook (tiers 1–3)
@@ -39,6 +41,24 @@ EVENT_NAME_ARGV = "argv"                # the payload carries no name; the hook 
 SCOPE_NONE = "none"                     # the CLI's own config is not relocated (claude: ``--settings``)
 SCOPE_PER_AGENT = "per_agent"           # one config home per agent per host — the default for tier 2
 SCOPE_PER_SESSION = "per_session"       # never for a CLI whose session index lives in the home (§6.1)
+
+# PRD-253 D4: how long the hook shim waits for the host's answer to a held call
+# (``AUTOMATOS_HOOK_WAIT_SECONDS``) before it denies on its own. Every preset's
+# timeout for a held event sits ABOVE it: a CLI that kills a hook first decides
+# the call itself, and a CLI whose timed-out hook fails open (Copilot) would run it.
+HOOK_WAIT_SECONDS = 560
+HELD_HOOK_TIMEOUT_SECONDS = 600
+# ...and the host's own hold ends BELOW it: ``--ask-timeout`` is capped here, so
+# the host answers every held call itself. An answer that came after the shim gave
+# up would be recorded for a call the CLI had already been told was denied.
+MAX_HOLD_SECONDS = HOOK_WAIT_SECONDS - 30
+UNSET_HOLD_SECONDS = 120.0
+
+
+def hold_seconds(ask_timeout: Optional[float]) -> float:
+    """How long a held call waits for the operator inside a turn: ``--ask-timeout``
+    (``UNSET_HOLD_SECONDS`` when unset), never past ``MAX_HOLD_SECONDS``."""
+    return min(float(ask_timeout or UNSET_HOLD_SECONDS), MAX_HOLD_SECONDS)
 
 # The bus (design §5): every event the host models. A preset lists the subset its CLI delivers.
 BUS_EVENTS: FrozenSet[str] = frozenset({
@@ -76,6 +96,8 @@ class CliPreset:
     mcp_config_flag: Optional[str] = None     # "--mcp-config" (PRD-245 W1; None ⇒ this CLI takes MCP elsewhere)
     worktree_args: Tuple[str, ...] = ()       # ("--worktree",) / ("--enable", "worktrees", "--worktree")
     worktree_excludes_resume: bool = False    # Codex: --worktree cannot resume (§6.7)
+    name_excludes_resume: bool = False        # Copilot: --name names a NEW session; beside --resume it is refused
+    session_id_excludes_worktree: bool = False  # Copilot: no --session-id beside --worktree; SessionStart reports its id
     worktree_takes_name: bool = False         # Claude: ``--worktree <name>``; Codex names its own
     system_prompt_flag: Optional[str] = None  # "--append-system-prompt-file"; None ⇒ the soul rides the bus (§6.9)
     initial_prompt: str = PROMPT_POSITIONAL
@@ -90,6 +112,10 @@ class CliPreset:
     hook_timeouts: Mapping[str, Any] = field(default_factory=dict)  # {"*": literal, "<Event>": literal} — the CLI's own unit
     allow_is_silence: bool = False            # agy: any stdout object is a decision; allow = write nothing
     event_name_source: str = EVENT_NAME_PAYLOAD
+    # A PermissionRequest hook: "deny" (a prompt reached the TUI, nobody watches it) or
+    # "rejudge" (the CLI re-asks after the gate allowed — the gate's verdict on the same
+    # call, never a card; permission_request.py, PRD-253 S1.4).
+    permission_request: str = "deny"
     # How long a gated session may take to prove its gate loaded (its SessionStart
     # hook); None = the host's --startup-timeout. A print-mode CLI shows no login
     # screen or dialog, so its window can be short (turn_end.py, PRD-253 S0.2).
@@ -123,6 +149,8 @@ class CliPreset:
             raise ValueError(f"{self.id}: hook_events not on the bus: {sorted(unknown)}")
         if self.initial_prompt == PROMPT_FLAG and not self.initial_prompt_flag:
             raise ValueError(f"{self.id}: initial_prompt=flag needs initial_prompt_flag")
+        if self.permission_request not in PERMISSION_REQUEST_MODES:
+            raise ValueError(f"{self.id}: permission_request must be one of {PERMISSION_REQUEST_MODES}")
 
     @property
     def hold_events(self) -> Tuple[str, ...]:
@@ -162,9 +190,9 @@ CLAUDE = CliPreset(
     # The operator's user-scope settings only, no repo .claude/, no MCP from the folder.
     required_args=("--setting-sources", "user", "--strict-mcp-config"),
     hook_events=BUS_EVENTS,
-    # PreToolUse may HOLD while the approvals inbox answers; Claude's default for a
-    # command hook is 600 s — stay under it and deny on our own clock. Seconds.
-    hook_timeouts={"*": 60, "PreToolUse": 540, "PermissionRequest": 540},
+    # PreToolUse may HOLD while the approvals inbox answers: the shim answers by
+    # HOOK_WAIT_SECONDS, before Claude's own timeout would decide the call (D4). Seconds.
+    hook_timeouts={"*": 60, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
     config_home_scope=SCOPE_NONE,              # per-session ``--settings``; CLAUDE_CONFIG_DIR stays the operator's
     strip_env=frozenset({
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -209,7 +237,9 @@ CODEX = CliPreset(
     ungated_stance=("-a", "never", "-s", "workspace-write"),   # approvals off, OS sandbox on
     required_args=("--dangerously-bypass-hook-trust",),        # trusts OUR hook file; not a gate bypass (§6.4)
     hook_events=BUS_EVENTS - {"Notification"},
-    hook_timeouts={"*": 30},                   # SECONDS, and 0 floors to 1 s (§6.3)
+    # SECONDS, and 0 floors to 1 s (§6.3). A held call outlasts the shim's wait (D4):
+    # with approvals off, a hook Codex timed out first would leave the call to Codex.
+    hook_timeouts={"*": 30, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
     config_home_env="CODEX_HOME",
     config_home_scope=SCOPE_PER_AGENT,         # the session index lives in the home (§6.1)
     strip_env=frozenset({"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"}),
@@ -224,7 +254,79 @@ CODEX = CliPreset(
     docs_url="https://github.com/openai/codex",
 )
 
-REGISTRY: Dict[str, CliPreset] = {p.id: p for p in (CLAUDE, CODEX)}
+# GitHub Copilot CLI (PRD-253): the hooks tier — the design doc's "seed" row was read
+# from munder's code, not the binary. ``copilot -p``: hooks fire in print mode, the
+# turn is the process, and with no allow flag a call the gate did not allow is
+# refused by Copilot itself (D1, D3). Facts from the 1.0.91 bundle; what only a
+# live run proves is listed under the PRD's "Verify at build".
+COPILOT = CliPreset(
+    id="copilot",
+    label="GitHub Copilot",
+    binary="copilot",
+    tier=TIER_HOOKS,
+    turn_end=TURN_END_PROCESS_EXIT,
+    startup_timeout_seconds=30,                # no login screen or dialog in -p (turn_end.py)
+    model_flag="--model",
+    session_id_flag="--session-id",            # a new session with the backend's pre-assigned uuid
+    resume_flag="--resume",                    # an unknown id fails; --session-id would silently start fresh
+    add_dir_flag="--add-dir",
+    mcp_config_flag="--additional-mcp-config", # value: "@<session>/mcp.json"
+    worktree_args=("--worktree",),
+    worktree_takes_name=True,
+    # F236 (build 6, 3 Oct): 1.0.91's own parser refuses --resume beside --name or
+    # --worktree, and --session-id beside --worktree (probed against the binary). A
+    # resumed session keeps its name and folder; a worktree session's id is minted by
+    # Copilot and reported on SessionStart, which is what a later resume uses.
+    worktree_excludes_resume=True,
+    name_excludes_resume=True,
+    session_id_excludes_worktree=True,
+    system_prompt_flag=None,                   # the soul rides UserPromptSubmit → additionalContext (§6.9)
+    initial_prompt=PROMPT_FLAG,
+    initial_prompt_flag="-p",
+    name_flag="--name",
+    ungated_stance=(),                         # nothing: the gate's allow is the only lift (D3)
+    plan_stance=(),                            # Plan is the plan turn (Wave P); Copilot's own --plan is not used
+    permission_request="rejudge",              # its own path/URL checks may re-ask after the gate allowed (S1.4)
+    # Never --no-auto-login: it switches off the stored login AND the gh fallback, the
+    # only ways a session signs in (env tokens are stripped), so every session failed
+    # "No authentication information found" (F233). Without a credential, -p exits
+    # with that error; it never waits on a login prompt.
+    required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"),
+    hook_events=BUS_EVENTS - {"PostCompact"},
+    # SECONDS (``timeoutSec``). A timed-out Copilot hook FAILS OPEN, so a held call
+    # must be answered by the shim first (D4).
+    hook_timeouts={"*": 60, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
+    config_home_env="COPILOT_HOME",
+    config_home_scope=SCOPE_PER_AGENT,         # the session index lives in the home (§6.1)
+    strip_env=frozenset({
+        "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",          # a session never carries a token (D6)
+        "COPILOT_ALLOW_ALL", "COPILOT_ASSISTED_APPROVAL",            # allow flags by another name (D3)
+        "COPILOT_MODEL", "COPILOT_OFFLINE", "COPILOT_HOOK_ALLOW_LOCALHOST",
+        "GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS", "GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP",
+        "GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS",                    # repo hooks, workspace MCP, extensions in -p
+        "COPILOT_CLI",
+    }),
+    strip_env_prefixes=("COPILOT_PROVIDER_",), # BYOK never reaches a session
+    keep_env=frozenset({"GH_HOST", "COPILOT_GH_HOST", "COPILOT_PROXY_KERBEROS_SPN"}),   # GHE.com data residency, proxy
+    extra_env={"COPILOT_AUTO_UPDATE": "false"},
+    forbidden_args=(
+        "--allow-all-tools", "--allow-all", "--yolo", "--allow-all-paths", "--allow-all-urls", "--allow-tool",
+        "--assisted-approval", "--enable-memory", "--config-dir", "--share-gist", "--remote", "--remote-export",
+        "--cloud", "--connect", "--acp", "--server", "--headless", "-i", "--interactive", "--continue",
+        "--mcp-github-auth",
+    ),
+    auth_probe=AuthProbe(
+        kind="copilot_login",
+        code="copilot_not_logged_in",
+        refusal="GitHub Copilot is not logged in on this machine. Run `copilot login` (or `gh auth login` with an "
+                "account that has a Copilot seat), then retry.",
+    ),
+    install_hint="GitHub Copilot CLI is not installed on this machine (no `copilot` on your PATH). Install it "
+                 "(`brew install copilot-cli`, or `npm install -g @github/copilot`) and run `copilot login`.",
+    docs_url="https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
+)
+
+REGISTRY: Dict[str, CliPreset] = {p.id: p for p in (CLAUDE, CODEX, COPILOT)}
 DEFAULT_CLI = CLAUDE.id
 
 

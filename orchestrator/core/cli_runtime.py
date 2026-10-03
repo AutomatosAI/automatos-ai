@@ -37,7 +37,7 @@ CONFIG_WORKTREE_KEY = "worktree_per_ticket"
 # kept in step with the host's preset table by a parity test; re-exported here so
 # every importer keeps its name.
 from core.cli_presets import (  # noqa: E402,F401
-    BILLING_SUBSCRIPTION, CLI_PRESETS, CLI_PROVIDERS, PROVIDER_CLAUDE, PROVIDER_CODEX,
+    BILLING_SUBSCRIPTION, CLI_PRESETS, CLI_PROVIDERS, PROVIDER_CLAUDE, PROVIDER_CODEX, PROVIDER_COPILOT,
     USAGE_PROVIDER_LABELS, USAGE_PROVIDER_SLUGS, is_valid_cli_model, registry_public, usage_provider_slug,
 )
 from core.session_permission_modes import PERMISSION_MODE_KEY, validate_permission_mode  # noqa: E402

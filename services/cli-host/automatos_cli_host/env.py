@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from .presets import CliPreset, union_strip_env
@@ -146,6 +147,14 @@ def build_shell_env(
     strip, prefixes, keep = union_strip_env()
     return build_env(parent, strip=strip, prefixes=prefixes, keep=keep, extra=extra, path=path)
 
+
+def hook_pythonpath(parent: Optional[Dict[str, str]] = None) -> str:
+    """``PYTHONPATH`` for a CLI's hooks. They run from the session's folder, and the
+    shim (``python -m automatos_cli_host.hook_shim``) must find this package there;
+    whatever the host inherited stays behind it."""
+    inherited = (os.environ if parent is None else parent).get("PYTHONPATH", "")
+    package_root = str(Path(__file__).resolve().parents[1])
+    return package_root + (os.pathsep + inherited if inherited else "")
 
 def forbidden_keys_present(env: Dict[str, str], preset: Optional[CliPreset] = None) -> List[str]:
     """Source-guard helper: which forbidden keys a built environment still carries

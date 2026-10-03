@@ -50,9 +50,11 @@ def test_backend_registry_matches_the_hosts_preset_rows():
 
 def test_runtime_module_still_exports_the_registry_names():
     """Every importer of core.cli_runtime keeps its names; the rules are the registry's."""
-    assert cli_runtime.CLI_PROVIDERS == cli_presets.CLI_PROVIDERS == ("claude", "codex")
+    assert cli_runtime.CLI_PROVIDERS == cli_presets.CLI_PROVIDERS == ("claude", "codex", "copilot")
     assert cli_runtime.usage_provider_slug("claude") == "claude_code" and cli_runtime.usage_provider_slug("codex") == "codex"
-    assert cli_runtime.USAGE_PROVIDER_LABELS == {"claude_code": "Claude Code", "codex": "Codex"}
+    assert cli_runtime.USAGE_PROVIDER_LABELS == {"claude_code": "Claude Code", "codex": "Codex",
+                                                 "copilot_cli": "GitHub Copilot"}
+    assert cli_runtime.usage_provider_slug("copilot") == "copilot_cli"
     assert cli_runtime.is_valid_cli_model("claude", "opus") and cli_runtime.is_valid_cli_model("claude", "claude-opus-5[1m]")
     assert not cli_runtime.is_valid_cli_model("claude", "gpt-5.5") and cli_runtime.is_valid_cli_model("codex", "gpt-5.5")
     assert cli_runtime.is_valid_cli_model("codex", None) and not cli_runtime.is_valid_cli_model("grok", "x")
@@ -140,7 +142,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
         f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
     )
     assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
-        "0.10.0",
+        "0.11.0",
         sorted(_EXPECTED_CLAIM_KEYS),
     ), (
         "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
@@ -148,7 +150,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
     )
 
 
-# The claim payload as of host contract 0.10.0.
+# The claim payload as of host contract 0.11.0 (0.11.0 moved no claim key: Copilot is a new CLI).
 _EXPECTED_CLAIM_KEYS = {
     "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
     "agent_id", "agent_name", "provider", "model", "allowed_tools",

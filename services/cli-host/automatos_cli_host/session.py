@@ -33,7 +33,6 @@ import os
 import pty
 import queue
 import re
-import shutil
 import signal
 import struct
 import subprocess
@@ -52,11 +51,14 @@ from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
-from .env import build_session_env
+from .env import build_session_env, hook_pythonpath
 from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
 from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
-from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
+from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, request_of
+from .permission_request import answer as permission_answer
+from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
 from .session_prompt import build_system_prompt, build_ticket_file
+from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import empty_usage, usage_delta
 
@@ -108,86 +110,6 @@ class SessionOutcome:
 
 def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
-
-
-# What the host itself writes into a session folder — never a deliverable.
-HOST_OWNED_SESSION_FILES = frozenset({"ticket.md", "settings.json", "system_prompt.md", TERMINAL_LOG_FILENAME, "mcp.json"})
-# The subset that holds this ticket's own credential in PLAINTEXT. Removed the
-# moment the turn ends — the row's copy is revoked there too, but a file is what
-# gets read later, and every finished ticket used to leave one behind.
-CREDENTIAL_SESSION_FILES = ("mcp.json",)
-# A host-owned file is excluded by CONTENT as well as by name: a session can read
-# one and write it back under another name, and from Wave 1 one of them carries
-# the ticket's own credential. Only small files are compared (the terminal log is
-# bounded but large, and no session hand-copies it).
-MAX_HOST_FILE_COMPARE_BYTES = 256 * 1024
-
-
-def host_owned_blobs(session_dir: Path) -> List[bytes]:
-    """The bytes of the host's own files in this session folder, for the content
-    check below. Unreadable or oversized files are simply not compared."""
-    blobs: List[bytes] = []
-    for name in sorted(HOST_OWNED_SESSION_FILES):
-        path = session_dir / name
-        try:
-            if path.is_file() and path.stat().st_size <= MAX_HOST_FILE_COMPARE_BYTES:
-                blobs = [*blobs, path.read_bytes()]
-        except OSError:
-            continue
-    return blobs
-
-
-def _is_host_copy(path: Path, blobs: Sequence[bytes]) -> bool:
-    """True when this file is one of the host's own under another name."""
-    try:
-        size = path.stat().st_size
-        if size > MAX_HOST_FILE_COMPARE_BYTES:
-            return False
-        candidates = [b for b in blobs if len(b) == size]
-        return bool(candidates) and path.read_bytes() in candidates
-    except OSError:
-        return False
-
-
-def session_deliverables(files_touched: Sequence[str], session_dir: Path, cwd: Path) -> List[Path]:
-    """The files a session wrote inside its own folder, relative to it (PRD-245
-    S0.7) — never the host's own files (by name or by content), each once."""
-    root = session_dir.resolve()
-    blobs = host_owned_blobs(root)
-    found: List[Path] = []
-    for raw in files_touched:
-        path = Path(raw)
-        try:
-            resolved = (path if path.is_absolute() else cwd / path).resolve()
-            rel = resolved.relative_to(root)
-        except (OSError, RuntimeError, ValueError):
-            continue
-        if not rel.parts or str(rel) in HOST_OWNED_SESSION_FILES or rel in found:
-            continue
-        if _is_host_copy(resolved, blobs):
-            log.warning("deliverable %s is a copy of one of the host's own session files — not landed", resolved)
-            continue
-        found = [*found, rel]
-    return found
-
-
-def land_session_deliverables(relatives: Sequence[Path], session_dir: Path, dest: Path) -> List[str]:
-    """Copy each file into the ticket's deliverables folder — created on demand
-    (0o755), names kept, an earlier copy overwritten. One file failing is a
-    warning, never a lost result. Returns the copies' paths."""
-    landed: List[str] = []
-    for rel in relatives:
-        source, target = session_dir / rel, dest / rel
-        try:
-            if not source.is_file():
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-            shutil.copy2(source, target)
-        except OSError as exc:
-            log.warning("deliverable %s not copied to %s: %s", source, target, exc)
-            continue
-        landed = [*landed, str(target)]
-    return landed
 
 
 def assert_secret_not_in_args(args: Sequence[str], secret: Optional[str]) -> None:
@@ -269,6 +191,7 @@ class Session:
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        self._allowed_calls = AllowedCalls()            # what the gate allowed: a CLI's own re-ask is answered alike
         # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
         self._pending_asks: Dict[str, threading.Event] = {}
         self._ask_answers: Dict[str, bool] = {}
@@ -323,14 +246,11 @@ class Session:
             if self._contract_injected:
                 return Reply.none()
             self._contract_injected = True
-            return Reply.with_context(build_ticket_file(self.ticket, self.default_root, self.plan_turn))
+            return Reply.with_context(self._turn_context())
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
-            tool = payload.get("tool_name") or "?"
-            reason = "a permission prompt reached the TUI — sessions are policy-gated, not prompted"
-            self.denials.append({"tool": tool, "reason": reason, "stage": "PermissionRequest"})
-            return Reply.deny(reason)
+            return self._permission_request(payload)
         if event == "PostToolUse":
             self._track_file(payload)
             return Reply.none()
@@ -345,6 +265,17 @@ class Session:
             self.ended.set()
             return Reply.none()
         return Reply.none()
+
+    def _turn_context(self) -> str:
+        """What the session is told with its first prompt: the ticket — and, for a CLI
+        with no system-prompt flag (Codex, GitHub Copilot), the agent's system prompt
+        ahead of it. Design §6.9: there the soul rides this hook, not argv; before,
+        only the ticket did, and such a session never saw its rules or its tools."""
+        ticket = build_ticket_file(self.ticket, self.default_root, self.plan_turn)
+        preset = self.adapter.preset
+        if preset.system_prompt_flag:
+            return ticket
+        return f"{build_system_prompt(self.ticket, preset.label)}\n{ticket}"
 
     def _pre_tool_use(self, payload: Dict[str, Any]) -> Reply:
         tool = str(payload.get("tool_name") or "")
@@ -368,11 +299,26 @@ class Session:
                          "decision": decision.behavior, "reason": decision.reason[:DECISION_REASON_CHARS],
                          **({"answer": answer, "request_id": request_id} if answer else {})})
         if verdict.allow:
+            self._allowed_calls.add(tool, tool_input)
             return Reply.allow()
         if verdict.reason != PLAN_WITH_OPERATOR:    # a plan handed to the operator is not a refusal
             self.denials.append({"tool": tool, "reason": verdict.reason, "stage": "PreToolUse",
                                  "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
         return Reply.deny(verdict.reason)
+
+    def _permission_request(self, payload: Dict[str, Any]) -> Reply:
+        """The CLI asked its own permission (``permission_request.py``): denied, or —
+        for a preset that rejudges — the gate's verdict on the same call."""
+        tool, tool_input = request_of(payload)
+        mode = self.adapter.preset.permission_request
+        now = decide(self.adapter.tool_intent(tool, dict(tool_input)), self._policy) if (
+            mode == PERMISSION_REQUEST_REJUDGE and self._policy is not None) else None
+        allow, reason = permission_answer(mode, allowed_before=self._allowed_calls.holds(tool, dict(tool_input)),
+                                          behavior=now.behavior if now else None, reason=now.reason if now else "")
+        if allow:
+            return Reply.allow()
+        self.denials.append({"tool": tool or "?", "reason": reason, "stage": "PermissionRequest"})
+        return Reply.deny(reason)
 
     def _plan_card(self, tool: str, intent: Any, decision: Decision, text: str) -> Tuple[Decision, Optional[str], Optional[str]]:
         """The plan a CLI presents in its turn (Claude Code's ExitPlanMode) is a card
@@ -409,7 +355,7 @@ class Session:
             "tool_name": tool, "subject": subject, "reason": reason,
             "session_id": self.reported_session_id or self.session_id,
         })
-        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        timeout = hold_seconds(getattr(self.cfg, "ask_timeout", None))    # the hook's own wait bounds it (D4)
         answered = done.wait(timeout)
         with self._ask_lock:
             self._pending_asks.pop(request_id, None)
@@ -477,7 +423,7 @@ class Session:
         cwd = self._working_dir()
         if isinstance(cwd, SessionOutcome):
             return cwd
-        refused = self._preflight()
+        refused = self._preflight() or self._refused_here(cwd)
         if refused is not None:
             return refused
         preset = self.adapter.preset
@@ -521,6 +467,11 @@ class Session:
         if refusal is not None:
             return self._outcome("error", error=refusal.message, exit_reason=refusal.code)
         return None
+
+    def _refused_here(self, cwd: Path) -> Optional[SessionOutcome]:
+        """2b. what the CLI can tell about THIS folder before spawn (PRD-253 S1.6)."""
+        refusal = self.adapter.refuse_here(cwd)
+        return self._outcome("error", error=refusal.message, exit_reason=refusal.code) if refusal else None
 
     def _choose_mode(self, preset: Any) -> None:
         """The session's permission mode — before the ticket file, which names a Plan
@@ -588,6 +539,7 @@ class Session:
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
             session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
+            extra_dirs=tuple(self._policy.extra_dirs), hook_socket=self.sock_path,
         )
         return ctx, worktree
 
@@ -597,16 +549,13 @@ class Session:
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
-        package_root = str(Path(__file__).resolve().parents[1])
-        inherited_pp = os.environ.get("PYTHONPATH", "")
         env = build_session_env(preset, extra={
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
+            "AUTOMATOS_HOST_PID": str(os.getpid()),      # the shim talks to this process only (F234)
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,
-            "AUTOMATOS_HOOK_WAIT_SECONDS": "560",
-            # Hooks run from the session's directory: the shim (`python -m
-            # automatos_cli_host.hook_shim`) must find this package from there.
-            "PYTHONPATH": package_root + (os.pathsep + inherited_pp if inherited_pp else ""),
+            "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),
+            "PYTHONPATH": hook_pythonpath(),
             **prepared.env,
         })
         master, slave = pty.openpty()
@@ -726,6 +675,8 @@ class Session:
         ungated = exit_reason == turn_end.UNGATED_EXIT
         if ungated:
             text = ""                       # PRD-253 S0.2: nothing a run without the gate produced is reported
+        elif transcript and transcript.exists():
+            text += "".join(f"\n\n[{note}]" for note in self.adapter.record_notes(transcript))
         status, error = turn_end.describe(
             exit_reason, cli=os.path.basename(binary), returncode=self.proc.returncode if self.proc else None,
             tail=bytes(self.output_tail).decode("utf-8", "replace")[-1500:],
