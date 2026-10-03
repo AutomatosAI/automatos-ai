@@ -29,6 +29,8 @@ FINISHED_RUN_STATUSES = ("completed", "failed", "cancelled")
 PLAYBOOK_CANCEL_PERMISSION = "playbooks:execute"
 MISSION_CANCEL_PERMISSION = "missions:execute"
 BOARD_CANCEL_REASON = "cancelled on the board"
+# How much of a mission's goal a refusal quotes.
+GOAL_SHOWN_CHARS = 80
 PERSON_PREFIX = "user:"
 # A refusal: the HTTP status and why, in the owner's words.
 Refusal = Tuple[int, str]
@@ -153,7 +155,7 @@ def _cancel_live_mission(db: Any, task: Any, run: Any, *, by: str, may: Callable
     from services.ticket_numbers import ticket_label
 
     if task.source_type == MISSION_STEP:
-        return 409, (f"{ticket_label(task, capital=True)} is a step of the mission \"{(run.goal or '')[:80]}\": "
+        return 409, (f"{ticket_label(task, capital=True)} is a step of the mission \"{(run.goal or '')[:GOAL_SHOWN_CHARS]}\": "
                      f"the mission runs its steps, so cancel the mission to stop it (/missions/{run.id}).")
     if not may(MISSION_CANCEL_PERMISSION):
         return 403, f"Permission denied: {MISSION_CANCEL_PERMISSION}"
