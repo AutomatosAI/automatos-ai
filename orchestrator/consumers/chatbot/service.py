@@ -1606,7 +1606,7 @@ class StreamingChatService:
         yield self.streaming_handler.format_aisdk_tool_end(
             call_id, PREFETCH_TOOL, True, duration_ms=found.elapsed_ms, summary=found.summary,
         )
-        prefetched.append((PREFETCH_TOOL, found.args))
+        prefetched.extend((PREFETCH_TOOL, args) for args in (found.searches or [found.args]))   # one per question (F227)
         if found.message:
             llm_messages.append(found.message)
 
