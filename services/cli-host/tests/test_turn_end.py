@@ -128,6 +128,31 @@ def test_hooks_that_could_not_reach_the_host_say_so(reason):
     assert "login screen" not in error and "organisation policy" not in error
 
 
+COPILOT_REFUSED_ARGS = ("error: the argument '--resume [<value>]' cannot be used with '--name <name>'\n\n"
+                        "Usage: copilot --resume [<value>] --prompt <text>\n\nFor more information, try '--help'.")
+
+
+def test_a_command_line_the_cli_refuses_is_named_as_ours_not_a_policy():
+    """F236 (build 6): ticket 1273's resume died on Copilot's own usage error, and its
+    headline blamed "a repository setting or an organisation policy"."""
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=2, tail=COPILOT_REFUSED_ARGS,
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error"
+    assert error.startswith("copilot refused the command line this Automatos host started it with")
+    assert "cannot be used with '--name <name>'" in error and "Automatos bug" in error
+    assert "organisation policy" not in error and "could not sign in" not in error
+    assert turn_end.usage_error("error: unknown option '--yolo'") == "unknown option '--yolo'"   # commander's shape
+    assert turn_end.usage_error("Error: No session, task, or name matched 'x'.\n\nTo resume: copilot --resume=<id>") is None
+    assert turn_end.usage_error(COPILOT_SIGNED_OUT) is None
+
+
+def test_an_exit_before_the_session_started_names_no_cause_it_has_not_seen():
+    status, error = turn_end.describe("ungated_exit", cli="copilot", returncode=1, tail="Error: something else",
+                                      startup_window=30, session_timeout=60, stopped_by_host=None)
+    assert status == "error" and error.startswith("copilot exited (code 1) before its session started")
+    assert "organisation policy" not in error
+
+
 def test_a_turn_that_ran_tools_is_never_read_as_a_sign_in_failure():
     """Past the gate, the tail can be a tool's output ("gh: not logged in")."""
     status, error = turn_end.describe("exited_before_stop", cli="copilot", returncode=1, tail="gh: not logged in",

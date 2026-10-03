@@ -96,6 +96,8 @@ class CliPreset:
     mcp_config_flag: Optional[str] = None     # "--mcp-config" (PRD-245 W1; None ⇒ this CLI takes MCP elsewhere)
     worktree_args: Tuple[str, ...] = ()       # ("--worktree",) / ("--enable", "worktrees", "--worktree")
     worktree_excludes_resume: bool = False    # Codex: --worktree cannot resume (§6.7)
+    name_excludes_resume: bool = False        # Copilot: --name names a NEW session; beside --resume it is refused
+    session_id_excludes_worktree: bool = False  # Copilot: no --session-id beside --worktree; SessionStart reports its id
     worktree_takes_name: bool = False         # Claude: ``--worktree <name>``; Codex names its own
     system_prompt_flag: Optional[str] = None  # "--append-system-prompt-file"; None ⇒ the soul rides the bus (§6.9)
     initial_prompt: str = PROMPT_POSITIONAL
@@ -271,6 +273,13 @@ COPILOT = CliPreset(
     mcp_config_flag="--additional-mcp-config", # value: "@<session>/mcp.json"
     worktree_args=("--worktree",),
     worktree_takes_name=True,
+    # F236 (build 6, 3 Oct): 1.0.91's own parser refuses --resume beside --name or
+    # --worktree, and --session-id beside --worktree (probed against the binary). A
+    # resumed session keeps its name and folder; a worktree session's id is minted by
+    # Copilot and reported on SessionStart, which is what a later resume uses.
+    worktree_excludes_resume=True,
+    name_excludes_resume=True,
+    session_id_excludes_worktree=True,
     system_prompt_flag=None,                   # the soul rides UserPromptSubmit → additionalContext (§6.9)
     initial_prompt=PROMPT_FLAG,
     initial_prompt_flag="-p",

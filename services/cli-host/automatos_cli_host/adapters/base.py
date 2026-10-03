@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from ..env import resolve_binary
 from ..sandbox import SessionSandbox
 from ..presets import (
-    PROMPT_FLAG, PROMPT_POSITIONAL, PROMPT_TYPE_INTO_TUI, CliPreset,
+    PROMPT_FLAG, PROMPT_POSITIONAL, CliPreset,
 )
 
 
@@ -208,16 +208,10 @@ class PresetAdapter:
         """Full argv from the preset. The positional prompt is a short pointer —
         nothing sensitive in argv."""
         p = self.preset
-        binary = self.resolve_binary() or p.binary
-        args: List[str] = [binary]
         resuming = bool(ctx.resume_session_id)
-        if resuming:
-            if p.resume_subcommand:
-                args += [p.resume_subcommand, ctx.resume_session_id]
-            elif p.resume_flag:
-                args += [p.resume_flag, ctx.resume_session_id]
-        elif p.session_id_flag:
-            args += [p.session_id_flag, ctx.session_id]
+        worktree = bool(ctx.worktree_name and p.worktree_args) and not (resuming and p.worktree_excludes_resume)
+        args: List[str] = [self.resolve_binary() or p.binary]
+        args += self._session_args(ctx.resume_session_id, ctx.session_id, worktree=worktree)
         if p.cwd_flag:
             args += [p.cwd_flag, str(ctx.cwd)]
         args += list(p.plan_stance if ctx.plan_first and p.plan_stance else p.ungated_stance)
@@ -227,22 +221,14 @@ class PresetAdapter:
         args += list(p.required_args)
         if p.add_dir_flag:
             args += [p.add_dir_flag, str(ctx.session_dir)]
-        if p.name_flag:
-            args += [p.name_flag, f"automatos #{ctx.task_id}"]
+        args += self._name_args(ctx.task_id, resuming)
         if ctx.model and p.model_flag:
             args += [p.model_flag, str(ctx.model)]
-        if ctx.worktree_name and p.worktree_args and not (resuming and p.worktree_excludes_resume):
+        if worktree:
             args += list(p.worktree_args)
             if p.worktree_takes_name:
                 args.append(ctx.worktree_name)   # Claude names the worktree; Codex manages its own
-        pointer = f"Work the Automatos ticket described in {ctx.ticket_path}. Read it first."
-        if p.initial_prompt == PROMPT_POSITIONAL:
-            args.append(pointer)
-        elif p.initial_prompt == PROMPT_FLAG:
-            args += [p.initial_prompt_flag or "", pointer]
-        elif p.initial_prompt == PROMPT_TYPE_INTO_TUI:
-            pass   # the pointer is typed after boot by whoever drives the TUI (not this host, today)
-        return args
+        return args + self._prompt_args(ctx.ticket_path)
 
     def terminal_args(self, binary: str, *, session_id: str, resume: bool,
                       system_prompt_path: Optional[Path], model: Optional[str], task_id: Optional[str]) -> List[str]:
@@ -251,21 +237,43 @@ class PresetAdapter:
         the CLI can take one on the command line. Nothing that assumes nobody is
         at the keyboard."""
         p = self.preset
-        args: List[str] = [binary]
-        if resume:
-            if p.resume_subcommand:
-                args += [p.resume_subcommand, session_id]
-            elif p.resume_flag:
-                args += [p.resume_flag, session_id]
-        elif p.session_id_flag:
-            args += [p.session_id_flag, session_id]
+        args: List[str] = [binary, *self._session_args(session_id if resume else None, session_id)]
         if system_prompt_path is not None and p.system_prompt_flag:
             args += [p.system_prompt_flag, str(system_prompt_path)]
-        if task_id and p.name_flag:
-            args += [p.name_flag, f"automatos #{task_id}"]
+        args += self._name_args(task_id, resume)
         if model and p.model_flag:
             args += [p.model_flag, str(model)]
         return args
+
+    def _session_args(self, resume_id: Optional[str], session_id: str, *, worktree: bool = False) -> List[str]:
+        """Continue ``resume_id``, else start ``session_id``. F236: a CLI that takes no
+        id beside a worktree (Copilot) mints its own, and SessionStart reports it."""
+        p = self.preset
+        if resume_id:
+            if p.resume_subcommand:
+                return [p.resume_subcommand, resume_id]
+            return [p.resume_flag, resume_id] if p.resume_flag else []
+        if p.session_id_flag and not (worktree and p.session_id_excludes_worktree):
+            return [p.session_id_flag, session_id]
+        return []
+
+    def _name_args(self, task_id: Any, resuming: bool) -> List[str]:
+        """How the session shows in the CLI's own UI. F236: Copilot names only a new
+        session, and refuses --name beside --resume."""
+        p = self.preset
+        if not (task_id and p.name_flag) or (resuming and p.name_excludes_resume):
+            return []
+        return [p.name_flag, f"automatos #{task_id}"]
+
+    def _prompt_args(self, ticket_path: Path) -> List[str]:
+        """The turn's opening pointer, the way the CLI takes it."""
+        p = self.preset
+        pointer = f"Work the Automatos ticket described in {ticket_path}. Read it first."
+        if p.initial_prompt == PROMPT_POSITIONAL:
+            return [pointer]
+        if p.initial_prompt == PROMPT_FLAG:
+            return [p.initial_prompt_flag or "", pointer]
+        return []   # PROMPT_TYPE_INTO_TUI: the pointer is typed after boot by whoever drives the TUI (not this host, today)
 
     # ── the bus ─────────────────────────────────────────────────────────────
     def normalize_event(self, raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:

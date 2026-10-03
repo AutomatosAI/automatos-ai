@@ -209,18 +209,41 @@ def _argv(tmp_path, operator, **over):
     return a.launch_args(ctx, a.prepare(ctx)), ctx
 
 
-def test_a_new_session_and_a_resumed_one(tmp_path, operator):
-    args, ctx = _argv(tmp_path, operator, model="claude-sonnet-4.6", worktree_name="automatos-7")
-    assert args[1:3] == ["--session-id", "sid-1"]
+# What Copilot 1.0.91's own parser refuses (F236, build 6: probed against the binary;
+# tests/fake_copilot.py refuses the same pairs). This test used to pin --session-id
+# beside --worktree, the PRD's unverified guess, which the binary refuses.
+COPILOT_REFUSES = (("--resume", "--name"), ("--resume", "--worktree"), ("--session-id", "--worktree"))
+
+
+def test_a_new_session_a_worktree_session_and_a_resumed_one(tmp_path, operator):
+    args, ctx = _argv(tmp_path, operator, model="claude-sonnet-4.6")
+    assert args[1:3] == ["--session-id", "sid-1"] and args[args.index("--name") + 1] == "automatos #7"
     for flag in COPILOT.required_args:
         assert flag in args
     assert args[args.index("--model") + 1] == "claude-sonnet-4.6"
-    assert args[args.index("--worktree") + 1] == "automatos-7"
-    assert args[args.index("--name") + 1] == "automatos #7"
     assert args[-2] == "-p" and "ticket" in args[-1]
     session.assert_args_honour_invariant(args, COPILOT.forbidden_args)
-    resumed, _ = _argv(tmp_path, operator, resume_session_id="copilot-1")
-    assert resumed[1:3] == ["--resume", "copilot-1"] and "--session-id" not in resumed
+    in_worktree, _ = _argv(tmp_path, operator, worktree_name="automatos-7")
+    assert in_worktree[in_worktree.index("--worktree") + 1] == "automatos-7"
+    assert "--session-id" not in in_worktree and in_worktree[in_worktree.index("--name") + 1] == "automatos #7"
+    resumed, _ = _argv(tmp_path, operator, resume_session_id="copilot-1", worktree_name="automatos-7")
+    assert resumed[1:3] == ["--resume", "copilot-1"]
+    assert not {"--session-id", "--name", "--worktree"} & set(resumed)    # F236: ticket 1273's resume
+
+
+def test_no_launch_carries_a_pair_copilot_refuses(tmp_path, operator):
+    for over in ({}, {"resume_session_id": "x"}, {"worktree_name": "w"}, {"resume_session_id": "x", "worktree_name": "w"},
+                 {"plan_first": True, "resume_session_id": "x"}):
+        args, _ = _argv(tmp_path, operator, **over)
+        assert not [pair for pair in COPILOT_REFUSES if set(pair) <= set(args)], over
+
+
+def test_a_terminal_on_a_resumed_session_is_not_renamed(tmp_path, operator):
+    a = _adapter(tmp_path, operator)
+    resumed = a.terminal_args("copilot", session_id="s-1", resume=True, system_prompt_path=None, model=None, task_id="7")
+    assert resumed == ["copilot", "--resume", "s-1"]
+    fresh = a.terminal_args("copilot", session_id="s-1", resume=False, system_prompt_path=None, model="gpt-5", task_id="7")
+    assert fresh == ["copilot", "--session-id", "s-1", "--name", "automatos #7", "--model", "gpt-5"]
 
 
 def test_a_session_may_sign_in_by_itself(tmp_path, operator):

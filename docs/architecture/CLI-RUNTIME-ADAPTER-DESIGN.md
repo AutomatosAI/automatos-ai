@@ -164,6 +164,8 @@ class CliPreset:
     add_dir_flag: Optional[str]               # "--add-dir"
     worktree_args: Tuple[str, ...]            # ("--worktree",) / ("--enable","worktrees","--worktree")
     worktree_excludes_resume: bool            # Codex: --worktree cannot resume (§6.7)
+    name_excludes_resume: bool                # Copilot: --name only names a NEW session (F236)
+    session_id_excludes_worktree: bool        # Copilot: no --session-id beside --worktree; learn it (F236)
     system_prompt_flag: Optional[str]         # "--append-system-prompt-file"; None ⇒ ride the bus (§6.9)
     initial_prompt: PromptDelivery            # positional | flag("-i") | type_into_tui
     ungated_stance: Tuple[str, ...]           # argv that means "don't prompt, we gate at PreToolUse"

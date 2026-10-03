@@ -103,6 +103,34 @@ def test_a_resumed_session_continues_the_same_session_id(short_tmp, fake_copilot
     assert unknown.status == "error"
 
 
+def test_a_worktree_session_lets_copilot_mint_its_id_and_resumes_by_it(short_tmp, fake_copilot_home, env_clean):
+    """F236: Copilot refuses --session-id beside --worktree. In a git repo the host lets
+    Copilot mint the id; SessionStart reports it, and the resume continues it."""
+    workdir = _workdir(short_tmp)
+    (workdir / ".git").mkdir()
+    cfg = _cfg(short_tmp, use_worktrees=True)
+    ticket = _ticket(workdir)
+    s, out = _run(short_tmp, ticket, cfg)
+    assert out.status == "success", out
+    argv = list(s.proc.args)
+    assert argv[argv.index("--worktree") + 1] == "automatos-91" and "--session-id" not in argv
+    assert out.session_id and out.session_id != ticket["session_id"]      # Copilot's own, from SessionStart
+    again_s, again = _run(short_tmp, _ticket(workdir, resume_session_id=out.session_id), cfg)
+    assert again.status == "success", again
+    assert not {"--worktree", "--name", "--session-id"} & set(again_s.proc.args)
+
+
+def test_the_fake_refuses_what_copilot_1_0_91_refuses():
+    """The fake holds the host to the binary's own parser (probed 3 Oct, F236)."""
+    import subprocess
+    import sys
+
+    for pair, words in (("--name", "'--name <name>'"), ("--worktree", "'--worktree [<name>]'")):
+        run = subprocess.run([sys.executable, str(FAKE_COPILOT), "--resume", "x", pair, "n", "-p", "hi"],
+                             capture_output=True, text=True, timeout=30)
+        assert run.returncode == 2 and f"cannot be used with {words}" in run.stderr
+
+
 def test_every_permission_mode_runs_on_copilot(short_tmp, fake_copilot_home, env_clean):
     workdir = _workdir(short_tmp)
     _, manual = _run(short_tmp, _ticket(workdir, permission_mode="manual"))      # the edit is a card nobody answers
@@ -127,6 +155,7 @@ def test_plan_on_copilot_is_the_plan_turn(short_tmp, fake_copilot_home, env_clea
     approved_s, approved = _run(short_tmp, _ticket(workdir, permission_mode="edits", plan_approved=True,
                                                    resume_session_id=out.session_id))
     assert approved.status == "success" and (workdir / "hello.txt").exists() and approved_s.plan is None
+    assert "--name" not in approved_s.proc.args          # F236: ticket 1273's approved resume died on it
 
 
 def test_a_run_whose_hooks_never_loaded_reports_nothing(short_tmp, fake_copilot_home, env_clean, monkeypatch):

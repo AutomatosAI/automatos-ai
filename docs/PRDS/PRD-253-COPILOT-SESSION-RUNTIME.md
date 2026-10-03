@@ -459,11 +459,13 @@ A new session:
 
 A resumed session uses `--resume <cli_session_id>` in place of `--session-id`.
 
+**As built (F236, build 6):** 1.0.91's own parser refuses `--resume` beside `--name` or `--worktree`, and `--session-id` beside `--worktree` (probed against the binary). So a worktree session passes `--worktree automatos-N` and no `--session-id`: Copilot mints the id, SessionStart reports it, and a later resume uses it. A resumed session passes `--resume <id>` with neither `--name` nor `--worktree`, and keeps its name and folder.
+
 - **PTY:** it spawns on the host's PTY like every CLI. The drain and the terminal log are unchanged.
 - **`--add-dir`:** passed for every folder the gate grants: the session dir, and the deliverables folder when it is not the cwd. Copilot's own path check ("cwd + temp") then sees the same folders.
 - **The prompt:** the pointer is the same short line every CLI gets. The soul and the ticket ride `UserPromptSubmit` → `additionalContext`, which Copilot puts into the model-facing prompt (1.0.65).
 - **Telemetry:** `OTEL_*` is kept for Copilot's own export (O1). `OTEL_EXPORTER_OTLP_HEADERS`, when set, is also named in `--secret-env-vars`, so session shells never see its value.
-- **Resume:** if verify shows `--worktree` cannot combine with `--resume`, set `worktree_excludes_resume=True`. If `--name` fails on resume, the adapter drops it there.
+- **Resume:** `worktree_excludes_resume=True` and `name_excludes_resume=True`; `session_id_excludes_worktree=True` for a new worktree session (F236).
 **Files:** `adapters/copilot.py`; `tests/test_adapters.py`.
 **Acceptance:**
 - [ ] Golden argv for the new, resumed, worktree, model and Automatos-tools cases.
@@ -702,7 +704,6 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
   - the plaintext-token key: the probe checks `storeTokenPlaintext` and the presence of five
     candidate keys, and never reads a value;
   - the MCP tool-name spelling: six spellings are accepted;
-  - `--worktree` combined with `--resume` (`worktree_excludes_resume` stays false);
   - the `totalNanoAiu` unit (booked as `/1e9` AI credits);
   - the version floor (1.0.70).
 - **Found by the first live runs (build 5, 2 Oct night):**
@@ -721,6 +722,16 @@ The ticket's `SessionBlock` shows `ai_credits` and `premium_requests` when prese
     the peer is the host's PID (`AUTOMATOS_HOST_PID`; macOS
     `LOCAL_PEERPID`, Linux `SO_PEERCRED`). Under Linux's bubblewrap the socket is a bind mount
     that cannot be unlinked.
+- **Found by build 6 (3 Oct):**
+  - **F236.** Ticket 1273's Plan was approved, and the resumed run died at once:
+    `error: the argument '--resume [<value>]' cannot be used with '--name <name>'`. Its headline
+    blamed "a repository setting or an organisation policy". Probing the binary found two more
+    refused pairs: `--resume` with `--worktree`, and `--session-id` with `--worktree`. So every
+    Copilot ticket in a git repo would have failed at launch. The preset now says all three
+    (see S1.3), and the fake `copilot` refuses the same pairs in the same words. A CLI's own
+    usage error is now named as an Automatos bug. A non-zero exit before SessionStart says
+    so and no longer guesses at a policy; the policy sentence is kept for a CLI that ran a whole
+    turn and exited 0 with no hook fired.
 
 ## Bank PoC
 
@@ -799,7 +810,7 @@ That is O1.
 5. **Hooks load.** Hooks load from `$COPILOT_HOME/hooks/` in `-p` for an untrusted folder, and SessionStart fires before the first model call.
 6. **Payload shape.** The PascalCase payload carries `session_id`, `cwd`, `transcript_path` (SessionStart), `last_assistant_message` (Stop), and `tool_input` with Copilot's keys. Hook commands inherit the CLI's environment (`AUTOMATOS_HOST_SOCK`, `AUTOMATOS_TASK_ID`, `PYTHONPATH`).
 7. **Resume.** `-p --resume <id>` continues the session and appends to the same `events.jsonl`. `--session-id <new uuid>` creates a new one.
-8. **Worktree.** Where `--worktree <name>` puts the worktree, and whether `--worktree` and `--name` combine with `--resume`.
+8. **Worktree.** Where `--worktree <name>` puts the worktree. (`--worktree` and `--name` do not combine with `--resume`, nor `--worktree` with `--session-id`: F236.)
 9. **MCP config.** `--additional-mcp-config` accepts the HTTP entry (does it need `tools`?), and MCP tool names arrive in one of the S1.4 spellings.
 10. **permissionRequest.** Does it fire after a PreToolUse `allow`, for a path outside the cwd or a URL? That decides `permission_request="rejudge"`. Also its camelCase output shape.
 11. **AI-credit unit.** The unit of `totalNanoAiu`.

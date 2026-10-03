@@ -4,6 +4,9 @@
 
 * refuses what the COPILOT preset forbids (every allow flag, ``--config-dir``,
   ``-i``, …) and a launch without ``-p``, with exit 64 — the invariant is executable;
+* refuses the pairs 1.0.91's own parser refuses, in its words and with its exit 2:
+  ``--resume`` beside ``--name`` or ``--worktree``, ``--session-id`` beside
+  ``--worktree`` (probed against the binary, F236);
 * needs ``COPILOT_HOME`` (66) and the account pointer in its ``config.json`` (67);
 * loads the Claude-format hook files in ``$COPILOT_HOME/hooks/`` and fires them the
   way Copilot fires Claude-format hooks: snake_case payloads with Claude tool names
@@ -37,6 +40,12 @@ FORBIDDEN = {"--allow-all-tools", "--allow-all", "--yolo", "--allow-all-paths", 
              "--assisted-approval", "--enable-memory", "--config-dir", "--share-gist", "--remote", "--acp",
              "--headless", "-i", "--interactive", "--continue"}
 FETCH_URL = "https://example.com/spec"
+# The pairs Copilot 1.0.91's clap parser refuses, as it prints them (F236, 3 Oct).
+CONFLICTS = {
+    ("--resume", "--name"): "'--resume [<value>]' cannot be used with '--name <name>'",
+    ("--resume", "--worktree"): "'--resume [<value>]' cannot be used with '--worktree [<name>]'",
+    ("--session-id", "--worktree"): "'--session-id <id>' cannot be used with '--worktree [<name>]'",
+}
 
 
 def _flag(args, name):
@@ -109,6 +118,11 @@ def _refuse(args) -> int:
     if "-p" not in args:
         sys.stderr.write("fake copilot: a supervised session runs with -p\n")
         return 64
+    for (first, second), words in CONFLICTS.items():
+        if first in args and second in args:
+            sys.stderr.write(f"error: the argument {words}\n\nUsage: copilot {first} --prompt <text>\n\n"
+                             "For more information, try '--help'.\n")
+            return 2
     return 0
 
 
