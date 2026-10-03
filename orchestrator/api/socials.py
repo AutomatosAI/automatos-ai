@@ -103,6 +103,7 @@ from api.socials_channels import router as channels_router
 from api import socials_preview
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
+from api import socials_compose
 from api import socials_brand
 from api.socials_media_upload import router as media_upload_router
 from api.socials_plans import router as plans_router
@@ -540,8 +541,10 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
     the files in ``media``, or in ``failed`` with the report in ``review_log``:
     a render whose footage or voice would take the post or the workspace over
-    its media cap submits nothing more and fails saying why (D13).
+    its media cap submits nothing more and fails saying why (D13). A post left to
+    "Let Auto pick" gets Auto's template first (F253, ``socials_compose.let_auto_pick``).
     """
+    await socials_compose.let_auto_pick(db, workspace, post, actor, service.assert_can_render)
     status, content_hash = post.status, post.content_hash
     voice = post.voice
     service.assert_can_render(post)
@@ -794,7 +797,8 @@ async def render_social_post(
     """Render the post in the background (``render_post``): 202 with it in ``rendering``.
 
     Refused, with nothing changed, when the post holds an approval or is already
-    rendering (409), has no social template (422), is a chart bound to a report
+    rendering (409), has no social template (422; one left to "Let Auto pick" gets
+    Auto's first, F253, and 422 says why when Auto cannot pick), is a chart bound to a report
     that no longer shows the report's rows or names it (422, saying which row
     differs; 503 when the report's file cannot be read), names a voice toolkit the
     workspace cannot speak with now (422, saying why), the workspace has used

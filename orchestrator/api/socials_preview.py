@@ -5,7 +5,8 @@ Socials preview render (PRD-251 S2.2b, US-208)
 ``POST /api/socials/posts/{id}/render`` with ``{"preview": true}``: the composer's
 preview of a video, at half resolution, stored as the post's ``preview``
 (``modules/socials/preview.py``). The post keeps its status, ``media`` and
-content hash. Its seconds are held against the month's render quota before
+content hash; a post left to "Let Auto pick" first gets Auto's template, an edit
+like any other (F253). Its seconds are held against the month's render quota before
 anything reaches media-render (429 when none are left), and the render runs in
 the background. A post whose content can no longer be edited is 409, and so is a
 second preview while one renders.
@@ -24,6 +25,7 @@ from core import media_render_quota as render_quota
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
 from core.utils.background_tasks import launch_guarded
+from api import socials_compose
 from modules.socials import preview, render
 
 
@@ -40,8 +42,10 @@ def _launch_preview(job: render.RenderJob) -> None:
 
 
 async def preview_post(db: Session, workspace: Workspace, post: SocialPost, actor: str) -> Dict[str, Any]:
-    """Start the post's preview render; the post answers with ``preview.status`` rendering."""
+    """Start the post's preview render; the post answers with ``preview.status`` rendering.
+    A post left to "Let Auto pick" gets Auto's template first, saved on the post (F253)."""
     posts_api = _posts_api()
+    await socials_compose.let_auto_pick(db, workspace, post, actor, preview.assert_can_preview)
     preview.assert_can_preview(post)
     template = posts_api._render_template(db, workspace.id, post)
     brand_kit = await asyncio.to_thread(posts_api._render_brand_kit, workspace.settings)

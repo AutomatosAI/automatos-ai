@@ -193,6 +193,7 @@ EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
 # Composio voice toolkit (modules/socials/recipes/voice.py).
 KOKORO = "kokoro"
+AUTO = "Auto"  # F253: who picked a template left to "Let Auto pick", in the history
 VOICE_KEYS = ("toolkit", "voice_id", "name")
 VOICE_TOOLKIT = post_targets.TOOLKIT_NAME  # a Composio toolkit's name, as a channel's
 VOICE_TEXT_MAX_CHARS = 200
@@ -791,6 +792,15 @@ def update_post(
         _move(post, ACTION_EDIT)
         post.override_unsourced = False
         _log(post, actor, ACTION_APPROVAL_VOIDED, "The content changed after approval.")
+    return post
+
+
+def record_auto_pick(post: SocialPost, actor: str, changes: Mapping[str, Any], template_name: str) -> SocialPost:
+    """PRD-251B F253 ("Let Auto pick"): the template Auto picked for a post left to it, and
+    the values it wrote for the template's fields, applied as an edit; the history names
+    the template, and Auto as the one who picked it."""
+    update_post(post, actor, changes)
+    _log(post, actor, ACTION_EDIT, f"Auto picked the template {template_name} and wrote its fields.", agent=AUTO, fields=sorted(changes))
     return post
 
 

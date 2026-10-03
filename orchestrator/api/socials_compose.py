@@ -15,6 +15,11 @@ skills (global ``skills`` rows). One model call, through the platform's LLM
 manager (``modules/socials/compose.py``), checked field by field
 (``modules/socials/compose_checks.py``).
 
+F253 ("Let Auto pick"): a post saved with its template left to Auto is given one when it
+renders (``auto_template``): the composer picks the template for the post's format and
+writes its fields from the post's own words, and ``api/socials.py`` saves the pick before
+the render starts.
+
 This router has no prefix and no gate of its own: ``api/socials.py`` includes it
 in the Socials router, whose ``require_socials_enabled`` answers 404 unless both
 switches are on (D1). Never mount it in the app directly.
@@ -22,9 +27,11 @@ switches are on (D1). Never mount it in the app directly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 import anyio
@@ -38,15 +45,17 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import DocumentTemplate, Skill
-from core.models.socials import SOCIAL_POST_FORMATS
+from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SOCIAL_TEMPLATE_FORMATS
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import compose
+from modules.socials import compose, service
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
+from modules.socials.render import NotRenderable
 from modules.socials.template_gallery import durations_of
+from api.socials_media_upload import UPLOAD_ASPECT
 
 TEXT_FORMAT = "text"
 
@@ -264,3 +273,103 @@ def compose_social_post(
     except Exception as exc:
         logger.exception("[Socials] compose failed for workspace %s", ctx.workspace_id)
         raise HTTPException(status_code=502, detail="The model could not be reached. Try again.") from exc
+
+
+# ---------------------------------------------------------------------------
+# F253: "Let Auto pick" when the post renders
+# ---------------------------------------------------------------------------
+# The editor's Template card offers "Let Auto pick" first, and the post is saved with no
+# template. Every template has fields a render needs, so picking a template alone would
+# still be refused: the composer picks it and writes those fields, as Redraft with Auto
+# does, from the post's own words. The person's copy and title stay as they are.
+
+VISUAL_FORMATS = tuple(name for name in SOCIAL_POST_FORMATS if name != TEXT_FORMAT)
+NO_TEMPLATE_FOR = "Auto found no template for this {format} post: add one in Templates, or choose a format that has one."
+
+
+def left_to_auto(post: Any) -> bool:
+    """A post whose template is left to Auto: a visual format, no template yet, and no file
+    of the person's own as its visual (an upload or a Library pick, ``media.original``)."""
+    media = post.media if isinstance(post.media, dict) else {}
+    return post.template_id is None and post.format in VISUAL_FORMATS and UPLOAD_ASPECT not in media
+
+
+def auto_brief(post: Any) -> str:
+    """What Auto writes the fields from: the post's brief and its copy, or its title alone."""
+    copy = post.copy if isinstance(post.copy, dict) else {}
+    words = [text.strip() for text in (post.brief, copy.get("base")) if isinstance(text, str) and text.strip()]
+    return "\n\n".join(words or [post.title])[:BRIEF_MAX_CHARS]
+
+
+def _auto_context(db: Session, workspace_id: UUID, post: Any) -> compose.ComposeContext:
+    """The composer's context for ``post``; a chosen length keeps the templates that offer it."""
+    body = ComposeRequest(brief=auto_brief(post), format=post.format, length_seconds=post.length_seconds)
+    context = compose_context(db, workspace_id, body)
+    if post.length_seconds is None:
+        return context
+    return replace(context, templates=[t for t in context.templates if post.length_seconds in (t.get("durations") or [])])
+
+
+def _auto_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
+    """The edit that records the pick: the template, its fields and the sources Auto bound,
+    where the post's own value wins for a field the template has, and its own sources stay."""
+    schema = (proposal.get("template") or {}).get("variables_schema") or {}
+    own = {name: spec for name, spec in (post.variables or {}).items() if name in schema}
+    return {
+        "template_id": proposal["template_id"],
+        "variables": {**(proposal.get("variables") or {}), **own},
+        "sources": {**(proposal.get("sources") or {}), **(post.sources or {})},
+    }
+
+
+async def _auto_proposal(context: compose.ComposeContext, workspace_id: UUID, post_id: Any) -> Dict[str, Any]:
+    """The composer's checked proposal; a model that gives no usable answer is NotRenderable."""
+    timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
+    try:
+        return await compose.propose(context, compose.llm_factory(workspace_id), timeout)
+    except (compose.ComposeTimedOut, compose.ComposeFailed) as exc:
+        raise NotRenderable(f"Auto could not pick a template: {exc}") from exc
+    except Exception as exc:
+        logger.exception("[Socials] Auto's template pick failed for post %s", post_id)
+        raise NotRenderable("Auto could not pick a template: the model could not be reached. Try again.") from exc
+
+
+async def auto_template(db: Session, workspace_id: UUID, post: Any) -> Tuple[Dict[str, Any], str]:
+    """Auto's pick for ``post``: the edit that records it, and the template's name.
+    :class:`NotRenderable` (422, saying why) when no template of the workspace fits the
+    post's format and length, or the model gave no usable answer."""
+    try:
+        context = await asyncio.to_thread(_auto_context, db, workspace_id, post)
+    except ChoiceRefused as exc:
+        raise NotRenderable(f"Auto could not pick a template: {exc}") from exc
+    if not context.templates:
+        raise NotRenderable(NO_TEMPLATE_FOR.format(format=post.format))
+    proposal = await _auto_proposal(context, workspace_id, post.id)
+    if not proposal.get("template_id"):
+        raise NotRenderable(NO_TEMPLATE_FOR.format(format=post.format))
+    return _auto_edit(proposal, post), str(proposal["template"]["name"])
+
+
+def _posts_api() -> Any:
+    """``api/socials.py``, for its compare-and-set commit: it includes this module's router,
+    so it is imported when a request runs."""
+    from api import socials
+
+    return socials
+
+
+async def let_auto_pick(
+    db: Session, workspace: Workspace, post: SocialPost, actor: str, check: Callable[[Any], None]
+) -> None:
+    """Give a post left to Auto (``left_to_auto``) its template as it first renders or
+    previews: Auto picks it and writes its fields, and the pick is saved before the render
+    starts, by the compare-and-set commit, with a line in the history naming the template.
+    The render, the preview and the editor then all use it. ``check`` refuses a post that
+    cannot render or preview now, before the model is asked. Any other post is left as it is."""
+    if not left_to_auto(post):
+        return
+    check(post)
+    status, content_hash = post.status, post.content_hash
+    changes, template_name = await auto_template(db, workspace.id, post)
+    service.record_auto_pick(post, actor, changes, template_name)
+    _posts_api()._commit_unchanged(db, post, status=status, content_hash=content_hash)
