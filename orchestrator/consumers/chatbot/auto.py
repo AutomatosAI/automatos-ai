@@ -705,23 +705,7 @@ _MEMORY_PATTERN = re.compile(
 )
 
 
-def build_assessment_prompt(
-    message: str, conversation_length: int, platform_context: str = ""
-) -> str:
-    """The Tier-3 classifier prompt (pure — string-presence testable).
-
-    Carries the three-lane routing rubric (PRD-224 US-004): DELEGATE answers
-    THIS turn, ASSIGN files an off-thread board ticket for a named single agent,
-    MISSION staffs a multi-agent project.
-    """
-    return f"""You are a message complexity classifier for an AI platform.
-
-Analyze the user's message step by step, then classify it.
-
-Message: "{message}"
-Conversation turn: {conversation_length}
-
-## Reasoning Steps (think through each):
+_ASSESSMENT_RUBRIC = """## What to weigh:
 
 1. **Intent**: What is the user asking for? (greeting, question, action, complex task)
 2. **Tool need**: Does this require external data or actions? (database, email, search, file ops)
@@ -772,10 +756,9 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 
 **Default bias: atom.** Most messages are simpler than they look.
 **Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ.
-**One named agent ≠ mission.** A single agent owning a deliverable is assign.
-{platform_context}
-Return ONLY valid JSON:
-{{
+**One named agent ≠ mission.** A single agent owning a deliverable is assign."""
+_ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
+{
   "complexity": "atom|molecule|cell|organ|organism",
   "action": "respond|delegate|assign|mission",
   "target_agent": "the agent name for an assign (else empty)",
@@ -783,11 +766,28 @@ Return ONLY valid JSON:
   "needs_memory": false,
   "needs_multi_agent": false,
   "reasoning": "one sentence"
-}}
+}
 
 action mapping: "respond" for atom; "delegate" for inline molecule/cell/organ answers; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
 target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant") — it MUST appear in the user's own words; a request addressed to you ("can you…", "please close…") with no named assignee is NOT assign; empty otherwise.
 tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
+
+
+def build_assessment_prompt(
+    message: str, conversation_length: int, platform_context: str = ""
+) -> str:
+    """The Tier-3 classifier prompt (pure — string-presence testable).
+
+    Carries the three-lane routing rubric (PRD-224 US-004): DELEGATE answers
+    THIS turn, ASSIGN files an off-thread board ticket for a named single agent,
+    MISSION staffs a multi-agent project.
+    """
+    return (
+        "You are a message complexity classifier for an AI platform.\n\n"
+        f'Message: "{message}"\n'
+        f"Conversation turn: {conversation_length}\n\n"
+        f"{_ASSESSMENT_RUBRIC}\n{platform_context}\n{_ASSESSMENT_OUTPUT}"
+    )
 
 
 # ---------------------------------------------------------------------------

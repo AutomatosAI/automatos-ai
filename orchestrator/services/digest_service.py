@@ -19,7 +19,6 @@ from services.workspace_digest import build_digest_snapshot, render_fallback_dig
 logger = logging.getLogger(__name__)
 
 _DIGEST_NAMESPACE = "digest"
-_MAX_WORDS = 150
 
 
 def _digest_ttl() -> int:
@@ -75,7 +74,7 @@ def _build_messages(snapshot: Dict[str, Any]) -> list:
     }, separators=(",", ":"))
     system = (
         "You are Auto, summarising a workspace for its owner. Write a calm, "
-        f"plain-English read in at most {_MAX_WORDS} words. Name any blocked or "
+        "plain-English read. Name any blocked or "
         "failed items explicitly and say why. No raw logs, no JSON, no bullet "
         "lists — two or three sentences a non-technical owner can act on."
     )
