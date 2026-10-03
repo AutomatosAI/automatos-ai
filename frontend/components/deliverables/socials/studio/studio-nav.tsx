@@ -2,10 +2,10 @@
 
 /**
  * PRD-251B US-B107 — the Socials Studio's header (docs/PRDS/prd251b-reference/Nav.dc.html):
- * the sub-navigation Calendar · Queue (how many posts need you) · Plans · Brand kit, and the
- * two actions New plan and New post. Every item is a 44 px target; the active one is
- * underlined in the accent (TOKENS.md). Brand kit opens the brand kit dialog in place, for a
- * role that edits it; the actions are for a role that drafts posts.
+ * the sub-navigation Calendar · Queue (how many posts need you) · Plans, and the two actions
+ * New plan and New post. Every item is a 44 px target; the active one is underlined in the
+ * accent (TOKENS.md). The actions are for a role that drafts posts. F250: the brand kit is
+ * the Deliverables Brand kit tab only, shared by Templates and Socials; no second entry here.
  */
 import { Plus } from 'lucide-react'
 
@@ -45,15 +45,13 @@ interface SocialsStudioNavProps {
   /** Posts waiting for approval: the Queue's badge. */
   queueCount: number
   canAuthor: boolean
-  canBrand: boolean
   onView: (view: SocialsStudioView) => void
-  onBrandKit: () => void
   onNewPlan: () => void
   onNewPost: () => void
 }
 
 export function SocialsStudioNav(props: SocialsStudioNavProps) {
-  const { view, queueCount, canAuthor, canBrand, onView, onBrandKit, onNewPlan, onNewPost } = props
+  const { view, queueCount, canAuthor, onView, onNewPlan, onNewPost } = props
   return (
     <div className="socials-studio-head flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-border">
       <nav aria-label="Socials" className="flex flex-wrap gap-0.5">
@@ -69,11 +67,6 @@ export function SocialsStudioNav(props: SocialsStudioNavProps) {
             {item.view === 'queue' && <QueueCount count={queueCount} />}
           </button>
         ))}
-        {canBrand && (
-          <button type="button" className={cn(ITEM, OFF)} onClick={onBrandKit}>
-            Brand kit
-          </button>
-        )}
       </nav>
       {canAuthor && (
         <div className="socials-studio-actions flex flex-wrap items-center gap-2 pb-2">
