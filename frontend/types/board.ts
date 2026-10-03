@@ -57,6 +57,8 @@ export interface BoardTask {
   number?: string | null
   /** PRD-252 D3: Rejects since the brief was last agreed; from 3, Review suggests Discuss. */
   times_sent_back?: number
+  /** F243: the draft a failed redo keeps on the card's face (the last run that had one). */
+  kept_draft?: string | null
 }
 
 export interface BoardColumn {

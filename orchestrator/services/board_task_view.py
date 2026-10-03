@@ -14,14 +14,16 @@ from core.models import Agent
 from core.models.core import BoardTask
 from core.services.ticket_reasons import blocked_code, review_reason
 from services.ticket_numbers import ticket_numbers
-from services.ticket_redo import times_sent_back
+from services.ticket_redo import kept_draft, times_sent_back
 
 
 def board_dict(task: BoardTask, number: Optional[str] = None) -> Dict[str, Any]:
-    """A ticket's columns, its number, why it waits in Review or Blocked, and how
-    often it was sent back (R2: the review panel suggests Discuss after three)."""
+    """A ticket's columns, its number, why it waits in Review or Blocked, how
+    often it was sent back (R2: the review panel suggests Discuss after three),
+    and (F243) the draft a failed redo keeps on the card's face."""
     return {**task.to_dict(), "number": number, "review_reason": review_reason(task),
-            "blocked_code": blocked_code(task), "times_sent_back": times_sent_back(task)}
+            "blocked_code": blocked_code(task), "times_sent_back": times_sent_back(task),
+            "kept_draft": kept_draft(task)}
 
 
 def enrich_with_agents(tasks: List[BoardTask], db: Session, workspace_id: Any) -> List[Dict[str, Any]]:

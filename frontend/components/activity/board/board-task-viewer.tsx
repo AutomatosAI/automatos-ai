@@ -550,6 +550,8 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
         </div>
       )}
 
+      <KeptDraft task={task} />
+
       {/* F094: the notes, the mission's verdict among them, stay on a finished ticket */}
       <NotesSection task={task} />
 
@@ -594,6 +596,19 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
 }
 
 // PRD-252 R7: a cancelled or closed ticket opened to an empty viewer.
+/** F243: a redo that failed keeps the draft it was correcting on the card's face (#0171, #0174). */
+export function KeptDraft({ task }: { task: BoardTask }) {
+  if (!task.kept_draft || task.result) return null
+  return (
+    <div>
+      <SectionLabel icon={<FileText className="w-3 h-3" />}>Your last draft (this run failed; the draft is kept)</SectionLabel>
+      <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
+        {task.kept_draft}
+      </div>
+    </div>
+  )
+}
+
 function CancelledContent({ task }: { task: BoardTask }) {
   return (
     <div className="space-y-6">
