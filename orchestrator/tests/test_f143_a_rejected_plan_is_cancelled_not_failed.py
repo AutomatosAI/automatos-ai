@@ -6,9 +6,9 @@ as failed. The card went ``failed``, and the watch scored a run that never ran
 A rejected plan now ends ``cancelled`` with the owner's reason:
 
 - the watch closes a cancelled target without scoring it;
-- the card maps cancelled to ``done`` (PRD-204 S4), and its error_message keeps
-  "Plan rejected: <reason>", so ``done`` never reads as success (JEV keys watch
-  verdicts on that prefix);
+- the card is ``cancelled`` (F245; it was ``done`` under PRD-204 S4), and its
+  error_message keeps "Plan rejected: <reason>" (JEV keys watch verdicts on that
+  prefix);
 - the tool reply says "rejected by the owner", never completed or failed.
 """
 from __future__ import annotations
@@ -52,12 +52,12 @@ def test_a_rejected_plan_is_cancelled_with_the_owners_reason(db_session, seed_wo
     assert (run.state, run.stop_reason, run.stop_detail) == ("cancelled", "human_cancelled", f"Plan rejected: {REASON}")
 
 
-def test_the_card_is_done_but_says_the_plan_was_rejected(db_session, seed_workspace):
+def test_the_card_is_cancelled_and_says_the_plan_was_rejected(db_session, seed_workspace):
     ws = UUID(seed_workspace())
     run, card, _watch = _mission(db_session, ws)
     asyncio.run(reject_mission(db_session, ws, {"mission_id": str(run.id), "reason": REASON}))
     db_session.refresh(card)
-    assert card.status == "done"
+    assert card.status == "cancelled"
     assert card.error_message == f"Plan rejected: {REASON}"
     assert card.completed_at is not None
 

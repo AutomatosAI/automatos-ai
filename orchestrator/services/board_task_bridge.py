@@ -117,6 +117,12 @@ def complete_recipe_board_task(
 
     if not task:
         return
+    if task.status in ("cancelled", "closed"):
+        # F245: a run that ends after its card was cancelled never moves it
+        # (#0096 and #0150 went Cancelled → Done with the run's result).
+        logger.info("[board_bridge] execution %s ended after its card was %s: left as it is",
+                    execution_id, task.status)
+        return
 
     if review:
         # F123 (F014's rule): a run that stopped after finished work puts that

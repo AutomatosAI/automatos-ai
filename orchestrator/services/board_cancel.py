@@ -15,6 +15,9 @@ F224 (2 Oct, Gerard): the same for every parent — when a task, playbook run,
 mission or routine is cancelled, fails or dies, every runtime session it
 started stops. ``stop_ticket_run`` is the one path; it does not commit, so a
 caller inside a larger transaction (a mission's state change) keeps it whole.
+
+F245 (night 7): a failed ticket can be cancelled too, which closes it: it
+waits in Needs you until the owner deals with it (F246).
 """
 from __future__ import annotations
 
@@ -26,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 RUN_STEP_LIVE = ("inbox", "assigned", "in_progress", "blocked")
 FINISHED = ("done", "failed", "cancelled", "closed")
+# What no cancel moves: a failed ticket can still be cancelled, which closes it (F245).
+UNCANCELLABLE = ("done", "cancelled", "closed")
 CANCEL_REQUESTED_KEY = "cancel_requested_at"
 # A mission step's card the session lane runs carries ``source_id`` "mission:…"
 # (services.cli_ticket_lane.MISSION_SOURCE_TYPE) and its run's id: only those
@@ -47,11 +52,11 @@ ROUTINE_BY = "the routine"
 
 
 def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
-    """End ``task``'s run unless it has finished: terminal ``cancelled``, the
-    lease and the session credential gone, ``cancel_requested_at`` so the CLI
-    host stops the session at its next event batch, the board told. Does NOT
-    commit. True when the ticket was stopped here."""
-    if task.status in FINISHED:
+    """End ``task``'s run unless it is done or already closed: terminal
+    ``cancelled``, the lease and the session credential gone,
+    ``cancel_requested_at`` so the CLI host stops the session at its next event
+    batch, the board told. Does NOT commit. True when the ticket was stopped here."""
+    if task.status in UNCANCELLABLE:
         return False
     from services.board_events import notify_board_event
     from services.cli_host_service import clear_session_token
@@ -75,13 +80,14 @@ def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
     notify_board_event(
         db, workspace_id=task.workspace_id, task_id=task.id, status="cancelled", event="task_cancelled",
     )
+    db.flush()
     logger.info("[BoardCancel] task %d stopped (was %s) by %s — %s", task.id, previous, by, reason)
     return True
 
 
 def cancel_board_ticket(db: Any, task: Any, *, by: str, reason: str) -> bool:
-    """Cancel ``task`` unless it has finished. Commits and tells the board.
-    True when it was cancelled here."""
+    """Cancel ``task`` unless it is done or already closed. Commits and tells the
+    board. True when it was cancelled here."""
     if not stop_ticket_run(db, task, by=by, reason=reason):
         return False
     db.commit()
@@ -111,29 +117,6 @@ def stop_run_step_tickets(db: Any, execution_id: str, *, by: str, reason: str) -
     stopped; a step that already finished keeps its result."""
     return [task.id for task in run_step_tickets(db, execution_id)
             if stop_ticket_run(db, task, by=by, reason=reason)]
-
-
-def cancel_run_step_tickets(db: Any, execution_id: str, *, by: str) -> List[int]:
-    """F116: cancel the session step tickets a playbook run filed that are still
-    queued or being worked, each saying it was cancelled with the run. Commits.
-    Returns the ticket ids cancelled."""
-    cancelled = stop_run_step_tickets(db, execution_id, by=by, reason=f"cancelled with run {execution_id}")
-    if cancelled:
-        db.commit()
-    return cancelled
-
-
-def cancel_playbook_run_board(db: Any, execution_id: str, *, by: str, error_message: str) -> List[int]:
-    """A playbook run its owner cancelled, on the board: its step tickets are
-    cancelled with it, each naming ``by`` (F116), and then its card is failed.
-    In that order: failing the card stops any step still live as a run that
-    failed (F224), and a cancelled run's steps say who cancelled them. Commits.
-    Returns the step tickets cancelled."""
-    from services.board_task_bridge import complete_recipe_board_task
-
-    cancelled = cancel_run_step_tickets(db, execution_id, by=by)
-    complete_recipe_board_task(db, execution_id, success=False, error_message=error_message)
-    return cancelled
 
 
 def live_mission_step_cards(db: Any, run_id: Any) -> List[Any]:
@@ -227,8 +210,8 @@ def stop_heartbeat_sessions(db: Any, workspace_id: Any, agent_id: int) -> List[i
 
 __all__ = [
     "CANCEL_REQUESTED_KEY", "FINISHED", "HEARTBEAT_OFF_REASON", "MISSION_STOP_REASONS", "PLAYBOOK_RUN_BY",
-    "ROUTINE_OFF_REASONS", "RUN_DIED_REASON", "RUN_FAILED_REASON", "RUN_STEP_LIVE", "cancel_board_ticket",
-    "cancel_playbook_run_board", "cancel_run_step_tickets", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
+    "ROUTINE_OFF_REASONS", "RUN_DIED_REASON", "RUN_FAILED_REASON", "RUN_STEP_LIVE", "UNCANCELLABLE",
+    "cancel_board_ticket", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
     "stop_mission_sessions", "stop_routine_sessions", "stop_run_step_tickets", "stop_scheduled_task_sessions",
     "stop_ticket_run",
 ]

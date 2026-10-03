@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 # One mission step's card (the session lane claims it when a Claude Code agent runs the step).
 STEP_CARD_SOURCE_TYPE = "orchestration_task"
+# A card closed by a person or a cancel: the mission never moves it again (F245).
+CLOSED_CARD_STATUSES = ("cancelled", "closed")
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +55,8 @@ _ORCHESTRATION_TO_BOARD_STATUS: dict[str, str] = {
     "in_review": "review",
     "done": "done",
     "blocked": "blocked",
-    "cancelled": "done",
+    # F245: a skipped step never ran: it is Cancelled, not Done.
+    "cancelled": "cancelled",
 }
 
 
@@ -264,9 +267,29 @@ def sync_board_status(
 
     if board_task.status == new_status:
         return  # No change needed
+    if board_task.status in CLOSED_CARD_STATUSES:
+        return  # F245: a cancelled card stays cancelled; a late step result never reopens it
 
     old_status = board_task.status
     board_task.status = new_status
+    _copy_step_onto_card(board_task, task, task_state, old_status)
+    db.flush()
+
+    logger.info(
+        "Synced board task %s status: %s → %s (orchestration task %s state=%s)",
+        board_task.id,
+        old_status,
+        new_status,
+        task.id,
+        task_state.value,
+    )
+
+
+def _copy_step_onto_card(board_task: BoardTask, task: OrchestrationTask, task_state: TaskState,
+                         old_status: str) -> None:
+    """The step's agent, times, output and failure onto its card, after its
+    status moved from ``old_status`` to ``board_task.status``."""
+    new_status = board_task.status
 
     # Sync agent assignment if it changed
     if task.assigned_agent_id and board_task.assigned_agent_id != task.assigned_agent_id:
@@ -296,17 +319,6 @@ def sync_board_status(
         board_task.blocked_at = None
         board_task.blocked_reason = None
 
-    db.flush()
-
-    logger.info(
-        "Synced board task %s status: %s → %s (orchestration task %s state=%s)",
-        board_task.id,
-        old_status,
-        new_status,
-        task.id,
-        task_state.value,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Mission-level board status sync
@@ -324,10 +336,11 @@ _RUN_STATE_TO_BOARD_STATUS: dict[str, str] = {
     RunState.COMPLETED.value: "done",
     # PRD-204 S4 (OS-review F023): a failed mission's card used to render
     # "done" -- the board was lying. "failed" is a valid board status
-    # (api/board_tasks.VALID_STATUSES). cancelled stays "done": the user
-    # deliberately closed it.
+    # (api/board_tasks.VALID_STATUSES). F245: a cancelled mission's card is
+    # Cancelled (the board has had that stage since PRD-252 R7); "done" read
+    # as finished work (#0098, #0119).
     RunState.FAILED.value: "failed",
-    RunState.CANCELLED.value: "done",
+    RunState.CANCELLED.value: "cancelled",
 }
 
 
@@ -369,6 +382,8 @@ def sync_mission_board_status(
 
     if board_task.status == new_status:
         return
+    if board_task.status in CLOSED_CARD_STATUSES:
+        return  # F245: a card the owner cancelled stays cancelled (#0098 went Cancelled → Done)
 
     old_status = board_task.status
     board_task.status = new_status
@@ -377,13 +392,13 @@ def sync_mission_board_status(
     if new_status == "in_progress" and board_task.started_at is None:
         board_task.started_at = run.started_at or datetime.now(timezone.utc)
 
-    # "failed" is terminal for the card too (PRD-204 S4) -- stamp completion.
-    if new_status in ("done", "failed") and board_task.completed_at is None:
+    # "failed" and "cancelled" are terminal for the card too (PRD-204 S4) -- stamp completion.
+    if new_status in ("done", "failed", "cancelled") and board_task.completed_at is None:
         board_task.completed_at = run.completed_at or datetime.now(timezone.utc)
 
-    # Store failure info when mission fails. F143: a cancelled mission's card is
-    # "done" (PRD-204 S4), so its error_message is what says it did not succeed,
-    # e.g. "Plan rejected: <the owner's reason>" (JEV keys watch verdicts on it).
+    # Store failure info when mission fails. F143: a cancelled mission's card
+    # keeps why on its error_message, e.g. "Plan rejected: <the owner's reason>"
+    # (JEV keys watch verdicts on it).
     if run_state == RunState.FAILED:
         board_task.error_message = run.stop_detail or run.stop_reason or "Mission failed"
     elif run_state == RunState.CANCELLED:

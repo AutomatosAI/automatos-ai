@@ -11,6 +11,8 @@ On the real schema, through the host's own claim and result.
 
 A mission that ENDS without finishing (cancelled, failed) is F224's: it stops the
 step's session and cancels the card (test_f224_a_parent_that_ends_stops_its_sessions).
+A cancel also skips and cancels the mission's other steps (F245,
+test_f245_cancel_stops_a_mission).
 """
 from __future__ import annotations
 
