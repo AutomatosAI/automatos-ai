@@ -62,3 +62,15 @@ def workspace_root() -> Path:
     """
     raw = os.environ.get(WORKSPACE_ROOT_ENV, "").strip()
     return Path(raw or DEFAULT_WORKSPACE_ROOT)
+
+
+# The largest binary file the platform may write through /files/write a piece at a
+# time (the Socials copies of approved pictures and videos, executor._write_chunk).
+MAX_BINARY_WRITE_ENV = "WORKER_MAX_BINARY_WRITE_BYTES"
+DEFAULT_MAX_BINARY_WRITE_BYTES = 500 * 1024 * 1024
+
+
+def max_binary_write_bytes() -> int:
+    """The cap on one binary file written in pieces (``WORKER_MAX_BINARY_WRITE_BYTES``)."""
+    raw = os.environ.get(MAX_BINARY_WRITE_ENV, "").strip()
+    return int(raw) if raw.isdigit() else DEFAULT_MAX_BINARY_WRITE_BYTES

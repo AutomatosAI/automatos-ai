@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search
+from modules.socials import report_charts, text_search, workspace_copies
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -701,7 +701,8 @@ async def approve_social_post(
     the post's → 409 with the current hash. An edit another worker commits
     after the load is caught by the compare-and-set → the same 409, nothing
     written. Every source is resolved again first (D7): a claim whose source is
-    gone from the workspace counts as unsourced."""
+    gone from the workspace counts as unsourced. The approved post's files are then
+    copied into the workspace's socials folders (``workspace_copies``)."""
     post = _load(db, ctx, post_id)
     unresolved = post_sources.unresolved(db, ctx.workspace_id, post.sources)
     try:
@@ -713,9 +714,11 @@ async def approve_social_post(
             comment=body.comment,
             unresolved_sources=unresolved,
         )
-        return _commit_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
+        saved = _commit_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
+    workspace_copies.copy_when_approved(db, post)
+    return saved
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])
