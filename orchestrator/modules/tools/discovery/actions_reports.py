@@ -20,8 +20,8 @@ def _register_submit_report(registry: ActionRegistry) -> None:
         description=(
             "Save a structured report after completing work — research, heartbeat, "
             "audit, or deliverable. The report is stored persistently in the workspace "
-            "and visible on the Activity page and agent profile. ALWAYS submit a report "
-            "after finishing significant work. For ephemeral notes, use write_file instead."
+            "and visible on the Activity page and agent profile. Submit one when you finish "
+            "significant work someone will want to read later, not for ephemeral notes."
         ),
         category="reports",
         parameters=_submit_report_parameters(),
@@ -108,7 +108,7 @@ def _register_link_report_to_task(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "report_id": {"type": "string"},
+                "report_id": {"type": "string", "description": "The report's id, as the report tools return it."},
                 # PRD-252 R4: the ticket by its number, as Auto's ticket tools take it
                 "task_id": {"type": "string",
                             "description": "The ticket: its number as the board shows it, e.g. #0042; its id still works."},

@@ -195,6 +195,10 @@ class ToolRegistry:
         
         # Initialize with core platform tools
         self._register_core_tools()
+        from .app_and_document_tools import app_and_document_specs
+
+        for spec in app_and_document_specs():
+            self.register_tool(spec)
         
         self.logger.info(f"ToolRegistry initialized with {len(self.tools)} tools")
 
@@ -1132,157 +1136,6 @@ class ToolRegistry:
                 "max_output_bytes": 500_000,
                 "added_in": "self-test-v1",
             }
-        ))
-
-        # ==========================================
-        # COMPOSIO EXECUTION (External Apps)
-        # ==========================================
-
-        self.register_tool(
-            ToolSpec(
-                name="composio_execute",
-                category=ToolCategory.API_TOOLS,
-                description=(
-                    "Execute any action across 1000+ external app integrations via Composio — "
-                    "web search, email, messaging, GitHub, CRM, calendars, databases, and more. "
-                    "If your tool list includes per-action tools (with typed parameters), prefer those "
-                    "for accuracy. Use composio_execute for any action not already in your tool list. "
-                    "Check platform_list_connected_apps to see what's available. "
-                    "IMPORTANT: action-specific parameters MUST go inside the `params` object, NOT at the top level."
-                ),
-                executor_class="ComposioToolExecutor",
-                executor_method="execute",
-                parameters=[
-                    ToolParameter(
-                        name="app_name",
-                        type="string",
-                        description="App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')",
-                        required=False,
-                    ),
-                    ToolParameter(
-                        name="action",
-                        type="string",
-                        description="Action name (e.g., 'GMAIL_LIST_EMAILS', 'SLACK_SEND_MESSAGE')",
-                        required=True,
-                    ),
-                    ToolParameter(
-                        name="params",
-                        type="object",
-                        description=(
-                            "Action-specific parameters as a JSON object. "
-                            "All fields required by the action (e.g. issue_key, channel, text) "
-                            "MUST be placed inside this params object."
-                        ),
-                        required=False,
-                        default={},
-                    ),
-                ],
-                security_level=SecurityLevel.CAUTIOUS,
-                permissions_required={"read": True, "execute": True},
-                examples=[
-                    {
-                        "action": "composio_execute",
-                        "params": {
-                            "action": "SLACK_SEND_MESSAGE",
-                            "params": {"channel": "#general", "text": "Hello"}
-                        },
-                    },
-                ],
-                metadata={"integration_type": "composio"},
-            )
-        )
-
-        # ==========================================
-        # DOCUMENT GENERATION (PRD-63)
-        # ==========================================
-
-        # PRD-251 US-117: the social formats render a social template through
-        # media-render; every format generate() dispatches is offered.
-        from core.models.core import DOCUMENT_TEMPLATE_FORMATS
-
-        self.register_tool(ToolSpec(
-            name="generate_document",
-            category=ToolCategory.FILE_OPERATIONS,
-            description=(
-                f"{GENERATE_DOCUMENT_DESCRIPTION} "
-                "PREFER this over write_file when the user needs a formatted, downloadable document. "
-                "WILL produce a BLANK document if you omit the 'data' parameter — you MUST include "
-                "actual written content. For PDFs, include 'sections' with full paragraphs. "
-                "Returns a download URL."
-            ),
-            executor_class="AgentPlatformTools",
-            executor_method="execute_tool",
-            parameters=[
-                ToolParameter(
-                    name="title",
-                    type="string",
-                    description="Document title (e.g., 'Monthly Sales Report', 'Invoice #1234')",
-                    required=True
-                ),
-                ToolParameter(
-                    name="format",
-                    type="string",
-                    description=GENERATE_DOCUMENT_FORMAT_DESCRIPTION,
-                    required=True,
-                    enum=list(DOCUMENT_TEMPLATE_FORMATS)
-                ),
-                ToolParameter(
-                    name="data",
-                    type="object",
-                    description=(
-                        "REQUIRED — the actual document content. Without this the document will be blank. "
-                        "For PDF/DOCX reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Write full "
-                        "paragraphs of text here — this is the body of the document.\"}], "
-                        "\"author\": \"...\", \"date\": \"...\"}. "
-                        "You MUST write out the full text content for each section — do not leave sections empty. "
-                        "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}. "
-                        "For a social template (social_image / social_video): its variables by name, "
-                        "as platform_get_template_schema lists them; one left out takes its default."
-                    ),
-                    required=True
-                ),
-                ToolParameter(
-                    name="template_name",
-                    type="string",
-                    description="Template to use (e.g., 'Basic Report', 'Invoice'). Omit for auto-selection.",
-                    required=False
-                ),
-                # P2-09 S2 (F031/J2): the handler already parses/validates template_id,
-                # but only the chatbot's inline schema declared it — so id-driven
-                # template generation worked in chat and nowhere else. Declaring it
-                # here gives the non-chat autonomy lane (missions/board/scheduled)
-                # parity, and makes platform_get_template_schema's "use before
-                # generate_document" discovery flow followable. Wording mirrors the
-                # inline chat schema (agent_platform_tools.get_available_tools).
-                ToolParameter(
-                    name="template_id",
-                    type="string",
-                    description="UUID of a specific template to fill (from platform_list_templates). Takes precedence over template_name.",
-                    required=False
-                ),
-            ],
-            returns="JSON with filename, format, download_url, and size_kb",
-            security_level=SecurityLevel.CAUTIOUS,
-            permissions_required={"read": True, "write": True},
-            examples=[
-                {
-                    "action": "generate_document",
-                    "params": {
-                        "title": "Weekly Status Report",
-                        "format": "pdf",
-                        "data": {"sections": [{"title": "Summary", "content": "All tasks completed on time. The team delivered 5 features and resolved 12 bugs."}]},
-                    },
-                },
-                {
-                    "action": "generate_document",
-                    "params": {
-                        "title": "User Export",
-                        "format": "xlsx",
-                        "data": {"rows": [{"name": "Alice", "email": "alice@example.com"}]},
-                    },
-                },
-            ],
-            metadata={"added_in": "PRD-63"}
         ))
 
         # ==========================================

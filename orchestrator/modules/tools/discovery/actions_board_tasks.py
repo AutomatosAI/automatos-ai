@@ -76,6 +76,25 @@ def _register_create_task(registry: ActionRegistry) -> None:
     ))
 
 
+def _approval_action() -> dict:
+    """The two actions an approval can run (api/board_tasks._run_approval_action)."""
+    return {
+        "type": "object",
+        "description": (
+            "If set, the task waits in Review behind an approval gate and the action runs when "
+            "the owner approves. publish_blog publishes an existing draft post; create_blog "
+            "starts a blog mission on a topic. No other action exists."
+        ),
+        "properties": {
+            "type": {"type": "string", "enum": ["publish_blog", "create_blog"]},
+            "post_id": {"type": "string", "description": "publish_blog: the draft post's id."},
+            "topic": {"type": "string", "description": "create_blog: what the post is about."},
+            "category": {"type": "string", "description": "create_blog: the blog category (default 'AI & Automation')."},
+        },
+        "required": ["type"],
+    }
+
+
 def _create_task_properties() -> dict:
     return {
         "title": {
@@ -106,10 +125,7 @@ def _create_task_properties() -> dict:
             "type": "string",
             "description": "PRD-234: due date/time as ISO 8601 (e.g. 2026-09-05T17:00:00Z). Shows on the board and the calendar.",
         },
-        "approval_action": {
-            "type": "object",
-            "description": "If set, task goes to Review status with an approval gate. On user approve, the action executes. Example: {\"type\": \"publish_blog\", \"post_id\": \"uuid\"}",
-        },
+        "approval_action": _approval_action(),
         "status": {
             "type": "string",
             "enum": ["inbox", "assigned", "review"],
@@ -117,7 +133,11 @@ def _create_task_properties() -> dict:
         },
         "auto_approve": {
             "type": "boolean",
-            "description": "If true AND approval_action is set, immediately execute the action (skip human review). Use for automated pipelines.",
+            "description": (
+                "If true and approval_action is publish_blog, publish at once and mark the task "
+                "done instead of waiting for review. Any other approval action still waits for "
+                "the owner. Use for automated pipelines."
+            ),
         },
     }
 
@@ -296,8 +316,9 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_assign_task",
         description=(
-            "Assign a board task to an agent by name. Moves the task to 'assigned' "
-            "status so the agent picks it up on its next heartbeat."
+            "Assign a board task to an agent by name. A task still in the inbox moves to "
+            "'assigned' so the agent picks it up on its next heartbeat; a task past the "
+            "inbox keeps its status and changes owner."
         ),
         category="tasks",
         parameters={

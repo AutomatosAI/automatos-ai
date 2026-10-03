@@ -17,6 +17,7 @@ from .actions_playbook_runs import register_playbook_run_actions  # F242: create
 from .actions_analytics import register_analytics_actions
 from .actions_documents import register_documents_actions
 from .actions_workspace import register_workspace_actions_defs
+from .actions_memory_store import register_store_memory_action
 from .actions_monitoring import register_monitoring_actions
 from .actions_search import register_search_actions
 from .actions_tools_llms import register_tools_llms_actions
@@ -67,6 +68,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_analytics_actions(registry)
     register_documents_actions(registry)
     register_workspace_actions_defs(registry)
+    register_store_memory_action(registry)
     register_monitoring_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)

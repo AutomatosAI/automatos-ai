@@ -10,7 +10,12 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_auto_reporting_actions(registry: ActionRegistry) -> None:
     """Register Auto-reporting + send-notification tools."""
+    _register_get_prefs(registry)
+    _register_update_prefs(registry)
+    _register_send_notification(registry)
 
+
+def _register_get_prefs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_auto_reporting_prefs",
         description=(
@@ -34,6 +39,52 @@ def register_auto_reporting_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+_UPDATE_PREFS_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "enabled": {"type": "boolean", "description": "Turns auto-reporting on or off for the workspace."},
+        "primary_channel": {
+            "type": "string",
+            "enum": ["telegram", "slack", "in_app", "webhook"],
+            "description": "The workspace's main channel; a route set to 'primary' delivers here.",
+        },
+        "fallback_channel": {
+            "type": "string",
+            "enum": ["in_app", "webhook"],
+            "description": "Where a route set to 'fallback' delivers (default in_app).",
+        },
+        "quiet_hours": {
+            "type": "object",
+            "description": "A daily do-not-disturb window.",
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "start": {"type": "string", "description": "HH:MM 24-hour."},
+                "end": {"type": "string", "description": "HH:MM 24-hour."},
+                "timezone": {"type": "string", "description": "IANA tz name, e.g. Europe/Dublin."},
+            },
+        },
+        "digest_frequency": {
+            "type": "string",
+            "enum": ["immediate", "daily", "weekly"],
+            "description": "immediate sends each notification as it happens; daily and weekly batch them into a digest at digest_time.",
+        },
+        "digest_time": {"type": "string", "description": "HH:MM the digest should fire."},
+        "routes": {
+            "type": "object",
+            "description": (
+                "Map of event_type (or event_type:severity) to a destination. "
+                "Destination may be a literal channel (telegram/slack/in_app/webhook/silent) "
+                "or an alias ('primary'/'fallback'). Example: "
+                "{\"agent_error\": \"primary\", \"task_complete:info\": \"silent\"}."
+            ),
+        },
+    },
+    "required": [],
+}
+
+
+def _register_update_prefs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_auto_reporting_prefs",
         description=(
@@ -44,44 +95,7 @@ def register_auto_reporting_actions(registry: ActionRegistry) -> None:
             "Always confirm with the user before changing the primary channel."
         ),
         category="settings",
-        parameters={
-            "type": "object",
-            "properties": {
-                "enabled": {"type": "boolean"},
-                "primary_channel": {
-                    "type": "string",
-                    "enum": ["telegram", "slack", "in_app", "webhook"],
-                },
-                "fallback_channel": {
-                    "type": "string",
-                    "enum": ["in_app", "webhook"],
-                },
-                "quiet_hours": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {"type": "boolean"},
-                        "start": {"type": "string", "description": "HH:MM 24-hour."},
-                        "end": {"type": "string", "description": "HH:MM 24-hour."},
-                        "timezone": {"type": "string", "description": "IANA tz name, e.g. Europe/Dublin."},
-                    },
-                },
-                "digest_frequency": {
-                    "type": "string",
-                    "enum": ["immediate", "daily", "weekly"],
-                },
-                "digest_time": {"type": "string", "description": "HH:MM the digest should fire."},
-                "routes": {
-                    "type": "object",
-                    "description": (
-                        "Map of event_type (or event_type:severity) to a destination. "
-                        "Destination may be a literal channel (telegram/slack/in_app/webhook/silent) "
-                        "or an alias ('primary'/'fallback'). Example: "
-                        "{\"agent_error\": \"primary\", \"task_complete:info\": \"silent\"}."
-                    ),
-                },
-            },
-            "required": [],
-        },
+        parameters=_UPDATE_PREFS_PARAMETERS,
         permission_level="write",
         requires_confirmation=True,
         tags=["settings", "auto-reporting", "notifications", "preferences"],
@@ -92,6 +106,63 @@ def register_auto_reporting_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+# Every enum value here is one handlers_auto_reporting.send_notification accepts
+# (VALID_EVENT_TYPES, _VALID_SEVERITIES, _VALID_STATUSES).
+_SEND_NOTIFICATION_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "event_type": {
+            "type": "string",
+            "enum": [
+                "heartbeat_complete",
+                "task_complete",
+                "mission_step_complete",
+                "mission_complete",
+                "playbook_step_complete",
+                "playbook_complete",
+                "trigger_fired",
+                "report_submitted",
+                "agent_error",
+                "approval_pending",
+            ],
+            "description": (
+                "Platform event_type. Drives prefs lookup and routing; "
+                "approval_pending is a decision the owner must make."
+            ),
+        },
+        "title": {
+            "type": "string",
+            "description": "The line the owner reads first: what happened or what is needed.",
+        },
+        "message": {
+            "type": "string",
+            "description": "The detail behind the title, and what the owner should do, if anything.",
+        },
+        "severity": {
+            "type": "string",
+            "enum": ["info", "task", "approval", "urgent", "security"],
+            "description": "Routing hint. Maps onto auto_reporting.routes for severity-based delivery.",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["ok", "warning", "error", "info"],
+            "description": "Status icon used in formatted external messages.",
+        },
+        "link_type": {
+            "type": "string",
+            "description": "Optional link type, e.g. 'report' / 'task' / 'mission'.",
+        },
+        "link_id": {
+            "type": "string",
+            "description": "Optional link target id for in-app deep-link.",
+        },
+    },
+    "required": ["event_type", "title"],
+}
+
+
+def _register_send_notification(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_send_notification",
         description=(
@@ -102,53 +173,13 @@ def register_auto_reporting_actions(registry: ActionRegistry) -> None:
             "every routine event (those auto-fire through the dispatcher)."
         ),
         category="notifications",
-        parameters={
-            "type": "object",
-            "properties": {
-                "event_type": {
-                    "type": "string",
-                    "enum": [
-                        "heartbeat_complete",
-                        "task_complete",
-                        "mission_step_complete",
-                        "mission_complete",
-                        "playbook_step_complete",
-                        "playbook_complete",
-                        "trigger_fired",
-                        "report_submitted",
-                        "agent_error",
-                    ],
-                    "description": "Platform event_type. Drives prefs lookup and routing.",
-                },
-                "title": {"type": "string"},
-                "message": {"type": "string"},
-                "severity": {
-                    "type": "string",
-                    "enum": ["info", "warning", "urgent", "security"],
-                    "description": "Routing hint. Maps onto auto_reporting.routes for severity-based delivery.",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["ok", "warning", "error", "info"],
-                    "description": "Status icon used in formatted external messages.",
-                },
-                "link_type": {
-                    "type": "string",
-                    "description": "Optional link type, e.g. 'report' / 'task' / 'mission'.",
-                },
-                "link_id": {
-                    "type": "string",
-                    "description": "Optional link target id for in-app deep-link.",
-                },
-            },
-            "required": ["event_type", "title"],
-        },
+        parameters=_SEND_NOTIFICATION_PARAMETERS,
         permission_level="write",
         requires_confirmation=False,
         tags=["notifications", "send", "auto-reporting"],
         examples=[
             "ping me on telegram about the failing harness run",
             "send an approval request notification",
-            "notify Gerard that the daily brief is ready",
+            "notify the owner that the daily brief is ready",
         ],
     ))
