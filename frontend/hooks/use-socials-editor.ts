@@ -94,11 +94,15 @@ export interface EditorSave {
   targets: SocialPostTargetInput[]
   /** The slot to set (ISO, UTC) and its zone; undefined leaves the slot as it is. */
   slot?: { plannedFor: string | null; timezone: string }
+  /** F254: told the new post as soon as it exists, before its channels, its slot or what
+   * follows the save, so a step that fails after it never leaves the post behind. */
+  onCreated?: (post: SocialPost) => void
 }
 
 /** Save the editor: create or edit the post, then its channels, then its slot. */
-export async function saveEditor({ postId, fields, targets, slot }: EditorSave): Promise<SocialPost> {
+export async function saveEditor({ postId, fields, targets, slot, onCreated }: EditorSave): Promise<SocialPost> {
   let saved = postId ? await apiClient.updateSocialPost(postId, fields) : await apiClient.createSocialPost(fields)
+  if (!postId) onCreated?.(saved)
   if (targets.length > 0 || postId) saved = await apiClient.setSocialPostTargets(saved.id, targets)
   if (slot) saved = await apiClient.setSocialPostSlot(saved.id, slot.plannedFor, slot.timezone)
   return saved
