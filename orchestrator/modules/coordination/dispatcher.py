@@ -39,8 +39,8 @@ from core.models.orchestration_enums import (
     TaskState,
     TaskType,
 )
-from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from modules.coordination.step_inputs import with_its_inputs
+from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
