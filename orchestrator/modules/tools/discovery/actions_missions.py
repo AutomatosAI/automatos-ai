@@ -129,17 +129,6 @@ def register_mission_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
-        name="platform_resume_mission",
-        description="Resume a paused mission (it goes back to running).",
-        category="missions",
-        parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
-        permission_level="write",
-        requires_confirmation=False,
-        tags=["missions", "write", "lifecycle", "resume"],
-        examples=["resume that mission", "continue the paused mission"],
-    ))
-
-    registry.register(ActionDefinition(
         name="platform_cancel_mission",
         description="Cancel a mission. Pending/queued tasks are skipped; in-flight tasks finish. Terminal.",
         category="missions",

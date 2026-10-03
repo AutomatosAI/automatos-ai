@@ -48,6 +48,18 @@ const STATUS_STYLES: Record<BudgetStatus, { bar: string; text: string; bg: strin
   },
 }
 
+/** What the banner says. F153: a paused mission says why. F247: a failed one says
+ *  why too, and that Retry runs its failed steps again with the same plan. */
+function bannerText(missionState: string | undefined, status: BudgetStatus, stopDetail?: string | null): string {
+  if (missionState === 'paused') return stopDetail || 'Mission paused'
+  if (missionState === 'failed') {
+    return `${(stopDetail || 'Mission failed').replace(/\.$/, '')}. Retry runs its failed steps again, with the same plan.`
+  }
+  if (status === 'exceeded') return 'Budget exceeded — mission may be paused'
+  if (status === 'critical') return 'Budget critical — only synthesis and review tasks will dispatch'
+  return 'Budget usage above 50%'
+}
+
 export function MissionBudgetBar({
   tokensUsed,
   tokenBudgetEstimate,
@@ -66,6 +78,9 @@ export function MissionBudgetBar({
   }, [tokensUsed, tokenBudgetEstimate])
 
   const isPaused = missionState === 'paused'
+  // F247: a failed mission is retried from here, through the same Resume.
+  const isFailed = missionState === 'failed'
+  const stopped = isPaused || isFailed
 
   return (
     <div className={cn('space-y-2', styles.bg && `rounded-lg border p-3 ${styles.bg}`, className)}>
@@ -94,21 +109,13 @@ export function MissionBudgetBar({
       {/* Warning banner + resume button. F153: a paused mission says why. The
           budget is spend in dollars (a Claude Code session's tokens cost
           nothing), so a budget pause can come at any token percentage. */}
-      {(isPaused || status === 'warning' || status === 'critical' || status === 'exceeded') && (
+      {(stopped || status === 'warning' || status === 'critical' || status === 'exceeded') && (
         <div className="flex items-center justify-between gap-2">
-          <div className={cn('flex items-center gap-1.5 text-[11px]', isPaused ? 'text-warning' : styles.text)}>
+          <div className={cn('flex items-center gap-1.5 text-[11px]', stopped ? 'text-warning' : styles.text)}>
             <AlertTriangle className="w-3 h-3 shrink-0" />
-            <span>
-              {isPaused
-                ? stopDetail || 'Mission paused'
-                : status === 'exceeded'
-                  ? 'Budget exceeded — mission may be paused'
-                  : status === 'critical'
-                    ? 'Budget critical — only synthesis and review tasks will dispatch'
-                    : 'Budget usage above 50%'}
-            </span>
+            <span>{bannerText(missionState, status, stopDetail)}</span>
           </div>
-          {isPaused && onResume && (
+          {stopped && onResume && (
             <Button
               size="sm"
               variant="outline"
@@ -117,7 +124,7 @@ export function MissionBudgetBar({
               className="h-6 px-2.5 text-[11px] gap-1 border-warning/40 text-warning hover:bg-warning/10"
             >
               <Play className="w-3 h-3" />
-              {isResuming ? 'Resuming...' : 'Resume'}
+              {isFailed ? (isResuming ? 'Retrying...' : 'Retry') : (isResuming ? 'Resuming...' : 'Resume')}
             </Button>
           )}
         </div>

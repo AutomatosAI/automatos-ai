@@ -205,6 +205,7 @@ class StopReason(str, Enum):
     NO_CAPABLE_AGENT = "no_capable_agent"      # No agent matched task requirements
     DEPENDENCY_FAILED = "dependency_failed"    # Upstream task failed, downstream can't run
     STALLED = "stalled"                        # PRD-164 S4: joiner halt — loop without progress, replans exhausted
+    OUT_OF_CREDIT = "out_of_credit"            # F247: paused (never failed) when the AI credit ran out; Resume carries on
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +298,8 @@ ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
     TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
     TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # human rejection re-queues for retry
-    TaskState.FAILED: frozenset({TaskState.SKIPPED}),  # allow skip during replan
+    # skip during replan; F247: a retried mission's failed step waits to run again
+    TaskState.FAILED: frozenset({TaskState.SKIPPED, TaskState.PENDING}),
     TaskState.SKIPPED: frozenset(),   # terminal
     TaskState.STALLED: frozenset({TaskState.QUEUED, TaskState.ASSIGNED, TaskState.SKIPPED}),
     TaskState.RETRYING: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
@@ -313,7 +315,8 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     RunState.VERIFYING: frozenset({RunState.COMPLETED, RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED}),
     RunState.AWAITING_HUMAN: frozenset({RunState.COMPLETED, RunState.RUNNING, RunState.CANCELLED}),
     RunState.COMPLETED: frozenset(),   # terminal
-    RunState.FAILED: frozenset({RunState.REPLANNING}),  # replannable (PRD-82B US-005)
+    # replannable (PRD-82B US-005); F247: a retry pauses it, and Resume runs it again
+    RunState.FAILED: frozenset({RunState.REPLANNING, RunState.PAUSED}),
     RunState.CANCELLED: frozenset(),   # terminal
 }
 
