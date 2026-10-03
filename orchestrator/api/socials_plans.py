@@ -10,6 +10,8 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
   any of its fields, each checked (known channels and formats, lengths the chosen
   template declares, times and days); an ended plan is read-only.
 * ``POST /api/socials/plans/{plan_id}/pause`` · ``/resume`` · ``/end``.
+* ``POST /api/socials/plans/draft``: **Plan with Auto**, a plan drafted from what the person
+  says, not saved (``api/socials_plan_draft.py``).
 * ``POST /api/socials/plans/{plan_id}/research``: **Research again** (US-B204): the
   workspace's Content bank research playbook runs for the plan now (202 with its
   execution id); 409 when the Socials package that carries it is not installed.
@@ -34,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.socials_plan_draft import router as plan_draft_router
 from api.socials_topics import router as topics_router
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
@@ -45,6 +48,8 @@ from services import socials_plan_research
 
 router = APIRouter()
 router.include_router(topics_router)
+# Plan with Auto: a plan drafted from what the person says (api/socials_plan_draft.py).
+router.include_router(plan_draft_router)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))

@@ -94,6 +94,44 @@ export interface SocialPlanInput {
   approval_mode?: 'per_post' | 'series'
 }
 
+/** The sources "Plan with Auto" lets research read: the person's choice, sent with their words. */
+export interface SocialPlanAutoSources {
+  knowledge: boolean
+  website: boolean
+  deliverables: boolean
+}
+
+/** What "Plan with Auto" sends (POST /api/socials/plans/draft): nothing is saved by it. */
+export interface SocialPlanAutoRequest {
+  request: string
+  timezone: string
+  sources: SocialPlanAutoSources
+}
+
+/** A post idea Auto heard, as a content bank topic: it joins the bank when the plan is saved. */
+export interface SocialPlanAutoTopic {
+  title: string
+  angle: string | null
+  formats: string[]
+}
+
+/** Auto's draft: the plan as the Plan page opens it, the ideas it heard, and each thing in its
+ * answer a plan cannot carry (a channel not connected, a day or time it could not use). */
+export interface SocialPlanAutoDraft {
+  plan: {
+    name: string
+    goal: string
+    audience: string
+    starts_on: string
+    ends_on: string
+    timezone: string
+    cadence: Array<Omit<SocialPlanCadenceRow, 'id'>>
+    sources: SocialPlanSources
+  }
+  topics: SocialPlanAutoTopic[]
+  warnings: string[]
+}
+
 export interface SocialPlanSlot {
   key: string
   row_id: string
