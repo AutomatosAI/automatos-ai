@@ -171,20 +171,22 @@ def find_pending_grant(
     *,
     subject_type: str,
     subject_id: str,
+    kind: Optional[str] = None,
 ) -> Optional[ApprovalGrant]:
-    """Return an existing PENDING grant for a subject (idempotency guard), or None."""
+    """Return an existing PENDING grant for a subject (idempotency guard), or None.
+
+    ``kind`` narrows it to approvals or questions (F259: a ticket's open question
+    is not consent to run it)."""
     try:
-        return (
-            db.query(ApprovalGrant)
-            .filter(
-                ApprovalGrant.workspace_id == workspace_id,
-                ApprovalGrant.subject_type == subject_type,
-                ApprovalGrant.subject_id == str(subject_id),
-                ApprovalGrant.status == GrantStatus.PENDING.value,
-            )
-            .order_by(ApprovalGrant.requested_at.desc())
-            .first()
+        query = db.query(ApprovalGrant).filter(
+            ApprovalGrant.workspace_id == workspace_id,
+            ApprovalGrant.subject_type == subject_type,
+            ApprovalGrant.subject_id == str(subject_id),
+            ApprovalGrant.status == GrantStatus.PENDING.value,
         )
+        if kind is not None:
+            query = query.filter(ApprovalGrant.kind == kind)
+        return query.order_by(ApprovalGrant.requested_at.desc()).first()
     except Exception:
         logger.warning("[approval_grants] pending-grant read failed", exc_info=True)
         return None

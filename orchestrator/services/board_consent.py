@@ -129,14 +129,17 @@ def record_operator_consent(
     ``"error"`` (nothing recorded — the gate will ask as before; never raises).
     """
     try:
-        from core.models.approval_grants import SUBJECT_BOARD_TASK
+        from core.models.approval_grants import KIND_APPROVAL, SUBJECT_BOARD_TASK
         from core.services.approval_grants import (
             create_grant, find_active_grant, find_pending_grant, grant_grant,
         )
         subject = str(task_id)
         if find_active_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject) is not None:
             return "active"
-        pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject)
+        # F259: only an approval is consent. An open question waits for its answer:
+        # granting it here dropped it from the Questions tab unanswered.
+        pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
+                                     kind=KIND_APPROVAL)
         if pending is not None:
             grant_grant(pending, granted_by=actor)
             db.commit()

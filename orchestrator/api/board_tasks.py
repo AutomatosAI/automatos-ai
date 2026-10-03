@@ -45,6 +45,7 @@ from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
+from services.board_drag_rules import NO_AGENT_NO_PROGRESS, UNFINISHED_BY_HAND, drag_refusal, question_refusal  # R6
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 
@@ -59,9 +60,6 @@ VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done
 # F194: the source kinds a request may file: the board's own create ('user') and a
 # Command Centre follow-up ('activity'). Every other kind is the platform's.
 USER_CREATABLE_SOURCE_TYPES = frozenset({"user", "activity"})
-# #1094: a ticket with no agent cannot run, so it is never in progress. The
-# board's PATCHes and platform_update_task_status refuse it in these words.
-NO_AGENT_NO_PROGRESS = "Assign an agent first: a ticket with no agent cannot be in progress."
 # An operator note is read on a card, not in a document.
 MAX_TASK_NOTE_CHARS = 1000
 # A reviewer's verdict is folded into the next attempt's prompt, so it is read
@@ -1351,6 +1349,8 @@ def _redispatch_task(db: Session, task: BoardTask) -> bool:
     task.attempts = 0
     task.completed_at = None
     task.started_at = None
+    task.blocked_at = None    # F259: a started ticket is not blocked; its old reason
+    task.blocked_reason = None  # ("Awaiting human approval …") stayed on it to Done
     _note_no_host_for_cli(db, task)  # a Claude Code agent's ticket says who it waits for
     # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
@@ -1406,10 +1406,13 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     if _running_now(db, task):
         raise HTTPException(status_code=409, detail=(
             f"{ticket_label(task, capital=True)} is already running — nothing to start; it reports when it finishes."))
+    asked = question_refusal(db, task)  # F259: its question was "granted" unanswered
+    if asked:
+        raise HTTPException(status_code=409, detail=asked)
     # PRD-234: pressing Run Now (or dragging to In progress) is the operator's
     # approval, so the gate lets the ticket through instead of parking it.
-    record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
-                            agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
+    consent = record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
+                                      agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
     was = task.status
     rerun = was in FINISHED
     # F190: a new run starts clean. The last run's result goes on record (a no-op
@@ -1424,7 +1427,7 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
     return {"success": True, "task_id": task.id, "status": task.status,
             "rerun_of": was if rerun else None, "started": not _waiting_for_a_host(task),
-            "message": _run_now_message(task, was, rerun)}
+            "message": _run_now_message(task, was, rerun, approved=consent == "granted")}
 
 
 def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -> Dict[str, Any]:
@@ -1440,13 +1443,15 @@ def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -
             "rerun_of": was if was in FINISHED else None, "started": True, "message": message}
 
 
-def _run_now_message(task: BoardTask, was: str, rerun: bool) -> str:
+def _run_now_message(task: BoardTask, was: str, rerun: bool, *, approved: bool = False) -> str:
     """What Run Now did, in words (#1115: a Claude Code ticket waits for a host)."""
     if _waiting_for_a_host(task):
         return f"{ticket_label(task, capital=True)} is queued, but nothing can start it yet: {task.blocked_reason}"
     if rerun:
         return (f"Re-running {ticket_label(task)} — it was {was}; its previous result is kept in the "
                 "ticket's history.")
+    if approved:  # F259 (#0059): it waited for an approval, and nothing said this gave it
+        return f"{ticket_label(task, capital=True)} started. It was waiting for your approval; starting it gave it."
     if was == "in_progress":  # F176: the word said running, but no run held it
         return f"{ticket_label(task, capital=True)} said in progress, but nothing was running it — started it now."
     return f"{ticket_label(task, capital=True)} started."
@@ -1481,15 +1486,6 @@ def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
         task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
 
 
-# PRD-252 R6: a drag that needs a decision goes through the decision's button.
-# Review → Done by drag skipped the ticket's approval action (a blog never
-# published), and Review → Assigned sent work back with no note.
-DECISION_DRAGS = {
-    ("review", "done"): "Use Approve on the ticket: a drag to Done would skip its approval step.",
-    ("review", "assigned"): "Use Reject on the ticket: it sends the agent what to fix with the redo.",
-}
-
-
 @router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
@@ -1516,13 +1512,12 @@ async def update_task_status(
         _hold_before_starting(db, task)  # F209: a claim that landed while the body arrived wins
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
-    refusal = DECISION_DRAGS.get((task.status, new_status))
+    refusal = drag_refusal(task, new_status, running=_running_now(db, task),
+                           mission_ticket=task.source_type in MISSION_TICKET_TYPES)
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
     if new_status == "cancelled" and task.status not in UNCANCELLABLE:
         return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
-    if new_status == "in_progress" and not task.assigned_agent_id:
-        raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
     # F190 review: a repeat of in_progress on a running ticket (a double drag)
     # changes nothing; a stuck ticket has Run Now.
     if new_status == "in_progress" and task.status != "in_progress" \
@@ -1565,6 +1560,8 @@ def _set_status_by_hand(task: BoardTask, new_status: str, blocked_reason: Any, *
     end_session_claim(task, old_status, new_status)
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
+    if new_status in UNFINISHED_BY_HAND:  # F259: Done → Inbox kept its completion time
+        task.completed_at = None
     if new_status == "review" and old_status != "review":  # PRD-252 R3: why it is there
         task.runtime_ref = with_review_reason(task.runtime_ref, MOVED_BY_YOU, task.completed_at)
     if new_status == "blocked" and task.blocked_at is None:
