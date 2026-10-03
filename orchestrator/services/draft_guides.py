@@ -68,11 +68,11 @@ async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str
     from modules.tools.tool_router import get_tool_router
 
     async def _search(args):
-        return await get_tool_router().execute_and_format(
+        return owners_own(db, await get_tool_router().execute_and_format(
             tool_name=PREFETCH_TOOL, tool_args=args, agent_id=agent_id,
             workspace_id=UUID(str(workspace_id)), original_intent=brief,
             caller_context={"retrieval_first": True, "draft_guides": True},
-        )
+        ))
 
     try:
         found = await prefetch(
@@ -87,6 +87,36 @@ async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str
         return brief
     logger.info(f"[F201] draft ticket: {found.summary}")
     return f"{brief}\n\n{found.message['content']}"
+
+
+def owners_own(db: Any, result: Any) -> Any:
+    """The search result without the passages from documents an agent wrote.
+
+    F269 (night 7b): #0188.2's redo was given an old draft from last night as a
+    "guide": a 14 December cut-off, a handwritten card and January to March dates the
+    owner had never decided, and it dropped "orders open 2 November". A guide is the
+    owner's own rule; an agent's earlier draft, report or document is not, approved or
+    not, so it is never one."""
+    found = ((result or {}).get("raw_result") or {}).get("results") if isinstance(result, dict) else None
+    if not isinstance(found, list) or db is None:
+        return result
+    drafts = _agents_documents(db, {r.get("document_id") for r in found if isinstance(r, dict)})
+    kept = [r for r in found if not (isinstance(r, dict) and r.get("document_id") in drafts)]
+    return {**result, "raw_result": {**result["raw_result"], "results": kept}}
+
+
+def _agents_documents(db: Any, ids: set) -> set:
+    """Which of these documents an agent wrote (``source_type`` agent_output)."""
+    from sqlalchemy import text
+
+    from services.knowledge_flywheel import AGENT_OUTPUT_SOURCE_TYPE
+
+    wanted = sorted(i for i in ids if isinstance(i, int))
+    if not wanted:
+        return set()
+    rows = db.execute(text("SELECT id FROM documents WHERE id = ANY(:ids) AND source_type = :kind"),
+                      {"ids": wanted, "kind": AGENT_OUTPUT_SOURCE_TYPE}).fetchall()
+    return {row[0] for row in rows}
 
 
 def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Optional[str]:
