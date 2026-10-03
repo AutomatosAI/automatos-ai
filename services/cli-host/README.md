@@ -1,7 +1,7 @@
 # Automatos CLI host (PRD-234 Session Mode)
 
 The local process that runs `runtime: cli` tickets as **your own CLI sessions on
-your machine** — Claude Code today, the others as their adapters land — with
+your machine** — Claude Code, Codex and GitHub Copilot today, the others as their adapters land — with
 Automatos (the local edition, in Docker) as the manager above them.
 Standard-library Python 3.9+, nothing to install.
 
@@ -18,7 +18,10 @@ files and a folder:
 Served today: **Claude Code** (native tier) and **Codex** (hooks tier — a per-agent
 `CODEX_HOME` under the host's state dir with your `~/.codex/auth.json` linked in,
 hooks as `config.toml` tables, `codex resume <id>` for continuity; `codex login`
-with your ChatGPT plan is required — an API-key login is refused before spawn).
+with your ChatGPT plan is required — an API-key login is refused before spawn)
+and **GitHub Copilot** (hooks tier — `copilot -p` per turn in a per-agent
+`COPILOT_HOME`, Claude-format hooks; `copilot login` with your Copilot seat, see
+[GitHub Copilot CLI](#github-copilot-cli-prd-253) below).
 
 The host announces every CLI in the registry with `served: true/false` and why;
 the backend claims a ticket for a host only when that host serves the ticket's
@@ -69,20 +72,24 @@ simply exits; start it again.
    says what the session can reach and how to ask, a hooks-only `settings.json`)
    — never into your repository — and records the folder-trust decision where
    Claude Code reads it (`~/.claude.json`, one flag, backup kept).
-4. Spawns **your** CLI, interactively, under a pseudo-terminal it only drains,
-   with the argv its preset spells — for Claude Code: `--session-id`,
+4. Spawns **your** CLI under a pseudo-terminal it only drains — interactively
+   for Claude Code and Codex, `copilot -p` for GitHub Copilot (below) — with the
+   argv its preset spells — for Claude Code: `--session-id`,
    `--permission-mode acceptEdits`, `--append-system-prompt-file`, `--settings`,
    `--setting-sources user`, `--strict-mcp-config`, `--add-dir`, `--name`,
    `--model` when the agent has one, `--worktree` for git repositories, and a
-   short pointer prompt. Never `-p`, never `--bare` (the preset's forbidden list
-   is asserted on every command line).
+   short pointer prompt. Never `-p`, never `--bare` for Claude Code (each preset's
+   forbidden list is asserted on every command line).
 5. Hooks carry the turn over one bus, whatever the CLI: `PreToolUse` is the
    policy gate — it reads what the call *does* (read, write, run a shell) so the
    rules are the same for every CLI: file tools inside the directory, the Bash
    gate below, never `git push`; `PostToolUse` the files touched; `Stop` the end
    of the turn with the final text. A permission prompt that would reach the TUI
-   is denied — nobody is watching it.
-6. On `Stop` it reads the transcript for token usage, terminates the process,
+   is denied — nobody is watching it. (GitHub Copilot can ask again for a call the
+   gate already allowed, for a path or URL check of its own: that request gets the
+   gate's verdict on the same call, at once.)
+6. On `Stop` (for a CLI whose turn is the process, its exit) it reads the
+   transcript for token usage, terminates the process,
    copies what the session wrote in its own ticket folder into the deliverables
    folder (below) and posts the result. Only a held command forces `review`
    (below).
@@ -111,6 +118,24 @@ command in it:
   and `sudo` are never on it. `git push`, `git remote add`, `gh pr create`,
   `sudo`, `rm -rf /` and `curl … | sh` are denied on sight, in every spelling
   the gate can read (`git -C x push`, a newline, `$(git push)`, a subshell).
+- **`gh` reads, and only reads.** Sessions never publish, so every `gh`
+  subcommand not known to be a read is refused — an issue, a pull request, a
+  release, a workflow run, an SSH key, an extension, an alias — and so is `gh api`
+  with a body or any method but `GET`/`HEAD` (PRD-253 S0.3).
+- **What the gate cannot read is a card, even in Auto.** A shell's `-c` or an
+  `eval` is judged as the command line it runs (`bash -c 'git push'` is denied).
+  A command whose name is decided only when it runs (`$CMD`, `git${IFS}push`),
+  code an interpreter takes inline (`python3 -c`, `node -e`) and a shell reading
+  its commands from input (`echo … | sh`, `bash -s`, `source /dev/stdin`) are held
+  for you — in Auto mode too, where an unlisted verb otherwise runs. A write tool
+  that names no file is refused in every mode.
+- **Plan is read-only, on every CLI.** In Plan mode only the read-only part of
+  the allowlist runs (`PLAN_BASH_ALLOW`: no git write, test runner or `npm run`),
+  and a redirection into a file or an in-place edit (`sed -i`) is a card. A CLI
+  with no plan mode of its own has nothing else holding it read-only. Its ticket
+  file says to end the turn with the plan, which reaches the backend as a
+  `PlanReady` event in the final flush. The result always waits for that flush
+  (PRD-253 Wave P).
 - **Every global option is peeled first.** `git -c k=v push`,
   `git --git-dir=… push` and a repeated `-C` all reach the never-allowed list as
   `git push`; `gh -R owner/name pr create` likewise. A path a global names is
@@ -151,9 +176,11 @@ command in it:
 - **Everything else** — a verb outside the allowlist — is **held** (in Auto
   mode it runs, with its paths still judged; see *Permission modes* in
   `docs/getting-started/self-hosting.md`): the session
-  waits (`--ask-timeout`, 120 s by default) while the command is shown as a card
-  on the ticket's Canvas and, once the PRD-245 backend lane lands, in the
-  Questions tab, the bell and on Telegram. No answer in time is a deny.
+  waits while the command is shown as a card on the ticket's Canvas, in the
+  Questions tab, the bell and on Telegram. No answer in time is a deny. The wait
+  is `--ask-timeout` (an hour by default), but never more than 530 s inside a
+  turn: a CLI's hook waits at most 560 s for the host, and the host answers
+  first (PRD-253 D4).
 
 A guardrail against accidents on your own machine, not a sandbox: what a
 command reads through data it fetched at run time (`$(cat list)`, a `for` over
@@ -177,7 +204,122 @@ deciding every call first. On Linux the host checks for `bwrap` and `socat` and,
 without them, does not serve Claude (`claude_sandbox_unavailable`, with the
 install command). `--no-session-sandbox` turns it off for a host that is
 already isolated (a VM, a container, a dedicated user with no credentials).
-Codex sandboxes itself (`-s workspace-write`).
+Codex sandboxes itself (`-s workspace-write`). GitHub Copilot sessions get
+Copilot's own sandbox, configured the same way ([below](#github-copilot-cli-prd-253)).
+
+## GitHub Copilot CLI (PRD-253)
+
+**Install and log in.** GitHub Copilot CLI 1.0.70 or later, the first version
+whose hooks fail closed: `brew install copilot-cli` (a standalone binary) or
+`npm install -g @github/copilot`. Then run `copilot login` with the account that
+holds your Copilot seat. A `gh auth login` to that account also works: Copilot
+asks `gh` for the token itself.
+
+Two kinds of login are refused, because sessions never carry a token and the host
+never copies one:
+- a login that exists only as an environment token (`COPILOT_GITHUB_TOKEN`,
+  `GH_TOKEN`, `GITHUB_TOKEN`);
+- a plaintext token in `~/.copilot/config.json`.
+
+Settings → Session mode shows the account each host runs Copilot as (`login`) and
+how it logs in (`copilot`: its own login, with the token in the OS credential
+store; or `gh`).
+
+**How a turn runs.** Each turn is one `copilot -p` process on the host's
+pseudo-terminal, and the process exit ends the turn. GitHub documents `-p` for
+programmatic use and bills it the same way as an interactive prompt (premium
+requests, or AI credits).
+
+```
+copilot -p "<pointer>" (--session-id <uuid> | --resume <id>) --add-dir <session dir> [--add-dir <deliverables>]
+        [--model M] [--name "automatos #N"] [--worktree automatos-N] [--additional-mcp-config @<session>/mcp.json]
+        --no-ask-user --disable-builtin-mcps --no-remote --no-auto-update
+```
+
+- **No allow flag, ever.** In `-p`, Copilot itself refuses any call that would
+  need approval, so a call runs only when the gate allows it. A missing hook, a
+  crashed shim or a timed-out hook therefore ends in a refusal, never in an
+  allowed call. Every allow flag (`--allow-all-tools`, `--yolo`, `--allow-tool`,
+  …) is on the preset's forbidden list, and `COPILOT_ALLOW_ALL` is stripped.
+- **The agent's own home.** `COPILOT_HOME` is
+  `~/.automatos/cli-host/agents/<agent>/.copilot`, rebuilt on every spawn. It
+  holds three files:
+  - `config.json`: your account pointer, and no trusted folder. In `-p`, an
+    untrusted folder keeps repository hooks, workspace MCP servers and
+    extensions out.
+  - `settings.json`: memory, auto-update, tips and the silent model switch off,
+    plus your own co-author and proxy settings.
+  - `hooks/automatos.json`: our hooks, in Claude's format. Copilot answers them
+    in Claude's shape.
+
+  Your own `~/.copilot` is never written, and your MCP servers never come along.
+  The home is per agent, not per ticket, because Copilot keeps its session index
+  there and `--resume` needs it.
+- **The soul and the ticket** ride the first prompt (`UserPromptSubmit` →
+  `additionalContext`), because Copilot has no system-prompt flag.
+- **The gate reads Copilot's tools** (`bash`, `view`, `create`, `edit`,
+  `apply_patch`, `grep`, `glob`, `web_fetch`, …) the way it reads Claude's.
+  Copilot's own plan mode, subagents and other agent tools are denied. Plan is
+  the plan turn, as on every CLI.
+- **Held calls.** The shim waits up to 560 s for your answer, and Copilot's hook
+  timeout is 600 s. A Copilot hook that times out lets the call through to
+  Copilot's own check, so the shim always answers first.
+- **The Automatos tools.** They come in as an HTTP MCP server, from a 0600 file
+  in the session folder that is removed when the turn ends.
+  - GitHub's own MCP server is off (`--disable-builtin-mcps`): it would let a
+    session write to GitHub with your token, outside the gate.
+  - If your organisation's MCP policy allows only registry servers, Copilot
+    refuses ours. The ticket then says the session ran without the Automatos
+    tools.
+- **Usage.** The host reads tokens per model, AI credits and premium requests
+  from the session record (`session-state/<id>/events.jsonl`). They are booked
+  as your plan's usage, never as a price. Running out of AI credits, or hitting
+  a rate limit, pauses the host for Copilot and puts the ticket back in the
+  queue.
+- **Taking over.** The ticket's Runtime Canvas terminal runs
+  `copilot --resume <id>` in the agent's home, with you at the keyboard. Our
+  hooks stand aside there.
+
+**The sandbox.** Copilot sandboxes its own shell commands (Seatbelt on macOS,
+bubblewrap on Linux; still experimental in 1.0.91). When the host sandboxes, the
+agent's `settings.json` turns that sandbox on, with these limits:
+- writes go only to the working folder and the session's folders;
+- the credential stores, the platform's secrets and the host's state are
+  unreadable;
+- there is no bypass, no git or gh credentials and no keychain;
+- outbound network reaches only the allowed hosts, never the local network.
+
+The host refuses Copilot (`copilot_sandbox_unavailable`) on a machine without
+the prerequisites:
+- macOS: `sandbox-exec`;
+- Linux: bubblewrap 0.5 or later, slirp4netns, util-linux 2.35 or later,
+  iptables and `/dev/net/tun`.
+
+`--no-session-sandbox` turns the sandbox off on a host that is already isolated.
+
+**Refusals.** Settings shows each one with its sentence. A Copilot ticket waits
+for a host that serves Copilot.
+
+| Code | When | What to do |
+|---|---|---|
+| `copilot_missing` | No `copilot` on your PATH | Install it (above) |
+| `copilot_too_old` | Older than 1.0.70 | `copilot update` |
+| `copilot_not_logged_in` | No Copilot login and no `gh` login | `copilot login`, or `gh auth login` with an account that has a Copilot seat |
+| `copilot_plaintext_token` | The login is a plaintext token in `config.json`, and `gh` is not logged in | Turn on the OS credential store (the macOS Keychain; on Linux or WSL2, a Secret Service such as gnome-keyring) and run `copilot login` again |
+| `copilot_managed_hooks_only` | A managed policy (`/etc/github-copilot/policy.d/*.json`) sets `allowManagedHooksOnly` | Ask your Copilot administrator to allow user hooks |
+| `copilot_sandbox_unavailable` | The host sandboxes and a prerequisite is missing | Install it, or use `--no-session-sandbox` on an isolated host |
+| `copilot_hooks_disabled_here` | Per ticket: the repository's `.github/copilot/settings.json` (or `settings.local.json`) sets `disableAllHooks` | Remove the setting, or give the agent another folder |
+
+**What an organisation administrator must allow:**
+- **Copilot CLI** for the users (the Copilot CLI policy).
+- **The models** the agents name, enabled at the enterprise or organisation
+  level. "No model available. Check policy enablement…" is an error on the
+  ticket, not a pause.
+- **User hooks.** Under `allowManagedHooksOnly` no hook of ours loads, so the
+  host refuses Copilot.
+- **The Automatos MCP server,** where the MCP policy allows only registry
+  servers. Otherwise sessions run without the Automatos tools.
+- **The sandbox prerequisites** above, on Linux machines.
 
 ## Review, and where held commands appear
 
@@ -205,14 +347,17 @@ no default root copies nothing.
 
 - the unmodified CLI from your login-shell `PATH` (or `--cli-binary claude=/path`);
   nothing bundled or patched;
-- your own login (`claude login`, `codex login`); no credential is ever read,
-  copied or set; `CLAUDE_CONFIG_DIR` is never overridden;
+- your own login (`claude login`, `codex login`, `copilot login` or `gh`); no
+  credential is ever read, copied or set; `CLAUDE_CONFIG_DIR` is never overridden;
 - no identity games: each preset names the keys and session markers stripped from
   its session environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
   `CLAUDE_CODE_ENTRYPOINT`, every `CLAUDE*` marker for Claude Code); the Canvas
   terminal's shell gets the union over every CLI;
-- interactive sessions only — the surface each vendor keeps on your plan; no
-  headless mode, ever (each preset names the flags that would be one);
+- only the surface each vendor keeps on your plan: interactive sessions for
+  Claude Code and Codex, `copilot -p` for GitHub Copilot (GitHub documents it for
+  programmatic use and bills it like an interactive prompt). No other headless
+  mode, server or remote control, ever: each preset names the flags that would be
+  one;
 - one user, one machine; the host refuses any backend that is not the local
   edition with `CLI_RUNTIME_ENABLED=true`.
 
@@ -225,6 +370,7 @@ no default root copies nothing.
 | `~/.automatos/cli-host/sessions.json` | process table (killed on the next start if left behind) |
 | `~/.automatos/cli-host/hooks.sock` | the loopback socket hooks talk to |
 | `~/.automatos/cli-host/sessions/<ticket>/` | ticket, system prompt, settings, terminal log for one session; what the session writes here is copied to the deliverables folder |
+| `~/.automatos/cli-host/agents/<agent>/.codex`, `.copilot` | an agent's own config home for Codex and GitHub Copilot: rebuilt on every spawn, never holding a token; the CLI's session index lives here |
 | `<default root>/sessions/<ticket>/` | the ticket's deliverables folder (the backend registers what lands here) |
 
 ## Tests
@@ -233,7 +379,10 @@ no default root copies nothing.
 CLI: it refuses forbidden arguments, fires the hooks from the settings file,
 writes a transcript where Claude Code would, and idles until terminated — so the
 whole loop runs in CI without a real session or a subscription. Every CLI gets
-such a fake, in *its* vocabulary and transcript shape, when its adapter lands.
+such a fake, in *its* vocabulary and transcript shape, when its adapter lands:
+`tests/fake_codex.py`, and `tests/fake_copilot.py` (`copilot -p` with Claude-format
+hooks that fail open on a timeout, as the real CLI's do, and the `events.jsonl`
+session record).
 
 ## Adding a CLI
 

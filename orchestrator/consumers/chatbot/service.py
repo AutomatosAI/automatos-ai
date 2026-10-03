@@ -33,8 +33,8 @@ from modules.tools.execution.tool_loop import (
     ToolLoopExecutor,
     ToolLoopResult,
     ToolPostResult,
-    claimed_action_not_done,
 )
+from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
@@ -43,6 +43,7 @@ from config import config
 from core.database.read_release import release_if_read_only
 
 # Import from consumer's own modules
+from consumers.chatbot.atom_prompt import atom_memory_block, atom_system_prompt, resolve_atom_attachments
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
@@ -128,7 +129,7 @@ def unexecuted_claims_notice(
     do. Both reply paths ask this: a turn whose first reply calls no tool never
     enters the tool loop, and that is exactly where night 3's replayed answer was."""
     from modules.tools.execution.tool_loop import (
-        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run, claimed_action_not_done,
+        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run,
         looks_like_narrated_action, offered_tool_names,
     )
 
@@ -1153,109 +1154,35 @@ class StreamingChatService:
 
         force_text_only (proactive openers) skips memory retrieval entirely —
         the opener is self-contained and the Mem0 read only adds latency.
+        F232: the prompt carries the product facts the full path's section does.
         """
+        from modules.context.sections.product_facts import product_facts
+
         logger.info(
             "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
             len(atom_tools or []),
             "skipped" if force_text_only else "on",
         )
-        _now = datetime.utcnow()
-        _time_ctx = (
-            "Good morning" if _now.hour < 12
-            else "Good afternoon" if _now.hour < 18
-            else "Good evening"
+        memory_block = "" if force_text_only else await atom_memory_block(
+            smart_chat.orchestrator, messages,
+            workspace_id=self.workspace_id,
+            agent_id=agent_runtime.agent_id,
+            widget_mode=self.widget_mode,
+            viewer_subject_id=getattr(self, "_viewer_subject_id", None),
         )
-
-        _memory_block = ""
-        try:
-            _user_msg = next(
-                (m.get("content", "") for m in reversed(messages)
-                 if isinstance(m, dict) and m.get("role") == "user"),
-                ""
-            )
-            if (
-                not force_text_only
-                and _user_msg
-                and smart_chat.orchestrator
-                and smart_chat.orchestrator.memory_manager
-            ):
-                _mem_result = await smart_chat.orchestrator.memory_manager.retrieve_memories(
-                    workspace_id=str(self.workspace_id),
-                    agent_id=agent_runtime.agent_id,
-                    query=_user_msg if len(_user_msg) > 5 else "user context",
-                    widget_mode=self.widget_mode,
-                    # PRD-206 S7: Q7 private-scope guard needs the viewer.
-                    viewer_subject_id=getattr(self, "_viewer_subject_id", None),
-                )
-                if _mem_result and _mem_result.formatted_context:
-                    _memory_block = f"\n\n## What you remember about this user:\n{_mem_result.formatted_context}\n"
-                    logger.info(f"[PRD-68] ATOM memory: {len(_mem_result.memories)} memories injected")
-        except Exception as _mem_err:
-            logger.debug(f"[PRD-68] ATOM memory retrieval skipped: {_mem_err}")
-
-        _persona_block = ""
-        if agent_runtime.metadata.persona:
-            _persona_block = f"\n\n{agent_runtime.metadata.persona}\n"
-
-        _description_block = ""
-        if agent_runtime.metadata.description and str(agent_runtime.metadata.description).strip():
-            _description_block = f"\n\n## Agent Description\n{str(agent_runtime.metadata.description).strip()}\n"
-
-        _atom_prompt = (
-            f"You are {agent_runtime.metadata.name}, an AI assistant on the Automatos platform.\n\n"
-            f"{_time_ctx}.{atom_identity_clause(smart_chat.get_user_name())} "
-            "Read the conversation and match the user's energy. "
-            "If they're frustrated, be direct — skip the niceties and lead with the answer. "
-            "If they're curious, explain the why. If they're casual, be casual back. "
-            "If they're formal, match it. Never be artificially cheerful when someone is having a bad time. "
-            "Never be robotic when someone is being warm.\n\n"
-            "You adapt. That's what makes you good at this.\n"
-            f"{_description_block}"
-            f"{_persona_block}"
-            f"{_memory_block}"
+        _atom_prompt = atom_system_prompt(
+            agent_runtime.metadata,
+            identity=atom_identity_clause(smart_chat.get_user_name()),
+            memory_block=memory_block,
+            facts=product_facts(self.db, self.workspace_id),
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
             messages, system_prompt=_atom_prompt, available_tools=atom_tools,
             resolved_attachment_ids=attachment_ids,
         )
-
-        # PRD-127: Resolve ephemeral attachments for ATOM path.
-        # Full path goes through ContextService.build_context which handles this;
-        # ATOM bypasses ContextService, so we resolve directly here.
         if attachment_ids:
-            try:
-                from uuid import UUID
-                from modules.attachments.resolver import (
-                    AttachmentResolver,
-                    VisionNotSupportedError,
-                    inject_parts_into_last_user_message,
-                )
-                resolver = AttachmentResolver(db_session=self.db)
-                parts, _att_failures = await resolver.resolve(
-                    attachment_ids=[UUID(a) for a in attachment_ids],
-                    workspace_id=UUID(str(self.workspace_id)),
-                    model_id=model_id or "",
-                )
-                if parts:
-                    inject_parts_into_last_user_message(llm_messages, parts)
-                    logger.info(
-                        f"[PRD-127] ATOM path: resolved {len(parts)} attachment parts "
-                        f"from {len(attachment_ids)} ids"
-                    )
-                if _att_failures:
-                    # PRD-223 S0.3: the unavailable-marker part is already in
-                    # `parts`, so the model will say what it cannot see.
-                    logger.warning(
-                        f"[PRD-223] ATOM path: {len(_att_failures)} attachment(s) unavailable"
-                    )
-            except VisionNotSupportedError as _vne:
-                logger.warning(f"[PRD-127] ATOM vision not supported: {_vne}")
-            except Exception as _att_err:
-                logger.error(
-                    f"[PRD-127] ATOM attachment resolution failed: {_att_err}",
-                    exc_info=True,
-                )
-
+            await resolve_atom_attachments(self.db, llm_messages, attachment_ids,
+                                           workspace_id=self.workspace_id, model_id=model_id)
         return llm_messages, atom_tools, None
 
     async def _prepare_full_path(
@@ -1679,7 +1606,7 @@ class StreamingChatService:
         yield self.streaming_handler.format_aisdk_tool_end(
             call_id, PREFETCH_TOOL, True, duration_ms=found.elapsed_ms, summary=found.summary,
         )
-        prefetched.append((PREFETCH_TOOL, found.args))
+        prefetched.extend((PREFETCH_TOOL, args) for args in (found.searches or [found.args]))   # one per question (F227)
         if found.message:
             llm_messages.append(found.message)
 
@@ -2649,9 +2576,12 @@ class StreamingChatService:
 
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
+        # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
+        # is off for it) leaves every action listing of the turn, the ATOM enum too.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
-                             self.widget_agent_lock):
+                             self.widget_agent_lock), \
+                self._hidden_action_scope(agent_id):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2661,6 +2591,24 @@ class StreamingChatService:
                 page_context=page_context, spoken_mode=spoken_mode,
             ):
                 yield chunk
+
+    def _hidden_action_scope(self, agent_id: int):
+        """PRD-251B US-B106: the turn's scope for the action categories its workspace is
+        not shown (Socials while it is off for it), read once for the turn. A workspace
+        that cannot be read hides them (fail-closed)."""
+        from contextlib import nullcontext
+
+        try:
+            from modules.tools.discovery.action_registry import hidden_scope
+            from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace
+        except ImportError:  # a test's stand-in registry
+            return nullcontext()
+        if not getattr(self, "workspace_id", None):
+            try:
+                self._resolve_workspace_id(agent_id)
+            except Exception:  # noqa: BLE001 — the turn resolves it again; Socials stays hidden
+                logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
+        return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
     async def _stream_response_with_agent_scoped(
         self,

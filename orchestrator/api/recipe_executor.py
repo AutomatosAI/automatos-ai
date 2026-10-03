@@ -51,7 +51,7 @@ _INTERNAL_ERRORS = (AttributeError, TypeError, KeyError, IndexError, NameError,
                     AssertionError, ZeroDivisionError, RecursionError)
 RUN_STOPPED_TEXT = (
     "The run stopped before it finished — the backend stopped while it was in progress. "
-    "Session steps it had started carry on; their results are on the board."
+    "Session steps it had started were stopped with it."
 )
 INTERNAL_ERROR_TEXT = (
     "The run stopped on an internal error, so nothing after it ran. "
@@ -1277,6 +1277,8 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
                 execution.status = "cancelled"
                 execution.error_message = execution.error_message or RUN_STOPPED_TEXT
                 execution.completed_at = datetime.now(timezone.utc)
+                from services.board_cancel import PLAYBOOK_RUN_BY, RUN_DIED_REASON, stop_run_step_tickets
+                stop_run_step_tickets(db, execution_id, by=PLAYBOOK_RUN_BY, reason=RUN_DIED_REASON)   # F224
                 db.commit()
         finally:
             db.close()

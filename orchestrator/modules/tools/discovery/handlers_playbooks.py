@@ -4,9 +4,12 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+from modules.tools.discovery.wait_for_me import keeps_wait_for_me, updates_wait_for_me
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +195,7 @@ def _playbook_namesakes_refusal(namesakes: List[Any]) -> str:
             "of them, or give the new one a different name.")
 
 
+@keeps_wait_for_me  # F242: the owner's "wait for me"
 async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     import uuid
@@ -201,16 +205,13 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     if not name or not description:
         return {"success": False, "error": "Missing required: name and description"}
 
-    # F185 (night 6): asked to run the playbook it had just made, Auto made
-    # another of the same name. F144's namesake rule, for playbooks.
-    namesakes = _playbooks_called(db, workspace_id, name)
-    if namesakes:
-        return {
-            "success": False,
-            "existing_playbook_id": namesakes[0].id,
-            "existing_playbook_ids": [playbook.id for playbook in namesakes],
-            "error": _playbook_namesakes_refusal(namesakes),
-        }
+    # F185: never a namesake of one of this workspace's; F222: never an empty copy
+    # of a marketplace playbook (playbook_names.py).
+    from modules.tools.discovery.playbook_names import name_refusal
+
+    refusal = name_refusal(db, workspace_id, name)
+    if refusal is not None:
+        return refusal
 
     tags = params.get("tags", [])
     inputs = params.get("inputs")
@@ -256,6 +257,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+@updates_wait_for_me  # F242: the owner's "wait for me"
 async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
@@ -687,6 +689,7 @@ def _sync_schedule(playbook) -> tuple:
     return None, notes.get(outcome, "Active now.")
 
 
+@keeps_wait_for_me  # F242: the owner's "wait for me"
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution
@@ -838,6 +841,12 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
+# F241: the run's card is made when the run starts, so the answer can name it by number.
+# Wrapped after the definition, around any decorators it carries.
+execute_playbook = says_the_run_card(execute_playbook)
+
+
+@names_the_run_cards  # F241: each run's card, by number
 async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Check status/results of a playbook execution."""
     from core.models.core import RecipeExecution

@@ -24,6 +24,9 @@ from typing import Any, Dict, Mapping, Optional
 from .music_build import LICENCES, MANIFEST_NAME
 
 
+# A start the library picks lands this long before a drop, so the drop is heard.
+DROP_LEAD_SECONDS = 2.0
+
 class MusicLibraryError(ValueError):
     """The manifest cannot be used; the service refuses to start on it."""
 
@@ -38,10 +41,32 @@ class Track:
     licence: str = ""
     attribution: str = ""
     cues: Mapping[str, Any] = field(default_factory=dict)
+    style: str = ""  # e.g. "deep house": how a picker names the track (PRD-251B, a post's music)
 
     @property
     def credit_required(self) -> bool:
         return bool(LICENCES[self.licence]["credit"])
+
+    def start_for(self, duration: float) -> float:
+        """Where a ``duration``-second video starts in the track when its cue names no start
+        (PRD-251B: a post that picked this track over its template's): the first groove that
+        leaves room for the whole video, where a voice-over sits well; else just before the
+        first drop that does; else the opening."""
+        room = None if self.duration is None else self.duration - duration
+        grooves = [g.get("start") for g in self.cues.get("grooves") or [] if isinstance(g, Mapping)]
+        drops = [max(0.0, d - DROP_LEAD_SECONDS) for d in self.cues.get("drops") or [] if isinstance(d, (int, float))]
+        for start in (*grooves, *drops):
+            if isinstance(start, (int, float)) and start >= 0 and (room is None or start <= room):
+                return float(start)
+        return 0.0
+
+    def listing(self) -> Dict[str, Any]:
+        """What ``GET /music`` lists for the track: who made it, its style, length and credit."""
+        licence = LICENCES[self.licence]
+        return {
+            "id": self.id, "title": self.title, "artist": self.artist, "style": self.style,
+            "duration": self.duration, "licence": licence["name"], "credit_required": bool(licence["credit"]),
+        }
 
     def report(self) -> Dict[str, Any]:
         """What a render that mixes this track reports about it."""
@@ -93,6 +118,7 @@ def _track(entry: Any, root: Path) -> Track:
         licence=licence,
         attribution=_text(entry, "attribution", track_id),
         cues=cues,
+        style=entry.get("style").strip() if isinstance(entry.get("style"), str) else "",
     )
 
 

@@ -30,6 +30,9 @@ import {
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
 import { ExecutionDetail } from './execution-detail'
+import { feedItemHref } from '@/lib/ticket-links'
+import { boardStatusWord } from './board-status-word'
+import { numberedTitle } from './board/ticket-kind'
 import dynamic from 'next/dynamic'
 import { cn } from '@/lib/utils'
 
@@ -131,7 +134,6 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   const [statusFilter, setStatusFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [selectedItem, setSelectedItem] = useState<ActivityFeedItem | null>(null)
-  const deepLinkHandled = useRef(false)
 
   const filters = useMemo<ActivityFeedFilters>(
     () => ({
@@ -150,61 +152,8 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   const total = data?.total ?? 0
   const hasMore = items.length < total
 
-  // Track known IDs to detect items arriving via polling (for log-slide-in animation)
-  const knownIds = useRef<Set<string>>(new Set())
-  const isInitialLoad = useRef(true)
-
-  const newItemIds = useMemo(() => {
-    if (isInitialLoad.current || items.length === 0) return new Set<string>()
-    const result = new Set<string>()
-    for (const item of items) {
-      if (!knownIds.current.has(item.id)) result.add(item.id)
-    }
-    return result
-  }, [items])
-
-  useEffect(() => {
-    if (items.length > 0) {
-      for (const item of items) {
-        knownIds.current.add(item.id)
-      }
-      isInitialLoad.current = false
-    }
-  }, [items])
-
-  // Deep-link: /activity?openExecution=X&recipeId=Y → auto-select matching item
-  useEffect(() => {
-    if (!openExecution || deepLinkHandled.current || items.length === 0) return
-    // Find matching item by execution ID in the source_url or id
-    const match = items.find(
-      (item) =>
-        item.source_url?.includes(`openExecution=${openExecution}`) ||
-        item.id === `recipe-${openExecution}`
-    )
-    if (match) {
-      setSelectedItem(match)
-      deepLinkHandled.current = true
-    } else if (!isLoading) {
-      // Item not in current page — build a minimal stub so ExecutionDetail can render
-      setSelectedItem({
-        id: `recipe-${openExecution}`,
-        type: 'recipe',
-        name: 'Playbook Execution',
-        status: 'completed',
-        started_at: null,
-        completed_at: null,
-        duration_seconds: null,
-        agent: null,
-        agents: [],
-        summary: '',
-        source_id: deepLinkRecipeId || null,
-        source_url: `/activity?openExecution=${openExecution}&recipeId=${deepLinkRecipeId}`,
-        trigger: null,
-        error_message: null,
-      })
-      deepLinkHandled.current = true
-    }
-  }, [openExecution, deepLinkRecipeId, items, isLoading])
+  const newItemIds = useNewItemIds(items)
+  useOpenExecutionLink({ openExecution, deepLinkRecipeId, items, isLoading, onOpen: setSelectedItem })
 
   const toggleType = useCallback((type: string) => {
     setActiveTypes((prev) => {
@@ -225,24 +174,11 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   }, [])
 
   const handleViewItem = useCallback((item: ActivityFeedItem) => {
-    // Navigate to ExecutionKitchen for recipes (detailed live view)
-    if (item.type === 'recipe' && item.source_id) {
-      const execId = item.id.replace('recipe-', '')
-      router.push(`/activity/execution?id=${execId}&recipeId=${item.source_id}`)
-      return
-    }
-    // For chats, navigate to the chat
-    if (item.type === 'chat' && item.source_id) {
-      router.push(`/chat?chatId=${item.source_id}`)
-      return
-    }
-    // For tasks, jump to the kanban board with the task highlighted
-    if (item.type === 'task' && item.source_id) {
-      router.push(`/command-center?tab=board&task=${item.source_id}` as any)
-      return
-    }
-    // Fallback to inline detail for routines
-    setSelectedItem(item)
+    // A row opens the thing itself: a playbook's run, the chat, the ticket
+    // (PRD-252 R1; F218 built ?task=, which nothing read). Routines open inline.
+    const href = item.type === 'routine' ? null : feedItemHref(item)
+    if (href) router.push(href as any)
+    else setSelectedItem(item)
   }, [router])
 
   const handleCloseDetail = useCallback(() => {
@@ -289,13 +225,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           onStatusChange={handleStatusChange}
           isFetching={isFetching}
         />
-        <div className="glass-card p-12 text-center text-muted-foreground">
-          <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No activity yet</p>
-          <p className="text-sm mt-1 max-w-sm mx-auto">
-            Create a routine or run a playbook to see your workforce in action
-          </p>
-        </div>
+        <FeedEmpty />
       </div>
     )
   }
@@ -312,19 +242,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           onStatusChange={handleStatusChange}
           isFetching={false}
         />
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="glass-card p-4 animate-pulse">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-secondary/30" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-secondary/30 rounded w-1/3" />
-                  <div className="h-3 bg-secondary/20 rounded w-1/4" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <FeedSkeleton />
       </div>
     )
   }
@@ -379,6 +297,208 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   )
 }
 
+// ─── Feed state, split out of ActivityFeed ──────────────
+
+/** Ids that arrived by polling after the first load (they slide in). */
+function useNewItemIds(items: ActivityFeedItem[]): Set<string> {
+  const knownIds = useRef<Set<string>>(new Set())
+  const isInitialLoad = useRef(true)
+
+  const newItemIds = useMemo(() => {
+    if (isInitialLoad.current || items.length === 0) return new Set<string>()
+    const result = new Set<string>()
+    for (const item of items) {
+      if (!knownIds.current.has(item.id)) result.add(item.id)
+    }
+    return result
+  }, [items])
+
+  useEffect(() => {
+    if (items.length > 0) {
+      for (const item of items) {
+        knownIds.current.add(item.id)
+      }
+      isInitialLoad.current = false
+    }
+  }, [items])
+
+  return newItemIds
+}
+
+interface OpenExecutionLink {
+  openExecution?: string | null
+  deepLinkRecipeId?: string | null
+  items: ActivityFeedItem[]
+  isLoading: boolean
+  onOpen: (item: ActivityFeedItem) => void
+}
+
+/** Deep-link: /activity?openExecution=X&recipeId=Y → auto-select the matching item. */
+function useOpenExecutionLink({ openExecution, deepLinkRecipeId, items, isLoading, onOpen }: OpenExecutionLink) {
+  const handled = useRef(false)
+  useEffect(() => {
+    if (!openExecution || handled.current || items.length === 0) return
+    // Find matching item by execution ID in the source_url or id
+    const match = items.find(
+      (item) =>
+        item.source_url?.includes(`openExecution=${openExecution}`) ||
+        item.id === `recipe-${openExecution}`
+    )
+    if (match) {
+      onOpen(match)
+      handled.current = true
+    } else if (!isLoading) {
+      // Item not in current page — build a minimal stub so ExecutionDetail can render
+      onOpen({
+        id: `recipe-${openExecution}`,
+        type: 'recipe',
+        name: 'Playbook Execution',
+        status: 'completed',
+        started_at: null,
+        completed_at: null,
+        duration_seconds: null,
+        agent: null,
+        agents: [],
+        summary: '',
+        source_id: deepLinkRecipeId || null,
+        source_url: `/activity?openExecution=${openExecution}&recipeId=${deepLinkRecipeId}`,
+        trigger: null,
+        error_message: null,
+      })
+      handled.current = true
+    }
+  }, [openExecution, deepLinkRecipeId, items, isLoading, onOpen])
+}
+
+function FeedEmpty() {
+  return (
+    <div className="glass-card p-12 text-center text-muted-foreground">
+      <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
+      <p className="font-medium">No activity yet</p>
+      <p className="text-sm mt-1 max-w-sm mx-auto">
+        Create a routine or run a playbook to see your workforce in action
+      </p>
+    </div>
+  )
+}
+
+function FeedSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="glass-card p-4 animate-pulse">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-lg bg-secondary/30" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 bg-secondary/30 rounded w-1/3" />
+              <div className="h-3 bg-secondary/20 rounded w-1/4" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The row's kind and stage. PRD-252 R5: a ticket's stage reads in the board's words. */
+function FeedRowBadges({ item }: { item: ActivityFeedItem }) {
+  const statusBadge = getStatusBadge(item.status)
+  return (
+    <>
+      {item.type === 'chat' && (
+        <Badge className="text-xs bg-info/20 text-info/80 border-info/30 shrink-0">
+          <MessageCircle className="w-3 h-3 mr-1" />
+          Chat
+        </Badge>
+      )}
+      {item.type === 'routine' && (
+        <Badge className="text-xs bg-agent/20 text-agent/80 border-agent/30 shrink-0">
+          <RefreshCw className="w-3 h-3 mr-1" />
+          Routine
+        </Badge>
+      )}
+      {item.type === 'recipe' && (
+        <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
+          <Zap className="w-3 h-3 mr-1" />
+          Playbook
+        </Badge>
+      )}
+      {item.type === 'mission' && (
+        <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
+          <Rocket className="w-3 h-3 mr-1" />
+          Mission
+        </Badge>
+      )}
+      {item.type === 'task' && (
+        <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+          <CheckSquare className="w-3 h-3 mr-1" />
+          Task
+        </Badge>
+      )}
+      <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
+        {boardStatusWord(item) ?? statusBadge.label}
+      </Badge>
+    </>
+  )
+}
+
+/** Time, steps, tokens and duration (hidden on mobile). */
+function FeedRowMetrics({ item }: { item: ActivityFeedItem }) {
+  const isRecipe = item.type === 'recipe'
+  const isRoutine = item.type === 'routine'
+  return (
+    <div className="hidden lg:flex items-center gap-6 text-sm shrink-0">
+      {item.started_at && (
+        <div className="text-left max-w-[200px]">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3" />
+            <span>{formatTimestamp(item.started_at)}</span>
+          </div>
+        </div>
+      )}
+
+      {isRecipe && item.step_progress && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Steps</p>
+          <p className="font-medium">{item.step_progress.total}</p>
+        </div>
+      )}
+
+      {/* Tokens for recipes */}
+      {isRecipe && item.total_tokens != null && item.total_tokens > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Tokens</p>
+          <p className="font-medium">{item.total_tokens.toLocaleString()}</p>
+        </div>
+      )}
+
+      {/* Tokens for routines */}
+      {isRoutine && item.tokens_used != null && item.tokens_used > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Tokens</p>
+          <p className="font-medium">{item.tokens_used.toLocaleString()}</p>
+        </div>
+      )}
+
+      {/* Duration for recipes */}
+      {isRecipe && item.total_duration_ms != null && item.total_duration_ms > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Duration</p>
+          <p className="font-medium">{(item.total_duration_ms / 1000).toFixed(1)}s</p>
+        </div>
+      )}
+
+      {/* Duration fallback from duration_seconds */}
+      {!isRecipe && item.duration_seconds != null && item.duration_seconds > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Duration</p>
+          <p className="font-medium">{item.duration_seconds.toFixed(1)}s</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Feed Row (Cooking-Style Slim Row) ──────────────────
 
 interface FeedRowProps {
@@ -390,8 +510,6 @@ interface FeedRowProps {
 
 function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
   const isRecipe = item.type === 'recipe'
-  const isRoutine = item.type === 'routine'
-  const statusBadge = getStatusBadge(item.status)
 
   return (
     <motion.div
@@ -412,40 +530,8 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
-            {item.type === 'chat' && (
-              <Badge className="text-xs bg-info/20 text-info/80 border-info/30 shrink-0">
-                <MessageCircle className="w-3 h-3 mr-1" />
-                Chat
-              </Badge>
-            )}
-            {isRoutine && (
-              <Badge className="text-xs bg-agent/20 text-agent/80 border-agent/30 shrink-0">
-                <RefreshCw className="w-3 h-3 mr-1" />
-                Routine
-              </Badge>
-            )}
-            {isRecipe && (
-              <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
-                <Zap className="w-3 h-3 mr-1" />
-                Playbook
-              </Badge>
-            )}
-            {item.type === 'mission' && (
-              <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
-                <Rocket className="w-3 h-3 mr-1" />
-                Mission
-              </Badge>
-            )}
-            {item.type === 'task' && (
-              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
-                <CheckSquare className="w-3 h-3 mr-1" />
-                Task
-              </Badge>
-            )}
-            <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
-              {statusBadge.label}
-            </Badge>
+            <h4 className="font-semibold text-sm sm:text-base truncate">{numberedTitle(item.number, item.name)}</h4>
+            <FeedRowBadges item={item} />
           </div>
 
           {/* Sub-line: step progress or summary */}
@@ -530,56 +616,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
           )}
         </div>
 
-        {/* Metrics (hidden on mobile) */}
-        <div className="hidden lg:flex items-center gap-6 text-sm shrink-0">
-          {item.started_at && (
-            <div className="text-left max-w-[200px]">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="w-3 h-3" />
-                <span>{formatTimestamp(item.started_at)}</span>
-              </div>
-            </div>
-          )}
-
-          {isRecipe && item.step_progress && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Steps</p>
-              <p className="font-medium">{item.step_progress.total}</p>
-            </div>
-          )}
-
-          {/* Tokens for recipes */}
-          {isRecipe && item.total_tokens != null && item.total_tokens > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Tokens</p>
-              <p className="font-medium">{item.total_tokens.toLocaleString()}</p>
-            </div>
-          )}
-
-          {/* Tokens for routines */}
-          {isRoutine && item.tokens_used != null && item.tokens_used > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Tokens</p>
-              <p className="font-medium">{item.tokens_used.toLocaleString()}</p>
-            </div>
-          )}
-
-          {/* Duration for recipes */}
-          {isRecipe && item.total_duration_ms != null && item.total_duration_ms > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Duration</p>
-              <p className="font-medium">{(item.total_duration_ms / 1000).toFixed(1)}s</p>
-            </div>
-          )}
-
-          {/* Duration fallback from duration_seconds */}
-          {!isRecipe && item.duration_seconds != null && item.duration_seconds > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Duration</p>
-              <p className="font-medium">{item.duration_seconds.toFixed(1)}s</p>
-            </div>
-          )}
-        </div>
+        <FeedRowMetrics item={item} />
 
         {/* View button */}
         <Button

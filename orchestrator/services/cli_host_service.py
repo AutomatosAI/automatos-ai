@@ -43,10 +43,12 @@ from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
 from services.session_report import APPROVAL_NOT_ON_RECORD
+from services.ticket_numbers import ticket_label  # PRD-252 R4
 from core.session_permission_modes import (
     MODE_EDITS,
     PERMISSION_MODE_KEY,
     PERMISSION_MODES,
+    claim_permission_mode,
     ticket_permission_mode,
     workspace_permission_mode,
 )
@@ -304,7 +306,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.9.0"  # 2026-09-29: the claim carries ``permission_mode`` (manual | edits | plan | auto), the agent's or the workspace's — an older host ignores it and runs every session as Edit automatically. 0.8.0: 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
+EXPECTED_CLI_HOST_VERSION = "0.11.0"  # 2026-10-02: GitHub Copilot CLI is a session CLI (PRD-253) — an older host announces no `copilot` and never claims its tickets; the terminal launch carries `agent_id` (a per-agent CLI home). 0.10.0: 2026-10-02: Plan runs on every CLI (PRD-253 Wave P) — the claim's ``permission_mode`` is THIS turn's mode (``edits`` once the ticket's plan is approved) and it carries ``plan_approved``; a plan turn reports its plan as a ``PlanReady`` event before its result — an older host runs Plan on Claude Code only. 0.9.0: 2026-09-29: the claim carries ``permission_mode`` (manual | edits | plan | auto), the agent's or the workspace's — an older host ignores it and runs every session as Edit automatically. 0.8.0: 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py", "core/cli_presets.py")
 
@@ -731,6 +733,9 @@ def _terminal_launch_for(db: Session, task: BoardTask, ref: Dict[str, Any], host
         "system_prompt": _session_system_prompt(agent, ticket_session=False),
         "model": ref.get("model"),
         "agent_name": getattr(agent, "name", None),
+        # PRD-253: a CLI whose home is per agent (Codex, GitHub Copilot) keeps the
+        # agent's sessions in that home — the host opens the session there.
+        "agent_id": task.assigned_agent_id,
     }
 
 
@@ -926,6 +931,7 @@ def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[st
 
 
 def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
+    from services.session_plans import plan_fold_in
     from services.ticket_owner_ask import ticket_answers_block
     from services.ticket_redo import redo_block
 
@@ -933,6 +939,10 @@ def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     answers = _answers_fold_in(task)
     if answers:
         prompt = f"{prompt}\n\n{answers}"
+    # PRD-253 Wave P: the operator's answer to the session's plan — approved, or revise it.
+    plan = plan_fold_in(task.runtime_ref if isinstance(task.runtime_ref, dict) else {})
+    if plan:
+        prompt = f"{prompt}\n\n{plan}"
     # F183: the owner's answers from Questions (a parked ticket re-queued by one).
     owners = ticket_answers_block(getattr(task, "planning_data", None))
     if owners:
@@ -1006,6 +1016,8 @@ def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any],
     """The ticket's fresh ``runtime_ref`` for this claim: session, folder and the record it carries."""
     from uuid import uuid4
 
+    from services.session_plans import PLANS_KEY, session_plans
+
     resume_session_id = _resume_session_for(prior, host)
     session_id = str(uuid4())
     provider = cfg.get(CONFIG_PROVIDER_KEY) or PROVIDER_CLAUDE
@@ -1036,6 +1048,11 @@ def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any],
     # read the new empty ref: no answer ever reached the resumed session and
     # the ceiling reset to zero every claim.
     ref[SESSION_ASKS_KEY] = session_asks(prior)
+    # PRD-253 Wave P: so are its plans — each claim's mode, and the approved
+    # plan a resumed session carries out, are read from them.
+    plans = session_plans(prior)
+    if plans:
+        ref[PLANS_KEY] = plans
     # F094: the notes on the ticket (the operator's, the session's, the
     # mission's verdict) are its record too; a claim that resumes the same
     # run keeps them. A mission step's next run starts with none.
@@ -1048,6 +1065,7 @@ def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any],
 def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str) -> Dict[str, Any]:
     """Stamp one claimed ticket's ``runtime_ref`` and build what the host runs it from."""
     from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
+    from services.session_plans import PLANS_KEY, STATE_APPROVED, plan_state
 
     if task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason):
         task.blocked_reason = None  # a host that runs this CLI is here now
@@ -1060,19 +1078,25 @@ def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str)
     ref[SESSION_TOOLS_OFFERED_KEY] = True
     task.runtime_ref = ref
     prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
-    # Mark the answers just folded in, so a LATER resume of the same ticket
-    # does not render them again.
-    if ref.get(SESSION_ASKS_KEY):
-        ref[SESSION_ASKS_KEY] = _mark_answers_folded(ref[SESSION_ASKS_KEY])
-        task.runtime_ref = ref
-    return _claim_payload(task, agent, cfg, ref, prompt, session_token, ticket_permission_mode(cfg, workspace_mode))
+    # Mark the answers just folded in — to its questions and to its plan — so a
+    # LATER resume of the same ticket does not render them again.
+    for key in (SESSION_ASKS_KEY, PLANS_KEY):
+        if ref.get(key):
+            ref[key] = _mark_answers_folded(ref[key])
+            task.runtime_ref = ref
+    # PRD-253 Wave P: a Plan ticket plans until its plan is approved, then works.
+    approved = plan_state(ref) == STATE_APPROVED
+    mode = claim_permission_mode(ticket_permission_mode(cfg, workspace_mode), approved)
+    return _claim_payload(task, agent, cfg, ref, prompt, session_token, (mode, approved))
 
 
 def _claim_payload(
     task: BoardTask, agent: Optional[Agent], cfg: Dict[str, Any], ref: Dict[str, Any], prompt: str,
-    session_token: str, permission_mode: str,
+    session_token: str, permission: Tuple[str, bool],
 ) -> Dict[str, Any]:
-    """The claim entry the host starts the session from (host contract ``EXPECTED_CLI_HOST_VERSION``)."""
+    """The claim entry the host starts the session from (host contract ``EXPECTED_CLI_HOST_VERSION``).
+    ``permission`` is this turn's mode and whether the ticket's plan is approved."""
+    permission_mode, plan_approved = permission
     return {
         "task_id": task.id,
         "workspace_id": str(task.workspace_id),
@@ -1108,7 +1132,10 @@ def _claim_payload(
         "session_token": session_token,
         # manual | edits | plan | auto: the agent's own mode, else the workspace's
         # (Settings → Session mode). The host's gate applies it; its hard lines hold in all four.
+        # PRD-253 Wave P: a Plan ticket's mode is ``edits`` once its plan is approved.
         "permission_mode": permission_mode,
+        # …and a host whose own ``--permission-mode`` is Plan carries on too.
+        "plan_approved": plan_approved,
     }
 
 def _session_system_prompt(agent: Optional[Agent], *, ticket_session: bool = True) -> str:
@@ -1262,9 +1289,12 @@ async def record_events(
 ) -> Dict[str, Any]:
     """Absorb a batch of hook events: renew the lease, keep a compact live summary
     in ``runtime_ref`` (live tool, transcript path, counts), raise a question for
-    every command the host is holding (PRD-245 S0.4), and hand back control
-    (``cancel``) and the operator's answers the host must act on. Events are not
-    persisted individually here — S2 maps them to board events and the fleet."""
+    every command the host is holding (PRD-245 S0.4) and the Plan card for a
+    plan the turn presented (PRD-253 Wave P), and hand back control (``cancel``)
+    and the operator's answers the host must act on. Events are not persisted
+    individually here — S2 maps them to board events and the fleet."""
+    from services.session_plans import raise_session_plan
+
     events = [ev for ev in (events or []) if isinstance(ev, dict)]
     if events and all(_terminal_event_name(ev) for ev in events):
         return _record_terminal_events(db, host, task_id, events)
@@ -1278,6 +1308,7 @@ async def record_events(
     task.runtime_ref = ref
     db.commit()
     ref = await raise_session_holds(db, task, ref)
+    ref = await raise_session_plan(db, task, ref, events)
     # PRD-235 W2 S3: the same events light up the Code Canvas panel.
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     canvas: List[Dict[str, Any]] = []
@@ -1320,8 +1351,9 @@ SESSION_HOLD_OPTIONS = (SESSION_HOLD_OPTION_ALLOW, SESSION_HOLD_OPTION_DENY)
 SESSION_HOLD_TTL_SECONDS = 3600
 
 
-def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
-    """The question the operator sees, wherever it reaches them.
+def session_hold_question(task_id: Any, entry: Dict[str, Any], *, ticket: Optional[str] = None) -> str:
+    """The question the operator sees, wherever it reaches them. ``ticket`` names
+    the ticket ("ticket #0042", PRD-252 R4); without it, "ticket 612".
 
     Night 1 (2026-09-18): the card was a raw, truncated shell command plus the
     gate's own wording — the operator had to reverse-engineer what the agent was
@@ -1333,7 +1365,7 @@ def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
     subject = str(entry.get("subject") or entry.get("tool") or "?")
     intent = str(entry.get("intent") or entry.get("description") or "").strip()
 
-    lines = [f"**Allow this command in ticket #{task_id}?**", ""]
+    lines = [f"**Allow this command in {ticket or f'ticket {task_id}'}?**", ""]
     lines += [intent or _plain_intent(subject), ""]
     # The full command, never truncated, but folded away — the summary line is
     # what most decisions are made on.
@@ -1506,24 +1538,11 @@ async def raise_session_ask(
         .first()
     )
     if task is None:
-        return {"success": False, "error": f"ticket #{task_id} is not in this workspace"}
-
-    # One open question at a time, and a hard ceiling per ticket. Every ask
-    # raises a card in the Questions tab, rings the bell and sends a Telegram
-    # message with text the session chose — so "ask politely once" cannot be a
-    # prompt instruction alone. A session whose prompt has been steered would
-    # otherwise reach the operator as many times as its tool allowance allows.
-    ref = dict(task.runtime_ref or {})
-    still_open = open_session_asks(ref)
-    if still_open:
-        return {"success": False,
-                "error": "you already have a question waiting for an answer on this ticket: "
-                         f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
-                         "without it and end your turn — the answer resumes you."}
-    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
-        return {"success": False,
-                "error": f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
-                         "still need in your final message and end your turn."}
+        # PRD-252 R4: an id never follows a '#', which now means a ticket's number.
+        return {"success": False, "error": f"ticket {task_id} is not in this workspace"}
+    refused = _ask_refused(task)
+    if refused:
+        return {"success": False, "error": refused}
 
     try:
         staged = await stage_question(
@@ -1547,18 +1566,35 @@ async def raise_session_ask(
     task.runtime_ref = record_session_ask(dict(task.runtime_ref or {}), grant_id=ask_id, question=question)
     db.commit()
     logger.info("[cli-host] ticket #%s asked the operator (ask #%s)", task_id, ask_id)
-    return {
-        "success": True,
-        "result": {
-            "ask_id": int(ask_id),
-            "message": (
-                f"Asked the operator (question #{ask_id}). It is on their Questions tab and their phone. "
-                "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
-                "they reply. Finish everything that does not depend on the answer now, then end your "
-                "turn. Do not wait and do not ask again."
-            ),
-        },
-    }
+    return {"success": True, "result": {"ask_id": int(ask_id), "message": ASKED.format(ask_id=ask_id)}}
+
+
+# What the session reads once its question is filed.
+ASKED = (
+    "Asked the operator (question #{ask_id}). It is on their Questions tab and their phone. "
+    "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
+    "they reply. Finish everything that does not depend on the answer now, then end your "
+    "turn. Do not wait and do not ask again."
+)
+
+
+def _ask_refused(task: Any) -> Optional[str]:
+    """Why a session may not ask now. One open question at a time, and a hard
+    ceiling per ticket. Every ask raises a card in the Questions tab, rings the
+    bell and sends a Telegram message with text the session chose — so "ask
+    politely once" cannot be a prompt instruction alone. A session whose prompt
+    has been steered would otherwise reach the operator as many times as its
+    tool allowance allows."""
+    ref = dict(task.runtime_ref or {})
+    still_open = open_session_asks(ref)
+    if still_open:
+        return ("you already have a question waiting for an answer on this ticket: "
+                f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
+                "without it and end your turn — the answer resumes you.")
+    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
+        return (f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
+                "still need in your final message and end your turn.")
+    return None
 
 
 def answer_session_ask(db: Session, grant: Any) -> bool:
@@ -1586,17 +1622,23 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
         return False
     ref = record_session_answer(dict(task.runtime_ref or {}), grant_id=grant.id,
                                 answer=str(getattr(grant, "answer_text", "") or ""))
-    if task.status == "in_progress":
-        task.runtime_ref = ref
-        db.commit()
-        logger.info("[cli-host] ask #%s answered while ticket #%s still runs — its turn end picks it up",
-                    grant.id, task.id)
-        return False
+    return resume_on_answer(db, task, ref, what=f"ask #{grant.id}")
+
+
+def resume_on_answer(db: Session, task: BoardTask, ref: Dict[str, Any], *, what: str) -> bool:
+    """``ref`` carries the operator's answer; re-queue the ticket to RESUME its
+    session when it is parked for that answer — ``blocked`` → ``assigned``. Shared
+    by a session's own question (PRD-245 W2) and its Plan card (PRD-253 Wave P).
+    True when the work actually moves.
+
+    A ticket still ``in_progress`` (answered mid-turn) is only recorded: its own
+    turn end does the re-queue, because a running session must never be claimed
+    twice. ``what`` names the answered card in the log."""
     if task.status != "blocked":
         task.runtime_ref = ref
         db.commit()
-        logger.info("[cli-host] ask #%s answered, but ticket #%s is %s — nothing to resume",
-                    grant.id, task.id, task.status)
+        logger.info("[cli-host] %s answered while ticket #%s is %s — %s", what, task.id, task.status,
+                    "its turn end picks it up" if task.status == "in_progress" else "nothing to resume")
         return False
     # F036: the answer is recorded on the ticket either way, but it only
     # resumes a ticket that is parked FOR it. Night 1's ticket 136 was stopped
@@ -1607,8 +1649,7 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
     if operator_stop(task):
         task.runtime_ref = ref
         db.commit()
-        logger.info("[cli-host] ask #%s answered, but ticket #%s was stopped by a person — not resumed",
-                    grant.id, task.id)
+        logger.info("[cli-host] %s answered, but ticket #%s was stopped by a person — not resumed", what, task.id)
         return False
     if requeue_exhausted(task):
         task.runtime_ref = ref
@@ -1621,7 +1662,7 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
     db.commit()
     _notify_status(db, task)
     _notify_available(db, task)
-    logger.info("[cli-host] ticket #%s resumes on the answer to ask #%s", task.id, grant.id)
+    logger.info("[cli-host] ticket #%s resumes on the answer to %s", task.id, what)
     return True
 
 
@@ -1701,7 +1742,7 @@ async def _stage_hold_question(
         res = await stage_question(
             db, task.workspace_id,
             subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id),
-            question=session_hold_question(task.id, entry), options=list(SESSION_HOLD_OPTIONS),
+            question=session_hold_question(task.id, entry, ticket=ticket_label(task)), options=list(SESSION_HOLD_OPTIONS),
             ttl_seconds=SESSION_HOLD_TTL_SECONDS,
             asked_by_agent_id=task.assigned_agent_id, agent_name=agent_name,
             details={SESSION_HOLD_MARKER: {"request_id": request_id, "task_id": task.id}},
@@ -2202,7 +2243,7 @@ def _register_session_deliverables(
                 file_path=rel, source_type="task", source_id=str(task.id),
                 agent_id=agent_id, agent_name=agent_name, artifact_type=artifact_type,
                 file_size_bytes=size,
-                summary=f"Written by a Claude Code session for ticket #{task.id}",
+                summary=f"Written by a Claude Code session for {ticket_label(task)}",
                 extra={"task_id": task.id, "session_id": session_id, "host_path": str(host_path),
                        "runtime": RUNTIME_CLI},
             )
@@ -2522,9 +2563,11 @@ def _produced_nothing(exec_result: Dict[str, Any]) -> bool:
 
 def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
     """``ref`` with any answer a concurrent request wrote to this row's
-    ``session_asks`` folded in. Read-only re-select; returns ``ref`` unchanged
-    on any error or when nothing new is there."""
+    ``session_asks`` — or to its plans (PRD-253 Wave P) — folded in. Read-only
+    re-select; returns ``ref`` unchanged on any error or when nothing new is there."""
     from sqlalchemy import text as sql_text
+
+    from services.session_plans import PLANS_KEY
 
     try:
         row = db.execute(
@@ -2533,19 +2576,28 @@ def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any])
     except Exception:  # noqa: BLE001 — a merge must never fail the result
         return ref
     fresh = (row[0] if row and isinstance(row[0], dict) else {}) or {}
-    by_grant = {int(a.get("grant_id") or 0): a for a in fresh.get(SESSION_ASKS_KEY, []) if isinstance(a, dict)}
-    if not by_grant:
-        return ref
+    merged = dict(ref)
+    for key in (SESSION_ASKS_KEY, PLANS_KEY):
+        answered = _with_fresh_answers(ref.get(key), fresh.get(key))
+        if answered is not None:
+            merged[key] = answered
+    return merged if merged != ref else ref
+
+
+def _with_fresh_answers(mine: Any, theirs: Any) -> Optional[List[Dict[str, Any]]]:
+    """``mine`` with the answers ``theirs`` holds and it lacks, matched by question
+    id; None when there are none."""
+    by_grant = {int(a.get("grant_id") or 0): a for a in (theirs or []) if isinstance(a, dict)}
     merged: List[Dict[str, Any]] = []
     changed = False
-    for ask in session_asks(ref):
+    for ask in [a for a in (mine or []) if isinstance(a, dict)]:
         other = by_grant.get(int(ask.get("grant_id") or 0))
         if other and other.get("answered_at") and not ask.get("answered_at"):
             merged.append({**ask, "answer": other.get("answer"), "answered_at": other.get("answered_at")})
             changed = True
         else:
             merged.append(ask)
-    return {**ref, SESSION_ASKS_KEY: merged} if changed else ref
+    return merged if changed else None
 
 
 def _merge_fresh_session_notes(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -2677,8 +2729,14 @@ def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optio
 
     Either way the ticket keeps its session id, so the host RESUMES the same
     Claude Code session instead of starting a fresh one with no memory of the
-    work so far."""
-    asks = session_asks(ref)
+    work so far.
+
+    PRD-253 Wave P: the Plan card parks the same way — it is the operator's
+    question to answer — and a plan rejected while the turn still ran sends the
+    ticket to review (``review``)."""
+    from services.session_plans import park_reason, reject_plan, rejected_plan, session_plans
+
+    asks = [*session_asks(ref), *session_plans(ref)]
     if not asks:
         return None
     open_asks = [a for a in asks if not a.get("answered_at")]
@@ -2693,13 +2751,15 @@ def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optio
     resumable = [a for a in asks if a.get("answered_at") and a.get("answer") and not a.get("folded_at")]
     if not open_asks and not resumable:
         return None
+    if not open_asks and rejected_plan(ref):
+        return reject_plan(db, task, ref)
     if resumable and not open_asks and requeue_exhausted(task):
         return park_exhausted(db, task, "an answered question kept sending it back")
     ref = _mark_resumable(ref)
     if open_asks:
         task.status = "blocked"
         task.blocked_at = _now()
-        task.blocked_reason = PARKED_FOR_ANSWER_REASON.format(grant_id=open_asks[0].get("grant_id"))
+        task.blocked_reason = park_reason(open_asks[0])
     else:
         task.status = "assigned"
         task.blocked_at = None

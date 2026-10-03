@@ -152,9 +152,14 @@ export function anyRendering(posts: ReadonlyArray<SocialPost>): boolean {
   return posts.some((post) => post.status === 'rendering')
 }
 
-/** Whether any post is rendering or publishing: the list polls until none is (US-308). */
+/** Whether any post is rendering or publishing, rendering its preview (the editor's,
+ * PRD-251B US-B109) or having AI options made for a slot (US-B305): the list polls until
+ * none is (US-308). */
 export function anyInFlight(posts: ReadonlyArray<SocialPost>): boolean {
-  return posts.some((post) => post.status === 'rendering' || post.status === 'publishing')
+  return posts.some(
+    (post) => post.status === 'rendering' || post.status === 'publishing' || post.preview?.status === 'rendering'
+      || Object.values(post.footage ?? {}).some((asked) => asked?.options_state === 'making'),
+  )
 }
 
 /** "3.5 / 10" (or "3.5" with no quota), minutes to one decimal place. */

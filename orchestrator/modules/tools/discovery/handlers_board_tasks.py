@@ -2,10 +2,16 @@
 
 import logging
 from datetime import datetime, timezone
+from inspect import unwrap
 from typing import Optional, Any, Dict
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
+
+from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
+from services.ticket_refs import by_ticket_number
+from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
+from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
@@ -190,6 +196,7 @@ def _parse_deadline(value: Any):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -393,6 +400,7 @@ def _widget_turn() -> bool:
     return widget_turn()
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List board tasks with optional filters."""
     from core.models.core import BoardTask
@@ -482,10 +490,6 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
-#: PRD-238 S4: statuses at which a ticket has nothing more to wait for.
-WAIT_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "review", "blocked"})
-
-
 def _agent_name_for(db: Session, agent_id: Optional[int]) -> Optional[str]:
     if not agent_id:
         return None
@@ -495,47 +499,7 @@ def _agent_name_for(db: Session, agent_id: Optional[int]) -> Optional[str]:
     return agent.name if agent else None
 
 
-def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
-    """PRD-238 S6: the compact, live-updatable card the chat renders for a ticket.
-
-    Only ids, status, names, timestamps and the session's own counters from
-    ``runtime_ref`` — never descriptions, transcripts or file contents.
-    """
-    ref = getattr(task, "runtime_ref", None) or {}
-    ref = ref if isinstance(ref, dict) else {}
-    tools = ref.get("recent_tools") or []
-    last_tool = None
-    if isinstance(tools, (list, tuple)) and tools:
-        last = tools[-1]
-        # F168: the host's entries carry ``tool``; ``name`` is the older shape.
-        last_tool = (last.get("tool") or last.get("name")) if isinstance(last, dict) else str(last)
-    files = ref.get("files_touched") or []
-    return {
-        "id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "assigned_agent": agent_name or "unassigned",
-        "runtime": ref.get("runtime"),
-        "last_tool": last_tool,
-        "files_touched": len(files) if isinstance(files, (list, tuple)) else 0,
-        "exit_reason": ref.get("exit_reason"),
-        "denials": int(ref.get("denials") or 0) if isinstance(ref.get("denials"), int) else 0,
-        "started_at": str(task.started_at) if getattr(task, "started_at", None) else None,
-        "completed_at": str(task.completed_at) if getattr(task, "completed_at", None) else None,
-    }
-
-
-def _progress_line(card: Dict[str, Any], waited_s: int) -> str:
-    who = card.get("assigned_agent") or "the agent"
-    bits = [f"{who} is working on #{card['id']} · {waited_s} s"]
-    if card.get("last_tool"):
-        bits.append(f"last tool: {card['last_tool']}")
-    if card.get("files_touched"):
-        n = card["files_touched"]
-        bits.append(f"{n} file{'s' if n != 1 else ''} touched")
-    return " · ".join(bits)
-
-
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-238 S4: wait, inside this turn, for a ticket to end — bounded, narrated.
 
@@ -549,7 +513,6 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
     import asyncio
     import time
 
-    from config import config
     from core.models.core import BoardTask
     from services import turn_progress
 
@@ -561,13 +524,7 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
     except (TypeError, ValueError):
         return {"success": False, "error": f"task_id must be an integer, got {task_id!r}"}
 
-    budget = max(1, int(config.CHATBOT_WAIT_BUDGET_S))
-    requested = params.get("max_wait_seconds")
-    try:
-        limit = min(budget, int(requested)) if requested else budget
-    except (TypeError, ValueError):
-        limit = budget
-    poll = max(1, int(config.CHATBOT_WAIT_POLL_S))
+    limit, poll = _wait_budget(params)
     turn_id = params.get("_turn_id")
 
     def _load():
@@ -585,7 +542,7 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
     waited = 0
     visitor = _widget_turn()
     while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
-        await turn_progress.emit(turn_id, (f"#{task.id} is still running · {waited} s" if visitor
+        await turn_progress.emit(turn_id, (f"The ticket is still running · {waited} s" if visitor
                                            else _progress_line(task_card(task, agent_name), waited)))
         await asyncio.sleep(min(poll, limit - waited))
         waited = int(time.monotonic() - started)
@@ -594,23 +551,10 @@ async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str,
             return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
 
     card = task_visitor_view(task) if visitor else task_card(task, agent_name)
-    terminal = task.status in WAIT_TERMINAL_STATUSES
-    return {
-        "success": True,
-        "terminal": terminal,
-        "status": task.status if terminal else "still running",
-        "waited_seconds": waited,
-        "budget_seconds": limit,
-        "task": card,
-        "message": (
-            f"Task #{task.id} ended: {task.status}."
-            if terminal
-            else f"Task #{task.id} is still running after {waited} s — the watcher will report back when it ends."
-        ),
-        "frontend_data": {"task_card": card},
-    }
+    return _wait_result(task, card, waited, limit, visitor=visitor)
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get full details of a single board task."""
     from core.models.core import BoardTask
@@ -659,6 +603,8 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
     }
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(ASSIGN)  # F241: never a closed ticket; each change noted on its ticket
 async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a board task to an agent by name."""
     from core.models.core import BoardTask
@@ -734,6 +680,9 @@ async def _update_many_board_task_statuses(
         return {"success": False, "error": "task_id (or task_ids) and status are required"}
 
     single = {k: v for k, v in params.items() if k != "task_ids"}
+    # PRD-252 R4 review: the bulk call took its numbers and numbers its whole
+    # answer in one read, so each id runs the handler without its numbering.
+    update_one = unwrap(update_board_task_status)
     updated = []
     failed = []
     for raw_id in task_ids:
@@ -742,7 +691,7 @@ async def _update_many_board_task_statuses(
         except (TypeError, ValueError):
             failed.append({"task_id": raw_id, "error": "not an integer task id"})
             continue
-        result = await update_board_task_status(db, workspace_id, {**single, "task_id": tid})
+        result = await update_one(db, workspace_id, {**single, "task_id": tid})
         if result.get("success"):
             updated.append(tid)
         else:
@@ -758,6 +707,8 @@ async def _update_many_board_task_statuses(
     }
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(EDIT)  # F241: never a closed ticket; each change noted on its ticket
 async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Edit a board task's FIELDS — title, description, priority, tags, review_mode.
 
@@ -843,6 +794,9 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     return {"success": True, "task_id": task.id, "updated": changed}
 
 
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@guarded_and_recorded(STATUS)  # F241: never a closed ticket; each change noted on its ticket
+@stops_what_it_cancels  # F241 with F245: a cancel stops what runs the card, as the board's does
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Update a board task's status. Moving to in_progress triggers execution.
     With ``task_ids`` (a list) every id is updated to the same status — see

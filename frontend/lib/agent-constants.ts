@@ -137,5 +137,19 @@ export function getAgentCategoryDisplay(agent: any): string {
 export function getAgentRoleLine(agent: any): string {
   const category = getAgentCategoryDisplay(agent)
   const jobTitle = (agent?.job_title || '').trim()
-  return jobTitle ? `${category} · ${jobTitle}` : category
+  const role = jobTitle ? `${category} · ${jobTitle}` : category
+  const cantRun = cantRunLine(agent)
+  return cantRun ? `${cantRun} · ${role}` : role
+}
+
+/**
+ * F244 (night 7): all eight agents read "active" while every run failed for the AI
+ * credit. The Agents API now says why an agent can't run now (`unavailable`: the
+ * credit ran out, no CLI host online); its first sentence leads the card's subtitle.
+ * Null when the agent can run.
+ */
+export function cantRunLine(agent: any): string | null {
+  const why = typeof agent?.unavailable === 'string' ? agent.unavailable.trim() : ''
+  if (!why) return null
+  return why.split('. ')[0].replace(/\.$/, '')
 }

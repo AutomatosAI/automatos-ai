@@ -171,6 +171,7 @@ def test_a_cli_tickets_grant_carries_the_launch_and_the_browser_only_its_summary
     assert "system_prompt" not in out["launch"]
     delivered = svc.pop_terminal_grants(host.id)[0]
     assert delivered["launch"]["system_prompt"] == "SOUL" and delivered["launch"]["model"] == "opus"
+    assert delivered["launch"]["agent_id"] == 7      # PRD-253: a per-agent CLI home is opened by agent
     assert delivered["cwd"] == "/Users/me/Development/repo" and delivered["task_id"] == "93"
 
 

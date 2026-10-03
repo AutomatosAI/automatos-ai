@@ -33,7 +33,6 @@ import os
 import pty
 import queue
 import re
-import shutil
 import signal
 import struct
 import subprocess
@@ -47,15 +46,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__
-from . import usage_limit
+from . import turn_end, usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
-from .env import build_session_env
-from .permission_modes import MODE_EDITS, MODE_PLAN, plan_text, save_plan, session_mode
-from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
-from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
+from .env import build_session_env, hook_pythonpath
+from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
+from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
+from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, request_of
+from .permission_request import answer as permission_answer
+from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
+from .session_prompt import build_system_prompt, build_ticket_file
+from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import empty_usage, usage_delta
 
@@ -107,136 +110,6 @@ class SessionOutcome:
 
 def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
-
-
-# Stable per agent — no ids, dates or counters (the prompt-cache invariant).
-# PRD-245 S0.6: the session is told what it can and cannot reach, and how to ask.
-SESSION_RULES = (
-    "The ticket you are working is described in the file named in your first message; "
-    "read it fully before acting.\n"
-    "Rules of the session: work only inside the directory you were started in; "
-    "never push, publish or open pull requests — the manager integrates your work; "
-    "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
-    "reply with a concise summary of what changed, what you verified, and anything left open.\n"
-    "Tools in this session: file tools work only inside the working folder and the ticket "
-    "folder; Bash runs an allowlist of read, build and test verbs, and anything else may be held "
-    "for the operator. The Automatos tools you have are listed earlier in this prompt, under "
-    "\"Tools in this session\" — that list is the truth, and it is the only place to read it. "
-    "A platform tool your skills name that is NOT on that list does not exist here: do not call "
-    "it and do not wait for it.\n"
-    "To ask a question: use the ask_human tool if you have it — your ticket parks when your turn "
-    "ends and picks up again with the answer. Without it, state the question in your final "
-    "message and end the turn. Never wait for an answer inside the session.\n"
-)
-
-
-def build_system_prompt(ticket: Dict[str, Any], cli_label: str = "Claude Code") -> str:
-    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant).
-
-    PRD-239 S1: the backend renders the agent's soul — description, persona and
-    skills — as ``system_prompt`` on the ticket (stable per agent); it sits
-    between the introduction and the session rules. Without it the prompt is
-    exactly the name and the rules, as before.
-    """
-    name = ticket.get("agent_name") or "an Automatos agent"
-    intro = f"You are {name}, working as a supervised {cli_label} session managed by Automatos.\n"
-    soul = ticket.get("system_prompt")
-    soul = soul.strip() if isinstance(soul, str) else ""
-    if soul:
-        return intro + "\n" + soul + "\n\n" + SESSION_RULES
-    return intro + SESSION_RULES
-
-
-def build_ticket_file(ticket: Dict[str, Any], default_root: Optional[str] = None) -> str:
-    """The dispatch contract. With the host's default root known, the ticket names
-    its own deliverables folder (PRD-245 S0.7); without one there is no such line."""
-    folder = session_deliverables_dir(default_root, str(ticket.get("task_id")))
-    deliverables = f"\nDeliverables: save any file you produce under {folder}/\n" if folder else ""
-    return (
-        f"# Ticket #{ticket.get('task_id')} — {ticket.get('title') or ''}\n\n"
-        f"{ticket.get('prompt') or ''}\n"
-        f"{deliverables}"
-    )
-
-
-# What the host itself writes into a session folder — never a deliverable.
-HOST_OWNED_SESSION_FILES = frozenset({"ticket.md", "settings.json", "system_prompt.md", TERMINAL_LOG_FILENAME, "mcp.json"})
-# The subset that holds this ticket's own credential in PLAINTEXT. Removed the
-# moment the turn ends — the row's copy is revoked there too, but a file is what
-# gets read later, and every finished ticket used to leave one behind.
-CREDENTIAL_SESSION_FILES = ("mcp.json",)
-# A host-owned file is excluded by CONTENT as well as by name: a session can read
-# one and write it back under another name, and from Wave 1 one of them carries
-# the ticket's own credential. Only small files are compared (the terminal log is
-# bounded but large, and no session hand-copies it).
-MAX_HOST_FILE_COMPARE_BYTES = 256 * 1024
-
-
-def host_owned_blobs(session_dir: Path) -> List[bytes]:
-    """The bytes of the host's own files in this session folder, for the content
-    check below. Unreadable or oversized files are simply not compared."""
-    blobs: List[bytes] = []
-    for name in sorted(HOST_OWNED_SESSION_FILES):
-        path = session_dir / name
-        try:
-            if path.is_file() and path.stat().st_size <= MAX_HOST_FILE_COMPARE_BYTES:
-                blobs = [*blobs, path.read_bytes()]
-        except OSError:
-            continue
-    return blobs
-
-
-def _is_host_copy(path: Path, blobs: Sequence[bytes]) -> bool:
-    """True when this file is one of the host's own under another name."""
-    try:
-        size = path.stat().st_size
-        if size > MAX_HOST_FILE_COMPARE_BYTES:
-            return False
-        candidates = [b for b in blobs if len(b) == size]
-        return bool(candidates) and path.read_bytes() in candidates
-    except OSError:
-        return False
-
-
-def session_deliverables(files_touched: Sequence[str], session_dir: Path, cwd: Path) -> List[Path]:
-    """The files a session wrote inside its own folder, relative to it (PRD-245
-    S0.7) — never the host's own files (by name or by content), each once."""
-    root = session_dir.resolve()
-    blobs = host_owned_blobs(root)
-    found: List[Path] = []
-    for raw in files_touched:
-        path = Path(raw)
-        try:
-            resolved = (path if path.is_absolute() else cwd / path).resolve()
-            rel = resolved.relative_to(root)
-        except (OSError, RuntimeError, ValueError):
-            continue
-        if not rel.parts or str(rel) in HOST_OWNED_SESSION_FILES or rel in found:
-            continue
-        if _is_host_copy(resolved, blobs):
-            log.warning("deliverable %s is a copy of one of the host's own session files — not landed", resolved)
-            continue
-        found = [*found, rel]
-    return found
-
-
-def land_session_deliverables(relatives: Sequence[Path], session_dir: Path, dest: Path) -> List[str]:
-    """Copy each file into the ticket's deliverables folder — created on demand
-    (0o755), names kept, an earlier copy overwritten. One file failing is a
-    warning, never a lost result. Returns the copies' paths."""
-    landed: List[str] = []
-    for rel in relatives:
-        source, target = session_dir / rel, dest / rel
-        try:
-            if not source.is_file():
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-            shutil.copy2(source, target)
-        except OSError as exc:
-            log.warning("deliverable %s not copied to %s: %s", source, target, exc)
-            continue
-        landed = [*landed, str(target)]
-    return landed
 
 
 def assert_secret_not_in_args(args: Sequence[str], secret: Optional[str]) -> None:
@@ -318,6 +191,7 @@ class Session:
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        self._allowed_calls = AllowedCalls()            # what the gate allowed: a CLI's own re-ask is answered alike
         # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
         self._pending_asks: Dict[str, threading.Event] = {}
         self._ask_answers: Dict[str, bool] = {}
@@ -327,6 +201,11 @@ class Session:
         self.terminal_log: Optional[BoundedLog] = None
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
+        # PRD-253 Wave P: the mode is chosen before the ticket file is written.
+        self.permission_mode: str = MODE_EDITS
+        self.plan_turn = False                        # Plan on a CLI with no plan tool: the final message is the plan
+        self.plan: Optional[Dict[str, Any]] = None    # {"text", "approved_in_turn"} once the turn produced one
+        self._full_bash: Sequence[str] = ()
 
     @property
     def cli(self) -> str:
@@ -367,14 +246,11 @@ class Session:
             if self._contract_injected:
                 return Reply.none()
             self._contract_injected = True
-            return Reply.with_context(build_ticket_file(self.ticket, self.default_root))
+            return Reply.with_context(self._turn_context())
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
-            tool = payload.get("tool_name") or "?"
-            reason = "a permission prompt reached the TUI — sessions are policy-gated, not prompted"
-            self.denials.append({"tool": tool, "reason": reason, "stage": "PermissionRequest"})
-            return Reply.deny(reason)
+            return self._permission_request(payload)
         if event == "PostToolUse":
             self._track_file(payload)
             return Reply.none()
@@ -390,6 +266,17 @@ class Session:
             return Reply.none()
         return Reply.none()
 
+    def _turn_context(self) -> str:
+        """What the session is told with its first prompt: the ticket — and, for a CLI
+        with no system-prompt flag (Codex, GitHub Copilot), the agent's system prompt
+        ahead of it. Design §6.9: there the soul rides this hook, not argv; before,
+        only the ticket did, and such a session never saw its rules or its tools."""
+        ticket = build_ticket_file(self.ticket, self.default_root, self.plan_turn)
+        preset = self.adapter.preset
+        if preset.system_prompt_flag:
+            return ticket
+        return f"{build_system_prompt(self.ticket, preset.label)}\n{ticket}"
+
     def _pre_tool_use(self, payload: Dict[str, Any]) -> Reply:
         tool = str(payload.get("tool_name") or "")
         tool_input = payload.get("tool_input") or {}
@@ -401,12 +288,10 @@ class Session:
         else:
             decision = decide(intent, self._policy)
         verdict, answer, request_id = decision, None, None
-        if decision.behavior == "ask":
-            if intent.cls is ToolClass.PLAN:
-                save_plan(self._plan_dir, plan_text(tool_input))
+        if decision.behavior == "ask" and intent.cls is ToolClass.PLAN:
+            verdict, answer, request_id = self._plan_card(tool, intent, decision, plan_text(tool_input))
+        elif decision.behavior == "ask":
             verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
-            if intent.cls is ToolClass.PLAN and verdict.allow:
-                self._policy.permission_mode = MODE_EDITS  # the plan is approved: work as Edit automatically
         # F167: what the host decided, and why, is on the ticket — a call that ran
         # with nobody asked never reads as one the operator approved.
         # ``event_id``: a batch re-posted after a lost response counts once on the ticket.
@@ -414,10 +299,45 @@ class Session:
                          "decision": decision.behavior, "reason": decision.reason[:DECISION_REASON_CHARS],
                          **({"answer": answer, "request_id": request_id} if answer else {})})
         if verdict.allow:
+            self._allowed_calls.add(tool, tool_input)
             return Reply.allow()
-        self.denials.append({"tool": tool, "reason": verdict.reason, "stage": "PreToolUse",
-                             "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
+        if verdict.reason != PLAN_WITH_OPERATOR:    # a plan handed to the operator is not a refusal
+            self.denials.append({"tool": tool, "reason": verdict.reason, "stage": "PreToolUse",
+                                 "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
         return Reply.deny(verdict.reason)
+
+    def _permission_request(self, payload: Dict[str, Any]) -> Reply:
+        """The CLI asked its own permission (``permission_request.py``): denied, or —
+        for a preset that rejudges — the gate's verdict on the same call."""
+        tool, tool_input = request_of(payload)
+        mode = self.adapter.preset.permission_request
+        now = decide(self.adapter.tool_intent(tool, dict(tool_input)), self._policy) if (
+            mode == PERMISSION_REQUEST_REJUDGE and self._policy is not None) else None
+        allow, reason = permission_answer(mode, allowed_before=self._allowed_calls.holds(tool, dict(tool_input)),
+                                          behavior=now.behavior if now else None, reason=now.reason if now else "")
+        if allow:
+            return Reply.allow()
+        self.denials.append({"tool": tool or "?", "reason": reason, "stage": "PermissionRequest"})
+        return Reply.deny(reason)
+
+    def _plan_card(self, tool: str, intent: Any, decision: Decision, text: str) -> Tuple[Decision, Optional[str], Optional[str]]:
+        """The plan a CLI presents in its turn (Claude Code's ExitPlanMode) is a card
+        (#845). Approved in time: the session carries on as Edit automatically.
+        Unanswered (PRD-253 Wave P): the plan goes to the operator as the Plan card
+        instead — the turn ends, the ticket parks on it, and Approve resumes this
+        session. Declined: it keeps planning."""
+        if self.plan is not None and not self.plan.get("approved_in_turn"):
+            return Decision("deny", PLAN_WITH_OPERATOR), None, None     # already with the operator
+        save_plan(self._plan_dir, text)
+        verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
+        if verdict.allow:
+            self._policy.permission_mode = MODE_EDITS                 # the plan is approved: work as Edit automatically
+            self._policy.allowed_bash = self._full_bash
+            self.plan = {"text": text, "approved_in_turn": True}
+        elif answer == ANSWER_NONE:
+            self.plan = {"text": text, "approved_in_turn": False}
+            verdict = Decision("deny", PLAN_WITH_OPERATOR)
+        return verdict, answer, request_id
 
     def _ask_operator(self, tool: str, subject: Optional[str], reason: str) -> Tuple[Decision, str, str]:
         """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
@@ -435,7 +355,7 @@ class Session:
             "tool_name": tool, "subject": subject, "reason": reason,
             "session_id": self.reported_session_id or self.session_id,
         })
-        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        timeout = hold_seconds(getattr(self.cfg, "ask_timeout", None))    # the hook's own wait bounds it (D4)
         answered = done.wait(timeout)
         with self._ask_lock:
             self._pending_asks.pop(request_id, None)
@@ -503,11 +423,12 @@ class Session:
         cwd = self._working_dir()
         if isinstance(cwd, SessionOutcome):
             return cwd
-        refused = self._preflight()
+        refused = self._preflight() or self._refused_here(cwd)
         if refused is not None:
             return refused
         preset = self.adapter.preset
         binary = self.adapter.resolve_binary()
+        self._choose_mode(preset)
         ticket_path, system_prompt_path = self._write_session_files(preset.label)
         session_tools = self._session_tools()
         self._set_policy(cwd, preset, session_tools)
@@ -547,13 +468,26 @@ class Session:
             return self._outcome("error", error=refusal.message, exit_reason=refusal.code)
         return None
 
+    def _refused_here(self, cwd: Path) -> Optional[SessionOutcome]:
+        """2b. what the CLI can tell about THIS folder before spawn (PRD-253 S1.6)."""
+        refusal = self.adapter.refuse_here(cwd)
+        return self._outcome("error", error=refusal.message, exit_reason=refusal.code) if refusal else None
+
+    def _choose_mode(self, preset: Any) -> None:
+        """The session's permission mode — before the ticket file, which names a Plan
+        turn: Plan on a CLI with no plan tool of its own ends with the plan as the
+        turn's final message (PRD-253 Wave P)."""
+        self.permission_mode = session_mode(getattr(self.cfg, "permission_mode", None), self.ticket.get("permission_mode"),
+                                            plan_approved=bool(self.ticket.get("plan_approved")))
+        self.plan_turn = self.permission_mode == MODE_PLAN and not preset.plan_stance
+
     def _write_session_files(self, cli_label: str) -> Tuple[Path, Path]:
         """3. the ticket, the system prompt and the terminal log beside the session."""
         session_dir = self.cfg.sessions_dir / self.task_id
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
-        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root), encoding="utf-8")
+        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root, self.plan_turn), encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
@@ -575,14 +509,13 @@ class Session:
             except OSError as exc:
                 log.warning("deliverables folder %s not created: %s", deliverables, exc)
             extra_dirs = (*extra_dirs, deliverables)
-        self.permission_mode = session_mode(
-            getattr(self.cfg, "permission_mode", None), self.ticket.get("permission_mode"),
-            resuming=bool(self.ticket.get("resume_session_id")), can_plan=bool(preset.plan_stance))
         self._plan_dir = deliverables or session_dir
+        self._full_bash = bash_allowlist_from_config(self.ticket.get("allowed_tools"))
         self._policy = PolicyContext(
             permission_mode=self.permission_mode,
             cwd=cwd,
-            allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
+            allowed_bash=PLAN_BASH_ALLOW if self.permission_mode == MODE_PLAN else self._full_bash,
+            plan_tool=bool(preset.plan_stance),
             extra_dirs=extra_dirs,
             session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
             # F042: the platform's own .env / credential key and this host's state
@@ -606,6 +539,7 @@ class Session:
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
             session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
+            extra_dirs=tuple(self._policy.extra_dirs), hook_socket=self.sock_path,
         )
         return ctx, worktree
 
@@ -615,16 +549,13 @@ class Session:
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
-        package_root = str(Path(__file__).resolve().parents[1])
-        inherited_pp = os.environ.get("PYTHONPATH", "")
         env = build_session_env(preset, extra={
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
+            "AUTOMATOS_HOST_PID": str(os.getpid()),      # the shim talks to this process only (F234)
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,
-            "AUTOMATOS_HOOK_WAIT_SECONDS": "560",
-            # Hooks run from the session's directory: the shim (`python -m
-            # automatos_cli_host.hook_shim`) must find this package from there.
-            "PYTHONPATH": package_root + (os.pathsep + inherited_pp if inherited_pp else ""),
+            "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),
+            "PYTHONPATH": hook_pythonpath(),
             **prepared.env,
         })
         master, slave = pty.openpty()
@@ -650,28 +581,35 @@ class Session:
                  f" worktree={worktree}" if worktree else "")
 
     def _wait_for_turn(self, preset: Any) -> str:
-        """5. wait for the turn's end / exit / cancel / timeout — the preset says how a turn ends."""
+        """5. wait for the turn's end / exit / cancel / timeout — the preset says how a
+        turn ends (``turn_end.py``). A gated CLI proves its gate loaded (SessionStart)
+        whatever ends its turn (PRD-253 S0.2)."""
         deadline = self.started_at + self.cfg.session_timeout_seconds
-        exit_reason = "completed"
         hook_driven = preset.turn_end == TURN_END_STOP_HOOK
+        proof_window = turn_end.startup_timeout(preset, self.cfg.startup_timeout_seconds)
+        ended_at: Optional[float] = None
         while True:
+            now = time.time()
             if hook_driven and self.stopped.is_set():
                 self.ended.wait(STOP_GRACE_SECONDS)
-                break
+                return turn_end.COMPLETED
             if self.proc.poll() is not None:
-                exit_reason = "exited_before_stop" if hook_driven else "completed"
-                break
+                return self._exit_reason(preset)
             if self.cancel_requested.is_set():
-                exit_reason = "cancelled"
-                break
-            if time.time() > deadline:
-                exit_reason = "timeout"
-                break
-            if hook_driven and not self.session_started.is_set() and time.time() - self.started_at > self.cfg.startup_timeout_seconds:
-                exit_reason = "no_session_start"
-                break
+                return "cancelled"
+            if now > deadline:
+                return "timeout"
+            if turn_end.is_gated(preset) and not self.session_started.is_set() and now - self.started_at > proof_window:
+                return "no_session_start"
+            if not hook_driven and self.ended.is_set():
+                ended_at = ended_at or now     # a print-mode CLI said goodbye; give it a moment to exit
+                if now - ended_at > turn_end.EXIT_GRACE_AFTER_SESSION_END_SECONDS:
+                    return self._exit_reason(preset)
             time.sleep(0.25)
-        return exit_reason
+
+    def _exit_reason(self, preset: Any) -> str:
+        return turn_end.exit_reason(preset, returncode=self.proc.poll() if self.proc else None,
+                                    session_started=self.session_started.is_set(), stopped=self.stopped.is_set())
 
     def _drain(self, master: int) -> None:
         try:
@@ -734,27 +672,17 @@ class Session:
         text = self.last_assistant_message or (self.adapter.last_text(transcript) if transcript and transcript.exists() else None) or ""
         if not text and preset.turn_end == TURN_END_PROCESS_EXIT:
             text = bytes(self.output_tail).decode("utf-8", "replace").strip()   # print mode: stdout IS the answer
-        name = os.path.basename(binary)
-        if exit_reason == "completed":
-            status = "success"
-            error = None
-        elif exit_reason == "cancelled" and self.stopped_by_host:
-            status, error = "host_stopped", self.stopped_by_host
-        elif exit_reason == "cancelled":
-            status, error = "cancelled", "cancelled by the operator"
-        elif exit_reason == "timeout":
-            status, error = "error", f"session exceeded {int(self.cfg.session_timeout_seconds)} s"
-        elif exit_reason == "no_session_start":
-            tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
-            status, error = "error", (
-                f"{name} did not start a session within {int(self.cfg.startup_timeout_seconds)} s — "
-                f"it is probably showing a login screen or a dialog. Run `{name}` in that directory once "
-                f"and log in, then retry. Last output:\n{tail}"
-            )
-        else:
-            tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
-            code = self.proc.returncode if self.proc else None
-            status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
+        ungated = exit_reason == turn_end.UNGATED_EXIT
+        if ungated:
+            text = ""                       # PRD-253 S0.2: nothing a run without the gate produced is reported
+        elif transcript and transcript.exists():
+            text += "".join(f"\n\n[{note}]" for note in self.adapter.record_notes(transcript))
+        status, error = turn_end.describe(
+            exit_reason, cli=os.path.basename(binary), returncode=self.proc.returncode if self.proc else None,
+            tail=bytes(self.output_tail).decode("utf-8", "replace")[-1500:],
+            startup_window=turn_end.startup_timeout(preset, self.cfg.startup_timeout_seconds),
+            session_timeout=self.cfg.session_timeout_seconds, stopped_by_host=self.stopped_by_host,
+        )
         resets = None
         if status == "error":
             # F083: the CLI's plan window closed. That is a pause — the ticket goes
@@ -764,12 +692,27 @@ class Session:
             if usage_limit.is_usage_limit(said):
                 until, known = usage_limit.pause(said, _local_now())
                 status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
-        files = [*self.files_touched, *self._land_deliverables(cwd)]
+        files = [] if ungated else [*self.files_touched, *self._land_deliverables(cwd)]
+        files = self._report_plan(text, files) if status == "success" else files
         self._shred_session_credentials()
         outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
                                 files_touched=files)
         outcome.resets_at = resets
         return outcome
+
+    def _report_plan(self, text: str, files: List[str]) -> List[str]:
+        """PRD-253 Wave P: a plan this turn produced reaches the backend before the
+        turn's result — an event in the final flush, which files it as the Plan card
+        (or records an approval given in the turn) — and lands as plan.md beside the
+        deliverables. A Plan turn's plan is the one it presented, else its final
+        message — on Claude Code too, when the turn ends without ExitPlanMode."""
+        if self.plan is None and self.permission_mode == MODE_PLAN and text.strip():
+            self.plan = {"text": text.strip(), "approved_in_turn": False}
+        if self.plan is None:
+            return files
+        saved = save_plan(self._plan_dir, self.plan["text"])
+        self.events.put({"event": PLAN_EVENT, "at": time.time(), **self.plan})
+        return [*files, str(saved)] if saved is not None and str(saved) not in files else files
 
     def _shred_session_credentials(self) -> None:
         """The turn is over: delete the files holding this ticket's token.

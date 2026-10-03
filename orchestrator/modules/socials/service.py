@@ -85,6 +85,8 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
 from modules.socials import text_search
+from modules.socials.kokoro_voices import validate_kokoro
+from modules.socials.music import validate_music
 from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
@@ -123,6 +125,10 @@ ACTION_PARTIALLY_PUBLISHED = "partially_published"
 ACTION_PUBLISH_FAILED = "publish_failed"
 # Wave 3 (US-306): a scheduled post whose slot passed beyond the grace (D10).
 ACTION_MISSED = "missed"
+# PRD-251B (B11, US-B105): a planned slot passed with the post still unapproved; and a
+# missed post that holds no approval is given a new slot and starts again as a draft.
+ACTION_SLOT_PASSED = "slot_passed"
+ACTION_RESLOT = "reslot"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
 
@@ -157,6 +163,10 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_PARTIALLY_PUBLISHED: {PUBLISHING: PARTIALLY_PUBLISHED},
     ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
     ACTION_MISSED: {SCHEDULED: MISSED},
+    # PRD-251B (B11): an unapproved post whose planned slot passed ends missed too
+    # (nothing was posted); a missed post without an approval restarts as a draft.
+    ACTION_SLOT_PASSED: {DRAFT: MISSED, NEEDS_APPROVAL: MISSED, CHANGES_REQUESTED: MISSED},
+    ACTION_RESLOT: {MISSED: DRAFT},
 }
 
 # The same table seen per status: current status → the statuses it may move to.
@@ -174,9 +184,10 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 
 # What the hash covers (D6), and what a post edit may change. The voice (D11)
 # and the footage (D12) are render settings: editable, never hashed.
-CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", TARGETS)
+# PRD-251B (US-B101): the chosen video length is content too; the planned slot is not.
+CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", "length_seconds", TARGETS)
 LABEL_FIELDS = ("title", "brief")
-RENDER_FIELDS = ("voice", "footage")
+RENDER_FIELDS = ("voice", "footage", "music")  # PRD-251B: music, a render setting like the voice
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
@@ -193,6 +204,8 @@ FOOTAGE_REQUEST_KEYS = ("prompt",)
 FOOTAGE_RECORD_KEYS = (
     "status", "toolkit", "model", "deliverable_id", "name", "sha256", "bytes", "content_type",
     "estimate_usd", "cost_usd", "generated_at",
+    # PRD-251B US-B305: a slot's AI options (modules/socials/ai_options.py), the server's too.
+    "options", "options_state", "options_error",
 )
 FOOTAGE_DONE = "done"
 FOOTAGE_PROMPT_MAX_CHARS = 1500
@@ -296,6 +309,11 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
+    # PRD-251B (B5): a chosen length is content; a post without one hashes as before,
+    # so no existing approval moves when the field arrives.
+    length = getattr(post, "length_seconds", None)
+    if length is not None:
+        content["length_seconds"] = int(length)
     # Only a post with targets hashes them: one with none hashes as before (US-204).
     # With channels, the title is content too: a channel publishes it (YouTube's
     # video title, $title in channel_adapters.py), and so is whether its footage is
@@ -323,6 +341,8 @@ def compute_content_hash(post: Any) -> str:
     ``ensure_ascii=False``, so key order never changes the hash.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
     also binds to the exact rendered bytes; Wave 2 adds where the post goes.
+    PRD-251B adds ``length_seconds`` when the post has one (B5) and never
+    ``planned_for`` (B11): a slot move is not a content change.
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -376,6 +396,18 @@ def _validate_format(value: Any) -> Optional[str]:
         return None
     if value not in SOCIAL_POST_FORMATS:
         raise InvalidPost(f"format must be one of {list(SOCIAL_POST_FORMATS)}")
+    return value
+
+
+def _validate_length_seconds(value: Any) -> Optional[int]:
+    """PRD-251B (B5): a positive whole number of seconds, or None. Whether the
+    template declares it is the composer's check (US-B103)."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidPost("length_seconds must be a whole number of seconds")
+    if value <= 0:
+        raise InvalidPost("length_seconds must be at least 1")
     return value
 
 
@@ -447,8 +479,9 @@ def _voice_text(value: Any, where: str, *, required: bool) -> Optional[str]:
 
 def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
     """The post's voice (D11): ``None`` (or ``{}``, or ``{"toolkit": "kokoro"}``)
-    is Kokoro, stored as ``None``; a voice toolkit is ``{"toolkit", "voice_id",
-    "name"?}``. The shape only: whether the workspace can speak with the
+    is Kokoro with the template's own voice, stored as ``None``; one of Kokoro's voices
+    is ``{"toolkit": "kokoro", "voice_id"}`` (PRD-251B US-B306); a voice toolkit is
+    ``{"toolkit", "voice_id", "name"?}``. The shape only: whether the workspace can speak with the
     toolkit now is ``modules/socials/recipes/voice.py``'s to say."""
     if value is None:
         return None
@@ -462,10 +495,8 @@ def validate_voice(value: Any) -> Optional[Dict[str, Any]]:
     toolkit = toolkit.strip().lower() if isinstance(toolkit, str) else ""
     if not VOICE_TOOLKIT.match(toolkit):
         raise InvalidPost("voice.toolkit must name a voice, such as kokoro or fish_audio")
-    if toolkit == KOKORO:
-        if set(voice) - {"toolkit"}:
-            raise InvalidPost("Kokoro speaks with the template's own voice: set only voice.toolkit")
-        return None
+    if toolkit == KOKORO:  # PRD-251B (US-B306): the template's own voice, or one of Kokoro's
+        return validate_kokoro(voice)
     clean = {"toolkit": toolkit, "voice_id": _voice_text(voice.get("voice_id"), "voice.voice_id", required=True)}
     name = _voice_text(voice.get("name"), "voice.name", required=False)
     if name:
@@ -545,12 +576,14 @@ _VALIDATORS = {
     "copy": _validate_copy,
     "format": _validate_format,
     "template_id": _validate_template_id,
+    "length_seconds": _validate_length_seconds,
     "variables": _validate_variables,
     "sources": validate_sources,
     "media": _validate_media,
     TARGETS: validate_targets,
     "voice": validate_voice,
     "footage": validate_footage,
+    "music": validate_music,
 }
 
 
@@ -648,7 +681,9 @@ def create_draft(
     media: Optional[Mapping[str, Any]] = None,
     voice: Optional[Mapping[str, Any]] = None,
     footage: Optional[Mapping[str, Any]] = None,
+    length_seconds: Optional[int] = None,
     agent: Optional[str] = None,
+    music: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
@@ -667,6 +702,8 @@ def create_draft(
         "media": media,
         "voice": voice,
         "footage": footage,
+        "length_seconds": length_seconds,
+        "music": music,
     }
     clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
     post = SocialPost(
@@ -682,6 +719,29 @@ def create_draft(
     if agent:
         _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent)
     db.add(post)
+    return post
+
+
+def set_planned_for(
+    post: SocialPost, planned_for: Optional[datetime], tz_name: Optional[str] = None
+) -> SocialPost:
+    """PRD-251B (B11, US-B101/US-B105): the slot the post is planned for, stored UTC,
+    with the zone it was chosen in. Not content: the hash, the status and the
+    approval fields are untouched, so moving a slot never voids an approval.
+    ``None`` clears it. ``tz_name`` must be an IANA zone when given."""
+    if tz_name is not None:
+        try:
+            ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            raise InvalidPost(f"unknown timezone {tz_name!r}") from None
+    if planned_for is None:
+        post.planned_for = None
+        return post
+    if not isinstance(planned_for, datetime):
+        raise InvalidPost("planned_for must be a datetime")
+    post.planned_for = _as_utc(planned_for)
+    if tz_name is not None:
+        post.timezone = tz_name
     return post
 
 
@@ -786,6 +846,33 @@ def approve(
         _log(post, actor, ACTION_APPROVE, comment or note, **extra)
     else:
         _log(post, actor, ACTION_APPROVE, comment)
+    # PRD-251B (B11, US-B105): approved with a slot still ahead, the post is scheduled
+    # into it through the one schedule path; a past or missing slot leaves it approved.
+    planned = getattr(post, "planned_for", None)
+    if planned is not None and _as_utc(planned) > _utcnow():
+        schedule(post, actor, planned, getattr(post, "timezone", None) or "UTC")
+    return post
+
+
+def slot_passed(post: SocialPost, actor: str, reason: str) -> SocialPost:
+    """draft, needs_approval or changes_requested → missed (B11): the planned slot passed
+    with no approval, so nothing was posted. A new slot restarts it (``reslot``)."""
+    target = _target(post, ACTION_SLOT_PASSED)
+    slot = post.planned_for.isoformat() if post.planned_for else None
+    post.status = target
+    _log(post, actor, ACTION_SLOT_PASSED, reason[:COMMENT_MAX_CHARS], planned_for=slot)
+    return post
+
+
+def reslot(post: SocialPost, actor: str, planned_for: datetime, tz_name: Optional[str] = None) -> SocialPost:
+    """missed → draft with a new planned slot (B11): for a post that holds no approval
+    (one whose approval stands is rescheduled with ``schedule`` instead)."""
+    target = _target(post, ACTION_RESLOT)
+    if planned_for is None:
+        raise InvalidPost("a missed post needs a new slot")
+    set_planned_for(post, planned_for, tz_name)
+    post.status = target
+    _log(post, actor, ACTION_RESLOT, None, planned_for=post.planned_for.isoformat())
     return post
 
 

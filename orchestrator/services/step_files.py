@@ -12,6 +12,7 @@ that id, never by a path, read-only, cut at ``SESSION_STEP_FILE_MAX_CHARS``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
@@ -49,6 +50,13 @@ class StepFile:
     file_path: str
     ticket_id: int
     step_title: str
+    # PRD-252 R4: how the ticket is named, "ticket #0051.3"; empty when unknown.
+    ticket: str = ""
+
+    @property
+    def ticket_name(self) -> str:
+        """The ticket by its number; "ticket 612" without one (a '#' means a number)."""
+        return self.ticket or f"ticket {self.ticket_id}"
 
 
 def earlier_step_files(
@@ -63,21 +71,33 @@ def earlier_step_files(
     ticket first. A step's own tickets are left out: its session already works
     in its own folder."""
     rows = (
-        db.query(BoardTask.id, BoardTask.title, BoardTask.runtime_ref, BoardTask.orchestration_task_id)
+        db.query(BoardTask.id, BoardTask.title, BoardTask.runtime_ref, BoardTask.orchestration_task_id,
+                 BoardTask.workspace_seq, BoardTask.source_type, BoardTask.parent_task_id)
         .filter(BoardTask.workspace_id == workspace_id, BoardTask.orchestration_run_id == run_id)
         .order_by(BoardTask.id.asc())
         .all()
     )
+    names = _ticket_names(db, workspace_id, rows)
     files: List[StepFile] = []
-    for ticket_id, title, ref, task_id in rows:
+    for ticket_id, title, ref, task_id, *_ in rows:
         if ticket_id == exclude_ticket_id or (step_task_id is not None and task_id == step_task_id):
             continue
         registered = ref.get("deliverables") if isinstance(ref, dict) else None
         for entry in registered if isinstance(registered, list) else []:
             if isinstance(entry, dict) and entry.get("id"):
                 files.append(StepFile(str(entry["id"]), str(entry.get("file_path") or entry.get("title") or ""),
-                                      int(ticket_id), str(title or "")))
+                                      int(ticket_id), str(title or ""), names.get(ticket_id, "")))
     return files
+
+
+def _ticket_names(db: Session, workspace_id: Any, rows: Sequence[Any]) -> Dict[int, str]:
+    """Each row's ticket as messages name it ("ticket #0051.3"), in one read (PRD-252 R4)."""
+    from services.ticket_numbers import ticket_label, ticket_numbers
+
+    tickets = [SimpleNamespace(id=row[0], workspace_seq=row[4], source_type=row[5], parent_task_id=row[6])
+               for row in rows]
+    numbers = ticket_numbers(db, workspace_id, tickets)
+    return {t.id: ticket_label(t, numbers.get(t.id)) for t in tickets}
 
 
 def files_for_ticket(db: Session, *, ticket_id: int, workspace_id: Any) -> Optional[List[StepFile]]:
@@ -106,7 +126,7 @@ def step_files_block(files: Sequence[StepFile]) -> str:
         return ""
     lines = [STEP_FILES_HEADER, STEP_FILES_INTRO]
     lines += [
-        f"- `{f.deliverable_id}` {_plain(f.file_path)} (ticket #{f.ticket_id}, \"{_plain(f.step_title)}\")"
+        f"- `{f.deliverable_id}` {_plain(f.file_path)} ({f.ticket_name}, \"{_plain(f.step_title)}\")"
         for f in files[:STEP_FILES_LISTED_MAX]
     ]
     if len(files) > STEP_FILES_LISTED_MAX:
@@ -135,7 +155,7 @@ def step_file_text(chosen: StepFile, result: Any, max_chars: int) -> Dict[str, A
     if not isinstance(content, str):
         why = found.get("content_error") or f"it is a {found.get('artifact_type') or 'binary'} file, not text"
         return {"success": False, "error": f"{_plain(chosen.file_path)} cannot be read as text: {why}."}
-    head = (f"{_plain(chosen.file_path)}, saved by ticket #{chosen.ticket_id} "
+    head = (f"{_plain(chosen.file_path)}, saved by {chosen.ticket_name} "
             f"(\"{_plain(chosen.step_title)}\"). {READ_FRAME_LINE}")
     cut_at_source = bool(found.get("content_truncated"))
     if len(content) <= max_chars and not cut_at_source:

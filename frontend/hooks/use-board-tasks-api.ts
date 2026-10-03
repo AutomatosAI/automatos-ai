@@ -99,6 +99,22 @@ export function useUpdateTask() {
   })
 }
 
+/**
+ * PRD-252 R7: cancel a ticket from the board (POST /api/v1/tasks/{id}/cancel),
+ * which records who cancelled it and when.
+ */
+export function useCancelTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (taskId: string) =>
+      apiClient.request<{ status: string; applied: boolean }>(`/api/v1/tasks/${taskId}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
 export function useDeleteTask() {
   const queryClient = useQueryClient()
 

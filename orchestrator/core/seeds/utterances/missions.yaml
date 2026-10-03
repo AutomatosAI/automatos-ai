@@ -347,6 +347,8 @@ actions:
     source: example
   - text: continue the paused mission
     source: example
+  - text: retry the failed mission
+    source: example
   - text: unpause the mission
     source: authored
   - text: start the mission back up

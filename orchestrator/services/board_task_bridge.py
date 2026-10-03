@@ -15,6 +15,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from core.models.core import BoardTask
+from core.services.ticket_reasons import with_review_reason
+from services.playbook_wait import card_review_mode, why_it_waits
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def create_recipe_board_task(
         description=recipe.description,
         status='in_progress',
         priority='medium',
-        review_mode='auto',
+        review_mode=card_review_mode(recipe, execution),  # F242: the owner's "wait for me"
         assigned_agent_id=first_agent_id,
         created_by_type='recipe',
         source_type='recipe',
@@ -102,7 +104,14 @@ def complete_recipe_board_task(
     review: bool = False,
 ) -> None:
     """Move the linked BoardTask to done (success) or failed (failure), or to
-    review when a human must look at finished work (``review=True``)."""
+    review when a human must look at finished work (``review=True``).
+
+    F224: a run that ended without finishing (failed, or stopped after some
+    finished work) leaves no session working one of its steps."""
+    from services.board_cancel import PLAYBOOK_RUN_BY, RUN_FAILED_REASON, stop_run_step_tickets
+
+    if not success and stop_run_step_tickets(db, execution_id, by=PLAYBOOK_RUN_BY, reason=RUN_FAILED_REASON):
+        db.commit()
     task = db.query(BoardTask).filter(
         BoardTask.source_type == 'recipe',
         BoardTask.source_id == execution_id,
@@ -110,8 +119,16 @@ def complete_recipe_board_task(
 
     if not task:
         return
+    if task.status in ("cancelled", "closed"):
+        # F245: a run that ends after its card was cancelled never moves it
+        # (#0096 and #0150 went Cancelled → Done with the run's result).
+        logger.info("[board_bridge] execution %s ended after its card was %s: left as it is",
+                    execution_id, task.status)
+        return
 
-    if review:
+    # F242: a run the owner asked to wait for, or whose answer asks them something, waits.
+    waits = why_it_waits(db, task, execution_id, result) if success and not review else None
+    if review or waits:
         # F123 (F014's rule): a run that stopped after finished work puts that
         # work in front of a human, never under 'failed'. review_feedback stays
         # the reviewer's channel: a re-run's prompt carries it as their words.
@@ -122,6 +139,8 @@ def complete_recipe_board_task(
         # outage where the board reported green while every run failed).
         task.status = 'done' if success else 'failed'
     task.completed_at = datetime.now(timezone.utc)
+    if waits:
+        task.runtime_ref = with_review_reason(getattr(task, "runtime_ref", None), waits, task.completed_at)
 
     if result:
         task.result = result

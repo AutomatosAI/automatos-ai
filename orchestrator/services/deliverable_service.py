@@ -112,6 +112,22 @@ EXTENSION_TO_ARTIFACT: Dict[str, str] = {
 }
 
 
+# F244 (night 7): a ticket's run that failed still files its report, which the
+# Reports page lists as critical. The outputs view called it "published", and #0177
+# showed nine of them, each only the credit message. Its run's status rides in the
+# report's metrics (api.board_tasks._auto_create_task_report).
+FAILED_RUN = "failed"
+
+
+def shown_status(row: Any) -> str:
+    """The deliverable's status as people read it: a failed run's report is "failed"."""
+    extra = getattr(row, "extra", None)
+    if getattr(row, "artifact_type", None) == "report" and isinstance(extra, dict) \
+            and extra.get("task_status") == FAILED_RUN:
+        return FAILED_RUN
+    return row.status
+
+
 def _slugify(value: str) -> str:
     """Convert a string to a kebab-case slug."""
     value = (value or "").lower().strip()
@@ -814,7 +830,7 @@ class DeliverableService:
             ),
             "preview_type": row.preview_type,
             "extra": row.extra or {},
-            "status": row.status,
+            "status": shown_status(row),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }

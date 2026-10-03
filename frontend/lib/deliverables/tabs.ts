@@ -1,6 +1,9 @@
 /** The Deliverables page's tabs — the values `?tab=` accepts and the Studio page tabs link to (PRD-244 W0). */
-export const DELIVERABLE_TABS = ['outputs', 'blogs', 'templates', 'socials'] as const
+export const DELIVERABLE_TABS = ['outputs', 'blogs', 'templates', 'brand', 'socials'] as const
 export type DeliverableTab = (typeof DELIVERABLE_TABS)[number]
+
+/** PRD-251B US-B301: the Brand kit tab, always visible; Template Studio and Socials link here. */
+export const BRAND_KIT_HREF = '/deliverables?tab=brand'
 
 /**
  * PRD-251 D1: the Socials tab exists only while the platform offers Socials

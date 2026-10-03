@@ -161,7 +161,9 @@ class _Req:
         return self._body
 
 
-def test_a_drag_into_in_progress_launches_the_run_it_stamped(monkeypatch):
+def test_a_drag_into_in_progress_leaves_no_old_run_able_to_finish_it(monkeypatch):
+    """PRD-252 R6: a drag is Run Now. It clears the ticket's run, so the run it
+    replaces cannot finish it, and the dispatch loop's claim stamps the new one."""
     from uuid import UUID
 
     from api import board_tasks as bt
@@ -172,15 +174,18 @@ def test_a_drag_into_in_progress_launches_the_run_it_stamped(monkeypatch):
     monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launched.append(kw))
     monkeypatch.setattr(bt, "record_operator_consent", lambda *a, **k: None)
     monkeypatch.setattr(bt, "notify_board_event", lambda *a, **k: None)
+    monkeypatch.setattr(bt, "notify_task_available", lambda *a, **k: None)
     ws = UUID("00000000-0000-0000-0000-0000000000c1")
     task = BoardTask(id=51, workspace_id=ws, title="Weekly numbers", status="assigned", assigned_agent_id=5,
-                     source_type="user", review_mode="auto", planning_data={}, runtime_ref={"session_id": "s-1"})
+                     source_type="user", review_mode="auto", planning_data={},
+                     runtime_ref={"session_id": "s-1", "run_id": "run-before"})
 
     asyncio.run(bt.update_task_status(51, _Req({"status": "in_progress"}), ctx=NS(
         workspace_id=ws, user=NS(id=1, clerk_user_id="u1", email="owner@cafe.test")),
         db=_FakeSession(agent=NS(id=5), task=task)))
 
-    assert launched and launched[0].get("run_id") == task.runtime_ref.get("run_id") is not None   # night: no run id
+    assert launched == []                                        # the dispatch loop starts it
+    assert task.runtime_ref.get("run_id") is None                # "run-before" can no longer finish it
     assert task.runtime_ref["session_id"] == "s-1"
 
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
 import type { WorkspaceSocialsState } from '@/lib/api-client'
@@ -120,10 +121,60 @@ export function useWorkspaceOptional() {
     return useContext(WorkspaceContext)
 }
 
+/** A pending invitation (409) sends the browser to accept it; true when it did. */
+async function followPendingInvitation(response: Response): Promise<boolean> {
+    if (response.status !== 409) return false
+    const body = await response.json().catch(() => ({}))
+    const detail = body?.detail || body
+    if (detail?.code !== 'pending_invitation') return false
+    const tokenFromServer = detail?.token as string | undefined
+    const tokenFromUrl =
+        typeof window !== 'undefined'
+            ? new URL(window.location.href).searchParams.get('token')
+            : null
+    const token = tokenFromServer || tokenFromUrl
+    const target = token
+        ? `/accept-invitation?token=${encodeURIComponent(token)}`
+        : '/accept-invitation'
+    if (typeof window !== 'undefined') {
+        window.location.href = target
+    }
+    return true
+}
+
+/** The workspace /api/workspaces/current answers with. */
+function workspaceFrom(data: any): Workspace {
+    return {
+        id: data.id,
+        name: data.name,
+        slug: data.slug,
+        plan: data.plan,
+        role: data.role,
+        planLimits: data.plan_limits,
+        exposure: data.exposure ?? undefined,
+        onboarding: data.onboarding ?? undefined,
+        socials: data.socials ?? undefined,
+        webhookUrl: data.webhook_url,
+        webhookKey: data.webhook_key,
+        settings: data.settings || {},
+    }
+}
+
+/** F226: every request names the stored workspace. Reads sent before /current
+ * answered used the old one, so when it changes they all refetch: a board and a
+ * count from two workspaces never share a page. */
+function rememberWorkspace(id: string, queryClient: QueryClient): void {
+    if (typeof window === 'undefined') return
+    const before = localStorage.getItem('last_active_workspace')
+    localStorage.setItem('last_active_workspace', id)
+    if (before && before !== id) void queryClient.invalidateQueries()
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { isSignedIn, getToken } = useAuth()
     const { organization } = useOrganization()
     const pathname = usePathname()
+    const queryClient = useQueryClient()
     const [workspace, setWorkspace] = useState<Workspace | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<Error | null>(null)
@@ -151,50 +202,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 }
             )
 
-            if (response.status === 409) {
-                const body = await response.json().catch(() => ({}))
-                const detail = body?.detail || body
-                if (detail?.code === 'pending_invitation') {
-                    const tokenFromServer = detail?.token as string | undefined
-                    const tokenFromUrl =
-                        typeof window !== 'undefined'
-                            ? new URL(window.location.href).searchParams.get('token')
-                            : null
-                    const token = tokenFromServer || tokenFromUrl
-                    const target = token
-                        ? `/accept-invitation?token=${encodeURIComponent(token)}`
-                        : '/accept-invitation'
-                    if (typeof window !== 'undefined') {
-                        window.location.href = target
-                    }
-                    return
-                }
-            }
+            if (await followPendingInvitation(response)) return
 
             if (!response.ok) {
                 throw new Error('Failed to fetch workspace')
             }
 
             const data = await response.json()
-            setWorkspace({
-                id: data.id,
-                name: data.name,
-                slug: data.slug,
-                plan: data.plan,
-                role: data.role,
-                planLimits: data.plan_limits,
-                exposure: data.exposure ?? undefined,
-                onboarding: data.onboarding ?? undefined,
-                socials: data.socials ?? undefined,
-                webhookUrl: data.webhook_url,
-                webhookKey: data.webhook_key,
-                settings: data.settings || {},
-            })
-
-            if (typeof window !== 'undefined') {
-                localStorage.setItem('last_active_workspace', data.id)
-            }
-
+            setWorkspace(workspaceFrom(data))
+            rememberWorkspace(data.id, queryClient)
             setError(null)
         } catch (err) {
             console.error('Error fetching workspace:', err)

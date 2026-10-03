@@ -1,0 +1,20 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-02T12:00:00Z"},
+  "title": "Socials Studio mockup",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 1080, "title": "1 · Calendar (Socials home)", "expand": "fill", "is_interactive": true},
+    "Editor.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 1900, "title": "2 · Post editor", "expand": "fill", "is_interactive": true},
+    "Queue.dc.html": {"x": 0, "y": 2020, "w": 1440, "h": 1000, "title": "3 · Approval queue", "expand": "fill", "is_interactive": true},
+    "Plan.dc.html": {"x": 1520, "y": 2020, "w": 1440, "h": 1040, "title": "4 · Plan: cadence and content bank", "expand": "fill", "is_interactive": true},
+    "Brand.dc.html": {"x": 0, "y": 3180, "w": 1440, "h": 1750, "title": "5 · Brand kit: style references and AI tools", "expand": "fill", "is_interactive": true},
+    "Nav.dc.html": {"x": 1520, "y": 3180, "w": 1440, "h": 112, "title": "Shared: Socials navigation"}
+  },
+  "order": ["Main.dc.html", "Editor.dc.html", "Queue.dc.html", "Plan.dc.html", "Brand.dc.html", "Nav.dc.html"],
+  "notes": {
+    "title": {"x": 0, "y": -300, "text": "Socials Studio: clickable mockup", "kind": "title1", "maxW": 2960}
+  },
+  "designSystems": []
+}

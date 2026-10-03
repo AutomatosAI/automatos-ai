@@ -152,3 +152,26 @@ def test_the_claim_carries_the_sessions_mode_to_the_host(monkeypatch, stored, ag
     assert claimed["permission_mode"] == expected
     assert claimed["session_id"] == task.runtime_ref["session_id"] and claimed["resume_session_id"] is None
     assert claimed["session_token"] and claimed["prompt"] == "Build the site." and claimed["agent_name"] == "Builder"
+
+
+def test_a_plan_agents_claim_works_as_edits_once_its_plan_is_approved(monkeypatch):
+    """PRD-253 Wave P: the claim decides each turn's mode from the ticket's plan —
+    ``plan`` until the operator approves it, then Edit automatically."""
+    monkeypatch.setattr(svc.config, "AUTH_EDITION", "local")
+    task = _task()
+    task.runtime_ref = {"session_plans": [{"kind": "plan", "version": 1, "grant_id": 9, "plan": "1. hello.txt",
+                                           "answer": "Approve", "answered_at": "2026-10-02T10:05:00+00:00"}]}
+    agent = NS(id=3, name="Builder", configuration={"runtime": "cli", "provider": "codex", "permission_mode": "plan"})
+    monkeypatch.setattr(svc, "claim_tasks", lambda db, **kw: [task])
+    monkeypatch.setattr(svc, "_blocked_pending_approval", lambda db, t: False)
+    monkeypatch.setattr(svc, "served_providers_of", lambda h: None)
+    monkeypatch.setattr(svc, "default_session_folder", lambda db, ws: None)
+    monkeypatch.setattr(svc, "explorer_root_for", lambda *a, **k: None)
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    monkeypatch.setattr(svc, "_ticket_prompt", lambda t, memory="": "Build the site.")
+    monkeypatch.setattr(svc, "_field_memory_block", lambda db, t: "")
+
+    claimed = svc.claim_for_host(_DB(_ws(None), agent), NS(id="h1", workspace_id=WS), limit=1)["tasks"][0]
+
+    assert claimed["permission_mode"] == "edits" and claimed["plan_approved"] is True
+    assert task.runtime_ref["session_plans"][0]["folded_at"]          # the approval is shown to one claim only

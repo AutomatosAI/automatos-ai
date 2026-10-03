@@ -156,6 +156,8 @@ def test_the_proposal_has_each_channels_copy_a_template_valid_variables_and_cand
     assert proposal["template_id"] == composer.template and proposal["format"] == "image"
     assert proposal["template"] == {
         "id": composer.template, "name": "Fact card", "format": "social_image", "sizes": ["1080x1350"], "variables_schema": SCHEMA,
+        # PRD-251B (B5): the lengths a video declares; an image declares none.
+        "durations": [],
     }
     assert proposal["variables"] == {
         "headline": {"value": "Opens Friday", "claim": False},

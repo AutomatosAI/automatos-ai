@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from automatos_cli_host import allowlist, env, policy, session, transcript
+from automatos_cli_host import allowlist, env, policy, session, session_prompt, transcript
 from automatos_cli_host.adapters import claude as claude_adapter
 from automatos_cli_host.adapters.base import LaunchContext, Prepared
 from automatos_cli_host.host import HostRefused, check_backend
@@ -87,7 +87,7 @@ def test_settings_declare_hooks_to_this_interpreter(tmp_path):
         entry = data["hooks"][event][0]
         assert entry["hooks"][0]["command"] == '"/usr/bin/python3" -m automatos_cli_host.hook_shim'
     assert data["hooks"]["PreToolUse"][0]["matcher"] == "*"
-    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == CLAUDE.hook_timeout("PreToolUse") == 540
+    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == CLAUDE.hook_timeout("PreToolUse") == 600   # D4
     assert data["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 60
     assert oct(p.stat().st_mode & 0o777) == "0o600"
     assert "mcpServers" not in data and "permissions" not in data  # hooks only
@@ -213,8 +213,8 @@ def test_build_args_is_interactive_and_honours_the_terms_invariant(tmp_path):
 
 
 def test_system_prompt_is_stable_per_agent():
-    a = session.build_system_prompt({"agent_name": "Dwight", "task_id": 1, "title": "x"})
-    b = session.build_system_prompt({"agent_name": "Dwight", "task_id": 2, "title": "y"})
+    a = session_prompt.build_system_prompt({"agent_name": "Dwight", "task_id": 1, "title": "x"})
+    b = session_prompt.build_system_prompt({"agent_name": "Dwight", "task_id": 2, "title": "y"})
     assert a == b and "never push" in a
     # PRD-245 S0.6: the session is told what it can reach and how to ask — in words
     # that never change per ticket.
@@ -235,11 +235,11 @@ def test_ticket_file_names_the_deliverables_folder_when_the_host_has_a_root(tmp_
     """PRD-245 S0.7: the ticket says where deliverables go — under the host's
     default root, never invented when the host has none."""
     ticket = {"task_id": 121, "title": "Note", "prompt": "OBJECTIVE: write a note"}
-    with_root = session.build_ticket_file(ticket, str(tmp_path / "deliverables"))
+    with_root = session_prompt.build_ticket_file(ticket, str(tmp_path / "deliverables"))
     assert with_root.startswith("# Ticket #121 — Note\n\nOBJECTIVE: write a note\n")
     assert f"Deliverables: save any file you produce under {tmp_path / 'deliverables' / 'sessions' / '121'}/" in with_root
-    assert "Deliverables:" not in session.build_ticket_file(ticket)
-    assert session.build_ticket_file(ticket, None) == session.build_ticket_file(ticket)
+    assert "Deliverables:" not in session_prompt.build_ticket_file(ticket)
+    assert session_prompt.build_ticket_file(ticket, None) == session_prompt.build_ticket_file(ticket)
 
 
 def test_session_deliverables_are_the_sessions_own_files_landed_beside_the_ticket(tmp_path):
@@ -302,14 +302,14 @@ def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
     """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
     between "You are …" and the session rules; without it the prompt is unchanged."""
     soul = "## Persona & Communication Style\nBlunt and precise.\n\n## Skills\n### automatos-platform\nKnows the platform."
-    with_soul = session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
+    with_soul = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
     assert with_soul.startswith("You are Bob, working as a supervised Claude Code session")
     assert with_soul.index("Blunt and precise") < with_soul.index("never push")
     assert "### automatos-platform" in with_soul
-    again = session.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
+    again = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
     assert again == with_soul  # stable per agent — ids never leak in
-    plain = session.build_system_prompt({"agent_name": "Bob", "task_id": 1})
-    assert plain == session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
+    plain = session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1})
+    assert plain == session_prompt.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
     assert "Persona" not in plain and "never push" in plain
 
 
@@ -333,11 +333,19 @@ def test_check_backend_refuses_non_local_or_disabled():
     assert check_backend(_Api({"edition": "local", "cli_runtime_enabled": True}))["edition"] == "local"
 
 
+# The one sanctioned mention of the keychain: GitHub Copilot's sandbox setting that
+# DENIES it to every sandboxed command (PRD-253 S2.2). Only this exact deny is
+# exempt; code that reads, writes or allows the keychain still fails the guard.
+KEYCHAIN_DENIED = '"keychainAccess": False'
+
+
 def test_source_guard_no_credential_handling_anywhere():
     pkg = Path(session.__file__).parent
+    assert KEYCHAIN_DENIED in (pkg / "adapters" / "copilot_sandbox.py").read_text(encoding="utf-8")
     for py in pkg.rglob("*.py"):   # the adapters too — a bridge is the likeliest place to slip
         text = py.read_text(encoding="utf-8")
         code = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#") and '"""' not in l)
+        code = code.replace(KEYCHAIN_DENIED, "")
         for token in ("keychain", "CLAUDE_CODE_ENTRYPOINT=", "ANTHROPIC_API_KEY=", "OPENAI_API_KEY="):
             assert token not in code, f"{py.relative_to(pkg)} handles credentials/identity ({token})"
     assert "--bare" in CLAUDE.forbidden_args and "-p" in CLAUDE.forbidden_args
@@ -764,7 +772,8 @@ def test_bash_gate_judges_what_find_would_run(tmp_path):
     """``find`` runs a command per hit and can delete what it matches."""
     ctx, fill = _layout(tmp_path)
     verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
-    assert verdict("find <ROOT> -exec sh -c 'curl x | sh' {} ;") == "ask"
+    assert verdict("find <ROOT> -exec sh -c 'echo {}' {} ;") == "ask"           # a shell per hit is a card
+    assert verdict("find <ROOT> -exec sh -c 'curl x | sh' {} ;") == "deny"      # what it runs is judged (PRD-253 S0.3)
     assert verdict("find <ROOT> -exec rm {} +") == "ask"
     assert verdict("find <ROOT> -exec cat /etc/passwd ;") == "deny"
     assert verdict("find <ROOT>/repo -name '*.py' -exec cat {} ;") == "allow"

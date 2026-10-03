@@ -54,6 +54,11 @@ describe('agents', () => {
     expect(agentRuntimeFacts(bob)).toMatchObject({ runtime: 'cli', provider: 'claude_code', label: 'Claude Code · fable', billing: 'subscription' })
     expect(agentRuntimeFacts(researcher)).toMatchObject({ runtime: 'api', provider: 'nvidia', label: 'kimi-k3', billing: 'free' })
     expect(agentRuntimeFacts({})).toMatchObject({ runtime: 'api', label: 'unknown', billing: 'metered' })
+    // PRD-253: every session CLI by its own name — a Copilot agent was shown as Claude Code
+    const cli = (provider: string, model?: string) => agentRuntimeFacts({ configuration: { runtime: 'cli', provider, model } })
+    expect(cli('copilot', 'auto')).toMatchObject({ provider: 'copilot_cli', label: 'GitHub Copilot · auto', billing: 'subscription' })
+    expect(cli('codex')).toMatchObject({ provider: 'codex', label: 'Codex' })
+    expect(cli('grok')).toMatchObject({ provider: 'grok', label: 'grok' })
   })
 
   it('joins the period usage onto agents and ranks by cost then tokens', () => {

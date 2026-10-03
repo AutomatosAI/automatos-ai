@@ -3,8 +3,9 @@
 /**
  * PRD-244 D5 — the "Auto now" rail: a live view of the floor beside the
  * conversation. Every section is a read the Command Centre already makes;
- * every row deep-links to its Command Centre tab; empty sections say so and
- * never fabricate a count. Built from the shared primitives and tokens, so it
+ * every row deep-links to the thing itself (PRD-252 R1: the ticket an agent is
+ * on, the question inside its ticket), its eyebrow to its Command Centre tab;
+ * empty sections say so and never fabricate a count. Built from the shared primitives and tokens, so it
  * renders in both styles: the Studio shell mounts it in its rail, the Classic
  * chat in an aside of its own.
  */
@@ -16,15 +17,24 @@ import { Input } from '@/components/ui/input'
 import { useAnswerQuestion } from '@/hooks/use-approval-grants'
 import { useAutoNow, AUTO_NOW_ROWS } from '@/hooks/use-auto-now'
 import { formatRelative } from '@/lib/format-relative'
-import type { ApprovalGrant } from '@/lib/api-client'
+import { needsYouBreakdown } from '@/lib/needs-you-breakdown'
+import type { ApprovalGrant, FleetAgentRow } from '@/lib/api-client'
+import { questionHref, ticketHref } from '@/lib/ticket-links'
 import { cn } from '@/lib/utils'
 
 export const AUTO_NOW_LINKS = {
+  summary: '/command-center?tab=summary',
   board: '/command-center?tab=board',
   questions: '/command-center?tab=questions',
   watchlist: '/command-center?tab=watchlist',
   governance: '/command-center?tab=governance',
 } as const
+
+/** An agent at work opens the ticket it is on; a mission step, the board. */
+function workingHref(agent: FleetAgentRow): string {
+  const current = agent.current
+  return current?.kind === 'board_task' ? ticketHref(current.id) : AUTO_NOW_LINKS.board
+}
 
 const QUESTION_PREVIEW_CHARS = 140
 
@@ -95,7 +105,7 @@ function QuestionRow({ q }: { q: ApprovalGrant }) {
 
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-2 text-[12px] leading-snug" aria-label={`Question from ${asker}`}>
-      <Link href={AUTO_NOW_LINKS.questions as any} className="block hover:underline">
+      <Link href={questionHref(q) as any} className="block hover:underline">
         <span className="block text-[11px] text-muted-foreground">{asker} asks</span>
         <span className="block text-foreground">{questionPreview(q.question_md)}</span>
       </Link>
@@ -139,7 +149,7 @@ export function AutoNowRail({ className }: { className?: string }) {
               ['Working', stats?.working_now],
               ['Agents', stats?.agents_active],
               ['Queue', stats?.tasks_in_queue],
-              ['Attention', stats?.needs_attention],
+              ['Attention', now.needsYou?.total],
             ] as const
           ).map(([label, value]) => (
             <div key={label} className="rounded-md border border-border bg-card/60 px-1 py-1">
@@ -152,7 +162,7 @@ export function AutoNowRail({ className }: { className?: string }) {
           <EmptyLine>No one is working right now.</EmptyLine>
         ) : (
           now.working.slice(0, AUTO_NOW_ROWS).map((a) => (
-            <Row key={a.agent_id} href={AUTO_NOW_LINKS.board} primary={a.name} secondary={a.current?.title} />
+            <Row key={a.agent_id} href={workingHref(a)} primary={a.name} secondary={a.current?.title} />
           ))
         )}
       </section>
@@ -179,12 +189,13 @@ export function AutoNowRail({ className }: { className?: string }) {
         )}
       </section>
 
+      {/* PRD-252 R5: the one Needs-you number; its widget on Summary lists every row. */}
       <section className="flex flex-col gap-1.5">
-        <Eyebrow count={now.decisionsTotal} href={AUTO_NOW_LINKS.governance}>Decisions</Eyebrow>
-        {now.decisionsTotal === 0 ? (
-          <EmptyLine>No decisions waiting.</EmptyLine>
+        <Eyebrow count={now.needsYouTotal} href={AUTO_NOW_LINKS.summary}>Needs you</Eyebrow>
+        {now.needsYouTotal === 0 ? (
+          <EmptyLine>Nothing needs you.</EmptyLine>
         ) : (
-          <Row href={AUTO_NOW_LINKS.governance} primary={`${now.decisionsTotal} waiting for a decision`} secondary="Open Governance" />
+          <Row href={AUTO_NOW_LINKS.summary} primary={`${now.needsYouTotal} waiting for you`} secondary={needsYouBreakdown(now.needsYou?.counts)} />
         )}
       </section>
     </div>

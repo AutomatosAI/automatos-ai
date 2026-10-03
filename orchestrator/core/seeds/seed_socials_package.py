@@ -50,6 +50,8 @@ SEEDED_BY = "seed_socials_package"
 MARKETPLACE = "marketplace"
 DIRECTOR = "social-media-director"
 BRAND_DESIGNER = "brand-designer"
+# PRD-251B (B8, US-B204): the plan's research run starts the workspace's copy of this one.
+RESEARCH_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-content-research"
 
 CREATED = "created"
 PRESENT = "present"
@@ -252,6 +254,21 @@ Channels: {{input.channels}}
 3. Answer with the post's id and status.
 {_NEVER_PUBLISH}"""
 
+_RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
+
+1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list) and the topics its bank already holds.
+2. Research only the sources the plan switches on:
+   - knowledge: search_knowledge for the plan's goal and audience;
+   - deliverables: platform_list_deliverables for recent reports, blog posts and files;
+   - website: platform_web_fetch on the brand kit's website (platform_get_brand_kit names it): its product, news and about pages;
+   - github: when the workspace has GitHub connected, its README, docs, latest releases and merged pull requests, through the GitHub tools.
+3. Pick 5 to 15 topics the bank does not hold yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's).
+4. Every fact names its source: kind knowledge (the document's id), deliverable (its id), web (the page's address), github (the page's address) or note; its ref; and a short label. Leave out a fact you cannot source, and anything on the plan's never-say list.
+5. Add them with platform_add_social_topics, in one call. Its answer lists what was added and what was refused, with why: fix and resend a refused topic once, or leave it out.
+6. Answer with how many topics were added, and their titles.
+
+You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
+
 SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
     {
         "template_id": "marketplace-socials-brand-kit",
@@ -355,6 +372,23 @@ SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
             _agent_step("draft", 2, DIRECTOR, "post", _CAROUSEL_DRAFT_PROMPT),
         ),
         "tags": ["socials", "carousel", "images"],
+    },
+    {
+        "template_id": RESEARCH_PLAYBOOK_TEMPLATE_ID,
+        "name": "Content bank research",
+        "description": (
+            "The Social Media Director fills a Socials plan's content bank: ideas from your knowledge, "
+            "Deliverables, website and GitHub, every fact with its source. Each plan runs it weekly, and "
+            "on Research again."
+        ),
+        "icon": "🔎",
+        "inputs": {
+            "plan_id": {"type": "string", "required": True, "description": "The Socials plan to research for"},
+            "plan_name": {"type": "string", "required": False, "default": "", "description": "The plan's name"},
+        },
+        "outputs": {"topics": {"type": "string", "description": "The topics added to the bank"}},
+        "steps": (_agent_step("research", 1, DIRECTOR, "topics", _RESEARCH_PROMPT),),
+        "tags": ["socials", "plan", "research", "content bank"],
     },
 ]
 

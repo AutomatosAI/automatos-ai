@@ -18,8 +18,40 @@ def _board_statuses() -> list:
 
 
 def register_board_task_actions(registry: ActionRegistry) -> None:
-    """Register board task actions (PRD-72)."""
+    """Register board task actions (PRD-72), one tool each, in this order. Each
+    ActionDefinition is built inside registry.register(...), where
+    scripts/check_hierarchy_gate.py reads it."""
+    _register_create_task(registry)
+    _register_list_tasks(registry)
+    _register_board_snapshot(registry)
+    _register_board_summary(registry)
+    _register_get_task(registry)
+    _register_wait_for_task(registry)
+    _register_assign_task(registry)
+    _register_update_task(registry)
+    _register_update_task_status(registry)
 
+
+def _review_mode(default_note: str) -> dict:
+    """PRD-252 R3 (D7): no 'llm' until a model reviewer exists. It had none and
+    behaved exactly as 'human', while this told Auto a model would review it."""
+    return {
+        "type": "string",
+        "enum": ["human", "auto"],
+        "description": (
+            "Who signs the work off: 'human' parks the finished ticket in Review until a "
+            f"person approves it; 'auto'{default_note} closes it Done."
+        ),
+    }
+
+
+def _ticket_ref(what: str) -> dict:
+    """PRD-252 R4: a ticket by its number as the board shows it; its id still works."""
+    return {"type": "string",
+            "description": f"{what}: its number as the board shows it, e.g. #0042 (a mission step: #0051.3)."}
+
+
+def _register_create_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_task",
         description=(
@@ -30,59 +62,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         category="tasks",
         parameters={
             "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Short task title",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Detailed task description / prompt for the agent",
-                },
-                "priority": {
-                    "type": "string",
-                    "enum": ["urgent", "high", "medium", "low"],
-                    "description": "Task priority",
-                },
-                "assigned_agent_name": {
-                    "type": "string",
-                    "description": "Name of agent to assign (default: unassigned)",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Tags for categorization",
-                },
-                "parent_task_id": {
-                    "type": "integer",
-                    "description": "Parent task ID if this is a sub-task",
-                },
-                "review_mode": {
-                    "type": "string",
-                    "enum": ["human", "llm", "auto"],
-                    "description": (
-                        "Who signs the work off: 'human' parks the finished ticket in Review until a "
-                        "person approves it; 'llm' has a model review it; 'auto' (default) closes it Done."
-                    ),
-                },
-                "sla_deadline": {
-                    "type": "string",
-                    "description": "PRD-234: due date/time as ISO 8601 (e.g. 2026-09-05T17:00:00Z). Shows on the board and the calendar.",
-                },
-                "approval_action": {
-                    "type": "object",
-                    "description": "If set, task goes to Review status with an approval gate. On user approve, the action executes. Example: {\"type\": \"publish_blog\", \"post_id\": \"uuid\"}",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["inbox", "assigned", "review"],
-                    "description": "Initial task status. Auto-set to 'review' if approval_action is provided.",
-                },
-                "auto_approve": {
-                    "type": "boolean",
-                    "description": "If true AND approval_action is set, immediately execute the action (skip human review). Use for automated pipelines.",
-                },
-            },
+            "properties": _create_task_properties(),
             "required": ["title", "description"],
         },
         permission_level="write",
@@ -95,14 +75,63 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # ── Board read tools ────────────────────────────────────────────
 
+def _create_task_properties() -> dict:
+    return {
+        "title": {
+            "type": "string",
+            "description": "Short task title",
+        },
+        "description": {
+            "type": "string",
+            "description": "Detailed task description / prompt for the agent",
+        },
+        "priority": {
+            "type": "string",
+            "enum": ["urgent", "high", "medium", "low"],
+            "description": "Task priority",
+        },
+        "assigned_agent_name": {
+            "type": "string",
+            "description": "Name of agent to assign (default: unassigned)",
+        },
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Tags for categorization",
+        },
+        "parent_task_id": _ticket_ref("The parent ticket, if this is a sub-task"),
+        "review_mode": _review_mode(" (default)"),
+        "sla_deadline": {
+            "type": "string",
+            "description": "PRD-234: due date/time as ISO 8601 (e.g. 2026-09-05T17:00:00Z). Shows on the board and the calendar.",
+        },
+        "approval_action": {
+            "type": "object",
+            "description": "If set, task goes to Review status with an approval gate. On user approve, the action executes. Example: {\"type\": \"publish_blog\", \"post_id\": \"uuid\"}",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["inbox", "assigned", "review"],
+            "description": "Initial task status. Auto-set to 'review' if approval_action is provided.",
+        },
+        "auto_approve": {
+            "type": "boolean",
+            "description": "If true AND approval_action is set, immediately execute the action (skip human review). Use for automated pipelines.",
+        },
+    }
+
+
+# ── Board read tools ────────────────────────────────────────────
+
+def _register_list_tasks(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_tasks",
         description=(
             "List tasks on the board with optional filters. Returns task titles, "
             "statuses, priorities, assigned agents, and dates. Use when the user asks "
-            "about their tasks, board status, what's in progress, or what's in the queue."
+            "about their tasks, board status, what's in progress, or what's in the queue. "
+            "Each ticket has a number (#0042): name tickets by it, never by their place in a list."
         ),
         category="tasks",
         parameters={
@@ -144,6 +173,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         accepts=("tags",),
     ))
 
+
+def _register_board_snapshot(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_board_snapshot",
         description=(
@@ -173,6 +204,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_board_summary(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_board_summary",
         description=(
@@ -199,6 +232,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_get_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_task",
         description=(
@@ -209,10 +244,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to look up",
-                },
+                "task_id": _ticket_ref("The ticket to look up"),
             },
             "required": ["task_id"],
         },
@@ -225,6 +257,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_wait_for_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_wait_for_task",
         description=(
@@ -238,10 +272,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to wait for",
-                },
+                "task_id": _ticket_ref("The ticket to wait for"),
                 "max_wait_seconds": {
                     "type": "integer",
                     "description": "Upper bound on the wait in seconds (capped by the workspace budget)",
@@ -258,8 +289,10 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # ── Board write tools ───────────────────────────────────────────
 
+# ── Board write tools ───────────────────────────────────────────
+
+def _register_assign_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_assign_task",
         description=(
@@ -270,10 +303,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID to assign",
-                },
+                "task_id": _ticket_ref("The ticket to assign"),
                 "agent_name": {
                     "type": "string",
                     "description": "Name of the agent to assign",
@@ -290,6 +320,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_update_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_task",
         description=(
@@ -302,7 +334,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {"type": "integer", "description": "The task to edit."},
+                "task_id": _ticket_ref("The ticket to edit"),
                 "title": {"type": "string", "description": "New title."},
                 "description": {"type": "string", "description": "New description."},
                 "priority": {
@@ -310,14 +342,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                     "enum": ["urgent", "high", "medium", "low"],
                     "description": "New priority.",
                 },
-                "review_mode": {
-                    "type": "string",
-                    "enum": ["human", "llm", "auto"],
-                    "description": (
-                        "Who signs the work off: 'human' parks the finished ticket in Review until a "
-                        "person approves it; 'llm' has a model review it; 'auto' closes it Done."
-                    ),
-                },
+                "review_mode": _review_mode(""),
                 "tags": {
                     "type": "array", "items": {"type": "string"},
                     "description": "Replaces the task's tags.",
@@ -339,6 +364,8 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_update_task_status(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_task_status",
         description=(
@@ -347,21 +374,20 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
             "never loop one call per task). Moving to 'in_progress' starts the "
             "assigned agent at once; a task with no agent is refused, so assign one "
             "first (platform_assign_task). Moving to 'done' completes it. "
-            "'blocked' requires blocked_reason."
+            "'blocked' requires blocked_reason. To cancel a ticket set 'cancelled', never 'done' "
+            "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed. "
+            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop."
         ),
         category="tasks",
         parameters={
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task ID (single task)",
-                },
+                "task_id": _ticket_ref("The ticket (one ticket)"),
                 "task_ids": {
                     "type": "array",
-                    "items": {"type": "integer"},
+                    "items": {"type": "string"},
                     "description": (
-                        "Several task IDs to move to the same status in one call "
+                        "Several tickets (numbers like #0042) to move to the same status in one call "
                         "(max 100). The result lists 'updated' and 'failed' ids — "
                         "report both to the user."
                     ),

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan: cadence and content bank</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,400;6..72,500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#171614}
+a{color:#F1EADF}a:hover{color:#FF8A5B}
+</style>
+</helmet>
+<div class="app">
+<dc-import name="Nav" active="plans" hint-size="100%,112px"></dc-import>
+<main class="wrap col" style="gap: 20px;">
+<div class="row between wrapf" style="gap: 16px; align-items: flex-end;">
+<div class="col" style="gap: 6px;"><div class="row wrapf" style="gap: 12px;"><h1 class="h1">WebSummit countdown</h1><span class="pill ok">Running · day 10 of 35</span></div><p class="hint" style="margin: 0;">5 Oct – 8 Nov 2026 · Europe/London · the plan sets the rhythm and the topics; each post is made on its day.</p></div>
+<div class="row"><button type="button" class="btn">Pause plan</button><a href="Main.dc.html" class="btn primary">Save plan</a></div>
+</div>
+<div class="split" style="display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start;">
+<nav class="card col" style="gap: 4px; padding: 10px;" aria-label="Plan steps">
+<sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+<button type="button" aria-pressed="{{ s.pressed }}" onClick="{{ s.pick }}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ s.bg }}; color: {{ s.fg }}; font: 500 14px Geist, system-ui, sans-serif; text-align: left; cursor: pointer;"><span class="mono" style="font-size: 12px; color: {{ s.num }};">{{ s.n }}</span>{{ s.label }}</button>
+</sc-for>
+</nav>
+<section class="card col" style="gap: 18px; min-height: 640px;">
+<sc-if value="{{ s1 }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 16px;">
+<div class="col" style="gap: 4px;"><h2 class="h2">Goal and dates</h2><p class="hint" style="margin: 0;">What the plan is for. Auto reads this before every post it makes.</p></div>
+<div class="field"><label for="pname">Name</label><input id="pname" class="input" defaultValue="WebSummit countdown"></div>
+<div class="field"><label for="goal">Goal</label><textarea id="goal" class="textarea" defaultValue="Count down to Web Summit Lisbon on 9 Nov. People who visit the stand should already know three things: it runs on your own machine, the code is public, and nothing posts without a person approving it."></textarea></div>
+<div class="field"><label for="aud">Who it is for</label><input id="aud" class="input" defaultValue="Founders and engineering leads visiting Web Summit"></div>
+<div class="grid3">
+<div class="field"><label for="from">Starts</label><input id="from" class="input" type="date" defaultValue="2026-10-05"></div>
+<div class="field"><label for="to">Ends</label><input id="to" class="input" type="date" defaultValue="2026-11-08"></div>
+<div class="field"><label for="ptz">Timezone</label><select id="ptz" class="select"><option>Europe/London</option><option>Europe/Lisbon</option><option>UTC</option></select></div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ s2 }}" hint-placeholder-val="{{ true }}">
+<div class="col" style="gap: 16px;">
+<div class="col" style="gap: 4px;"><h2 class="h2">Cadence</h2><p class="hint" style="margin: 0;">How often each channel gets a post, in what format and at what time. Nothing is made now: the plan only books the slots.</p></div>
+<div class="col" style="gap: 8px;">
+<div class="row h3" style="padding: 0 12px; gap: 12px;"><span style="width: 180px;">Channel</span><span style="flex-grow: 1;">Format</span><span style="width: 170px;">How often</span><span style="width: 110px;">Time</span><span style="width: 84px;"></span></div>
+<sc-for list="{{ cadence }}" as="r" hint-placeholder-count="6">
+<div class="row" style="gap: 12px; padding: 6px 12px; border: 1px solid #35312B; border-radius: 10px; background: #1A1816;">
+<span class="row" style="width: 180px; gap: 8px;"><span class="ch">{{ r.ch }}</span><span style="font-weight: 500;">{{ r.name }}</span></span>
+<span style="flex-grow: 1;"><select class="select" aria-label="Format"><option>{{ r.format }}</option><option>Image</option><option>Carousel</option><option>Video 0:30</option><option>Text only</option></select></span>
+<span style="width: 170px;"><select class="select" aria-label="How often"><option>{{ r.when }}</option><option>Every day</option><option>Weekdays</option><option>Once a week</option></select></span>
+<span style="width: 110px;"><input class="input mono" type="time" aria-label="Time" defaultValue="{{ r.time }}"></span>
+<span class="hint" style="width: 84px;">{{ r.note }}</span>
+</div>
+</sc-for>
+<button type="button" class="btn sm" style="align-self: flex-start;">Add a channel</button>
+</div>
+<div class="card col" style="background: #1A1816; gap: 8px;">
+<p style="margin: 0; line-height: 1.6;">Over 35 days: <strong>35</strong> X images, <strong>15</strong> LinkedIn posts, <strong>15</strong> Instagram images and <strong>5</strong> videos shared by Reels, TikTok and Shorts. That is <strong>70</strong> posts, 2 a day.</p>
+<p class="hint" style="margin: 0;">Render minutes for the whole plan: about 2.5 (5 videos × 0:30, one 9:16 render each). Images use none.</p>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ s3 }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 16px;">
+<div class="col" style="gap: 4px;"><h2 class="h2">What to research</h2><p class="hint" style="margin: 0;">Auto reads these, pulls out features, facts and stories with their sources, and keeps them in the content bank. Every claim in a post has to come from the bank.</p></div>
+<sc-for list="{{ sources }}" as="s" hint-placeholder-count="4">
+<label class="row" style="gap: 12px; min-height: 54px; padding: 10px 12px; border: 1px solid #35312B; border-radius: 10px;">
+<input type="checkbox" checked="{{ s.on }}" onChange="{{ s.toggle }}">
+<span class="col" style="gap: 2px; flex-grow: 1;"><span style="font-weight: 500;">{{ s.name }}</span><span class="hint">{{ s.what }}</span></span>
+<sc-if value="{{ s.hasTag }}" hint-placeholder-val="{{ false }}"><span class="pill ok">{{ s.tag }}</span></sc-if>
+</label>
+</sc-for>
+<div class="field"><label for="notes">Notes for Auto</label><textarea id="notes" class="textarea" defaultValue="The stand is at Web Summit Lisbon on 9 Nov. Lead with what people can try themselves: the local edition and the public code."></textarea></div>
+<div class="grid2">
+<div class="field"><label for="avoid">Never say</label><input id="avoid" class="input" defaultValue="Prices, customer names, anything without a source"></div>
+<div class="field"><label for="refresh">Research again</label><select id="refresh" class="select"><option>Every Monday at 06:00</option><option>Every day at 06:00</option><option>Only when I ask</option></select></div>
+</div>
+<p class="hint" style="margin: 0;">New releases and documents join the bank. A topic that has been used is not repeated unless you pin it.</p>
+</div>
+</sc-if>
+<sc-if value="{{ s4 }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 16px;">
+<div class="col" style="gap: 4px;"><h2 class="h2">Making and approving</h2><p class="hint" style="margin: 0;">Posts are made close to their slot, so the work and the AI spend are spread over the plan instead of spent up front.</p></div>
+<div class="grid2">
+<div class="field"><label for="mk">Images and carousels are made</label><select id="mk" class="select"><option>On their day at 07:00</option><option>The day before at 07:00</option></select></div>
+<div class="field"><label for="mkv">Videos are made</label><select id="mkv" class="select"><option>The day before at 07:00</option><option>On their day at 07:00</option></select></div>
+</div>
+<div class="field"><span class="lab">Visuals</span><div class="seg" role="group" aria-label="Visual mix" style="align-self: flex-start;"><sc-for list="{{ mixes }}" as="m" hint-placeholder-count="3"><button type="button" class="{{ m.on }}" aria-pressed="{{ m.pressed }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></div><span class="hint">{{ mixNote }}</span></div>
+<div class="row between wrapf" style="gap: 10px; padding: 12px 14px; border: 1px solid #35312B; border-radius: 10px;"><span class="col" style="gap: 2px;"><span style="font-weight: 500;">Higgsfield · connected in Composio</span><span class="hint">Images: GPT Image 2 · Footage: Kling 3.0 · Voice: Kokoro, built in</span></span><a href="Brand.dc.html" class="btn sm">AI tools</a></div>
+<div class="field"><span class="lab">If a post is not approved by its slot</span><div class="seg" role="group" aria-label="Late approval" style="align-self: flex-start;"><sc-for list="{{ lates }}" as="l" hint-placeholder-count="2"><button type="button" class="{{ l.on }}" aria-pressed="{{ l.pressed }}" onClick="{{ l.pick }}">{{ l.label }}</button></sc-for></div><span class="hint">Every post waits in your Queue for approval. You are told in Automatos and on Telegram when the day's posts are ready.</span></div>
+<div class="grid2">
+<div class="field"><label for="cap">AI credits per month</label><input id="cap" class="input" placeholder="[your cap]"><span class="hint">A job over the cap does not start. Higgsfield's balance is read before and after each job.</span></div>
+<div class="field"><span class="lab">Render minutes</span><span style="font-size: 15px; min-height: 42px; display: flex; align-items: center;">About 2.5 for this plan</span><span class="hint">5 videos × 0:30. Images use none.</span></div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ s5 }}" hint-placeholder-val="{{ false }}">
+<div class="col" style="gap: 16px;">
+<div class="row between wrapf" style="gap: 12px;"><div class="col" style="gap: 4px;"><h2 class="h2">Content bank</h2><p class="hint" style="margin: 0;">24 topics from 4 sources, researched Mon 12 Oct at 06:00. For each slot Auto takes the next unused topic that suits the slot's format.</p></div><div class="row"><button type="button" class="btn sm">Add a topic</button><button type="button" class="btn sm">Research again</button></div></div>
+<div class="grid3">
+<sc-for list="{{ bank }}" as="b" hint-placeholder-count="6">
+<article class="col" style="gap: 10px; padding: 14px; border: 1px solid #35312B; border-radius: 12px; background: #1A1816;">
+<div class="row between" style="gap: 8px;"><span class="pill">{{ b.fmt }}</span><span class="hint">{{ b.use }}</span></div>
+<h3 style="margin: 0; font-family: Newsreader, Georgia, serif; font-weight: 400; font-size: 21px; line-height: 1.15;">{{ b.title }}</h3>
+<p class="hint" style="margin: 0;">{{ b.angle }}</p>
+<sc-for list="{{ b.facts }}" as="f" hint-placeholder-count="1">
+<div class="col" style="gap: 3px; padding: 8px 10px; border-radius: 8px; background: #22201C;"><span style="font-size: 13px;">{{ f.text }}</span><span class="mono" style="font-size: 11px; color: #A9A194;">{{ f.src }}</span></div>
+</sc-for>
+</article>
+</sc-for>
+</div>
+<button type="button" class="btn sm" style="align-self: flex-start;">Show all 24 topics</button>
+</div>
+</sc-if>
+<div class="row between" style="margin-top: auto; padding-top: 14px; border-top: 1px solid #35312B;">
+<button type="button" class="btn" onClick="{{ back }}" disabled="{{ first }}">Back</button>
+<sc-if value="{{ notLast }}" hint-placeholder-val="{{ true }}"><button type="button" class="btn primary" onClick="{{ next }}">Next</button></sc-if>
+<sc-if value="{{ last }}" hint-placeholder-val="{{ false }}"><a href="Main.dc.html" class="btn primary">Save plan</a></sc-if>
+</div>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const step = st.step || 2;
+    const mix = st.mix || 'mixed';
+    const late = st.late || 'skip';
+    const srcOff = st.srcOff || {};
+    const set = (patch) => () => this.setState(patch);
+    const STEPS = ['Goal and dates', 'Cadence', 'What to research', 'Making and approving', 'Content bank'];
+    const SOURCES = [
+      ['knowledge', 'Knowledge', 'All documents in this workspace', ''],
+      ['deliverables', 'Deliverables', 'Blog posts and reports', ''],
+      ['github', 'GitHub · AutomatosAI/automatos-ai', 'README, docs, releases and merged pull requests', 'Connected in Composio'],
+      ['website', 'Website', 'The site in your brand kit', ''],
+    ];
+    const MIX = [['templates', 'Templates only (free)'], ['mixed', 'Templates + AI images'], ['ai', 'AI first']];
+    const MIX_NOTE = {
+      templates: 'Brand templates only. No AI tool is called.',
+      mixed: 'Templates for most posts, with AI images where a template has an image slot, styled by your brand-kit references.',
+      ai: 'AI images first, with the words added on top by a template.',
+    };
+    const LATE = [['skip', 'Skip it, nothing posts'], ['next', 'Move it to the next free slot']];
+    const BANK = [
+      ['Give Auto a goal', 'Missions take a goal, not a to-do list.', 'Carousel', 'Today 09:00', [['Missions split a goal into tasks across your agents and hand back a Deliverable', 'Docs · Missions']]],
+      ['Nothing posts without you', 'The approval rule behind Socials.', 'Image', 'Today 12:00', [['Every post is approved one by one', 'Docs · Socials'], ['An edit after approval sends it back', 'Docs · Socials']]],
+      ['Runs on your machine', 'The local edition, start to finish.', 'Image', 'Today 18:00', [['The platform runs locally with Docker Compose', 'README · Install']]],
+      ['Read the code', 'Everything is public on GitHub.', 'Video 0:30', 'Fri 16 Oct', [['The platform code is public on GitHub', 'README']]],
+      ['Ask your documents', 'Answers that say where they came from.', 'Carousel', 'Used 7 Oct', [['Agents search your documents and cite the source', 'Docs · Knowledge']]],
+      ['See us in Lisbon', 'The stand, the date, what to try.', 'Video 0:30', 'Pinned Fri 6 Nov', [['Web Summit Lisbon, 9 Nov', 'Notes for Auto']]],
+    ];
+    return {
+      steps: STEPS.map((label, i) => ({
+        n: i + 1,
+        label,
+        pressed: i + 1 === step,
+        bg: i + 1 === step ? '#262320' : 'transparent',
+        fg: i + 1 === step ? '#F1EADF' : '#A9A194',
+        num: i + 1 === step ? '#FF6E33' : '#A9A194',
+        pick: set({ step: i + 1 }),
+      })),
+      s1: step === 1,
+      s2: step === 2,
+      s3: step === 3,
+      s4: step === 4,
+      s5: step === 5,
+      first: step === 1,
+      notLast: step < 5,
+      last: step === 5,
+      back: () => this.setState({ step: Math.max(1, step - 1) }),
+      next: () => this.setState({ step: Math.min(5, step + 1) }),
+      cadence: [
+        { ch: 'X', name: 'X', format: 'Image · 16:9', when: 'Every day', time: '12:00', note: '' },
+        { ch: 'in', name: 'LinkedIn', format: 'Image or carousel', when: 'Tue, Wed, Thu', time: '09:00', note: '' },
+        { ch: 'IG', name: 'Instagram', format: 'Image · 4:5', when: 'Mon, Wed, Fri', time: '18:00', note: '' },
+        { ch: 'IG', name: 'Instagram Reels', format: 'Video 0:30 · 9:16', when: 'Fridays', time: '17:00', note: 'Same video' },
+        { ch: 'TT', name: 'TikTok', format: 'Video 0:30 · 9:16', when: 'Fridays', time: '17:00', note: 'Same video' },
+        { ch: 'YT', name: 'YouTube Shorts', format: 'Video 0:30 · 9:16', when: 'Fridays', time: '17:00', note: 'Same video' },
+      ],
+      sources: SOURCES.map(([id, name, what, tag]) => ({ name, what, tag, hasTag: tag !== '', on: !srcOff[id], toggle: () => this.setState({ srcOff: { ...srcOff, [id]: !srcOff[id] } }) })),
+      mixes: MIX.map(([id, label]) => ({ label, on: id === mix ? 'on' : '', pressed: id === mix, pick: set({ mix: id }) })),
+      mixNote: MIX_NOTE[mix],
+      lates: LATE.map(([id, label]) => ({ label, on: id === late ? 'on' : '', pressed: id === late, pick: set({ late: id }) })),
+      bank: BANK.map(([title, angle, fmt, use, facts]) => ({ title, angle, fmt, use, facts: facts.map(([text, src]) => ({ text, src })) })),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -9,6 +9,7 @@ import {
   FileText,
   BookOpen,
   FolderTree,
+  Palette,
   Share2,
 } from 'lucide-react'
 
@@ -24,6 +25,7 @@ import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import { DeliverablesStudio } from '@/components/deliverables/studio/deliverables-studio'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
+import { BrandKitTab } from '@/components/deliverables/brand/brand-kit-tab'
 import {
   DEFAULT_FILTERS,
   FEED_DEFAULT_FILTERS,
@@ -37,6 +39,7 @@ const TAB_META: Record<DeliverableTab, Omit<FilterTab, 'value'>> = {
   outputs: { label: 'Outputs', icon: LayoutGrid },
   blogs: { label: 'Blogs', icon: FileText },
   templates: { label: 'Templates', icon: BookOpen },
+  brand: { label: 'Brand kit', icon: Palette },
   socials: { label: 'Socials', icon: Share2 },
 }
 const EXPLORER_TAB: FilterTab = { value: 'explorer', label: 'Explorer', icon: FolderTree }
@@ -158,6 +161,12 @@ export default function DeliverablesPage() {
             <TabsContent value="templates">
               <div className="mx-auto max-w-[1600px]">
                 <TemplateStudio />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="brand">
+              <div className="mx-auto max-w-[1600px]">
+                <BrandKitTab />
               </div>
             </TabsContent>
 

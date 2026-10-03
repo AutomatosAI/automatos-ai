@@ -161,8 +161,8 @@ def test_failed_mission_board_card_shows_failed():
     from services.orchestration_board_bridge import _RUN_STATE_TO_BOARD_STATUS
 
     assert _RUN_STATE_TO_BOARD_STATUS[RunState.FAILED.value] == "failed"
-    # cancelled stays done -- the user deliberately closed it.
-    assert _RUN_STATE_TO_BOARD_STATUS[RunState.CANCELLED.value] == "done"
+    # F245: a cancelled mission's card is Cancelled (PRD-252 R7's stage), never Done.
+    assert _RUN_STATE_TO_BOARD_STATUS[RunState.CANCELLED.value] == "cancelled"
     assert _RUN_STATE_TO_BOARD_STATUS[RunState.COMPLETED.value] == "done"
 
 

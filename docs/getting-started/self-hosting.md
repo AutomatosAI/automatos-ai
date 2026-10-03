@@ -107,10 +107,13 @@ Composio, if you add a key).
 | `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
-`automatos_minio_data`, `automatos_backend_logs`, and `backend_data`, which
-holds the auto-generated credential-encryption key (`CREDENTIAL_KEY_FILE` in
-`envs/api.defaults`). The workspace directory is a **bind mount** of a host
-folder, not a volume (§5).
+`automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
+and `backend_data`, which holds the auto-generated credential-encryption key
+(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`). Your workspace's directory is a
+**bind mount** of a host folder, not a volume (§5). `automatos_workspaces_data`
+holds the files of every other workspace on the stack (a second or a test
+workspace), so they survive `docker compose up --build`; `make reset` removes
+it with the rest.
 
 ### Where configuration lives
 
@@ -781,21 +784,30 @@ credentials. On such a host, `--no-session-sandbox` turns the sandbox off.
 ### Permission modes
 
 How much a session asks before it acts. The four modes are Claude Code's own,
-applied by the host's gate:
+applied by the host's gate to every CLI:
 
 | Mode | Edits in the session's folders | A command off the Bash allowlist |
 |---|---|---|
 | **Manual** | a card for each | a card for each |
 | **Edit automatically** | run | a card for each |
-| **Plan** | refused until you approve the plan | a card for each |
+| **Plan** | refused until you approve the plan | read-only commands run; a card for anything else |
 | **Auto** | run | run |
 
-In **Plan**, Claude Code starts in its own plan mode, explores, and presents a
-plan. The plan comes to you as a card and is saved as `plan.md` in the ticket's
-deliverables. Approve it and the session carries on as Edit automatically.
-Plan needs a CLI with a plan mode of its own: today that is Claude Code. An agent
-on Codex runs Plan as Edit automatically; the other three modes work the same on
-both.
+In **Plan**, the session explores read-only and ends with a plan. Claude Code
+presents it in its own plan mode; every other CLI as its final message. Only
+the read-only part of the Bash allowlist runs (`git status`, `git log`, `ls`,
+`cat`, `grep`, …); a commit, a test run, a redirection into a file or a
+`sed -i` is a card. The plan comes to you as the **Plan card**: on the ticket, in
+Command Center → Questions, the bell and Telegram. It is also saved as `plan.md`
+in the ticket's deliverables, and the ticket waits on it. Then:
+
+- **Approve** resumes the same session as Edit automatically, with the plan in
+  its prompt.
+- **Your own words** resume it planning again, with your feedback.
+- **Reject** sends the ticket to review, with your answer as the reason.
+
+After five rounds only Approve carries on. A Claude Code plan card you approve
+while the session is still waiting lets it carry on in the same turn.
 
 Set the workspace's default on **Settings → Session mode**; an agent can pick
 its own (Agent → Model → Permission mode). The local edition defaults to

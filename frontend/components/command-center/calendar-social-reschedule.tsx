@@ -25,12 +25,21 @@ export const POST_CHANGED_MESSAGE = 'This post changed since the calendar loaded
 
 type Reschedule = (postId: string, scheduledFor: string, timezone: string) => Promise<void>
 
-/** POST /schedule, then refresh the calendar however it went: a 409 says the post changed. */
-function useRescheduleCall(onChanged: () => void): Reschedule {
+/** PRD-251B US-B108: how a move is written, and what it says. The Command Center's
+ * default is POST /schedule (a scheduled post); the Socials calendar moves any post's
+ * slot through PUT /slot, which keeps an approval and schedules an approved post. */
+export interface RescheduleOptions {
+  move?: (postId: string, slot: string, timezone: string) => Promise<unknown>
+  movedMessage?: string
+}
+
+/** POST /schedule (or the given move), then refresh the calendar however it went: a 409 says the post changed. */
+function useRescheduleCall(onChanged: () => void, options: RescheduleOptions): Reschedule {
+  const move = options.move ?? ((postId, slot, timezone) => apiClient.scheduleSocialPost(postId, slot, timezone))
   return async (postId, scheduledFor, timezone) => {
     try {
-      await apiClient.scheduleSocialPost(postId, scheduledFor, timezone)
-      toast.success(RESCHEDULED_MESSAGE)
+      await move(postId, scheduledFor, timezone)
+      toast.success(options.movedMessage ?? RESCHEDULED_MESSAGE)
     } catch (error) {
       const status = (error as { status?: unknown } | null)?.status
       toast.error(status === HTTP_CONFLICT ? POST_CHANGED_MESSAGE : (error as Error)?.message || 'The post could not be rescheduled')
@@ -101,9 +110,9 @@ function RescheduleDialog({ item, onClose, reschedule }: { item: ScheduleItem | 
 }
 
 /** ``onChanged`` refreshes the calendar after a reschedule (its feed's refetch). */
-export function useSocialReschedule(onChanged: () => void): SocialReschedule {
+export function useSocialReschedule(onChanged: () => void, options: RescheduleOptions = {}): SocialReschedule {
   const [editing, setEditing] = useState<ScheduleItem | null>(null)
-  const reschedule = useRescheduleCall(onChanged)
+  const reschedule = useRescheduleCall(onChanged, options)
 
   const dragProps = (item: ScheduleItem): HTMLAttributes<HTMLElement> => {
     if (!isSocialItem(item)) return {}

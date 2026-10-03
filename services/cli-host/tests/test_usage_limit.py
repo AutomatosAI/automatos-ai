@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from automatos_cli_host import usage_limit
 from automatos_cli_host.config import HostConfig
 from automatos_cli_host.hook_server import HookServer
@@ -156,3 +158,24 @@ def test_a_ticket_claimed_for_a_paused_cli_goes_straight_back(short_tmp, fake_ho
     released = host.pending_results["77"]
     assert released["status"] == "usage_limit" and released["attempt"] == 2
     assert released["resets_at"] == until and released["error"].startswith("paused: claude usage limit")
+
+
+# ── PRD-253 S1.6: GitHub Copilot's own words for a plan that ran out ─────────
+
+
+@pytest.mark.parametrize("said", [
+    "Error: You've run out of your AI credits for this month.",
+    "You have used your included AI credits for the month.",
+    "You've been rate limited on the current model. Would you like to switch to auto mode to continue?",
+    "You've hit your rate limit.",
+    "You've reached your weekly rate limit.",
+    "Your session rate limit was reached.",
+])
+def test_copilots_limit_sentences_pause(said):
+    assert usage_limit.is_usage_limit(said)
+
+
+def test_copilots_model_policy_error_is_not_a_pause():
+    """The organisation's model policy is an error the operator fixes, not a window that reopens."""
+    assert not usage_limit.is_usage_limit("Error: No supported model available")
+    assert not usage_limit.is_usage_limit("No model available. Check policy enablement under GitHub Settings > Copilot")

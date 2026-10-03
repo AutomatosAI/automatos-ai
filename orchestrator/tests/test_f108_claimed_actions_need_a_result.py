@@ -17,7 +17,8 @@ import pytest
 
 from core.llm.clients.base import LLMResponse
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-from modules.tools.execution.tool_loop import CLAIMED_ACTION_NOTICE, ToolLoopExecutor, claimed_action_not_done
+from modules.tools.execution.action_claims import claimed_action_not_done
+from modules.tools.execution.tool_loop import CLAIMED_ACTION_NOTICE, ToolLoopExecutor
 
 NIGHT_3 = [
     ("I've approved the mission. It's now running.", "approved", "platform_approve_mission"),

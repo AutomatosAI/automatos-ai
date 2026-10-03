@@ -1,5 +1,5 @@
 {
-  "route_count": 851,
+  "route_count": 884,
   "routes": [
     {
       "method": "GET",
@@ -32,6 +32,10 @@
     {
       "method": "GET",
       "path": "/api/activity/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/needs-you"
     },
     {
       "method": "GET",
@@ -1075,6 +1079,34 @@
     },
     {
       "method": "GET",
+      "path": "/api/documents/brand-kit/references"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/references"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/brand-kit/references/{ref_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/brand-kit/references/{ref_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/references/{ref_id}/image"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/brand-kit/style"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/style/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/documents/brand-kit/suggestions"
     },
     {
@@ -2103,6 +2135,78 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/media-tools"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/media-tools"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/music"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/end"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/research"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/resume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/slots"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/slots/{slot_key:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/topics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/topics"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/posts"
     },
     {
@@ -2119,10 +2223,22 @@
     },
     {
       "method": "POST",
+      "path": "/api/socials/posts/{post_id}/ai-options"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/ai-options/{slot}"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/posts/{post_id}/approve"
     },
     {
       "method": "GET",
+      "path": "/api/socials/posts/{post_id}/media"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/posts/{post_id}/media"
     },
     {
@@ -2147,11 +2263,19 @@
     },
     {
       "method": "POST",
+      "path": "/api/socials/posts/{post_id}/retake"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/posts/{post_id}/retry"
     },
     {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/schedule"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/slot"
     },
     {
       "method": "POST",
@@ -2172,6 +2296,10 @@
     {
       "method": "GET",
       "path": "/api/socials/sources/reports/{report_id}/chart"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/templates"
     },
     {
       "method": "GET",
@@ -2708,6 +2836,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/rebrief"
     },
     {
       "method": "POST",

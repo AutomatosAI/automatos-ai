@@ -16,11 +16,13 @@ if str(ROOT) not in sys.path:
 
 FAKE_CLAUDE = Path(__file__).with_name("fake_claude.py")
 FAKE_CODEX = Path(__file__).with_name("fake_codex.py")
+FAKE_PRINT = Path(__file__).with_name("fake_print_cli.py")
+FAKE_COPILOT = Path(__file__).with_name("fake_copilot.py")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _fake_claude_executable():
-    for fake in (FAKE_CLAUDE, FAKE_CODEX):
+    for fake in (FAKE_CLAUDE, FAKE_CODEX, FAKE_PRINT, FAKE_COPILOT):
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -57,6 +59,25 @@ def fake_codex_home(short_tmp, monkeypatch):
 
 
 @pytest.fixture
+def fake_copilot_home(short_tmp, monkeypatch):
+    """A HOME whose ~/.copilot is logged in through the keychain (the account
+    pointer, no token in the file) and carries the operator's own settings."""
+    home = short_tmp / "home"
+    home.mkdir(exist_ok=True)
+    copilot = home / ".copilot"
+    copilot.mkdir(exist_ok=True)
+    account = {"host": "https://github.com", "login": "octocat"}
+    (copilot / "config.json").write_text(json.dumps({"loggedInUsers": [account], "lastLoggedInUser": account,
+                                                     "trustedFolders": ["/somewhere/else"]}))
+    (copilot / "settings.json").write_text(json.dumps({"model": "gpt-5.4", "includeCoAuthoredBy": False}))
+    monkeypatch.setenv("HOME", str(home))
+    for key in ("COPILOT_HOME", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_ALLOW_ALL",
+                "FAKE_COPILOT_SCENARIO"):
+        monkeypatch.delenv(key, raising=False)
+    return home
+
+
+@pytest.fixture
 def env_clean(monkeypatch):
     for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                 "CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION"):
@@ -74,5 +95,8 @@ def _sandbox_tools_present(monkeypatch):
     ``test_session_sandbox.py`` sets the answer itself where the check is
     the point."""
     from automatos_cli_host import sandbox
+    from automatos_cli_host.adapters import copilot_sandbox
 
     monkeypatch.setattr(sandbox, "missing_tools", lambda system=None, path=None: [])
+    # GitHub Copilot's own sandbox prerequisites (PRD-253 S2.2), answered the same way.
+    monkeypatch.setattr(copilot_sandbox, "missing", lambda system=None, path=None, tun=None: [])

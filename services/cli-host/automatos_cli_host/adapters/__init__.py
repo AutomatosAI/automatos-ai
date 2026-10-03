@@ -14,10 +14,12 @@ from ..sandbox import SessionSandbox
 from .base import LaunchContext, Prepared, PresetAdapter, Reply, ToolClass, ToolIntent, hook_command
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
+from .copilot import CopilotAdapter
 
 _ADAPTERS: Dict[str, Callable[..., PresetAdapter]] = {
     "claude": ClaudeAdapter,
     "codex": CodexAdapter,
+    "copilot": CopilotAdapter,
 }
 
 

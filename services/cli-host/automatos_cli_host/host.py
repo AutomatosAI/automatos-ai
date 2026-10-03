@@ -92,6 +92,7 @@ class Host:
         self.sessions: Dict[str, Session] = {}
         self.threads: Dict[str, threading.Thread] = {}
         self.pending_results: Dict[str, Dict[str, Any]] = {}
+        self.final_events: Dict[str, List[Dict[str, Any]]] = {}   # a finished session's last events, sent before its result
         self.allow_roots: List[str] = []
         self.default_root: Optional[str] = None
         self.stop = threading.Event()
@@ -445,17 +446,38 @@ class Host:
         self._retry_results(host_id)
 
     def _flush_session_events(self, host_id: str, task_id: str, session: Session) -> None:
+        """A finished session's last events are kept until the backend takes them."""
         batch: List[Dict[str, Any]] = []
         while not session.events.empty():
             batch.append(session.events.get_nowait())
         if batch:
-            try:
-                self.api.events(host_id, int(task_id), batch)
-            except BackendError as exc:
-                log.warning("final events for task %s failed: %s", task_id, exc)
+            self.final_events[task_id] = [*self.final_events.get(task_id, []), *batch]
+        self._send_final_events(host_id, task_id)
+
+    def _send_final_events(self, host_id: str, task_id: str) -> bool:
+        """PRD-253 Wave P: a session's result never overtakes its last events. The
+        Plan card rides on them (a ``PlanReady`` event the backend files before the
+        result parks the ticket on it) and so do the turn's last tool calls; a
+        backend restarting just then dropped them, and the result still landed.
+        False while the backend has not taken them — the result waits, and both
+        retry. A batch the backend refuses outright (4xx) is dropped."""
+        batch = self.final_events.get(task_id)
+        if not batch:
+            return True
+        try:
+            self.api.events(host_id, int(task_id), batch)
+        except BackendError as exc:
+            if exc.status == 0 or exc.status >= 500:
+                log.warning("final events for task %s not accepted yet (%s) — retrying", task_id, exc)
+                return False
+            log.error("final events for task %s refused (%s) — dropping", task_id, exc)
+        self.final_events.pop(task_id, None)
+        return True
 
     def _retry_results(self, host_id: str) -> None:
         for task_id, payload in list(self.pending_results.items()):
+            if not self._send_final_events(host_id, task_id):
+                continue
             try:
                 out = self.api.result(host_id, int(task_id), payload)
             except BackendError as exc:

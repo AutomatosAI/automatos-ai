@@ -10,7 +10,7 @@ through the enum/include_super_admin path instead).
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -54,44 +54,51 @@ def _keyword_matches(actions: List[Any], query: str, limit: int) -> List[Any]:
     return [a for _, a in scored[:limit]]
 
 
-async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Search the full platform action catalog by natural-language intent."""
-    query = str(params.get("query") or "").strip()
-    if not query:
-        return {"success": False, "error": "query parameter is required"}
-    try:
-        limit = min(int(params.get("limit", _DEFAULT_LIMIT)), _MAX_LIMIT)
-    except (TypeError, ValueError):
-        limit = _DEFAULT_LIMIT
-    limit = max(1, limit)
-    include_params = params.get("include_params", True) is not False
-
+def _discoverable(hidden: Any) -> List[Any]:
+    """Fail-closed advertisement: never surface admin/su actions via discovery, nor a
+    hidden category (PRD-251B US-B106), nor what cannot run here (F078)."""
     from modules.tools.discovery.action_registry import action_is_available, get_action_registry
+    from modules.tools.discovery.hidden_categories import without_hidden
 
-    registry = get_action_registry()
-    # Fail-closed advertisement: never surface admin/su actions via discovery.
     eligible = [
-        a for a in registry.get_all()
+        a for a in get_action_registry().get_all()
         if not getattr(a, "admin_only", False)
         and not getattr(a, "super_admin_only", False)
         and action_is_available(a)
     ]
-    # F155: a widget turn discovers only what its key's scopes grant.
+    return without_hidden(eligible, hidden)
+
+
+def _find_limit(params: Dict[str, Any]) -> int:
+    """How many matches to return: ``limit``, bounded to 1.._MAX_LIMIT, else the default."""
+    try:
+        limit = min(int(params.get("limit", _DEFAULT_LIMIT)), _MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = _DEFAULT_LIMIT
+    return max(1, limit)
+
+
+def _for_this_turn(eligible: List[Any]) -> List[Any]:
+    """F155: a widget turn discovers only what its key's scopes grant."""
     from core.security.surface import widget_scopes, widget_turn
 
-    if widget_turn():
-        from core.security.widget_scopes import allowed_tools
+    if not widget_turn():
+        return eligible
+    from core.security.widget_scopes import allowed_tools
 
-        granted = allowed_tools(widget_scopes())
-        eligible = [a for a in eligible if a.name in granted]
+    granted = allowed_tools(widget_scopes())
+    return [a for a in eligible if a.name in granted]
+
+
+async def _ranked_matches(query: str, limit: int, eligible: List[Any], hidden: Any) -> Tuple[List[Any], str]:
+    """Semantic ranking first; the keyword fallback when the ranker cannot answer (an embed
+    time-out, an empty index), so discovery never comes back empty-handed for that."""
+    from modules.tools.discovery.hidden_categories import exclude_kwargs
+
     by_name = {a.name: a for a in eligible}
-
     matched: List[Any] = []
-    ranker = "semantic"
     try:
-        from modules.tools.discovery.action_semantic_index import (
-            get_action_semantic_index,
-        )
+        from modules.tools.discovery.action_semantic_index import get_action_semantic_index
 
         ranked = await get_action_semantic_index().rank_actions(
             query=query,
@@ -99,33 +106,50 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
             exclude_admin=True,
             exclude_promoted=False,  # discovery spans the WHOLE catalog
             include_super_admin=False,
+            **exclude_kwargs(hidden),
         )
         matched = [by_name[n] for n, _ in ranked if n in by_name]
     except Exception:
         logger.warning("find_tools: semantic ranking failed — keyword fallback", exc_info=True)
+    if matched:
+        return matched, "semantic"
+    return _keyword_matches(eligible, query, limit), "keyword"
 
-    if not matched:
-        ranker = "keyword"
-        matched = _keyword_matches(eligible, query, limit)
 
-    results = []
-    for action in matched:
-        row: Dict[str, Any] = {
-            "action": action.name,
-            "description": action.description,
-            "category": action.category,
-            "permission_level": getattr(action, "permission_level", "read"),
-            "call_with": f"platform_execute(action='{action.name}', params={{...}})",
-        }
-        if include_params:
-            row["params"] = _compact_params(getattr(action, "parameters", {}) or {})
-        results.append(row)
+def _match_row(action: Any, include_params: bool) -> Dict[str, Any]:
+    """One match as find_tools answers it: how to call it, and its parameters when asked."""
+    row: Dict[str, Any] = {
+        "action": action.name,
+        "description": action.description,
+        "category": action.category,
+        "permission_level": getattr(action, "permission_level", "read"),
+        "call_with": f"platform_execute(action='{action.name}', params={{...}})",
+    }
+    if include_params:
+        row["params"] = _compact_params(getattr(action, "parameters", {}) or {})
+    return row
 
+
+async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Search the full platform action catalog by natural-language intent."""
+    query = str(params.get("query") or "").strip()
+    if not query:
+        return {"success": False, "error": "query parameter is required"}
+    limit = _find_limit(params)
+    include_params = params.get("include_params", True) is not False
+
+    from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace
+
+    # PRD-251B US-B106 (B3): a category the workspace is not shown (Socials while it is
+    # off for the workspace) is not discoverable either; the handlers' own refusal stays.
+    hidden = hidden_categories_for_workspace(workspace_id, db)
+    eligible = _for_this_turn(_discoverable(hidden))
+    matched, ranker = await _ranked_matches(query, limit, eligible, hidden)
     return {
         "success": True,
         "query": query,
         "ranker": ranker,
-        "matches": results,
+        "matches": [_match_row(action, include_params) for action in matched],
         "catalog_size": len(eligible),
         "note": (
             "Call any match via platform_execute with its 'action' name and "

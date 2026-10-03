@@ -1,0 +1,115 @@
+'use client'
+
+/**
+ * PRD-251B US-B207 — the Plan page (Plan.dc.html): the plan's name and state, its dates and
+ * timezone, Pause (or Resume) and Save; the five steps on the left (Goal and dates, Cadence,
+ * What to research, Making and approving, Content bank) and the chosen one on the right,
+ * with Back and Next. A new plan is created on Save, then opens as itself; the content bank
+ * fills once the plan exists.
+ */
+import { useEffect, useState } from 'react'
+
+import { Button } from '@/components/ui/button'
+import type { SocialPlan } from '@/lib/socials-plan-types'
+import { browserTimezone } from '@/lib/social-time'
+import { cn } from '@/lib/utils'
+import { useSaveSocialPlan, useSetSocialPlanStatus, useSocialPlan } from '@/hooks/use-socials-plans'
+import { PLAN_STEPS, draftFromPlan, emptyDraft, inputFromDraft, missingFields, statusLine, type PlanDraft } from './plan-model'
+import { PlanStepBank } from './plan-step-bank'
+import { PlanStepCadence } from './plan-step-cadence'
+import { PlanStepGoal } from './plan-step-goal'
+import { PlanStepMaking } from './plan-step-making'
+import { PlanStepResearch } from './plan-step-research'
+
+const STEP_BUTTON = 'flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 text-left text-sm font-medium'
+
+interface PlanPageProps {
+  /** A plan's id, or null for a new plan. */
+  planId: string | null
+  canEdit: boolean
+  onSaved: (plan: SocialPlan) => void
+}
+
+function StepBody({ step, draft, set, planId }: { step: number; draft: PlanDraft; set: (c: Partial<PlanDraft>) => void; planId: string | null }) {
+  if (step === 0) return <PlanStepGoal draft={draft} set={set} />
+  if (step === 1) return <PlanStepCadence draft={draft} set={set} />
+  if (step === 2) return <PlanStepResearch draft={draft} set={set} />
+  if (step === 3) return <PlanStepMaking draft={draft} set={set} />
+  return <PlanStepBank planId={planId} />
+}
+
+function StepsNav({ step, onStep }: { step: number; onStep: (step: number) => void }) {
+  return (
+    <nav aria-label="Plan steps" className="flex flex-col gap-1 rounded-xl border border-border bg-card p-2.5">
+      {PLAN_STEPS.map((label, index) => (
+        <button key={label} type="button" aria-label={label} aria-pressed={index === step} onClick={() => onStep(index)}
+          className={cn(STEP_BUTTON, index === step ? 'bg-secondary text-foreground' : 'text-muted-foreground')}>
+          <span className="text-[12px] text-muted-foreground">{index + 1}</span>
+          {label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+function usePlanDraft(plan: SocialPlan | undefined): [PlanDraft, (changes: Partial<PlanDraft>) => void] {
+  const [draft, setDraft] = useState<PlanDraft>(() => (plan ? draftFromPlan(plan) : emptyDraft(browserTimezone())))
+  const loadedId = plan?.id
+  useEffect(() => {
+    if (plan) setDraft(draftFromPlan(plan))
+    // Reload the form when another plan (or the saved one) arrives, never while typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId])
+  return [draft, (changes) => setDraft((current) => ({ ...current, ...changes }))]
+}
+
+export function SocialsPlanPage({ planId, canEdit, onSaved }: PlanPageProps) {
+  const { data: plan } = useSocialPlan(planId)
+  const [draft, set] = usePlanDraft(plan)
+  const [step, setStep] = useState(planId ? 1 : 0)
+  const save = useSaveSocialPlan()
+  const status = useSetSocialPlanStatus()
+  const missing = missingFields(draft)
+  const onSave = () => save.mutate({ planId, input: inputFromDraft(draft) }, { onSuccess: onSaved })
+  const last = step === PLAN_STEPS.length - 1
+  const saveButton = (
+    <Button type="button" disabled={!canEdit || save.isLoading || missing.length > 0 || plan?.status === 'ended'} onClick={onSave}>
+      Save plan
+    </Button>
+  )
+  return (
+    <div className="socials-plan flex flex-col gap-5">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="m-0 text-[26px] font-semibold text-foreground">{draft.name || 'New plan'}</h1>
+            {plan && <span className="rounded-full border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground">{statusLine(plan)}</span>}
+          </div>
+          <p className="m-0 text-sm text-muted-foreground">
+            {draft.startsOn} – {draft.endsOn} · {draft.timezone} · the plan sets the rhythm and the topics; each post is made on its day.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {plan && plan.status !== 'ended' && canEdit && (
+            <Button type="button" variant="outline" disabled={status.isLoading}
+              onClick={() => status.mutate({ planId: plan.id, action: plan.status === 'paused' ? 'resume' : 'pause' })}>
+              {plan.status === 'paused' ? 'Resume plan' : 'Pause plan'}
+            </Button>
+          )}
+          {saveButton}
+        </div>
+      </header>
+      {missing.length > 0 && <p className="m-0 text-[12.5px] text-muted-foreground">Before saving, the plan needs {missing.join(', ')}.</p>}
+      <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <StepsNav step={step} onStep={setStep} />
+        <section aria-label={PLAN_STEPS[step]} className="flex min-h-[520px] flex-col gap-5 rounded-xl border border-border bg-background p-5">
+          <StepBody step={step} draft={draft} set={set} planId={planId} />
+          <footer className="mt-auto flex gap-2 border-t border-border pt-3.5">
+            <Button type="button" variant="ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</Button>
+            {last ? saveButton : <Button type="button" variant="outline" onClick={() => setStep(step + 1)}>Next</Button>}
+          </footer>
+        </section>
+      </div>
+    </div>
+  )
+}

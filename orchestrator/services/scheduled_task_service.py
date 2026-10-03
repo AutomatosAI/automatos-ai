@@ -23,7 +23,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
-from services.schedule_util import is_valid_cron, next_run as _util_next_run
+from services.schedule_util import next_run as _util_next_run
+from services.scheduled_task_steps import (  # noqa: F401 — DELIVER_* and DELIVERY_MODES are imported from here
+    DELIVER_BOARD_TASK, DELIVER_CHAT, DELIVERY_MODES, count_the_run, one_shot_time, request_error,
+    schedule_error, scheduled_message, skipped_for_trial, tell_the_chat, ticket_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +51,6 @@ RECONCILE_INTERVAL_SECONDS = 60
 ONE_SHOT_MISFIRE_GRACE_SECONDS = 3 * RECONCILE_INTERVAL_SECONDS
 
 # How a fired task is delivered.
-DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
-DELIVER_BOARD_TASK = "board_task"  # file a board ticket (assigned, or Inbox)
-DELIVERY_MODES = (DELIVER_CHAT, DELIVER_BOARD_TASK)
-_REVIEW_MODES = ("auto", "human", "llm")
 
 class ScheduledTaskService:
     """Creates, lists, cancels, and executes agent-scheduled tasks."""
@@ -117,34 +117,68 @@ class ScheduledTaskService:
             created_by_user_id: the operator who scheduled it (the board dialog,
                 or the human driving a chat turn); the consent actor at fire time.
         """
-        # Validate task_type
-        if task_type not in ("one_shot", "recurring"):
-            return {"success": False, "error": "task_type must be 'one_shot' or 'recurring'"}
-        if deliver_as not in DELIVERY_MODES:
-            return {"success": False, "error": f"deliver_as must be one of: {', '.join(DELIVERY_MODES)}"}
-        if created_by_agent_id is None and not created_by_user_id:
-            return {"success": False, "error": "A creator is required (an agent or a user)"}
-        if deliver_as == DELIVER_CHAT and target_agent_id is None:
-            return {"success": False, "error": "Chat delivery needs a target agent"}
         payload = dict(payload or {})
-        if deliver_as == DELIVER_BOARD_TASK and not str(payload.get("title") or "").strip():
-            return {"success": False, "error": "A board task needs a title"}
+        names, error = self._refusal(
+            task_type, deliver_as, created_by_agent_id, created_by_user_id, target_agent_id, payload, schedule,
+        )
+        if error:
+            return {"success": False, "error": error}
 
-        # Validate schedule format
-        if task_type == "one_shot":
-            try:
-                run_at = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
-                if run_at <= datetime.now(timezone.utc):
-                    return {"success": False, "error": "Schedule datetime must be in the future"}
-            except (ValueError, TypeError):
-                return {"success": False, "error": f"Invalid ISO datetime: {schedule}. Use format: 2026-03-11T09:00:00Z"}
-        else:
-            # Validate with the shared cron util (croniter — standard crontab
-            # semantics, the same the calendar and firing use post-PRD-162).
-            if not is_valid_cron(schedule):
-                return {"success": False, "error": f"Invalid cron expression: {schedule}. Use 5-field format: '0 9 * * 1' (minute hour dom month dow)"}
+        next_run_at = one_shot_time(schedule) if task_type == "one_shot" else self._next_cron_run(schedule)
+        task_id = self._insert_row(
+            created_by_agent_id=created_by_agent_id, target_agent_id=target_agent_id, task_type=task_type,
+            description=description, schedule=schedule, max_runs=max_runs, next_run_at=next_run_at,
+            origin_chat_id=origin_chat_id, deliver_as=deliver_as, payload=payload,
+            created_by_user_id=created_by_user_id,
+        )
 
-        # Validate agents exist in workspace
+        # Register with APScheduler
+        self._register_with_scheduler(task_id, task_type, schedule, target_agent_id)
+
+        target_name = names.get(target_agent_id)
+        logger.info(
+            "[ScheduledTask] Created task %d: %s → %s '%s' (%s @ %s)",
+            task_id, task_type, deliver_as, target_name or "unassigned", task_type, schedule,
+        )
+        message = scheduled_message(task_id, task_type, deliver_as, payload, target_name)
+
+        # Tell the owner. Night 1 (2026-09-18) ended with four 09:00 agent
+        # routines running in the workspace that nobody had been told about —
+        # they were on the Calendar, but nothing announced them. A schedule an
+        # AGENT set up is the one worth saying out loud.
+        if created_by_agent_id:
+            await self._announce_new_schedule(
+                task_id=task_id, message=message, schedule=schedule,
+                created_by_agent_id=created_by_agent_id,
+            )
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "task_type": task_type,
+            "deliver_as": deliver_as,
+            "title": payload.get("title"),
+            "target_agent": target_name,
+            "schedule": schedule,
+            "next_run_at": next_run_at.isoformat() if next_run_at else None,
+            "message": message,
+        }
+
+    def _refusal(
+        self, task_type: str, deliver_as: str, created_by_agent_id: Optional[int], created_by_user_id: Optional[str],
+        target_agent_id: Optional[int], payload: Dict[str, Any], schedule: str,
+    ):
+        """``({agent id: name}, why the request is refused or None)``, checked in the
+        order it always was: the request, its schedule, its agents, the limits."""
+        error = request_error(task_type, deliver_as, created_by_agent_id, created_by_user_id, target_agent_id, payload)
+        error = error or schedule_error(task_type, schedule)
+        if error:
+            return {}, error
+        names, error = self._agent_names(created_by_agent_id, target_agent_id)
+        return names, error or self._limit_error(created_by_agent_id, task_type)
+
+    def _agent_names(self, created_by_agent_id: Optional[int], target_agent_id: Optional[int]):
+        """``({agent id: name}, error)``: both agents must be this workspace's."""
         agent_check = self.db.execute(
             text("""
                 SELECT id, name FROM agents
@@ -153,13 +187,16 @@ class ScheduledTaskService:
             {"created_by": created_by_agent_id, "target": target_agent_id, "ws_id": str(self.workspace_id)},
         ).fetchall()
 
-        agent_ids_found = {row.id for row in agent_check}
-        if created_by_agent_id is not None and created_by_agent_id not in agent_ids_found:
-            return {"success": False, "error": f"Creator agent {created_by_agent_id} not found in workspace"}
-        if target_agent_id is not None and target_agent_id not in agent_ids_found:
-            return {"success": False, "error": f"Target agent {target_agent_id} not found in workspace"}
+        names = {row.id: row.name for row in agent_check}
+        if created_by_agent_id is not None and created_by_agent_id not in names:
+            return names, f"Creator agent {created_by_agent_id} not found in workspace"
+        if target_agent_id is not None and target_agent_id not in names:
+            return names, f"Target agent {target_agent_id} not found in workspace"
+        return names, None
 
-        # Rate limits: per creator agent, or one workspace-wide cap for operator rows
+    def _limit_error(self, created_by_agent_id: Optional[int], task_type: str) -> Optional[str]:
+        """Rate limits: per creator agent, or one workspace-wide cap for operator rows;
+        and a workspace cap on recurring rows."""
         if created_by_agent_id is not None:
             active_count = self.db.execute(
                 text("""
@@ -171,7 +208,7 @@ class ScheduledTaskService:
                 {"agent_id": created_by_agent_id, "ws_id": str(self.workspace_id)},
             ).scalar() or 0
             if active_count >= MAX_TASKS_PER_AGENT:
-                return {"success": False, "error": f"Agent has reached the limit of {MAX_TASKS_PER_AGENT} active tasks"}
+                return f"Agent has reached the limit of {MAX_TASKS_PER_AGENT} active tasks"
         else:
             operator_count = self.db.execute(
                 text("""
@@ -183,32 +220,31 @@ class ScheduledTaskService:
                 {"ws_id": str(self.workspace_id)},
             ).scalar() or 0
             if operator_count >= MAX_OPERATOR_TASKS_PER_WORKSPACE:
-                return {
-                    "success": False,
-                    "error": f"Workspace has reached the limit of {MAX_OPERATOR_TASKS_PER_WORKSPACE} active scheduled board tasks",
-                }
+                return f"Workspace has reached the limit of {MAX_OPERATOR_TASKS_PER_WORKSPACE} active scheduled board tasks"
+        return self._recurring_limit_error(task_type)
 
-        if task_type == "recurring":
-            recurring_count = self.db.execute(
-                text("""
-                    SELECT COUNT(*) FROM agent_scheduled_tasks
-                    WHERE workspace_id = :ws_id
-                      AND task_type = 'recurring'
-                      AND status = 'active'
-                """),
-                {"ws_id": str(self.workspace_id)},
-            ).scalar() or 0
+    def _recurring_limit_error(self, task_type: str) -> Optional[str]:
+        if task_type != "recurring":
+            return None
+        recurring_count = self.db.execute(
+            text("""
+                SELECT COUNT(*) FROM agent_scheduled_tasks
+                WHERE workspace_id = :ws_id
+                  AND task_type = 'recurring'
+                  AND status = 'active'
+            """),
+            {"ws_id": str(self.workspace_id)},
+        ).scalar() or 0
+        if recurring_count >= MAX_RECURRING_PER_WORKSPACE:
+            return f"Workspace has reached the limit of {MAX_RECURRING_PER_WORKSPACE} recurring tasks"
+        return None
 
-            if recurring_count >= MAX_RECURRING_PER_WORKSPACE:
-                return {"success": False, "error": f"Workspace has reached the limit of {MAX_RECURRING_PER_WORKSPACE} recurring tasks"}
-
-        # Compute next_run_at
-        if task_type == "one_shot":
-            next_run_at = run_at
-        else:
-            next_run_at = self._next_cron_run(schedule)
-
-        # Insert
+    def _insert_row(
+        self, *, created_by_agent_id: Optional[int], target_agent_id: Optional[int], task_type: str,
+        description: str, schedule: str, max_runs: Optional[int], next_run_at: Any,
+        origin_chat_id: Optional[str], deliver_as: str, payload: Dict[str, Any], created_by_user_id: Optional[str],
+    ) -> int:
+        """Insert the scheduled row and commit it; its id."""
         result = self.db.execute(
             text("""
                 INSERT INTO agent_scheduled_tasks
@@ -239,45 +275,7 @@ class ScheduledTaskService:
         )
         row = result.fetchone()
         self.db.commit()
-
-        task_id = row.id
-
-        # Register with APScheduler
-        self._register_with_scheduler(task_id, task_type, schedule, target_agent_id)
-
-        target_name = next((r.name for r in agent_check if r.id == target_agent_id), None)
-        logger.info(
-            "[ScheduledTask] Created task %d: %s → %s '%s' (%s @ %s)",
-            task_id, task_type, deliver_as, target_name or "unassigned", task_type, schedule,
-        )
-
-        if deliver_as == DELIVER_BOARD_TASK:
-            where = f"assigned to '{target_name}'" if target_name else "in the Inbox"
-            message = f"Scheduled {task_type} board task #{task_id} '{payload['title']}' — filed {where} when it fires"
-        else:
-            message = f"Scheduled {task_type} task #{task_id} for agent '{target_name or 'unknown'}'"
-
-        # Tell the owner. Night 1 (2026-09-18) ended with four 09:00 agent
-        # routines running in the workspace that nobody had been told about —
-        # they were on the Calendar, but nothing announced them. A schedule an
-        # AGENT set up is the one worth saying out loud.
-        if created_by_agent_id:
-            await self._announce_new_schedule(
-                task_id=task_id, message=message, schedule=schedule,
-                created_by_agent_id=created_by_agent_id,
-            )
-
-        return {
-            "success": True,
-            "task_id": task_id,
-            "task_type": task_type,
-            "deliver_as": deliver_as,
-            "title": payload.get("title"),
-            "target_agent": target_name,
-            "schedule": schedule,
-            "next_run_at": next_run_at.isoformat() if next_run_at else None,
-            "message": message,
-        }
+        return row.id
 
     # ------------------------------------------------------------------
     # List / Get
@@ -374,33 +372,42 @@ class ScheduledTaskService:
             return {"success": False, "error": f"Task {task_id} not found"}
 
         self.db.commit()
-
-        # Update scheduler
-        job_id = f"scheduled_task_{task_id}"
-        try:
-            from services.scheduler import get_unified_scheduler
-            scheduler = get_unified_scheduler()
-            if scheduler.apscheduler:
-                if new_status in ("cancelled", "paused"):
-                    try:
-                        scheduler.apscheduler.remove_job(job_id)
-                    except Exception:
-                        pass  # Job may not exist yet
-                elif new_status == "active":
-                    # Re-read task and re-register
-                    task = self.db.execute(
-                        text("SELECT * FROM agent_scheduled_tasks WHERE id = :id"),
-                        {"id": task_id},
-                    ).fetchone()
-                    if task:
-                        self._register_with_scheduler(
-                            task.id, task.task_type, task.schedule, task.target_agent_id,
-                        )
-        except Exception as e:
-            logger.warning("[ScheduledTask] Failed to update scheduler for task %d: %s", task_id, e)
-
+        # F224: a routine cancelled or paused stops the firing in flight, too.
+        from services.board_cancel import stop_scheduled_task_sessions
+        stop_scheduled_task_sessions(self.db, self.workspace_id, task_id, new_status)
+        self._reschedule(task_id, new_status)
         logger.info("[ScheduledTask] Task %d → %s", task_id, new_status)
         return {"success": True, "task_id": task_id, "status": new_status}
+
+    def _reschedule(self, task_id: int, new_status: str) -> None:
+        """The scheduler follows the task's status: a cancelled or paused task's job
+        is removed, an active one's is registered again."""
+        job_id = f"scheduled_task_{task_id}"
+        try:
+            from apscheduler.jobstores.base import JobLookupError
+
+            from services.scheduler import get_unified_scheduler
+            scheduler = get_unified_scheduler()
+            if not scheduler.apscheduler:
+                return
+            if new_status in ("cancelled", "paused"):
+                try:
+                    scheduler.apscheduler.remove_job(job_id)
+                except JobLookupError:
+                    pass  # Job may not exist yet
+                return
+            if new_status == "active":
+                # Re-read task and re-register
+                task = self.db.execute(
+                    text("SELECT * FROM agent_scheduled_tasks WHERE id = :id"),
+                    {"id": task_id},
+                ).fetchone()
+                if task:
+                    self._register_with_scheduler(
+                        task.id, task.task_type, task.schedule, task.target_agent_id,
+                    )
+        except Exception as e:
+            logger.warning("[ScheduledTask] Failed to update scheduler for task %d: %s", task_id, e)
 
     # ------------------------------------------------------------------
     # Execution (called by APScheduler when job fires)
@@ -427,92 +434,17 @@ class ScheduledTaskService:
             if not task:
                 logger.warning("[ScheduledTask] Task %d not found or not active", task_id)
                 return
-
-            # PRD-222 US-005 — no background burn: trial workspaces get no
-            # scheduled execution until converted. Visible skip, never silent.
-            try:
-                from core.models.workspaces import Workspace
-                from services.trial_ledger import is_trial_active_workspace
-                # PRD-234 S3: the local edition has no platform-paid trial credit to
-                # protect (operator keys / the user's own Claude subscription) — the
-                # onboarding trial record must not switch scheduled work off there.
-                from config import config as _config
-                _local_edition = getattr(_config, "AUTH_EDITION", "saas") == "local"
-
-                _ws = db.query(Workspace).get(task.workspace_id)
-                if not _local_edition and is_trial_active_workspace(_ws):
-                    logger.warning(
-                        "[ScheduledTask] Skipping task %d — trial workspace %s "
-                        "(no background burn until converted)",
-                        task_id, task.workspace_id,
-                    )
-                    return
-            except Exception as _e:
-                logger.debug("[ScheduledTask] trial-skip check failed for task %d: %s", task_id, _e)
+            if skipped_for_trial(db, task, task_id):
+                return
 
             logger.info(
                 "[ScheduledTask] Firing task %d: '%s' → %s / agent %s",
                 task_id, task.description[:80], getattr(task, "deliver_as", DELIVER_CHAT),
                 task.target_agent_id,
             )
-
-            # Update run tracking
-            db.execute(
-                text("""
-                    UPDATE agent_scheduled_tasks
-                    SET run_count = run_count + 1,
-                        last_run_at = NOW(),
-                        updated_at = NOW()
-                    WHERE id = :id
-                """),
-                {"id": task_id},
-            )
-
-            # Check if we've hit max_runs → mark completed
-            if task.max_runs and (task.run_count + 1) >= task.max_runs:
-                db.execute(
-                    text("""
-                        UPDATE agent_scheduled_tasks
-                        SET status = 'completed', updated_at = NOW()
-                        WHERE id = :id
-                    """),
-                    {"id": task_id},
-                )
-                # Remove from scheduler
-                try:
-                    from services.scheduler import get_unified_scheduler
-                    sched = get_unified_scheduler()
-                    if sched.apscheduler:
-                        sched.apscheduler.remove_job(f"scheduled_task_{task_id}")
-                except Exception:
-                    pass
-
-            # Mark one_shot as completed after execution
-            if task.task_type == "one_shot":
-                db.execute(
-                    text("""
-                        UPDATE agent_scheduled_tasks
-                        SET status = 'completed', updated_at = NOW()
-                        WHERE id = :id
-                    """),
-                    {"id": task_id},
-                )
-
+            count_the_run(db, task, task_id)
             db.commit()
-
-            if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_BOARD_TASK:
-                # Board delivery: the ticket goes on the board, the dispatcher runs it.
-                ScheduledTaskService._file_board_task(db, task, task_id)
-            else:
-                # Trigger agent chat via internal API
-                await ScheduledTaskService._trigger_agent_chat(
-                    workspace_id=str(task.workspace_id),
-                    agent_id=task.target_agent_id,
-                    message=f"[Scheduled Task #{task_id}] {task.description}",
-                    db=db,
-                    origin_chat_id=getattr(task, "origin_chat_id", None),
-                    task_id=task_id,
-                )
+            await ScheduledTaskService._deliver(db, task, task_id)
 
         except Exception as e:
             logger.error("[ScheduledTask] Task %d execution failed: %s", task_id, e, exc_info=True)
@@ -529,6 +461,24 @@ class ScheduledTaskService:
             db.close()
 
     @staticmethod
+    async def _deliver(db: Session, task: Any, task_id: int) -> None:
+        """Deliver a fired row: a board ticket the dispatcher runs, or a chat with its agent."""
+        if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_BOARD_TASK:
+            # Board delivery: the ticket goes on the board, the dispatcher runs it.
+            ScheduledTaskService._file_board_task(db, task, task_id)
+            return
+        # Trigger agent chat via internal API. PRD-252 R4: a schedule's id never
+        # follows a '#', which now means a ticket's number.
+        await ScheduledTaskService._trigger_agent_chat(
+            workspace_id=str(task.workspace_id),
+            agent_id=task.target_agent_id,
+            message=f"[Scheduled task {task_id}] {task.description}",
+            db=db,
+            origin_chat_id=getattr(task, "origin_chat_id", None),
+            task_id=task_id,
+        )
+
+    @staticmethod
     def _file_board_task(db: Session, task: Any, task_id: int) -> None:
         """Board delivery: file the ticket the row describes.
 
@@ -538,41 +488,14 @@ class ScheduledTaskService:
         ticket runs exactly like one filed by hand. A recurring row files a fresh
         ticket per fire (``source_id`` carries the fire time).
         """
-        from core.models.core import BoardTask
         from services.board_consent import (
             WHY_SCHEDULED_AND_ASSIGNED, actor_from_user_id, consent_for_created_ticket,
         )
         from services.board_dispatcher import notify_task_available
         from services.board_events import notify_board_event
-        from services.board_sla import PRIORITY_SLA_HOURS, sla_deadline_for
-        from services.cli_ticket_lane import source_id_for
 
-        payload = task.payload if isinstance(getattr(task, "payload", None), dict) else {}
-        description = str(task.description or "").strip()
-        first_line = description.splitlines()[0] if description else "Scheduled task"
-        title = (str(payload.get("title") or "").strip() or first_line)[:255]
-        priority = payload.get("priority") if payload.get("priority") in PRIORITY_SLA_HOURS else "medium"
-        review_mode = payload.get("review_mode") if payload.get("review_mode") in _REVIEW_MODES else "auto"
-        tags = [str(t) for t in (payload.get("tags") or []) if t]
-        assigned_agent_id = getattr(task, "target_agent_id", None)
         created_by_user_id = getattr(task, "created_by_user_id", None)
-        now = datetime.now(timezone.utc)
-
-        ticket = BoardTask(
-            workspace_id=task.workspace_id,
-            title=title,
-            description=description or title,
-            priority=priority,
-            review_mode=review_mode,
-            assigned_agent_id=assigned_agent_id,
-            status="assigned" if assigned_agent_id else "inbox",
-            created_by_type="user" if created_by_user_id else "agent",
-            created_by_id=str(created_by_user_id or getattr(task, "created_by_agent_id", None) or ""),
-            source_type="scheduled_task",
-            source_id=source_id_for("task", task_id, now),
-            tags=tags,
-            sla_deadline=sla_deadline_for(priority, now=now),
-        )
+        ticket = ticket_for(task, task_id)
         db.add(ticket)
         db.flush()  # the id the notice carries
         # F119: each notice before the commit that carries it — the loop closes
@@ -594,17 +517,7 @@ class ScheduledTaskService:
             notify_task_available(db, workspace_id=str(task.workspace_id), task_id=ticket.id)
             db.commit()
         logger.info("[ScheduledTask] Task %d filed board ticket #%s (%s)", task_id, ticket.id, ticket.status)
-
-        origin_chat_id = getattr(task, "origin_chat_id", None)
-        if origin_chat_id:
-            from services.chat_messenger import deliver_background_message
-
-            deliver_background_message(
-                db, workspace_id=str(task.workspace_id),
-                text=f"Filed board ticket #{ticket.id}: {title}",
-                source={"origin": "scheduled_task"}, chat_id=str(origin_chat_id),
-                link_type="board_task", link_id=str(ticket.id),
-            )
+        tell_the_chat(db, task, ticket)
 
     @staticmethod
     async def _trigger_agent_chat(
@@ -702,7 +615,7 @@ class ScheduledTaskService:
         """Register task with UnifiedScheduler (APScheduler)."""
         try:
             from services.scheduler import get_unified_scheduler
-            from apscheduler.triggers.cron import CronTrigger
+            from services.schedule_util import scheduler_cron_trigger
             from apscheduler.triggers.date import DateTrigger
 
             scheduler = get_unified_scheduler()
@@ -725,8 +638,8 @@ class ScheduledTaskService:
                 job_kwargs["misfire_grace_time"] = ONE_SHOT_MISFIRE_GRACE_SECONDS
             else:
                 # Standard crontab semantics so firing matches the calendar's
-                # croniter next_run (PRD-162 — one schedule truth).
-                trigger = CronTrigger.from_crontab(schedule)
+                # croniter next_run (PRD-162 — one schedule truth; F240: the weekday too).
+                trigger = scheduler_cron_trigger(schedule)
 
             # APScheduler needs a sync wrapper for async execute_task
             import asyncio

@@ -57,7 +57,8 @@ function statusTone(status: string): string {
   }
 }
 
-function GrantCard({ grant }: { grant: ApprovalGrant }) {
+/** One grant with its decision buttons; a ticket shows its own (PRD-252 R1, ticket-approvals.tsx). */
+export function GrantCard({ grant }: { grant: ApprovalGrant }) {
   const grantMut = useGrantApproval()
   const denyMut = useDenyApproval()
   const revokeMut = useRevokeApproval()

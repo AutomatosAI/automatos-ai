@@ -2,6 +2,7 @@
  * PRD-251 S0.5 (D1) — the Socials tab in BOTH Deliverables shells, through the
  * real /deliverables route: absent while `socials.available` is false (and
  * `?tab=socials` then renders Outputs), present with its body when true.
+ * PRD-251B US-B301: the Brand kit tab is always there, beside Templates.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
@@ -22,6 +23,7 @@ vi.mock('@/components/deliverables/deliverables-blogs', () => ({ DeliverablesBlo
 vi.mock('@/components/documents/blocks/TemplateStudio', () => ({ TemplateStudio: () => <div data-testid="body-templates" /> }))
 vi.mock('@/components/workspace/gallery-view', () => ({ GalleryView: () => <div data-testid="gallery" /> }))
 vi.mock('@/components/deliverables/socials/socials-tab', () => ({ SocialsTab: () => <div data-testid="body-socials" /> }))
+vi.mock('@/components/deliverables/brand/brand-kit-tab', () => ({ BrandKitTab: () => <div data-testid="body-brand" /> }))
 
 import DeliverablesPage from '@/app/deliverables/page'
 import { resolveDeliverableTab, visibleDeliverableTabs } from '@/lib/deliverables/tabs'
@@ -50,7 +52,7 @@ describe.each([
     state.workspace = workspaceWith(false)
     state.search = 'tab=socials'
     render(<DeliverablesPage />)
-    expect(tabLabels()).toEqual(['Outputs', 'Blogs', 'Templates', 'Explorer'])
+    expect(tabLabels()).toEqual(['Outputs', 'Blogs', 'Templates', 'Brand kit', 'Explorer'])
     expect(screen.getByTestId('body-outputs')).toBeInTheDocument()
     expect(screen.queryByTestId('body-socials')).toBeNull()
   })
@@ -67,7 +69,7 @@ describe.each([
     state.workspace = workspaceWith(true)
     state.search = 'tab=socials'
     render(<DeliverablesPage />)
-    expect(tabLabels()).toEqual(['Outputs', 'Blogs', 'Templates', 'Socials', 'Explorer'])
+    expect(tabLabels()).toEqual(['Outputs', 'Blogs', 'Templates', 'Brand kit', 'Socials', 'Explorer'])
     expect(screen.getByTestId('body-socials')).toBeInTheDocument()
     expect(screen.queryByTestId('body-outputs')).toBeNull()
   })
@@ -75,12 +77,29 @@ describe.each([
 
 describe('the tab rule both shells share', () => {
   it('lists socials only when available and falls back to outputs', () => {
-    expect(visibleDeliverableTabs(false)).toEqual(['outputs', 'blogs', 'templates'])
-    expect(visibleDeliverableTabs(true)).toEqual(['outputs', 'blogs', 'templates', 'socials'])
+    expect(visibleDeliverableTabs(false)).toEqual(['outputs', 'blogs', 'templates', 'brand'])
+    expect(visibleDeliverableTabs(true)).toEqual(['outputs', 'blogs', 'templates', 'brand', 'socials'])
+    expect(resolveDeliverableTab('brand', false)).toBe('brand')
     expect(resolveDeliverableTab('socials', false)).toBe('outputs')
     expect(resolveDeliverableTab('socials', true)).toBe('socials')
     expect(resolveDeliverableTab('blogs', false)).toBe('blogs')
     expect(resolveDeliverableTab('nonsense', true)).toBe('outputs')
     expect(resolveDeliverableTab(null, true)).toBe('outputs')
+  })
+})
+
+describe.each([
+  ['Studio', true],
+  ['Classic', false],
+])('the Brand kit tab in the %s shell', (_name, studio) => {
+  beforeEach(() => { state.studio = studio })
+
+  it('is there whether or not Socials is, and ?tab=brand renders it', () => {
+    state.workspace = workspaceWith(false)
+    state.search = 'tab=brand'
+    render(<DeliverablesPage />)
+    expect(tabLabels()).toContain('Brand kit')
+    expect(screen.getByTestId('body-brand')).toBeInTheDocument()
+    expect(screen.queryByTestId('body-outputs')).toBeNull()
   })
 })

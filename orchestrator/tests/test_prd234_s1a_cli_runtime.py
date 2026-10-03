@@ -98,6 +98,12 @@ def test_cli_requires_the_flag_a_provider_and_a_cli_model():
         ("claude", "anthropic/claude-opus-4", False),
         ("codex", "gpt-5-codex", True),
         ("codex", "openai/gpt-5", False),
+        # PRD-253: Copilot's models are its plan's — permissive, like Codex (D-2)
+        ("copilot", "auto", True),
+        ("copilot", "claude-sonnet-4.6", True),
+        ("copilot", "gpt-5.4", True),
+        ("copilot", "openai/gpt-5", False),
+        ("copilot", "GPT 5", False),
         ("gemini", "gemini-pro", False),  # not a v1 provider
     ],
 )

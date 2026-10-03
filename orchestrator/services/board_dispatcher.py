@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
+from services.daily_spend_guard import release_spend_holds
 from services.pasted_data import pasted_data_rule
 from services.ticket_owner_ask import ticket_answers_block
 from services.ticket_redo import redo_block
@@ -634,6 +635,7 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
     db = session_factory()
     try:
         requeue_expired_leases(db, max_attempts=cfg.BOARD_DISPATCH_MAX_ATTEMPTS)
+        release_spend_holds(db)  # PRD-252 R3: a spend hold ends once the ceiling allows
         breached = scan_sla_breaches(db)
         claimed = claim_tasks(
             db,

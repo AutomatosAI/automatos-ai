@@ -14,9 +14,9 @@ Everything the host needs to know about ITS machine and the backend it serves:
 * ``--cli-binary ID=PATH`` (repeatable) / ``AUTOMATOS_CLI_BINARIES`` — an explicit
   binary for one CLI (``claude=/opt/homebrew/bin/claude``); default = the
   operator's login-shell PATH, per CLI (design §7)
-* ``--no-session-sandbox``          — run Claude sessions without the OS sandbox
-  (``sandbox.py``); for a host that is already isolated (a VM, a container, a
-  dedicated user with no credentials)
+* ``--no-session-sandbox``          — run Claude Code and GitHub Copilot sessions without
+  their OS sandbox (``sandbox.py``, ``adapters/copilot_sandbox.py``); for a host
+  that is already isolated (a VM, a container, a dedicated user with no credentials)
 * ``--session-allow-domain HOST`` (repeatable) — a host sandboxed commands may
   reach, on top of the package registries
 
@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .permission_modes import PERMISSION_MODES, UNLISTED_BASH_MODES
+from .presets import MAX_HOLD_SECONDS
 from .sandbox import DEFAULT_ALLOWED_DOMAINS, SessionSandbox
 
 DEFAULT_URL = "http://127.0.0.1:8000"
@@ -160,7 +161,7 @@ def _add_session_args(p: argparse.ArgumentParser) -> None:
     # so a service installed with it still starts (permission_modes.UNLISTED_BASH_MODES).
     p.add_argument("--unlisted-bash", choices=tuple(UNLISTED_BASH_MODES), default=None, help=argparse.SUPPRESS)
     p.add_argument("--no-session-sandbox", action="store_true",
-                   help="run Claude sessions WITHOUT the OS sandbox: build and test commands then run with "
+                   help="run Claude Code and GitHub Copilot sessions WITHOUT their OS sandbox: build and test commands then run with "
                         "your full user rights, home directory and network. Only on a host that is already "
                         "isolated (a VM, a container, a dedicated user with no credentials)")
     p.add_argument("--session-allow-domain", action="append", default=[], metavar="HOST",
@@ -168,7 +169,8 @@ def _add_session_args(p: argparse.ArgumentParser) -> None:
                         f"({', '.join(DEFAULT_ALLOWED_DOMAINS)}); repeatable")
     p.add_argument("--ask-timeout", type=float, default=DEFAULT_ASK_TIMEOUT_SECONDS,
                    help=("seconds a session waits for the operator to answer a permission card before "
-                         f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)})"))
+                         f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)}); inside a turn never more than "
+                         f"{int(MAX_HOLD_SECONDS)}, the longest a CLI's hook waits"))
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
 

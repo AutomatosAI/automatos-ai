@@ -154,12 +154,14 @@ def preferred_toolkits() -> Tuple[str, ...]:
     return tuple(dict.fromkeys(name for name in names if name in RECIPES))
 
 
-def route_for(kind: str, caps: MediaCapabilities) -> Union[Route, str]:
-    """The first toolkit route that makes ``kind`` here; else why none does."""
+def route_for(kind: str, caps: MediaCapabilities, prefer: Optional[str] = None) -> Union[Route, str]:
+    """The first toolkit route that makes ``kind`` here, the workspace's default for it
+    first (``prefer``, PRD-251B US-B304); else why none does."""
     if caps.problem:
         return caps.problem
     reasons = []
-    for toolkit in preferred_toolkits():
+    order = preferred_toolkits()
+    for toolkit in dict.fromkeys((prefer, *order) if prefer in order else order):
         if toolkit not in caps.connected:
             continue
         route, why = RECIPES[toolkit].route(kind, caps)
@@ -173,7 +175,22 @@ def route_for(kind: str, caps: MediaCapabilities) -> Union[Route, str]:
     return f"no generation toolkit that makes {KIND_WORDS[kind]} is connected{hint}"
 
 
-def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, height: int) -> Optional[FootagePlan]:
+def _skip_reason(slot: str, spec: Any, record: Any) -> Optional[str]:
+    """Why this render plays the slot's own motion graphics instead of making it, or ``None``."""
+    if not isinstance(spec, Mapping):
+        return "the template has no such slot"
+    label = str(spec.get("label") or slot)
+    if not slot_generatable(spec):
+        return f"{label} takes the workspace's own file, never generated footage"
+    if not isinstance(record, Mapping) or not isinstance(record.get("prompt"), str):
+        return "it asks for no prompt"
+    if record.get("options_state"):  # PRD-251B US-B305: AI options made, none picked yet
+        return f"{label}: pick one of its AI options first"
+    return None
+
+
+def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, height: int, style: str = "",
+             prefer: Optional[Mapping[str, str]] = None, references: Tuple[str, ...] = ()) -> Optional[FootagePlan]:
     """The plan for the post's ``footage`` over its template's ``slots``; ``None`` when it asks for none."""
     asked = footage if isinstance(footage, Mapping) else {}
     if not asked:
@@ -186,27 +203,24 @@ def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, h
     routes: Dict[str, Union[Route, str]] = {}
     for slot, record in asked.items():
         spec = specs.get(slot)
-        if not isinstance(spec, Mapping):
-            fallback[slot] = "the template has no such slot"
+        why = _skip_reason(slot, spec, record)
+        if why:
+            fallback[slot] = why
             continue
         label = str(spec.get("label") or slot)
-        if not slot_generatable(spec):
-            fallback[slot] = f"{label} takes the workspace's own file, never generated footage"
-            continue
-        if not isinstance(record, Mapping) or not isinstance(record.get("prompt"), str):
-            fallback[slot] = "it asks for no prompt"
-            continue
         if record.get("status") == service.FOOTAGE_DONE and valid_file_name(record.get("name")):
             kept.append(Kept(slot=slot, path=spec["path"], name=record["name"]))
             continue
         kind = spec["kind"]
         if kind not in routes:
-            routes[kind] = route_for(kind, caps)
+            routes[kind] = route_for(kind, caps, (prefer or {}).get(kind))
         route = routes[kind]
         if isinstance(route, str):
             fallback[slot] = route
             continue
-        shots.append((Shot(slot=slot, kind=kind, path=spec["path"], label=label, prompt=record["prompt"], aspect_ratio=ratio), route))
+        shot = Shot(slot=slot, kind=kind, path=spec["path"], label=label, prompt=record["prompt"], aspect_ratio=ratio, style=style,
+                    references=references)
+        shots.append((shot, route))
     return FootagePlan(shots=tuple(shots), kept=tuple(kept), fallback=dict(fallback))
 
 
@@ -277,6 +291,7 @@ class Made:
     bytes: int
     sha256: str
     estimate_usd: float
+    deliverable_id: Optional[str] = None  # PRD-251B US-B305: an AI option's own Deliverable
 
 
 def _store(store: MediaStore, key: str, data: bytes, content_type: str) -> None:
@@ -319,12 +334,14 @@ def _register(session_factory: Callable[[], Any], *, workspace_id: UUID, post_id
     return str(result["deliverable_id"])
 
 
-def _locked_post(db: Any, workspace_id: UUID, post_id: UUID) -> Optional[SocialPost]:
-    """The post, its row locked until the transaction ends (footage is written whole)."""
+def locked_post(db: Any, workspace_id: UUID, post_id: UUID) -> Optional[SocialPost]:
+    """The post as its row stands now, locked until the transaction ends (footage is written whole,
+    so every writer of it reads it this way first)."""
     return (
         db.query(SocialPost)
         .filter(SocialPost.workspace_id == workspace_id, SocialPost.id == post_id)
         .with_for_update()
+        .populate_existing()
         .first()
     )
 
@@ -333,7 +350,7 @@ def _record(session_factory: Callable[[], Any], workspace_id: UUID, post_id: UUI
     """Mark the slot done on the post with its file; ``False`` when the post no longer asks for it."""
     db = session_factory()
     try:
-        post = _locked_post(db, workspace_id, post_id)
+        post = locked_post(db, workspace_id, post_id)
         if post is None or not service.record_footage(post, slot, record):
             db.rollback()
             return False
@@ -350,7 +367,7 @@ def _record_costs(session_factory: Callable[[], Any], workspace_id: UUID, post_i
     """A credit-billed toolkit's cost per slot, once its balance difference is known."""
     db = session_factory()
     try:
-        post = _locked_post(db, workspace_id, post_id)
+        post = locked_post(db, workspace_id, post_id)
         footage = dict(post.footage) if post is not None and isinstance(post.footage, dict) else {}
         changed = False
         for slot, usd in costs.items():
@@ -370,10 +387,9 @@ def _record_costs(session_factory: Callable[[], Any], workspace_id: UUID, post_i
         db.close()
 
 
-async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Shot, route: Route, estimate_usd: float,
-                returned: ReturnedFile, *, workspace_id: UUID, post_id: UUID, title: str) -> Made:
-    """Fetch the shot now (its link expires), check it, store it, register it, then mark it done."""
-    label = route.recipe.label
+async def _fetched(returned: ReturnedFile, shot: Shot, label: str) -> Tuple[bytes, str, str]:
+    """The shot's bytes (fetched now: its link expires), checked to be the slot's kind and
+    within the size limit; with its extension and content type."""
     try:
         data = returned.data or await fetch(
             returned.url,
@@ -388,6 +404,33 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
     if found is None or found[0] != shot.kind:
         raise FootageError(f"{label} returned something that is not {KIND_WORDS[shot.kind]}")
     _, extension, content_type = found
+    return data, extension, content_type
+
+
+def _footage_record(shot: Shot, route: Route, made: Made, content_type: str) -> Dict[str, Any]:
+    """What the post records for a slot made: its file, the toolkit and model, and the spend."""
+    record = {
+        "prompt": shot.prompt,
+        "toolkit": route.recipe.toolkit,
+        "model": route.model,
+        "deliverable_id": made.deliverable_id,
+        "name": made.name,
+        "sha256": made.sha256,
+        "bytes": made.bytes,
+        "content_type": content_type,
+        "estimate_usd": made.estimate_usd,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if not route.recipe.credit_billed:
+        record["cost_usd"] = made.estimate_usd
+    return record
+
+
+async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Shot, route: Route, estimate_usd: float,
+                returned: ReturnedFile, *, workspace_id: UUID, post_id: UUID, title: str) -> Made:
+    """Fetch the shot now (its link expires), check it, store it, register it, then mark it done."""
+    label = route.recipe.label
+    data, extension, content_type = await _fetched(returned, shot, label)
     digest = hashlib.sha256(data).hexdigest()
     name = footage_file_name(shot.slot, digest, extension)
     try:
@@ -403,26 +446,14 @@ async def _keep(store: MediaStore, session_factory: Callable[[], Any], shot: Sho
         _register, session_factory, workspace_id=workspace_id, post_id=post_id, title=title, shot=shot,
         route=route, key=key, name=name, size=len(data), digest=digest, estimate_usd=estimate_usd,
     )
-    record = {
-        "prompt": shot.prompt,
-        "toolkit": route.recipe.toolkit,
-        "model": route.model,
-        "deliverable_id": deliverable_id,
-        "name": name,
-        "sha256": digest,
-        "bytes": len(data),
-        "content_type": content_type,
-        "estimate_usd": estimate_usd,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if not route.recipe.credit_billed:
-        record["cost_usd"] = estimate_usd
-    if not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
-        logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
-    return Made(
+    made = Made(
         slot=shot.slot, path=shot.path, key=key, name=name, toolkit=route.recipe.toolkit, model=route.model,
-        bytes=len(data), sha256=digest, estimate_usd=estimate_usd,
+        bytes=len(data), sha256=digest, estimate_usd=estimate_usd, deliverable_id=deliverable_id,
     )
+    record = _footage_record(shot, route, made, content_type)
+    if shot.record and not await asyncio.to_thread(_record, session_factory, workspace_id, post_id, shot.slot, record):
+        logger.warning("[SocialsFootage] post %s no longer asks for %s as generated; it is kept as a Deliverable", post_id, shot.slot)
+    return made
 
 
 # ── calling the toolkit ─────────────────────────────────────────────────────
@@ -750,5 +781,7 @@ async def generate(plan: FootagePlan, *, workspace_id: UUID, post_id: UUID, titl
         db.close()
     if failed:
         labels = {shot.slot: shot.label for shot, _ in plan.shots}
-        raise FootageError("; ".join(f"{labels.get(slot, slot)}: {why}" for slot, why in failed.items()))
+        error = FootageError("; ".join(f"{labels.get(slot, slot)}: {why}" for slot, why in failed.items()))
+        error.made = dict(made)  # kept and booked: an AI option's caller still offers them (US-B305)
+        raise error
     return made

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2 } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -13,6 +13,7 @@ import { ApiKeyManager } from './ApiKeyManager'
 import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { SessionModeTab } from './SessionModeTab'
+import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -28,6 +29,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  * and Telegram's inbound path long-polls from inside the orchestrator, so a
  * local install can run a Telegram bot — and answer agent questions from it
  * (PRD-225) — with no tunnel. Webhook-only platforms say so on their card.
+ *
+ * Socials (PRD-251B US-B106) is the WORKSPACE switch, in both editions: the
+ * platform master stays under System Settings (super-admin).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -37,6 +41,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'credentials',
   'channels',
   'notifications',
+  'socials',  // PRD-251B US-B106 — the workspace's own Socials switch
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
 ])
 
@@ -54,6 +59,7 @@ export function SettingsPanel() {
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
+    { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
@@ -139,6 +145,11 @@ export function SettingsPanel() {
         {/* PRD-128: Notification Preferences */}
         <TabsContent value="notifications">
           <NotificationsSettingsTab />
+        </TabsContent>
+
+        {/* PRD-251B US-B106: the workspace's own Socials switch (the master is under System Settings) */}
+        <TabsContent value="socials">
+          <WorkspaceSocialsCard />
         </TabsContent>
 
         {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}

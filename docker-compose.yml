@@ -25,7 +25,10 @@
 #     folder in between. Point it next to your projects folder
 #     (e.g. LOCAL_PROJECTS_DIR=~/Development, AUTOMATOS_WORKSPACE_DIR=~/Development/deliverables)
 #     and Deliverables → Explorer, the chat's Code mode and your Claude Code
-#     sessions all read and write the one place.
+#     sessions all read and write the one place. Every OTHER workspace on this
+#     stack (a second workspace, a test workspace) lives in the named volume
+#     automatos_workspaces_data, so it survives `docker compose up --build` too
+#     (F220); only `docker compose down -v` removes it.
 #   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
@@ -165,6 +168,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # F220: the worker mounts workspaces_data first, so a fresh volume takes the
+      # worker image's /workspaces ownership (uid 1000), never root's.
+      workspace-worker:
+        condition: service_started
     # Local-edition topology + edition defaults (AUTH_EDITION=local,
     # DEFAULT_WORKSPACE_ID, MinIO/mem0/qdrant wiring). NO secrets — those stay in
     # `environment:` below as `:?`-required. `environment:` overrides env_file, so
@@ -292,18 +299,24 @@ services:
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs
-      # The workspace-worker's host directory, read-only (PRD-233 S1): the
-      # backend's WORKSPACE_VOLUME_PATH view of agent deliverables. The file
-      # browser and Code Canvas go through the worker's HTTP API instead
-      # (WORKER_INTERNAL_URL in envs/api.defaults). Mounted as the local
-      # workspace's root (same shape as the worker's mount below).
+      # The workspace-worker's files, read-only (PRD-233 S1): the backend's
+      # WORKSPACE_VOLUME_PATH view of agent deliverables (session files it adopts,
+      # their sizes, HARNESS's reads). The file browser and Code Canvas go through
+      # the worker's HTTP API instead (WORKER_INTERNAL_URL in envs/api.defaults).
+      # Same shape as the worker's mounts below: every workspace in the named
+      # volume (F220), the local workspace's root nested in it from your folder.
+      - workspaces_data:/workspaces:ro
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # F228 (2 Oct): a boot with migrations and seeds took 147 s, past the old
+      # 40 s + 3 x 30 s budget, so the backend was marked unhealthy and the
+      # frontend never started. A probe that passes inside start_period marks it
+      # healthy at once, so a fast boot waits for nothing more.
+      start_period: 300s
     networks:
       - automatos
 
@@ -408,9 +421,16 @@ services:
       LOG_RELAY_ENABLED: "false"
       SERVICE_NAME: workspace-worker
     volumes:
+      # F220: every workspace's files (/workspaces/<workspace_id>/…) in a named
+      # volume. Without it, any workspace but the local one lived in this
+      # container's own layer, and `docker compose up --build` discarded its
+      # reports, sessions and artifacts while their rows stayed in the database.
+      # Railway mounts its volume at /workspaces the same way.
+      - workspaces_data:/workspaces
       # Host directory (bind mount, read-write) — the ONE host-access dial,
       # mounted as THE local workspace's root (no <workspace_id> folder on the
-      # host). `make up` migrates an older ./workspaces/<workspace_id>/ layout.
+      # host), nested inside the volume above. `make up` migrates an older
+      # ./workspaces/<workspace_id>/ layout.
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}
       # PRD-234 S2 (local edition): your own projects folder, read-only, shown by
       # Deliverables → Explorer under projects/. Sessions write to it through the
@@ -562,6 +582,10 @@ volumes:
   backend_logs:
     driver: local
     name: automatos_backend_logs
+  # F220: every workspace's files but the local one's (which is your folder).
+  workspaces_data:
+    driver: local
+    name: automatos_workspaces_data
 
 # =============================================================================
 # Networks

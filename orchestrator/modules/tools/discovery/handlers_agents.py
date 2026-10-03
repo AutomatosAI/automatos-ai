@@ -7,6 +7,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from services.agent_availability import says_who_can_run
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +24,7 @@ def _widget_turn() -> bool:
     return widget_turn()
 
 
+@says_who_can_run  # F244: each agent says whether it can run now
 async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, agent_skills
     from core.models.composio_cache import AgentAppAssignment

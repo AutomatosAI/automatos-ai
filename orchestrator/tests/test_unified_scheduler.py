@@ -88,16 +88,16 @@ class TestIntervalToCronTrigger:
         return CronTrigger
 
     # PRD-162: _interval_to_cron_trigger now builds from the shared
-    # schedule_util.interval_to_cron() via CronTrigger.from_crontab(), so the
-    # cron-field math lives in ONE place. These assert the cron STRING handed to
-    # from_crontab — behaviour-equivalent to the old explicit minute/hour kwargs.
+    # schedule_util.interval_to_cron() via schedule_util.scheduler_cron_trigger()
+    # (F240), so the cron-field math lives in ONE place. These assert the cron
+    # STRING handed to the builder — behaviour-equivalent to the old explicit
+    # minute/hour kwargs.
 
     def test_60min_is_top_of_hour(self):
         """60 minutes → fires at minute 0 every hour."""
         from services.heartbeat_service import HeartbeatService
 
-        with patch("services.heartbeat_service.CronTrigger") as MockCron:
-            MockCron.from_crontab.side_effect = lambda expr: expr
+        with patch("services.schedule_util.scheduler_cron_trigger", side_effect=lambda expr: expr):
             result = HeartbeatService._interval_to_cron_trigger(60)
 
         assert result == "0 * * * *"
@@ -106,8 +106,7 @@ class TestIntervalToCronTrigger:
         """30 minutes → fires at :00 and :30."""
         from services.heartbeat_service import HeartbeatService
 
-        with patch("services.heartbeat_service.CronTrigger") as MockCron:
-            MockCron.from_crontab.side_effect = lambda expr: expr
+        with patch("services.schedule_util.scheduler_cron_trigger", side_effect=lambda expr: expr):
             result = HeartbeatService._interval_to_cron_trigger(30)
 
         assert result == "0,30 * * * *"
@@ -116,8 +115,7 @@ class TestIntervalToCronTrigger:
         """15 minutes → fires at :00, :15, :30, :45."""
         from services.heartbeat_service import HeartbeatService
 
-        with patch("services.heartbeat_service.CronTrigger") as MockCron:
-            MockCron.from_crontab.side_effect = lambda expr: expr
+        with patch("services.schedule_util.scheduler_cron_trigger", side_effect=lambda expr: expr):
             result = HeartbeatService._interval_to_cron_trigger(15)
 
         assert result == "0,15,30,45 * * * *"
@@ -126,8 +124,7 @@ class TestIntervalToCronTrigger:
         """120 minutes → fires at minute 0, every 2nd hour."""
         from services.heartbeat_service import HeartbeatService
 
-        with patch("services.heartbeat_service.CronTrigger") as MockCron:
-            MockCron.from_crontab.side_effect = lambda expr: expr
+        with patch("services.schedule_util.scheduler_cron_trigger", side_effect=lambda expr: expr):
             result = HeartbeatService._interval_to_cron_trigger(120)
 
         assert result == "0 */2 * * *"
@@ -136,8 +133,7 @@ class TestIntervalToCronTrigger:
         """0 minutes → treated as 60 (top of hour)."""
         from services.heartbeat_service import HeartbeatService
 
-        with patch("services.heartbeat_service.CronTrigger") as MockCron:
-            MockCron.from_crontab.side_effect = lambda expr: expr
+        with patch("services.schedule_util.scheduler_cron_trigger", side_effect=lambda expr: expr):
             result = HeartbeatService._interval_to_cron_trigger(0)
 
         assert result == "0 * * * *"

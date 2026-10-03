@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from core.llm.credit import is_out_of_credit
+
 CODE_RATE_LIMITED = "rate_limited"
 CODE_MODEL_UNAVAILABLE = "model_unavailable"
 CODE_NO_API_KEY = "no_api_key"
@@ -33,6 +35,7 @@ PROVIDER_SDK_MODULES = ("openai", "anthropic", "httpx")
 _STATUS_IN_TEXT = re.compile(r"^Error code: (\d{3})\b")
 _SERVER_TOOL = re.compile(r'Server tool \\?"[\w.-]+:(?P<tool>[\w.-]+)\\?" failed')
 ASK_AGAIN = "Nothing needs changing on your side; ask again in a minute."
+CREDIT_REFUSED_STATUS = 402
 
 
 @dataclass(frozen=True)
@@ -76,8 +79,10 @@ def _provider_error(status: int, text: str, who: str) -> TurnError:
         tool = server_tool.group("tool").replace("_", " ")
         return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider's {tool} failed on its side. {ASK_AGAIN}")
     if status == 402:
-        return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider refused it because the account is out of "
-                                               "credits. Top up the provider account, then ask again.")
+        # F244: whose credit, so it is never read as a customer's or a supplier's.
+        return TurnError(CODE_PROVIDER_FAILED, f"{head} your AI credit ran out (the AI provider account that pays "
+                                               "for the model calls is out of credits). Top up the provider account, "
+                                               "then ask again.")
     if status in (401, 403):
         return TurnError(CODE_PROVIDER_FAILED, f"{head} the AI provider rejected its API key. Check the provider's "
                                                "key in Settings, then ask again.")
@@ -117,6 +122,11 @@ def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None)
             CODE_ACTIVATION_FAILED,
             f"{who} could not be started — check its model and provider key in the agent's Model tab.",
         )
+    # F197 (night 6): the provider's credit refusal often arrives wrapped in another
+    # error ("Task execution failed after 2 attempts: Error code: 402 - {...}"), so
+    # the chat showed the raw 402. It reads as the provider's own 402 now.
+    if is_out_of_credit(text):
+        return _provider_error(CREDIT_REFUSED_STATUS, text, who)
     status = _provider_status(exc)
     if status is not None:
         return _provider_error(status, text, who)

@@ -315,3 +315,35 @@ def test_a_launch_the_host_cannot_honour_is_refused_before_any_shell_runs(tmp_pa
         assert server.active == 0
     finally:
         server.stop()
+
+
+def test_a_per_agent_cli_session_opens_in_the_agents_own_home(tmp_path):
+    """PRD-253: Codex and GitHub Copilot keep an agent's sessions in that agent's
+    home on this host; the Canvas terminal opens the session there — resuming it —
+    instead of starting a fresh one in the operator's own home."""
+    root = tmp_path / "ws"
+    root.mkdir()
+    script = tmp_path / "copilot"
+    script.write_text('#!/bin/sh\necho "FAKE_CLAUDE_ARGS: $*"\necho "HOME_SEEN: $COPILOT_HOME"\n'
+                      'echo "PATH_SEEN: $PYTHONPATH"\necho "FAKE_CLAUDE_CWD: $(pwd)"\n')
+    script.chmod(0o755)
+    sessions = tmp_path / "state" / "sessions"
+    agent_home = tmp_path / "state" / "agents" / "58" / ".copilot"
+    sid = "44444444-4444-4444-4444-444444444444"
+    (agent_home / "session-state" / sid).mkdir(parents=True)
+    (agent_home / "session-state" / sid / "events.jsonl").write_text("{}\n")
+    events = []
+    server = ts.TerminalServer([str(root)], str(root), shell="/bin/sh", cli_binaries={"copilot": str(script)},
+                               sessions_dir=sessions, on_event=lambda task_id, ev, payload: events.append(payload),
+                               home=tmp_path / "home")
+    port = server.start()
+    launch = {"kind": "copilot", "session_id": sid, "agent_name": "Coder", "agent_id": 58}
+    try:
+        server.admit([{"token": "t", "cwd": str(root), "task_id": 94, "launch": launch}])
+        out = _run_launch(server, port, "t")
+    finally:
+        server.stop()
+    assert b"--resume " + sid.encode() in out and b"--session-id" not in out, out
+    assert b"HOME_SEEN: " + str(agent_home).encode() in out
+    assert b"PATH_SEEN: " + str(Path(ts.__file__).resolve().parents[1]).encode() in out   # its hooks load, and stand aside
+    assert all("config_home" not in p for p in events)                  # the agent's home stays host-side

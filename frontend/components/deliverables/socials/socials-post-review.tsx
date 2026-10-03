@@ -10,7 +10,7 @@
  *   source has since gone (a 422), which asks the same way.
  * - Request changes needs a comment; reject takes an optional reason.
  */
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -85,13 +85,28 @@ function UnsourcedConfirmation({ claims, busy, onConfirm, onCancel }: {
   )
 }
 
+/** PRD-251B US-B111: the Queue sends a post back to Auto (request changes, then another take). */
+export interface SendBack {
+  label: string
+  submit: string
+  hint: string
+  busy: boolean
+  onSend: (comment: string) => void
+}
+
 interface SocialsPostReviewProps {
   post: SocialPost
   /** Unsaved edits on screen: approving them would approve what the server does not have. */
   dirty: boolean
+  /** PRD-251B US-B111: the Queue's wording, "Approve · publishes HH:MM". */
+  approveLabel?: string
+  /** PRD-251B US-B111: Request changes sends the post back to Auto instead of its author. */
+  sendBack?: SendBack
+  /** PRD-251B US-B111: more actions beside these (the Queue's Make another take). */
+  extra?: ReactNode
 }
 
-export function SocialsPostReview({ post, dirty }: SocialsPostReviewProps) {
+export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra }: SocialsPostReviewProps) {
   const [asking, setAsking] = useState<Asking>(null)
   const [confirmClaims, setConfirmClaims] = useState<string[] | null>(null)
   const [stale, setStale] = useState(false)
@@ -124,11 +139,12 @@ export function SocialsPostReview({ post, dirty }: SocialsPostReviewProps) {
       )}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={startApprove} disabled={busy || dirty || confirmClaims !== null}>
-          Approve
+          {approveLabel}
         </Button>
         <Button size="sm" variant="outline" onClick={() => setAsking('changes')} disabled={busy}>
           Request changes
         </Button>
+        {extra}
         <Button
           size="sm"
           variant="outline"
@@ -147,11 +163,20 @@ export function SocialsPostReview({ post, dirty }: SocialsPostReviewProps) {
           onCancel={() => setConfirmClaims(null)}
         />
       )}
-      {asking === 'changes' && (
+      {asking === 'changes' && !sendBack && (
         <CommentForm
           postId={post.id} heading="Request changes" label="What needs to change?" submit="Send request" required busy={busy}
           onSend={(comment) => run({ kind: 'request_changes', comment })} onCancel={() => setAsking(null)}
         />
+      )}
+      {asking === 'changes' && sendBack && (
+        <>
+          <CommentForm
+            postId={post.id} heading="Request changes" label={sendBack.label} submit={sendBack.submit} required busy={busy || sendBack.busy}
+            onSend={(comment) => { sendBack.onSend(comment); setAsking(null) }} onCancel={() => setAsking(null)}
+          />
+          <p className="text-xs text-muted-foreground">{sendBack.hint}</p>
+        </>
       )}
       {asking === 'reject' && (
         <CommentForm

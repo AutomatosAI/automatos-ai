@@ -3,15 +3,15 @@ import { agentLabel, ownerLine, ticketLabel } from '../grant-owner'
 
 describe('grant owner labels (F091-E1)', () => {
   it('names the agent and the ticket when the list carries them', () => {
-    const owner = { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions' } }
-    expect(ownerLine(owner)).toBe('Scout (agent #294) · Ticket #612 · Cafe questions')
+    const owner = { agent: { id: 294, name: 'Scout' }, ticket: { id: 612, title: 'Cafe questions', number: '#0042' } }
+    expect(ownerLine(owner)).toBe('Scout (agent #294) · Ticket #0042 · Cafe questions')   // PRD-252 R4: its number
   })
 
   it('falls back to ids, then to "An agent"', () => {
     expect(agentLabel({ agent: { id: 294, name: null } })).toBe('Agent #294')
     expect(agentLabel(null, 7)).toBe('Agent #7')
     expect(agentLabel(null, null)).toBe('An agent')
-    expect(ticketLabel({ ticket: { id: 612 } })).toBe('Ticket #612')
+    expect(ticketLabel({ ticket: { id: 612 } })).toBe('Ticket 612')   // no number: never "#612", another ticket's
   })
 
   it('says nothing when there is nobody to name', () => {

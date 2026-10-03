@@ -29,6 +29,7 @@ import {
   useWatches,
 } from '@/hooks/use-watches-api'
 import type { WatchRow } from '@/lib/api-client'
+import { BOARD_HREF, ticketHref } from '@/lib/ticket-links'
 
 const LIVE_STATUSES = new Set([
   'watching',
@@ -71,7 +72,7 @@ export function targetHref(watch: WatchRow): string | null {
     case 'scheduled_playbook':
       return '/assignments?tab=playbooks'
     case 'board_task':
-      return '/command-center?tab=board'
+      return watch.target_id ? ticketHref(watch.target_id) : BOARD_HREF
     default:
       return null
   }

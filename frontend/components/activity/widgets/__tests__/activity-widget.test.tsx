@@ -17,7 +17,7 @@ vi.mock('@/hooks/use-activity-api', () => ({
     },
   }),
 }))
-vi.mock('@/components/command-center/activity-tab', () => ({ rowHref: (i: { source_id: string }) => `/x/${i.source_id}` }))
+vi.mock('@/lib/ticket-links', () => ({ feedItemHref: (i: { source_id: string }) => `/x/${i.source_id}` }))
 
 import { ActivityWidget } from '@/components/activity/widgets/activity-widget'
 

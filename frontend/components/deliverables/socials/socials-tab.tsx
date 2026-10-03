@@ -8,9 +8,11 @@
  * card (turn it on, or ask an admin); with both on it is the post list.
  * S2.1: `postId` is the page's `?post=` (global search links a post there), and
  * the list opens that post.
+ * PRD-251B US-B107: with both on it is the Socials Studio (studio/studio-shell.tsx):
+ * Calendar · Queue · Plans · Brand kit, the view held in the URL.
  */
 import { useWorkspace } from '@/components/workspace-provider'
-import { SocialsPostList } from './socials-post-list'
+import { SocialsStudio } from './studio/studio-shell'
 import { SocialsTurnOnCard } from './socials-turn-on-card'
 
 export function SocialsTab({ postId = null }: { postId?: string | null }) {
@@ -18,5 +20,5 @@ export function SocialsTab({ postId = null }: { postId?: string | null }) {
   const socials = workspace?.socials
   if (!workspace || !socials?.available) return null
   if (!socials.enabled) return <SocialsTurnOnCard role={workspace.role} />
-  return <SocialsPostList role={workspace.role} focusPostId={postId} />
+  return <SocialsStudio role={workspace.role} postId={postId} />
 }

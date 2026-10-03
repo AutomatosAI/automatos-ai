@@ -16,6 +16,7 @@ import {
 import { PremiumIcon } from '@/components/shared/premium-icon'
 import type { PlanResponse, RefineResponse } from '@/hooks/use-board-tasks-api'
 import type { TaskPriority, ReviewMode } from '@/types/board'
+import { cantRunLine } from '@/lib/agent-constants'
 import { cn } from '@/lib/utils'
 import { SCHEDULE_MODE_OPTIONS, type ScheduleMode } from './schedule-choice'
 
@@ -45,6 +46,18 @@ export interface QuickCreateFormProps {
   onPlan: () => void
   isSubmitting: boolean
   isPlanning: boolean
+}
+
+/** An agent in the picker. F244: one that can't run now says so beside its name, with why on hover. */
+export function AgentOption({ agent }: { agent: any }) {
+  const cantRun = cantRunLine(agent)
+  return (
+    <span className="flex items-center gap-1.5" title={cantRun ? agent.unavailable : undefined}>
+      <PremiumIcon name={agent.agent_icon ?? null} size={14} />
+      {agent.name}
+      {cantRun && <span className="text-warning">· {cantRun}</span>}
+    </span>
+  )
 }
 
 export function QuickCreateForm(props: QuickCreateFormProps) {
@@ -99,10 +112,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
               <SelectItem value="none">Unassigned</SelectItem>
               {(props.agents as any[]).map((agent: any) => (
                 <SelectItem key={agent.id} value={String(agent.id)}>
-                  <span className="flex items-center gap-1.5">
-                    <PremiumIcon name={agent.agent_icon ?? null} size={14} />
-                    {agent.name}
-                  </span>
+                  <AgentOption agent={agent} />
                 </SelectItem>
               ))}
             </SelectContent>
@@ -129,7 +139,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
             <SelectContent>
               <SelectItem value="auto">Auto</SelectItem>
               <SelectItem value="human">Human</SelectItem>
-              <SelectItem value="llm">LLM</SelectItem>
+              {/* PRD-252 R3: no LLM option until a model reviewer exists (it behaved as Human) */}
             </SelectContent>
           </Select>
         </div>

@@ -10,11 +10,11 @@ import { Loader2, Share2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { Workspace } from '@/components/workspace-provider'
-import { useEnableSocials } from '@/hooks/use-socials-api'
+import { useSetWorkspaceSocials } from '@/hooks/use-socials-api'
 import { canTurnOnSocials } from './socials-status'
 
 export function SocialsTurnOnCard({ role }: { role: Workspace['role'] }) {
-  const enable = useEnableSocials()
+  const enable = useSetWorkspaceSocials()
 
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center gap-3 rounded-xl border border-dashed border-border/60 bg-card/30 px-6 py-10 text-center">
@@ -24,7 +24,7 @@ export function SocialsTurnOnCard({ role }: { role: Workspace['role'] }) {
         On-brand posts for your channels, each one approved before it can go out.
       </p>
       {canTurnOnSocials(role) ? (
-        <Button onClick={() => enable.mutate()} disabled={enable.isLoading}>
+        <Button onClick={() => enable.mutate(true)} disabled={enable.isLoading}>
           {enable.isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
           Turn on Socials for this workspace
         </Button>

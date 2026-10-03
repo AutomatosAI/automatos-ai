@@ -226,8 +226,10 @@ def test_platform_skill_upsert_reselects_when_race_lost(monkeypatch, tmp_path):
     seed_file.write_text("---\nname: platform-management\n---\nBODY", encoding="utf-8")
     existing = MagicMock(id=42)
     db = MagicMock()
-    # first .first() → None (row not there yet); second → the winner's row
-    db.query.return_value.filter.return_value.first.side_effect = [None, existing]
+    # The global rows of that name: none yet (F239: one ordered read, so our own row
+    # wins over a same-name import). The re-select after the lost insert: the winner's.
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+    db.query.return_value.filter.return_value.first.return_value = existing
     db.flush.side_effect = IntegrityError("stmt", {}, Exception("duplicate key"))
     monkeypatch.setattr(seed_mod, "read_seed", lambda _path: read_seed(seed_file))
 

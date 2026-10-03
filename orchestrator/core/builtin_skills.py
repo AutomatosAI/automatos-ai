@@ -37,6 +37,8 @@ SOURCE_FILE = "SKILL.md"
 SEED_SUFFIX = ".md"
 # A new built-in row's provenance, in PRD-202's canonical scheme:ref form.
 BUILTIN_SOURCE_PREFIX = "builtin:"
+# A git import of the automatos-skills repo itself (the built-in skills' own source), as PRD-202 writes it.
+SKILLS_REPO_SOURCE = "github:AutomatosAI/automatos-skills"
 
 _NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _VERSION = re.compile(r'^version:\s*"?([\d.]+)"?', re.M)

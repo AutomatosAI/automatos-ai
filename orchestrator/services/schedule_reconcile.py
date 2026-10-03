@@ -88,4 +88,7 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
     )
     _tick(scheduler)
     logger.info("[ScheduleReconcile] tick registered every %ds", RECONCILE_INTERVAL_SECONDS)
+    from services.socials_plan_maker import register as register_plan_tick
+
+    register_plan_tick(scheduler)  # PRD-251B (US-B205): plans make their posts on the leader
     return True

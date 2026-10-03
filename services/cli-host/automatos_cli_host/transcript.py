@@ -32,6 +32,9 @@ def transcript_path(cwd: str, session_id: str, home: Optional[Path] = None) -> P
     return project_dir(cwd, home) / f"{session_id}.jsonl"
 
 
+PLAN_UNIT_KEYS = ("ai_credits", "premium_requests", "reasoning_output_tokens")
+
+
 def _num(v: Any) -> int:
     return int(v) if isinstance(v, (int, float)) and v == v else 0
 
@@ -136,4 +139,11 @@ def usage_delta(after: Dict[str, Any], before: Optional[Dict[str, Any]]) -> Dict
         if any(bucket.values()):
             out["per_model"][model] = bucket
     out["total_tokens"] = out["input_tokens"] + out["output_tokens"]
+    # The plan's own units, when a CLI books them (GitHub Copilot's AI credits and
+    # premium requests, PRD-253 S1.5) — cumulative per session like the tokens.
+    for key in PLAN_UNIT_KEYS:
+        if isinstance(after.get(key), (int, float)):
+            prior = before.get(key) if isinstance(before.get(key), (int, float)) else 0
+            delta = max(0, after[key] - prior)
+            out[key] = round(delta, 6) if isinstance(delta, float) else delta
     return out

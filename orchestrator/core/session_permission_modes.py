@@ -51,6 +51,13 @@ def ticket_permission_mode(agent_configuration: Optional[Mapping[str, Any]], wor
     return own if own in PERMISSION_MODES else workspace_mode
 
 
+def claim_permission_mode(ticket_mode: str, plan_approved: bool) -> str:
+    """The mode one claim runs in (PRD-253 Wave P). A Plan ticket plans until the
+    operator approves its plan, then works as Edit automatically. Every other mode
+    passes through."""
+    return MODE_EDITS if ticket_mode == MODE_PLAN and plan_approved else ticket_mode
+
+
 def validate_permission_mode(value: Any) -> List[str]:
     """Errors for an agent's ``permission_mode``: absent (the workspace default) or one of the modes."""
     if value is None or value in PERMISSION_MODES:

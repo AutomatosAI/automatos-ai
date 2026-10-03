@@ -1,0 +1,172 @@
+/**
+ * PRD-251B US-B111 — the Queue (Queue.dc.html).
+ *
+ * * The heading's three forms; the posts waiting for approval by their slot's day, today first.
+ * * The pane shows the selected post exactly (PRD-251's approval view: the media, each
+ *   channel's copy, the claims and sources) and approves the hash on screen; a 409 says it
+ *   changed; unsourced claims still ask for the second confirmation.
+ * * Send back to Auto requests changes with the comment, then asks for another take with it;
+ *   Make another take asks for one without guidance.
+ * * Approve all shown is offered only with series approval on; it approves each shown post by
+ *   its hash (the series path for one series campaign) and reports one that changed.
+ */
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+
+const state = vi.hoisted(() => ({ seriesOn: false, role: 'owner' }))
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspace: () => ({
+    workspace: { id: 'w1', name: 'Acme', role: state.role, socials: { available: true, enabled: true, series_approval: state.seriesOn } },
+  }),
+}))
+vi.mock('@/lib/api-client', () => {
+  const apiClient = {
+    getSocialPostMedia: vi.fn(async () => []),
+    listSocialCampaigns: vi.fn(async () => ({ campaigns: [] })),
+    approveSocialPost: vi.fn(),
+    requestSocialPostChanges: vi.fn(async (id: string) => ({ id })),
+    retakeSocialPost: vi.fn(async (id: string) => ({ id })),
+    rejectSocialPost: vi.fn(),
+    approveSocialCampaignSeries: vi.fn(),
+    listSocialPosts: vi.fn(async () => ({ posts: [], total: 0 })),
+  }
+  return { apiClient, default: apiClient }
+})
+vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({ FilePreview: () => null, inferPreviewType: () => 'image' }))
+
+import { toast } from 'sonner'
+import { apiClient } from '@/lib/api-client'
+import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
+import { queueHeading, timeLeft } from '@/components/deliverables/socials/studio/queue-model'
+import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { renderWith } from './socials-editor-harness'
+
+const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
+const select = vi.fn()
+
+function waiting(id: string, slot: string | null, extra: Record<string, unknown> = {}) {
+  return {
+    id, title: `Post ${id}`, status: 'needs_approval', format: 'image', length_seconds: null, timezone: 'UTC',
+    planned_for: slot, scheduled_for: null, content_hash: `hash-${id}`, approved_hash: null, media: {},
+    copy: { base: `Copy of ${id}.` }, variables: {}, sources: {}, review_log: [], campaign_id: null,
+    targets: [{ id: `t-${id}`, toolkit: 'twitter', post_kind: 'image', options: {}, status: 'pending' }],
+    created_at: '2026-10-13T09:00:00Z', ...extra,
+  } as any
+}
+
+const TODAY = [waiting('a', '2026-10-14T12:00:00Z'), waiting('b', '2026-10-14T18:00:00Z')]
+const LATER = waiting('c', '2026-10-16T09:00:00Z')
+const UNSLOTTED = waiting('d', null)
+
+function renderQueue(posts: any[]) {
+  return renderWith(<SocialsQueue role={state.role as any} posts={posts} selectedId={null} onSelect={select} />)
+}
+
+const pane = () => screen.getByRole('region', { name: 'Post to approve' })
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-14T07:20:00Z'))
+  state.seriesOn = false
+  state.role = 'owner'
+  Object.values(api).forEach((fn) => fn.mockClear())
+  api.approveSocialPost.mockImplementation(async (id: string) => ({ id, status: 'scheduled' }))
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
+})
+afterEach(() => { cleanup(); vi.useRealTimers() })
+
+describe('the Queue', () => {
+  it('says how many need you today, in three forms', () => {
+    expect(queueHeading(2)).toBe('2 posts need you today')
+    expect(queueHeading(1)).toBe('1 post needs you today')
+    expect(queueHeading(0)).toBe('All caught up for today')
+    expect(timeLeft('2026-10-14T12:00:00Z', new Date('2026-10-14T07:20:00Z'))).toBe('in 4h 40m')
+  })
+
+  it('lists the waiting posts by day, today first, then later, then no slot', () => {
+    renderQueue([UNSLOTTED, LATER, ...TODAY])
+    expect(screen.getByRole('heading', { name: '2 posts need you today' })).toBeInTheDocument()
+    const list = screen.getByRole('complementary', { name: 'Waiting for approval' })
+    expect(within(list).getAllByRole('heading').map((h) => h.textContent)).toEqual(['Wed 14 Oct', 'Fri 16 Oct', 'No slot'])
+    expect(within(list).getAllByRole('button').map((b) => b.textContent?.match(/Post (\w)/)?.[1])).toEqual(['a', 'b', 'c', 'd'])
+    expect(within(list).getAllByText('Needs you')).toHaveLength(4)
+  })
+
+  it('shows the selected post exactly and approves the hash on screen', async () => {
+    renderQueue(TODAY)
+    expect(within(pane()).getByText('Post a')).toBeInTheDocument()
+    expect(within(pane()).getByText('12:00 · X · Image')).toBeInTheDocument()
+    expect(within(pane()).getByText('Publishes 12:00 · in 4h 40m')).toBeInTheDocument()
+    expect(within(pane()).getByText('Copy of a.')).toBeInTheDocument() // the channel copy (SocialsPostEvidence)
+    expect(within(pane()).getByText(/You approve exactly this file and this copy/)).toBeInTheDocument()
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a'))
+  })
+
+  it('a post that changed while it was shown says so', async () => {
+    api.approveSocialPost.mockRejectedValue(Object.assign(new Error('changed'), { status: 409 }))
+    renderQueue(TODAY)
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    expect(await within(pane()).findByText(SOCIAL_POST_REVIEW_STALE_MESSAGE)).toBeInTheDocument()
+  })
+
+  it('unsourced claims still ask for the second confirmation', () => {
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { variables: { members: { value: 1200, claim: true } } })])
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    expect(within(pane()).getByRole('alertdialog', { name: 'Approve with unsourced claims' })).toBeInTheDocument()
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+  })
+
+  it('Send back to Auto requests changes, then another take with the comment', async () => {
+    renderQueue(TODAY)
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Request changes' }))
+    fireEvent.change(within(pane()).getByLabelText('What should change?'), { target: { value: 'Use the Missions screenshot' } })
+    expect(within(pane()).getByText('Auto redrafts it and it comes back here.')).toBeInTheDocument()
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Send back to Auto' }))
+    await waitFor(() => expect(api.retakeSocialPost).toHaveBeenCalledWith('a', 'Use the Missions screenshot'))
+    expect(api.requestSocialPostChanges).toHaveBeenCalledWith('a', 'Use the Missions screenshot')
+  })
+
+  it('Make another take asks for one without guidance', async () => {
+    renderQueue(TODAY)
+    fireEvent.click(within(pane()).getByRole('button', { name: /Make another take/ }))
+    await waitFor(() => expect(api.retakeSocialPost).toHaveBeenCalledWith('a'))
+  })
+
+  it('Approve all shown is absent while series approval is off', () => {
+    renderQueue(TODAY)
+    expect(screen.queryByRole('button', { name: 'Approve all shown' })).toBeNull()
+  })
+
+  it('with series approval on, approves each shown post by its hash and reports one that changed', async () => {
+    state.seriesOn = true
+    api.approveSocialPost.mockImplementation(async (id: string) => {
+      if (id === 'b') throw Object.assign(new Error('changed'), { status: 409 })
+      return { id, status: 'scheduled' }
+    })
+    renderQueue(TODAY)
+    fireEvent.click(screen.getByRole('button', { name: 'Approve all shown' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Not approved: Post b, because it changed since it was shown.'))
+    expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a')
+    expect(api.approveSocialPost).toHaveBeenCalledWith('b', 'hash-b')
+    expect(toast.success).toHaveBeenCalledWith('Approved 1 post.')
+  })
+
+  it('the shown posts of one series campaign go through the series path', async () => {
+    state.seriesOn = true
+    api.listSocialCampaigns.mockResolvedValue({ campaigns: [{ id: 'c-1', name: 'WebSummit countdown', approval_mode: 'series' }] })
+    api.approveSocialCampaignSeries.mockResolvedValue({ campaign: {}, approved: [{}, {}], left: [] })
+    renderQueue(TODAY.map((post) => ({ ...post, campaign_id: 'c-1' })))
+    expect(await within(pane()).findByText('12:00 · X · Image · WebSummit countdown')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve all shown' }))
+    await waitFor(() =>
+      expect(api.approveSocialCampaignSeries).toHaveBeenCalledWith('c-1', [
+        { post_id: 'a', content_hash: 'hash-a' }, { post_id: 'b', content_hash: 'hash-b' },
+      ]),
+    )
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+  })
+})

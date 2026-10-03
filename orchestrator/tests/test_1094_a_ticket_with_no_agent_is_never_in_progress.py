@@ -88,7 +88,8 @@ def test_a_bulk_move_names_the_ticket_with_no_agent(board):
     ready, bare = _ticket(board, status="assigned", assigned_agent_id=board.agent), _ticket(board)
     reply = _status_by_tool(board, task_ids=[ready.id, bare.id])
     assert reply["updated"] == [ready.id] and board.launched == [ready.id]
-    assert reply["failed"] == [{"task_id": bare.id, "error": _refusal()}]
+    # PRD-252 R4: the answer names the ticket by its number too
+    assert reply["failed"] == [{"task_id": bare.id, "error": _refusal(), "number": f"#{bare.workspace_seq:04d}"}]
 
 
 def _redo(board):

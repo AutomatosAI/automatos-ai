@@ -139,7 +139,8 @@ def _six_fields(post):
 
 def test_the_targets_are_content():
     assert service.CONTENT_FIELDS[-1] == "targets" and "targets" in service.EDITABLE_FIELDS
-    assert service.RENDER_FIELDS == ("voice", "footage")  # still render settings, never hashed
+    # still render settings, never hashed; PRD-251B (US-B109) adds the post's music beside them
+    assert service.RENDER_FIELDS == ("voice", "footage", "music")
 
 
 def test_a_post_with_no_target_hashes_exactly_as_before():

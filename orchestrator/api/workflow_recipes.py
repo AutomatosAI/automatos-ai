@@ -1169,52 +1169,14 @@ async def cancel_execution(
         if execution.status in ("completed", "failed", "cancelled"):
             return {"status": execution.status, "message": "Execution already finished"}
 
-        execution.status = "cancelled"
-        execution.error_message = "Cancelled by user"
-        execution.completed_at = sa_func.now()
-        db.commit()
+        # F245: the run stops (its executor checks before every step and model
+        # call; on this worker its task is cancelled at once), and its card and
+        # its session step tickets (F116; their sessions stop, F224) end
+        # Cancelled, saying who.
+        from services.board_consent import actor_ref
+        from services.run_cancel import cancel_playbook_run
 
-        try:
-            from services.board_task_bridge import complete_recipe_board_task
-            complete_recipe_board_task(
-                db, execution_id, success=False, error_message="Cancelled by user"
-            )
-        except Exception:
-            logger.warning("Board task update on cancel failed (non-blocking)", exc_info=True)
-
-        # F116 (run 4): the run's session step tickets stop with it, through the
-        # board's own cancel (the host's next event batch gets control: cancel),
-        # each saying who cancelled and that it went with this run. Only an
-        # explicit cancel does this — a backend restart kills the run's task but
-        # must not kill the sessions working its steps.
-        try:
-            from services.board_cancel import cancel_run_step_tickets
-            from services.board_consent import actor_ref
-
-            stopped = cancel_run_step_tickets(db, execution_id, by=actor_ref(ctx))
-            if stopped:
-                logger.info("[cancel_execution] %s — step tickets cancelled with it: %s", execution_id, stopped)
-        except Exception:
-            logger.warning("[cancel_execution] the step tickets of %s could not be cancelled", execution_id, exc_info=True)
-
-        # Signal the running task to abort the in-flight LLM call immediately.
-        # If the task is on this replica, httpx propagates CancelledError and
-        # closes the TCP connection mid-request — no more cost burn. If the
-        # task is on a different replica, it'll catch the status flip on its
-        # next DB poll inside _execute_step.
-        try:
-            from api.recipe_executor import request_execution_cancel
-            killed_locally = request_execution_cancel(execution_id)
-            logger.info(
-                "[cancel_execution] %s cancelled (local_kill=%s)",
-                execution_id, killed_locally,
-            )
-        except Exception:
-            logger.warning(
-                "[cancel_execution] Failed to signal task — DB poll will pick it up next iteration",
-                exc_info=True,
-            )
-
+        cancel_playbook_run(db, execution, by=actor_ref(ctx), reason="Cancelled by user")
         return {"status": "cancelled", "execution_id": execution_id}
 
     except HTTPException:

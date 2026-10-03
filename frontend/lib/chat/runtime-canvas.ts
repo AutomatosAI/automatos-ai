@@ -40,5 +40,5 @@ export function runtimeCanvasData(workspaceId: string, session: RuntimeSession):
 
 /** The Canvas title: the agent's name when known, else the ticket. */
 export function runtimeCanvasTitle(session: RuntimeSession): string {
-  return session.agent_name ? `${session.agent_name} · session` : `Session · ticket #${session.task_id}`
+  return session.agent_name ? `${session.agent_name} · session` : `Session · ticket ${session.task_id}`
 }

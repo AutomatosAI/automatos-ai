@@ -79,7 +79,15 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # prd251_wave1 into the single head (a merge revision, no operations).
 # 2026-09-29: document_chunks_ingestion_columns chains onto that — the columns
 # document ingestion writes, which fresh-built databases lacked (#825).
-EXPECTED_HEAD = "document_chunks_ingestion_columns"
+# 2026-10-02: #852 left two heads (prd251_wave2 beside it); prd252_ticket_numbers
+# merges them and adds the per-workspace ticket number (PRD-252 R4).
+# 2026-10-02 (PRD-251B Wave 1): prd251b_wave1 chains onto that — the ONE migration
+# of the Studio wave (social_posts.planned_for, length_seconds, the text format).
+# 2026-10-03 (PRD-251B Wave 2): prd251b_wave2 chains onto prd251b_wave1 — the ONE
+# migration of the plans wave (the plan columns, slot_key, music, social_topics).
+# 2026-10-03 (PRD-251B Wave 3): prd251b_wave3 chains onto prd251b_wave2 — the ONE
+# migration of the brand kit wave (the reference_image flag in the media allowlist).
+EXPECTED_HEAD = "prd251b_wave3"
 
 
 def _literal(node: ast.AST):

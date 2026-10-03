@@ -3,8 +3,18 @@
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { sessionNotes, type SessionNote } from './session-notes'
+import { SessionPlanPanel } from './session-plan'
+import { sessionUsageText } from './session-usage'
 import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary } from './session-tool-calls'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
+import { ReviewVerdict } from './review-verdict'
+import { MissionVerdict } from './mission-verdict'
+import { TicketQuestions } from './ticket-questions'
+import { TicketApprovals } from './ticket-approvals'
+import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
+import { stageReason } from './ticket-stage'
+import { runsInSession, ticketKind } from './ticket-kind'
+import { isMissionTicket } from './ticket-actions'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -18,7 +28,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
-import { useUpdateTaskStatus, useApproveTask, useRejectTask, useRunTask } from '@/hooks/use-board-tasks'
+import { useUpdateTaskStatus, useRunTask } from '@/hooks/use-board-tasks'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +36,8 @@ interface BoardTaskViewerProps {
   task: BoardTask | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** PRD-252 R1: opened from a question link — that question is highlighted. */
+  focusQuestionId?: number | null
 }
 
 /**
@@ -114,10 +126,10 @@ function SessionBlock({ task }: { task: BoardTask }) {
           <span>{ref.provider || 'claude'}{ref.model ? ` · ${ref.model}` : ''}</span>
           <span className="text-muted-foreground">State</span>
           <span>{ref.exit_reason ? `finished (${ref.exit_reason})` : ref.live_tool ? `running · ${ref.live_tool}` : ref.last_event ? `running · ${ref.last_event}` : 'claimed'}</span>
-          {usage.total_tokens != null && (
+          {sessionUsageText(usage) && (
             <>
               <span className="text-muted-foreground">Tokens</span>
-              <span>{Number(usage.total_tokens).toLocaleString()}{usage.model ? ` on ${usage.model}` : ''} · plan usage, no cost</span>
+              <span>{sessionUsageText(usage)}</span>
             </>
           )}
           {typeof ref.denials === 'number' && ref.denials > 0 && (
@@ -146,6 +158,7 @@ function SessionBlock({ task }: { task: BoardTask }) {
             )}
           </div>
         )}
+        <SessionPlanPanel runtimeRef={ref} />
         {notes.length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Notes</p>
@@ -229,7 +242,8 @@ function MetadataGrid({ task }: { task: BoardTask }) {
       </MetaItem>
 
       <MetaItem icon={<Shield className="w-3.5 h-3.5" />} label="Review Mode">
-        <span className="text-sm font-medium capitalize">{task.review_mode}</span>
+        {/* PRD-252 R3: llm has no reviewer; such a ticket waits for a person */}
+        <span className="text-sm font-medium capitalize">{task.review_mode === 'llm' ? 'human' : task.review_mode}</span>
       </MetaItem>
 
       {task.due_date ? (
@@ -264,11 +278,13 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const grantApproval = useGrantApproval()
   const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  const reason = stageReason(task)  // PRD-252 R3: what it waits for, in words
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-4 space-y-3" data-testid="blocked-banner">
         <p className="text-sm font-medium">
-          {grantId ? `Waiting for your approval (grant #${grantId})` : 'Waiting for the operator'}
+          <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider">{reason?.chip}</span>
+          {grantId ? `Waiting for your approval (grant #${grantId})` : reason?.says}
         </p>
         {text && <p className="text-xs text-muted-foreground">{text}</p>}
         <div className="flex flex-wrap items-center gap-2">
@@ -408,15 +424,19 @@ function InProgressContent({ task }: { task: BoardTask }) {
   )
 }
 
-function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: BoardTask; onStatusChange: (status: string) => void; onApprove: () => void; onReject: (feedback?: string) => void }) {
-  const hasApprovalAction = !!task.planning_data?.approval_action
+function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => void }) {
+  const reason = stageReason(task)  // PRD-252 R3: why it is in review
+  // D6: a mission's card and its steps are decided on the mission, never by ticket verdict;
+  // F242: except a step the owner asked to check, which waits for their Approve or Reject
+  const missionDecides = isMissionTicket(task) && task.review_reason !== 'asked'
   return (
     <div className="space-y-6">
       {/* Review banner */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20" data-testid="review-banner">
         <Clock className="w-5 h-5 text-[hsl(var(--warning))] shrink-0" />
         <div className="flex-1">
-          <p className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</p>
+          <p className="text-sm font-medium text-[hsl(var(--warning))]">{reason?.stage ?? 'Awaiting Review'}</p>
+          {reason && <p className="text-xs mt-0.5">{reason.says}</p>}
           {task.completed_at && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
@@ -475,37 +495,9 @@ function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: Bo
         )}
       </div>
 
-      {/* Approval action info */}
-      {hasApprovalAction && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
-          <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-          <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Approval action:</span>{' '}
-            {task.planning_data?.approval_action?.type === 'publish_blog'
-              ? 'Publish blog post to live site'
-              : task.planning_data?.approval_action?.type ?? 'Execute action'}
-          </p>
-        </div>
-      )}
-
-      {/* Review actions */}
-      <div className="flex gap-3 pt-2 border-t border-border/30">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={() => onReject()}
-        >
-          <AlertCircle className="w-4 h-4 mr-2" />
-          Reject
-        </Button>
-        <Button
-          className="flex-1"
-          onClick={onApprove}
-        >
-          <CheckCircle2 className="w-4 h-4 mr-2" />
-          {hasApprovalAction ? 'Approve & Publish' : 'Approve'}
-        </Button>
-      </div>
+      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does.
+          D6: a mission's plan is decided with the mission's own buttons; a step is its mission's to check. */}
+      {missionDecides ? <MissionVerdict task={task} onDecided={onDecided} /> : <ReviewVerdict task={task} onDecided={onDecided} />}
     </div>
   )
 }
@@ -559,6 +551,8 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
         </div>
       )}
 
+      <KeptDraft task={task} />
+
       {/* F094: the notes, the mission's verdict among them, stay on a finished ticket */}
       <NotesSection task={task} />
 
@@ -602,6 +596,45 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
   )
 }
 
+// PRD-252 R7: a cancelled or closed ticket opened to an empty viewer.
+/** F243: a redo that failed keeps the draft it was correcting on the card's face (#0171, #0174). */
+export function KeptDraft({ task }: { task: BoardTask }) {
+  if (!task.kept_draft || task.result) return null
+  return (
+    <div>
+      <SectionLabel icon={<FileText className="w-3 h-3" />}>Your last draft (this run failed; the draft is kept)</SectionLabel>
+      <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
+        {task.kept_draft}
+      </div>
+    </div>
+  )
+}
+
+function CancelledContent({ task }: { task: BoardTask }) {
+  return (
+    <div className="space-y-6">
+      <CancelledBanner task={task} />
+      {task.description && (
+        <div>
+          <SectionLabel>Task Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {task.description}
+          </div>
+        </div>
+      )}
+      {task.result && (
+        <div>
+          <SectionLabel icon={<FileText className="w-3 h-3" />}>Last result</SectionLabel>
+          <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto leading-relaxed">
+            {String(task.result)}
+          </div>
+        </div>
+      )}
+      <NotesSection task={task} />
+    </div>
+  )
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
@@ -637,11 +670,9 @@ function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () 
 
 // ── Main Modal ──────────────────────────────────────────────────────
 
-export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTaskViewerProps) {
+export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuestionId }: BoardTaskViewerProps) {
   const task = useLiveTask(propTask)
   const updateStatus = useUpdateTaskStatus()
-  const approveTask = useApproveTask()
-  const rejectTask = useRejectTask()
   const runTask = useRunTask()
 
   if (!task) return null
@@ -654,16 +685,6 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
     if (newStatus === 'done') {
       onOpenChange(false)
     }
-  }
-
-  const handleApprove = () => {
-    approveTask.mutate({ taskId: task.id }, {
-      onSuccess: () => onOpenChange(false),
-    })
-  }
-
-  const handleReject = (feedback?: string) => {
-    rejectTask.mutate({ taskId: task.id, feedback })
   }
 
   // PRD-161 S5: re-dispatch a failed/idle/blocked task on demand.
@@ -684,6 +705,8 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
           <div className="flex items-start justify-between gap-4 pr-8">
             <div className="space-y-2 min-w-0 flex-1">
               <DialogTitle className="text-lg font-semibold leading-tight">
+                {/* PRD-252 R4: number, type and title, so two same-titled tickets differ */}
+                {task.number && <span className="mr-2 font-mono text-sm text-muted-foreground tabular-nums">{task.number}</span>}
                 {task.name}
               </DialogTitle>
               <DialogDescription className="flex items-center gap-2 flex-wrap">
@@ -697,7 +720,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                 )}>
                   {task.status === 'in_progress' && <Loader2 className="w-3 h-3 animate-spin" />}
                   <div className={cn('w-1.5 h-1.5 rounded-full', statusConf.dotColor)} />
-                  {statusConf.label}
+                  {stageReason(task)?.stage ?? statusConf.label}
                 </span>
 
                 {/* Priority badge */}
@@ -706,13 +729,12 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                   <span className="capitalize">{task.priority}</span>
                 </span>
 
-                {/* Playbook badge */}
-                {task.type === 'playbook' && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
-                    <Workflow className="w-3 h-3" />
-                    Playbook
-                  </span>
-                )}
+                {/* PRD-252 R4: the type, from what filed it, and a session mark */}
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
+                  <Workflow className="w-3 h-3" />
+                  {ticketKind(task.source_type)}
+                  {runsInSession(task) && <span className="text-[hsl(var(--info))]">· &gt;_ session</span>}
+                </span>
 
                 {/* Agent */}
                 {task.assignee && (
@@ -726,17 +748,22 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                   </span>
                 )}
               </DialogDescription>
+              {/* PRD-252 R7: assign and cancel without leaving the board */}
+              <TicketActionsBar task={task} />
             </div>
           </div>
         </div>
 
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
+          <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
+          <TicketApprovals taskId={task.id} blockedReason={task.status === 'blocked' ? task.blocked_reason : null} focusGrantId={focusQuestionId} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
-          {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
+          {task.status === 'review' && <ReviewContent task={task} onDecided={() => onOpenChange(false)} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+          {(task.status === 'cancelled' || task.status === 'closed') && <CancelledContent task={task} />}
 
           {/* PRD-161 S5: failed tasks surface the error + a re-run affordance. */}
           {task.status === 'failed' && task.error_message && (

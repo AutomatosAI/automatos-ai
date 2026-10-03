@@ -23,6 +23,13 @@ const state = vi.hoisted(() => ({
   workspace: { id: 'w1', role: 'editor', socials: { available: true, enabled: true } } as any,
 }))
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/deliverables',
+  // PRD-251B US-B107: the Studio holds its view in the URL (router.push).
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // US-B108: the calendar's List is the post list these tests drive.
+  useSearchParams: () => new URLSearchParams('tab=socials&cal=list'),
+}))
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => state.compact,
   useIsTabletOrBelow: () => state.compact,
@@ -122,7 +129,7 @@ describe('the Board beside the List', () => {
     }
     expect(Object.values(columns).reduce((sum, column) => sum + column.count, 0)).toBe(POSTS.length)
 
-    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show posts as' })).getByRole('button', { name: 'List' }))
     expect(shown(listSections(), ' posts')).toEqual(list)
     // Both views read the same query: switching views fetched nothing.
     expect(apiClient.listSocialPosts).toHaveBeenCalledTimes(1)
@@ -204,17 +211,24 @@ describe('on a wide screen', () => {
 })
 
 describe('?post= (global search links a post there)', () => {
-  it('opens that post', async () => {
+  // PRD-251B US-B109: the post opens in the editor, with its way back to the calendar.
+  it('opens that post in the editor', async () => {
     renderTab('post-launch-day')
-    expect(await screen.findByRole('article', { name: 'Post: Launch day' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Approved posts' })).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Launch day')
+    expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
+    expect(listSections()).toHaveLength(0)
   })
 
-  it('on a phone, opens it in place of the list', async () => {
+  it('on a phone, opens it the same way, in place of the list', async () => {
     state.compact = true
     renderTab('post-launch-day')
-    expect(await screen.findByRole('article', { name: 'Post: Launch day' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Back to posts' })).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Launch day')
     expect(listSections()).toHaveLength(0)
+  })
+
+  it('a published post opens in its read view', async () => {
+    state.posts = [...POSTS, seed('Out already', 'published', 7)]
+    renderTab('post-out-already')
+    expect(await screen.findByRole('article', { name: 'Post: Out already' })).toBeInTheDocument()
   })
 })

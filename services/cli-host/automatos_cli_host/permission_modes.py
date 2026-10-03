@@ -3,9 +3,13 @@
 * ``manual`` — every edit and every command off the Bash allowlist is a card.
 * ``edits`` ("Edit automatically") — edits inside the session's folders run;
   a command off the allowlist is a card. The default when nothing says otherwise.
-* ``plan`` — Claude Code starts in its own plan mode: it explores, then presents
-  a plan (``ExitPlanMode``). The plan is a card; approving it lets the session
-  carry on as ``edits`` (Claude Code leaves plan mode when a hook approves).
+* ``plan`` — the session explores read-only and presents a plan; edits start once
+  the operator approves it (PRD-253 Wave P, on EVERY CLI). Claude Code starts in
+  its own plan mode and presents the plan with ``ExitPlanMode``: a card answered in
+  time lets it carry on as ``edits`` in the same turn (Claude Code leaves plan mode
+  when a hook approves). Every other CLI — and a Claude card nobody answered — ends
+  its turn with the plan, which parks the ticket on the Plan card; the operator's
+  Approve resumes the same session as ``edits``.
 * ``auto`` — edits and commands off the allowlist run; only what the gate judges
   risky asks.
 
@@ -45,22 +49,35 @@ MAX_PLAN_BYTES = 256 * 1024
 MANUAL_EDIT = "Manual mode: every edit waits for the operator's approval"
 PLAN_EDIT_REFUSED = ("Plan mode: edits wait until the operator approves your plan — "
                      "present it with ExitPlanMode first")
+# PRD-253 Wave P: a CLI with no plan tool presents its plan as its final message.
+PLAN_EDIT_REFUSED_TURN = ("Plan mode: edits wait until the operator approves your plan — "
+                          "end your turn with the plan as your final message")
 PLAN_CARD = "Plan mode: approve this plan to let the session start work"
+# A plan card nobody answered in time: the plan goes to the operator as the Plan
+# card instead, the ticket parks on it, and Approve resumes this same session.
+PLAN_WITH_OPERATOR = ("Your plan has gone to the operator. Make no more changes and end your turn now — "
+                      "this session resumes with their answer.")
+# The event that carries a plan to the backend before the turn's result (the final
+# events flush precedes the result): the backend files it as the Plan card.
+PLAN_EVENT = "PlanReady"
 
 
-def session_mode(host_choice: Optional[str], ticket_choice: Any, *, resuming: bool, can_plan: bool) -> str:
-    """The mode this session runs in: the host's override, else the ticket's, else Edit automatically.
+def session_mode(host_choice: Optional[str], ticket_choice: Any, *, plan_approved: bool = False) -> str:
+    """The mode this session runs in: the host's override, else the claim's, else Edit automatically.
 
-    A resumed session already presented its plan, and a CLI with no plan mode
-    could never present one: both run as Edit automatically instead of waiting
-    for a plan that will not come."""
+    PRD-253 Wave P: Plan runs on every CLI, and the backend decides each claim's
+    mode from the ticket's plan state — ``plan`` until the operator approves the
+    plan, then ``edits`` — so the host no longer guesses from "resuming", nor runs
+    a CLI without a plan mode of its own as Edit automatically. ``plan_approved``
+    (from the claim) lets a host whose own override is Plan carry on once the
+    ticket's plan is approved, instead of planning it again forever."""
     if host_choice in PERMISSION_MODES:
         mode = host_choice
     elif ticket_choice in PERMISSION_MODES:
         mode = ticket_choice
     else:
         mode = DEFAULT_MODE
-    if mode == MODE_PLAN and (resuming or not can_plan):
+    if mode == MODE_PLAN and plan_approved:
         return MODE_EDITS
     return mode
 

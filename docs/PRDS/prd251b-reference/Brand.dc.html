@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brand kit: style references and AI tools</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,400;6..72,500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#171614}
+a{color:#F1EADF}a:hover{color:#FF8A5B}
+</style>
+</helmet>
+<div class="app">
+<dc-import name="Nav" active="brand" hint-size="100%,112px"></dc-import>
+<main class="wrap col" style="gap: 20px;">
+<div class="col" style="gap: 6px;"><h1 class="h1">Brand kit</h1><p class="hint" style="margin: 0;">Everything Auto uses to make a post look like yours. Templates read the colours and fonts; the AI tools get the style references.</p></div>
+<section class="card" aria-label="Basics" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px;">
+<div class="col" style="gap: 8px;"><h2 class="h3">Logo</h2><div class="row" style="gap: 8px;"><span style="width: 44px; height: 44px; border-radius: 10px; background: #FF6E33; color: #1A0E07; display: inline-flex; align-items: center; justify-content: center; font-weight: 700;">A</span><span class="hint">Wordmark and square mark</span></div></div>
+<div class="col" style="gap: 8px;"><h2 class="h3">Colours</h2><div class="row" style="gap: 6px;"><span style="width: 28px; height: 28px; border-radius: 8px; background: #141210; border: 1px solid #4A443C;"></span><span style="width: 28px; height: 28px; border-radius: 8px; background: #FF6E33;"></span><span style="width: 28px; height: 28px; border-radius: 8px; background: #F4EEE2;"></span></div><span class="mono" style="font-size: 11.5px; color: #A9A194;">#141210 · #FF6E33 · #F4EEE2</span></div>
+<div class="col" style="gap: 8px;"><h2 class="h3">Fonts</h2><span style="font-family: Newsreader, Georgia, serif; font-size: 21px;">Newsreader</span><span class="hint">Headlines · Geist for text</span></div>
+<div class="col" style="gap: 8px;"><h2 class="h3">Voice</h2><span>Plain, specific, calm</span><span class="hint">Never: revolutionary, game-changing</span></div>
+<div class="col" style="gap: 8px;"><h2 class="h3">Handles</h2><span class="row" style="gap: 4px;"><span class="ch">X</span><span class="ch">in</span><span class="ch">IG</span><span class="ch">TT</span><span class="ch">YT</span></span><button type="button" class="btn sm" style="align-self: flex-start;">Edit basics</button></div>
+</section>
+<section class="card col" aria-label="Style references" style="gap: 16px;">
+<div class="row between wrapf" style="gap: 12px;">
+<div class="col" style="gap: 4px;"><div class="row" style="gap: 10px;"><h2 class="h2">Style references</h2><span class="pill" style="color: #FF8A5B; border-color: rgba(255, 110, 51, 0.5);">New</span></div><p class="hint" style="margin: 0;">Images you like, or want to avoid, each with a note on why. Auto reads them into a style profile and uses it for every post.</p></div>
+<button type="button" class="btn primary"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg>Upload images</button>
+</div>
+<div class="split" style="display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; align-items: start;">
+<div class="col" style="gap: 12px;">
+<div class="grid3">
+<sc-for list="{{ refs }}" as="r" hint-placeholder-count="6">
+<div class="col" style="gap: 8px;">
+<div class="tile" style="background: {{ r.bg }}; min-height: 150px;"><span class="pill" style="align-self: flex-start; color: #1A0E07; background: {{ r.tagBg }}; border-color: transparent;">{{ r.tag }}</span><span style="font-size: 13px; font-weight: 500;">{{ r.label }}</span><span style="font-size: 11px; color: #CFC6B8;">Placeholder for your image</span></div>
+<span class="hint">{{ r.note }}</span>
+<div class="seg" role="group" aria-label="Like or avoid" style="align-self: flex-start;"><button type="button" class="{{ r.likeOn }}" aria-pressed="{{ r.likePressed }}" onClick="{{ r.setLike }}">Like</button><button type="button" class="{{ r.avoidOn }}" aria-pressed="{{ r.avoidPressed }}" onClick="{{ r.setAvoid }}">Avoid</button></div>
+</div>
+</sc-for>
+</div>
+<div class="drop"><svg class="ic" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><span style="color: #F1EADF; font-weight: 500;">Drop images here</span><span class="hint">Posts you admire, photos, ads, screenshots. PNG, JPG or WebP.</span></div>
+</div>
+<aside class="col" style="gap: 14px; padding: 16px; border-radius: 12px; background: #1A1816; border: 1px solid #35312B;" aria-label="Style profile">
+<h3 class="h3">What Auto takes from these</h3>
+<div class="col" style="gap: 6px;"><span class="lab">Palette</span><div class="row" style="gap: 6px;"><span style="width: 30px; height: 30px; border-radius: 8px; background: #141210; border: 1px solid #4A443C;"></span><span style="width: 30px; height: 30px; border-radius: 8px; background: #3A2B20;"></span><span style="width: 30px; height: 30px; border-radius: 8px; background: #8C7A66;"></span><span style="width: 30px; height: 30px; border-radius: 8px; background: #FF6E33;"></span><span style="width: 30px; height: 30px; border-radius: 8px; background: #F4EEE2;"></span></div></div>
+<div class="col" style="gap: 6px;"><span class="lab">Mood</span><div class="row wrapf" style="gap: 6px;"><span class="pill">warm</span><span class="pill">low light</span><span class="pill">editorial</span><span class="pill">calm</span><span class="pill">real product</span></div></div>
+<div class="col" style="gap: 6px;"><span class="lab">Composition</span><span style="font-size: 13px; color: #D9D1C4; line-height: 1.5;">One subject, lots of dark space, large type set to the left. Screens shown as they are.</span></div>
+<div class="col" style="gap: 6px;"><span class="lab">Avoid</span><span style="font-size: 13px; color: #D9D1C4; line-height: 1.5;">{{ avoidText }}</span></div>
+<div class="divider"></div>
+<label class="row" style="gap: 10px; align-items: flex-start;"><input type="checkbox" checked="{{ send }}" onChange="{{ toggleSend }}" style="margin-top: 2px;"><span class="col" style="gap: 2px;"><span>Send liked images to AI tools as references</span><span class="hint">Only to models that accept a reference image. The style profile goes into every prompt either way.</span></span></label>
+<button type="button" class="btn sm" style="align-self: flex-start;">Read the references again</button>
+</aside>
+</div>
+</section>
+<section class="card col" aria-label="AI tools" style="gap: 14px;">
+<div class="col" style="gap: 4px;"><h2 class="h2">AI tools</h2><p class="hint" style="margin: 0;">Connected through Composio with your own accounts, so Automatos never holds the keys. Templates and the Kokoro voice are free and need nothing.</p></div>
+<sc-for list="{{ tools }}" as="t" hint-placeholder-count="6">
+<div class="row between wrapf" style="gap: 12px; padding: 12px 14px; border: 1px solid #35312B; border-radius: 10px;">
+<span class="col" style="gap: 2px; min-width: 200px;"><span style="font-weight: 600;">{{ t.name }}</span><span class="hint">{{ t.kind }}</span></span>
+<span class="hint" style="flex-grow: 1;">{{ t.models }}</span>
+<span class="pill {{ t.pillCls }}">{{ t.status }}</span>
+<button type="button" class="btn sm">{{ t.action }}</button>
+</div>
+</sc-for>
+<div class="grid4">
+<div class="field"><label for="d1">Images</label><select id="d1" class="select"><option>Templates (free)</option><option>Higgsfield · GPT Image 2</option></select></div>
+<div class="field"><label for="d2">AI images</label><select id="d2" class="select"><option>Higgsfield · GPT Image 2</option><option>Ask each time</option></select></div>
+<div class="field"><label for="d3">Footage</label><select id="d3" class="select"><option>Higgsfield · Kling 3.0</option><option>Higgsfield · Seedance 2.5</option><option>Off</option></select></div>
+<div class="field"><label for="d4">Voice</label><select id="d4" class="select"><option>Kokoro (free)</option><option>ElevenLabs (connect first)</option></select></div>
+</div>
+<div class="grid2">
+<div class="field"><label for="cap2">AI credits per month</label><input id="cap2" class="input" placeholder="[your cap]"><span class="hint">A job that would go over it does not start.</span></div>
+<div class="field"><label for="cap3">Per post</label><input id="cap3" class="input" placeholder="[your cap]"><span class="hint">Checked before each job, from the tool's price estimate or its credit balance.</span></div>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1750}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const likes = st.likes || {};
+    const send = st.send !== false;
+    const REFS = [
+      ['Desk at dusk, laptop glow', 'Warm low light, dark space around one subject', '#3A2B20', true],
+      ['Big serif numbers on black', 'Type does the work; one accent colour', '#1B1815', true],
+      ['Terminal close-up', 'Real product, real text on screen', '#20251F', true],
+      ['Hands on a phone', 'A person in control; faces optional', '#2E2620', true],
+      ['Stock team high-five', 'Staged stock people', '#3B3A44', false],
+      ['Neon gradient blobs', 'Gradient washes and glossy 3D', '#33243F', false],
+    ];
+    const refs = REFS.map(([label, note, bg, liked], i) => {
+      const like = likes[i] === undefined ? liked : likes[i];
+      return {
+        label,
+        note,
+        bg,
+        like,
+        likeOn: like ? 'on' : '',
+        avoidOn: like ? '' : 'on',
+        likePressed: like,
+        avoidPressed: !like,
+        tag: like ? 'Like' : 'Avoid',
+        tagBg: like ? '#52BE9F' : '#EA7563',
+        setLike: () => this.setState({ likes: { ...likes, [i]: true } }),
+        setAvoid: () => this.setState({ likes: { ...likes, [i]: false } }),
+      };
+    });
+    const avoided = refs.filter((r) => !r.like).map((r) => r.label.toLowerCase());
+    const TOOLS = [
+      ['Higgsfield', 'Images and footage', 'GPT Image 2 · Kling 3.0 · Seedance 2.5 · Minimax', 'Connected', 'Manage'],
+      ['fal.ai', 'Images and footage', 'Prices each job before it runs', 'Not connected', 'Connect in Composio'],
+      ['Kie.ai', 'Footage', 'Veo', 'Not connected', 'Connect in Composio'],
+      ['ElevenLabs', 'Voice', '', 'Not connected', 'Connect in Composio'],
+      ['Fish Audio', 'Voice', '', 'Not connected', 'Connect in Composio'],
+      ['Kokoro', 'Voice', 'Built in', 'Free', 'Voices'],
+    ];
+    return {
+      refs,
+      send,
+      toggleSend: () => this.setState({ send: !send }),
+      avoidText: avoided.length ? 'Nothing like: ' + avoided.join(', ') + '.' : 'Nothing marked to avoid yet.',
+      tools: TOOLS.map(([name, kind, models, status, action]) => ({ name, kind, models, status, action, pillCls: status === 'Connected' || status === 'Free' ? 'ok' : '' })),
+    };
+  }
+}
+</script>
+</body>
+</html>

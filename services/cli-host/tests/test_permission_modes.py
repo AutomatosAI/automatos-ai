@@ -55,17 +55,18 @@ def test_a_plan_is_a_card_only_in_plan_mode(tmp_path):
     assert policy.decide(intent, _ctx(tmp_path, "auto")).behavior == "allow"
 
 
-@pytest.mark.parametrize("host, ticket, resuming, can_plan, expected", [
-    (None, "auto", False, True, "auto"),        # the claim's mode
-    ("manual", "auto", False, True, "manual"),  # the host's override wins
-    (None, None, False, True, "edits"),         # an older backend: today's behaviour
-    (None, "bypassPermissions", False, True, "edits"),
-    (None, "plan", False, True, "plan"),
-    (None, "plan", True, True, "edits"),        # a resumed session presented its plan already
-    (None, "plan", False, False, "edits"),      # a CLI with no plan mode could never present one
+@pytest.mark.parametrize("host, ticket, approved, expected", [
+    (None, "auto", False, "auto"),          # the claim's mode
+    ("manual", "auto", False, "manual"),    # the host's override wins
+    (None, None, False, "edits"),           # an older backend: today's behaviour
+    (None, "bypassPermissions", False, "edits"),
+    (None, "plan", False, "plan"),          # PRD-253 Wave P: on every CLI, resumed or not — the claim decides
+    (None, "edits", True, "edits"),         # the backend sends Edit automatically once the plan is approved
+    ("plan", "edits", True, "edits"),       # a host whose override is Plan carries on once the plan is approved
+    ("plan", "edits", False, "plan"),
 ])
-def test_which_mode_a_session_runs_in(host, ticket, resuming, can_plan, expected):
-    assert modes.session_mode(host, ticket, resuming=resuming, can_plan=can_plan) == expected
+def test_which_mode_a_session_runs_in(host, ticket, approved, expected):
+    assert modes.session_mode(host, ticket, plan_approved=approved) == expected
 
 
 def _launch(tmp_path, plan_first):
@@ -136,11 +137,24 @@ def test_a_declined_plan_keeps_the_session_planning(tmp_path):
     assert _hook(s, "Write", {"file_path": str(tmp_path / "index.html")}) == "deny"
 
 
-def test_a_write_that_names_no_path_follows_the_mode_too(tmp_path):
+@pytest.mark.parametrize("mode", ["manual", "edits", "plan", "auto"])
+def test_a_write_that_names_no_file_is_refused_in_every_mode(tmp_path, mode):
+    """PRD-253 S0.1: the gate cannot place a write with no path, so no mode lets it
+    run. (#845 had it follow the mode, which allowed it in Edit automatically and
+    Auto — harmless for Claude Code, whose edits always carry ``file_path``, but
+    not for a patch whose paths an adapter could not read.)"""
     intent = policy.ToolIntent(tool="NotebookEdit", cls=ToolClass.FILE_WRITE)
-    assert policy.decide(intent, _ctx(tmp_path, "manual")).behavior == "ask"
-    assert policy.decide(intent, _ctx(tmp_path, "plan")).behavior == "deny"
-    assert policy.decide(intent, _ctx(tmp_path, "edits")).behavior == "allow"
+    decision = policy.decide(intent, _ctx(tmp_path, mode))
+    assert decision.behavior == "deny"
+    assert decision.reason == policy.WRITE_NAMES_NO_FILE
+
+
+@pytest.mark.parametrize("mode", ["manual", "edits", "auto"])
+def test_a_search_without_a_path_still_works_in_the_folder(tmp_path, mode):
+    for tool in ("Grep", "Glob"):
+        intent = _CLAUDE.tool_intent(tool, {"pattern": "TODO"})
+        assert not intent.paths
+        assert policy.decide(intent, _ctx(tmp_path, mode)).behavior == "allow"
 
 
 def test_the_plan_is_read_from_claude_codes_plan_file_when_only_its_path_arrives(tmp_path):
@@ -182,12 +196,72 @@ def test_codex_sessions_take_the_same_modes(tmp_path, mode, edit, unlisted):
     # the hard lines hold for Codex too
     assert verdict("exec_command", {"cmd": "git push origin main"}) == "deny"
     assert verdict("apply_patch", _codex_patch("/etc/hosts")) == "deny"
+    # PRD-253 S0.1: a patch whose files the adapter cannot read is a write to nowhere
+    headless = {"input": "*** Begin Patch\n+x\n*** End Patch\n"}
+    assert codex.tool_intent("apply_patch", headless).paths == ()
+    assert verdict("apply_patch", headless) == "deny"
 
 
-def test_codex_has_no_plan_mode_so_plan_runs_as_edit_automatically(tmp_path):
-    """Plan needs a CLI that can present a plan; Codex cannot, so it never waits for one."""
-    assert modes.session_mode(None, "plan", resuming=False, can_plan=bool(CODEX.plan_stance)) == "edits"
+def test_codex_plans_too_its_plan_is_the_turns_final_message(tmp_path):
+    """PRD-253 Wave P: Plan needs no plan mode of the CLI's own. Codex launches as it
+    always does; the gate holds it read-only and its refusals say how a plan is
+    presented without ExitPlanMode."""
+    assert modes.session_mode(None, "plan") == "plan"
     ctx = LaunchContext(cwd=tmp_path, session_dir=tmp_path / "s", ticket_path=tmp_path / "t.md",
                         system_prompt_path=tmp_path / "sp.md", task_id="1", session_id="sid", plan_first=True)
     args = _codex().launch_args(ctx, Prepared())
     assert all(token in args for token in CODEX.ungated_stance)
+    plan = policy.PolicyContext(cwd=tmp_path, permission_mode="plan", allowed_bash=policy.PLAN_BASH_ALLOW)
+    refused = policy.decide(_codex().tool_intent("apply_patch", _codex_patch(tmp_path / "index.html")), plan)
+    assert refused.behavior == "deny" and refused.reason == modes.PLAN_EDIT_REFUSED_TURN
+    claude_plan = policy.PolicyContext(cwd=tmp_path, permission_mode="plan", plan_tool=True)
+    assert _decide("Write", {"file_path": str(tmp_path / "x.md")}, claude_plan).reason == modes.PLAN_EDIT_REFUSED
+
+
+@pytest.mark.parametrize("command, expected", [
+    ("git log --oneline", "allow"), ("git diff", "allow"), ("cat a.txt", "allow"), ("rg TODO", "allow"),
+    ("sort < data.txt", "allow"), ("ls > /dev/null", "allow"), ("grep -rn x . 2>&1", "allow"),
+    ("git commit -m x", "ask"), ("git add a", "ask"), ("pytest", "ask"), ("npm run build", "ask"),
+    ("echo x > notes.md", "ask"), ("cat a >> b.txt", "ask"), ("sed -i 's/a/b/' f", "ask"),
+    ("sed --in-place 's/a/b/' f", "ask"), ("awk -i inplace '{print}' f", "ask"), ("sed -n '1p' f", "allow"),
+])
+def test_plan_is_read_only_in_the_shell_too(tmp_path, command, expected):
+    """Plan is read-only on every CLI; a CLI with no plan mode has only the gate holding it there."""
+    plan = policy.PolicyContext(cwd=tmp_path, permission_mode="plan", allowed_bash=policy.PLAN_BASH_ALLOW)
+    assert policy.decide_bash(command, plan).behavior == expected, command
+    assert set(policy.PLAN_BASH_ALLOW) < set(policy.DEFAULT_BASH_ALLOW)
+
+
+def test_outside_plan_a_redirection_is_judged_as_before(tmp_path):
+    edits = policy.PolicyContext(cwd=tmp_path, permission_mode="edits")
+    assert policy.decide_bash("echo x > notes.md", edits).behavior == "allow"
+    assert policy.decide_bash("sed -i 's/a/b/' f", edits).behavior == "allow"
+
+
+def test_an_unanswered_plan_card_hands_the_plan_to_the_operator(tmp_path):
+    """Claude Code's plan card nobody answered (PRD-253 Wave P): not a refusal that
+    sends the ticket to review — the plan goes to the operator as the Plan card,
+    the turn ends, and Approve resumes this same session. A second presentation
+    is not a second card."""
+    s = _session(tmp_path, "plan")
+    s.cfg.ask_timeout = 0.2
+    assert _hook(s, "ExitPlanMode", {"plan": PLAN}) == "deny"
+    assert s.plan == {"text": PLAN, "approved_in_turn": False}
+    assert s.denials == []                                        # handed over, not refused
+    assert not s._pending_asks
+    assert _hook(s, "ExitPlanMode", {"plan": PLAN}) == "deny"      # already with the operator: no new card
+    assert s._policy.permission_mode == "plan"
+
+
+def test_a_plan_approved_in_the_turn_is_reported_as_approved(tmp_path):
+    s = _session(tmp_path, "plan")
+    _answer(s, True)
+    assert _hook(s, "ExitPlanMode", {"plan": PLAN}) == "allow"
+    assert s.plan == {"text": PLAN, "approved_in_turn": True}
+
+
+def test_a_plan_turn_is_named_in_the_ticket_file():
+    from automatos_cli_host.session_prompt import PLAN_TURN_SECTION, build_ticket_file
+    ticket = {"task_id": 4, "title": "t", "prompt": "do it"}
+    assert PLAN_TURN_SECTION in build_ticket_file(ticket, None, True)
+    assert "Plan mode" not in build_ticket_file(ticket, None)

@@ -177,6 +177,7 @@ def test_every_tool_a_persona_or_a_step_names_is_one_the_platform_has():
 def test_the_four_playbooks_pass_the_create_routes_validators():
     assert [spec["name"] for spec in SOCIALS_PLAYBOOKS] == [
         "Brand kit from your website", "Launch video", "Weekly social posts", "Image carousel",
+        "Content bank research",  # PRD-251B (US-B204): a plan's weekly research
     ]
     for spec in SOCIALS_PLAYBOOKS:
         row = _row(spec)
@@ -324,7 +325,7 @@ def test_platform_search_packages_finds_socials_with_its_guided_setup(monkeypatc
     out = _search(monkeypatch, signals)
     socials = next(m for m in out["matches"] if m["slug"] == "socials")
     manifest = SOCIALS_PACKAGE["setup_manifest"]
-    assert socials["contents"] == {"agent": 2, "playbook": 4}
+    assert socials["contents"] == {"agent": 2, "playbook": len(SOCIALS_PLAYBOOKS)}  # PRD-251B W2 added Content bank research
     assert socials["questions"] == manifest["questions"]
     assert socials["required_connects"] == manifest["required_connects"]
     assert socials["guide_steps"] == manifest["guide_steps"]
@@ -694,7 +695,7 @@ def _assert_installed(session, ws):
     """Both agents with persona and skills, all four Playbooks on this workspace's agents."""
     market_agents, market_playbooks = _marketplace_rows(session)
     agents, playbooks = _installed(session, ws)
-    assert len(agents) == 2 and len(playbooks) == 4
+    assert len(agents) == 2 and len(playbooks) == len(SOCIALS_PLAYBOOKS)
     clones = {a.cloned_from_id: a for a in agents}
     clone_of = {}
     for spec in SOCIALS_AGENTS:
@@ -741,7 +742,7 @@ def test_installing_the_package_clones_both_agents_and_all_four_playbooks_and_a_
         body = first.json()
         assert body["success"] is True, body
         kinds = [r["type"] for r in body["registrations"]]
-        assert kinds.count("agent") == 2 and kinds.count("playbook") == 4
+        assert kinds.count("agent") == 2 and kinds.count("playbook") == len(SOCIALS_PLAYBOOKS)
         assert all(r["workspace_owned"] for r in body["registrations"])
         agent_ids, steps = _assert_installed(session, ws)
 
@@ -787,7 +788,7 @@ def test_a_skill_synced_after_the_first_boot_attaches_on_the_next_and_nothing_is
             names = [s.name for s in agents[spec["slug"]].skills]
             assert sorted(names) == sorted(spec["skills"]) and not set(names) & PUBLISHER_SKILLS
         assert session.query(Agent).filter(Agent.owner_type == "marketplace", Agent.slug.in_(list(AGENTS))).count() == 2
-        assert len(playbooks) == 4
+        assert len(playbooks) == len(SOCIALS_PLAYBOOKS)
 
 
 @pytest.mark.integration

@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
 }))
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WorkspaceProvider, useWorkspace } from '../workspace-provider'
 
 function Probe() {
@@ -84,9 +85,11 @@ describe('WorkspaceProvider — onboarding snapshot (US-002)', () => {
     })
 
     render(
-      <WorkspaceProvider>
-        <Probe />
-      </WorkspaceProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider>
+          <Probe />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
     )
 
     await waitFor(() =>
@@ -101,9 +104,11 @@ describe('WorkspaceProvider — onboarding snapshot (US-002)', () => {
     mockFetch({ ...BASE_RESPONSE })
 
     render(
-      <WorkspaceProvider>
-        <Probe />
-      </WorkspaceProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider>
+          <Probe />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
     )
 
     await waitFor(() =>

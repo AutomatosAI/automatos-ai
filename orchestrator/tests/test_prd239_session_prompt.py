@@ -307,8 +307,10 @@ def test_the_sessions_real_directory_always_wins(monkeypatch):
 
 
 def test_host_contract_version_moved_with_the_claim_shape():
+    # 0.11.0 (2026-10-02, PRD-253): GitHub Copilot served; the terminal launch carries agent_id.
+    # 0.10.0 (2026-10-02, PRD-253 Wave P): the claim carries plan_approved.
     # 0.8.0 (2026-09-17, PRD-245 W1): the claim carries session_tools,
     # session_tools_path and a per-ticket session_token.
     # 0.7.0 (2026-09-11, CLI adapter design): capabilities carry every CLI under
     # ``clis`` with served/reason; ``providers`` = the served ids.
-    assert svc.EXPECTED_CLI_HOST_VERSION == "0.9.0"
+    assert svc.EXPECTED_CLI_HOST_VERSION == "0.11.0"

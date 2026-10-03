@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from services.ticket_refs import by_ticket_number
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,6 +137,10 @@ async def acknowledge_report(
         if result is None:
             return {"success": False, "error": "report not found in this workspace"}
         db.commit()
+        # F235: an acknowledged report is approved work: it becomes a Document.
+        from services.report_knowledge import file_owner_approved
+
+        await file_owner_approved(db, workspace_id, str(result[0]))
         return {"success": True, "data": {"report_id": str(result[0])}}
     except Exception as exc:
         logger.error("[acknowledge_report] failed: %s", exc, exc_info=True)
@@ -142,6 +148,7 @@ async def acknowledge_report(
         return {"success": False, "error": str(exc)}
 
 
+@by_ticket_number  # PRD-252 R4: takes the ticket as #0042
 async def link_report_to_task(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:

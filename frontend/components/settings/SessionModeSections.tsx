@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PermissionModePicker, type PermissionMode } from './PermissionModePicker'
+import { hostCliLines, type HostCliInfo } from './host-clis'
 
 export interface HostRow {
   id: string
@@ -25,7 +26,7 @@ export interface HostRow {
   paired_at?: string | null
   /** Host 0.7.0 (CLI adapter design): every CLI the host knows, served or not, under `clis`; `providers` = the served ids. */
   capabilities?: {
-    clis?: Record<string, { version?: string | null; path?: string | null; served?: boolean; reason?: string | null }> | null
+    clis?: Record<string, HostCliInfo> | null
     providers?: string[] | null
   } | null
 }
@@ -73,6 +74,19 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
+/** PRD-253 S3.1: every CLI the host announced — served, or why not; for Copilot, whose seat it spends. */
+function HostClis({ clis, hostId }: { clis: Record<string, HostCliInfo> | null | undefined; hostId: string }) {
+  const lines = hostCliLines(clis)
+  if (lines.length === 0) return null
+  return (
+    <ul className="mt-1.5 space-y-0.5 pl-5 text-xs text-muted-foreground" data-testid={`host-clis-${hostId}`}>
+      {lines.map((c) => (
+        <li key={c.id} className={c.served ? 'text-foreground/80' : undefined}>{c.text}</li>
+      ))}
+    </ul>
+  )
+}
+
 export function HostsList({ hosts }: { hosts: HostRow[] }) {
   return (
     <div>
@@ -82,22 +96,24 @@ export function HostsList({ hosts }: { hosts: HostRow[] }) {
           <p className="text-sm text-muted-foreground">No host paired yet.</p>
         )}
         {hosts.map((h) => (
-          <div key={h.id} className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2 text-sm">
-            <div className="flex items-center gap-3">
-              <span
-                className={
-                  'inline-block h-2 w-2 rounded-full ' +
-                  (h.status !== 'paired' ? 'bg-muted-foreground' : h.online ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--warning))]')
-                }
-                aria-hidden
-              />
-              <span className="font-medium">{h.name}</span>
-              <span className="text-muted-foreground">
-                {h.status !== 'paired' ? h.status : h.online ? 'connected' : 'not running'}
-                {h.capabilities?.clis?.claude?.version ? ` · Claude Code ${h.capabilities.clis.claude.version}` : ''}
-              </span>
+          <div key={h.id} className="rounded-lg border border-border/40 px-3 py-2 text-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span
+                  className={
+                    'inline-block h-2 w-2 rounded-full ' +
+                    (h.status !== 'paired' ? 'bg-muted-foreground' : h.online ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--warning))]')
+                  }
+                  aria-hidden
+                />
+                <span className="font-medium">{h.name}</span>
+                <span className="text-muted-foreground">
+                  {h.status !== 'paired' ? h.status : h.online ? 'connected' : 'not running'}
+                </span>
+              </div>
+              <span className="font-mono text-xs text-muted-foreground">{h.id.slice(0, 8)}</span>
             </div>
-            <span className="font-mono text-xs text-muted-foreground">{h.id.slice(0, 8)}</span>
+            <HostClis clis={h.capabilities?.clis} hostId={h.id} />
           </div>
         ))}
       </div>
@@ -233,7 +249,7 @@ export function PermissionModeCard({ settings, saving, onSave }: SettingCardProp
         The same modes as Claude Code. This is the default for every session agent; an agent can pick its own
         (Agent → Model → Permission mode). In every mode sessions never push or publish, the platform&apos;s secrets stay
         out of reach, and commands run inside the session sandbox. Questions reach you as cards on the ticket.
-        Plan needs Claude Code: an agent on another CLI (Codex) runs Plan as Edit automatically.
+        Plan works on every CLI: the plan reaches you as a card, and approving it starts the work.
       </p>
     </div>
   )

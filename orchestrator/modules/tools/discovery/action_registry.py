@@ -14,10 +14,39 @@ Usage:
 
 import logging
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+# PRD-251B US-B106 (B3, off means invisible): the action categories the current turn's
+# workspace is not shown (Socials while it is off for it). A turn's entry sets them
+# (hidden_scope) for the listings it cannot hand them to; every listing reads them
+# beside its own exclude_categories.
+_turn_hidden: ContextVar[Optional[Tuple[str, ...]]] = ContextVar("hidden_action_categories", default=None)
+
+
+@contextmanager
+def hidden_scope(categories: Optional[Iterable[str]]):
+    """Hide ``categories`` from every action listing for the duration of the block."""
+    token = _turn_hidden.set(tuple(categories or ()))
+    try:
+        yield
+    finally:
+        _turn_hidden.reset(token)
+
+
+def turn_hidden() -> Optional[Tuple[str, ...]]:
+    """The categories the current turn hides, or None outside a ``hidden_scope``."""
+    return _turn_hidden.get()
+
+
+def hidden_categories_now(extra: Optional[Iterable[str]] = None) -> Set[str]:
+    """The categories hidden here: the turn's (``hidden_scope``) and ``extra``."""
+    return set(_turn_hidden.get() or ()) | set(extra or ())
+
 
 # Thread-safe singleton
 _registry_lock = threading.Lock()
@@ -193,7 +222,8 @@ class ActionRegistry:
                 action the caller isn't entitled to.
         """
         self._ensure_initialized()
-        promoted = [a for a in self._actions.values() if a.promoted and action_is_available(a)]
+        hidden = hidden_categories_now()
+        promoted = [a for a in self._actions.values() if a.promoted and a.category not in hidden and action_is_available(a)]
         if first_class_names is not None:
             promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
@@ -202,111 +232,50 @@ class ActionRegistry:
             promoted = [a for a in promoted if not a.admin_only]
         return [a.to_openai_schema() for a in promoted]
 
-    def to_dispatcher_schema(
-        self,
-        exclude_admin: bool = False,
-        exclude_promoted: bool = True,
-        allowed_names: Optional[List[str]] = None,
-        include_super_admin: bool = False,
-        allow_promoted_in_allowlist: bool = False,
-        exclude_names: Optional[Set[str]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Return a SINGLE OpenAI tool schema (platform_execute) that wraps
-        all platform actions behind one dispatcher.
-
-        Args:
-            exclude_admin: If True, admin_only actions are excluded from the
-                dispatcher (non-admin callers won't see them).
-            exclude_promoted: If True (default), promoted actions are excluded
-                from the dispatcher since they have first-class schemas.
-            allowed_names: Optional whitelist applied AFTER admin/promoted
-                filters. When None, the enum exposes every eligible action
-                (legacy behavior). When a non-empty list, the enum is the
-                intersection of (admin/promoted-filtered actions) and
-                ``allowed_names``. When an empty list, falls back to the full
-                enum and logs a WARNING — empty list is treated as "ranker
-                returned nothing", not "block everything", so the LLM is
-                never left with zero callable actions.
-            include_super_admin: Fail-closed — super_admin_only actions are
-                excluded from the enum (and from every fallback path)
-                unless this is explicitly True.
-            allow_promoted_in_allowlist: PR-B (tool-surface review) — when
-                True, names in ``allowed_names`` that are promoted may enter
-                the enum despite ``exclude_promoted`` (role filters still
-                apply first). Used by the closed-pins fallback, whose pin set
-                (platform_find_tools et al.) is largely promoted; without
-                this the pins would intersect to nothing and fall open to
-                the full enum — the exact failure the mode exists to stop.
-            exclude_names: PRD-232 US-014 (promotion-as-prior) — names to keep
-                OUT of the enum because they are attached FIRST-CLASS this turn
-                (the config pins + whatever promoted actions ranked into the
-                surface). Applied AFTER the role/su filters, alongside
-                ``exclude_promoted=False`` so the remaining (non-first-class)
-                promoted actions stay reachable in the enum like any action.
-        """
-        self._ensure_initialized()
-
-        exclude_set = set(exclude_names or ())
-
-        # Build enum of valid action names AFTER admin/su/promoted filters.
-        # The su filter applies here, BEFORE the allow-list, so the
-        # empty-intersection fallback below can never re-admit su actions.
-        # US-014: exclude_set drops the first-class-attached names (pins + ranked
-        # promoted) so they aren't duplicated in the enum.
-        valid_actions = sorted(
+    def _eligible_names(
+        self, exclude_admin: bool, exclude_promoted: bool, include_super_admin: bool, excluded: Set[str], hidden: Set[str],
+    ) -> List[str]:
+        """The names the dispatcher may offer, sorted: the role and tier gates (the su filter
+        runs BEFORE any allow-list, so no fallback can re-admit su actions), less the names
+        attached first-class this turn (US-014) and the hidden categories (PRD-251B US-B106),
+        and only what can run here (F078)."""
+        return sorted(
             a.name for a in self._actions.values()
             if (not exclude_promoted or not a.promoted)
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
-            and a.name not in exclude_set
+            and a.name not in excluded
+            and a.category not in hidden
             and action_is_available(a)
         )
 
-        # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
-        # sees the ranker's top-K. Permission filters above always run first.
+    @staticmethod
+    def _narrowed(valid: List[str], pool: List[str], allowed_names: Optional[List[str]]) -> List[str]:
+        """PRD-138 US-008: the ranker's allow-list narrows the enum (the gates above ran
+        first). None keeps the full enum; an empty list, or an intersection the gates left
+        empty, falls back to it with a warning: never a schema with zero options."""
         if allowed_names is None:
-            narrowed_actions = valid_actions
-        elif len(allowed_names) == 0:
+            return valid
+        if len(allowed_names) == 0:
             logger.warning(
                 "[ActionRegistry] to_dispatcher_schema(allowed_names=[]) — "
                 "empty allow-list, falling back to full enum"
             )
-            narrowed_actions = valid_actions
-        else:
-            allow_set = set(allowed_names)
-            intersect_pool = valid_actions
-            if allow_promoted_in_allowlist and exclude_promoted:
-                # Same role gates as valid_actions, promoted admitted — the
-                # allow-list (pins) is the narrowing here, not the flag.
-                intersect_pool = sorted(
-                    a.name for a in self._actions.values()
-                    if (not exclude_admin or not a.admin_only)
-                    and (include_super_admin or not a.super_admin_only)
-                    and a.name not in exclude_set
-                    and action_is_available(a)
-                )
-            narrowed_actions = [n for n in intersect_pool if n in allow_set]
-            # Defensive: if the intersection is empty (e.g. ranker returned
-            # only admin actions for a non-admin caller), fall back to the
-            # full eligible set rather than ship a schema with zero options.
-            if not narrowed_actions:
-                logger.warning(
-                    "[ActionRegistry] to_dispatcher_schema: allowed_names "
-                    "intersection is empty after permission filters, "
-                    "falling back to full enum"
-                )
-                narrowed_actions = valid_actions
+            return valid
+        allow_set = set(allowed_names)
+        narrowed = [n for n in pool if n in allow_set]
+        if not narrowed:
+            logger.warning(
+                "[ActionRegistry] to_dispatcher_schema: allowed_names "
+                "intersection is empty after permission filters, "
+                "falling back to full enum"
+            )
+            return valid
+        return narrowed
 
-        # F025: what the model is STEERED to this turn, published for the
-        # caller to render as a late system line, and — when the cache-stable
-        # dial is on — kept OUT of the tool block so its bytes never move.
-        from modules.tools.turn_narrowing import publish_narrowed_actions, enum_is_cache_stable
-
-        if allowed_names and narrowed_actions != valid_actions:
-            publish_narrowed_actions(narrowed_actions)
-        enum_actions = valid_actions if enum_is_cache_stable() else narrowed_actions
-
+    @staticmethod
+    def _dispatcher_tool(enum_actions: List[str]) -> Dict[str, Any]:
+        """The platform_execute tool schema over ``enum_actions`` (no enum when empty)."""
         action_property: Dict[str, Any] = {
             "type": "string",
             "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
@@ -344,12 +313,83 @@ class ActionRegistry:
             },
         }
 
+    def to_dispatcher_schema(
+        self,
+        exclude_admin: bool = False,
+        exclude_promoted: bool = True,
+        allowed_names: Optional[List[str]] = None,
+        include_super_admin: bool = False,
+        allow_promoted_in_allowlist: bool = False,
+        exclude_names: Optional[Set[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Return a SINGLE OpenAI tool schema (platform_execute) that wraps
+        all platform actions behind one dispatcher.
+
+        Args:
+            exclude_admin: If True, admin_only actions are excluded from the
+                dispatcher (non-admin callers won't see them).
+            exclude_promoted: If True (default), promoted actions are excluded
+                from the dispatcher since they have first-class schemas.
+            allowed_names: Optional whitelist applied AFTER admin/promoted
+                filters. When None, the enum exposes every eligible action
+                (legacy behavior). When a non-empty list, the enum is the
+                intersection of (admin/promoted-filtered actions) and
+                ``allowed_names``. When an empty list, falls back to the full
+                enum and logs a WARNING — empty list is treated as "ranker
+                returned nothing", not "block everything", so the LLM is
+                never left with zero callable actions.
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded from the enum (and from every fallback path)
+                unless this is explicitly True.
+            allow_promoted_in_allowlist: PR-B (tool-surface review) — when
+                True, names in ``allowed_names`` that are promoted may enter
+                the enum despite ``exclude_promoted`` (role filters still
+                apply first). Used by the closed-pins fallback, whose pin set
+                (platform_find_tools et al.) is largely promoted; without
+                this the pins would intersect to nothing and fall open to
+                the full enum — the exact failure the mode exists to stop.
+            exclude_names: PRD-232 US-014 (promotion-as-prior) — names to keep
+                OUT of the enum because they are attached FIRST-CLASS this turn
+                (the config pins + whatever promoted actions ranked into the
+                surface). Applied AFTER the role/su filters, alongside
+                ``exclude_promoted=False`` so the remaining (non-first-class)
+                promoted actions stay reachable in the enum like any action.
+            exclude_categories: PRD-251B US-B106 — whole categories kept out of the
+                enum and of every fallback below, with the role filters: a feature
+                switched off for the workspace (Socials) is not offered at all.
+        """
+        self._ensure_initialized()
+        excluded = set(exclude_names or ())
+        hidden = hidden_categories_now(exclude_categories)
+        valid_actions = self._eligible_names(exclude_admin, exclude_promoted, include_super_admin, excluded, hidden)
+        # PR-B: the closed-pins fallback's pins are largely promoted: the same gates, promoted admitted.
+        pool = (
+            self._eligible_names(exclude_admin, False, include_super_admin, excluded, hidden)
+            if allow_promoted_in_allowlist and exclude_promoted
+            else valid_actions
+        )
+        narrowed_actions = self._narrowed(valid_actions, pool, allowed_names)
+
+        # F025: what the model is STEERED to this turn, published for the
+        # caller to render as a late system line, and — when the cache-stable
+        # dial is on — kept OUT of the tool block so its bytes never move.
+        from modules.tools.turn_narrowing import publish_narrowed_actions, enum_is_cache_stable
+
+        if allowed_names and narrowed_actions != valid_actions:
+            publish_narrowed_actions(narrowed_actions)
+        enum_actions = valid_actions if enum_is_cache_stable() else narrowed_actions
+
+        return self._dispatcher_tool(enum_actions)
+
     def build_prompt_summary(
         self,
         exclude_admin: bool = False,
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Build a markdown summary of all platform actions for injection
@@ -365,6 +405,8 @@ class ActionRegistry:
                 excluded unless this is explicitly True.
             exclude_names: PRD-229 — action names to omit entirely (mode-scoped
                 admission, e.g. ask_orchestrator outside execution lanes).
+            exclude_categories: PRD-251B US-B106 — categories to omit entirely: a
+                feature switched off for the workspace (Socials) is not described.
         """
         self._ensure_initialized()
         return self._format_actions_summary(
@@ -373,6 +415,7 @@ class ActionRegistry:
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
             exclude_names=exclude_names,
+            exclude_categories=exclude_categories,
         )
 
     def build_filtered_prompt_summary(
@@ -382,6 +425,7 @@ class ActionRegistry:
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Build a markdown summary of only the named subset of platform actions,
@@ -414,6 +458,7 @@ class ActionRegistry:
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
             exclude_names=exclude_names,
+            exclude_categories=exclude_categories,
         )
 
     @staticmethod
@@ -428,12 +473,38 @@ class ActionRegistry:
         return f"- `{action.name}`: {action.description}{param_str}"
 
     @staticmethod
+    def _summarised(
+        actions: List[ActionDefinition],
+        exclude_admin: bool,
+        exclude_promoted: bool,
+        include_super_admin: bool,
+        exclude_names: Optional[List[str]],
+        exclude_categories: Optional[Iterable[str]],
+    ) -> List[ActionDefinition]:
+        """The actions a summary describes: those that can run here (F121/F078), less
+        the names blocked (PRD-229), the categories hidden (PRD-251B US-B106: a feature
+        switched off for the workspace, such as Socials), the su tier unless asked for
+        (PRD-143), and the admin or promoted ones when excluded."""
+        blocked, hidden = set(exclude_names or ()), hidden_categories_now(exclude_categories)
+        return [
+            action
+            for action in actions
+            if action.name not in blocked
+            and action.category not in hidden
+            and action_is_available(action)
+            and (include_super_admin or not action.super_admin_only)
+            and not (exclude_admin and action.admin_only)
+            and not (exclude_promoted and action.promoted)
+        ]
+
+    @staticmethod
     def _format_actions_summary(
         actions: List[ActionDefinition],
         exclude_admin: bool,
         exclude_promoted: bool,
         include_super_admin: bool = False,
         exclude_names: Optional[List[str]] = None,
+        exclude_categories: Optional[Iterable[str]] = None,
     ) -> str:
         """
         Render a list of ActionDefinitions as the canonical markdown summary
@@ -449,23 +520,15 @@ class ActionRegistry:
         instructions.
 
         PRD-229: ``exclude_names`` drops actions by name entirely (mode-scoped
-        admission), mirroring the callable-surface gate.
+        admission), mirroring the callable-surface gate. PRD-251B US-B106:
+        ``exclude_categories`` drops whole categories the same way.
         """
-        blocked = set(exclude_names or ())
         promoted_by_cat: Dict[str, List[ActionDefinition]] = {}
         dispatcher_by_cat: Dict[str, List[ActionDefinition]] = {}
 
-        for action in actions:
-            if action.name in blocked:
-                continue
-            if not action_is_available(action):
-                continue  # F121: the prompt never describes what cannot run here (F078)
-            if action.super_admin_only and not include_super_admin:
-                continue
-            if exclude_admin and action.admin_only:
-                continue
-            if exclude_promoted and action.promoted:
-                continue
+        for action in ActionRegistry._summarised(
+            actions, exclude_admin, exclude_promoted, include_super_admin, exclude_names, exclude_categories
+        ):
             bucket = promoted_by_cat if action.promoted else dispatcher_by_cat
             bucket.setdefault(action.category, []).append(action)
 

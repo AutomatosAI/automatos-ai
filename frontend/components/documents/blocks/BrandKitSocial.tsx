@@ -47,7 +47,8 @@ export function toneWordsProblem(tone: string[]): string | null {
 }
 
 interface BrandKitSocialProps {
-  handles: Record<string, string>
+  /** The handles to edit; undefined while Socials is off for the workspace (PRD-251B US-B106): no handles editor. */
+  handles?: Record<string, string>
   voice: BrandVoice
   onHandlesChange: (handles: Record<string, string>) => void
   onVoiceChange: (voice: BrandVoice) => void
@@ -58,9 +59,12 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
   const [toneText, setToneText] = useState(() => voice.tone.join(', '))
   const [phrasesText, setPhrasesText] = useState(() => voice.banned_phrases.join('\n'))
   const problem = toneWordsProblem(voice.tone)
+  // PRD-251B US-B106: no handles (Socials off for the workspace) means no handles editor.
+  const shownHandles = handles
 
   return (
     <>
+      {shownHandles && (
       <div className="rounded-md border p-3">
         <p className="mb-2 flex items-center text-xs font-medium text-muted-foreground">
           Social handles <FieldHelp id="deliverables.brand_kit.handles" />
@@ -75,15 +79,16 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
                 <span className="shrink-0 text-xs text-muted-foreground">{prefix}</span>
                 <Input
                   id={`brand-handle-${toolkit}`}
-                  value={handles[toolkit] ?? ''}
+                  value={shownHandles[toolkit] ?? ''}
                   placeholder={placeholder}
-                  onChange={(e) => onHandlesChange({ ...handles, [toolkit]: e.target.value })}
+                  onChange={(e) => onHandlesChange({ ...shownHandles, [toolkit]: e.target.value })}
                 />
               </div>
             </div>
           ))}
         </div>
       </div>
+      )}
 
       <div className="rounded-md border p-3">
         <p className="mb-2 flex items-center text-xs font-medium text-muted-foreground">

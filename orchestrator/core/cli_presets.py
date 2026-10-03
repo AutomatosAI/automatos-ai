@@ -18,14 +18,16 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
+PROVIDER_COPILOT = "copilot"
 
 # What ``claude --model`` accepts: an alias or a full model id. Deliberately
 # narrow — a session agent never carries an OpenRouter id (PRD-223: the model
 # route used to validate nothing).
 _CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku", "fable", "default"})
 _CLAUDE_MODEL_ID_RE = re.compile(r"^claude-[a-z0-9][a-z0-9.\-]*(\[1m\])?$")
-# Codex: permissive (design D-2) — the CLI refuses a bad model honestly, and a
-# hardcoded list rots.
+# Codex and GitHub Copilot: permissive (design D-2) — the CLI refuses a bad model
+# honestly, and a hardcoded list rots. Copilot's models are its plan's and the
+# organisation's policy's (auto, claude-sonnet-4.6, gpt-5.4, …): never a route.
 _CODEX_MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
 
 
@@ -45,11 +47,19 @@ class CliPresetInfo:
     model_ok: Callable[[str], bool]       # the rule a saved model must satisfy (blank = the CLI's default)
     model_hint: str                       # the help line under the picker's model field
     model_placeholder: str
+    # PRD-253 S0.5: how the operator continues a session in their own terminal
+    # ({session_id}), and the note a CLI whose home is per agent needs with it.
+    takeover: str = ""
+    takeover_note: str = ""
 
     def public(self) -> Dict[str, str]:
         """What the picker renders (design §8.3) — never the rule itself."""
         return {"id": self.id, "label": self.label, "model_hint": self.model_hint, "model_placeholder": self.model_placeholder}
 
+
+# A CLI whose config home is per agent (Codex's CODEX_HOME) resumes its sessions
+# only from that home, which the operator's own terminal does not point at.
+AGENT_HOME_NOTE = "or open the ticket's Runtime Canvas terminal, which starts it in the agent's own home"
 
 CLI_PRESETS: Dict[str, CliPresetInfo] = {
     PROVIDER_CLAUDE: CliPresetInfo(
@@ -57,17 +67,52 @@ CLI_PRESETS: Dict[str, CliPresetInfo] = {
         "Claude Code's own aliases, lowercase (fable · opus · sonnet · haiku) or a full id such as claude-opus-5. "
         "Blank = the CLI's default. The model must be available to your login; it is not one of the API models below.",
         "fable · opus · sonnet · haiku · or claude-opus-5",
+        takeover="claude --resume {session_id}",
     ),
     PROVIDER_CODEX: CliPresetInfo(
         PROVIDER_CODEX, "Codex", "codex", _codex_model_ok,
         "A model your ChatGPT plan offers in Codex (for example gpt-5.5). Blank = the CLI's default from your ~/.codex/config.toml.",
         "gpt-5.5",
+        takeover="codex resume {session_id}",
+        takeover_note=AGENT_HOME_NOTE,
+    ),
+    # PRD-253: GitHub Copilot CLI, run as ``copilot -p`` with its config home per agent.
+    PROVIDER_COPILOT: CliPresetInfo(
+        PROVIDER_COPILOT, "GitHub Copilot", "copilot_cli", _codex_model_ok,
+        "A model your Copilot plan and your organisation's policy enable in Copilot CLI (for example auto, "
+        "claude-sonnet-4.6 or gpt-5.4). Blank = the CLI's default.",
+        "auto · claude-sonnet-4.6 · gpt-5.4",
+        takeover="copilot --resume {session_id}",
+        takeover_note=AGENT_HOME_NOTE,
     ),
 }
 
 
 def registry_public() -> List[Dict[str, str]]:
     return [info.public() for info in CLI_PRESETS.values()]
+
+
+def _info(cli_provider: Optional[str]) -> Optional[CliPresetInfo]:
+    """The row for a ticket's CLI; no provider at all is Claude Code (what every
+    session agent ran on before the field existed, as the claim defaults it)."""
+    return CLI_PRESETS.get(str(cli_provider or PROVIDER_CLAUDE).strip().lower())
+
+
+def session_heading(cli_provider: Optional[str]) -> str:
+    """The task report's section title for a session: the CLI's own name."""
+    info = _info(cli_provider)
+    return f"## {info.label if info else 'CLI'} session"
+
+
+def takeover_line(cli_provider: Optional[str], session_id: Optional[str], cwd: Optional[str]) -> Optional[str]:
+    """How to continue this session in the operator's own terminal, in THIS CLI's
+    spelling (PRD-253 S0.5); None for a CLI the registry does not know."""
+    info = _info(cli_provider)
+    if info is None or not info.takeover or not session_id:
+        return None
+    cd = f"cd {cwd} && " if cwd else ""
+    note = f" — {info.takeover_note}" if info.takeover_note else ""
+    return f"- Take over in your terminal: `{cd}{info.takeover.format(session_id=session_id)}`{note}"
 CLI_PROVIDERS = tuple(CLI_PRESETS)
 
 # How a session's spend is tagged in ``llm_usage.provider`` (never a registry API

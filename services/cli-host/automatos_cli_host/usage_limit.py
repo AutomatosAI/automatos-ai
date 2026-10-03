@@ -13,9 +13,15 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-# The persona runner's patterns — plus a result record whose subtype names a limit.
+# The persona runner's patterns — plus a result record whose subtype names a limit,
+# and GitHub Copilot's own words for a plan that ran out (PRD-253 S1.6): its AI
+# credits ("You've run out of your AI credits", "…your included AI credits for the
+# month") and its rate limits (overall, per model, per session, weekly — all say
+# "rate limit"). Copilot's "No model available. Check policy enablement…" is NOT
+# a limit: it is the organisation's policy, an error the operator has to fix.
 _LIMIT = re.compile(
     r"hit your limit|usage[ _-]?limit|rate[ _-]?limit|Error:\s*(?:429|529)"
+    r"|run out of (?:your )?(?:included )?AI credits|included AI credits for the month"
     r"|\"subtype\"\s*:\s*\"[^\"]*(?:error[^\"]*limit|rate_limit)",
     re.IGNORECASE,
 )

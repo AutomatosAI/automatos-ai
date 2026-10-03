@@ -73,8 +73,9 @@ from .core import BoardTask  # noqa: F811
 from .core import BlogPost  # noqa: F811
 
 # PRD-251 S0.2: Socials — posts and their per-channel targets; Wave 2 (S2.4) — campaigns
-from .socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: F401
+from .socials import SocialCampaign, SocialPost, SocialPostTarget, SocialTopic  # noqa: F401
 from .harness import HarnessTaskLedger  # noqa: F401  # F156: the HARNESS task ledger
+from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

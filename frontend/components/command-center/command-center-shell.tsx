@@ -9,21 +9,27 @@
  *   3. Tab strip (Summary · Board · Calendar · Activity) with live counts
  *   4. Tab body
  *
+ * PRD-252 R8: the page scrolls as one. The head and the stats scroll away, the
+ * tab strip sticks at the top, and the strip with the tab body (`.cc-work`) is
+ * at least the visible height, so a work surface can take the whole screen.
+ * Board and Calendar fill it exactly and keep their own inner scroll; the other
+ * tabs grow with their content under the stuck strip (globals.css).
+ *
  * The active tab is driven by `?tab=` in the URL. Counts on tabs come from
  * the same data hooks that the tabs use, so they stay in sync as backend
- * state changes.
+ * state changes. PRD-252 R5: the Board tab's badge and the lede's "need your
+ * eyes" are the Needs-you number, the one the Needs you widget lists.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { RotateCw } from 'lucide-react'
 
 import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
-import { useBoardTasks } from '@/hooks/use-board-tasks'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
-import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
+import { useNeedsYou } from '@/hooks/use-needs-you'
 import { useWatches } from '@/hooks/use-watches-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
 
@@ -66,6 +72,8 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 const VALID_TABS = new Set<TabKey>(TABS.map((t) => t.key))
+// PRD-252 R8: the work surfaces that take the whole height under the tab strip.
+const FILL_TABS = new Set<TabKey>(['board', 'calendar'])
 
 function todayDateline(): string {
   const now = new Date()
@@ -92,12 +100,11 @@ export function CommandCenterShell() {
   // the stats, the Summary tab's read and the Activity stream.
   const [period, setPeriod] = useState<Period>('1d')
   const { data: stats } = useActivityStats(period)
-  const { columns } = useBoardTasks()
+  const { data: needsYou } = useNeedsYou()
   const { data: schedule } = useActivitySchedule('7d')
   // The backend caps `limit` at 100 (api/activity.py) — 200 was a 422 and an
   // empty Activity count; PR #397 found the same on the tab (harvested here).
   const { data: feed } = useActivityFeed({ limit: 100 })
-  const { data: decisions } = useDecisionsNeeded(10)
   // PRD-204 S11: live watches only (the default list) -- the tab badge is
   // "how many things is Auto supervising right now".
   const { data: watchlist } = useWatches()
@@ -109,18 +116,19 @@ export function CommandCenterShell() {
   // makes "Streaming live" honest (the board no longer polls on an interval).
   useBoardEventStream(true)
 
-  const dateline = useMemo(todayDateline, [])
+  // F219: the clock is the reader's, so it is written after mount. Rendered on
+  // the server it carried the server's time and zone, and React logged #418.
+  const [dateline, setDateline] = useState('')
+  useEffect(() => setDateline(todayDateline()), [])
   // Seven tabs are wider than a phone, so the active one is scrolled into
   // view on a compact viewport (PRD-246 US-002).
   const tabStrip = useTabStripScroll(activeTab)
 
   const tabCounts: Record<TabKey, number> = useMemo(
     () => ({
-      summary: decisions?.total ?? 0,
-      board: columns.reduce(
-        (sum, c) => (c.status === 'done' ? sum : sum + c.tasks.length),
-        0,
-      ),
+      // PRD-252 R5: the one Needs-you number sits on Board; it counted every open ticket.
+      summary: 0,
+      board: needsYou?.total ?? 0,
       calendar: schedule?.scheduled?.length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
       watchlist: watchlist?.total ?? 0,
@@ -131,11 +139,11 @@ export function CommandCenterShell() {
       // the ws-admin-gated pane, not fetched for every member on the shell.
       governance: 0,
     }),
-    [decisions, columns, schedule, feed, watchlist, questions],
+    [needsYou, schedule, feed, watchlist, questions],
   )
 
   const working = stats?.working_now ?? 0
-  const attn = stats?.needs_attention ?? 0
+  const attn = needsYou?.total ?? 0
   const isQuiet = working === 0 && attn === 0
 
   const lede = isQuiet ? (
@@ -172,7 +180,7 @@ export function CommandCenterShell() {
     <div className="cc-page">
       <div className="cc-headrow">
         <div className="cc-head">
-          <p className="cc-eyebrow">Operations · {dateline}</p>
+          <p className="cc-eyebrow">{dateline ? `Operations · ${dateline}` : 'Operations'}</p>
           <h1 className="cc-h1">Command Centre</h1>
           <p className="cc-sub">{lede}</p>
         </div>
@@ -201,33 +209,35 @@ export function CommandCenterShell() {
           powerup/completed stages or once dismissed). */}
       <SetupChecklistCard className="my-3" />
 
-      <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
-        {TABS.map((t) => {
-          const isActive = t.key === activeTab
-          const count = tabCounts[t.key]
-          return (
-            <button
-              key={t.key}
-              type="button"
-              className={`cc-tab${isActive ? ' active' : ''}`}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={() => setTab(t.key)}
-            >
-              <span>{t.label}</span>
-              {count > 0 && <span className="cc-tab-ct">{count}</span>}
-            </button>
-          )
-        })}
-      </nav>
+      <div className={`cc-work${FILL_TABS.has(activeTab) ? ' fill' : ''}`}>
+        <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
+          {TABS.map((t) => {
+            const isActive = t.key === activeTab
+            const count = tabCounts[t.key]
+            return (
+              <button
+                key={t.key}
+                type="button"
+                className={`cc-tab${isActive ? ' active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setTab(t.key)}
+              >
+                <span>{t.label}</span>
+                {count > 0 && <span className="cc-tab-ct">{count}</span>}
+              </button>
+            )
+          })}
+        </nav>
 
-      <div className="cc-body">
-        {activeTab === 'summary' && <SummaryTab period={period} />}
-        {activeTab === 'board' && <BoardTab />}
-        {activeTab === 'calendar' && <CalendarTab />}
-        {activeTab === 'activity' && <ActivityTab period={period} />}
-        {activeTab === 'watchlist' && <WatchlistTab />}
-        {activeTab === 'questions' && <QuestionsTab />}
-        {activeTab === 'governance' && <GovernanceTab />}
+        <div className="cc-body">
+          {activeTab === 'summary' && <SummaryTab period={period} />}
+          {activeTab === 'board' && <BoardTab />}
+          {activeTab === 'calendar' && <CalendarTab />}
+          {activeTab === 'activity' && <ActivityTab period={period} />}
+          {activeTab === 'watchlist' && <WatchlistTab />}
+          {activeTab === 'questions' && <QuestionsTab />}
+          {activeTab === 'governance' && <GovernanceTab />}
+        </div>
       </div>
     </div>
   )
