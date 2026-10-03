@@ -799,10 +799,32 @@ def _tc_args(tc: ToolCall) -> Dict[str, Any]:
     args_str = tc.get("function", {}).get("arguments", "{}")
     if isinstance(args_str, str):
         try:
-            return json.loads(args_str) if args_str else {}
+            args = json.loads(args_str) if args_str else {}
         except json.JSONDecodeError:
             return {}
-    return dict(args_str or {})
+    else:
+        args = dict(args_str or {})
+    return _nested_params_decoded(_tc_name(tc), args)
+
+
+# The dispatcher whose ``params`` is an object of its inner action's parameters.
+NESTED_PARAMS_TOOLS = frozenset({"platform_execute"})
+
+
+def _nested_params_decoded(name: str, args: Any) -> Any:
+    """F181 (night 6): Gemini sent platform_execute's ``params`` as a JSON
+    string, and workspace_exec failed three times on "'str' object has no
+    attribute 'get'", so Auto counted a 501-row spreadsheet by eye and called
+    313 exact. A ``params`` string that holds a JSON object is decoded; anything
+    else stays as it came (the executor refuses a ``params`` that is no object)."""
+    raw = args.get("params") if isinstance(args, dict) else None
+    if name not in NESTED_PARAMS_TOOLS or not isinstance(raw, str):
+        return args
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return args
+    return {**args, "params": decoded} if isinstance(decoded, dict) else args
 
 
 def _result_to_llm_context(result: Any, truncate_tokens: int) -> str:

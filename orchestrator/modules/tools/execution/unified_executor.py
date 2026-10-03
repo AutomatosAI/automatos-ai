@@ -269,7 +269,11 @@ def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, An
 def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
                               via: str = VIA_DISPATCHER) -> Optional[str]:
     """F182: the refusal for the keys in ``params`` the action does not take,
-    each logged to be counted, or None when there are none."""
+    each logged to be counted, or None when there are none. F181: a ``params``
+    that is no object (text the model meant as JSON) is refused, never run."""
+    if not isinstance(params, dict):
+        return (f"{action_name}'s params must be an object of its parameters, e.g. "
+                f"{{\"action\": \"{action_name}\", \"params\": {{...}}}}, not {type(params).__name__}.")
     unknown = undeclared_params(action_def, params)
     for key in unknown:
         logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")

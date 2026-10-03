@@ -33,7 +33,8 @@ SPREADSHEET_TYPES = frozenset({"csv", "spreadsheet"})
 # command can use the path as it is.
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 COUNT_WITH_CODE = ("This is a spreadsheet. Count or total it with code on workspace_path (python3's csv "
-                   "module, or awk), never from these pages: a page is a slice of its rows.")
+                   "module, or awk), never from these pages: a page is a slice of its rows. If code "
+                   "cannot run, say how many of its row_count rows you read, and call no figure exact.")
 
 
 def _safe(name: str) -> str:
