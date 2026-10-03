@@ -98,47 +98,48 @@ def floor(engine, new_session):
 def test_needs_you_counts_each_thing_once(floor, new_session):
     from services.needs_you import needs_you
 
-    out = needs_you(new_session(), UUID(floor.ws), "1d")
+    out = needs_you(new_session(), UUID(floor.ws))
 
     # review: not the step (its mission checks it), not the card (the mission's approval);
     # a session-run step on the board is. approval: the grant and the mission, once.
-    # failed: today's ticket and mission card, not the step.
-    assert out["counts"] == {"review": 2, "question": 2, "approval": 2, "failed": 2}
-    assert out["total"] == 8
+    # failed: every failed ticket and mission card, not the step (F246: whatever its age).
+    assert out["counts"] == {"review": 2, "question": 2, "approval": 2, "stuck": 0, "failed": 3}
+    assert out["total"] == 9
     assert sum(len(rows) for rows in out["rows"].values()) == out["total"]     # the widget lists every one
 
 
 def test_each_row_opens_the_thing_itself(floor, new_session):
     from services.needs_you import needs_you
 
-    rows = needs_you(new_session(), UUID(floor.ws), "1d")["rows"]
+    rows = needs_you(new_session(), UUID(floor.ws))["rows"]
 
     assert {(r["ticket_id"], r["mission_id"]) for r in rows["review"]} == {
         (floor.review, None), (floor.session_step, None)}                      # F225 review: never the mission page
     assert {r["ticket_id"] for r in rows["question"]} == {floor.blocked}       # opens inside its ticket
-    assert {(r["source"], r["ticket_id"]) for r in rows["approval"]} == {("grant", floor.review), ("mission", None)}
+    assert {(r["source"], r["ticket_id"]) for r in rows["approval"]} == {("grant", floor.review), ("mission", floor.card)}  # F246: its card
     assert [r["id"] for r in rows["approval"] if r["source"] == "mission"] == [floor.run]
     assert {(r["ticket_id"], r["mission_id"]) for r in rows["failed"]} == {
-        (floor.failed, None), (floor.failed_card, floor.lost)}                 # a mission's card opens its mission
+        (floor.failed, None), (floor.failed_old, None), (floor.failed_card, floor.lost)}  # a mission's card opens its mission
 
 
-def test_the_period_only_moves_failures(floor, new_session):
+def test_a_failure_counts_whatever_its_age(floor, new_session):
+    """F246: a '1d' window dropped a failure nobody had dealt with (#0003, #0004, #0050, #0052)."""
     from services.needs_you import needs_you
 
-    week = needs_you(new_session(), UUID(floor.ws), "7d")
+    out = needs_you(new_session(), UUID(floor.ws))
 
-    assert week["counts"]["failed"] == 3 and week["total"] == 9
-    assert needs_you(new_session(), UUID(floor.ws), "nonsense")["period"] == "1d"
+    assert floor.failed_old in {r["ticket_id"] for r in out["rows"]["failed"]}
+    assert "period" not in out
 
 
 def test_a_member_who_cannot_answer_is_not_counted_what_they_cannot_open(floor, new_session):
     from services.needs_you import needs_you
 
-    out = needs_you(new_session(), UUID(floor.ws), "1d", may_answer=False)
+    out = needs_you(new_session(), UUID(floor.ws), may_answer=False)
 
-    assert out["counts"] == {"review": 2, "question": 0, "approval": 1, "failed": 2}
+    assert out["counts"] == {"review": 2, "question": 0, "approval": 1, "stuck": 0, "failed": 3}
     assert out["rows"]["question"] == [] and [r["source"] for r in out["rows"]["approval"]] == ["mission"]
-    assert sum(len(rows) for rows in out["rows"].values()) == out["total"] == 5
+    assert sum(len(rows) for rows in out["rows"].values()) == out["total"] == 6
 
 
 @pytest.mark.parametrize("may_answer", [True, False])
@@ -152,16 +153,16 @@ def test_attention_is_the_needs_you_number(floor, new_session, monkeypatch, may_
     monkeypatch.setattr(ActivityService, "_count_completed", lambda self, since: 0)
     for period in ("1d", "7d"):
         stats = ActivityService(new_session(), UUID(floor.ws)).get_stats(period=period, may_answer=may_answer)
-        assert stats["needs_attention"] == needs_you(new_session(), UUID(floor.ws), period, may_answer=may_answer)["total"]
+        assert stats["needs_attention"] == needs_you(new_session(), UUID(floor.ws), may_answer=may_answer)["total"]
 
 
 def test_the_endpoint_serves_the_viewers_number(floor, new_session, monkeypatch):
     import api.activity as activity
 
     monkeypatch.setattr(activity, "may_see_own_workspace_health", lambda db, ctx: False)
-    out = activity.get_needs_you(period="1d", db=new_session(), ctx=NS(workspace_id=UUID(floor.ws)))
+    out = activity.get_needs_you(db=new_session(), ctx=NS(workspace_id=UUID(floor.ws)))
 
-    assert out["total"] == 5 and out["rows"]["question"] == []
+    assert out["total"] == 6 and out["rows"]["question"] == []
 
 
 def test_a_failed_read_is_never_nothing_needs_you(monkeypatch):
@@ -174,7 +175,7 @@ def test_a_failed_read_is_never_nothing_needs_you(monkeypatch):
     monkeypatch.setattr(activity, "may_see_own_workspace_health", lambda db, ctx: True)
     monkeypatch.setattr(activity, "needs_you", broken)
     with pytest.raises(HTTPException) as failed:
-        activity.get_needs_you(period="1d", db=NS(), ctx=NS(workspace_id=uuid.uuid4()))
+        activity.get_needs_you(db=NS(), ctx=NS(workspace_id=uuid.uuid4()))
 
     assert failed.value.status_code == 503 and failed.value.detail == activity.NEEDS_YOU_NOT_LOADED
 

@@ -12,11 +12,14 @@
  * number the Board tab, ATTENTION and Auto's pill show. Every row is listed, so
  * the header's number is the rows below it; a family with more than the
  * endpoint lists says how many more.
+ *
+ * F246: a stuck ticket (one nothing will move until the owner does) is its own
+ * family, each row saying why.
  */
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, ClipboardCheck, HelpCircle, Loader2, ShieldCheck, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleSlash, ClipboardCheck, HelpCircle, Loader2, ShieldCheck, XCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useNeedsYou, type NeedsYou, type NeedsYouAskRow, type NeedsYouTicketRow } from '@/hooks/use-needs-you'
+import { useNeedsYou, type NeedsYou, type NeedsYouAskRow, type NeedsYouTicketRow, type StuckWhy } from '@/hooks/use-needs-you'
 import { AUTO_NOW_LINKS, questionPreview } from '@/components/chatbot/auto-now-rail'
 import { cn } from '@/lib/utils'
 import { QUESTIONS_HREF, missionHref, ticketHref } from '@/lib/ticket-links'
@@ -64,11 +67,27 @@ function ticketRows(rows: NeedsYouTicketRow[]): ShownRow[] {
   }))
 }
 
+/** F246: why nothing will move a stuck ticket, in the owner's words. */
+export const STUCK_WHY: Record<StuckWhy, string> = {
+  no_host: 'Waiting for a CLI host that is not online',
+  no_agent: 'Assigned to no agent',
+  not_picked_up: 'Waiting, but nothing will run it',
+  mission_ended: 'Its mission has ended',
+}
+
+function stuckRows(rows: NeedsYouTicketRow[]): ShownRow[] {
+  return ticketRows(rows).map((shown, i) => {
+    const why = rows[i].why
+    return why ? { ...shown, meta: `${STUCK_WHY[why]} · ${shown.meta}` } : shown
+  })
+}
+
+// F246: a mission's plan names its card by number, as every ticket row does.
 function askRows(rows: NeedsYouAskRow[], fallback: string): ShownRow[] {
   return rows.map((r) => ({
     key: `${r.source}${r.id}`,
     href: askRowHref(r, fallback),
-    title: r.source === 'mission' ? r.title ?? 'A mission plan' : questionPreview(r.title ?? ''),
+    title: r.source === 'mission' ? numberedTitle(r.ticket_number, r.title ?? 'A mission plan') : questionPreview(r.title ?? ''),
     meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}`
       : [r.ticket_number, by(r.agent_name, r.at)].filter(Boolean).join(' · '),
   }))
@@ -82,13 +101,14 @@ interface Family {
   rows: ShownRow[]
 }
 
-/** The four families, in the order the owner acts on them. */
+/** The five families, in the order the owner acts on them. */
 export function families(data: NeedsYou): Family[] {
   const { counts, rows } = data
   return [
     { title: 'In review', href: AUTO_NOW_LINKS.board, icon: ClipboardCheck, count: counts.review, rows: ticketRows(rows.review) },
     { title: 'Questions', href: AUTO_NOW_LINKS.questions, icon: HelpCircle, count: counts.question, rows: askRows(rows.question, QUESTIONS_HREF) },
     { title: 'Approvals', href: AUTO_NOW_LINKS.governance, icon: ShieldCheck, count: counts.approval, rows: askRows(rows.approval, AUTO_NOW_LINKS.governance) },
+    { title: 'Stuck', href: AUTO_NOW_LINKS.board, icon: CircleSlash, count: counts.stuck, rows: stuckRows(rows.stuck) },
     { title: 'Failed', href: AUTO_NOW_LINKS.board, icon: XCircle, count: counts.failed, rows: ticketRows(rows.failed) },
   ]
 }
@@ -145,12 +165,11 @@ function Body({ query }: { query: ReturnType<typeof useNeedsYou> }) {
 }
 
 interface NeedsYouWidgetProps {
-  period: string
   className?: string
 }
 
-export function NeedsYouWidget({ period, className }: NeedsYouWidgetProps) {
-  const query = useNeedsYou(period)
+export function NeedsYouWidget({ className }: NeedsYouWidgetProps) {
+  const query = useNeedsYou()
   const total = query.data?.total ?? 0
 
   return (

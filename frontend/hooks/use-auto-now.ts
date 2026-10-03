@@ -42,7 +42,7 @@ export function useAutoNow(): AutoNowSnapshot {
   const fleet = useFleetState()
   const questions = useQuestions()
   const watches = useWatches()
-  const needs = useNeedsYou('1d')
+  const needs = useNeedsYou()
 
   return useMemo(() => {
     const working = [...(fleet.data?.agents ?? [])]

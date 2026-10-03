@@ -1,18 +1,19 @@
 /**
  * PRD-252 R5 — one "Needs you" number. The Board tab badge, the lede's "need
- * your eyes" and the stats strip's ATTENTION all show useNeedsYou's total for
- * the shell's period, and the Summary tab carries no second count. (Auto's pill:
- * auto-now-rail.test.tsx. The widget's rows: needs-you-widget.test.tsx.)
+ * your eyes" and the stats strip's ATTENTION all show useNeedsYou's total, and
+ * the Summary tab carries no second count. F246: the number has no period, so
+ * every counter asks for it the same way. (Auto's pill: auto-now-rail.test.tsx.
+ * The widget's rows: needs-you-widget.test.tsx.)
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 
-const needs = vi.hoisted(() => ({ periods: [] as string[] }))
+const needs = vi.hoisted(() => ({ calls: [] as unknown[][] }))
 
 vi.mock('@/hooks/use-needs-you', () => ({
-  useNeedsYou: (period: string) => {
-    needs.periods.push(period)
-    return { data: { period, total: 5, counts: { review: 2, question: 1, approval: 1, failed: 1 } } }
+  useNeedsYou: (...args: unknown[]) => {
+    needs.calls.push(args)
+    return { data: { total: 5, counts: { review: 2, question: 1, approval: 1, stuck: 0, failed: 1 } } }
   },
 }))
 vi.mock('next/navigation', () => ({
@@ -45,7 +46,7 @@ vi.mock('@/components/onboarding/setup-checklist-card', () => ({ SetupChecklistC
 import { CommandCenterShell } from '../command-center-shell'
 
 describe('the one Needs-you number in the Command Centre', () => {
-  it('is the Board badge, the lede and ATTENTION, for the same period', () => {
+  it('is the Board badge, the lede and ATTENTION, whatever the period', () => {
     render(<CommandCenterShell />)
 
     expect(screen.getByRole('button', { name: /Board/ }).textContent).toContain('5')
@@ -53,6 +54,7 @@ describe('the one Needs-you number in the Command Centre', () => {
     expect(screen.getByText(/need your eyes/).textContent).toContain('5')
     const attention = screen.getByText('ATTENTION').closest('.cell') as HTMLElement
     expect(within(attention).getByText('5')).toBeInTheDocument()
-    expect(new Set(needs.periods)).toEqual(new Set(['1d']))
+    expect(needs.calls.length).toBeGreaterThan(0)
+    expect(needs.calls.every((args) => args.length === 0)).toBe(true)
   })
 })

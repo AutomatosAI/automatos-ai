@@ -30,7 +30,6 @@ from core.models.core import (
 from services.activity_social_items import social_post_items
 from services.needs_you import needs_you_counts
 from services.ticket_numbers import ticket_label, ticket_numbers
-from services.needs_you import period_start as needs_you_period_start
 from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
 # Board tasks in these states are closed: their SLA deadline is history, not a
@@ -198,7 +197,7 @@ class ActivityService:
         working_now = self._count_working_now()
         channels_live = self._count_channels_live()
         completed_today = self._count_completed(since)
-        needs_attention = self._count_needs_attention(period, may_answer=may_answer)
+        needs_attention = self._count_needs_attention(may_answer=may_answer)
 
         return {
             "working_now": working_now,
@@ -646,17 +645,17 @@ class ActivityService:
             logger.error("Failed to count completed: %s", e)
             return 0
 
-    def _count_needs_attention(self, period: str, *, may_answer: bool) -> int:
+    def _count_needs_attention(self, *, may_answer: bool) -> int:
         """PRD-252 R5: ATTENTION is the Needs-you number (services/needs_you.py).
 
         It summed failed playbook runs, routine errors, every Review or Blocked
         ticket and every pending grant, so a ticket blocked on a grant counted
         twice and a mission step waiting on its own mission counted as the
-        owner's. Now it is the number the Board tab, Needs you and Auto show.
+        owner's. Now it is the number the Board tab, Needs you and Auto show,
+        for any period (F246: what waits for the owner has no window).
         """
         try:
-            since = needs_you_period_start(period)
-            return needs_you_counts(self.db, self.workspace_id, since, may_answer=may_answer)["total"]
+            return needs_you_counts(self.db, self.workspace_id, may_answer=may_answer)["total"]
         except Exception:
             logger.exception("Failed to count needs_attention")
             self.db.rollback()
