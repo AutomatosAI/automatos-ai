@@ -8,10 +8,15 @@
   marketplace playbook's name is refused too: the result says what the
   marketplace holds, and that the owner installs it there. No action installs
   a single marketplace playbook for Auto, so it says it can't, never pretends.
+- F231 (night 6, B119): asked to run the café playbook for Quayside Pantry, Auto
+  made "New Cafe Onboarding - Quayside Pantry", a copy with the café written in,
+  and ran that: each new café would leave another playbook behind. A name that is
+  one of the workspace's playbooks with a qualifier added is refused; the run's
+  details go to platform_execute_playbook as input_data.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import func
@@ -25,6 +30,47 @@ MARKETPLACE_REFUSAL = (
     "empty copy, not that one, so none was made. The owner installs it themselves, from the Playbooks "
     "tab of the Marketplace page: you can't install a single marketplace playbook for them. Tell them so."
 )
+
+
+# How a copy names what it was copied for: "<playbook> - Quayside Pantry", "(…)", ": …", "for …".
+QUALIFIERS = (" - ", " – ", " — ", " | ", ": ", " (", " for ")
+QUALIFIED_REFUSAL = (
+    "'{name}' is playbook {id} '{base}' with details added, so none was made: a copy per run leaves "
+    "another playbook behind each time. To run it for {detail}, call platform_execute_playbook with "
+    "playbook_id {id} and those details in input_data. If the owner asked for a separate playbook, "
+    "give it a name of its own."
+)
+
+
+def _cuts(name: str) -> List[Tuple[int, str]]:
+    """Every place a qualifier starts in ``name`` (lower case), latest first."""
+    cuts = []
+    for qualifier in QUALIFIERS:
+        at = name.find(qualifier)
+        while at > 0:
+            cuts.append((at, qualifier))
+            at = name.find(qualifier, at + 1)
+    return sorted(cuts, reverse=True)
+
+
+def qualified_namesake(db: Session, workspace_id: UUID, name: Any) -> Optional[Tuple[Any, str]]:
+    """The workspace playbook that ``name`` is with a qualifier added, and the
+    qualifier's detail ("Quayside Pantry"); None when it is no such name. The
+    longest playbook name wins, so a name with a qualifier of its own still matches."""
+    from core.models.core import WorkflowTemplate
+
+    text = str(name).strip()
+    cuts = _cuts(text.lower())
+    if not cuts:
+        return None
+    playbooks = {str(p.name).strip().lower(): p for p in db.query(WorkflowTemplate.id, WorkflowTemplate.name)
+                 .filter(WorkflowTemplate.workspace_id == workspace_id).order_by(WorkflowTemplate.id.desc())}
+    for at, qualifier in cuts:
+        playbook = playbooks.get(text[:at].strip().lower())
+        if playbook is not None:
+            detail = text[at + len(qualifier):].strip().rstrip(")").strip()
+            return playbook, detail or "this run"
+    return None
 
 
 def marketplace_playbook_called(db: Session, name: Any) -> Optional[Any]:
@@ -57,7 +103,14 @@ def name_refusal(db: Session, workspace_id: UUID, name: Any) -> Optional[Dict[st
     if listed is not None:
         return {"success": False, "marketplace_playbook_id": listed.id,
                 "error": MARKETPLACE_REFUSAL.format(name=listed.name)}
+    qualified = qualified_namesake(db, workspace_id, name)
+    if qualified is not None:
+        playbook, detail = qualified
+        return {"success": False, "existing_playbook_id": playbook.id,
+                "error": QUALIFIED_REFUSAL.format(name=str(name).strip(), id=playbook.id, base=playbook.name,
+                                                  detail=detail)}
     return None
 
 
-__all__ = ["MARKETPLACE_REFUSAL", "marketplace_playbook_called", "name_refusal"]
+__all__ = ["MARKETPLACE_REFUSAL", "QUALIFIED_REFUSAL", "marketplace_playbook_called", "name_refusal",
+           "qualified_namesake"]
