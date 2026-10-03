@@ -562,9 +562,8 @@ def test_server_tool_never_attached_when_switched_off(monkeypatch, web_off):
     assert _client_stub()(None) is None
 
 
-def test_request_kwargs_skip_the_server_tool_on_a_forced_tool_turn(monkeypatch, web_on):
-    """'You MUST call composio_execute' ⇒ tool_choice required — a web search
-    must not be able to satisfy that instead of the forced tool."""
+def test_request_kwargs_attach_the_server_tool_on_every_tool_turn(monkeypatch, web_on):
+    """No turn forces a tool, so none withholds the provider's web search."""
     from core.llm.clients.openai_compatible_client import OpenAICompatibleProvider
 
     stub = SimpleNamespace(
@@ -574,10 +573,10 @@ def test_request_kwargs_skip_the_server_tool_on_a_forced_tool_turn(monkeypatch, 
     )
     stub._web_search_server_tool = lambda tools: OpenAICompatibleProvider._web_search_server_tool(stub, tools)
     fn_tool = {"type": "function", "function": {"name": "composio_execute", "parameters": {}}}
-    forced = [{"role": "system", "content": "You MUST call `composio_execute` now."}]
-    kwargs = OpenAICompatibleProvider._request_kwargs(stub, forced, [fn_tool])
-    assert kwargs["tool_choice"] == "required"
-    assert kwargs["tools"] == [fn_tool]
+    steered = [{"role": "system", "content": "You MUST call `composio_execute` now."}]
+    kwargs = OpenAICompatibleProvider._request_kwargs(stub, steered, [fn_tool])
+    assert kwargs["tool_choice"] == "auto"
+    assert kwargs["tools"][-1]["type"] == "openrouter:web_search"
     # an ordinary turn — with or without function tools — carries the server tool
     kwargs = OpenAICompatibleProvider._request_kwargs(stub, [{"role": "user", "content": "hi"}], [fn_tool])
     assert kwargs["tool_choice"] == "auto" and kwargs["tools"][-1]["type"] == "openrouter:web_search"
@@ -588,7 +587,6 @@ def test_request_kwargs_skip_the_server_tool_on_a_forced_tool_turn(monkeypatch, 
 def test_retry_paths_judge_the_outgoing_tools_not_the_callers():
     src = (_ORCH / "core/llm/clients/openai_compatible_client.py").read_text(encoding="utf-8")
     assert 'if kwargs.get("tools") and ("not support tool use"' in src
-    assert 'if kwargs.get("tools") and "Tool choice must be auto"' in src
     assert "if tools and (" not in src
 
 

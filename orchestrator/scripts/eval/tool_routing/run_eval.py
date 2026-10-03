@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 import logging
 import os
@@ -243,6 +244,43 @@ def _platform_execute_enum_size(tools: List[Dict[str, Any]]) -> str:
     return "—"
 
 
+@functools.lru_cache(maxsize=1)
+def _unforced_models() -> frozenset:
+    """Models whose models.yaml entry sets ``tool_choice: auto``. A forced tool
+    choice is a 400 on Claude Opus 5.5 and Fable 5.1, so those run unforced and
+    a missing call scores as a miss."""
+    entries = _load_yaml(MODELS_YAML).get("models") or []
+    return frozenset(m["id"] for m in entries if m.get("tool_choice") == "auto")
+
+
+def _ms_since(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def _empty_row(latency_ms: int, raw_finish: Any = None) -> Dict[str, Any]:
+    return {
+        "chosen_action": None,
+        "chosen_via": None,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "total_tokens": None,
+        "latency_ms": latency_ms,
+        "raw_finish": raw_finish,
+    }
+
+
+def _chosen(resp: Any) -> Tuple[Optional[str], Optional[str]]:
+    """The action a response chose, and whether through platform_execute or directly."""
+    tool_calls = getattr(resp.choices[0].message, "tool_calls", None) or []
+    if not tool_calls:
+        return None, None
+    fn = tool_calls[0].function
+    if fn.name == "platform_execute":
+        # The chosen "action" is inside the JSON args.
+        return json.loads(fn.arguments or "{}").get("action"), "platform_execute"
+    return fn.name, "direct"
+
+
 def _call_model(
     client: Any,
     model: str,
@@ -262,7 +300,8 @@ def _call_model(
     PRD-232 US-012A: on abstain rows (no applicable tool) tool_choice is "auto"
     so the model CAN decline to call a tool — the correct outcome for these
     queries; the scorer counts a no-call as correct only for abstain rows.
-    Non-abstain rows keep "required" so a chosen action is always produced.
+    Non-abstain rows keep "required" so a chosen action is always produced,
+    except on a model models.yaml marks ``tool_choice: auto`` (_unforced_models).
     """
     started = time.perf_counter()
     try:
@@ -273,75 +312,30 @@ def _call_model(
                 {"role": "user", "content": user_query},
             ],
             tools=tools,
-            tool_choice="auto" if abstain else "required",
+            tool_choice="auto" if abstain or model in _unforced_models() else "required",
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=request_timeout,
         )
     except Exception as exc:  # noqa: BLE001
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        return (
-            {
-                "chosen_action": None,
-                "chosen_via": None,
-                "prompt_tokens": None,
-                "completion_tokens": None,
-                "total_tokens": None,
-                "latency_ms": latency_ms,
-                "raw_finish": None,
-            },
-            f"{type(exc).__name__}: {exc}",
-        )
+        return _empty_row(_ms_since(started)), f"{type(exc).__name__}: {exc}"
 
-    latency_ms = int((time.perf_counter() - started) * 1000)
-
-    chosen_action: Optional[str] = None
-    chosen_via: Optional[str] = None
+    latency_ms = _ms_since(started)
     raw_finish = None
-
     try:
-        choice = resp.choices[0]
-        raw_finish = getattr(choice, "finish_reason", None)
-        msg = choice.message
-        tool_calls = getattr(msg, "tool_calls", None) or []
-        if tool_calls:
-            tc = tool_calls[0]
-            fn = tc.function
-            fn_name = fn.name
-            if fn_name == "platform_execute":
-                # The chosen "action" is inside the JSON args.
-                args = json.loads(fn.arguments or "{}")
-                chosen_action = args.get("action")
-                chosen_via = "platform_execute"
-            else:
-                chosen_action = fn_name
-                chosen_via = "direct"
+        raw_finish = getattr(resp.choices[0], "finish_reason", None)
+        chosen_action, chosen_via = _chosen(resp)
     except Exception as exc:  # noqa: BLE001
-        return (
-            {
-                "chosen_action": None,
-                "chosen_via": None,
-                "prompt_tokens": None,
-                "completion_tokens": None,
-                "total_tokens": None,
-                "latency_ms": latency_ms,
-                "raw_finish": raw_finish,
-            },
-            f"parse_error: {type(exc).__name__}: {exc}",
-        )
+        return _empty_row(latency_ms, raw_finish), f"parse_error: {type(exc).__name__}: {exc}"
 
     usage = getattr(resp, "usage", None)
-    prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
-    completion_tokens = getattr(usage, "completion_tokens", None) if usage else None
-    total_tokens = getattr(usage, "total_tokens", None) if usage else None
-
     return (
         {
             "chosen_action": chosen_action,
             "chosen_via": chosen_via,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
+            "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
+            "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+            "total_tokens": getattr(usage, "total_tokens", None) if usage else None,
             "latency_ms": latency_ms,
             "raw_finish": raw_finish,
         },

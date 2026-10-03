@@ -1439,7 +1439,7 @@ class Config:
     # above (object storage section). Local runs use MinIO through the same path —
     # the MARKETPLACE_LOCAL_DIR filesystem fallback was deleted (PRD-233 S4).
     PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
-    PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-20250414")
+    PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-5")
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
 
     # =============================================================================

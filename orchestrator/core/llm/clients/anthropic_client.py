@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
+from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
 
 try:
     import anthropic
@@ -216,10 +216,8 @@ class AnthropicProvider(BaseLLMProvider):
                 "Anthropic API key not configured. Cannot generate response. "
                 "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
             )
-        
-        from core.llm.prompt_cache import build_cached_system
+
         from core.llm.request_scope import is_headless_run
-        from modules.memory.memory_tool import memory_tool_definition
 
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
@@ -230,74 +228,70 @@ class AnthropicProvider(BaseLLMProvider):
             headless = is_headless_run()
 
             def _call():
-                kwargs = {
-                    "model": self.config.model,
-                    "max_tokens": request_max_tokens(self.config),
-                    "temperature": self.config.temperature,
-                    # PRD-201 S4: emit cache_control on the stable prefix. This IS
-                    # the Anthropic client, so the marker is inherently on the
-                    # Anthropic route only (gate-by-provider, §8-Q1). Render order
-                    # tools → system → messages caches tools+system together.
-                    "system": build_cached_system(system_message, cache_prefix),
-                    "messages": user_messages,
-                }
-                # PRD-17: Add tools if provided (convert to Anthropic format)
-                anthropic_tools = self._convert_tools_to_anthropic_format(tools) if tools else []
-
+                kwargs = self._request_kwargs(system_message, user_messages, cache_prefix, tools, headless)
                 if headless:
-                    # PRD-201 S5: context editing (clear stale tool results,
-                    # cache-preservingly) + the memory tool on the Anthropic-routed
-                    # headless loop only. Beta strings confirmed via the claude-api
-                    # skill; flag for build-time re-confirm (§8-Q2). Chat never
-                    # sets the headless scope, so it is unaffected.
-                    anthropic_tools.append(memory_tool_definition())
-                    kwargs["context_management"] = {
-                        "edits": [{"type": "clear_tool_uses_20250919"}]
-                    }
-                    if anthropic_tools:
-                        kwargs["tools"] = anthropic_tools
-                    return self.client.beta.messages.create(
-                        betas=["context-management-2025-06-27"], **kwargs
-                    )
-
-                if anthropic_tools:
-                    kwargs["tools"] = anthropic_tools
+                    return self.client.beta.messages.create(betas=["context-management-2025-06-27"], **kwargs)
                 return self.client.messages.create(**kwargs)
 
-            response = await run_blocking(_call)
-            
-            # PRD-17: Extract tool calls if present
-            tool_calls = None
-            content = ""
-            finish_reason = response.stop_reason
-            
-            for block in response.content:
-                if block.type == "text":
-                    content += block.text
-                elif block.type == "tool_use":
-                    if tool_calls is None:
-                        tool_calls = []
-                    tool_calls.append({
-                        "id": block.id,
-                        "type": "function",
-                        "function": {
-                            "name": block.name,
-                            "arguments": json.dumps(block.input)
-                        }
-                    })
-            
-            return LLMResponse(
-                content=content or "",
-                usage=_usage_dict(response.usage),
-                model=response.model,
-                provider="anthropic",
-                tool_calls=tool_calls,
-                finish_reason=finish_reason
-            )
+            return self._llm_response(await run_blocking(_call))
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise
-    
+
+    def _request_kwargs(self, system_message: Any, user_messages: List[Dict[str, Any]],
+                        cache_prefix: Optional[str], tools: Optional[List[Dict]], headless: bool) -> Dict[str, Any]:
+        """The Messages API request: model, budget, cached system prompt, messages, tools."""
+        from core.llm.prompt_cache import build_cached_system
+        from modules.memory.memory_tool import memory_tool_definition
+
+        kwargs = {
+            "model": self.config.model,
+            "max_tokens": request_max_tokens(self.config),
+            # PRD-201 S4: emit cache_control on the stable prefix. This IS
+            # the Anthropic client, so the marker is inherently on the
+            # Anthropic route only (gate-by-provider, §8-Q1). Render order
+            # tools → system → messages caches tools+system together.
+            "system": build_cached_system(system_message, cache_prefix),
+            "messages": user_messages,
+        }
+        if accepts_sampling_params(self.config.model):
+            kwargs["temperature"] = self.config.temperature
+        # PRD-17: Add tools if provided (convert to Anthropic format)
+        anthropic_tools = self._convert_tools_to_anthropic_format(tools) if tools else []
+        if headless:
+            # PRD-201 S5: context editing (clear stale tool results,
+            # cache-preservingly) + the memory tool on the Anthropic-routed
+            # headless loop only. Beta strings confirmed via the claude-api
+            # skill; flag for build-time re-confirm (§8-Q2). Chat never
+            # sets the headless scope, so it is unaffected.
+            anthropic_tools.append(memory_tool_definition())
+            kwargs["context_management"] = {"edits": [{"type": "clear_tool_uses_20250919"}]}
+        if anthropic_tools:
+            kwargs["tools"] = anthropic_tools
+        return kwargs
+
+    @staticmethod
+    def _llm_response(response: Any) -> LLMResponse:
+        """PRD-17: a response's text and tool calls, read by block type (a thinking
+        model's first block is its thinking, not text)."""
+        tool_calls = [
+            {
+                "id": block.id,
+                "type": "function",
+                "function": {"name": block.name, "arguments": json.dumps(block.input)},
+            }
+            for block in response.content
+            if block.type == "tool_use"
+        ]
+        return LLMResponse(
+            content="".join(block.text for block in response.content if block.type == "text"),
+            usage=_usage_dict(response.usage),
+            model=response.model,
+            provider="anthropic",
+            tool_calls=tool_calls or None,
+            finish_reason=response.stop_reason,
+        )
+
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using Anthropic API (synchronous)"""
         if self.client is None:
@@ -309,20 +303,15 @@ class AnthropicProvider(BaseLLMProvider):
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
             
-            response = self.client.messages.create(
-                model=self.config.model,
-                max_tokens=request_max_tokens(self.config),
-                temperature=self.config.temperature,
-                system=system_message,
-                messages=user_messages
-            )
-            
-            return LLMResponse(
-                content=response.content[0].text,
-                usage=_usage_dict(response.usage),
-                model=response.model,
-                provider="anthropic"
-            )
+            kwargs = {
+                "model": self.config.model,
+                "max_tokens": request_max_tokens(self.config),
+                "system": system_message,
+                "messages": user_messages,
+            }
+            if accepts_sampling_params(self.config.model):
+                kwargs["temperature"] = self.config.temperature
+            return self._llm_response(self.client.messages.create(**kwargs))
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise

@@ -376,7 +376,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     def _request_kwargs(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
         """The chat-completions request for ``messages`` (+ tools and tool_choice)."""
         from config import config as platform_config
-        from core.llm.prompt_cache import apply_openai_cache_control, strip_cache_hints, text_of
+        from core.llm.prompt_cache import apply_openai_cache_control, strip_cache_hints
 
         # Prompt caching (2026-09-16): on a provider that passes Anthropic
         # breakpoints through, an Anthropic model's first system message becomes
@@ -395,15 +395,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         kwargs = self._base_kwargs(messages)
         if tools:
             kwargs["tools"] = self._sanitize_tools(tools)
-            has_tool_results = any(m.get("role") == "tool" for m in (messages or []))
-            if has_tool_results:
-                kwargs["tool_choice"] = "auto"
-            else:
-                force_tool_choice = any(
-                    (m.get("role") == "system" and "You MUST call" in text_of(m.get("content")))
-                    for m in (messages or [])
-                )
-                kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+            kwargs["tool_choice"] = "auto"
         if getattr(self.spec, "reports_cost", False) or auto_cache is not None:
             body = dict(kwargs.get("extra_body") or {})
             if getattr(self.spec, "reports_cost", False):
@@ -411,13 +403,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             if auto_cache is not None:
                 body["cache_control"] = auto_cache
             kwargs["extra_body"] = body
-        # A caller forcing a specific tool ("You MUST call …" ⇒ tool_choice
-        # "required") must not be satisfiable by a web search instead — no
-        # server tool on that turn.
-        if kwargs.get("tool_choice") != "required":
-            server_tool = self._web_search_server_tool(kwargs.get("tools"))
-            if server_tool is not None:
-                kwargs["tools"] = [*(kwargs.get("tools") or []), server_tool]
+        server_tool = self._web_search_server_tool(kwargs.get("tools"))
+        if server_tool is not None:
+            kwargs["tools"] = [*(kwargs.get("tools") or []), server_tool]
         return kwargs
 
     def _web_search_server_tool(self, tools: Optional[List[Dict]]) -> Optional[Dict[str, Any]]:
@@ -472,13 +460,6 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         )
                         kwargs.pop("tools", None)
                         kwargs.pop("tool_choice", None)
-                        return self.client.chat.completions.create(**kwargs)
-                    if kwargs.get("tools") and "Tool choice must be auto" in err_str and kwargs.get("tool_choice") != "auto":
-                        logger.warning(
-                            "Model %s provider requires tool_choice=auto — retrying",
-                            self.config.model,
-                        )
-                        kwargs["tool_choice"] = "auto"
                         return self.client.chat.completions.create(**kwargs)
                     raise
 

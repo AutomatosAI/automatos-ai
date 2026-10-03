@@ -148,3 +148,16 @@ def test_non_abstain_row_uses_required_tool_choice():
     assert sink["tool_choice"] == "required"
     assert result["chosen_action"] == "platform_list_agents"
     assert err is None
+
+
+def test_a_model_marked_unforced_runs_auto(monkeypatch):
+    from scripts.eval.tool_routing import run_eval
+    monkeypatch.setattr(run_eval, "_unforced_models", lambda: frozenset({"m"}))
+    sink = {}
+    client = _fake_client(_fake_response(tool_calls=None), sink)
+    result, err = run_eval._call_model(
+        client, model="m", system_prompt="s", user_query="list my agents",
+        temperature=0.0, max_tokens=16, request_timeout=5, tools=[], abstain=False,
+    )
+    assert sink["tool_choice"] == "auto"
+    assert result["chosen_action"] is None and err is None

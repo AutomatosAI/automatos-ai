@@ -5,6 +5,8 @@
 # against https://openrouter.ai/models before publishing any chart.
 #
 # `tier` is for chart grouping only; it does not affect routing.
+# `tool_choice: auto` on an entry runs its non-abstain rows unforced; set it for
+# models that reject a forced tool choice (Claude Opus 5.5, Fable 5.1: a 400).
 # Drop or comment out a model to skip it for a given run.
 #
 # US-005 production-index parity verification (PRD-138): the active model list

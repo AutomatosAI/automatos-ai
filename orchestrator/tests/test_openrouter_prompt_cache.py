@@ -162,12 +162,14 @@ def test_request_on_a_provider_without_the_capability_is_stripped_only():
     assert "extra_body" not in kwargs
 
 
-def test_forced_tool_turn_is_still_detected_inside_cached_parts():
-    forced = [{"role": "system", "content": STABLE + "\nYou MUST call platform_execute now.", "cache_prefix": STABLE},
-              {"role": "user", "content": "go"}]
-    kwargs = _client("anthropic/claude-opus-4.6", prompt_cache_control=True)._request_kwargs(forced, [FN_TOOL])
+def test_prompt_text_never_forces_the_tool_choice():
+    # A forced tool choice is a 400 on Claude Opus 5.5 and Fable 5.1; a system
+    # line asking for a tool steers the model, it does not force the call.
+    steered = [{"role": "system", "content": STABLE + "\nYou MUST call platform_execute now.", "cache_prefix": STABLE},
+               {"role": "user", "content": "go"}]
+    kwargs = _client("anthropic/claude-opus-4.6", prompt_cache_control=True)._request_kwargs(steered, [FN_TOOL])
     assert isinstance(kwargs["messages"][0]["content"], list)
-    assert kwargs["tool_choice"] == "required"
+    assert kwargs["tool_choice"] == "auto"
 
 
 # ── 4. usage parsing ──────────────────────────────────────────────

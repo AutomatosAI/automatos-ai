@@ -90,31 +90,6 @@ class OpenAIProvider(BaseLLMProvider):
                     formatted_tools = self._sanitize_tools(tools, keep_strict=True)
                     kwargs["tools"] = formatted_tools
 
-                    # Check if tool results already exist in conversation
-                    # If so, switch to auto - the LLM has already acted on the request
-                    has_tool_results = any(
-                        m.get("role") == "tool" for m in (messages or [])
-                    )
-
-                    if has_tool_results:
-                        # Tool already executed - let LLM decide if more are needed
-                        kwargs["tool_choice"] = "auto"
-                    else:
-                        # First iteration - only force tool use when explicitly required
-                        # CHANGED: Removed "Tool candidates for this request" trigger since
-                        # that was causing tools to be forced for conversational queries.
-                        # Now only "You MUST call" (explicit instruction) triggers forced tools.
-                        force_tool_choice = any(
-                            (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
-                            for m in (messages or [])
-                        )
-                        kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
-                    import json
-                    tools_json = json.dumps(formatted_tools, default=str)
-                    tools_summary = f"{len(formatted_tools)} tools. Sample: {tools_json[:200]}..."
-                    logger.info(
-                        f"Sending tools to OpenAI (tool_choice={kwargs['tool_choice']}): {tools_summary}"
-                    )
                 return self.client.chat.completions.create(**kwargs)
             
             try:
