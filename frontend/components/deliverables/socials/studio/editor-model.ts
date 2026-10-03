@@ -4,6 +4,7 @@
  * channels and why one cannot take it, the size each channel gets, the ratios the post
  * renders in, the spoken words a length fits). The server checks all of it again.
  */
+import { closestShape, sizeAspect } from './channel-shape'
 import type {
   CreateSocialPostInput,
   SocialChannel,
@@ -230,24 +231,24 @@ export function aspectOf(toolkit: string, kind: string): string | null {
   return KIND_ASPECT[`${toolkit}:${kind}`] ?? DEFAULT_ASPECT[kind] ?? null
 }
 
-function ratioOfSize(size: string): string | null {
-  const [w, h] = size.split('x').map(Number)
-  if (!w || !h) return null
-  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
-  return `${w / gcd(w, h)}:${h / gcd(w, h)}`
-}
-
-/** "1080 × 1920": the template's size at the channel's aspect, else the aspect itself. */
+/** "1080 × 1920": the template's size the channel gets (its closest shape, channel-shape.ts),
+ * else the channel's aspect itself. */
 export function sizeFor(toolkit: string, kind: string, templateSizes: ReadonlyArray<string>): string {
   if (kind === 'text') return 'Text'
   const aspect = aspectOf(toolkit, kind)
-  const size = templateSizes.find((s) => ratioOfSize(s) === aspect)
+  const size = closestShape(templateSizes, (s) => s, aspect)
   return size ? size.replace('x', ' × ') : aspect ?? kind
 }
 
 /** The distinct aspect ratios the ticked channels render in, in channel order. */
-export function renderRatios(draft: Pick<EditorDraft, 'kinds'>): string[] {
-  const ratios = Object.entries(draft.kinds).map(([toolkit, kind]) => (kind === 'text' ? null : aspectOf(toolkit, kind)))
+/** The ratios a render makes, one per size the ticked channels get (their closest of the
+ * template's sizes); before a template is chosen, the channels' own aspects. */
+export function renderRatios(draft: Pick<EditorDraft, 'kinds'>, templateSizes: ReadonlyArray<string> = []): string[] {
+  const ratios = Object.entries(draft.kinds).map(([toolkit, kind]) => {
+    const aspect = kind === 'text' ? null : aspectOf(toolkit, kind)
+    const size = templateSizes.length ? closestShape(templateSizes, (s) => s, aspect) : null
+    return size ? sizeAspect(size) : aspect
+  })
   return Array.from(new Set(ratios.filter((r): r is string => !!r)))
 }
 

@@ -129,7 +129,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search
+from modules.socials import channel_sizes, report_charts, text_search
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -558,10 +558,12 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # PRD-251B (US-B303..B305): the brand kit's style and liked references, the default toolkits.
     brand = await asyncio.to_thread(socials_brand.generation_inputs, db, workspace) if caps is not None else {}
     footage_plan = render.footage_plan_for(post, template, caps, **brand) if caps is not None else None
-    bundle = render.bundle_for(
-        post, template, brand_kit, fallback_name=workspace.name or "",
-        footage_slots=footage_plan.shown if footage_plan is not None else (),
-    )
+    # 3 Oct 2026 (channel_sizes): one bundle for each size the post's channels need.
+    bundle, *other_sizes = [
+        render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "", size=size,
+                          footage_slots=footage_plan.shown if footage_plan is not None else ())
+        for size in channel_sizes.render_sizes(render.template_sizes(template), post.targets) or [None]
+    ]
     # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
     await report_charts.check_bound_chart(
         db, workspace.id, render.composition_of(template), post.sources, bundle["variables"]
@@ -588,6 +590,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             title=post.title,
             format=post.format,
             bundle=bundle,
+            extra_bundles=tuple(other_sizes),
             voice=voice_plan,
             footage=footage_plan,
             reservation=reservation,

@@ -49,7 +49,7 @@ interface EditorChannelsCardProps extends Omit<ChannelLineProps, 'channel'> {
 }
 
 export function EditorChannelsCard({ channels, loading, draft, ...line }: EditorChannelsCardProps) {
-  const ratios = renderRatios(draft)
+  const ratios = renderRatios(draft, line.templateSizes)
   const renders = draft.format === 'text' ? 'Text only' : ratios.length > 0 ? `Renders ${ratios.join(' · ')}` : 'Pick a channel'
   return (
     <EditorCard label="Channels and sizes" action={<span className="text-[12.5px] text-muted-foreground">{renders}</span>}>

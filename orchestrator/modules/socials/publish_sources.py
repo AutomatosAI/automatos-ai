@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from modules.socials import channel_sizes
 from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
 from modules.socials.service import footage_generated
@@ -89,6 +90,15 @@ def _family(media: MediaFile) -> str:
     return (media.content_type or "").split("/", 1)[0]
 
 
+def media_for(files: Sequence[MediaFile], toolkit: str, post_kind: str) -> Tuple[MediaFile, ...]:
+    """The files of the target's kind, of its own size when the post rendered several
+    (``channel_sizes``: the aspect closest to the channel's), in media order."""
+    families = KIND_MEDIA.get(post_kind, ())
+    mine = [f for f in files if _family(f) in families]
+    aspect = channel_sizes.aspect_for_target([f.aspect for f in mine], toolkit, post_kind)
+    return tuple(f for f in mine if aspect is None or f.aspect == aspect)
+
+
 def copy_for(copy: Any, toolkit: str) -> str:
     """The channel's own copy, else the base copy."""
     copy = copy if isinstance(copy, Mapping) else {}
@@ -98,7 +108,6 @@ def copy_for(copy: Any, toolkit: str) -> str:
 
 def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetContext:
     """A target's context: ``files`` are the post's media (``media_urls.resolve_post_media``)."""
-    families = KIND_MEDIA.get(target.post_kind, ())
     return TargetContext(
         workspace_id=post.workspace_id,
         post_id=post.id,
@@ -108,7 +117,7 @@ def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetCon
         title=post.title or "",
         options=MappingProxyType(dict(target.options)),
         idempotency_key=target.idempotency_key,
-        media=tuple(f for f in files if _family(f) in families),
+        media=media_for(files, target.toolkit, target.post_kind),
         thumbnail=next((f for f in files if _family(f) == IMAGE), None),
         generated=footage_generated(post.footage),
         setup_note=_setup_note(target.toolkit),

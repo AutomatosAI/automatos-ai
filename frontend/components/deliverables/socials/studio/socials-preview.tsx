@@ -91,7 +91,7 @@ export function SocialsPreview({ post, draft, channels, templateSizes, onChannel
   const textOnly = draft.format === 'text'
   const slot = slotInput(draft.slot)
   const note = renderNote({
-    format: draft.format, lengthSeconds: draft.lengthSeconds, ratios: renderRatios(draft), sizes: templateSizes.length, renderedAt: renderedAt(post),
+    format: draft.format, lengthSeconds: draft.lengthSeconds, ratios: renderRatios(draft, templateSizes), sizes: templateSizes.length, renderedAt: renderedAt(post),
   })
   const copyOf = (toolkit: string) => draft.perChannel[toolkit] ?? draft.base
   return (
