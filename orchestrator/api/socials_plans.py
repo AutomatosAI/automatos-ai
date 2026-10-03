@@ -9,6 +9,9 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
 * ``GET /api/socials/plans/{plan_id}``: the plan with its bank's counts; ``PUT`` changes
   any of its fields, each checked (known channels and formats, lengths the chosen
   template declares, times and days); an ended plan is read-only.
+* A plan's save (``POST`` or ``PUT``) in a workspace that never had research installs the
+  Content bank research playbook once the plan is committed (PRD-251C US-C101,
+  ``services/socials_research_setup.py``); a failure there never fails the save.
 * ``POST /api/socials/plans/{plan_id}/pause`` · ``/resume`` · ``/end``.
 * ``DELETE /api/socials/plans/{plan_id}``: the plan and its content bank are deleted (owners
   and admins, ``documents:delete``); the posts it made stay as ordinary posts, unlinked.
@@ -46,7 +49,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign
 from modules.socials import campaigns, plan_store, plans, service
-from services import socials_plan_research
+from services import socials_plan_research, socials_research_setup
 
 router = APIRouter()
 router.include_router(topics_router)
@@ -159,6 +162,13 @@ def _saved(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
     return plan_view(db, plan)
 
 
+def _saved_with_research(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
+    """A plan's save, then research set up in a workspace that never had it (US-C101)."""
+    view = _saved(db, plan)
+    socials_research_setup.after_plan_save(db, plan.workspace_id, datetime.now(timezone.utc))
+    return view
+
+
 @router.get("/plans")
 def list_social_plans(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     """The workspace's plans, newest first, each with ``bank`` ({topics, unused})."""
@@ -178,7 +188,7 @@ def create_social_plan(
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
-    return _saved(db, plan)
+    return _saved_with_research(db, plan)
 
 
 @router.get("/plans/{plan_id}")
@@ -197,7 +207,7 @@ def update_social_plan(
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
-    return _saved(db, plan)
+    return _saved_with_research(db, plan)
 
 
 def _set_status(db: Session, ctx: RequestContext, plan_id: UUID, status: str) -> Dict[str, Any]:

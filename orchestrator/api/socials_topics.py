@@ -4,7 +4,9 @@ Socials content bank (PRD-251B B8; US-B203)
 
 A plan's topics (``modules/socials/topics.py``):
 
-* ``GET /api/socials/plans/{plan_id}/topics``: the bank, unused topics first.
+* ``GET /api/socials/plans/{plan_id}/topics``: the bank, unused topics first, and
+  ``research_note``: why research cannot run in the workspace, or null when it can
+  (PRD-251C US-C101, ``services/socials_research_setup.py``).
 * ``POST`` adds a topic; ``PUT .../topics/{topic_id}`` edits it; ``DELETE`` removes it;
   ``PUT .../topics/{topic_id}/pin`` pins it to a day (or unpins it).
 
@@ -29,6 +31,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from modules.socials import service, topics
+from services import socials_research_setup
 
 router = APIRouter()
 
@@ -87,7 +90,10 @@ def _commit(db: Session, topic: Any) -> Dict[str, Any]:
 def list_social_plan_topics(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     plan = _plans_api().load_plan(db, ctx, plan_id)
     rows = [topic.to_dict() for topic in topics.list_topics(db, plan)]
-    return {"topics": rows, "total": len(rows), "unused": sum(1 for row in rows if not row["used_at"])}
+    return {
+        "topics": rows, "total": len(rows), "unused": sum(1 for row in rows if not row["used_at"]),
+        "research_note": socials_research_setup.research_note(db, plan.workspace_id),
+    }
 
 
 @router.post("/plans/{plan_id}/topics", status_code=201, dependencies=[CAN_UPDATE])

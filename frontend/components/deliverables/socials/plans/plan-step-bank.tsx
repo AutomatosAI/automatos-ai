@@ -6,6 +6,7 @@
  * each slot Auto takes the next unused topic that suits the slot's format (a topic pinned to
  * the slot's day first). Add a topic by hand, or Research again. The server refuses a fact
  * without a source, a title the bank holds and the plan's never-say words, with the reason.
+ * PRD-251C US-C101: the bank says, in the server's words, when research cannot run.
  */
 import { useState } from 'react'
 
@@ -88,6 +89,7 @@ export function PlanStepBank({ planId, ideas = [], onLeaveOut = () => undefined 
     <div className="flex flex-col gap-4">
       <PlanStepHeading title="Content bank" action={actions}
         lead={`${data?.total ?? 0} topics, ${data?.unused ?? 0} unused. For each slot Auto takes the next unused topic that suits the slot's format.`} />
+      {data?.research_note && <p role="status" aria-label="Research" className="m-0 rounded-lg bg-secondary/60 px-3 py-2 text-sm text-foreground">{data.research_note}</p>}
       {adding && (
         <PlanTopicForm busy={write.isLoading} onCancel={() => setAdding(false)}
           onSave={(input) => write.mutate({ kind: 'add', input }, { onSuccess: () => setAdding(false) })} />

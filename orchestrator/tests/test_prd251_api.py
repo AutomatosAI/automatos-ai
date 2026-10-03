@@ -65,7 +65,7 @@ import modules.socials.settings as socials_settings  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.core import DocumentTemplate  # noqa: E402
+from core.models.core import DocumentTemplate, WorkflowTemplate  # noqa: E402
 from core.models.socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
@@ -115,8 +115,8 @@ def api(monkeypatch):
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     copies = sa.MetaData()
-    _sqlite_copy(Workspace.__table__, copies)
-    _sqlite_copy(DocumentTemplate.__table__, copies)
+    for table in (Workspace.__table__, DocumentTemplate.__table__, WorkflowTemplate.__table__):  # playbooks: PRD-251C
+        _sqlite_copy(table, copies)
     copies.create_all(engine)
     SocialPost.metadata.create_all(
         engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__]

@@ -442,7 +442,7 @@ def test_a_reinstall_leaves_the_workspaces_copy_of_a_playbook_as_it_is(monkeypat
 
     monkeypatch.setattr(ci, "cascade_recipe_dependencies", cascade)
     monkeypatch.setattr(pi, "_clone_recipe_to_workspace", lambda db, ws, recipe, uid: (SimpleNamespace(id=78), recipe.name))
-    manifest = asyncio.run(pi._install_playbook(_Rows(marketplace, existing), uuid.uuid4(), marketplace.template_id))
+    manifest = asyncio.run(pi.install_playbook(_Rows(marketplace, existing), uuid.uuid4(), marketplace.template_id))
 
     assert seen["remap_steps"] is remap
     assert manifest.by_type("playbook")[0].status == ("cloned" if remap else "already_installed")

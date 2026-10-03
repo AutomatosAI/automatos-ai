@@ -183,6 +183,8 @@ export interface SocialTopicsResponse {
   topics: SocialTopic[]
   total: number
   unused: number
+  /** Why research cannot run in the workspace (not set up, or its playbook removed); null when it can. */
+  research_note?: string | null
 }
 
 export interface SocialTopicInput {

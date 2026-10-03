@@ -5,7 +5,8 @@
  * * A new plan: five steps; Save waits for a name and a channel on every row; it creates the
  *   plan with what the form says, then opens the plan as itself.
  * * The content bank says to save first on a new plan; on a saved one it lists the topics and
- *   adds one through the bank (the server refuses with its reason).
+ *   adds one through the bank (the server refuses with its reason), and says when research
+ *   cannot run (PRD-251C US-C101).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
@@ -14,7 +15,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
-const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[] }))
+const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null }))
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/components/workspace-provider', () => ({
@@ -33,7 +34,7 @@ vi.mock('@/lib/api-client', () => {
       { toolkit: 'linkedin', label: 'LinkedIn', post_kinds: [kind('image')], verified: true, setup_note: null, copy_limits: { text: 3000 } },
     ]),
     listSocialTemplates: vi.fn(async () => []),
-    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length })),
+    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length, research_note: state.researchNote })),
     addSocialPlanTopic: vi.fn(async (_id: string, input: any) => ({ ...input, id: 't-new' })),
     researchSocialPlan: vi.fn(async () => ({ execution_id: 'research-1' })),
     deleteSocialPlan: vi.fn(async () => undefined),
@@ -71,6 +72,7 @@ beforeEach(() => {
   state.go.mockReset()
   state.plans = [PLAN]
   state.topics = []
+  state.researchNote = null
   Object.values(api).forEach((fn) => fn.mockClear())
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
@@ -130,6 +132,14 @@ describe('a saved plan', () => {
     await waitFor(() => expect(api.addSocialPlanTopic).toHaveBeenCalledWith('p1', { title: 'The roadmap', angle: null, formats: [], facts: [] }))
     fireEvent.click(screen.getByRole('button', { name: 'Research again' }))
     await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
+    expect(screen.queryByRole('status', { name: 'Research' })).not.toBeInTheDocument()  // research can run: nothing to say
+  })
+
+  it('its bank says when research cannot run, in the server\'s words', async () => {
+    state.researchNote = 'Research is not set up in this workspace yet.'
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    expect(await screen.findByRole('status', { name: 'Research' })).toHaveTextContent('Research is not set up in this workspace yet.')
   })
 })
 
