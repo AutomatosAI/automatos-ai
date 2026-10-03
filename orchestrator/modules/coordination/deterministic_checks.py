@@ -12,8 +12,13 @@ immediate FAIL verdict.
 
 Source: PRD-103 Section 4 (deterministic checks)
         PRD-82A Section 11 (verification guardrails)
+
+F248 (night 7): before any of them, an output that still holds a template's
+placeholders ("[Number]", "[Your Name/Company Name]") fails, whatever the step's
+criteria: #0126.3 was marked verified with both in it.
 """
 
+import functools
 import json
 import logging
 import re
@@ -56,6 +61,23 @@ class DeterministicResult:
 CheckHandler = Callable[[str, Any, Dict[str, Any]], Optional[str]]
 
 
+def _placeholders_first(check: Callable[..., "DeterministicResult"]) -> Callable[..., "DeterministicResult"]:
+    """F248: an output with a template's placeholders still in it fails before the
+    step's own criteria run, criteria or none: work with slots left in is not done."""
+    @functools.wraps(check)
+    def wrapped(self: "DeterministicChecker", output: str,
+                criteria: Optional[List[Dict[str, Any]]]) -> "DeterministicResult":
+        from core.services.placeholders import UNFINISHED, template_placeholders
+
+        slots = template_placeholders(output)
+        if not slots:
+            return check(self, output, criteria)
+        failure = CheckFailure(check_type="placeholders", description=UNFINISHED + ", ".join(slots[:6]) + ".",
+                               must_pass=True)
+        return DeterministicResult(passed=False, failures=[failure], short_circuited=True)
+    return wrapped
+
+
 # ---------------------------------------------------------------------------
 # DeterministicChecker
 # ---------------------------------------------------------------------------
@@ -81,6 +103,7 @@ class DeterministicChecker:
             "word_count_range": self._check_word_count_range,
         }
 
+    @_placeholders_first  # F248: slots left in fail first
     def check(
         self,
         output: str,

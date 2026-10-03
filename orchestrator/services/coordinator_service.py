@@ -60,6 +60,7 @@ from modules.coordination.planner import (
     PlanValidationError,
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
+from modules.coordination.step_inputs import builds_on_whole_results
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
@@ -1026,6 +1027,7 @@ class CoordinatorService:
         except Exception as e:
             logger.warning("[PRD-108] Failed to inject task output: %r", e, exc_info=True)
 
+    @builds_on_whole_results  # F248: the last step builds on its steps' results whole
     async def _attach_field_digest(
         self,
         db: Session,

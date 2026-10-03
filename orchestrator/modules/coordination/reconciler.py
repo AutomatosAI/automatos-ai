@@ -45,6 +45,7 @@ from modules.coordination.verification import (
     VerificationResult,
     VerificationService,
 )
+from modules.coordination.unfinished_work import fail_unfinished, placeholder_failures
 from services.orchestration_board_bridge import sync_board_status
 from services.orchestration_state import (
     ConflictError,
@@ -507,6 +508,8 @@ class MissionReconciler:
           with the verifier's feedback (via _apply_verdict_fail) so the agent
           revises. Empty output (the judge's hard FAIL) is the highest-value
           catch — it now gets one revision instead of flowing into synthesis.
+        - FAIL at the requeue cap because placeholders are still in the output →
+          FAILED, never VERIFIED (F248); returns True, as it was not verified.
         - FAIL at the requeue cap, PARTIAL, or PASS → VERIFIED. A non-PASS
           verdict has its feedback annotated in output_metadata for downstream
           consumers (advisory — the retreat deliberately kept for PARTIAL and
@@ -515,6 +518,10 @@ class MissionReconciler:
         if result.verdict == VERDICT_FAIL and MissionReconciler._apply_verdict_fail(
             db, task, result
         ):
+            return True
+        unfinished = placeholder_failures(result) if result.verdict == VERDICT_FAIL else []
+        if unfinished:      # F248: slots still in after its revision fail; never "verified"
+            fail_unfinished(db, task, unfinished)
             return True
 
         if result.verdict != VERDICT_PASS:

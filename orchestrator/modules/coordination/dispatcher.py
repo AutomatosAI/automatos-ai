@@ -39,6 +39,7 @@ from core.models.orchestration_enums import (
     TaskState,
     TaskType,
 )
+from modules.coordination.step_inputs import with_its_inputs
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from modules.coordination.credit_pause import pauses_when_credit_runs_out
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
@@ -992,6 +993,7 @@ class MissionDispatcher:
         sync_board_status(db, task)
 
     @staticmethod
+    @with_its_inputs  # F248: the last step's whole results, and the documents it names
     def build_task_prompt(
         task: OrchestrationTask,
         goal: Optional[str] = None,
