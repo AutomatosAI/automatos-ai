@@ -75,11 +75,19 @@ def _check_step_agents(db: Session, workspace_id, steps) -> None:
 
 
 def _explicit_schedule(recipe: WorkflowRecipe, db: Session, workspace_id) -> None:
-    """A cron saves with its zone named (the workspace's heartbeat timezone, else
-    UTC), and a cron or zone the scheduler cannot use is a 400, not a schedule
-    that never fires (F132)."""
+    """The check a saved schedule passes on create and update. A type the scheduler
+    does not know is a 422 that says how to turn a timer off (F271), a malformed one
+    a 400. A cron saves with its zone named (the workspace's heartbeat timezone, else
+    UTC); a cron or zone the scheduler cannot use is a 400, not a timer that never fires (F132)."""
+    from core.playbook_schedule import schedule_problem, unknown_type_refusal
     from services.playbook_scheduler import SERVER_ZONE, cron_trigger, is_live_cron, with_explicit_zone
 
+    refused = unknown_type_refusal(recipe.schedule_config)
+    if refused:
+        raise HTTPException(status_code=422, detail=refused)
+    problem = schedule_problem(recipe.schedule_config)
+    if problem:
+        raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {problem}")
     recipe.schedule_config = with_explicit_zone(recipe.schedule_config, db, workspace_id)
     sc = recipe.schedule_config
     if is_live_cron(sc):
@@ -507,10 +515,6 @@ async def create_workflow_recipe(
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
 
-        # Validate schedule_config structure
-        is_valid, error = recipe.validate_schedule_config()
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
         _explicit_schedule(recipe, db, ctx.workspace_id)
 
         _check_step_agents(db, ctx.workspace_id, recipe.steps)
@@ -613,10 +617,6 @@ async def update_workflow_recipe(
 
         # Validate schedule_config if updated
         if 'schedule_config' in recipe_data:
-            is_valid, error = recipe.validate_schedule_config()
-            if not is_valid:
-                logger.warning(f"[update_recipe] schedule_config validation failed for {recipe_id}: {error}")
-                raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
             _explicit_schedule(recipe, db, ctx.workspace_id)
 
         recipe.updated_at = datetime.now()

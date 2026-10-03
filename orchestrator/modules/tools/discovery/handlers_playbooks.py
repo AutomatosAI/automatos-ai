@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
+from modules.tools.discovery.playbook_schedule_check import checks_the_schedule
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -257,6 +258,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+@checks_the_schedule  # F271 (7b): the schedule rules the playbook routes keep
 @updates_wait_for_me  # F242: the owner's "wait for me"
 async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate

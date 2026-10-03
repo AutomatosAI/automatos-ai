@@ -21,6 +21,15 @@ card. A failure dropped out after a day though nobody had dealt with it;
 approvals stayed after they lapsed or after their card was cancelled; mission
 plans had no card number; and stuck cards were never counted.
 
+F274 (night 7b): the rows did not say what they were. An approval named its
+ticket's number as ``ticket_number`` where every other row says ``number``, so
+#0188's plan and #0192's assignment read as having none; #0192's was titled with
+the gate's policy sentence, not the ticket; and the steps a failed mission left
+open carried no mission (#0176.9-.12), so one mission read as five decisions.
+Every row now names its ticket as ``number``, a ticket's approval is titled with
+the ticket, and a step whose mission ended carries that mission: it opens the
+mission, where it is resumed or let go, and the widget lists its steps as one.
+
 Questions and approval grants are answered by workspace admins only (the
 grants API), so for anyone else they are neither counted nor listed: each
 viewer's number is the number of rows they can open. ``needs_you`` serves the
@@ -127,6 +136,7 @@ _MISSION_ROWS = text("""
 # #0177: the line the board writes on it); a mission step still open after its
 # mission ended (#0119.3, #0176.9-.12). A playbook step's session ticket
 # ('recipe:<run>:<step>') is claimed by a CLI host, so only a no-host line stalls it.
+# F274: a step's mission rides along, with its card's number and title.
 _STUCK_ROWS = text("""
     SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.parent_task_id, bt.orchestration_run_id,
            a.name AS agent_name, bt.updated_at AS at, COUNT(*) OVER () AS of_all,
@@ -134,12 +144,14 @@ _STUCK_ROWS = text("""
                 WHEN bt.blocked_reason = :no_host_line OR starts_with(bt.blocked_reason, :no_cli_host_prefix)
                   THEN :why_no_host
                 WHEN bt.assigned_agent_id IS NULL THEN :why_no_agent
-                ELSE :why_not_picked_up END AS why
+                ELSE :why_not_picked_up END AS why,
+           r.id AS mission_run_id, card.workspace_seq AS mission_seq, COALESCE(card.title, r.goal) AS mission_title
       FROM board_tasks bt
       LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
       LEFT JOIN orchestration_tasks ot ON ot.id = bt.orchestration_task_id
       LEFT JOIN orchestration_runs r ON r.id = COALESCE(bt.orchestration_run_id, ot.run_id)
                                     AND r.workspace_id = bt.workspace_id
+      LEFT JOIN board_tasks card ON card.id = bt.parent_task_id AND card.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid)
        AND ((bt.status = 'assigned' AND bt.source_type NOT IN ('orchestration_task', 'orchestration')
              AND (bt.assigned_agent_id IS NULL
@@ -235,37 +247,39 @@ def _grants_by_id(db: Session, workspace_id: Any, ids: List[int]) -> List[Any]:
 
 
 def _grant_rows(db: Session, workspace_id: Any, grants: List[Any]) -> List[Dict[str, Any]]:
-    """A question or approval grant as a row: the ticket it opens in (and its
-    number, PRD-252 R4), and who asked (F091-E1)."""
-    from core.models.approval_grants import KIND_QUESTION
+    """Question and approval grants as rows: the ticket each opens in, named by its
+    number as every row is (PRD-252 R4), and who asked (F091-E1)."""
     from services.grant_owners import grant_owners
 
     owners = grant_owners(db, workspace_id, grants)
-    tickets = {g.id: (owners.get(g.id) or {}).get("ticket") or {} for g in grants}
-    numbers = _numbers_of(db, workspace_id, {t["id"] for t in tickets.values() if t.get("id")})
-    rows = []
-    for g in grants:
-        ticket_id = tickets[g.id].get("id")
-        rows.append({
-            "source": "grant",
-            "id": str(g.id),
-            "title": g.question_md if g.kind == KIND_QUESTION else (g.reason or g.tool_name or "Approval"),
-            "ticket_id": ticket_id,
-            "ticket_number": numbers.get(ticket_id),
-            "agent_name": ((owners.get(g.id) or {}).get("agent") or {}).get("name"),
-            "at": _iso(g.requested_at),
-        })
-    return rows
+    return [_grant_row(g, owners.get(g.id) or {}) for g in grants]
 
 
-def _numbers_of(db: Session, workspace_id: Any, ticket_ids: set) -> Dict[int, Optional[str]]:
-    from core.models.core import BoardTask
-    from services.ticket_numbers import ticket_numbers
+def _grant_row(grant: Any, owner: Dict[str, Any]) -> Dict[str, Any]:
+    ticket = owner.get("ticket") or {}
+    return {
+        "source": "grant",
+        "id": str(grant.id),
+        "title": _grant_title(grant, ticket),
+        "ticket_id": ticket.get("id"),
+        "number": ticket.get("number"),
+        "agent_name": (owner.get("agent") or {}).get("name"),
+        "at": _iso(grant.requested_at),
+    }
 
-    if not ticket_ids:
-        return {}
-    tickets = db.query(BoardTask).filter(BoardTask.id.in_(ticket_ids), BoardTask.workspace_id == workspace_id).all()
-    return ticket_numbers(db, workspace_id, tickets)
+
+def _grant_title(grant: Any, ticket: Dict[str, Any]) -> Optional[str]:
+    """A question in its own words. Approving a ticket lets the ticket go ahead, so
+    the row is titled with the ticket, never the gate's policy sentence (F274:
+    #0192's read "board task requires approval under 'always_ask' policy"). Any
+    other approval says what it is for."""
+    from core.models.approval_grants import KIND_QUESTION, SUBJECT_BOARD_TASK
+
+    if grant.kind == KIND_QUESTION:
+        return grant.question_md
+    if grant.subject_type == SUBJECT_BOARD_TASK and ticket.get("title"):
+        return ticket["title"]
+    return grant.reason or grant.tool_name or "Approval"
 
 
 def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -275,7 +289,7 @@ def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Di
 
     missions = [
         {"source": "mission", "id": str(r.id), "title": r.goal, "ticket_id": r.card_id,
-         "ticket_number": format_number(r.workspace_seq), "agent_name": None, "at": _iso(r.updated_at)}
+         "number": format_number(r.workspace_seq), "agent_name": None, "at": _iso(r.updated_at)}
         for r in db.execute(_MISSION_ROWS, params)
     ]
     merged = _grant_rows(db, workspace_id, grants) + missions
@@ -283,9 +297,23 @@ def _approval_rows(db: Session, workspace_id: Any, grants: List[Any], params: Di
 
 
 def _stuck_rows(db: Session, workspace_id: Any, rows: List[Any]) -> List[Dict[str, Any]]:
-    """A stuck ticket opens itself, named by its number (a mission step's is its
-    card's: #0176.9), with why it is stuck."""
-    return [{**row, "why": r.why} for row, r in zip(_numbered_rows(db, workspace_id, rows), rows)]
+    """A stuck ticket, named by its number (a mission step's is its card's: #0176.9),
+    with why it is stuck. It opens itself, unless it is a step whose mission ended:
+    the board runs no mission's step, so such a step is resumed or let go with its
+    mission, and its row opens the mission (``_ended_mission``)."""
+    return [{**row, "why": r.why, **_ended_mission(r)} for row, r in zip(_numbered_rows(db, workspace_id, rows), rows)]
+
+
+def _ended_mission(r: Any) -> Dict[str, Any]:
+    """For a step whose mission ended: the mission's id (what the row opens) and its
+    card's number and title, which the widget lists the mission's steps under. F274:
+    #0176.9-.12 carried no mission, so one failed mission read as five decisions."""
+    from services.ticket_numbers import format_number
+
+    if r.why != STUCK_MISSION_ENDED or r.mission_run_id is None:
+        return {}
+    return {"mission_id": str(r.mission_run_id), "mission_number": format_number(r.mission_seq),
+            "mission_title": r.mission_title}
 
 
 def _numbered_rows(db: Session, workspace_id: Any, rows: List[Any]) -> List[Dict[str, Any]]:
@@ -301,8 +329,9 @@ def _iso(value: Any) -> Any:
 
 
 def _ticket_row(r: Any) -> Dict[str, Any]:
-    """A ticket opens in the board's viewer; only a mission's own card opens its
-    mission. A session-run mission step also carries the run id, and opens itself."""
+    """A ticket opens in the board's viewer; a mission's own card opens its mission
+    (so does a stuck step of a mission that ended, ``_stuck_rows``). A session-run
+    mission step also carries the run id, and opens itself."""
     from services.ticket_numbers import format_number
 
     mission = str(r.orchestration_run_id) if r.source_type == MISSION_CARD and r.orchestration_run_id else None
