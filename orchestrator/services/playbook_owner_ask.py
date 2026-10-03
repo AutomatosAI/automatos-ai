@@ -56,6 +56,8 @@ RERUN_WARNING = "Answering runs the whole playbook again from step 1."
 ASK_MARKER = "playbook_ask"
 STOPPED_KEY = "needs_owner"
 ANSWERS_KEY = "owner_answers"
+# F243: what the owner asked a redo of this playbook's card to change (services/run_redo).
+REDO_KEY = "owner_redo"
 # How the watch ticker reads a run that stopped for the owner: not terminal yet.
 WAITING_FOR_OWNER = "waiting_for_owner"
 
@@ -385,17 +387,19 @@ def _live_watch(db: Session, execution: Any) -> Any:
 
 
 def owner_answers_block(execution_metadata: Any) -> str:
-    """Every answer the owner gave this playbook's stopped runs, for every step's prompt."""
-    answers = (execution_metadata or {}).get(ANSWERS_KEY) if isinstance(execution_metadata, dict) else None
-    if not answers:
-        return ""
-    lines = ["## The owner's answer",
-             "An earlier run of this playbook stopped to ask the owner, and they answered. "
-             "Use the answer; do not ask it again."]
-    for entry in answers:
-        lines += ["", f"**Step {entry.get('step')} asked:** {entry.get('question')}",
-                  f"**The owner answered:** {entry.get('answer')}"]
-    return "\n".join(lines)
+    """For every step's prompt: what the owner asked this run, a redo they sent
+    back, to change (F243), then every answer they gave its stopped runs."""
+    metadata = execution_metadata if isinstance(execution_metadata, dict) else {}
+    redo, answers = metadata.get(REDO_KEY), metadata.get(ANSWERS_KEY)
+    lines = [str(redo), ""] if redo else []
+    if answers:
+        lines += ["## The owner's answer",
+                  "An earlier run of this playbook stopped to ask the owner, and they answered. "
+                  "Use the answer; do not ask it again."]
+        for entry in answers:
+            lines += ["", f"**Step {entry.get('step')} asked:** {entry.get('question')}",
+                      f"**The owner answered:** {entry.get('answer')}"]
+    return "\n".join(lines).strip()
 
 
 def rerun_after_answer(db: Session, grant: Any) -> bool:

@@ -45,6 +45,8 @@ from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
+from services.run_cancel import is_playbook_card
+from services.run_redo import redo_refusal, start_redo, takes_its_own_redo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -1156,7 +1158,10 @@ async def reject_task(
             status_code=422,
             detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
         )
-    if not task.assigned_agent_id:
+    refused = redo_refusal(db, task)  # F243: a redo that can't run on this card is refused before anything changes
+    if refused:
+        raise HTTPException(status_code=409, detail=refused)
+    if not task.assigned_agent_id and not takes_its_own_redo(task):
         raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
@@ -1173,9 +1178,9 @@ async def reject_task(
     # Q44: back to the same agent for another attempt, feedback in context.
     # F195: only from the status this request saw, so a second click (or an
     # approval that landed first) finds the ticket already decided.
-    if not _decide(db, task, seen=seen, values={"status": "assigned"}):
+    if not _decide(db, task, seen=seen, values={"status": _redo_status(task)}):
         raise already_decided(task)
-    _back_to_its_agent(db, ctx, task, feedback or SENT_BACK_WITHOUT_A_NOTE)
+    _redo(db, ctx, task, feedback or SENT_BACK_WITHOUT_A_NOTE)
     _refreshed(db, task, task_id)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
@@ -1188,6 +1193,23 @@ async def reject_task(
         "assigned_agent_id": task.assigned_agent_id,
         "feedback": feedback or None,
     }
+
+
+def _redo_status(task: BoardTask) -> str:
+    """Where a redo puts the ticket: back in Assigned for the board's dispatcher, or
+    In progress for a playbook's card or a mission's step, whose redo starts at once
+    (F243), so no claim takes it in between."""
+    return "in_progress" if takes_its_own_redo(task) else "assigned"
+
+
+def _redo(db: Session, ctx: RequestContext, task: BoardTask, feedback: str) -> None:
+    """A redo the owner asked for (Reject, a re-brief) on the same card: through its
+    agent, or (F243) through its playbook or its mission. Committed."""
+    if takes_its_own_redo(task):
+        task.review_feedback = feedback
+        start_redo(db, task, by=_operator_ref(ctx))
+    else:
+        _back_to_its_agent(db, ctx, task, feedback)
 
 
 def _back_to_its_agent(db: Session, ctx: RequestContext, task: BoardTask, feedback: str) -> None:
@@ -1350,6 +1372,8 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     owned = mission_runs_it(db, task)
     if owned:
         raise HTTPException(status_code=409, detail=owned)
+    if is_playbook_card(task):
+        return _run_the_playbook_again(db, ctx, task)  # F243: it said "started" and nothing ran
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
     # #1115: an agent whose model cannot run is never handed the task (F141's rule).
@@ -1381,6 +1405,19 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     return {"success": True, "task_id": task.id, "status": task.status,
             "rerun_of": was if rerun else None, "started": not _waiting_for_a_host(task),
             "message": _run_now_message(task, was, rerun)}
+
+
+def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -> Dict[str, Any]:
+    """Run Now (or a drag to In progress) on a playbook's card: the playbook runs
+    again on this card (F243), or the reason it can't is the answer."""
+    refused = redo_refusal(db, task)
+    if refused:
+        raise HTTPException(status_code=409, detail=refused)
+    was = task.status
+    keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    message = start_redo(db, task, by=_operator_ref(ctx))
+    return {"success": True, "task_id": task.id, "status": task.status,
+            "rerun_of": was if was in FINISHED else None, "started": True, "message": message}
 
 
 def _run_now_message(task: BoardTask, was: str, rerun: bool) -> str:
@@ -1460,7 +1497,7 @@ async def update_task_status(
     # F190 review: a repeat of in_progress on a running ticket (a double drag)
     # changes nothing; a stuck ticket has Run Now.
     if new_status == "in_progress" and task.status != "in_progress" \
-            and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES:
+            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)):
         return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
     owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
     if owned:

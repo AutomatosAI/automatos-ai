@@ -121,6 +121,21 @@ def redo_block(task: Any) -> Optional[str]:
     return "\n".join(lines)
 
 
+def kept_draft(task: Any) -> Optional[str]:
+    """F243: the draft a failed redo leaves on the card's face. A redo starts clean
+    (F190: the last run goes on record and off the card), so when it failed (#0171
+    and #0174 ran out of credit) the draft the owner had been correcting was only
+    in the card's history. While the failed run has no result of its own, this is
+    the latest run's that had one."""
+    if getattr(task, "status", None) != "failed" or getattr(task, "result", None):
+        return None
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    for run in reversed(data.get("previous_runs") or []):
+        if isinstance(run, dict) and run.get("result"):
+            return run["result"]
+    return None
+
+
 def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
     """When the ticket's brief was last agreed in a discussion; None if never."""
     briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
