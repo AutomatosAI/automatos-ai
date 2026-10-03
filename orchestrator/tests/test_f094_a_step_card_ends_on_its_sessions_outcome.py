@@ -4,11 +4,12 @@ Once the session lane claims a mission step's card, the lane alone writes its
 status. The code review worried that a card could then stay claimed after its
 session ended: the retry and the stall recovery clear the step's agent while the
 session may still be working. Whatever the mission does meanwhile — retries the
-step, recovers it from a stall, stops waiting for it, or is cancelled — the
-session's result lands on the card and the card ends on that outcome. When the
-mission stopped waiting or was cancelled, the card also says so, in a note, and
-its status stays the session's. On the real schema, through the host's own
-claim and result.
+step, recovers it from a stall, or stops waiting for it — the session's result
+lands on the card and the card ends on that outcome. When the mission stopped
+waiting, the card also says so, in a note, and its status stays the session's.
+On the real schema, through the host's own claim and result. (A cancelled
+mission stops its sessions and cancels their cards: F245,
+test_f245_cancel_stops_a_mission.)
 """
 from __future__ import annotations
 
@@ -29,8 +30,6 @@ from services.orchestration_board_bridge import create_mission_board_task, creat
 
 STOPPED_WAITING = ("The mission stopped waiting for this step after 60 minutes. The session is still working, "
                    "and its result will land here.")
-CANCELLED = ("The mission was cancelled while this step ran. The session is still working, and its result "
-             "will land here.")
 
 
 @pytest.fixture
@@ -96,13 +95,9 @@ def _stopped_waiting(db, run, task):
         "error": "ticket is still running after 3600 s — the Claude Code session carries on"})
 
 
-def _cancelled(db, run, task):
-    cs.CoordinatorService().cancel_mission(db, run.id, "user_test")
-
-
 @pytest.mark.parametrize("what_the_mission_did, note", [
-    (_retry, None), (_stall_recovery, None), (_stopped_waiting, STOPPED_WAITING), (_cancelled, CANCELLED),
-], ids=["retry", "stall-recovery", "stopped-waiting", "cancelled"])
+    (_retry, None), (_stall_recovery, None), (_stopped_waiting, STOPPED_WAITING),
+], ids=["retry", "stall-recovery", "stopped-waiting"])
 def test_no_card_the_lane_runs_stays_claimed_after_its_session_ends(db_session, seed_workspace, quiet,
                                                                      what_the_mission_did, note):
     ws = UUID(seed_workspace())
@@ -140,23 +135,3 @@ def test_the_notes_on_a_card_survive_the_claim_that_resumes_its_run(db_session, 
     assert again["task_id"] == card.id
     assert [n["note"] for n in card.runtime_ref["session_notes"]] == [STOPPED_WAITING]
 
-
-def test_a_note_the_database_refuses_never_costs_the_mission_its_cancel(db_session, seed_workspace, quiet,
-                                                                       monkeypatch):
-    """The note is written inside the transaction that holds the cancel. A note
-    statement that fails there must not abort that transaction (code review of
-    75e084cbf): each note has its own savepoint."""
-    from sqlalchemy import text
-
-    ws = UUID(seed_workspace())
-    run, task, card, host, ticket = _session_working(db_session, ws)
-
-    def _refused(db, **kwargs):
-        db.execute(text("SELECT 1 / 0"))                   # the note's statement fails in Postgres
-
-    monkeypatch.setattr(svc, "append_session_note", _refused)
-    cs.CoordinatorService().cancel_mission(db_session, run.id, "user_test")
-    db_session.flush()
-    db_session.refresh(run)                                # old: the transaction was aborted here
-
-    assert run.state == RunState.CANCELLED.value

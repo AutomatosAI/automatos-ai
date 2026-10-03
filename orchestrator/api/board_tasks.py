@@ -44,6 +44,7 @@ from services.board_task_view import enrich_with_agents
 from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
+from services.board_cancel import UNCANCELLABLE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -1433,8 +1434,8 @@ async def update_task_status(
     """Update only the status of a task (for drag-and-drop on the board).
 
     PRD-252 R6: a drag does what the matching button does. A move into In
-    progress is Run Now; a move that needs a verdict is refused, naming the
-    button that gives it.
+    progress is Run Now; a move into Cancelled is Cancel (F245); a move that
+    needs a verdict is refused, naming the button that gives it.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -1452,6 +1453,8 @@ async def update_task_status(
     refusal = DECISION_DRAGS.get((task.status, new_status))
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
+    if new_status == "cancelled" and task.status not in UNCANCELLABLE:
+        return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
     if new_status == "in_progress" and not task.assigned_agent_id:
         raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
     # F190 review: a repeat of in_progress on a running ticket (a double drag)
@@ -1549,7 +1552,9 @@ async def cancel_task(
     simply stops being claimable; a CLI-host session is told to stop on its next
     event batch (``control: ["cancel"]``) and its late result is a no-op; an API
     run still finishes in the background but its result is dropped honestly —
-    the completion writer only writes ``in_progress`` rows.
+    the completion writer only writes ``in_progress`` rows. F245: a playbook's
+    card stops its run and a mission's card cancels the mission; a failed
+    ticket can be cancelled, which closes it.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -1557,16 +1562,24 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status in ("done", "failed", "cancelled", "closed"):
+    if task.status in UNCANCELLABLE:
         return {"id": task.id, "status": task.status, "applied": False}
+    return _cancel_like_the_button(db, ctx, task)
 
-    # F116: one cancel for the board and for a cancelled playbook run's step
-    # tickets — it now also records who cancelled and why.
-    from services.board_cancel import cancel_board_ticket
+
+def _cancel_like_the_button(db: Session, ctx: RequestContext, task: BoardTask) -> Dict[str, Any]:
+    """F245: Cancel, from its button or a drag to Cancelled (PRD-252 R6): the
+    ticket and whatever runs it, as services/run_cancel.cancel_ticket decides."""
+    from core.auth.workspace_permission import workspace_permission_granted
+    from services.run_cancel import cancel_ticket
 
     previous = task.status
-    cancel_board_ticket(db, task, by=_operator_ref(ctx), reason="cancelled on the board")
-    return {"id": task.id, "status": "cancelled", "applied": True, "previous_status": previous}
+    refused = cancel_ticket(db, task, by=_operator_ref(ctx),
+                            may=lambda permission: workspace_permission_granted(db, ctx, permission))
+    if refused:
+        raise HTTPException(status_code=refused[0], detail=refused[1])
+    db.refresh(task)
+    return {"id": task.id, "status": task.status, "applied": True, "previous_status": previous}
 
 
 # ── Immediate execution (fire-and-forget) ────────────────────────────

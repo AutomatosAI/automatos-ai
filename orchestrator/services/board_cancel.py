@@ -20,12 +20,14 @@ from typing import Any, List
 logger = logging.getLogger(__name__)
 
 RUN_STEP_LIVE = ("inbox", "assigned", "in_progress", "blocked")
+UNCANCELLABLE = ("done", "cancelled", "closed")
 
 
 def cancel_board_ticket(db: Any, task: Any, *, by: str, reason: str) -> bool:
-    """Cancel ``task`` unless it has finished. Commits and tells the board.
-    True when it was cancelled here."""
-    if task.status in ("done", "failed", "cancelled", "closed"):
+    """Cancel ``task`` unless it is done or already closed. Commits and tells the
+    board. True when it was cancelled here. A failed ticket can be cancelled:
+    that is how the owner closes it (F245/F246: it waits in Needs you until then)."""
+    if task.status in UNCANCELLABLE:
         return False
     from services.board_events import notify_board_event
     from services.cli_host_service import clear_session_token

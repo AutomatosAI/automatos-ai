@@ -10,7 +10,7 @@ Two independent user-facing signals are proven here:
    produces the AI SDK data envelope the stream consumer expects.
 
 2. Coordinator side — when a mission crosses 1.5x its token budget,
-   ``_record_task_result`` emits a ``BUDGET_WARNING`` carrying the user-facing
+   ``_record_task_result`` (its ``_count_task_tokens`` part) emits a ``BUDGET_WARNING`` carrying the user-facing
    ``limit_type/spent/limit/message`` fields (the mission keeps running; this
    is a purely additive signal, no pause).
 """
@@ -18,7 +18,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +27,7 @@ _orchestrator_root = Path(__file__).resolve().parent.parent
 if str(_orchestrator_root) not in sys.path:
     sys.path.insert(0, str(_orchestrator_root))
 
-from core.models.orchestration_enums import EventType, TaskState
+from core.models.orchestration_enums import EventType
 from services.coordinator_service import CoordinatorService
 
 
@@ -105,33 +105,15 @@ def _make_run(*, token_budget_estimate, tokens_used=0):
     return run
 
 
-def _make_task():
-    task = MagicMock()
-    task.id = "task-1"
-    task.title = "Some task"
-    task.state = TaskState.RUNNING.value  # anything that is NOT FAILED
-    return task
-
-
 async def _call_record_task_result(run, result):
-    """Invoke the unbound method with a mock ``self`` + targeted patches.
+    """Invoke the budget block of ``_record_task_result`` with a mock ``self``.
 
-    ``_record_task_result`` does heavy work before the budget block
-    (record_task_completion, mission-event dispatch, field injection); we
-    patch those out so the test isolates the budget-warning emit.
+    F245 split ``_record_task_result`` into its parts; the budget block (the run's
+    token count and its BUDGET_WARNING) is ``_count_task_tokens``, run here on its
+    own so the test isolates the budget-warning emit, as it did before the split.
     """
-    mock_self = MagicMock()
-    mock_self._inject_task_output_into_field = AsyncMock()
-
-    db = MagicMock()
-    task = _make_task()
-
-    with patch("services.coordinator_service.MissionDispatcher"), \
-         patch("services.coordinator_service._dispatch_mission_event", new=AsyncMock()), \
-         patch("services.coordinator_service.emit_event") as mock_emit:
-        await CoordinatorService._record_task_result(
-            mock_self, db, run, task, agent_id=1, result=result,
-        )
+    with patch("services.coordinator_service.emit_event") as mock_emit:
+        CoordinatorService._count_task_tokens(MagicMock(), MagicMock(), run, result)
     return mock_emit
 
 
