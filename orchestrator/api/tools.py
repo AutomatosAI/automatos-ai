@@ -13,6 +13,7 @@ import hmac
 import logging
 from typing import Any, Dict, List, Optional
 
+from anyio import from_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text
@@ -23,6 +24,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.composio.client import composio_available, composio_unavailable_reason, get_composio_client
 from core.composio.entity_manager import EntityManager
+from core.composio.pending_connections import CONNECTED, PENDING, is_pending, settle_pending
 from core.database.database import get_db
 from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache, ComposioSyncJob
 from services.metadata_sync_service import MetadataSyncService
@@ -323,102 +325,92 @@ def _stored_auth_config_id(entity_manager, entity_id, app_name: str) -> Optional
         return None
 
 
+def _start_shopify_autosync(workspace_id: str) -> None:
+    """PRD-009 Layer 2: SHOPIFY just went active, so its catalog → knowledge graph sync
+    starts. The listing runs in the threadpool (F257) and the sync is a task on the
+    event loop, so the loop's own thread creates it."""
+    try:
+        from_thread.run_sync(_fire_shopify_autosync, workspace_id)
+        logger.info("[PRD-009] Auto-fired Shopify product sync for workspace %s", workspace_id)
+    except Exception:
+        logger.exception("[PRD-009] Auto-sync trigger failed for workspace %s", workspace_id)
+
+
+def _settle_row(entity_manager, client, entity, conn: Dict[str, Any], workspace_id: str) -> Dict[str, Any]:
+    """One pending row settled against Composio (F258); the row as it was on a failure."""
+    app_name = conn.get("app_name", "")
+    try:
+        settled = settle_pending(
+            entity_manager, client, entity, app_name, _stored_auth_config_id(entity_manager, entity["id"], app_name),
+        )
+    except Exception:
+        logger.exception(f"[CONNECTED_APPS] Pending sync failed for {app_name}")
+        return conn
+    if settled.status == PENDING:
+        return conn
+    logger.info(f"[CONNECTED_APPS] Synced {app_name} from pending → {settled.status}")
+    if settled.status == CONNECTED and app_name.upper() == "SHOPIFY":
+        _start_shopify_autosync(workspace_id)
+    return {**conn, "status": settled.status, "connection_id": settled.connection_id}
+
+
+def _with_pending_settled(entity_manager, entity, connections: List[Dict[str, Any]], workspace_id: str) -> List[Dict[str, Any]]:
+    """The workspace's connections, each pending one settled. Only pending rows cost a
+    Composio call."""
+    if not entity.get("composio_entity_id") or not any(is_pending(c) for c in connections):
+        return connections
+    client = get_composio_client()
+    return [_settle_row(entity_manager, client, entity, c, workspace_id) if is_pending(c) else c for c in connections]
+
+
+def _connected_app_entry(db: Session, c: Dict[str, Any], cached: Optional[ComposioAppCache]) -> Dict[str, Any]:
+    """One app of the Tools page's connected list: the row, enriched from the catalogue cache."""
+    app_name = (c.get("app_name") or "").upper()
+    meta = (cached.app_metadata or {}) if cached else {}
+    triggers = meta.get("triggers") or []
+    action_count = cached.action_count if cached else 0
+    if action_count == 0:
+        action_count = db.query(ComposioActionCache).filter(ComposioActionCache.app_name == app_name).count()
+    logger.info(f"[CONNECTED_APPS] {app_name}: status={c.get('status')}, connection_id={c.get('connection_id')}")
+    return {
+        "id": cached.id if cached else None,
+        "app_name": app_name,
+        "status": c.get("status"),  # 'active', 'added' or 'pending'
+        "connected_at": c.get("connected_at"),
+        "connection_id": c.get("connection_id"),
+        "display_name": cached.display_name if cached else app_name,
+        "description": cached.description if cached else None,
+        "logo_url": cached.logo_url if cached else None,
+        "categories": cached.categories if cached else [],
+        "action_count": action_count,
+        "trigger_count": cached.trigger_count if cached else 0,
+        "triggers": triggers if isinstance(triggers, list) else [],
+    }
+
+
 @router.get("/connected")
-async def connected(
+def connected(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    """The workspace's apps for the Tools page, each pending one settled first (F258).
+
+    A plain ``def`` (F257): settling asks Composio, a synchronous SDK call, so FastAPI
+    runs the route in its threadpool and the event loop never waits on it.
+    """
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
         return {"apps": [], "total": 0}
 
-    connections = entity_manager.get_entity_connections(entity["id"])
-
-    # Lightweight pending sync: check Composio API for any pending connections
-    # and upgrade to active if OAuth completed. Only hits Composio for pending apps.
-    pending = [c for c in connections if (c.get("status") or "").lower() == "pending"]
-    if pending and entity.get("composio_entity_id"):
-        client = get_composio_client()
-        for conn in pending:
-            try:
-                composio_status = client.get_connection_status(
-                    entity_id=entity["composio_entity_id"],
-                    app=conn.get("app_name", ""),
-                    auth_config_id=_stored_auth_config_id(entity_manager, entity["id"], conn.get("app_name", "")),
-                )
-                if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
-                    entity_manager.update_connection_status(
-                        entity_id=entity["id"],
-                        app_name=conn.get("app_name", ""),
-                        status="active",
-                        connection_id=composio_status.get("id"),
-                    )
-                    conn["status"] = "active"
-                    conn["connection_id"] = composio_status.get("id")
-                    logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
-                    # PRD-009 Layer 2 — when SHOPIFY first goes active, kick
-                    # off the catalog → knowledge graph sync. Detached task with
-                    # its OWN session (F033): never the request-scoped `db`,
-                    # which is torn down when this listing endpoint returns.
-                    if (conn.get("app_name") or "").upper() == "SHOPIFY":
-                        try:
-                            _fire_shopify_autosync(str(ctx.workspace_id))
-                            logger.info(
-                                "[PRD-009] Auto-fired Shopify product sync for workspace %s",
-                                ctx.workspace_id,
-                            )
-                        except Exception as sync_err:
-                            logger.warning(
-                                "[PRD-009] Auto-sync trigger failed for workspace %s: %s",
-                                ctx.workspace_id, sync_err,
-                            )
-            except Exception as e:
-                logger.warning(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
-
-    # Include active (connected), added (in workspace, auth revoked), and pending (OAuth in progress) apps.
-    # All three represent apps the user has interacted with in their workspace.
-    active = [c for c in connections if (c.get("status") or "").lower() in ("active", "added", "pending")]
-
-    # Enrich with cached metadata if present
-    conn_app_names = [c.get("app_name") for c in active if c.get("app_name")]
-    app_names_upper = [(a or "").upper() for a in conn_app_names]
-    cache = {
-        a.app_name: a
-        for a in db.query(ComposioAppCache).filter(
-            ComposioAppCache.app_name.in_(list(set(app_names_upper)))
-        ).all()
-    }
-    out = []
-    for c in active:
-        app_name = (c.get("app_name") or "").upper()
-        cached = cache.get(app_name)
-        meta = (cached.app_metadata or {}) if cached else {}
-        triggers = meta.get("triggers") or []
-        action_count = cached.action_count if cached else 0
-        if action_count == 0:
-            n = (
-                db.query(ComposioActionCache)
-                .filter(ComposioActionCache.app_name == app_name)
-                .count()
-            )
-            action_count = n
-        app_data = {
-            "id": cached.id if cached else None,
-            "app_name": app_name,
-            "status": c.get("status"),  # This should be 'active' or 'added'
-            "connected_at": c.get("connected_at"),
-            "connection_id": c.get("connection_id"),
-            "display_name": cached.display_name if cached else app_name,
-            "description": cached.description if cached else None,
-            "logo_url": cached.logo_url if cached else None,
-            "categories": cached.categories if cached else [],
-            "action_count": action_count,
-            "trigger_count": cached.trigger_count if cached else 0,
-            "triggers": triggers if isinstance(triggers, list) else [],
-        }
-        logger.info(f"[CONNECTED_APPS] {app_name}: status={c.get('status')}, connection_id={c.get('connection_id')}")
-        out.append(app_data)
+    connections = _with_pending_settled(
+        entity_manager, entity, entity_manager.get_entity_connections(entity["id"]), str(ctx.workspace_id),
+    )
+    # Include active (connected), added (in workspace, not connected) and pending (sign-in under way) apps.
+    shown = [c for c in connections if (c.get("status") or "").lower() in ("active", "added", "pending")]
+    app_names = list({(c.get("app_name") or "").upper() for c in shown if c.get("app_name")})
+    cache = {a.app_name: a for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()}
+    out = [_connected_app_entry(db, c, cache.get((c.get("app_name") or "").upper())) for c in shown]
     logger.info(f"[CONNECTED_APPS] Returning {len(out)} apps total")
     return {"apps": out, "total": len(out)}
 
@@ -532,7 +524,7 @@ async def save_app_actions(
 
 
 @router.post("/connect", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def connect_app(
+def connect_app(
     payload: ConnectIn,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -856,19 +848,39 @@ async def backfill_params(
     return result
 
 
+def _refresh_row(entity_manager, client, entity, conn: Dict[str, Any]) -> str:
+    """Settle one pending row (F258) and return its status; a row still pending is
+    stamped as checked, so the next refresh doesn't retry it in a storm."""
+    app_name = conn.get("app_name") or ""
+    try:
+        settled = settle_pending(
+            entity_manager, client, entity, app_name, _stored_auth_config_id(entity_manager, entity["id"], app_name),
+        )
+    except Exception:
+        logger.exception(f"[REFRESH] Failed to sync {app_name}")
+        return PENDING
+    if settled.status == PENDING:
+        entity_manager.update_connection_status(entity_id=entity["id"], app_name=app_name, status=PENDING)
+    else:
+        logger.info(f"[REFRESH] Updated {app_name} to {settled.status}")
+    return settled.status
+
+
 @router.post("/refresh-connections", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def refresh_connections(
+def refresh_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
     Manually refresh pending connections from Composio.
 
-    This endpoint checks all pending connections and updates their status.
-    Use this after OAuth callbacks to ensure UI reflects the latest state.
+    This endpoint settles every pending connection from Composio's record (F258):
+    connected, ended (Connect is offered again) or still under way. Use this after
+    OAuth callbacks to ensure UI reflects the latest state.
 
     PERFORMANCE NOTE: This makes API calls to Composio and should NOT
-    be called on every page load. Use only when explicitly needed.
+    be called on every page load. Use only when explicitly needed. A plain ``def``
+    (F257), so those calls never hold up the event loop.
     """
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
@@ -876,49 +888,14 @@ async def refresh_connections(
     if not entity:
         return {"synced": 0, "updated": 0, "message": "No entity found"}
 
-    from datetime import datetime, timedelta
-    connections = entity_manager.get_entity_connections(entity["id"])
-
-    # Find pending connections to sync
-    pending_to_sync = [
-        conn for conn in connections
-        if (conn.get("status") or "").lower() == "pending"
-    ]
-
+    pending_to_sync = [conn for conn in entity_manager.get_entity_connections(entity["id"]) if is_pending(conn)]
     if not pending_to_sync:
         return {"synced": 0, "updated": 0, "message": "No pending connections"}
 
     logger.info(f"[REFRESH] Syncing {len(pending_to_sync)} pending connections for workspace {ctx.workspace_id}")
-
     client = get_composio_client()
-    updated_count = 0
-
-    for conn in pending_to_sync:
-        try:
-            composio_status = client.get_connection_status(
-                entity_id=entity["composio_entity_id"],
-                app=(conn.get("app_name") or "").upper(),
-                auth_config_id=_stored_auth_config_id(entity_manager, entity["id"], conn.get("app_name") or ""),
-            )
-            if composio_status and composio_status.get("status") == "ACTIVE":
-                entity_manager.update_connection_status(
-                    entity_id=entity["id"],
-                    app_name=conn.get("app_name") or "",
-                    status="active",
-                    connection_id=composio_status.get("id"),
-                )
-                updated_count += 1
-                logger.info(f"[REFRESH] Updated {conn.get('app_name')} to active")
-            else:
-                # Mark as checked to avoid retry storms
-                entity_manager.update_connection_status(
-                    entity_id=entity["id"],
-                    app_name=conn.get("app_name") or "",
-                    status="pending",
-                )
-        except Exception as e:
-            logger.error(f"[REFRESH] Failed to sync {conn.get('app_name')}: {e}")
-
+    statuses = [_refresh_row(entity_manager, client, entity, conn) for conn in pending_to_sync]
+    updated_count = statuses.count(CONNECTED)
     return {
         "synced": len(pending_to_sync),
         "updated": updated_count,
