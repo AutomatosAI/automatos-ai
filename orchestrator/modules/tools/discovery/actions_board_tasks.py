@@ -342,6 +342,15 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     ))
 
 
+# F241 (night 7b): "Update #0199 with that brief and send it back" came as
+# platform_update_task {"status": "pending", "brief": ...}, and was refused.
+_UPDATE_TASK_MISPLACED = {
+    "status": ("this action changes a ticket's details, not its status. To send the ticket back to its agent "
+               "with a new brief, give the brief in description and send_back: true. Any other move is "
+               "platform_update_task_status's."),
+}
+
+
 def _register_update_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_task",
@@ -349,7 +358,8 @@ def _register_update_task(registry: ActionRegistry) -> None:
             "Edit a board task's details — title, description, priority, tags, "
             "review_mode — or add a note to it without rejecting it. Use this to "
             "correct or refine a ticket. To CHANGE ITS STATUS use "
-            "platform_update_task_status instead; this action never moves a task."
+            "platform_update_task_status instead; this action never moves a task, "
+            "except a re-brief: a new description with send_back sends it back to its agent."
         ),
         category="tasks",
         parameters={
@@ -372,9 +382,19 @@ def _register_update_task(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "A remark to add to the ticket. Not a rejection.",
                 },
+                "send_back": {
+                    "type": "boolean",
+                    "description": (
+                        "With a new description: the ticket goes back to its agent to redo it from that "
+                        "brief, on the same card, as the board's 'Update ticket and re-queue' does. The old "
+                        "brief and the last draft stay on record. For 'update #0199 with this brief and "
+                        "send it back'."
+                    ),
+                },
             },
             "required": ["task_id"],
         },
+        misplaced=_UPDATE_TASK_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "edit"],

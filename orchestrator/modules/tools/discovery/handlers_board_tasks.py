@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
 from modules.tools.discovery.new_card_checks import checks_the_new_card
-from modules.tools.discovery.ticket_edits import notes_say_who_asked
+from modules.tools.discovery.ticket_edits import notes_say_who_asked, rebriefs_on_send_back
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
@@ -713,6 +713,7 @@ async def _update_many_board_task_statuses(
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@rebriefs_on_send_back  # F241 (7b): a new brief with send_back is the board's re-brief
 @notes_say_who_asked  # F241 (7b): a note in a chat a person drives is theirs
 @guarded_and_recorded(EDIT)  # F241: never a closed ticket; each change noted on its ticket
 async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

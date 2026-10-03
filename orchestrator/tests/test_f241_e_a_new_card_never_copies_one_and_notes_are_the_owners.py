@@ -141,3 +141,76 @@ def test_notes_and_brief_reach_their_declared_names():
     mapped = map_optional_aliases("platform_update_task", action,
                                   {"task_id": "#0199", "brief": "About 80 words.", "notes": "Plain, please."}, "t")
     assert mapped == {"task_id": "#0199", "description": "About 80 words.", "note": "Plain, please."}
+
+
+# ── The re-brief: "Update #0199 with that brief and send it back" ────────────────
+
+@pytest.fixture
+def in_review(shop, monkeypatch):
+    """#0199-like: a Content Creator's card in Review with its first draft."""
+    import api.board_tasks as board
+    from sqlalchemy import text
+
+    monkeypatch.setattr(board, "notify_task_available", lambda *a, **k: None)
+    agent = shop.db.execute(text(
+        "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, owner_type) "
+        "VALUES ('Content Creator', 'custom', CAST(:w AS uuid), 'active', CAST('{}' AS json), 'workspace') "
+        "RETURNING id"), {"w": str(shop.ws)}).scalar()
+    shop.card.assigned_agent_id = agent
+    shop.card.status = "review"
+    shop.card.description = "Write the blog intro on resting espresso."
+    shop.card.result = '"At Harbourline Coffee Roasters, we believe great espresso starts…"'
+    shop.db.flush()
+    return shop
+
+
+NEW_BRIEF = ("About 80 words, plain, first person plural: fresh coffee gives off gas and five days' rest makes "
+             "shots steadier. Mention Sam our head roaster. No line before the paragraph, no quote marks.")
+
+
+def test_a_new_brief_with_send_back_goes_back_to_its_agent_on_the_same_card(in_review):
+    out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
+        "task_id": in_review.number, "description": NEW_BRIEF, "send_back": True, "_user_id": "user_owner"}))
+
+    assert out["success"] is True and out["updated"]["send_back"] is True
+    card = in_review.card
+    in_review.db.refresh(card)
+    assert card.status == "assigned" and card.description == NEW_BRIEF and card.raw_prompt == NEW_BRIEF
+    assert card.planning_data["previous_briefs"][-1]["description"] == "Write the blog intro on resting espresso."
+    assert "we believe great espresso" in card.planning_data["previous_runs"][-1]["result"]   # the draft is kept
+    assert "new brief" in card.planning_data["owner_corrections"][-1]["note"]
+    assert any("Gave this a new brief and sent it back" in n["note"] for n in _notes(in_review))
+
+
+def test_send_back_without_a_brief_says_where_the_brief_goes(in_review):
+    out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
+        "task_id": in_review.number, "send_back": True}))
+    assert out["success"] is False and "the brief goes in description" in out["error"]
+    in_review.db.refresh(in_review.card)
+    assert in_review.card.status == "review"
+
+
+def test_a_running_card_is_not_rebriefed_under_its_run(in_review):
+    in_review.card.status = "in_progress"
+    in_review.db.flush()
+    out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
+        "task_id": in_review.number, "description": NEW_BRIEF, "send_back": True}))
+    assert out["success"] is False and "re-brief it once it stops" in out["error"]
+
+
+def test_a_plain_edit_of_the_brief_loses_its_status_order_too(in_review):
+    asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
+        "task_id": in_review.number, "description": NIGHT_7B_BRIEF}))
+    in_review.db.refresh(in_review.card)
+    assert "platform_update_task_status" not in in_review.card.description
+    assert in_review.card.status == "review"                           # an edit never moves the card
+
+
+def test_a_status_sent_to_the_edit_tool_is_told_about_send_back():
+    from modules.tools.discovery import get_action_registry
+    from modules.tools.execution.unified_executor import undeclared_params_refusal
+
+    action = get_action_registry().get("platform_update_task")
+    refused = undeclared_params_refusal("platform_update_task", action,
+                                        {"task_id": 199, "status": "pending", "description": NEW_BRIEF}, "t")
+    assert "send_back: true" in refused

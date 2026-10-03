@@ -109,6 +109,16 @@ def _what_changed(db: Session, kind: str, was: Mapping[str, Any], now: Optional[
     return f"Changed its {', '.join(fields)}" if fields else None
 
 
+def note_change(db: Session, workspace_id: Any, task_id: int, what: str) -> None:
+    """One change another tool made, noted on its ticket as these tools note theirs
+    ("Auto · Gave this a new brief and sent it back, in chat."). A note that can't be
+    written never undoes the change: it is logged."""
+    try:
+        _append(db, workspace_id, {task_id: what})
+    except Exception:
+        logger.exception("[ticket_changes] the change to %s stands, but its note was not written", task_id)
+
+
 def _append(db: Session, workspace_id: Any, notes: Mapping[int, str]) -> None:
     """The notes, in a session of their own: the tool's change is already committed,
     and its own transaction is left exactly as the tool left it."""
@@ -145,4 +155,4 @@ def _status(value: Any) -> str:
     return STATUS_NAMES.get(str(value), str(value))
 
 
-__all__ = ["ASSIGN", "CLOSED_REFUSAL", "EDIT", "STATUS", "guarded_and_recorded"]
+__all__ = ["ASSIGN", "CLOSED_REFUSAL", "EDIT", "STATUS", "guarded_and_recorded", "note_change"]
