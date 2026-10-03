@@ -460,7 +460,7 @@ def test_turning_socials_on_seeds_the_four_templates_once_and_get_templates_list
             videos = client.get("/api/documents/templates", params={"format": "social_video"}).json()
             assert sorted(e["name"] for e in videos) == sorted(STARTER_NAMES)
             images = client.get("/api/documents/templates", params={"format": "social_image"}).json()
-            assert sorted(e["name"] for e in images) == sorted(IMAGE_STARTER_NAMES)
+            assert sorted(e["name"] for e in images) == sorted(IMAGE_STARTER_NAMES + PHOTO_STARTER_NAMES)
         finally:
             session.close()
             trans.rollback()
