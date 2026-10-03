@@ -22,8 +22,14 @@ export interface NeedsYouTicketRow {
   number?: string | null
   title: string | null
   agent_name: string | null
-  /** Set on a mission's own card: the row opens the mission. */
+  /**
+   * Set when the decision is the mission's: on a mission's own card, and (F274) on
+   * a stuck step whose mission ended. The row opens the mission.
+   */
   mission_id: string | null
+  /** F274: on a stuck step whose mission ended, its mission card's number and title. */
+  mission_number?: string | null
+  mission_title?: string | null
   at: string | null
   /** Set on a stuck ticket: why nothing will move it. */
   why?: StuckWhy
@@ -33,10 +39,11 @@ export interface NeedsYouTicketRow {
 export interface NeedsYouAskRow {
   source: 'grant' | 'mission'
   id: string
+  /** A question's words; an approval's ticket title (F274), or what it is for. */
   title: string | null
   ticket_id: number | null
-  /** PRD-252 R4: the number of the ticket it opens in */
-  ticket_number?: string | null
+  /** PRD-252 R4: the number of the ticket it opens in, named as on every row (F274) */
+  number?: string | null
   agent_name: string | null
   at: string | null
 }
