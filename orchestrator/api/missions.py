@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
+from api.mission_retry import resume_retries_a_failed_mission
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
@@ -1829,6 +1830,7 @@ async def pause_mission(
 
 
 @router.post("/{mission_id}/resume", dependencies=[Depends(require_workspace_permission("missions:execute"))])
+@resume_retries_a_failed_mission  # F247: a failed mission is retried, then resumed
 async def resume_mission(
     mission_id: UUID,
     request: Request,

@@ -53,6 +53,7 @@ from core.models.orchestration_enums import (
 from modules.coordination import progress_ledger
 from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
+from modules.coordination.mission_retry import retries_a_failed_mission
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
@@ -3717,6 +3718,7 @@ class CoordinatorService:
         logger.info("Mission %s paused by %s", run_id, actor_id)
         return run
 
+    @retries_a_failed_mission  # F247: Resume retries a failed mission
     def resume_mission(
         self,
         db: Session,

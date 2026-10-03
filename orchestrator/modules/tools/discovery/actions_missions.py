@@ -1,11 +1,84 @@
-"""Mission ActionDefinitions (create, list, get)."""
+"""Mission ActionDefinitions (create, list, get, and the lifecycle controls)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+
+# PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
+# through its states from chat (approve/reject the plan, pause/resume/cancel
+# a run, replan a failure). Each maps to an existing CoordinatorService method.
+_MISSION_ID_PARAM = {
+    "mission_id": {"type": "string", "description": "The mission/run UUID."},
+}
+
+_CREATE_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "goal": {
+            "type": "string",
+            "description": (
+                "Natural-language goal for the mission. Be specific about "
+                "the desired outcome, quality bar, and any constraints. "
+                "The coordinator will decompose this into agent tasks."
+            ),
+        },
+        "config": {
+            "type": "object",
+            "description": (
+                "Optional mission config overrides. Keys: "
+                "auto_approve (bool: skip the awaiting_approval gate and "
+                "start executing immediately — default false, the mission "
+                "waits for human approval), "
+                "max_retries (int), category (str), "
+                "output_format (str: 'markdown'|'json'|'code'), "
+                "publish (bool: auto-publish result if applicable)."
+            ),
+        },
+        "staffing": {
+            "type": "array",
+            "description": (
+                "Only when the owner says which agent does what: one entry per named "
+                "agent, with its work in the owner's words. Each named agent gets that "
+                "work and is pinned to it; anything else is routed by capability. A name "
+                "several agents share is refused with their ids: ask the owner which one."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string", "description": "The agent's name, slug or id"},
+                    "does": {"type": "string", "description": "Its work, in the owner's words"},
+                },
+                "required": ["agent", "does"],
+            },
+        },
+    },
+    "required": ["goal"],
+}
+
+_LIST_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "state": {
+            "type": "string",
+            "enum": ["pending", "planning", "running", "paused", "completed", "failed"],
+            "description": "Filter by mission state (omit for all)",
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Max results (default 10)",
+        },
+    },
+    "required": [],
+}
 
 
 def register_mission_actions(registry: ActionRegistry) -> None:
     """Register mission actions (PRD-82A)."""
+    for register in (_register_create, _register_reads, _register_plan_decisions, _register_run_controls,
+                     _register_replan, _register_plan_edit):
+        register(registry)
 
+
+def _register_create(registry: ActionRegistry) -> None:
+    """platform_create_mission."""
     registry.register(ActionDefinition(
         name="platform_create_mission",
         description=(
@@ -15,49 +88,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "code generation, audits. For single-agent tasks, use platform_create_task instead."
         ),
         category="missions",
-        parameters={
-            "type": "object",
-            "properties": {
-                "goal": {
-                    "type": "string",
-                    "description": (
-                        "Natural-language goal for the mission. Be specific about "
-                        "the desired outcome, quality bar, and any constraints. "
-                        "The coordinator will decompose this into agent tasks."
-                    ),
-                },
-                "config": {
-                    "type": "object",
-                    "description": (
-                        "Optional mission config overrides. Keys: "
-                        "auto_approve (bool: skip the awaiting_approval gate and "
-                        "start executing immediately — default false, the mission "
-                        "waits for human approval), "
-                        "max_retries (int), category (str), "
-                        "output_format (str: 'markdown'|'json'|'code'), "
-                        "publish (bool: auto-publish result if applicable)."
-                    ),
-                },
-                "staffing": {
-                    "type": "array",
-                    "description": (
-                        "Only when the owner says which agent does what: one entry per named "
-                        "agent, with its work in the owner's words. Each named agent gets that "
-                        "work and is pinned to it; anything else is routed by capability. A name "
-                        "several agents share is refused with their ids: ask the owner which one."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "agent": {"type": "string", "description": "The agent's name, slug or id"},
-                            "does": {"type": "string", "description": "Its work, in the owner's words"},
-                        },
-                        "required": ["agent", "does"],
-                    },
-                },
-            },
-            "required": ["goal"],
-        },
+        parameters=_CREATE_PARAMETERS,
         permission_level="write",
         requires_confirmation=False,
         tags=["missions", "write", "orchestration", "multi-agent", "research", "content"],
@@ -69,6 +100,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_reads(registry: ActionRegistry) -> None:
+    """platform_list_missions and platform_get_mission."""
     registry.register(ActionDefinition(
         name="platform_list_missions",
         description=(
@@ -77,21 +111,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "For full details of one mission, use platform_get_mission instead."
         ),
         category="missions",
-        parameters={
-            "type": "object",
-            "properties": {
-                "state": {
-                    "type": "string",
-                    "enum": ["pending", "planning", "running", "paused", "completed", "failed"],
-                    "description": "Filter by mission state (omit for all)",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default 10)",
-                },
-            },
-            "required": [],
-        },
+        parameters=_LIST_PARAMETERS,
         permission_level="read",
         tags=["missions", "read", "list", "status"],
         examples=[
@@ -128,13 +148,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
-    # through its states from chat (approve/reject the plan, pause/resume/cancel
-    # a run, replan a failure). Each maps to an existing CoordinatorService method.
-    _MISSION_ID_PARAM = {
-        "mission_id": {"type": "string", "description": "The mission/run UUID."},
-    }
 
+def _register_plan_decisions(registry: ActionRegistry) -> None:
+    """Approve or reject a plan awaiting approval."""
     registry.register(ActionDefinition(
         name="platform_approve_mission",
         description=(
@@ -180,6 +196,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["reject that plan", "no, don't run that mission", "cancel the proposed plan"],
     ))
 
+
+def _register_run_controls(registry: ActionRegistry) -> None:
+    """Pause, resume (or retry) and cancel a run."""
     registry.register(ActionDefinition(
         name="platform_pause_mission",
         description="Pause a running mission. In-flight tasks finish; no new tasks dispatch until resumed.",
@@ -193,13 +212,14 @@ def register_mission_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_resume_mission",
-        description="Resume a paused mission (it goes back to running).",
+        description=("Resume a paused mission (it goes back to running), or retry a failed one: its failed "
+                     "steps run again from where it stopped, with the same plan."),
         category="missions",
         parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
         permission_level="write",
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "resume"],
-        examples=["resume that mission", "continue the paused mission"],
+        examples=["resume that mission", "continue the paused mission", "retry the failed mission"],
     ))
 
     registry.register(ActionDefinition(
@@ -213,6 +233,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["cancel that mission", "stop the mission"],
     ))
 
+
+def _register_replan(registry: ActionRegistry) -> None:
+    """platform_replan_mission."""
     registry.register(ActionDefinition(
         name="platform_replan_mission",
         description="Replan a failed mission — regenerate replacement tasks for the failed subtree while keeping completed work.",
@@ -248,6 +271,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["replan that failed mission", "try the mission again with a different approach"],
     ))
 
+
+def _register_plan_edit(registry: ActionRegistry) -> None:
+    """platform_update_mission_plan."""
     registry.register(ActionDefinition(
         name="platform_update_mission_plan",
         description=(
