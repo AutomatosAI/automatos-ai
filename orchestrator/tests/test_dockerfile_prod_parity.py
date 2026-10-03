@@ -28,6 +28,8 @@ PROD_DEFAULTS = {
         "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL": "/dashboard",
         "NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL": "/dashboard",
         "FRONTEND_CACHE_BUST": None,  # any value: a cache key, not behaviour
+        # F237: where presigned media loads from (CSP img-src/media-src): the hosted product's AWS S3.
+        "NEXT_PUBLIC_MEDIA_ORIGINS": "https://*.amazonaws.com",
     },
     "orchestrator/Dockerfile": {"INSTALL_GRAPH_EXTRAS": "true"},
     "services/workspace-worker/Dockerfile": {"INSTALL_BROWSER": "true"},
@@ -37,7 +39,7 @@ PROD_DEFAULTS = {
 
 # What the LOCAL edition must pass explicitly (docker-compose.yml build args).
 LOCAL_BUILD_ARGS = {
-    "frontend": {"NEXT_PUBLIC_AUTH_EDITION": "local"},
+    "frontend": {"NEXT_PUBLIC_AUTH_EDITION": "local", "NEXT_PUBLIC_MEDIA_ORIGINS": "http://localhost:9000"},
     "backend": {"INSTALL_GRAPH_EXTRAS": "false"},
     "workspace-worker": {"INSTALL_BROWSER": "false"},
 }
