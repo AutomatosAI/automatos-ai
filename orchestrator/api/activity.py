@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_admin import may_see_own_workspace_health
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from pydantic import BaseModel
@@ -24,6 +25,7 @@ from pydantic import BaseModel
 from core.models.core import Agent, BoardTask, DigestFeedback
 from services.activity_service import ActivityService
 from services.digest_service import generate_digest
+from services.needs_you import needs_you
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/activity", tags=["Activity"])
@@ -299,7 +301,7 @@ async def get_board_stats(
 
 
 @router.get("/stats")
-async def get_activity_stats(
+def get_activity_stats(
     period: str = Query(
         "1d",
         description="Time window for stats: 1d, 7d, 30d, 90d",
@@ -307,10 +309,38 @@ async def get_activity_stats(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Return hero-card stats: working_now, channels_live, completed_today, needs_attention."""
+    """Return hero-card stats: working_now, channels_live, completed_today, needs_attention.
+
+    A plain ``def``: every open Command Centre polls this over a synchronous
+    session, which on the event loop froze it (F105). ``needs_attention`` is
+    the Needs-you number for this viewer (PRD-252 R5).
+    """
     try:
         svc = ActivityService(db, ctx.workspace_id)
-        return svc.get_stats(period=period)
+        return svc.get_stats(period=period, may_answer=may_see_own_workspace_health(db, ctx))
     except Exception as e:
         logger.error("Activity stats error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch activity stats")
+        raise HTTPException(status_code=500, detail="Failed to fetch activity stats") from e
+
+
+NEEDS_YOU_NOT_LOADED = "What needs you could not be loaded. Try again shortly."
+
+
+@router.get("/needs-you")
+def get_needs_you(
+    period: str = Query("1d", description="Window for failed tickets: 1d, 7d, 30d, 90d"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """PRD-252 R5: the one Needs-you number and the rows behind it.
+
+    The Board tab badge, ATTENTION and Auto's pill show ``total``; the Needs
+    you widget lists ``rows``. Questions and approval grants count only for a
+    workspace admin, who alone can answer them. A failure is a 503 with a
+    message, never "nothing needs you" (F207).
+    """
+    try:
+        return needs_you(db, ctx.workspace_id, period, may_answer=may_see_own_workspace_health(db, ctx))
+    except Exception as e:
+        logger.exception("Needs-you read failed for workspace %s", ctx.workspace_id)
+        raise HTTPException(status_code=503, detail=NEEDS_YOU_NOT_LOADED) from e

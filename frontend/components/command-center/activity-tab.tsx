@@ -21,6 +21,7 @@ import { Rows, Table2 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { feedItemHref } from '@/lib/ticket-links'
+import { boardStatusWord } from '@/components/activity/board-status-word'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
 
@@ -287,6 +288,7 @@ function CardsView({
             </div>
             <span className="ts">
               {fmtClock(it.started_at)} · {it.type}
+              {boardStatusWord(it) && ` · ${boardStatusWord(it)}`}
             </span>
             <span className="dur">{fmtDuration(it.duration_seconds)}</span>
             <span className="cost">
@@ -320,78 +322,80 @@ function TableView({
         </tr>
       </thead>
       <tbody>
-        {items.map((it) => {
-          const agName = it.agent?.name || it.agents?.[0]?.name || 'System'
-          const tone = toneFor(agName)
-          const kind = statusKind(it.status)
-          return (
-            <tr
-              key={it.id}
-              onClick={() => onRowClick(it)}
-              style={{ cursor: 'pointer' }}
-            >
-              <td className="mono">
-                <div>{fmtClock(it.started_at)}</div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: 'hsl(var(--muted-foreground))',
-                  }}
-                >
-                  {fmtRel(it.started_at)} ago
-                </div>
-              </td>
-              <td
-                className="mono"
-                style={{ color: 'hsl(var(--foreground) / 0.7)' }}
-              >
-                {it.type}
-              </td>
-              <td>
-                <div className="nm">{it.name}</div>
-                {it.summary && (
-                  <div
-                    style={{
-                      fontFamily: 'var(--font-geist-mono, monospace)',
-                      fontSize: 10.5,
-                      color: 'hsl(var(--muted-foreground))',
-                      marginTop: 2,
-                    }}
-                  >
-                    {it.summary}
-                  </div>
-                )}
-              </td>
-              <td>
-                <span
-                  aria-hidden
-                  style={{
-                    display: 'inline-block',
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    background: tone.bg,
-                    marginRight: 8,
-                    verticalAlign: 'middle',
-                  }}
-                />
-                <span className="ag">{agName}</span>
-              </td>
-              <td>
-                <span className={`cc-status-pill ${kind}`}>
-                  ● {kind.toUpperCase()}
-                </span>
-              </td>
-              <td className="mono" style={{ textAlign: 'right' }}>
-                {fmtDuration(it.duration_seconds)}
-              </td>
-              <td className="mono" style={{ textAlign: 'right' }}>
-                {fmtTokens(it.tokens_used ?? it.total_tokens)}
-              </td>
-            </tr>
-          )
-        })}
+        {items.map((it) => (
+          <ActivityTableRow key={it.id} item={it} onRowClick={onRowClick} />
+        ))}
       </tbody>
     </table>
+  )
+}
+
+/** One feed item in the table: when, source, event, agent, status, duration and tokens. */
+function ActivityTableRow({ item: it, onRowClick }: { item: ActivityFeedItem; onRowClick: (it: ActivityFeedItem) => void }) {
+  const agName = it.agent?.name || it.agents?.[0]?.name || 'System'
+  const tone = toneFor(agName)
+  const kind = statusKind(it.status)
+  return (
+    <tr onClick={() => onRowClick(it)} style={{ cursor: 'pointer' }}>
+      <td className="mono">
+        <div>{fmtClock(it.started_at)}</div>
+        <div
+          style={{
+            fontSize: 10,
+            color: 'hsl(var(--muted-foreground))',
+          }}
+        >
+          {fmtRel(it.started_at)} ago
+        </div>
+      </td>
+      <td
+        className="mono"
+        style={{ color: 'hsl(var(--foreground) / 0.7)' }}
+      >
+        {it.type}
+      </td>
+      <td>
+        <div className="nm">{it.name}</div>
+        {it.summary && (
+          <div
+            style={{
+              fontFamily: 'var(--font-geist-mono, monospace)',
+              fontSize: 10.5,
+              color: 'hsl(var(--muted-foreground))',
+              marginTop: 2,
+            }}
+          >
+            {it.summary}
+          </div>
+        )}
+      </td>
+      <td>
+        <span
+          aria-hidden
+          style={{
+            display: 'inline-block',
+            width: 8,
+            height: 8,
+            borderRadius: 2,
+            background: tone.bg,
+            marginRight: 8,
+            verticalAlign: 'middle',
+          }}
+        />
+        <span className="ag">{agName}</span>
+      </td>
+      <td>
+        {/* PRD-252 R5: a ticket's stage in the board's words */}
+        <span className={`cc-status-pill ${kind}`}>
+          ● {(boardStatusWord(it) ?? kind).toUpperCase()}
+        </span>
+      </td>
+      <td className="mono" style={{ textAlign: 'right' }}>
+        {fmtDuration(it.duration_seconds)}
+      </td>
+      <td className="mono" style={{ textAlign: 'right' }}>
+        {fmtTokens(it.tokens_used ?? it.total_tokens)}
+      </td>
+    </tr>
   )
 }

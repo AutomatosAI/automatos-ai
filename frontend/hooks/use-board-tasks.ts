@@ -64,7 +64,9 @@ export function useBoardTasks(filters?: BoardFilters) {
   if (filters?.agent_id) params.set('agent_id', String(filters.agent_id))
   if (filters?.priority) params.set('priority', filters.priority)
   if (filters?.search) params.set('search', filters.search)
-  params.set('limit', '200')
+  // F225: every open ticket, whatever its age (an old one in Review fell off the
+  // newest 200); only Done and Cancelled are windowed, to the newest 200.
+  params.set('finished_limit', '200')
 
   const endpoint = `/api/v1/tasks?${params.toString()}`
 
@@ -109,6 +111,9 @@ export function useBoardTasks(filters?: BoardFilters) {
       }
       if (col.status === 'in_progress') {
         return t.status === 'in_progress' || t.status === ('running' as any)
+      }
+      if (col.status === 'cancelled') {
+        return t.status === 'cancelled' || t.status === 'closed'   // PRD-252 R7: one stage
       }
       return t.status === col.status
     })
@@ -239,28 +244,17 @@ function mapTaskToBoardTask(item: any): BoardTask {
   const missionTag = tags.find((t: string) => t.startsWith('mission:'))
   const missionName = missionTag ? missionTag.slice(8) : undefined
 
-  const type = (item.source_type === 'recipe' || item.source_type === 'playbook')
-    ? 'playbook' as const
-    : (item.source_type === 'orchestration' || item.source_type === 'orchestration_task')
-      ? 'mission' as const
-      : (item.type ?? 'task') as 'task'
-
   return {
     id: String(item.id),
-    type,
+    type: boardType(item),
     name: item.title ?? 'Untitled',
     description: item.description ?? undefined,
     status: (item.status as BoardStatus) ?? 'inbox',
     priority: item.priority ?? 'medium',
     tags: tags.filter((t: string) => !t.startsWith('mission:')),
     mission_name: missionName,
-    assignee: item.agent
-      ? {
-          agent_id: item.agent.id,
-          agent_name: item.agent.name,
-          agent_icon: item.agent.agent_icon ?? null,
-        }
-      : undefined,
+    mission_id: item.orchestration_run_id ? String(item.orchestration_run_id) : undefined,
+    assignee: assigneeOf(item.agent),
     review_mode: item.review_mode ?? 'auto',
     started_at: item.started_at ?? undefined,
     completed_at: item.completed_at ?? undefined,
@@ -271,18 +265,37 @@ function mapTaskToBoardTask(item: any): BoardTask {
       ? item.orchestration_run_id.slice(0, 8)
       : undefined,
     step_progress: item.planning_data?.step_progress ?? undefined,
-    planning_data: item.planning_data ? {
-      // Normalize recipe_id (legacy) to playbook_id
-      playbook_id: item.planning_data.playbook_id ?? item.planning_data.recipe_id,
-      execution_id: item.planning_data.execution_id,
-      step_progress: item.planning_data.step_progress,
-      approval_action: item.planning_data.approval_action,
-    } : undefined,
+    planning_data: planningDataOf(item.planning_data),
     parent_task_id: item.parent_task_id ? String(item.parent_task_id) : undefined,
     sla_deadline: item.sla_deadline ?? undefined,
     blocked_at: item.blocked_at ?? undefined,
     blocked_reason: item.blocked_reason ?? undefined,
     result: item.result,
     runtime_ref: item.runtime_ref ?? undefined,  // PRD-234
+    review_reason: item.review_reason ?? null,  // PRD-252 R3
+    blocked_code: item.blocked_code ?? null,
+    source_type: item.source_type ?? undefined,
+  }
+}
+
+/** The board's type from what filed the ticket: a playbook's run, a mission's card or step, else a task. */
+function boardType(item: any): BoardTask['type'] {
+  if (item.source_type === 'recipe' || item.source_type === 'playbook') return 'playbook'
+  if (item.source_type === 'orchestration' || item.source_type === 'orchestration_task') return 'mission'
+  return (item.type ?? 'task') as 'task'
+}
+
+function assigneeOf(agent: any): BoardTask['assignee'] {
+  return agent ? { agent_id: agent.id, agent_name: agent.name, agent_icon: agent.agent_icon ?? null } : undefined
+}
+
+function planningDataOf(data: any): BoardTask['planning_data'] {
+  if (!data) return undefined
+  return {
+    // Normalize recipe_id (legacy) to playbook_id
+    playbook_id: data.playbook_id ?? data.recipe_id,
+    execution_id: data.execution_id,
+    step_progress: data.step_progress,
+    approval_action: data.approval_action,
   }
 }

@@ -31,6 +31,7 @@ import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
 import { ExecutionDetail } from './execution-detail'
 import { feedItemHref } from '@/lib/ticket-links'
+import { boardStatusWord } from './board-status-word'
 import dynamic from 'next/dynamic'
 import { cn } from '@/lib/utils'
 
@@ -398,6 +399,105 @@ function FeedSkeleton() {
   )
 }
 
+/** The row's kind and stage. PRD-252 R5: a ticket's stage reads in the board's words. */
+function FeedRowBadges({ item }: { item: ActivityFeedItem }) {
+  const statusBadge = getStatusBadge(item.status)
+  return (
+    <>
+      {item.type === 'chat' && (
+        <Badge className="text-xs bg-info/20 text-info/80 border-info/30 shrink-0">
+          <MessageCircle className="w-3 h-3 mr-1" />
+          Chat
+        </Badge>
+      )}
+      {item.type === 'routine' && (
+        <Badge className="text-xs bg-agent/20 text-agent/80 border-agent/30 shrink-0">
+          <RefreshCw className="w-3 h-3 mr-1" />
+          Routine
+        </Badge>
+      )}
+      {item.type === 'recipe' && (
+        <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
+          <Zap className="w-3 h-3 mr-1" />
+          Playbook
+        </Badge>
+      )}
+      {item.type === 'mission' && (
+        <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
+          <Rocket className="w-3 h-3 mr-1" />
+          Mission
+        </Badge>
+      )}
+      {item.type === 'task' && (
+        <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+          <CheckSquare className="w-3 h-3 mr-1" />
+          Task
+        </Badge>
+      )}
+      <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
+        {boardStatusWord(item) ?? statusBadge.label}
+      </Badge>
+    </>
+  )
+}
+
+/** Time, steps, tokens and duration (hidden on mobile). */
+function FeedRowMetrics({ item }: { item: ActivityFeedItem }) {
+  const isRecipe = item.type === 'recipe'
+  const isRoutine = item.type === 'routine'
+  return (
+    <div className="hidden lg:flex items-center gap-6 text-sm shrink-0">
+      {item.started_at && (
+        <div className="text-left max-w-[200px]">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3" />
+            <span>{formatTimestamp(item.started_at)}</span>
+          </div>
+        </div>
+      )}
+
+      {isRecipe && item.step_progress && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Steps</p>
+          <p className="font-medium">{item.step_progress.total}</p>
+        </div>
+      )}
+
+      {/* Tokens for recipes */}
+      {isRecipe && item.total_tokens != null && item.total_tokens > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Tokens</p>
+          <p className="font-medium">{item.total_tokens.toLocaleString()}</p>
+        </div>
+      )}
+
+      {/* Tokens for routines */}
+      {isRoutine && item.tokens_used != null && item.tokens_used > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Tokens</p>
+          <p className="font-medium">{item.tokens_used.toLocaleString()}</p>
+        </div>
+      )}
+
+      {/* Duration for recipes */}
+      {isRecipe && item.total_duration_ms != null && item.total_duration_ms > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Duration</p>
+          <p className="font-medium">{(item.total_duration_ms / 1000).toFixed(1)}s</p>
+        </div>
+      )}
+
+      {/* Duration fallback from duration_seconds */}
+      {!isRecipe && item.duration_seconds != null && item.duration_seconds > 0 && (
+        <div className="text-center">
+          <p className="text-muted-foreground text-xs">Duration</p>
+          <p className="font-medium">{item.duration_seconds.toFixed(1)}s</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Feed Row (Cooking-Style Slim Row) ──────────────────
 
 interface FeedRowProps {
@@ -409,8 +509,6 @@ interface FeedRowProps {
 
 function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
   const isRecipe = item.type === 'recipe'
-  const isRoutine = item.type === 'routine'
-  const statusBadge = getStatusBadge(item.status)
 
   return (
     <motion.div
@@ -432,39 +530,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
-            {item.type === 'chat' && (
-              <Badge className="text-xs bg-info/20 text-info/80 border-info/30 shrink-0">
-                <MessageCircle className="w-3 h-3 mr-1" />
-                Chat
-              </Badge>
-            )}
-            {isRoutine && (
-              <Badge className="text-xs bg-agent/20 text-agent/80 border-agent/30 shrink-0">
-                <RefreshCw className="w-3 h-3 mr-1" />
-                Routine
-              </Badge>
-            )}
-            {isRecipe && (
-              <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
-                <Zap className="w-3 h-3 mr-1" />
-                Playbook
-              </Badge>
-            )}
-            {item.type === 'mission' && (
-              <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
-                <Rocket className="w-3 h-3 mr-1" />
-                Mission
-              </Badge>
-            )}
-            {item.type === 'task' && (
-              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
-                <CheckSquare className="w-3 h-3 mr-1" />
-                Task
-              </Badge>
-            )}
-            <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
-              {statusBadge.label}
-            </Badge>
+            <FeedRowBadges item={item} />
           </div>
 
           {/* Sub-line: step progress or summary */}
@@ -549,56 +615,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
           )}
         </div>
 
-        {/* Metrics (hidden on mobile) */}
-        <div className="hidden lg:flex items-center gap-6 text-sm shrink-0">
-          {item.started_at && (
-            <div className="text-left max-w-[200px]">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="w-3 h-3" />
-                <span>{formatTimestamp(item.started_at)}</span>
-              </div>
-            </div>
-          )}
-
-          {isRecipe && item.step_progress && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Steps</p>
-              <p className="font-medium">{item.step_progress.total}</p>
-            </div>
-          )}
-
-          {/* Tokens for recipes */}
-          {isRecipe && item.total_tokens != null && item.total_tokens > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Tokens</p>
-              <p className="font-medium">{item.total_tokens.toLocaleString()}</p>
-            </div>
-          )}
-
-          {/* Tokens for routines */}
-          {isRoutine && item.tokens_used != null && item.tokens_used > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Tokens</p>
-              <p className="font-medium">{item.tokens_used.toLocaleString()}</p>
-            </div>
-          )}
-
-          {/* Duration for recipes */}
-          {isRecipe && item.total_duration_ms != null && item.total_duration_ms > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Duration</p>
-              <p className="font-medium">{(item.total_duration_ms / 1000).toFixed(1)}s</p>
-            </div>
-          )}
-
-          {/* Duration fallback from duration_seconds */}
-          {!isRecipe && item.duration_seconds != null && item.duration_seconds > 0 && (
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs">Duration</p>
-              <p className="font-medium">{item.duration_seconds.toFixed(1)}s</p>
-            </div>
-          )}
-        </div>
+        <FeedRowMetrics item={item} />
 
         {/* View button */}
         <Button

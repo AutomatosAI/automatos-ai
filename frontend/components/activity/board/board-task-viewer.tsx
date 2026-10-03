@@ -7,6 +7,11 @@ import { sessionToolCalls, toolCallVerdict, toolCallTitle, toolDecisionsSummary 
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { ReviewVerdict } from './review-verdict'
 import { TicketQuestions } from './ticket-questions'
+import { TicketApprovals } from './ticket-approvals'
+import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
+import { stageReason } from './ticket-stage'
+import { isMissionTicket } from './ticket-actions'
+import { missionHref } from '@/lib/ticket-links'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
@@ -233,7 +238,8 @@ function MetadataGrid({ task }: { task: BoardTask }) {
       </MetaItem>
 
       <MetaItem icon={<Shield className="w-3.5 h-3.5" />} label="Review Mode">
-        <span className="text-sm font-medium capitalize">{task.review_mode}</span>
+        {/* PRD-252 R3: llm has no reviewer; such a ticket waits for a person */}
+        <span className="text-sm font-medium capitalize">{task.review_mode === 'llm' ? 'human' : task.review_mode}</span>
       </MetaItem>
 
       {task.due_date ? (
@@ -268,11 +274,13 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const grantApproval = useGrantApproval()
   const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  const reason = stageReason(task)  // PRD-252 R3: what it waits for, in words
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-4 space-y-3" data-testid="blocked-banner">
         <p className="text-sm font-medium">
-          {grantId ? `Waiting for your approval (grant #${grantId})` : 'Waiting for the operator'}
+          <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider">{reason?.chip}</span>
+          {grantId ? `Waiting for your approval (grant #${grantId})` : reason?.says}
         </p>
         {text && <p className="text-xs text-muted-foreground">{text}</p>}
         <div className="flex flex-wrap items-center gap-2">
@@ -413,13 +421,17 @@ function InProgressContent({ task }: { task: BoardTask }) {
 }
 
 function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => void }) {
+  const reason = stageReason(task)  // PRD-252 R3: why it is in review
+  // D6: a mission's card and its steps are decided on the mission, never by ticket verdict
+  const missionDecides = isMissionTicket(task)
   return (
     <div className="space-y-6">
       {/* Review banner */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20" data-testid="review-banner">
         <Clock className="w-5 h-5 text-[hsl(var(--warning))] shrink-0" />
         <div className="flex-1">
-          <p className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</p>
+          <p className="text-sm font-medium text-[hsl(var(--warning))]">{reason?.stage ?? 'Awaiting Review'}</p>
+          {reason && <p className="text-xs mt-0.5">{reason.says}</p>}
           {task.completed_at && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
@@ -478,8 +490,17 @@ function ReviewContent({ task, onDecided }: { task: BoardTask; onDecided: () => 
         )}
       </div>
 
-      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does */}
-      <ReviewVerdict task={task} onDecided={onDecided} />
+      {/* PRD-252 R2: Reject with the owner's words, or Approve, named for what it does.
+          D6: a mission's plan is approved on its page; a step is its mission's to check. */}
+      {missionDecides ? (
+        task.mission_id && (
+          <Link href={missionHref(task.mission_id) as any} className="text-sm text-primary underline-offset-2 hover:underline" data-testid="review-on-mission">
+            {task.review_reason === 'mission_plan' ? 'Approve or change the plan on the mission' : 'Open the mission'} →
+          </Link>
+        )
+      ) : (
+        <ReviewVerdict task={task} onDecided={onDecided} />
+      )}
     </div>
   )
 }
@@ -576,6 +597,32 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
   )
 }
 
+// PRD-252 R7: a cancelled or closed ticket opened to an empty viewer.
+function CancelledContent({ task }: { task: BoardTask }) {
+  return (
+    <div className="space-y-6">
+      <CancelledBanner task={task} />
+      {task.description && (
+        <div>
+          <SectionLabel>Task Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {task.description}
+          </div>
+        </div>
+      )}
+      {task.result && (
+        <div>
+          <SectionLabel icon={<FileText className="w-3 h-3" />}>Last result</SectionLabel>
+          <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto leading-relaxed">
+            {String(task.result)}
+          </div>
+        </div>
+      )}
+      <NotesSection task={task} />
+    </div>
+  )
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
@@ -659,7 +706,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
                 )}>
                   {task.status === 'in_progress' && <Loader2 className="w-3 h-3 animate-spin" />}
                   <div className={cn('w-1.5 h-1.5 rounded-full', statusConf.dotColor)} />
-                  {statusConf.label}
+                  {stageReason(task)?.stage ?? statusConf.label}
                 </span>
 
                 {/* Priority badge */}
@@ -688,6 +735,8 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
                   </span>
                 )}
               </DialogDescription>
+              {/* PRD-252 R7: assign and cancel without leaving the board */}
+              <TicketActionsBar task={task} />
             </div>
           </div>
         </div>
@@ -695,11 +744,13 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
+          <TicketApprovals taskId={task.id} blockedReason={task.status === 'blocked' ? task.blocked_reason : null} focusGrantId={focusQuestionId} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onDecided={() => onOpenChange(false)} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+          {(task.status === 'cancelled' || task.status === 'closed') && <CancelledContent task={task} />}
 
           {/* PRD-161 S5: failed tasks surface the error + a re-run affordance. */}
           {task.status === 'failed' && task.error_message && (

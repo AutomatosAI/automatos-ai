@@ -14,11 +14,14 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
+from core.services.ticket_reasons import NOTHING_DONE_NOTE_PREFIX
+
 # The agent path's header when a run ends without an answer (agent_factory).
 TOOL_RESULTS_HEADER = "Based on the tool results:"
 NOTHING_DONE_HEADER = "No answer — the run ended with every tool call in its last round skipped:"
 
-NOTHING_DONE_NOTE = ("Nothing was produced: every tool call in the run's last round was skipped "
+# PRD-252 R3: the board reads the prefix as the ticket's reason for review.
+NOTHING_DONE_NOTE = (NOTHING_DONE_NOTE_PREFIX + " every tool call in the run's last round was skipped "
                      "({reasons}). Sent to review instead of done.")
 
 _SKIP_LINE = re.compile(

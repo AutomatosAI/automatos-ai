@@ -30,9 +30,10 @@ describe('Auto now mounts', () => {
     expect(src).toContain('<AutoNowPill')
   })
 
-  it('the rail reads the floor through the existing hooks only — no new endpoint', () => {
+  it('the rail reads the floor through the shared hooks only, never a fetch of its own', () => {
     const hook = read('hooks/use-auto-now.ts')
     expect(hook).not.toMatch(/apiClient\.request|fetch\(/)
-    for (const h of ['useActivityStats', 'useFleetState', 'useQuestions', 'useWatches', 'useDecisionsNeeded']) expect(hook).toContain(h)
+    // PRD-252 R5: what needs the owner is the one Needs-you number.
+    for (const h of ['useActivityStats', 'useFleetState', 'useQuestions', 'useWatches', 'useNeedsYou']) expect(hook).toContain(h)
   })
 })

@@ -28,6 +28,8 @@ from core.models.core import (
     WorkflowTemplate,
 )
 from services.activity_social_items import social_post_items
+from services.needs_you import needs_you_counts
+from services.needs_you import period_start as needs_you_period_start
 from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
 # Board tasks in these states are closed: their SLA deadline is history, not a
@@ -183,17 +185,19 @@ class ActivityService:
                 "requires_attention": progress_requires_attention(event.event_type),
             }
 
-    def get_stats(self, *, period: str = "1d") -> Dict[str, Any]:
+    def get_stats(self, *, period: str = "1d", may_answer: bool = True) -> Dict[str, Any]:
         """Return hero-card stats for the Activity Command Centre.
 
         Returns working_now, channels_live, completed_today, needs_attention.
+        ``may_answer``: the viewer is a workspace admin, so questions and
+        approval grants are theirs to answer (PRD-252 R5).
         """
         since = self._period_start(period)
 
         working_now = self._count_working_now()
         channels_live = self._count_channels_live()
         completed_today = self._count_completed(since)
-        needs_attention = self._count_needs_attention(since)
+        needs_attention = self._count_needs_attention(period, may_answer=may_answer)
 
         return {
             "working_now": working_now,
@@ -513,6 +517,9 @@ class ActivityService:
         board_item["orchestration_run_id"] = (
             str(t.orchestration_run_id) if t.orchestration_run_id else None
         )
+        # PRD-252 R5: the feed names a ticket's stage in the board's words; the
+        # mapped status above stays for the feed's filters.
+        board_item["board_status"] = t.status
         return board_item
 
     # ── Stats Helpers ─────────────────────────────────────────────
@@ -635,51 +642,20 @@ class ActivityService:
             logger.error("Failed to count completed: %s", e)
             return 0
 
-    def _count_needs_attention(self, since: datetime) -> int:
-        """Count failed executions + stale routines within the period."""
+    def _count_needs_attention(self, period: str, *, may_answer: bool) -> int:
+        """PRD-252 R5: ATTENTION is the Needs-you number (services/needs_you.py).
+
+        It summed failed playbook runs, routine errors, every Review or Blocked
+        ticket and every pending grant, so a ticket blocked on a grant counted
+        twice and a mission step waiting on its own mission counted as the
+        owner's. Now it is the number the Board tab, Needs you and Auto show.
+        """
         try:
-            recipe_failed = (
-                self.db.query(func.count(RecipeExecution.id))
-                .filter(
-                    RecipeExecution.workspace_id == self.workspace_id,
-                    RecipeExecution.status == "failed",
-                    RecipeExecution.started_at >= since,
-                )
-                .scalar()
-                or 0
-            )
-
-            hb_failed_row = self.db.execute(
-                text("""
-                    SELECT COUNT(*) AS cnt
-                    FROM heartbeat_results
-                    WHERE workspace_id = :ws_id
-                      AND status = 'error'
-                      AND created_at >= :since
-                """),
-                {"ws_id": self._ws_str, "since": since},
-            ).fetchone()
-            hb_failed = hb_failed_row.cnt if hb_failed_row else 0
-
-            # What is actually waiting on the OWNER, not just what broke.
-            # Night 1: ATTENTION read 0 all night while four tickets sat in
-            # review, questions went unanswered and tickets were blocked.
-            waiting_row = self.db.execute(
-                text("""
-                    SELECT
-                      (SELECT COUNT(*) FROM board_tasks
-                        WHERE workspace_id = :ws_id AND status IN ('review', 'blocked')) AS tickets,
-                      (SELECT COUNT(*) FROM approval_grants
-                        WHERE workspace_id = :ws_id AND status = 'pending'
-                          AND (expires_at IS NULL OR expires_at > NOW())) AS grants
-                """),
-                {"ws_id": self._ws_str},
-            ).fetchone()
-            waiting = (waiting_row.tickets + waiting_row.grants) if waiting_row else 0
-
-            return recipe_failed + hb_failed + waiting
-        except Exception as e:
-            logger.error("Failed to count needs_attention: %s", e)
+            since = needs_you_period_start(period)
+            return needs_you_counts(self.db, self.workspace_id, since, may_answer=may_answer)["total"]
+        except Exception:
+            logger.exception("Failed to count needs_attention")
+            self.db.rollback()
             return 0
 
     # ── Feed Item Builder ─────────────────────────────────────────

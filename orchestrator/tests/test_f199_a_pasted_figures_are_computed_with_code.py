@@ -39,6 +39,7 @@ def test_a_brief_with_pasted_rows_gets_the_count_with_code_rule(monkeypatch):
                 attachment_ids=[])
     monkeypatch.setattr(board_dispatcher, "requeue_expired_leases", lambda db, **k: None)
     monkeypatch.setattr(board_dispatcher, "scan_sla_breaches", lambda db: [])
+    monkeypatch.setattr(board_dispatcher, "release_spend_holds", lambda db: [])
     monkeypatch.setattr(board_dispatcher, "claim_tasks", lambda db, **k: [ticket])
     session = NS(commit=lambda: None, close=lambda: None)
     cfg = NS(BOARD_DISPATCH_MAX_ATTEMPTS=3, BOARD_DISPATCH_CLAIM_BATCH=5, BOARD_DISPATCH_LEASE_SECONDS=600,

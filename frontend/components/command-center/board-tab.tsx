@@ -24,6 +24,7 @@ import {
   DragDropContext,
   Droppable,
   Draggable,
+  type DraggableProvided,
   type DropResult,
 } from '@hello-pangea/dnd'
 import { BookMarked, CheckSquare } from 'lucide-react'
@@ -31,6 +32,8 @@ import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useTicketDeepLink } from '@/hooks/use-ticket-deep-link'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
+import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-menu'
+import { stageReason } from '@/components/activity/board/ticket-stage'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
@@ -48,8 +51,9 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   // Tidied away without a claim about the work (night 1, 2026-09-18).
   closed:      { label: 'Closed',      color: 'hsl(30 8% 30%)' },
 }
+// PRD-252 R7 (D1): Closed tickets sit in the Cancelled column.
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled', 'closed',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -161,82 +165,111 @@ function KanbanCard({
   index: number
   onOpen: () => void
 }) {
-  const tone = toneFor(task.assignee?.agent_name)
-  const isCompact = density === 'compact'
-  const isPlaybook = task.type === 'playbook'
-  const Icon = isPlaybook ? BookMarked : CheckSquare
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          className={`cc-kb-card${isCompact ? ' compact' : ''}${
-            snapshot.isDragging ? ' dragging' : ''
-          }`}
-          onClick={onOpen}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              onOpen()
-            }
-          }}
-          style={provided.draggableProps.style}
-        >
-          <div className="kind">
-            <Icon style={{ width: 11, height: 11 }} />
-            {(task.type ?? 'task').toUpperCase()}
-            {(task.priority === 'urgent' || task.priority === 'high') && (
-              <span className="high">· {task.priority.toUpperCase()}</span>
-            )}
-            {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
-                47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
-                A requeue is only evidence of a missed ack from the second
-                attempt on. */}
-            {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
-              <span
-                className="high"
-                style={{ color: 'hsl(0 72% 60%)' }}
-                title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
-              >
-                · UNRESPONSIVE
-              </span>
-            )}
-            {task.sla_deadline &&
-              task.status !== 'done' &&
-              task.status !== 'failed' &&
-              task.status !== 'cancelled' &&
-              new Date(task.sla_deadline).getTime() < Date.now() && (
-                <span
-                  className="high"
-                  style={{ color: 'hsl(0 72% 60%)' }}
-                  title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
-                >
-                  · OVERDUE
-                </span>
-              )}
-          </div>
-          <div className="ttl">{task.name}</div>
-          {!isCompact && task.description && (
-            <div className="body">{task.description}</div>
-          )}
-          <div className="row">
-            {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
-              <span key={tg} className="tag">
-                {tg}
-              </span>
-            ))}
-            <span className="ag">
-              <span className="swatch" style={{ background: tone.bg }} />
-              {task.assignee?.agent_name ?? 'Unassigned'}
-            </span>
-          </div>
-        </div>
+        <KanbanCardFace task={task} density={density} onOpen={onOpen} provided={provided} isDragging={snapshot.isDragging} />
       )}
     </Draggable>
+  )
+}
+
+/** The card itself; its Draggable hands it the drag props. */
+function KanbanCardFace({
+  task,
+  density,
+  onOpen,
+  provided,
+  isDragging,
+}: {
+  task: BoardTask
+  density: Density
+  onOpen: () => void
+  provided: DraggableProvided
+  isDragging: boolean
+}) {
+  const tone = toneFor(task.assignee?.agent_name)
+  const isCompact = density === 'compact'
+  const reason = stageReason(task)
+  return (
+    <div
+      ref={provided.innerRef}
+      {...provided.draggableProps}
+      {...provided.dragHandleProps}
+      className={`cc-kb-card${isCompact ? ' compact' : ''}${isDragging ? ' dragging' : ''}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      style={provided.draggableProps.style}
+    >
+      <KanbanKindRow task={task} />
+      <div className="ttl">{task.name}</div>
+      {/* PRD-252 R3: why it waits in Review or Blocked */}
+      {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
+      {!isCompact && task.description && (
+        <div className="body">{task.description}</div>
+      )}
+      <div className="row">
+        {(task.tags || []).slice(0, isCompact ? 1 : 3).map((tg) => (
+          <span key={tg} className="tag">
+            {tg}
+          </span>
+        ))}
+        <span className="ag">
+          <span className="swatch" style={{ background: tone.bg }} />
+          {task.assignee?.agent_name ?? 'Unassigned'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/** The card's top line: its type, priority, the flags that say it needs a look, and its actions. */
+function KanbanKindRow({ task }: { task: BoardTask }) {
+  const isPlaybook = task.type === 'playbook'
+  const Icon = isPlaybook ? BookMarked : CheckSquare
+  return (
+    <div className="kind">
+      <Icon style={{ width: 11, height: 11 }} />
+      {(task.type ?? 'task').toUpperCase()}
+      {(task.priority === 'urgent' || task.priority === 'high') && (
+        <span className="high">· {task.priority.toUpperCase()}</span>
+      )}
+      {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
+          47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
+          A requeue is only evidence of a missed ack from the second
+          attempt on. */}
+      {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
+        <span
+          className="high"
+          style={{ color: 'hsl(0 72% 60%)' }}
+          title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
+        >
+          · UNRESPONSIVE
+        </span>
+      )}
+      {task.sla_deadline &&
+        task.status !== 'done' &&
+        task.status !== 'failed' &&
+        task.status !== 'cancelled' &&
+        new Date(task.sla_deadline).getTime() < Date.now() && (
+          <span
+            className="high"
+            style={{ color: 'hsl(0 72% 60%)' }}
+            title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
+          >
+            · OVERDUE
+          </span>
+        )}
+      {/* PRD-252 R7: assign and cancel from the card */}
+      <TicketActionsMenu task={task} />
+    </div>
   )
 }
 

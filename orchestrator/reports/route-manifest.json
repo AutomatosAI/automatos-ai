@@ -1,5 +1,5 @@
 {
-  "route_count": 851,
+  "route_count": 852,
   "routes": [
     {
       "method": "GET",
@@ -32,6 +32,10 @@
     {
       "method": "GET",
       "path": "/api/activity/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/needs-you"
     },
     {
       "method": "GET",

@@ -12,6 +12,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { feedItemHref } from '@/lib/ticket-links'
+import { boardStatusWord } from '@/components/activity/board-status-word'
 import { cn } from '@/lib/utils'
 
 const RUNNING_ROWS = 5
@@ -109,7 +110,7 @@ export function ActivityWidget({ period, onViewAll, className }: ActivityWidgetP
                       <div className={cn('w-2 h-2 rounded-full shrink-0', item.status === 'running' ? 'bg-[hsl(var(--info))] animate-pulse' : 'bg-muted-foreground/30')} />
                       {item.type === 'recipe' ? <ChefHat className="w-3 h-3 text-[hsl(var(--info))] shrink-0" /> : <RefreshCw className="w-3 h-3 text-[hsl(var(--agent))] shrink-0" />}
                       <span className="text-sm font-medium truncate flex-1">{item.name}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0">{item.status === 'running' ? formatElapsed(item.started_at) : 'Pending'}</span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{item.status === 'running' ? formatElapsed(item.started_at) : boardStatusWord(item) ?? 'Pending'}</span>
                     </div>
                     {item.step_progress && (
                       <div className="pl-6 flex items-center gap-2">

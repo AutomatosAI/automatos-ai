@@ -26,9 +26,8 @@ vi.mock('@/hooks/use-activity-api', () => ({
   useActivityFeed: () => ({ data: { total: 0, items: [] } }),
   useActivitySchedule: () => ({ data: { scheduled: [] } }),
 }))
-vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTasks: () => ({ columns: [] }) }))
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: () => undefined }))
-vi.mock('@/hooks/use-kpi-api', () => ({ useDecisionsNeeded: () => ({ data: { total: 0 } }) }))
+vi.mock('@/hooks/use-needs-you', () => ({ useNeedsYou: () => ({ data: { total: 0 } }) }))
 vi.mock('@/hooks/use-watches-api', () => ({ useWatches: () => ({ data: { total: 0 } }) }))
 vi.mock('@/hooks/use-approval-grants', () => ({ useQuestions: () => ({ data: { grants: [] } }) }))
 vi.mock('../stats-strip', () => ({ StatsStrip: () => <div /> }))

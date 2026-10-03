@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text as sa_text
@@ -145,3 +145,49 @@ def refuse_new_work(db: Session, workspace_id: Any, what: str) -> Optional[str]:
         return None
     logger.warning("[spend-guard] refusing to start %s — %s", what, state.message)
     return state.message
+
+
+def release_spend_holds(db: Session) -> List[int]:
+    """PRD-252 R3: send the tickets a spend hold parked back to Assigned once
+    their workspace may start new work again (the ceiling was raised, or the
+    window rolled over). The park said they would come back on their own, and
+    nothing brought them back. Called on each dispatch tick; commits only when
+    it released something. Returns the released ticket ids."""
+    try:
+        return _release_spend_holds(db)
+    except Exception:  # noqa: BLE001 — a release that fails must not stop the dispatch tick
+        logger.exception("[spend-guard] could not release held tickets")
+        db.rollback()
+        return []
+
+
+def _release_spend_holds(db: Session) -> List[int]:
+    from core.services.ticket_reasons import SPEND_HOLD_KEY
+    from services.board_dispatcher import notify_task_available
+
+    held = db.execute(sa_text(
+        "SELECT id, workspace_id FROM board_tasks WHERE status = 'blocked' AND runtime_ref ? :key"
+    ), {"key": SPEND_HOLD_KEY}).fetchall()
+    by_workspace: Dict[str, List[int]] = {}
+    for task_id, workspace_id in held:
+        by_workspace.setdefault(str(workspace_id), []).append(int(task_id))
+    released: List[int] = []
+    for workspace_id, ids in by_workspace.items():
+        if spend_state(db, workspace_id).over:
+            continue
+        rows = db.execute(sa_text(
+            """
+            UPDATE board_tasks
+               SET status = 'assigned', blocked_at = NULL, blocked_reason = NULL,
+                   runtime_ref = runtime_ref - CAST(:key AS text), updated_at = NOW()
+             WHERE id = ANY(:ids) AND status = 'blocked' AND runtime_ref ? :key
+         RETURNING id
+            """
+        ), {"key": SPEND_HOLD_KEY, "ids": ids}).fetchall()
+        for (task_id,) in rows:
+            notify_task_available(db, workspace_id=workspace_id, task_id=task_id)  # rides the commit below
+            released.append(int(task_id))
+    if released:
+        db.commit()
+        logger.info("[spend-guard] released %d held ticket(s): %s", len(released), released)
+    return released

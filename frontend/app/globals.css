@@ -1979,6 +1979,27 @@
   :is(.studio, .cc-page) .cc-kb-card .kind .high {
     margin-left: auto; color: hsl(var(--accent)); font-weight: 700;
   }
+  /* PRD-252 R7: the card's actions menu (assign, cancel) ends its kind row. */
+  :is(.studio, .cc-page) .cc-kb-card .kind .cc-kb-menu {
+    margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 18px; border: 0; border-radius: 4px;
+    background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer;
+  }
+  :is(.studio, .cc-page) .cc-kb-card .kind .cc-kb-menu:hover,
+  :is(.studio, .cc-page) .cc-kb-card .kind .cc-kb-menu[data-state="open"] {
+    background: hsl(var(--muted)); color: hsl(var(--foreground));
+  }
+  :is(.studio, .cc-page) .cc-kb-card .kind .cc-kb-menu:focus-visible {
+    outline: 2px solid hsl(var(--accent)); outline-offset: 1px;
+  }
+  /* PRD-252 R3: the reason a card waits in Review or Blocked. */
+  :is(.studio, .cc-page) .cc-kb-card .cc-kb-reason {
+    align-self: flex-start;
+    font-family: var(--font-geist-mono, monospace); font-size: 9.5px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px;
+    background: hsl(var(--warn-ink) / 0.14); color: hsl(var(--warn-ink));
+  }
   :is(.studio, .cc-page) .cc-kb-card .ttl {
     font-family: var(--font-newsreader, serif);
     font-size: 13.5px; font-weight: 500; line-height: 1.3;
