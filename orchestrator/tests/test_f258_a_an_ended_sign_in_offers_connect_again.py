@@ -64,10 +64,10 @@ def _client(*accounts):
 
 
 def test_an_expired_sign_in_is_not_connected_and_offers_connect_again():
-    client = _client(_account("ca__M1K7R2dpPrg", "EXPIRED", "2026-10-03T12:33:19.831Z", EXPIRED_REASON))
+    client = _client(_account("ca_fal", "EXPIRED", "2026-10-03T12:33:19.831Z", EXPIRED_REASON))
     rows = _Rows()
 
-    assert settle_pending(rows, client, ENTITY, "FAL_AI", "ac_0jpN6E_qMSmK") == Settled("added", None)
+    assert settle_pending(rows, client, ENTITY, "FAL_AI", "ac_fal") == Settled("added", None)
     assert rows.writes == [{"entity_id": 11, "app_name": "FAL_AI", "status": "added", "connection_id": None}]
 
 
@@ -83,16 +83,16 @@ def test_a_sign_in_still_under_way_stays_pending(under_way):
     rows = _Rows()
     client = _client(_account("ca_new", under_way, "2026-10-03T12:35:00Z"))
 
-    assert settle_pending(rows, client, ENTITY, "KIEAI", "ac_eO3gDGkZVvdG") == Settled("pending", None)
+    assert settle_pending(rows, client, ENTITY, "KIEAI", "ac_kie") == Settled("pending", None)
     assert rows.writes == [], "INITIATED means the user hasn't finished: never connected"
 
 
 def test_an_active_account_is_connected():
     rows = _Rows()
-    client = _client(_account("ca_CWr5OWfrnj1w", "ACTIVE", "2026-10-03T12:53:00.928Z"))
+    client = _client(_account("ca_insta", "ACTIVE", "2026-10-03T12:53:00.928Z"))
 
-    assert settle_pending(rows, client, ENTITY, "INSTAGRAM", "ac_q0kjwICTW0-Z") == Settled("active", "ca_CWr5OWfrnj1w")
-    assert rows.writes == [{"entity_id": 11, "app_name": "INSTAGRAM", "status": "active", "connection_id": "ca_CWr5OWfrnj1w"}]
+    assert settle_pending(rows, client, ENTITY, "INSTAGRAM", "ac_insta") == Settled("active", "ca_insta")
+    assert rows.writes == [{"entity_id": 11, "app_name": "INSTAGRAM", "status": "active", "connection_id": "ca_insta"}]
 
 
 def test_a_working_account_outranks_a_newer_abandoned_attempt():
@@ -150,15 +150,15 @@ def routes():
 
 
 def test_the_tools_page_shows_an_expired_sign_in_as_not_connected(routes):
-    rows = _Rows(auth_config_id="ac_0jpN6E_qMSmK")
-    client = _client(_account("ca__M1K7R2dpPrg", "EXPIRED", "2026-10-03T12:33:19Z", EXPIRED_REASON))
+    rows = _Rows(auth_config_id="ac_fal")
+    client = _client(_account("ca_fal", "EXPIRED", "2026-10-03T12:33:19Z", EXPIRED_REASON))
     row = {"app_name": "FAL_AI", "status": "pending", "connection_id": None}
 
     shown = routes.tools._settle_row(rows, client, ENTITY, row, "ws-c1")
 
     assert shown == {"app_name": "FAL_AI", "status": "added", "connection_id": None}
     assert row["status"] == "pending", "the listing builds a new row; the one it was given is unchanged"
-    assert client.composio.connected_accounts.queries[0]["auth_config_ids"] == ["ac_0jpN6E_qMSmK"]
+    assert client.composio.connected_accounts.queries[0]["auth_config_ids"] == ["ac_fal"]
 
 
 def test_shopify_going_active_starts_its_catalog_sync(routes, monkeypatch):
@@ -186,8 +186,8 @@ def test_a_refresh_stamps_a_row_still_under_way_and_counts_what_settled(routes):
 
 
 def test_the_composio_connections_listing_settles_a_pending_row(routes):
-    rows = _Rows(auth_config_id="ac_eO3gDGkZVvdG")
-    client = _client(_account("ca_FFqsVHPWHhLs", "EXPIRED", "2026-10-03T12:33:32Z", EXPIRED_REASON))
+    rows = _Rows(auth_config_id="ac_kie")
+    client = _client(_account("ca_kie", "EXPIRED", "2026-10-03T12:33:32Z", EXPIRED_REASON))
     row = {"app_name": "KIEAI", "status": "pending", "connection_id": None, "connected_at": None}
 
     shown = routes.composio._connection_response(rows, client, ENTITY, row)
