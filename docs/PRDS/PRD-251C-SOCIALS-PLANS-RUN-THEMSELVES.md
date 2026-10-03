@@ -115,7 +115,8 @@ Paths are under `orchestrator/` or `frontend/`.
 - **Links.** Every batch notice and reminder links to the week's review. Through Telegram, Slack or in-app it opens on a phone. Approving inside a Telegram or Slack message is O8.
 
 ### C4 · Research comes with the first plan
-- **Installed with the first plan.** When a workspace saves its first plan (from the form or from Plan with Auto), the server installs the **Content bank research** playbook and the agent it runs, the Social Media Director, through the package installer.
+- **Installed with the first plan.** When a plan is saved (from the form or from Plan with Auto) in a workspace that has never had the research playbook, the server installs the **Content bank research** playbook and the agent it runs, the Social Media Director, through the package installer.
+  - "Never had" is recorded in `workspace.settings['socials'].research_installed_at`, set on the first install. That covers new workspaces (their first plan) and workspaces from before this PRD (their next plan save). It also means a playbook the owner deleted on purpose is not put back by a plan save.
   - It installs that playbook only, not the rest of the Socials package.
   - It is idempotent, and a failure never fails the plan's save: it is logged, and the bank says research is not set up.
 - **The workspace's own playbook.** The owner edits its prompt and steps, or gives it to another agent, in Playbooks. Research always runs the workspace's copy.
@@ -170,11 +171,13 @@ Every wave: **one** Alembic revision where a wave needs one, chained onto `EXPEC
 ### Wave 1 — research from the first plan, and history (no repeats)
 
 **US-C101 · Research installs with the first plan (M)**
-- **Install.** Saving a workspace's first plan installs the research playbook and its agent (C4) through `package_installer._install_playbook`, made public for this.
+- **Install.** Saving a plan in a workspace without `research_installed_at` installs the research playbook and its agent (C4) through `package_installer._install_playbook`, made public for this, and sets the flag.
   - It runs after the plan's commit, through `launch_guarded`: the plan route is a plain `def`, and the installer is async.
   - A failure is logged and leaves the plan saved.
 - **Tests.**
   - The first plan installs once, and a second plan installs nothing.
+  - A workspace with plans but no flag (made before this PRD) installs on its next plan save.
+  - A deleted copy is not reinstalled by a plan save.
   - An edited copy is left as it is.
   - A failing installer does not fail the save.
   - The installed copy is what `installed_playbook` finds.
