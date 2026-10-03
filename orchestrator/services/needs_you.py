@@ -38,9 +38,8 @@ from sqlalchemy.orm import Session
 # kind with more says how many more; the count is always exact.
 ROWS_PER_KIND = 200
 KINDS = ("review", "question", "approval", "stuck", "failed")
-# A mission's own card on the board (orchestration_board_bridge), and a step's.
+# A mission's own card on the board (orchestration_board_bridge).
 MISSION_CARD = "orchestration"
-MISSION_STEP = "orchestration_task"
 # A step card still waiting for its mission to run it.
 OPEN_STEP_STATUSES = ["inbox", "assigned", "in_progress", "review", "blocked"]
 # Why a stuck ticket is stuck: the `why` _STUCK_ROWS gives each one.
