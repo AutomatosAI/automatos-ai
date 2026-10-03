@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.card_numbers import says_the_mission_cards
 from services.chat_messenger import strip_caller_narration_origin
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,7 @@ def _create_reply_message(run: Any, task_count: int) -> str:
     return f"Mission {run.id} created with {task_count} task(s) (state: {run.state})."
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a mission via CoordinatorService.
 
@@ -270,6 +272,7 @@ def _mission_visitor_view(run: Any, task_count: int, tasks_done: Optional[int] =
     return view
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """List missions in the workspace."""
     from core.security.surface import widget_turn
@@ -306,6 +309,7 @@ async def list_missions(db: Session, workspace_id: UUID, params: Dict[str, Any])
     return {"success": True, "missions": result, "total": len(result)}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get full details of a specific mission."""
     from core.models.orchestration import OrchestrationRun, OrchestrationTask
@@ -435,6 +439,7 @@ def _ok(run: Any, verb: str) -> Dict[str, Any]:
     }
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Approve a mission plan and start execution (awaiting_approval → running)."""
     refused = _widget_cannot_change()
@@ -472,6 +477,7 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
         return {"success": False, "error": f"Failed to approve mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Reject a mission plan (awaiting_approval → cancelled, F143: it never ran)."""
     refused = _widget_cannot_change()
@@ -498,6 +504,7 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": f"Failed to reject mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Pause a running mission (running → paused)."""
     refused = _widget_cannot_change()
@@ -519,6 +526,7 @@ async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": False, "error": f"Failed to pause mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Resume a paused mission (paused → running)."""
     refused = _widget_cannot_change()
@@ -549,6 +557,7 @@ async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": f"Failed to resume mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Cancel a mission (any non-terminal → cancelled)."""
     refused = _widget_cannot_change()
@@ -570,6 +579,7 @@ async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": f"Failed to cancel mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Replan a failed mission (failed → replanning → running)."""
     refused = _widget_cannot_change()
@@ -593,6 +603,7 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": f"Failed to replan mission: {str(e)[:300]}"}
 
 
+@says_the_mission_cards  # F241: each mission's card, by number
 async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
     mission (e.g. reassign a task's agent) so they persist into execution."""

@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
+
 logger = logging.getLogger(__name__)
 
 # F182: how much of a run's stored inputs execute_playbook repeats back.
@@ -687,6 +689,7 @@ def _sync_schedule(playbook) -> tuple:
     return None, notes.get(outcome, "Active now.")
 
 
+@says_the_run_card  # F241: the run's card is made now and named by number
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution
@@ -838,6 +841,7 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
+@names_the_run_cards  # F241: each run's card, by number
 async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Check status/results of a playbook execution."""
     from core.models.core import RecipeExecution
