@@ -180,7 +180,7 @@ def channels(monkeypatch):
         ))
     factory = sessionmaker(bind=engine)
     session = factory()
-    for ws_id, settings in ((WS, {"socials": {"enabled": True}}), (OTHER_WS, {"socials": {"enabled": True}}), (WS_OFF, {})):
+    for ws_id, settings in ((WS, {"socials": {"enabled": True}}), (OTHER_WS, {"socials": {"enabled": True}}), (WS_OFF, {"socials": {"enabled": False}})):
         session.add(Workspace(
             id=ws_id, name=f"ws-{ws_id.hex[-2:]}", plan="basic", plan_limits={},
             settings=settings, onboarding={}, created_at=CREATED, updated_at=CREATED,
