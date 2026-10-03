@@ -13,9 +13,11 @@ ticket tool's handler:
 F241 (night 7): Auto's calls carried "#0175" as 175 or "0175" as often as with
 the '#', and every one was read as an id ("Task 175 not found"; 0 of 11 cards
 found by number in a night). A leading zero or a step ("105.4") now reads as a
-number. Bare digits read as whichever this workspace has, the id or the
-number. When it has both as two different tickets, the call is refused, and the
-refusal names both.
+number. Bare digits are read in the workspace, as ids or as numbers without
+their '#' (``read_bare_refs``): the reading that names more of a call's tickets
+is the one meant, and when both name as many, different tickets, the call is
+refused naming both. Bare digits that name no ticket reach the tool as given,
+and its "not found" says the number too.
 """
 from __future__ import annotations
 
@@ -44,7 +46,7 @@ def by_ticket_number(handler: Handler) -> Handler:
         resolved, error = _resolve_refs(db, workspace_id, params or {})
         if error:
             return {"success": False, "error": error}
-        result = await handler(db, workspace_id, resolved)
+        result = _not_found_by_number(await handler(db, workspace_id, resolved), resolved)
         try:
             return _with_numbers(db, workspace_id, result)
         except Exception:
@@ -59,39 +61,53 @@ def _resolve_refs(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Tup
     for key in SINGLE_REFS:
         if params.get(key) in (None, ""):
             continue
-        found, error, _ = _resolve_one(db, workspace_id, params[key])
+        found, error = _resolve(db, workspace_id, [params[key]], one=True)
         if error:
             return params, error
-        out[key] = found
+        out[key] = found[0]
     refs = params.get("task_ids")
     if isinstance(refs, (list, tuple)):
-        resolved = [_resolve_one(db, workspace_id, r) for r in refs]
-        # A list naming one ticket ambiguously is refused whole, never half-run on a guess.
-        ambiguous = next((error for _, error, unsure in resolved if unsure), None)
-        if ambiguous:
-            return params, ambiguous
-        # A ticket that matches nothing stays as given; the bulk handler lists it as failed.
-        out["task_ids"] = [r if error else found for r, (found, error, _) in zip(refs, resolved)]
+        found, error = _resolve(db, workspace_id, list(refs), one=False)
+        if error:
+            return params, error
+        out["task_ids"] = found
     return out, None
 
 
-def _resolve_one(db: Session, workspace_id: Any, ref: Any) -> Tuple[Any, Optional[str], bool]:
-    """``ref`` as the ticket's id; else why it names none, and whether it named two."""
-    from services.ticket_numbers import (format_number, is_bare_ref, is_number_ref, resolve_bare_ref,
-                                         resolve_ticket_ref)
+def _resolve(db: Session, workspace_id: Any, refs: List[Any], *, one: bool) -> Tuple[List[Any], Optional[str]]:
+    """``refs`` as ticket ids, in order, or why the call is refused. A '#' number
+    that names no ticket is refused when it is the one ticket asked for; in a list
+    it stays as given, and the bulk handler lists it as failed. So does a ref that
+    is neither a number nor digits, and bare digits that name no ticket."""
+    from services.ticket_numbers import is_bare_ref, is_number_ref, read_bare_refs, resolve_ticket_ref
 
-    if is_number_ref(ref):
-        found = resolve_ticket_ref(db, workspace_id, ref)
-        return (found, None, False) if found is not None else (ref, NO_SUCH_NUMBER.format(ref=str(ref).strip()), False)
-    if not is_bare_ref(ref):
-        return ref, None, False
-    found, ambiguous = resolve_bare_ref(db, workspace_id, ref)
-    if ambiguous:
-        return ref, ambiguous, True
-    if found is None:
-        n = int(str(ref).strip())
-        return ref, NO_SUCH_TICKET.format(number=format_number(n), ref=n), False
-    return found, None, False
+    bare, error = read_bare_refs(db, workspace_id, [r for r in refs if is_bare_ref(r)])
+    if error:
+        return refs, error
+    out: List[Any] = []
+    for ref in refs:
+        if is_number_ref(ref):
+            found = resolve_ticket_ref(db, workspace_id, ref)
+            if found is None and one:
+                return refs, NO_SUCH_NUMBER.format(ref=str(ref).strip())
+            out.append(ref if found is None else found)
+        else:
+            out.append(bare.get(int(str(ref).strip()), ref) if is_bare_ref(ref) else ref)
+    return out, None
+
+
+def _not_found_by_number(result: Any, params: Dict[str, Any]) -> Any:
+    """Bare digits that named no ticket reached the tool as given. Its "Task 175 not
+    found" then says the number too, so Auto looks the ticket up by its number."""
+    from services.ticket_numbers import format_number, is_bare_ref
+
+    ref = params.get("task_id")
+    if not (isinstance(result, dict) and result.get("success") is False and is_bare_ref(ref)):
+        return result
+    n = int(str(ref).strip())
+    if not str(result.get("error") or "").startswith(f"Task {n} not found"):
+        return result
+    return {**result, "error": NO_SUCH_TICKET.format(number=format_number(n), ref=n)}
 
 
 def _with_numbers(db: Session, workspace_id: Any, result: Any) -> Any:

@@ -102,6 +102,28 @@ def test_a_bare_number_that_is_two_tickets_is_refused_naming_both(shop, new_sess
     assert named["task"]["id"] == two.id                 # with its '#', it is the number
 
 
+def test_a_list_is_read_as_ids_or_as_numbers_whichever_names_its_tickets(shop, new_session):
+    """One call's refs are all ids or all numbers without their '#'."""
+    from services.ticket_refs import by_ticket_number
+
+    @by_ticket_number
+    async def given(db, workspace_id, params):
+        return {"success": True, "task_ids": params["task_ids"]}
+
+    one = _file(new_session, shop.ws, "Price list")
+    two = _file(new_session, shop.ws, "Roast schedule")
+    s = new_session()
+    s.execute(text("UPDATE board_tasks SET workspace_seq = :n WHERE id = :i"), {"n": one.id, "i": two.id})
+    s.commit()
+
+    as_ids = _call(given, new_session, shop.ws, {"task_ids": [one.id, two.id]})
+    as_numbers = _call(given, new_session, shop.ws, {"task_ids": [1, one.id]})
+    tied = _call(given, new_session, shop.ws, {"task_ids": [one.id, 10 ** 9]})
+
+    assert as_ids["task_ids"] == [one.id, two.id] and as_numbers["task_ids"] == [one.id, two.id]
+    assert tied["success"] is False and "could be ids or numbers without their '#'" in tied["error"]
+
+
 def test_a_ticket_that_is_neither_says_its_number(shop, new_session):
     _file(new_session, shop.ws, "Price list")
     out = _call(shop.handlers.update_board_task_status, new_session, shop.ws, {"task_id": "175", "status": "cancelled"})

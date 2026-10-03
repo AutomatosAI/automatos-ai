@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
@@ -23,9 +24,11 @@ NUMBER_DIGITS = 4
 # leading zero ("0175") and a step ("105.4"): an id has neither (F241).
 _DIGITS = re.compile(r"^(\d+)(?:\.(\d+))?$")
 # F241 (night 7): Auto's tools were called with "#0175" as 175 (a number with its
-# '#' and zeros gone) as often as with an id. A bare number is read in the workspace.
-AMBIGUOUS_REF = ("{n} is both ticket {number} ('{number_title}') and the id of ticket {other} "
-                 "('{id_title}'). Give the number with its '#', as the board shows it.")
+# '#' and zeros gone) as often as with an id. Bare digits are read in the workspace.
+AMBIGUOUS_REF = ("{said} is both the id of {as_ids} and the number of {as_numbers}. Nothing was done. "
+                 "Give the number with its '#', as the board shows it.")
+AMBIGUOUS_REFS = ("{said} could be ids or numbers without their '#'. As ids they are {as_ids}; as numbers, "
+                  "{as_numbers}. Nothing was done. Give each ticket's number with its '#', as the board shows it.")
 
 
 def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[str]:
@@ -139,20 +142,42 @@ def is_bare_ref(ref: Any) -> bool:
     return isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit() and not is_number_ref(ref))
 
 
-def resolve_bare_ref(db: Session, workspace_id: Any, ref: Any) -> Tuple[Optional[int], Optional[str]]:
-    """The ticket a bare 175 names in this workspace, and the refusal when it is
-    two tickets: the id of one and the number of another. (None, None) when it
-    names neither."""
-    n = int(str(ref).strip())
-    by_id = db.query(BoardTask.id, BoardTask.title, BoardTask.workspace_seq).filter(
-        BoardTask.id == n, BoardTask.workspace_id == workspace_id).first()
-    by_number = resolve_ticket_ref(db, workspace_id, f"#{n}")
-    if by_id is None or by_number in (None, by_id.id):
-        return (by_number if by_id is None else by_id.id), None
-    numbered = db.query(BoardTask.title).filter(BoardTask.id == by_number).first()
-    return None, AMBIGUOUS_REF.format(n=n, number=format_number(n), number_title=numbered.title if numbered else "",
-                                      other=format_number(by_id.workspace_seq) or f"id {by_id.id}",
-                                      id_title=by_id.title)
+def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple[Dict[int, int], Optional[str]]:
+    """The ticket ids that bare refs (175, "175") name in this workspace, by ref, or
+    the refusal when that can't be told. A ref that names no ticket is left out.
+
+    One call's refs are all ids or all numbers without their '#', so the reading
+    that names more of them is the one meant. When the two readings name as many,
+    and not the same tickets, nothing is guessed: the refusal names both."""
+    wanted = {int(str(r).strip()) for r in refs}
+    if not wanted:
+        return {}, None
+    rows = db.query(BoardTask.id, BoardTask.workspace_seq, BoardTask.title).filter(
+        BoardTask.workspace_id == workspace_id,
+        or_(BoardTask.id.in_(sorted(wanted)), BoardTask.workspace_seq.in_(sorted(wanted))),
+    ).all()
+    as_ids = {r.id: r for r in rows if r.id in wanted}
+    as_numbers = {r.workspace_seq: r for r in rows if getattr(r, "workspace_seq", None) in wanted}
+    if len(as_numbers) > len(as_ids):
+        return _ids(as_numbers), None
+    if len(as_ids) > len(as_numbers) or _ids(as_ids) == _ids(as_numbers):
+        return _ids(as_ids), None
+    return {}, _both_readings(db, workspace_id, sorted(wanted), as_ids, as_numbers)
+
+
+def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
+    return {n: r.id for n, r in reading.items()}
+
+
+def _both_readings(db: Session, workspace_id: Any, said: List[int], as_ids: Dict[int, Any],
+                   as_numbers: Dict[int, Any]) -> str:
+    """The refusal for refs that name as many tickets read as ids as read as numbers."""
+    def named(reading: Dict[int, Any]) -> str:
+        return ", ".join(f"{ticket_label_for(db, workspace_id, reading[n].id)} ('{reading[n].title}')"
+                         for n in sorted(reading))
+
+    template = AMBIGUOUS_REF if len(said) == 1 else AMBIGUOUS_REFS
+    return template.format(said=", ".join(str(n) for n in said), as_ids=named(as_ids), as_numbers=named(as_numbers))
 
 
 def resolve_ticket_ref(db: Session, workspace_id: Any, ref: Any) -> Optional[int]:
