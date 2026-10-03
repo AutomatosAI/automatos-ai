@@ -133,6 +133,29 @@ def test_whoever_may_not_stop_a_playbook_cannot_stop_it_from_the_board(workspace
     assert _tickets(new_session, [pb.card])[pb.card].status == "in_progress"
 
 
+def test_a_cancel_that_fails_part_way_changes_nothing(workspace, new_session, stopped_here, monkeypatch):
+    """Review of #885: the run, its card and its step tickets are cancelled in one
+    commit, so a failure on a step ticket leaves the run running, to be cancelled
+    again, rather than marked cancelled with its card still open."""
+    import services.board_cancel as board_cancel
+    from api.board_tasks import cancel_task
+
+    pb = _running_playbook(new_session, workspace)
+    staged = board_cancel.stage_ticket_cancel
+
+    def _step_fails(db, task, **kwargs):
+        if task.id == pb.step:
+            raise RuntimeError("the step ticket could not be written")
+        return staged(db, task, **kwargs)
+
+    monkeypatch.setattr(board_cancel, "stage_ticket_cancel", _step_fails)
+    with pytest.raises(RuntimeError):
+        asyncio.run(cancel_task(pb.card, ctx=_owner(workspace), db=new_session()))
+
+    assert _execution_status(new_session, pb.run) == "running" and stopped_here == []
+    assert _tickets(new_session, [pb.card])[pb.card].status == "in_progress"
+
+
 def test_a_failed_ticket_can_be_cancelled(workspace, new_session):
     """Night 7: the Cancel button refused a failed card without a word; F246 keeps
     a failure in Needs you until the owner deals with it."""

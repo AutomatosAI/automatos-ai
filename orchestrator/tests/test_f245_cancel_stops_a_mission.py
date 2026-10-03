@@ -77,6 +77,20 @@ def test_a_cancelled_mission_cancels_every_unfinished_step(db_session, seed_work
     assert _card(db_session, verified_card).status == "done"            # finished work stays done
 
 
+def test_a_missions_cancel_is_committed_by_its_caller_as_one(db_session, seed_workspace, monkeypatch):
+    """Review of #885: committed card by card, a cancel that failed half way left
+    the mission terminal (so it could not be cancelled again) and its other cards
+    open. The mission and every card now commit together, or not at all."""
+    ws = UUID(seed_workspace())
+    run, _card_row, _steps = _mission(db_session, ws)
+    commits = []
+    monkeypatch.setattr(db_session, "commit", lambda: commits.append(True))
+
+    cs.CoordinatorService().cancel_mission(db_session, run.id, "user_test")
+
+    assert commits == []
+
+
 def test_a_step_result_that_arrives_after_the_cancel_is_not_recorded(db_session, seed_workspace):
     ws = UUID(seed_workspace())
     run, _card_row, steps = _mission(db_session, ws)

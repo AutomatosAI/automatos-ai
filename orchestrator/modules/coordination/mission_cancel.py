@@ -39,8 +39,10 @@ MISSION_CANCELLED_REASON = "the mission was cancelled"
 
 def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[int]:
     """Skip every unfinished step of the mission and cancel its card. Returns the
-    cards cancelled. Commits (a cancelled card is committed as it is told)."""
-    from services.board_cancel import cancel_board_ticket
+    cards cancelled. Nothing is committed: the caller commits the mission's
+    cancel and its cards as one, or rolls them all back (a cancel half done would
+    leave the mission terminal and its open cards beyond a second cancel)."""
+    from services.board_cancel import stage_ticket_cancel
 
     steps = (
         db.query(OrchestrationTask)
@@ -60,7 +62,7 @@ def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[
         .order_by(BoardTask.id)
         .all()
     )
-    return [card.id for card in cards if cancel_board_ticket(db, card, by=by, reason=reason)]
+    return [card.id for card in cards if stage_ticket_cancel(db, card, by=by, reason=reason)]
 
 
 async def until_mission_cancelled(work: Awaitable[Any], run_id: Any,

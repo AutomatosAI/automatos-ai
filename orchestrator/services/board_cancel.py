@@ -27,6 +27,16 @@ def cancel_board_ticket(db: Any, task: Any, *, by: str, reason: str) -> bool:
     """Cancel ``task`` unless it is done or already closed. Commits and tells the
     board. True when it was cancelled here. A failed ticket can be cancelled:
     that is how the owner closes it (F245/F246: it waits in Needs you until then)."""
+    if not stage_ticket_cancel(db, task, by=by, reason=reason):
+        return False
+    db.commit()
+    return True
+
+
+def stage_ticket_cancel(db: Any, task: Any, *, by: str, reason: str) -> bool:
+    """``cancel_board_ticket`` without the commit, for a cancel that closes a run
+    and its tickets as one: the caller commits them together, or rolls them all
+    back (F245). The board is told when that commit lands."""
     if task.status in UNCANCELLABLE:
         return False
     from services.board_events import notify_board_event
@@ -51,7 +61,7 @@ def cancel_board_ticket(db: Any, task: Any, *, by: str, reason: str) -> bool:
     notify_board_event(
         db, workspace_id=task.workspace_id, task_id=task.id, status="cancelled", event="task_cancelled",
     )
-    db.commit()
+    db.flush()
     logger.info("[BoardCancel] task %d cancelled (was %s) by %s — %s", task.id, previous, by, reason)
     return True
 
@@ -60,7 +70,8 @@ def cancel_run_step_tickets(db: Any, execution_id: str, *, by: str) -> List[int]
     """F116: cancel the session step tickets a playbook run filed
     (``recipe:<run>:<step>``) that are still queued or being worked, each saying
     it was cancelled with the run. Returns the ticket ids cancelled. A step
-    that already finished keeps its result."""
+    that already finished keeps its result. The caller commits, with the run's
+    own cancel (F245)."""
     from core.models.core import BoardTask
 
     tickets = (
@@ -75,6 +86,6 @@ def cancel_run_step_tickets(db: Any, execution_id: str, *, by: str) -> List[int]
     )
     cancelled = []
     for task in tickets:
-        if cancel_board_ticket(db, task, by=by, reason=f"cancelled with run {execution_id}"):
+        if stage_ticket_cancel(db, task, by=by, reason=f"cancelled with run {execution_id}"):
             cancelled.append(task.id)
     return cancelled

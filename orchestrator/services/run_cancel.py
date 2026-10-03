@@ -54,15 +54,17 @@ def playbook_run_of(db: Any, task: Any) -> Optional[Any]:
 
 
 def cancel_playbook_run(db: Any, execution: Any, *, by: str, reason: str) -> bool:
-    """Stop ``execution`` and cancel its card and its session step tickets.
-    Commits. False when the run had already finished (its card is left as it is)."""
+    """Stop ``execution`` and cancel its card and its session step tickets, in one
+    commit: all of them or, if any fails, none (the cancel can then be asked
+    again). Then the run's task on this worker is cancelled at once. False when
+    the run had already finished (its card is left as it is)."""
     if execution.status in FINISHED_RUN_STATUSES:
         return False
     execution.status = "cancelled"
     execution.error_message = reason
     execution.completed_at = datetime.now(timezone.utc)
-    db.commit()
     _cancel_playbook_cards(db, execution, by=by, reason=reason)
+    db.commit()
     from api.recipe_executor import request_execution_cancel
 
     stopped_here = request_execution_cancel(execution.execution_id)
@@ -72,9 +74,10 @@ def cancel_playbook_run(db: Any, execution: Any, *, by: str, reason: str) -> boo
 
 
 def _cancel_playbook_cards(db: Any, execution: Any, *, by: str, reason: str) -> None:
-    """The run's card, then its session step tickets (F116), each saying who."""
+    """The run's card, then its session step tickets (F116), each saying who; the
+    caller commits them with the run."""
     from core.models.core import BoardTask
-    from services.board_cancel import cancel_board_ticket, cancel_run_step_tickets
+    from services.board_cancel import cancel_run_step_tickets, stage_ticket_cancel
 
     card = db.query(BoardTask).filter(
         BoardTask.source_type == PLAYBOOK_CARD,
@@ -82,7 +85,7 @@ def _cancel_playbook_cards(db: Any, execution: Any, *, by: str, reason: str) -> 
         BoardTask.workspace_id == execution.workspace_id,
     ).first()
     if card is not None:
-        cancel_board_ticket(db, card, by=by, reason=reason)
+        stage_ticket_cancel(db, card, by=by, reason=reason)
     stopped = cancel_run_step_tickets(db, execution.execution_id, by=by)
     if stopped:
         logger.info("[RunCancel] %s: step tickets cancelled with it: %s", execution.execution_id, stopped)
