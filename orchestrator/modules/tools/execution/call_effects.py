@@ -49,6 +49,19 @@ def call_effects(action: str, params: Any) -> Tuple[str, ...]:
     return ()
 
 
+# F308 (night 9): what a mission's answer said of its steps: #0033 was made and approved
+# with no check of each step while the reply said "Each step will pause for your approval".
+STEPS_CHECKED, STEPS_UNCHECKED = "mission_steps_checked", "mission_steps_unchecked"
+
+
+def result_effects(result: Any) -> Tuple[str, ...]:
+    """What a call's answer says it left a mission's steps doing: waiting for the
+    owner's check, or running on unchecked; () when it says nothing of it."""
+    if not isinstance(result, dict) or not isinstance(result.get("checks_each_step"), bool):
+        return ()
+    return (STEPS_CHECKED,) if result["checks_each_step"] else (STEPS_UNCHECKED,)
+
+
 def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     """The parameters the action itself received: platform_execute's ``params``
     (or the keys beside ``action`` when it sent none), else the call's own."""
@@ -60,4 +73,4 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["call_effects", "call_params"]
+__all__ = ["STEPS_CHECKED", "STEPS_UNCHECKED", "call_effects", "call_params", "result_effects"]

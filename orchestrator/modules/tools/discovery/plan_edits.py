@@ -71,10 +71,11 @@ def reads_the_plan_edits(handler: Handler) -> Handler:
             return {"success": False, "error": CHECKS_TOO_LATE}
         note = _check_each_step(db, run) if checks else None
         if not named and note:
-            return {"success": True, "mission_id": str(run.id), "state": run.state, "message": note}
+            return {"success": True, "mission_id": str(run.id), "state": run.state, "message": note,
+                    "checks_each_step": True}
         out = await edits_reach_the_steps(handler, db, workspace_id,  # F308: the step and its card, or why not
                                           {**params, "task_edits": named} if named else params, run, named, steps)
-        return {**out, "check_note": note} if note and isinstance(out, dict) else out
+        return {**out, "check_note": note, "checks_each_step": True} if note and isinstance(out, dict) else out
     return wrapped
 
 
