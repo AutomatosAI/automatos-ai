@@ -27,7 +27,7 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from api.board_tasks import report_type_for  # noqa: E402
+from services.task_report import report_type_for  # noqa: E402
 from tests.test_prd251w2_campaigns import VERSIONS, _load, _run  # noqa: E402
 
 MIGRATION = VERSIONS / "outputs_heartbeat_reports.py"

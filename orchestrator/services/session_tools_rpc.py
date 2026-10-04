@@ -30,11 +30,12 @@ What a client needs answered, in the order Claude Code 2.1.267 sends it:
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
-from services import session_tools
+from services import session_tool_groups, session_tools
 from services.session_tools import SessionContext, SessionToolRefused
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,10 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 MAX_RESULT_CHARS = session_tools.MAX_TOOL_RESULT_CHARS
+
+# Asked before each tool call: a refusal reason, or None. It may be a coroutine
+# function: F330 counts the call on a worker thread, off the event loop.
+OnCall = Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]
 
 
 def _error(rpc_id: Any, code: int, message: str, data: Any = None) -> Dict[str, Any]:
@@ -141,13 +146,15 @@ def initialize_result(requested: Any, *, server_version: str) -> Dict[str, Any]:
         "serverInfo": {"name": SERVER_NAME, "title": SERVER_TITLE, "version": server_version},
         "instructions": (
             "Automatos, the manager that gave you this ticket. These tools reach the board, "
-            "your reports and the workspace's knowledge. Scope is fixed to your own ticket."
+            "your reports, the workspace's knowledge and the owner's database (read-only). "
+            "Scope is fixed to your own ticket."
         ),
     }
 
 
-def tools_list_result() -> Dict[str, Any]:
-    return {"tools": [dict(t) for t in session_tools.definitions()]}
+def tools_list_result(ctx: SessionContext) -> Dict[str, Any]:
+    """#942: this session's agent's tools, in the fixed order (core, then its groups)."""
+    return {"tools": session_tool_groups.offered_definitions(ctx)}
 
 
 async def handle_message(
@@ -156,7 +163,7 @@ async def handle_message(
     *,
     server_version: str,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]] = None,
+    on_call: Optional[OnCall] = None,
 ) -> Optional[Dict[str, Any]]:
     """One JSON-RPC message → the reply, or ``None`` for a notification.
 
@@ -183,7 +190,7 @@ async def handle_message(
     if method == "ping":
         return _result(rpc_id, {})
     if method == "tools/list":
-        return _result(rpc_id, tools_list_result())
+        return _result(rpc_id, tools_list_result(ctx))
     if method == "tools/call":
         return await _handle_tools_call(rpc_id, params, ctx, call=call, on_call=on_call)
     if method in ("prompts/list", "resources/list", "resources/templates/list"):
@@ -202,21 +209,21 @@ async def _handle_tools_call(
     ctx: SessionContext,
     *,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]],
+    on_call: Optional[OnCall],
 ) -> Dict[str, Any]:
     name = str(params.get("name") or "")
-    tool = session_tools.get_tool(name)
+    tool = session_tool_groups.offered_tool(ctx, name)   # #942: only this agent's groups' tools
     # The call is charged BEFORE the name is judged. Charging only known names
     # left the allowance trivially avoidable: an unknown name cost nothing, so a
     # session could call the endpoint without limit and never be refused.
     if on_call is not None:
         refusal = on_call(tool.name if tool is not None else name)
+        if inspect.isawaitable(refusal):
+            refusal = await refusal
         if refusal:
             return _result(rpc_id, _text_content(refusal, is_error=True))
     if tool is None:
-        offered = ", ".join(session_tools.tool_names())
-        return _result(rpc_id, _text_content(
-            f"{name!r} is not a tool this session has. Available: {offered}.", is_error=True))
+        return _result(rpc_id, _text_content(session_tool_groups.not_offered_text(ctx, name), is_error=True))
     try:
         scoped = session_tools.resolve_parameters(tool, params.get("arguments"), ctx)
         result = await call(tool, scoped, ctx)
@@ -235,7 +242,7 @@ async def handle_payload(
     *,
     server_version: str,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]] = None,
+    on_call: Optional[OnCall] = None,
 ) -> Optional[Any]:
     """A whole request body: one message, or a batch. ``None`` = nothing to
     answer (every message was a notification), which the route sends as 202."""

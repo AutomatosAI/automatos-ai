@@ -28,6 +28,7 @@ from core.models import (
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from api.agent_session_tools import AgentDetailResponse, agent_detail, reject_unknown_tool_groups, requested_groups, skill_gaps
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def _reject_invalid_runtime(configuration) -> None:
     from config import config as _cfg
     from core.cli_runtime import validate_runtime_configuration
 
+    reject_unknown_tool_groups(configuration)  # #942: an unknown session tool group is a 422
     errors = validate_runtime_configuration(
         configuration, cli_enabled=bool(getattr(_cfg, "CLI_RUNTIME_ENABLED", False))
     )
@@ -214,20 +216,15 @@ def _normalize_tags(raw_tags) -> List[str]:
     return normalized
 
 
-def _session_tool_gaps(agent: Agent) -> Optional[List[Dict[str, Any]]]:
-    """PRD-245 S1.5: the platform tools this agent's skills name that a ticket
-    session cannot call. ``None`` for an API agent (its skills' tools all work)
-    and whenever the computation is unavailable — a form field is never worth a
-    500."""
+def _session_tool_gaps(agent: Agent, groups: Optional[List[str]] = None) -> Optional[List[Dict[str, Any]]]:
+    """PRD-245 S1.5 / #942: the platform tools this agent's skills name that its sessions
+    cannot call, given its tool groups (``groups`` previews others), each ``kind: "skill"``.
+    A list for EVERY agent, so the page warns before a switch to cli; ``None`` only when it
+    cannot be computed: a form field is never worth a 500."""
     try:
-        from core.cli_runtime import is_cli_agent
-        from services.cli_session_prompt import SESSION_TOOLS_AVAILABLE, session_tool_gaps
-
-        if not is_cli_agent(getattr(agent, "configuration", None) or {}):
-            return None
-        return session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE) or []
-    except Exception:  # noqa: BLE001
-        logger.debug("session tool gaps unavailable for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return [{**gap, "kind": "skill"} for gap in skill_gaps(agent, groups)]
+    except Exception:  # noqa: BLE001 — logged; the form renders without the gaps
+        logger.exception("session tool gaps unavailable for agent %s", getattr(agent, "id", "?"))
         return None
 
 
@@ -825,10 +822,11 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/{agent_id:int}", response_model=AgentResponse)
-async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """Get a specific agent by ID with skills and tools"""
+@router.get("/{agent_id:int}", response_model=AgentDetailResponse)
+async def get_agent(agent_id: int, groups: Optional[str] = Query(None), ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+    """An agent with skills, tools and its session tool groups; ``?groups=a,b`` previews others (#942)"""
     try:
+        preview = requested_groups(groups)  # 422 on an unknown id
         agent = (
             db.query(Agent)
             .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
@@ -837,8 +835,7 @@ async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_con
         )
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-
-        return _build_agent_response(agent, db)
+        return await agent_detail(_build_agent_response(agent, db), agent, db, preview, _session_tool_gaps(agent, preview))
     except HTTPException:
         raise
     except Exception as e:

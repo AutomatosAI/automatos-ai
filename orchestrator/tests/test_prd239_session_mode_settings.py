@@ -24,7 +24,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 from services import cli_host_service as svc
-from services.session_tools import tool_names as session_tool_names  # noqa: E402
+from services.session_tool_groups import DEFAULT_SESSION_TOOL_GROUPS, tools_for_groups  # noqa: E402
 from services import cli_ticket_lane as lane  # noqa: E402
 
 WS = uuid4()
@@ -93,8 +93,9 @@ def test_the_default_is_a_folder_of_its_own_even_with_a_projects_folder_configur
     monkeypatch.setattr(svc.config, "AUTH_EDITION", "local")
     out = svc.session_mode_settings(_DB(workspace=_ws(None)), WS)
     # PRD-245 W1: the tab now also names the Automatos tools a session gets; the
-    # list itself is pinned in test_prd245_session_tools.py.
-    assert [t["name"] for t in out.pop("session_tools")] == list(session_tool_names())
+    # list itself is pinned in test_prd245_session_tools.py. #942: the page has no one
+    # agent, so it shows what an agent on the default groups is offered.
+    assert [t["name"] for t in out.pop("session_tools")] == tools_for_groups(DEFAULT_SESSION_TOOL_GROUPS)
     assert out == {
         "default_folder": "sessions", "default_folder_explicit": False,
         "permission_mode": "auto",  # the local edition's default (test_session_permission_modes.py)

@@ -1,13 +1,36 @@
 """Scheduling handlers for PlatformActionExecutor (PRD-77) + NL2SQL query_data (PRD-79)."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+# F300/F301: what the database tool adds beside the rows (modules.nl2sql.agent_answer).
+ANSWER_CONTEXT_KEYS = ("schema", "notes", "derived", "not_recorded")
+NO_ROWS = "Query returned no rows."
+ANSWER_ROWS_SHOWN = 50
+ANSWER_CELL_CHARS = 50
+ANSWER_HEADER_CHARS = 20
+
+
+def answer_table(columns: List[Any], rows: List[Dict[str, Any]], row_count: int) -> str:
+    """The rows as a readable table, at most ``ANSWER_ROWS_SHOWN`` of them."""
+    if not columns or not rows:
+        return ""
+    header = " | ".join(str(c) for c in columns)
+    separator = "-+-".join("-" * min(len(str(c)), ANSWER_HEADER_CHARS) for c in columns)
+    rows_text = "\n".join(
+        " | ".join(str(row.get(c, ""))[:ANSWER_CELL_CHARS] for c in columns) for row in rows
+    )
+    table_text = f"{header}\n{separator}\n{rows_text}"
+    if row_count > ANSWER_ROWS_SHOWN:
+        table_text += f"\n... ({row_count - ANSWER_ROWS_SHOWN} more rows)"
+    return table_text
 
 
 async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,6 +164,11 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     dependencies (TypeError). It now runs the same in-process NL2SQL path as
     ``query_database`` / ``smart_query_database``: the one service construction
     site, workspace-scoped resolution by id OR name, one audit row.
+
+    F300/F301 (night 9): board agents reach this through ``platform_execute``
+    too (28 of the night's Decimal failures). The database's schema and any
+    note on dates past the data go out with the answer, as they do from
+    ``smart_query_database``.
     """
     question = params.get("question")
     if not question or not str(question).strip():
@@ -161,41 +189,32 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
             caller_context={"user_id": params.get("_user_id")},
             db_session=db,
         )
+        context = {key: result[key] for key in ANSWER_CONTEXT_KEYS if result.get(key)}
         if not result.get("success"):
             return {
                 "success": False,
                 "error": result.get("error", "Query execution failed"),
                 "sql": result.get("sql"),
+                **context,
             }
 
         # Format for agent consumption
         data = result.get("data", [])
         columns = result.get("columns", [])
-        row_count = result.get("row_count", len(data))
-
-        # Build readable table (truncate large results)
-        display_rows = data[:50]
-        table_text = ""
-        if columns and display_rows:
-            header = " | ".join(str(c) for c in columns)
-            separator = "-+-".join("-" * min(len(str(c)), 20) for c in columns)
-            rows_text = "\n".join(
-                " | ".join(str(row.get(c, ""))[:50] for c in columns)
-                for row in display_rows
-            )
-            table_text = f"{header}\n{separator}\n{rows_text}"
-            if row_count > 50:
-                table_text += f"\n... ({row_count - 50} more rows)"
+        # F301 B1: a date past the data has no count to give, not a count of 0.
+        row_count = None if result.get("not_recorded") else result.get("row_count", len(data))
+        display_rows = data[:ANSWER_ROWS_SHOWN]
 
         return {
             "success": True,
-            "answer": table_text or "Query returned no rows.",
+            "answer": result.get("answer") or answer_table(columns, display_rows, row_count) or NO_ROWS,
             "sql": result.get("sql"),
             "row_count": row_count,
             "columns": columns,
             "data": display_rows,
             "explanation": result.get("explanation"),
             "confidence": result.get("confidence"),
+            **context,
         }
 
     except Exception as e:

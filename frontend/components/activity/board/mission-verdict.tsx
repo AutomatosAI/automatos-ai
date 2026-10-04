@@ -6,6 +6,7 @@
  * the mission's approve endpoint (a ticket approval stranded it), and Reject
  * cancels it through the mission's reject endpoint. Changing the plan instead
  * happens on the mission's page. A step in Review is its mission's to check.
+ * F291: Approve takes a note, which every step of the mission is given.
  */
 
 import { useState } from 'react'
@@ -41,6 +42,7 @@ export function MissionVerdict({ task, onDecided }: { task: BoardTask; onDecided
 function MissionPlanVerdict({ missionId, onDecided }: { missionId: string; onDecided: () => void }) {
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
   const approve = useApproveMission()
   const reject = useRejectMission()
   const queryClient = useQueryClient()
@@ -53,7 +55,7 @@ function MissionPlanVerdict({ missionId, onDecided }: { missionId: string; onDec
     onDecided()
   }
   const approveNow = () =>
-    approve.mutate({ id: missionId, body: {} }, {
+    approve.mutate({ id: missionId, body: note.trim() ? { note: note.trim() } : {} }, {
       onSuccess: () => decided('Plan approved. The mission is starting.'),
       onError: (err) => toast.error(failure(err, 'Could not approve the plan')),
     })
@@ -81,6 +83,19 @@ function MissionPlanVerdict({ missionId, onDecided }: { missionId: string; onDec
             disabled={busy}
             onChange={(e) => setReason(e.target.value)}
             rows={2}
+            className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+          />
+        </label>
+      )}
+      {!rejecting && (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium">A note for every step (optional)</span>
+          <textarea
+            value={note}
+            disabled={busy}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            data-testid="plan-note"
             className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
         </label>

@@ -77,7 +77,10 @@ def refuse_the_patch(db: Session, task: BoardTask, body: Dict[str, Any], new_sta
     from api import board_tasks as bt
 
     check_fields(body)
-    owned = bt.mission_runs_it(db, task) if new_status in bt.STARTING_STATUSES else None
+    from api.board_mission_card import starts_its_mission
+
+    starts = new_status in bt.STARTING_STATUSES and not starts_its_mission(db, task, new_status)  # F291
+    owned = bt.mission_runs_it(db, task) if starts else None
     if owned:
         raise HTTPException(status_code=409, detail=owned)
     if new_status is None or new_status == task.status:
@@ -117,6 +120,17 @@ def patch_fields(task: BoardTask, body: Dict[str, Any]) -> None:
             setattr(task, field, body[field])
     if body.get("note"):
         add_operator_note(task, body["note"])
+
+
+def note_the_assign(db: Session, task: BoardTask, agent: Optional[int]) -> None:
+    """F294 (#0313, #0332): the board's Assign says on the card who it went to, as
+    Auto's does ("Auto · Gave this to Analyst, in chat."). Nothing when the agent is
+    the same."""
+    from api.board_card_moves import assign_note
+
+    said = assign_note(db, task.workspace_id, task.assigned_agent_id, agent)
+    if said:
+        add_operator_note(task, said)
 
 
 def add_operator_note(task: BoardTask, note: Any) -> None:

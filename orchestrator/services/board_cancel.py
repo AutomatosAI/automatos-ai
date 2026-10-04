@@ -91,6 +91,28 @@ def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str, note: str = CAN
     return True
 
 
+def call_off_done(db: Any, task: Any, *, by: str, reason: str) -> bool:
+    """F294 (night 8): a Done card the owner calls off is Cancelled, with the cancel on
+    record and its note (F273), as any cancel. Nothing runs a Done card, so nothing
+    stops, and its answer stays on it. #0422: Auto approved the card when asked to
+    cancel it; the board's Cancel then answered ``applied: false`` with no words, and a
+    drag to Cancelled moved it with no note. Does NOT commit. False unless it was Done."""
+    if task.status != "done":
+        return False
+    from services.board_events import notify_board_event
+
+    now = datetime.now(timezone.utc)
+    task.status = "cancelled"
+    task.completed_at = now
+    task.runtime_ref = with_cancel_recorded(db, task, by=by, reason=reason, at=now)
+    notify_board_event(
+        db, workspace_id=task.workspace_id, task_id=task.id, status="cancelled", event="task_cancelled",
+    )
+    db.flush()
+    logger.info("[BoardCancel] done task %d called off by %s — %s", task.id, by, reason)
+    return True
+
+
 def cancel_board_ticket(db: Any, task: Any, *, by: str, reason: str) -> bool:
     """Cancel ``task`` unless it is done or already closed. Commits and tells the
     board. True when it was cancelled here."""
@@ -217,7 +239,7 @@ def stop_heartbeat_sessions(db: Any, workspace_id: Any, agent_id: int) -> List[i
 __all__ = [
     "CANCEL_REQUESTED_KEY", "FINISHED", "HEARTBEAT_OFF_REASON", "MISSION_STOP_REASONS", "PLAYBOOK_RUN_BY",
     "ROUTINE_OFF_REASONS", "RUN_DIED_REASON", "RUN_FAILED_REASON", "RUN_STEP_LIVE", "UNCANCELLABLE",
-    "cancel_board_ticket", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
+    "call_off_done", "cancel_board_ticket", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
     "stop_mission_sessions", "stop_routine_sessions", "stop_run_step_tickets", "stop_scheduled_task_sessions",
     "stop_ticket_run",
 ]
