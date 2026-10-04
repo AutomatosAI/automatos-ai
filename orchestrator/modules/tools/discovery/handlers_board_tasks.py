@@ -14,6 +14,7 @@ from modules.tools.discovery.ticket_edits import briefs_like_the_board, notes_sa
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
+from modules.tools.discovery.ticket_run_now import redo_keeps_the_correction
 from modules.tools.discovery.ticket_moves import keeps_the_board_rules
 from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
 
@@ -803,6 +804,7 @@ async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@redo_keeps_the_correction  # F249 (8): a card's waiting redo runs with its correction
 @guarded_and_recorded(STATUS)  # F241: never a closed ticket; each change noted on its ticket
 @stops_what_it_cancels  # F241 with F245: a cancel stops what runs the card, as the board's does
 @keeps_the_board_rules  # F259/F278: refused where the board refuses; a send-back is the board's Reject
