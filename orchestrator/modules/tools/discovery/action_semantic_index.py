@@ -295,6 +295,92 @@ class ActionSemanticIndex:
                 logger.info("ActionSemanticIndex: indexed %d actions", len(self._action_embeddings))
                 self._indexed = True
 
+    async def _ensure_indexed_bounded(self, timeout_s: Optional[float]) -> bool:
+        """Index every action, waiting at most ``timeout_s`` (#927).
+
+        Returns True when the index is ready. On timeout it returns False: the turn
+        ranks nothing and its callers fall back to the lexical shortlist, as for a
+        timed-out query embed. The build is NOT cancelled — it finishes in the
+        background and fills the Redis cache, so the next turn ranks normally. Before
+        this, a cold cache (the first turn after an embedding key is added, an upgrade
+        that rewords many actions, an evicted Redis) embedded the whole catalogue
+        inside the turn: minutes when the upstream is slow. ``timeout_s`` None waits.
+
+        Each build is waited on once: after one waiter has spent the full budget on
+        it, it is known to be slow, and later rankings (the rest of that turn, other
+        turns) return at once until it ends, instead of each waiting the budget."""
+        task = self._index_build()
+        overdue = self._overdue_builds()
+        if task in overdue:
+            return False
+        done, _pending = await asyncio.wait({task}, timeout=timeout_s)
+        if not done:
+            overdue.add(task)
+            logger.warning(
+                "ActionSemanticIndex: the action index was not ready within %.1fs — "
+                "rankings fall back (lexical) until it is; the build continues in the "
+                "background to warm the cache",
+                timeout_s,
+            )
+            return False
+        task.result()  # a failed build raises here, as the unbounded call did
+        return True
+
+    def _index_build(self) -> "asyncio.Task":
+        """The in-flight index build for this loop, started if there is none.
+
+        It indexes the widest view (admin, promoted and super-admin actions): the
+        index is keyed by action name, and who may see what is decided when ranking
+        (``_eligible_actions`` in ``_compute_full_ranking``), so one build serves
+        every caller instead of one per super-admin view. One build per loop, shared
+        by every turn that waits on it, so a slow upstream is asked once rather than
+        once per turn. It is forgotten when it ends, so a later turn indexes whatever
+        is still missing. Loop id in the key for the same reason as ``_inflight``: a
+        task is only awaitable on the loop that made it. Lazy-init because tests
+        construct the index via ``__new__``."""
+        builds = getattr(self, "_index_builds", None)
+        if builds is None:
+            builds = self._index_builds = {}
+        key = (id(asyncio.get_running_loop()),)
+        task = builds.get(key)
+        if task is not None:
+            return task
+        task = asyncio.ensure_future(
+            self.ensure_indexed(
+                exclude_admin=False,
+                exclude_promoted=False,
+                include_super_admin=True,
+            )
+        )
+        builds[key] = task
+
+        def _finalize(t: "asyncio.Task", _key: tuple = key) -> None:
+            # Also retrieves the exception of a build no turn waited for, so it is
+            # logged here instead of as "Task exception was never retrieved". No
+            # provider at all fails at once, to the waiting turn, which reports it.
+            builds.pop(_key, None)
+            self._overdue_builds().discard(t)
+            exc = None if t.cancelled() else t.exception()
+            provider = getattr(self._embedding_manager, "provider", None)
+            no_provider = getattr(provider, "is_degraded", False) is True
+            if exc is not None and not no_provider:
+                logger.warning("ActionSemanticIndex: background index build failed: %s", exc)
+
+        task.add_done_callback(_finalize)
+        return task
+
+    def _overdue_builds(self) -> set:
+        """Builds a waiter already gave the full budget to (lazy, like ``_inflight``)."""
+        overdue = getattr(self, "_overdue", None)
+        if overdue is None:
+            overdue = self._overdue = set()
+        return overdue
+
+    async def warm(self) -> None:
+        """Build the index ahead of the first turn (#927), from the boot seeds,
+        through the same shared build a turn would wait on."""
+        await self._index_build()
+
     def _embed_timeout_s(self) -> Optional[float]:
         """Budget for a LIVE query embed, from the canonical config singleton.
 
@@ -512,13 +598,17 @@ class ActionSemanticIndex:
         The candidate set is the widest su-gated view (exclude_admin=False,
         exclude_promoted=False) so a single computation serves every per-call
         slice. Ranks the full eligible set (≤ ~110 actions, sub-ms) — no
-        pre-scoring truncation, matching the PRD-138 Appendix A baselines."""
+        pre-scoring truncation, matching the PRD-138 Appendix A baselines.
+
+        #927: the index build waits within the same budget as the query embed,
+        so a cold cache ranks nothing this turn instead of holding it."""
+        if embed_timeout_s is None:
+            embed_timeout_s = self._embed_timeout_s()
+        elif embed_timeout_s <= 0:
+            embed_timeout_s = None
         _t0 = time.monotonic()
-        await self.ensure_indexed(
-            exclude_admin=False,
-            exclude_promoted=False,
-            include_super_admin=include_super_admin,
-        )
+        if not await self._ensure_indexed_bounded(embed_timeout_s):
+            return []
         _t1 = time.monotonic()
         candidate_names = [
             a.name
@@ -527,10 +617,6 @@ class ActionSemanticIndex:
         ]
         if not candidate_names:
             return []
-        if embed_timeout_s is None:
-            embed_timeout_s = self._embed_timeout_s()
-        elif embed_timeout_s <= 0:
-            embed_timeout_s = None
         raw_vec, cache_hit, timed_out = await self._embed_query_bounded(
             query,
             model_key=model_key,
@@ -545,6 +631,26 @@ class ActionSemanticIndex:
                 len(candidate_names),
             )
             return []
+        scored = self._cosine_rank(raw_vec, candidate_names, include_super_admin)
+        logger.info(
+            "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",
+            (_t1 - _t0) * 1000,
+            (_t2 - _t1) * 1000,
+            (time.monotonic() - _t2) * 1000,
+            len(candidate_names),
+            int(cache_hit),
+        )
+        return scored
+
+    def _cosine_rank(
+        self,
+        raw_vec: List[float],
+        candidate_names: List[str],
+        include_super_admin: bool,
+    ) -> List[Tuple[str, float]]:
+        """Score each indexed candidate by cosine similarity to ``raw_vec``, best first.
+
+        A zero query vector ranks nothing."""
         query_vec = np.asarray(raw_vec, dtype=float)
         q_norm = float(np.linalg.norm(query_vec))
         if q_norm == 0.0:
@@ -572,14 +678,6 @@ class ActionSemanticIndex:
                 cos += boost
             scored.append((name, cos))
         scored.sort(key=lambda x: x[1], reverse=True)
-        logger.info(
-            "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",
-            (_t1 - _t0) * 1000,
-            (_t2 - _t1) * 1000,
-            (time.monotonic() - _t2) * 1000,
-            len(candidate_names),
-            int(cache_hit),
-        )
         return scored
 
 
