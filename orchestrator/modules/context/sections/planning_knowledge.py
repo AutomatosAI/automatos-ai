@@ -9,6 +9,12 @@ parallel retrieval path to audit.
 
 Output is the budgeter's numbered-citation context ``[1]..[n]`` so planners
 can cite real documents in the plan.
+
+F287 (night 8): the planner wrote "mention a last order date (Friday 27 November
+from [2] is a good reference)" into mission #0352's plan against the owner's
+"Thursday 10 December", and the email step used it; [2] was a document an agent had
+written. Chunks from documents an agent wrote (``source_type`` agent_output) are
+dropped before the plan sees them (services/draft_guides.owners_own_chunks).
 """
 
 from __future__ import annotations
@@ -48,6 +54,7 @@ class PlanningKnowledgeSection(BaseSection):
             return ""
 
         from modules.rag.service import get_rag_service
+        from services.draft_guides import owners_own_chunks
 
         rag = get_rag_service()
         # PRD-157 path: retrieve() resolves scope via build_retrieval_filters
@@ -60,6 +67,8 @@ class PlanningKnowledgeSection(BaseSection):
             workspace_id=str(ctx.workspace_id),
             team=ctx.kwargs.get("team"),
         )
+        # F287: the owner's documents only, never what an agent wrote.
+        result = owners_own_chunks(ctx.db_session, result, ctx.workspace_id)
 
         if not result or not result.chunks:
             return ""
