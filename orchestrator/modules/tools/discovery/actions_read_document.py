@@ -44,6 +44,10 @@ def register_read_document_action(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "The document's filename, exactly as list_documents shows it.",
                 },
+                "document_name": {
+                    "type": "string",
+                    "description": "The same as filename (night 9b: Auto sent the filename under this name).",
+                },
                 "page": {
                     "type": "integer",
                     "description": "Zero-based page number to read. Defaults to 0 (the first page).",
@@ -55,7 +59,6 @@ def register_read_document_action(registry: ActionRegistry) -> None:
             },
             "required": [],  # its document_id or its filename; the handler refuses a call naming neither
         },
-        accepts=("document_name",),  # night 9b: Auto sent the filename under this name
         permission_level="read",
         tags=["documents", "read", "knowledge", "rag"],
         examples=[
