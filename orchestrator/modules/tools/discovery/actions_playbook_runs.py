@@ -196,6 +196,7 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
             "run the daily digest playbook",
             "execute playbook 5",
             "trigger the bug triage automation",
+            "run my New Cafe Onboarding for a new café",   # F288 (night 8): a named playbook, no word "playbook"
         ],
         accepts=("inputs", "input"),
         # F182: night 6 nested the café's details under "params".

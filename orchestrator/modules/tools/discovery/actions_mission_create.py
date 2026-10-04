@@ -98,6 +98,7 @@ def register_mission_create_action(registry: ActionRegistry) -> None:
             "launch a mission to research and write a blog post about AI agents",
             "start a mission to audit our API security",
             "create a mission to build a landing page",
-            "run a deep research mission on competitor pricing",
+            # F288 (night 8): "run …" is a playbook's word; "Run my New Cafe Onboarding" became a mission 9 of 9.
+            "begin a deep research mission on competitor pricing",
         ],
     ))
