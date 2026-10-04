@@ -34,6 +34,8 @@ from .nudges import CLAIMED_ACTION_RECOVERY_MSG as _CLAIMED_ACTION_RECOVERY_MSG,
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG
 from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
+from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
+from .cap_answer import answers_at_the_cap  # F328
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 
@@ -160,15 +162,6 @@ class RoundState:
     tool_attempts: Dict[str, int] = field(default_factory=dict)
 
 
-_LENGTH_RECOVERY_MSG = (
-    "Your previous response was truncated (output token limit reached) "
-    "while writing tool call arguments. The JSON was incomplete and could "
-    "not be parsed. Please retry with SHORTER content — use concise text, "
-    "fewer sections, or summarise instead of writing full prose in the "
-    "tool arguments."
-)
-
-
 class ToolLoopExecutor:
     """Shared tool-execution loop for chat + agent paths.
 
@@ -214,6 +207,7 @@ class ToolLoopExecutor:
     # Public API
     # ------------------------------------------------------------------
 
+    @answers_at_the_cap  # F328: a run stopped by its round cap still ends on its answer
     async def run(
         self,
         *,
