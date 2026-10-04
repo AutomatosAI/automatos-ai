@@ -69,18 +69,22 @@ def _holds_no_caller_connection(
     process froze (``pool._do_get``; /health timed out).
 
     So the caller's transaction is ended first, if it has only read (one that
-    wrote, locked or sent a NOTIFY is kept: ``core.database.read_release``),
+    wrote, locked or sent a NOTIFY is kept: ``core.database.read_release``, and
+    then the caller's session is used, since only it can see what it wrote),
     and the query is run WITHOUT the caller's session: the source lookup then
     takes a short session of its own and closes it straight away, instead of
     re-opening the caller's transaction and keeping it for the whole query.
     """
     @functools.wraps(fn)
     async def wrapper(*, db_session: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
+        released = False
         if db_session is not None:
             from core.database.read_release import release_if_read_only
 
-            release_if_read_only(db_session)
-        return await fn(db_session=None, **kwargs)
+            released = release_if_read_only(db_session)
+        # A caller that has written keeps its transaction (and its connection) either
+        # way, and only it can see what it wrote (the owner's card, F301): pass it on.
+        return await fn(db_session=None if released or db_session is None else db_session, **kwargs)
 
     return wrapper
 
