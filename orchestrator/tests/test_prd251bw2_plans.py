@@ -141,7 +141,8 @@ def test_a_good_cadence_is_cleaned():
         {"channels": ["linkedin"], "format": "image", "days": ["tue"], "time": "08:00"},
     ], TEMPLATES)
     assert rows[0] == {"id": "r1", "channels": ["instagram", "tiktok"], "format": "video", "length_seconds": 30,
-                       "template_id": VIDEO_TEMPLATE, "days": ["mon", "fri"], "time": "17:30", "kind": None}
+                       "template_id": VIDEO_TEMPLATE, "days": ["mon", "fri"], "time": "17:30", "kind": None,
+                       "visual": None}
     assert rows[1]["id"] == "r2" and rows[1]["length_seconds"] is None
     with pytest.raises(plans.InvalidPlan):
         plans.validate_cadence([{**rows[0], "id": "same"}, {**rows[1], "id": "same"}], TEMPLATES)

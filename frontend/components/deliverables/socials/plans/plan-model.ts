@@ -6,12 +6,14 @@
  * row's story choice (US-C301).
  */
 import type { SocialChannel } from '@/lib/api-client'
+import { keptVisual } from './plan-row-visual'
 import type {
   SocialLatePolicy,
   SocialPlan,
   SocialPlanInput,
   SocialPlanRhythm,
   SocialPlanRowKind,
+  SocialPlanRowVisual,
   SocialPlanSources,
   SocialWeekday,
 } from '@/lib/socials-plan-types'
@@ -66,6 +68,8 @@ export interface DraftRow {
   time: string
   /** PRD-251C (US-C301): 'story' when the row posts its image or video as a story. */
   kind?: SocialPlanRowKind | null
+  /** PRD-251C (US-C302): the row's own visual; null follows the plan's mix. */
+  visual?: SocialPlanRowVisual | null
 }
 
 /** PRD-251C (US-C301): the formats a story row may post, and the format select's story choices. */
@@ -83,7 +87,7 @@ export function withFormatChoice(row: DraftRow, choice: string): DraftRow {
   const format = story ? choice.slice(STORY_CHOICE_PREFIX.length) : choice
   const sameFormat = format === row.format
   return {
-    ...row, format, kind: story ? 'story' : null,
+    ...row, format, kind: story ? 'story' : null, visual: keptVisual(format, row.visual),
     templateId: sameFormat ? row.templateId : null, lengthSeconds: sameFormat ? row.lengthSeconds : null,
   }
 }
@@ -186,7 +190,7 @@ export function draftFromPlan(plan: SocialPlan): PlanDraft {
     startsOn: plan.starts_on ?? base.startsOn, endsOn: plan.ends_on ?? base.endsOn,
     cadence: plan.cadence.map((row) => ({
       id: row.id, channels: [...row.channels], format: row.format, lengthSeconds: row.length_seconds,
-      templateId: row.template_id, days: [...row.days], time: row.time, kind: row.kind ?? null,
+      templateId: row.template_id, days: [...row.days], time: row.time, kind: row.kind ?? null, visual: row.visual ?? null,
     })),
     sources: { knowledge: plan.sources.knowledge, deliverables: plan.sources.deliverables, website: plan.sources.website, github: plan.sources.github, notes: plan.sources.notes ?? '' },
     neverSay: (plan.sources.never_say ?? []).join(', '),
@@ -211,6 +215,7 @@ export function inputFromDraft(draft: PlanDraft): SocialPlanInput {
       ...(row.id ? { id: row.id } : {}), channels: row.channels, format: row.format,
       length_seconds: row.format === 'video' ? row.lengthSeconds : null, template_id: row.templateId, days: row.days, time: row.time,
       ...(row.kind === 'story' && STORY_FORMATS.includes(row.format) ? { kind: row.kind } : {}),
+      ...(row.visual && row.format !== 'text' ? { visual: row.visual } : {}),
     })),
     sources: { ...draft.sources, never_say: phrases(draft.neverSay) },
     make: {

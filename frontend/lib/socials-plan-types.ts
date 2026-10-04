@@ -24,6 +24,17 @@ export interface SocialPlanCadenceRow {
   time: string
   /** PRD-251C (US-C301): 'story' posts the row's image or video as an Instagram story; absent for the format's own kind. */
   kind?: SocialPlanRowKind | null
+  /** PRD-251C (US-C302): the row's own visual, over the plan's mix; absent follows the mix. */
+  visual?: SocialPlanRowVisual | null
+}
+
+/** PRD-251C (C6): where a row's visuals come from (the plan mix's sources). */
+export type SocialPlanVisualSource = 'templates' | 'library' | 'ai_images' | 'ai_footage'
+
+export interface SocialPlanRowVisual {
+  source: SocialPlanVisualSource
+  /** The Composio toolkit that makes the row's AI media; null: the workspace's default. */
+  toolkit?: string | null
 }
 
 /** PRD-251C (C6): what a cadence row may post as instead of its format's own kind. */

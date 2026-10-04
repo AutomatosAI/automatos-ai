@@ -69,6 +69,10 @@ MAX_CADENCE_ROWS = 20
 STORY = "story"
 ROW_KINDS = (STORY,)
 STORY_FORMATS = ("image", VIDEO)
+# PRD-251C (C6, US-C302): a row's own visual overrides the plan's mix for its posts; an AI one
+# may name the toolkit that makes it (connected and able to: checked at save, plan_row_visuals).
+AI_IMAGES, AI_FOOTAGE = VISUAL_MIX_KEYS[2], VISUAL_MIX_KEYS[3]
+ROW_VISUAL_KEYS = ("source", "toolkit")
 MAX_ROW_CHANNELS = 10
 MAX_PLAN_DAYS = 366
 MAX_WINDOW_DAYS = 62
@@ -150,6 +154,22 @@ def _row_kind(row: Mapping[str, Any], where: str) -> Optional[str]:
     return kind
 
 
+def _row_visual(row: Mapping[str, Any], where: str) -> Optional[Dict[str, Any]]:
+    """The row's own visual (US-C302): one of the mix's sources, and for AI media the toolkit
+    that makes it (``None``: the workspace's default); ``None`` follows the plan's mix."""
+    visual = row.get("visual")
+    if visual is None:
+        return None
+    if not isinstance(visual, Mapping) or set(visual) - set(ROW_VISUAL_KEYS) or visual.get("source") not in VISUAL_MIX_KEYS:
+        raise InvalidPlan(f"{where}.visual must be {{source, toolkit}}, its source one of {', '.join(VISUAL_MIX_KEYS)}")
+    source, toolkit, fmt = visual["source"], visual.get("toolkit"), row.get("format")
+    if fmt == TEXT or (source == AI_FOOTAGE and fmt != VIDEO):
+        raise InvalidPlan(f"{where}.visual: {source} is not for {fmt} rows")
+    if toolkit is not None and (source not in (AI_IMAGES, AI_FOOTAGE) or not isinstance(toolkit, str) or not TOOLKIT_NAME.match(toolkit)):
+        raise InvalidPlan(f"{where}.visual.toolkit names the Composio toolkit that makes its AI images or footage")
+    return {"source": source, "toolkit": toolkit}
+
+
 def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) -> Dict[str, Any]:
     where = f"cadence[{index}]"
     if not isinstance(row, Mapping):
@@ -169,6 +189,7 @@ def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) ->
         "days": _days(row.get("days"), f"{where}.days"),
         "time": _clock(row.get("time"), f"{where}.time"),
         "kind": _row_kind(row, where),
+        "visual": _row_visual(row, where),
     }
 
 
@@ -326,13 +347,16 @@ class Slot:
     at: datetime  # UTC
     moved: bool = False
     kind: Optional[str] = None  # PRD-251C: STORY when the row posts stories
+    visual_source: Optional[str] = None  # PRD-251C (US-C302): the row's own visual, else the plan's mix
+    visual_toolkit: Optional[str] = None  # the toolkit that row names for its AI media
 
     def to_dict(self) -> Dict[str, Any]:
+        visual = {"source": self.visual_source, "toolkit": self.visual_toolkit} if self.visual_source else None
         return {
             "key": self.key, "row_id": self.row_id, "channels": list(self.channels), "format": self.format,
             "length_seconds": self.length_seconds, "template_id": self.template_id,
             "local_date": self.local_date.isoformat(), "local_time": self.local_time,
-            "at": self.at.isoformat(), "moved": self.moved, "kind": self.kind,
+            "at": self.at.isoformat(), "moved": self.moved, "kind": self.kind, "visual": visual,
         }
 
 
@@ -379,11 +403,12 @@ def _slot(plan: Any, row: Mapping[str, Any], day: date, zone: ZoneInfo) -> Optio
     if override.get("skip"):
         return None
     moved_to = _parse_utc(override.get("to")) if override.get("to") else None
+    visual = row.get("visual") or {}
     return Slot(
         key=key, row_id=row["id"], channels=tuple(row.get("channels") or ()), format=row["format"],
         length_seconds=row.get("length_seconds"), template_id=row.get("template_id"),
         local_date=day, local_time=row["time"], at=moved_to or local_to_utc(day, row["time"], zone), moved=moved_to is not None,
-        kind=row.get("kind"),
+        kind=row.get("kind"), visual_source=visual.get("source"), visual_toolkit=visual.get("toolkit"),
     )
 
 

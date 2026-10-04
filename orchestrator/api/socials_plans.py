@@ -9,6 +9,8 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
 * ``GET /api/socials/plans/{plan_id}``: the plan with its bank's counts; ``PUT`` changes
   any of its fields, each checked (known channels and formats, lengths the chosen
   template declares, times and days); an ended plan is read-only.
+* A cadence row may set its own visual (PRD-251C US-C302); a save naming an AI toolkit the
+  workspace cannot use for it now is a 422 (``modules/socials/plan_row_visuals.py``).
 * A plan's save (``POST`` or ``PUT``) in a workspace that never had research installs the
   Content bank research playbook once the plan is committed (PRD-251C US-C101,
   ``services/socials_research_setup.py``); a failure there never fails the save.
@@ -52,7 +54,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign
-from modules.socials import batches, campaigns, plan_store, plans, service
+from modules.socials import batches, campaigns, plan_row_visuals, plan_store, plans, service
 from services import socials_plan_research, socials_research_setup
 
 router = APIRouter()
@@ -73,6 +75,13 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RowVisual(_Strict):
+    """PRD-251C (US-C302): a row's own visual, and the toolkit of its AI media."""
+
+    source: str = Field(..., max_length=32)
+    toolkit: Optional[str] = Field(None, max_length=64)
+
+
 class CadenceRow(_Strict):
     id: Optional[str] = Field(None, max_length=32)
     channels: List[str] = Field(..., min_length=1, max_length=plans.MAX_ROW_CHANNELS)
@@ -83,6 +92,8 @@ class CadenceRow(_Strict):
     time: str
     # PRD-251C (US-C301): "story" posts the row's image or video as a story.
     kind: Optional[str] = None
+    # PRD-251C (US-C302): the row's own visual, over the plan's mix.
+    visual: Optional[RowVisual] = None
 
 
 class PlanSources(_Strict):
@@ -144,6 +155,13 @@ def _fields(body: PlanFields) -> Dict[str, Any]:
     return fields
 
 
+def _checked(db: Session, workspace_id: UUID, body: PlanFields) -> Dict[str, Any]:
+    """The body's fields, each row's AI toolkit checked against the workspace's tools (US-C302)."""
+    fields = _fields(body)
+    plan_row_visuals.check_toolkits(db, workspace_id, fields.get("cadence") or ())
+    return fields
+
+
 def _posts_api() -> Any:
     """``api/socials.py``: its router includes this one, so it is imported when a request runs."""
     from api import socials
@@ -202,7 +220,8 @@ def create_social_plan(
 ) -> Dict[str, Any]:
     """A new active plan (name, starts_on, ends_on, timezone and cadence required)."""
     try:
-        plan = plan_store.create_plan(db, workspace_id=ctx.workspace_id, created_by=_posts_api()._actor(ctx), fields=_fields(body))
+        fields = _checked(db, ctx.workspace_id, body)
+        plan = plan_store.create_plan(db, workspace_id=ctx.workspace_id, created_by=_posts_api()._actor(ctx), fields=fields)
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
@@ -221,7 +240,7 @@ def update_social_plan(
     """Change any of the plan's fields, each checked; an ended plan is read-only (422)."""
     plan = load_plan(db, ctx, plan_id)
     try:
-        plan_store.update_plan(db, plan, _fields(body))
+        plan_store.update_plan(db, plan, _checked(db, ctx.workspace_id, body))
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)

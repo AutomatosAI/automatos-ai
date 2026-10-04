@@ -201,7 +201,9 @@ VOICE_TEXT_MAX_CHARS = 200
 # D12 (S1.8): footage a post asks for, per slot, and what a render recorded for
 # it. A client writes the prompt; the rest is the server's, and a client that
 # sends it back has it ignored.
-FOOTAGE_REQUEST_KEYS = ("prompt",)
+# PRD-251C (US-C302): ``via`` names the toolkit that makes the slot (a plan row's), never another.
+FOOTAGE_REQUEST_KEYS = ("prompt", "via")
+FOOTAGE_VIA = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 FOOTAGE_RECORD_KEYS = (
     "status", "toolkit", "model", "deliverable_id", "name", "sha256", "bytes", "content_type",
     "estimate_usd", "cost_usd", "generated_at",
@@ -525,23 +527,28 @@ def validate_footage(value: Any) -> Optional[Dict[str, Dict[str, str]]]:
         return None
     if len(footage) > MAX_SLOTS:
         raise InvalidPost(f"footage names at most {MAX_SLOTS} slots")
-    clean: Dict[str, Dict[str, str]] = {}
-    for slot, request in footage.items():
-        if not isinstance(slot, str) or not VARIABLE_NAME.match(slot):
-            raise InvalidPost(f"footage.{slot} is not a slot name (letters, digits and _, not starting with a digit)")
-        if not isinstance(request, dict):
-            raise InvalidPost(f'footage.{slot} must be an object such as {{"prompt": "a calm sea at dawn"}}')
-        unknown = [k for k in request if k not in FOOTAGE_REQUEST_KEYS + FOOTAGE_RECORD_KEYS]
-        if unknown:
-            raise InvalidPost(f"footage.{slot} takes a prompt, got {unknown!r}")
-        prompt = request.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            raise InvalidPost(f"footage.{slot}.prompt is required")
-        text = prompt.strip()
-        if len(text) > FOOTAGE_PROMPT_MAX_CHARS:
-            raise InvalidPost(f"footage.{slot}.prompt must be at most {FOOTAGE_PROMPT_MAX_CHARS} characters")
-        clean[slot] = {"prompt": text}
-    return clean
+    return {slot: _footage_request(slot, request) for slot, request in footage.items()}
+
+
+def _footage_request(slot: Any, request: Any) -> Dict[str, str]:
+    """One slot's ask: its prompt, and the toolkit that makes it when one is named (``via``)."""
+    if not isinstance(slot, str) or not VARIABLE_NAME.match(slot):
+        raise InvalidPost(f"footage.{slot} is not a slot name (letters, digits and _, not starting with a digit)")
+    if not isinstance(request, dict):
+        raise InvalidPost(f'footage.{slot} must be an object such as {{"prompt": "a calm sea at dawn"}}')
+    unknown = [k for k in request if k not in FOOTAGE_REQUEST_KEYS + FOOTAGE_RECORD_KEYS]
+    if unknown:
+        raise InvalidPost(f"footage.{slot} takes a prompt, got {unknown!r}")
+    prompt = request.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise InvalidPost(f"footage.{slot}.prompt is required")
+    text = prompt.strip()
+    if len(text) > FOOTAGE_PROMPT_MAX_CHARS:
+        raise InvalidPost(f"footage.{slot}.prompt must be at most {FOOTAGE_PROMPT_MAX_CHARS} characters")
+    via = request.get("via")
+    if via is not None and (not isinstance(via, str) or not FOOTAGE_VIA.match(via)):
+        raise InvalidPost(f"footage.{slot}.via names a Composio toolkit, e.g. fal_ai")
+    return {"prompt": text, **({"via": via} if via else {})}
 
 
 def validate_targets(value: Any) -> List[Dict[str, Any]]:

@@ -13,7 +13,9 @@ slot always gets the same one, and over many slots the shares hold:
   (D13), exactly as for a post a person asked for; the brand kit's style follows each prompt.
 
 A visual the slot cannot have (no such slots in its template, nothing in the library that
-fits) leaves the template's own visuals.
+fits) leaves the template's own visuals. PRD-251C (US-C302): a cadence row's own visual
+(``slot.visual_source``) replaces the draw for its slots, and the toolkit it names
+(``slot.visual_toolkit``) goes with each slot's ask as ``via``: that toolkit makes it.
 """
 from __future__ import annotations
 
@@ -62,9 +64,13 @@ def topic_prompt(title: str, angle: Optional[str]) -> str:
     return text[:TOPIC_PROMPT_MAX_CHARS]
 
 
-def footage_asks(slots: Sequence[Mapping[str, str]], prompts: Mapping[str, str], fallback: str) -> Dict[str, Dict[str, str]]:
-    """``post.footage`` for the slots: each with the composer's prompt for it, else ``fallback``."""
-    return {slot["slot"]: {"prompt": (prompts.get(slot["slot"]) or fallback).strip()} for slot in slots}
+def footage_asks(
+    slots: Sequence[Mapping[str, str]], prompts: Mapping[str, str], fallback: str, via: Optional[str] = None,
+) -> Dict[str, Dict[str, str]]:
+    """``post.footage`` for the slots: each with the composer's prompt for it, else ``fallback``,
+    and the toolkit that makes it when the plan's row names one (``via``)."""
+    extra = {"via": via} if via else {}
+    return {slot["slot"]: {"prompt": (prompts.get(slot["slot"]) or fallback).strip(), **extra} for slot in slots}
 
 
 def _words(text: Any) -> set:

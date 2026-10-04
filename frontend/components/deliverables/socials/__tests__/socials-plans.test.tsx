@@ -9,6 +9,8 @@
  *   cannot run (PRD-251C US-C101). A topic close to one the workspace has is added with the
  *   server's warning, and the plan saves its repeat window (US-C104); a topic close to a post
  *   says so, linked to the post (US-C106).
+ * * A cadence row may set its own visual and the AI tool that makes it, shows its AI spend over
+ *   a month, and the plan saves it (PRD-251C US-C302).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
@@ -42,6 +44,13 @@ vi.mock('@/lib/api-client', () => {
     deleteSocialPlan: vi.fn(async () => undefined),
     listSocialMusic: vi.fn(async () => ({ available: true, tracks: [{ id: 'spring-of-2026', title: 'Spring of 2026', artist: 'S', style: 'tropical house', duration: 120, licence: 'CC BY 4.0', credit_required: true }] })),
     updateSocialPost: vi.fn(async (id: string, changes: any) => ({ id, ...changes })),
+    getSocialMediaTools: vi.fn(async () => ({
+      toolkits: [],
+      offered: { images: [], ai_images: [{ value: 'fal_ai', label: 'fal.ai' }, { value: 'ask', label: 'Ask each time' }], footage: [{ value: 'off', label: 'Off' }], voice: [] },
+      defaults: { images: 'templates', ai_images: 'ask', footage: 'off', voice: 'kokoro' },
+      caps: { monthly_usd: 30, per_post_usd: 10, problem: null }, spend: { month_usd: 0, period_end: '2026-11-01T00:00:00Z' },
+      shot_usd: { image: 0.3, video: 2.5 },
+    })),
   }
   return { apiClient, default: apiClient }
 })
@@ -123,6 +132,20 @@ describe('a new plan', () => {
 })
 
 describe('a saved plan', () => {
+  it('a row may set its own visual and AI tool, shows its AI spend, and saves them (PRD-251C US-C302)', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    const row = await screen.findByRole('group', { name: 'Cadence row 1' })
+    expect(within(row).queryByLabelText('Row 1 AI tool')).toBeNull()  // the plan's mix: templates only
+    fireEvent.change(within(row).getByLabelText('Row 1 visual'), { target: { value: 'ai_images' } })
+    fireEvent.change(within(row).getByLabelText('Row 1 AI tool'), { target: { value: 'fal_ai' } })
+    // mon, wed and fri: about 13 posts in 30 days, one AI still each at $0.30.
+    await waitFor(() => expect(row).toHaveTextContent('AI media: about 13 shots a month (about $3.86).'))
+    expect(screen.getByRole('region', { name: 'Cadence summary' })).toHaveTextContent("The workspace's cap of $30.00 a month still holds.")
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].cadence[0].visual).toEqual({ source: 'ai_images', toolkit: 'fal_ai' })
+  })
+
   it('opens on its cadence, and its bank adds a topic through the server', async () => {
     state.topics = [{ id: 't1', plan_id: 'p1', title: 'Three weeks to Lisbon', angle: 'Why visit', facts: [{ text: 'Stand B12.', source: { kind: 'web', ref: 'https://x.test', label: 'Stand page' } }], formats: ['image'], pinned_on: null, used_at: null, used_post_id: null, origin: 'research' }]
     renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)

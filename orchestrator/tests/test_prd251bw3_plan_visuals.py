@@ -143,9 +143,10 @@ def _plan(mix):
     return SimpleNamespace(workspace_id=WS_A, created_by="owner-1", make={"visual_mix": mix})
 
 
-def _slot(fmt="video", template_id=TEMPLATE_ID):
+def _slot(fmt="video", template_id=TEMPLATE_ID, visual_source=None, visual_toolkit=None):
     return SimpleNamespace(key="r1|2026-10-14|09:00", format=fmt, template_id=str(template_id) if template_id else None,
-                           channels=("linkedin",), length_seconds=None)
+                           channels=("linkedin",), length_seconds=None, kind=None,
+                           visual_source=visual_source, visual_toolkit=visual_toolkit)  # PRD-251C: a row's own visual
 
 
 def test_the_visual_changes_ask_ai_slots_or_set_a_library_file():

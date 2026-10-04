@@ -15,11 +15,14 @@ The defaults per media type live in ``workspace.settings['media_tools']``:
 A default must be one the workspace is offered now. A render's footage and stills try the
 default toolkit first (:func:`prefer_for`). The monthly media cap (``socials`` settings,
 D13) and the per-post cap that overrides ``SOCIALS_MEDIA_POST_CAP_USD`` are kept beside.
+PRD-251C (US-C302): :func:`shot_usd`, what a shot is booked at when its toolkit prices
+nothing ahead, prices the Plan page's spend estimate per cadence row.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional
 
+from config import config
 from core.social_templates import IMAGE_SLOT, VIDEO_SLOT
 from modules.socials.recipes.footage import footage_sources
 from modules.socials.recipes.voice import voice_sources
@@ -85,6 +88,12 @@ def validate_defaults(changes: Mapping[str, Any], choices: Mapping[str, List[Dic
             raise InvalidPost(f"the {kind.replace('_', ' ')} default must be one of {', '.join(allowed)}: connect a toolkit in Composio first")
         merged[kind] = value
     return merged
+
+
+def shot_usd() -> Dict[str, float]:
+    """What a still or a clip is booked at when its toolkit prices nothing ahead (D13,
+    ``SOCIALS_FOOTAGE_CEILING_*_USD``; fal.ai prices each shot itself): the Plan page's estimate."""
+    return {"image": float(config.SOCIALS_FOOTAGE_CEILING_IMAGE_USD), "video": float(config.SOCIALS_FOOTAGE_CEILING_VIDEO_USD)}
 
 
 def prefer_for(settings: Optional[Mapping[str, Any]]) -> Dict[str, str]:

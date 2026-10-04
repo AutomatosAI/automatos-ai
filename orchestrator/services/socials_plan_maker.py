@@ -292,7 +292,7 @@ def _visual_changes(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: Soci
     if not asked:
         return {}
     fallback = plan_visuals.topic_prompt(topic.title, topic.angle)
-    return {"footage": plan_visuals.footage_asks(asked, proposal.get("visual_prompts") or {}, fallback)}
+    return {"footage": plan_visuals.footage_asks(asked, proposal.get("visual_prompts") or {}, fallback, slot.visual_toolkit)}
 
 
 def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, post: SocialPost, now: datetime) -> None:
@@ -301,7 +301,7 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
     from api import socials_targets
 
     posts_api, actor = _posts_api(), plan.created_by
-    visual = plan_visuals.visual_for(plans.make_settings(plan)["visual_mix"], slot.key)
+    visual = slot.visual_source or plan_visuals.visual_for(plans.make_settings(plan)["visual_mix"], slot.key)  # PRD-251C US-C302
     known = plan_visuals.ai_slots(template_blocks(db, plan.workspace_id, slot.template_id), visual) if visual in plan_visuals.SLOT_KIND else []
     proposal = _propose(db, plan, slot, topic, now, known)
     changes = {**_changes(proposal, slot), **_visual_changes(db, plan, slot, topic, proposal, visual)}
