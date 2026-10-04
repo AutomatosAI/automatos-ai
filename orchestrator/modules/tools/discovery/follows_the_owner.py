@@ -92,6 +92,8 @@ NOTHING_DONE = " Nothing was done."
 # The calls that move a card: platform_update_task moves it too when it carries a status (F309).
 STATUS_CALLS = ("platform_update_task_status", "platform_update_task")
 MISSION_CALLS = frozenset(action for action in CARD_ACTIONS if "_mission" in action)
+# Where a mission's call names its mission (never a page size or a limit).
+MISSION_REF_KEYS = ("mission_id", "run_id", "id")
 # A card the owner can send back: one its agent has answered.
 SENDABLE_BACK = ("review", "done")
 # How much of the owner's words a refusal or a card's call quotes for the call to carry.
@@ -157,12 +159,13 @@ def _wrong_kind(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, pa
 def _not_a_mission(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
                    params: Dict[str, Any]) -> Optional[str]:
     """A mission's call on a card the owner named that is not a mission's (#1879, night 9)."""
-    if action not in MISSION_CALLS:
+    said = [params.get(key) for key in MISSION_REF_KEYS if params.get(key) is not None]
+    if action not in MISSION_CALLS or not said:
         return None
     for card in turn.found():
         if card_kind(card) in (MISSION_CARD, STEP_CARD):
             continue
-        if any(names_card(value, card) for value in values_in(params)):
+        if any(names_card(value, card) for value in said):
             return (f"{card_words(card)} is a card on the owner's board, not a mission.{NOTHING_DONE} "
                     f"{right_call(turn, card)}")
     return None

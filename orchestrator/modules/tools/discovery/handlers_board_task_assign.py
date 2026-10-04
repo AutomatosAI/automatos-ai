@@ -18,15 +18,12 @@ A playbook's card and a mission's step are run by their playbook or mission, as 
 from __future__ import annotations
 
 import functools
-import logging
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.handlers_board_tasks import assign_board_task as _assign_board_task
-
-logger = logging.getLogger(__name__)
 
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
@@ -57,7 +54,11 @@ def _answered_card(db: Session, workspace_id: Any, ref: Any) -> Optional[Tuple[i
     from services.run_redo import takes_its_own_redo
     from services.ticket_refs import ticket_id_named
 
-    task_id, _ = ticket_id_named(db, workspace_id, ref) if ref not in (None, "") else (None, None)
+    if ref in (None, "") or isinstance(ref, bool):
+        return None
+    # An id sent as a JSON number (1859) is read as its digits: ticket_id_named reads a
+    # number equal to the id it resolves to as one that named no ticket.
+    task_id, _ = ticket_id_named(db, workspace_id, str(ref) if isinstance(ref, int) else ref)
     task = (db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
             if task_id else None)
     if task is None or task.status not in ANSWERED or takes_its_own_redo(task):
