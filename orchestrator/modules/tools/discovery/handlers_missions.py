@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.mission_asks import asks_as_the_owner_says
 from modules.tools.discovery.card_numbers import says_the_mission_cards
 from modules.tools.discovery.mission_refs import DECIDES, READS, RUNS, takes_card_numbers
+from modules.tools.discovery.plan_edits import reads_the_plan_edits
 from services.chat_messenger import strip_caller_narration_origin
 
 logger = logging.getLogger(__name__)
@@ -615,6 +616,7 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 @takes_card_numbers(RUNS)  # F241 (7b): a card's number is its mission
 @says_the_mission_cards  # F241: each mission's card, by number
+@reads_the_plan_edits  # F261/F282 (8): edits land on real steps; "each step waits" is check_each_step
 async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
     mission (e.g. reassign a task's agent) so they persist into execution."""
