@@ -6,9 +6,12 @@
  * each slot Auto takes the next unused topic that suits the slot's format (a topic pinned to
  * the slot's day first). Add a topic by hand, or Research again. The server refuses a fact
  * without a source, a title the bank holds and the plan's never-say words, with the reason.
- * PRD-251C US-C101: the bank says, in the server's words, when research cannot run.
+ * PRD-251C US-C101: the bank says, in the server's words, when research cannot run. US-C106: a
+ * topic close to a post the workspace already has says so ("Posted 5 Oct 2026 as ..."), with a
+ * link that opens that post.
  */
 import { useState } from 'react'
+import Link from 'next/link'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +20,7 @@ import { useResearchSocialPlan, useSocialPlanTopics, useWriteSocialTopic } from 
 import { PlanAutoSuggestions } from './plan-auto-notes'
 import { PlanTopicForm } from './plan-topic-form'
 import { PlanStepHeading } from './plan-ui'
+import { socialsHref } from '../studio/studio-route'
 
 export const SAVE_FIRST = 'Save the plan first: its content bank fills once it exists.'
 const SHOWN_AT_FIRST = 6
@@ -38,6 +42,10 @@ function TopicCard({ topic, onPin, onDelete }: { topic: SocialTopic; onPin: (day
       </div>
       <h3 className="m-0 font-serif text-[21px] font-normal leading-[1.15] text-foreground">{topic.title}</h3>
       {topic.angle && <p className="m-0 text-sm text-muted-foreground">{topic.angle}</p>}
+      {topic.repeat && (
+        <Link className="text-[12.5px] text-muted-foreground underline underline-offset-2"
+          href={socialsHref({ view: 'calendar', post: topic.repeat.post_id, plan: null, cal: 'month' })}>{topic.repeat.note}</Link>
+      )}
       {topic.facts.map((fact, i) => (
         <div key={i} className="flex flex-col gap-0.5 rounded-lg bg-secondary/60 px-2.5 py-2">
           <span className="text-[13px] text-foreground">{fact.text}</span>

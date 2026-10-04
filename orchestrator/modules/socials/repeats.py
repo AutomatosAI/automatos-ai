@@ -8,7 +8,8 @@ Research may not add a topic too close to:
 
 The refusal names the earlier topic or post and its date. A person's topic is never refused
 for this: they may repeat on purpose, and are warned instead ("Posted 5 Oct 2026 as 'What is
-a Mission?'").
+a Mission?'"). The content bank says the same on each topic close to a post (``post_notes``,
+US-C106), with the post to open.
 
 "Too close" is deterministic and cheap, with no model or embedding call per topic (the 15 Sep
 embedding storm). Two titles are too close when they are the same once case, punctuation and
@@ -79,15 +80,22 @@ class Earlier:
     plan_name: Optional[str] = None  # a bank topic's plan
     went_out: bool = False  # a post that went out (else it is approved, scheduled or waiting)
     is_post: bool = False
+    post_id: Optional[str] = None
+    folded: Tuple[str, ...] = ()  # the texts folded, and their content words: worked out once
+    word_sets: Tuple[FrozenSet[str], ...] = ()
 
-    def score(self, title: str, at_least: float) -> float:
-        """How close ``title`` is: 2 for the same folded title, else the best overlap at or over
-        ``at_least``; 0 when it is not close."""
-        folded, title_words = fold(title), words(title)
-        if folded and any(fold(text) == folded for text in self.texts):
+    def score(self, folded: str, title_words: FrozenSet[str], at_least: float) -> float:
+        """How close a title (folded, and its content words) is: 2 for the same folded title,
+        else the best overlap at or over ``at_least``; 0 when it is not close."""
+        if folded and folded in self.folded:
             return 2.0
-        best = max((overlap(title_words, words(text)) for text in self.texts), default=0.0)
+        best = max((overlap(title_words, other) for other in self.word_sets), default=0.0)
         return best if best >= at_least else 0.0
+
+
+def _earlier(title: str, texts: Tuple[str, ...], **fields: Any) -> Earlier:
+    return Earlier(title=title, texts=texts, folded=tuple(fold(text) for text in texts),
+                   word_sets=tuple(words(text) for text in texts), **fields)
 
 
 def _day(moment: Any) -> Optional[str]:
@@ -100,14 +108,21 @@ def _day(moment: Any) -> Optional[str]:
 
 
 def of_topic(title: str, created_at: Any, plan_name: Optional[str]) -> Earlier:
-    return Earlier(title=title, texts=(title,), day=_day(created_at), plan_name=plan_name)
+    return _earlier(title, (title,), day=_day(created_at), plan_name=plan_name)
 
 
 def of_post(item: Dict[str, Any]) -> Earlier:
     """A history item (``history.history``) as something a new title is held against."""
     texts = tuple(text for text in (item.get("title"), item.get("topic")) if text)
-    return Earlier(title=str(item.get("title") or ""), texts=texts, day=_day(item.get("date")),
-                   went_out=item.get("state") in WENT_OUT, is_post=True)
+    return _earlier(str(item.get("title") or ""), texts, day=_day(item.get("date")),
+                    went_out=item.get("state") in WENT_OUT, is_post=True, post_id=item.get("id"))
+
+
+def recent_posts(db: Any, plan: SocialCampaign, now: Optional[datetime] = None) -> Tuple[Earlier, ...]:
+    """The workspace's history within the plan's repeat window."""
+    days = plans.validate_research(plan.research)["repeat_after_days"]
+    posts = history.history(db, plan.workspace_id, days=days, limit=history.MAX_LIMIT, now=now or datetime.now(timezone.utc))
+    return tuple(of_post(item) for item in posts)
 
 
 def earlier_for(db: Any, plan: SocialCampaign, now: Optional[datetime] = None) -> Tuple[Earlier, ...]:
@@ -118,17 +133,16 @@ def earlier_for(db: Any, plan: SocialCampaign, now: Optional[datetime] = None) -
         .filter(SocialTopic.workspace_id == plan.workspace_id)
         .all()
     )
-    days = plans.validate_research(plan.research)["repeat_after_days"]
-    posts = history.history(db, plan.workspace_id, days=days, limit=history.MAX_LIMIT, now=now or datetime.now(timezone.utc))
-    return (*(of_topic(title, made, name) for title, made, name in rows), *(of_post(item) for item in posts))
+    return (*(of_topic(title, made, name) for title, made, name in rows), *recent_posts(db, plan, now))
 
 
 def closest(title: Any, earlier: Iterable[Earlier], at_least: Optional[float] = None) -> Optional[Earlier]:
     """The earlier topic or post ``title`` is closest to, when it is too close to any; else None."""
-    if not isinstance(title, str) or not fold(title):
+    folded = fold(title) if isinstance(title, str) else ""
+    if not folded:
         return None
-    floor = threshold() if at_least is None else at_least
-    scored = [(item.score(title, floor), item) for item in earlier]
+    floor, title_words = threshold() if at_least is None else at_least, words(title)
+    scored = [(item.score(folded, title_words, floor), item) for item in earlier]
     best = max(scored, key=lambda pair: pair[0], default=(0.0, None))
     return best[1] if best[0] > 0 else None
 
@@ -153,6 +167,19 @@ def warning(earlier: Earlier) -> str:
         return f"The plan \"{earlier.plan_name}\" has \"{earlier.title}\" in its bank{when}."
     verb = "Posted" if earlier.went_out else "Planned"
     return f"{verb}{' ' + earlier.day if earlier.day else ''} as \"{earlier.title}\"."
+
+
+def post_notes(db: Any, plan: SocialCampaign, topics: Iterable[SocialTopic]) -> Dict[Any, Dict[str, Any]]:
+    """US-C106: for each of the plan's topics close to a post in the history (its own post
+    aside), the post to open and what the bank says ("Posted 5 Oct 2026 as ..."), by topic id."""
+    posts = recent_posts(db, plan)
+    notes: Dict[Any, Dict[str, Any]] = {}
+    for topic in topics:
+        own = str(topic.used_post_id) if topic.used_post_id else None
+        found = closest(topic.title, (post for post in posts if post.post_id != own)) if posts else None
+        if found is not None:
+            notes[topic.id] = {"post_id": found.post_id, "note": warning(found)}
+    return notes
 
 
 def warning_for(db: Any, plan: SocialCampaign, title: Any) -> Optional[str]:

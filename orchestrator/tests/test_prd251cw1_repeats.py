@@ -1,4 +1,4 @@
-"""PRD-251C Wave 1, US-C104 — no topic repeats by accident.
+"""PRD-251C Wave 1, US-C104 and US-C106 — no topic repeats by accident, and the bank says so.
 
 On the S0.3b API harness (SQLite). Pinned:
 
@@ -11,7 +11,8 @@ On the S0.3b API harness (SQLite). Pinned:
   topic or post and its date;
 * the threshold is config;
 * a person's close topic is added, with a warning naming the earlier post;
-* the repeat window is a plan setting: 60 days unless set, 1 to 365.
+* the repeat window is a plan setting: 60 days unless set, 1 to 365;
+* the bank names the post each topic is close to, with the post to open; never the topic's own.
 """
 from __future__ import annotations
 
@@ -60,11 +61,13 @@ def _research(api, plan, *titles):
 
 
 def _posted(api, title, days_ago, status="published"):
-    api.session.add(SocialPost(
+    post = SocialPost(
         id=uuid.uuid4(), workspace_id=WS_A, created_by="member-1", title=title, status=status, content_hash="0" * 64,
         created_at=datetime.now(UTC) - timedelta(days=days_ago),
-    ))
+    )
+    api.session.add(post)
     api.session.commit()
+    return post.id
 
 
 def _day(days_ago):
@@ -142,3 +145,25 @@ def test_the_repeat_window_is_a_plan_setting(bank):
     assert saved.status_code == 200 and saved.json()["research"]["repeat_after_days"] == 45
     kept = bank.client.put(f"/api/socials/plans/{plan['id']}", json={"research": {"day": "tue"}})
     assert kept.json()["research"]["repeat_after_days"] == 45  # a save that does not send it keeps it
+
+
+def _bank(api, plan):
+    resp = api.client.get(f"/api/socials/plans/{plan['id']}/topics")
+    assert resp.status_code == 200, resp.text
+    return {topic["title"]: topic for topic in resp.json()["topics"]}
+
+
+def test_the_bank_names_the_post_a_topic_is_close_to_never_its_own(bank):
+    plan = _create_plan(bank)
+    post_id = _posted(bank, "What is a Mission?", days_ago=9)
+    for title in ("what's a mission", "The roadmap for 2027"):
+        assert bank.client.post(f"/api/socials/plans/{plan['id']}/topics", json={"title": title, "facts": []}).status_code == 201
+    listed = _bank(bank, plan)
+    assert listed["what's a mission"]["repeat"] == {"post_id": str(post_id), "note": f'Posted {_day(9)} as "What is a Mission?".'}
+    assert listed["The roadmap for 2027"]["repeat"] is None
+
+    topic = bank.session.query(SocialTopic).filter(SocialTopic.title == "what's a mission").one()
+    topic.used_post_id, topic.used_at = post_id, datetime.now(UTC)  # that very post was made from it
+    bank.session.commit()
+    assert _bank(bank, plan)["what's a mission"]["repeat"] is None
+

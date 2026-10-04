@@ -4,9 +4,10 @@ Socials content bank (PRD-251B B8; US-B203)
 
 A plan's topics (``modules/socials/topics.py``):
 
-* ``GET /api/socials/plans/{plan_id}/topics``: the bank, unused topics first, and
-  ``research_note``: why research cannot run in the workspace, or null when it can
-  (PRD-251C US-C101, ``services/socials_research_setup.py``).
+* ``GET /api/socials/plans/{plan_id}/topics``: the bank, unused topics first, each with
+  ``repeat`` when the workspace's history holds a post close to it ({post_id, note}, PRD-251C
+  US-C106), and ``research_note``: why research cannot run in the workspace, or null when it
+  can (US-C101, ``services/socials_research_setup.py``).
 * ``POST`` adds a topic; ``PUT .../topics/{topic_id}`` edits it; ``DELETE`` removes it;
   ``PUT .../topics/{topic_id}/pin`` pins it to a day (or unpins it).
 
@@ -91,7 +92,9 @@ def _commit(db: Session, topic: Any) -> Dict[str, Any]:
 @router.get("/plans/{plan_id}/topics")
 def list_social_plan_topics(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     plan = _plans_api().load_plan(db, ctx, plan_id)
-    rows = [topic.to_dict() for topic in topics.list_topics(db, plan)]
+    bank = topics.list_topics(db, plan)
+    notes = repeats.post_notes(db, plan, bank)
+    rows = [{**topic.to_dict(), "repeat": notes.get(topic.id)} for topic in bank]
     return {
         "topics": rows, "total": len(rows), "unused": sum(1 for row in rows if not row["used_at"]),
         "research_note": socials_research_setup.research_note(db, plan.workspace_id),

@@ -179,6 +179,8 @@ export interface SocialTopic {
   created_by: string
   created_at: string | null
   updated_at: string | null
+  /** PRD-251C: a post in the workspace's history close to this topic, and what the bank says of it. */
+  repeat?: { post_id: string; note: string } | null
 }
 
 export interface SocialTopicsResponse {

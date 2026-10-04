@@ -7,7 +7,8 @@
  * * The content bank says to save first on a new plan; on a saved one it lists the topics and
  *   adds one through the bank (the server refuses with its reason), and says when research
  *   cannot run (PRD-251C US-C101). A topic close to one the workspace has is added with the
- *   server's warning, and the plan saves its repeat window (US-C104).
+ *   server's warning, and the plan saves its repeat window (US-C104); a topic close to a post
+ *   says so, linked to the post (US-C106).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
@@ -146,6 +147,16 @@ describe('a saved plan', () => {
     fireEvent.change(within(form).getByLabelText('Title'), { target: { value: 'What is a mission' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Add to the bank' }))
     await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Added. Posted 5 Oct 2026 as "What is a Mission?".'))
+  })
+
+  it('a topic close to a post the workspace has says so, with a link that opens the post', async () => {
+    state.topics = [{ id: 't1', plan_id: 'p1', title: "what's a mission", angle: null, facts: [], formats: [], pinned_on: null, used_at: null, used_post_id: null, origin: 'person',
+      repeat: { post_id: 'post-9', note: 'Posted 5 Oct 2026 as "What is a Mission?".' } }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    const card = await screen.findByRole('article', { name: "what's a mission" })
+    const link = within(card).getByRole('link', { name: 'Posted 5 Oct 2026 as "What is a Mission?".' })
+    expect(link).toHaveAttribute('href', '/deliverables?tab=socials&view=calendar&post=post-9')
   })
 
   it('saves how long a posted idea stays off research\'s list', async () => {
