@@ -202,7 +202,7 @@ def _install_turn(lane, *texts):
     with usage_scope(request_type=lane, execution_id=f"{lane}:1"):
         result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[create]),
                                           messages=messages, tools=TOOLS, workspace_id=WS))
-    nudges = [m for m in messages if m["role"] == "system" and "says something was under way" in m["content"]]
+    nudges = [m for m in messages if m["role"] == "user" and "says something was under way" in m["content"]]
     return result, nudges
 
 

@@ -78,7 +78,7 @@ def test_the_replayed_reply_is_nudged_once_and_the_retry_searches():
     assert tools.executed == ["search_knowledge"]
     assert result.response.content.startswith("Hambela Alaka: £8.62/kg")
     nudge = model.calls[0][-1]
-    assert nudge["role"] == "system" and "gives search_knowledge as its source, but no tool ran" in nudge["content"]
+    assert nudge["role"] == "user" and "gives search_knowledge as its source, but no tool ran" in nudge["content"]
 
 
 def test_the_notice_names_the_tool():
