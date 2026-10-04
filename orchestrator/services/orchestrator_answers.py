@@ -361,7 +361,9 @@ async def _external_blocks(db: Any, subject: ClarificationSubject, question: str
     out: List[Dict[str, Any]] = []
     out += await _field_blocks(subject, question)
     out += await _memory_blocks(subject, question)
-    out += await _corpus_blocks(subject, question)
+    from services.agents_writing import owners_corpus  # F269 (night 9): never an agent's writing as the corpus
+
+    out += owners_corpus(db, subject.workspace_id, await _corpus_blocks(subject, question))
     out += _fleet_blocks(db, subject, question)
     return out
 
