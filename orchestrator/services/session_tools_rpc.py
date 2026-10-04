@@ -34,7 +34,7 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from services import session_tools
+from services import session_tool_groups, session_tools
 from services.session_tools import SessionContext, SessionToolRefused
 
 logger = logging.getLogger(__name__)
@@ -147,8 +147,9 @@ def initialize_result(requested: Any, *, server_version: str) -> Dict[str, Any]:
     }
 
 
-def tools_list_result() -> Dict[str, Any]:
-    return {"tools": [dict(t) for t in session_tools.definitions()]}
+def tools_list_result(ctx: SessionContext) -> Dict[str, Any]:
+    """#942: this session's agent's tools, in the fixed order (core, then its groups)."""
+    return {"tools": session_tool_groups.offered_definitions(ctx)}
 
 
 async def handle_message(
@@ -184,7 +185,7 @@ async def handle_message(
     if method == "ping":
         return _result(rpc_id, {})
     if method == "tools/list":
-        return _result(rpc_id, tools_list_result())
+        return _result(rpc_id, tools_list_result(ctx))
     if method == "tools/call":
         return await _handle_tools_call(rpc_id, params, ctx, call=call, on_call=on_call)
     if method in ("prompts/list", "resources/list", "resources/templates/list"):
@@ -206,7 +207,7 @@ async def _handle_tools_call(
     on_call: Optional[Callable[[str], Optional[str]]],
 ) -> Dict[str, Any]:
     name = str(params.get("name") or "")
-    tool = session_tools.get_tool(name)
+    tool = session_tool_groups.offered_tool(ctx, name)   # #942: only this agent's groups' tools
     # The call is charged BEFORE the name is judged. Charging only known names
     # left the allowance trivially avoidable: an unknown name cost nothing, so a
     # session could call the endpoint without limit and never be refused.
@@ -215,9 +216,7 @@ async def _handle_tools_call(
         if refusal:
             return _result(rpc_id, _text_content(refusal, is_error=True))
     if tool is None:
-        offered = ", ".join(session_tools.tool_names())
-        return _result(rpc_id, _text_content(
-            f"{name!r} is not a tool this session has. Available: {offered}.", is_error=True))
+        return _result(rpc_id, _text_content(session_tool_groups.not_offered_text(ctx, name), is_error=True))
     try:
         scoped = session_tools.resolve_parameters(tool, params.get("arguments"), ctx)
         result = await call(tool, scoped, ctx)

@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
-from services.session_data_tools import DATA_TOOL_SPECS
+from services.session_work_tools import GROUP_TOOL_SPECS
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,8 @@ class SessionContext:
     # ``None`` for a standalone ticket — then record_memory writes durable memory
     # only, and says so.
     mission_field_id: Optional[str] = None
+    # #942: the names this agent's sessions are offered (its tool groups); None = all.
+    offered: Optional[Tuple[str, ...]] = None
 
 
 def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -682,7 +684,7 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         runner=_run_read_step_file,
         tags=("mission", "files"),
     ),
-) + tuple(SessionTool(**spec) for spec in DATA_TOOL_SPECS)   # F329: query_database, query_graph
+) + tuple(SessionTool(**spec) for spec in GROUP_TOOL_SPECS)  # F329/#942: the owner-chosen groups' tools
 
 _BY_NAME: Mapping[str, SessionTool] = {t.name: t for t in SESSION_TOOLS}
 
