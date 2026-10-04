@@ -31,7 +31,6 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
-from services.session_report import session_report_lines  # PRD-234 S2
 from services.board_consent import (  # PRD-234: a human's board action is the approval
     WHY_ASSIGNED_BY_HAND, WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
     consent_for_created_ticket, record_operator_consent,
@@ -147,129 +146,11 @@ async def _auto_create_task_report(
     task: BoardTask,
     exec_result: Dict[str, Any],
 ) -> None:
-    """
-    Persist an agent_reports row for a completed task so it shows up in
-    Reports / Deliverables / Activity Feed — same pattern heartbeats use.
-    Always non-blocking: never raises, just warns on failure.
-    """
-    try:
-        from services.report_service import ReportService, compute_execution_metrics
+    """File the ticket's report: services.task_report (F321: the metrics block every
+    report kind shares). Never raises."""
+    from services.task_report import auto_create_task_report
 
-        agent_name = "Unknown Agent"
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            if agent:
-                agent_name = agent.name
-
-        # Source the body from the agent's actual response, falling back to whatever
-        # text was captured in task.result.
-        llm_text = (
-            exec_result.get("result")
-            or exec_result.get("response")
-            or exec_result.get("output")
-            or exec_result.get("content")
-            or task.result
-            or ""
-        )
-
-        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
-        exec_metrics = compute_execution_metrics(
-            db,
-            workspace_id,
-            agent_id=task.assigned_agent_id,
-            execution_id=getattr(task, "execution_id", None),
-            started_at=getattr(task, "started_at", None),
-            completed_at=getattr(task, "completed_at", None),
-            extra={
-                "task_id": task.id,
-                "task_status": task.status,
-                "trigger": "task",
-            },
-        )
-
-        # Honour upstream-supplied tokens if the rollup found nothing
-        if not exec_metrics.get("tokens_used"):
-            usage = exec_result.get("usage") or {}
-            fallback_tokens = (
-                usage.get("total_tokens")
-                or exec_result.get("tokens_used")
-                or 0
-            )
-            if fallback_tokens:
-                exec_metrics["tokens_used"] = fallback_tokens
-
-        report_status = "ok" if task.status in ("done", "review") else "warning"
-        if task.error_message:
-            report_status = "critical"
-
-        # Render the same shape heartbeat reports use so consumers stay uniform.
-        lines = [
-            f"# {agent_name} — Task Report",
-            f"**Task:** {task.title}",
-            f"**Status:** {task.status}",
-            "",
-        ]
-        if task.error_message:
-            lines.append("## Error")
-            lines.append(str(task.error_message))
-            lines.append("")
-        if llm_text:
-            lines.append("## Result")
-            lines.append(str(llm_text))
-            lines.append("")
-        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
-        lines.append("## Execution Metrics")
-        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
-        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
-        lines.append(f"- Tokens (in/out/total): "
-                     f"{exec_metrics.get('input_tokens', 0)} / "
-                     f"{exec_metrics.get('output_tokens', 0)} / "
-                     f"{exec_metrics.get('tokens_used', 0)}")
-        if exec_result.get("runtime") == RUNTIME_CLI:
-            lines.append("- Cost: plan usage (subscription) — no dollar figure")
-        else:
-            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
-        if exec_metrics.get("duration_ms") is not None:
-            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
-        content = "\n".join(lines)
-
-        # Summary is the first non-empty body line — same convention as heartbeat reports.
-        summary = None
-        for line in str(llm_text).split("\n"):
-            stripped = line.strip().lstrip("#").strip()
-            if stripped:
-                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
-                break
-        # F197: a failed task's result is blank, so its report is summarised by
-        # why it failed. The summary used to fall back to "**Task:** …", and the
-        # bell could not tell a credit outage it had already announced.
-        if summary is None and task.error_message:
-            first = str(task.error_message).strip().splitlines()[0]
-            summary = (first[:497] + "...") if len(first) > 497 else first
-
-        svc = ReportService(db, workspace_id)
-        report_result = await svc.create_report(
-            agent_id=task.assigned_agent_id,
-            agent_name=agent_name,
-            title=f"Task: {task.title}",
-            content=content,
-            report_type="task",
-            status=report_status,
-            summary=summary,
-            metrics=exec_metrics,
-            linked_task_ids=[task.id],
-        )
-        if not report_result.get("success"):
-            logger.warning(
-                "[BoardTasks] Auto-report creation failed for task=%s: %s",
-                task.id, report_result.get("error"),
-            )
-    except Exception:
-        logger.error(
-            "[BoardTasks] _auto_create_task_report raised for task=%s",
-            getattr(task, "id", "?"),
-            exc_info=True,
-        )
+    await auto_create_task_report(db, workspace_id, task, exec_result)
 
 
 # ── PRD-128: Unified notification dispatch ─────────────────────────

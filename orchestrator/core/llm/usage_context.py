@@ -42,6 +42,8 @@ LANE_RERANK = "rerank"
 LANE_DECISION = "decision"
 # PRD-251 D13 (S4.4): renders, footage, stills and voice for Socials.
 LANE_MEDIA = "media"
+# A Playbook run (``execution_id`` is the run's own id, e.g. ``exec-45d8ac862a79``).
+LANE_RECIPE = "recipe"
 
 # Context ``source`` values that name a lane directly (the callers of
 # ``execute_with_prompt`` already pass these); anything else is passed through
@@ -66,14 +68,18 @@ def usage_scope(
     execution_id: Optional[str] = None,
     agent_id: Optional[int] = None,
     workspace_id: Any = None,
+    inherit: bool = True,
 ) -> Iterator[Dict[str, Any]]:
     """Attribute every LLM call made inside the block.
 
     Fields given as ``None`` inherit the enclosing scope, so a helper deep in a
     mission task (the verifier, a memory distil) keeps the mission's
-    ``execution_id`` while naming its own ``request_type``.
+    ``execution_id`` while naming its own ``request_type``. ``inherit=False``
+    starts clean: F321 (night 9b) — a Playbook run Auto started from chat
+    inherited the chat's scope, so run exec-45d8ac862a79's 16 model calls were
+    booked as ``chat:dd0b6649…`` and its report said "LLM calls: 0".
     """
-    merged: Dict[str, Any] = dict(current_usage_scope())
+    merged: Dict[str, Any] = dict(current_usage_scope()) if inherit else {}
     for key, value in (
         ("request_type", request_type),
         ("execution_id", execution_id),
