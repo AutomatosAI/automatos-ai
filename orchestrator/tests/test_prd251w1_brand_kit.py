@@ -176,7 +176,8 @@ def test_an_old_kit_reads_with_the_new_fields_empty():
     for kit in (get_brand_kit({"brand_kit": stored}), get_brand_kit(None)):
         assert kit["heading_font"] == "" and kit["font_files"] == []
         assert kit["logo_mark_url"] == "" and kit["logo_mark_path"] == ""
-        assert kit["social_handles"] == {} and kit["voice"] == {"tone": [], "banned_phrases": []}
+        # The brand kit at generation (night 10 prep) adds the voice's sign-off, empty on an old kit.
+        assert kit["social_handles"] == {} and kit["voice"] == {"tone": [], "banned_phrases": [], "sign_off": ""}
     assert get_brand_kit({"brand_kit": stored})["primary_color"] == "#0055aa"
 
 
@@ -287,7 +288,7 @@ def test_banned_phrases_are_capped_and_the_voice_merges_key_by_key():
             validate_brand_kit({"voice": {"banned_phrases": [bad]}})
     # A patch naming only the banned phrases keeps the tone words.
     merged = validate_brand_kit({"voice": {"banned_phrases": ["game-changer", "Game-Changer"]}}, kit)
-    assert merged["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"]}
+    assert merged["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"], "sign_off": ""}
 
 
 def test_a_client_patch_cannot_point_the_kit_at_a_stored_file():
@@ -584,7 +585,7 @@ def test_the_put_saves_the_new_fields_and_keeps_the_stored_files(api):
     kit = response.json()
     assert kit["heading_font"] == '"Brand Display", serif' and kit["logo_mark_url"] == "https://cdn.example/mark.png"
     assert kit["social_handles"] == {"twitter": "acme", "linkedin": "acme-inc"}
-    assert kit["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"]}
+    assert kit["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"], "sign_off": ""}
     assert kit["font_files"] == [] and kit["logo_mark_path"] == ""
     # A refusal names the field and the rule (the detail serialises: no exception objects in it).
     for body, loc, rule in (

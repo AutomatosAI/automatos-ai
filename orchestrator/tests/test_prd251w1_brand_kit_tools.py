@@ -132,7 +132,7 @@ def test_the_get_tool_returns_what_the_rest_get_returns(api):
     assert kit["heading_font"] == STORED_KIT["heading_font"]
     assert kit["logo_mark_url"] == STORED_KIT["logo_mark_url"]
     assert kit["social_handles"] == STORED_KIT["social_handles"]
-    assert kit["voice"] == STORED_KIT["voice"]
+    assert kit["voice"] == {**STORED_KIT["voice"], "sign_off": ""}   # the sign-off (brand kit at generation): unset
     assert kit["font_files"] == [] and kit["logo_path"] == STORED_KIT["logo_path"]
 
 
@@ -234,7 +234,7 @@ def test_an_update_through_the_tool_is_what_get_returns_and_the_put_shares_its_w
     # A partial merge: company and voice merge key by key, the handles map is replaced,
     # and every field the change left out keeps its value.
     assert rest["company"] == {**brand_kit.CompanyContact().model_dump(), **STORED_KIT["company"], "phone": "+44 20 7946 0000"}
-    assert rest["voice"] == {"tone": STORED_KIT["voice"]["tone"], "banned_phrases": ["synergy"]}
+    assert rest["voice"] == {"tone": STORED_KIT["voice"]["tone"], "banned_phrases": ["synergy"], "sign_off": ""}
     assert rest["social_handles"] == {"twitter": "acme_hq", "instagram": "acme.studio"}
     for field in ("name", "tagline", "primary_color", "font_family", "heading_font", "logo_mark_url", "logo_path"):
         assert rest[field] == STORED_KIT[field], field

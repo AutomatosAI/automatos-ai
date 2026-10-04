@@ -223,6 +223,7 @@ describe('the basics', () => {
     fireEvent.change(within(card).getByLabelText('Instagram'), { target: { value: 'acme.studio' } })
     fireEvent.change(within(card).getByLabelText(/^Tone words/), { target: { value: 'warm, precise, Warm, curious, ' } })
     fireEvent.change(within(card).getByLabelText(/^Phrases the brand never uses/), { target: { value: 'game-changer\n\nsynergy' } })
+    fireEvent.change(within(card).getByLabelText(/^Sign-off/), { target: { value: 'Sam, Acme Coffee' } })
     fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
@@ -230,7 +231,11 @@ describe('the basics', () => {
     expect(path).toBe('/api/documents/brand-kit')
     expect(body.heading_font).toBe('"Brand Serif", Georgia, serif')
     expect(body.social_handles).toEqual({ linkedin: 'acme-inc', twitter: 'acme', instagram: 'acme.studio' })
-    expect(body.voice).toEqual({ tone: ['warm', 'precise', 'curious'], banned_phrases: ['game-changer', 'synergy'] })
+    expect(body.voice).toEqual({
+      tone: ['warm', 'precise', 'curious'],
+      banned_phrases: ['game-changer', 'synergy'],
+      sign_off: 'Sam, Acme Coffee',
+    })
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Brand kit saved'))
   })
 

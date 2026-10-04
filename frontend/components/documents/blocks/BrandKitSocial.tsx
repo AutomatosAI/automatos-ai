@@ -3,8 +3,9 @@
 // The brand kit's social handles and voice (PRD-251 D5, S1.3). A handle is kept per
 // Composio toolkit and checked by the server against that network's rule
 // (modules/documents/brand_kit.py HANDLE_RULES). The voice is three to five tone
-// words, or none, and the phrases the brand never uses: the agents that draft its
-// posts read both.
+// words, or none, the phrases the brand never uses, and who signs: the agents that
+// draft its posts, emails and documents read them, and the platform fills a
+// "[Your name]" left in a draft with the sign-off (orchestrator/services/brand_rules.py).
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -124,6 +125,15 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
             setPhrasesText(e.target.value)
             onVoiceChange({ ...voice, banned_phrases: parseList(e.target.value, /\n/) })
           }}
+        />
+        <Label htmlFor="brand-voice-sign-off" className="mt-3 block text-xs">
+          Sign-off (who signs emails and letters)
+        </Label>
+        <Input
+          id="brand-voice-sign-off"
+          value={voice.sign_off ?? ''}
+          placeholder="Sam, Acme Coffee"
+          onChange={(e) => onVoiceChange({ ...voice, sign_off: e.target.value })}
         />
       </div>
     </>
