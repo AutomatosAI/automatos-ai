@@ -1,0 +1,111 @@
+"""How the tool loop nudges a reply, and what it keeps when a nudge gets nothing back.
+
+F295 (night 8): eight agent runs failed "Task execution failed after 2 attempts:
+Empty response from LLM" (#0207 twice, #0233, #0245 twice, #0260 twice, #0273), on
+three claude-sonnet-4 agents over OpenRouter. Each first reply was a real answer
+(107 to 860 tokens) that the loop took for narrated actions or for a claim with no
+action behind it, and nudged. The nudge went as a system message after the model's
+own reply. OpenRouter folds system messages into Anthropic's system prompt, so the
+conversation the model saw ended on its own reply, and it added nothing: every one
+of the 16 nudged retries came back with 3 tokens (llm_usage), each after a 502
+"Server tool openrouter:web_search failed: upstream returned an invalid response"
+that F264 sent again without the search. The empty retry replaced the answer. All
+27 such 502s of the night came before a 2- or 3-token reply; the three sonnet nudges
+that got a real reply had none.
+
+Now a nudge is the user's turn, so the conversation ends on it on every route, and
+a nudge that still gets an empty reply leaves the reply it was about standing.
+
+F297 (night 8): when the reply straight after a round of tool calls is empty, the
+run is asked once for its answer (``MISSING_ANSWER_MSG``). It used to end on its
+tool results, which became the card's answer ("Based on the tool results:
+**workspace_write_file**: {…}" on #0234; #0408.3's step wrote its notes into the
+mission field, then answered with 2 tokens).
+
+Stdlib only, like the loop.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+Messages = List[Dict[str, Any]]
+LLMCall = Callable[[Messages, Optional[List[Dict[str, Any]]]], Awaitable[Any]]
+
+NARRATION_RECOVERY_MSG = (
+    "Your previous reply described actions (\"let me create…\", \"now let me "
+    "assign…\", \"both created\") but made NO tool call, so nothing was executed "
+    "and nothing you reported exists. Either call the tools now, in this "
+    "response, or state plainly that you did not do it and what you need. "
+    "Never describe an action as done without a tool result, and never "
+    "invent ids, models or statuses."
+)
+# F099 (night 3): a reply that names a tool as its source when no tool ran in
+# this turn is repeating something from memory — an earlier conversation's
+# answer, labelled as if it were a fresh search.
+UNRUN_SOURCE_RECOVERY_MSG = (
+    "Your previous reply gives {tool} as its source, but no tool ran in this "
+    "turn: what you wrote came from memory of an earlier conversation and may "
+    "be out of date. Call {tool} now, in this response, or say plainly that the "
+    "answer is from an earlier conversation and was not searched again."
+)
+# F108 (night 3): "I've approved the mission. It's now running" — it wasn't.
+CLAIMED_ACTION_RECOVERY_MSG = (
+    "Your previous reply says something was {claim}, but no tool call in this turn "
+    "did that, so it has not happened. Make the call now, in this response, or say "
+    "plainly that it has not been done and what you need. Never report an action "
+    "as done without a tool result."
+)
+MISSING_ANSWER_MSG = (
+    "Your tool calls have run and their results are above, but your reply had no "
+    "answer in it. Write your answer now: the finished work itself (the email, the "
+    "table, the text, the figures), not a description of what you did or of the tools "
+    "you used. If you saved the work to a file, put the work itself in your answer too."
+)
+
+
+class Nudge(dict):
+    """A message the loop wrote in the user's turn. It is sent as any user message
+    is; the chat reads past it when it looks for the owner's own words."""
+
+
+def nudge(text: str) -> Nudge:
+    """A nudge, as the user's turn: the conversation ends on it, so the model answers it."""
+    return Nudge(role="user", content=text)
+
+
+def is_nudge(message: Any) -> bool:
+    """A user message the loop wrote, not the person."""
+    return isinstance(message, Nudge)
+
+
+def blank(response: Any) -> bool:
+    """A reply with no tool call and no words."""
+    return not getattr(response, "tool_calls", None) and not (getattr(response, "content", "") or "").strip()
+
+
+def kept_if_blank(nudged: Any, retry: Any) -> Any:
+    """The retry a nudge got, unless it came back empty: then the reply it nudged stands."""
+    if blank(retry) and not blank(nudged):
+        logger.warning("[tool-loop] the nudge got an empty reply — keeping the reply it was about")
+        return nudged
+    return retry
+
+
+def after_tool_results(messages: Messages) -> bool:
+    """The conversation's last turn is a round of tool results."""
+    return bool(messages) and messages[-1].get("role") == "tool"
+
+
+async def ask_for_the_answer(llm: LLMCall, messages: Messages, tools: Optional[List[Dict[str, Any]]]) -> Any:
+    """F297: the reply straight after a round of tool calls had nothing in it. Asked
+    once for the answer itself, through ``llm`` (the loop's callback). None when the
+    reply did not follow tool results, or the answer is still empty."""
+    if not after_tool_results(messages):
+        return None
+    logger.warning("[tool-loop] the reply after the tool calls was empty — asking once for the answer")
+    messages.append(nudge(MISSING_ANSWER_MSG))
+    retry = await llm(messages, tools)
+    return None if blank(retry) else retry

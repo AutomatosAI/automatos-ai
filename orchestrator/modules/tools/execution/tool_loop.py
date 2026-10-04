@@ -30,6 +30,9 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .action_claims import claimed_action_not_done
+from .nudges import CLAIMED_ACTION_RECOVERY_MSG as _CLAIMED_ACTION_RECOVERY_MSG, ask_for_the_answer
+from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, kept_if_blank as _kept_if_blank
+from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG, nudge as _nudge
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 
@@ -593,8 +596,8 @@ class ToolLoopExecutor:
         else:
             return await self._recover_claimed_action(current, messages, tools) or current
         messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "system", "content": nudge})
-        return await self._llm(messages, tools)
+        messages.append(_nudge(nudge))
+        return _kept_if_blank(current, await self._llm(messages, tools))
 
     async def _recover_claimed_action(
         self,
@@ -604,49 +607,28 @@ class ToolLoopExecutor:
     ) -> Optional[LLMResponse]:
         """F108: retry once when a reply without a tool call says an action was
         done and no action that does it succeeded this turn. The claim stays in
-        the history; the nudge says it has not happened. None when there is
-        nothing to recover."""
+        the history; the nudge says it has not happened. F297: an empty reply
+        straight after a round of tool calls is asked once for its answer. None
+        when there is nothing to recover."""
         if not tools or _has_tool_calls(current):
             return None
         text = getattr(current, "content", "") or ""
+        if not text.strip():  # F297: nothing in it straight after a round of tool calls
+            return await ask_for_the_answer(self._llm, messages, tools)
         claim = claimed_action_not_done(text, self.tracker.succeeded, promises=self.promises)
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
         messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "system", "content": _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)})
-        return await self._llm(messages, tools)
+        messages.append(_nudge(_CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)))
+        return _kept_if_blank(current, await self._llm(messages, tools))
 
 
 # ---------------------------------------------------------------------------
 # Helpers — pure, stdlib only.
 # ---------------------------------------------------------------------------
 
-_NARRATION_RECOVERY_MSG = (
-    "Your previous reply described actions (\"let me create…\", \"now let me "
-    "assign…\", \"both created\") but made NO tool call, so nothing was executed "
-    "and nothing you reported exists. Either call the tools now, in this "
-    "response, or state plainly that you did not do it and what you need. "
-    "Never describe an action as done without a tool result, and never "
-    "invent ids, models or statuses."
-)
-
-# F099 (night 3): a reply that names a tool as its source when no tool ran in
-# this turn is repeating something from memory — an earlier conversation's
-# answer, labelled as if it were a fresh search.
-_UNRUN_SOURCE_RECOVERY_MSG = (
-    "Your previous reply gives {tool} as its source, but no tool ran in this "
-    "turn: what you wrote came from memory of an earlier conversation and may "
-    "be out of date. Call {tool} now, in this response, or say plainly that the "
-    "answer is from an earlier conversation and was not searched again."
-)
-# F108 (night 3): "I've approved the mission. It's now running" — it wasn't.
-_CLAIMED_ACTION_RECOVERY_MSG = (
-    "Your previous reply says something was {claim}, but no tool call in this turn "
-    "did that, so it has not happened. Make the call now, in this response, or say "
-    "plainly that it has not been done and what you need. Never report an action "
-    "as done without a tool result."
-)
+# The nudges themselves (F099, F108, the narration rule) are in nudges.py (F295).
 UNRUN_SOURCE_NOTICE = (
     "No search ran for this reply — it gives {tool} as its source, but repeats an "
     "earlier answer that may be out of date. Ask me to search again."

@@ -118,10 +118,11 @@ def test_narrated_first_reply_is_nudged_once_and_the_retry_runs_the_tool():
     assert tools_cb.executed and tools_cb.executed[0][0] == "platform_create_agent"
     assert result.iterations == 1
     assert result.response.content == "OPS created (id 265)."
-    # the retry saw its own narration followed by the rule
+    # the retry saw its own narration followed by the rule, as the user's turn (F295: a
+    # system message there was moved into Anthropic's system prompt, ending the talk on the reply)
     retry_messages = model.calls[0][0]
     assert retry_messages[-2] == {"role": "assistant", "content": NARRATED_1930}
-    assert retry_messages[-1] == {"role": "system", "content": _NARRATION_RECOVERY_MSG}
+    assert retry_messages[-1] == {"role": "user", "content": _NARRATION_RECOVERY_MSG}
     assert model.calls[0][1] == [TOOL]  # tools offered again on the retry
 
 
