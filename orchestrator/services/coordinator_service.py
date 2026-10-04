@@ -55,14 +55,16 @@ from modules.coordination.agent_matcher import AgentMatcher, build_match_annotat
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.mission_ends import says_what_it_completed
 from modules.coordination.mission_retry import replaces_what_the_failure_skipped, retries_a_failed_mission
+from modules.coordination.step_inputs import (  # F286 (night 8): a summary's inputs
+    a_summary_keeps_its_approved_inputs, with_the_missions_earlier_steps,
+)
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
     PlanValidationError,
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
-from modules.coordination.step_inputs import a_summary_keeps_its_approved_inputs, builds_on_whole_results
-from modules.coordination.step_inputs import with_the_missions_earlier_steps
+from modules.coordination.step_inputs import builds_on_whole_results
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
