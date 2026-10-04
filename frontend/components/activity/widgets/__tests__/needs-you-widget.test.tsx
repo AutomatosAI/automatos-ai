@@ -71,7 +71,7 @@ describe('NeedsYouWidget', () => {
         { source: 'grant', id: '11', title: 'Send the price list', ticket_id: 760, agent_name: null, at: null },
         { source: 'mission', id: 'm1', title: 'Ship the invoice run', ticket_id: null, agent_name: null, at: null },
       ],
-      failed: [{ ticket_id: 771, title: 'Launch the autumn blend', agent_name: null, mission_id: 'run-9', at: null }],
+      failed: [{ ticket_id: 771, title: 'Launch the autumn blend', agent_name: null, mission_id: 'run-9', opens: 'mission', at: null }],
     })
     render(<NeedsYouWidget />)
     const href = (text: string) => screen.getByText(text).closest('a')?.getAttribute('href')
@@ -88,7 +88,7 @@ describe('NeedsYouWidget', () => {
     query.data = waiting({
       stuck: [
         // F274: a step whose mission ended carries the mission, and opens it (the board runs no mission's step).
-        { ticket_id: 1408, number: '#0176.9', title: 'Send the café letters', agent_name: 'Content Creator', mission_id: 'run-176', mission_number: '#0176', mission_title: 'Mission: café letters', at: null, why: 'mission_ended' },
+        { ticket_id: 1408, number: '#0176.9', title: 'Send the café letters', agent_name: 'Content Creator', mission_id: 'run-176', mission_number: '#0176', mission_title: 'Mission: café letters', opens: 'mission', at: null, why: 'mission_ended' },
         { ticket_id: 1290, number: '#0161', title: 'Cash-up check', agent_name: 'Numbers (on my Mac)', mission_id: null, at: null, why: 'no_host' },
         { ticket_id: 1203, number: '#0067', title: 'Order oat milk', agent_name: null, mission_id: null, at: null, why: 'no_agent' },
         { ticket_id: 1380, number: '#0149', title: 'Weekly posts', agent_name: 'Social', mission_id: null, at: null, why: 'not_picked_up' },
@@ -128,7 +128,7 @@ describe('NeedsYouWidget', () => {
   it('lists the steps an ended mission left open as one row that opens the mission (F274)', () => {
     const step = (ticket_id: number, number: string, title: string) => ({
       ticket_id, number, title, agent_name: 'Content Creator', mission_id: 'run-176', mission_number: '#0176',
-      mission_title: 'Mission: Guji launch', at: null, why: 'mission_ended' as const,
+      mission_title: 'Mission: Guji launch', opens: 'mission' as const, at: null, why: 'mission_ended' as const,
     })
     query.data = waiting({
       stuck: [
@@ -136,7 +136,7 @@ describe('NeedsYouWidget', () => {
         step(1409, '#0176.10', 'Draft the club email'),
         { ticket_id: 1290, number: '#0161', title: 'Cash-up check', agent_name: null, mission_id: null, at: null, why: 'no_host' },
       ],
-      failed: [{ ticket_id: 1399, number: '#0176', title: 'Mission: Guji launch', agent_name: null, mission_id: 'run-176', at: null }],
+      failed: [{ ticket_id: 1399, number: '#0176', title: 'Mission: Guji launch', agent_name: null, mission_id: 'run-176', opens: 'mission' as const, at: null }],
     })
     render(<NeedsYouWidget />)
     expect(screen.getByText('Stuck · 4')).toBeInTheDocument()                     // each step still counts
@@ -146,6 +146,37 @@ describe('NeedsYouWidget', () => {
     expect(mission).toHaveAttribute('href', '/missions/run-176')
     expect(mission).toHaveTextContent('3 steps left open when it ended: #0176.9, #0176.10, #0176.11')
     expect(stuck.getAllByRole('link').filter((a) => !/→$/.test(a.textContent ?? ''))).toHaveLength(2)   // the mission, #0161
+  })
+
+  it("names a step's mission but opens the step, where it is checked (F293)", () => {
+    query.data = waiting({
+      review: [{
+        ticket_id: 1636, number: '#0324.1', title: 'Margin on the Rwanda', agent_name: 'Analyst', mission_id: 'run-324',
+        mission_number: '#0324', mission_title: 'Mission: Rwanda launch', opens: 'ticket', at: null,
+      }],
+    })
+    render(<NeedsYouWidget />)
+    expect(screen.getByText('#0324.1 · Margin on the Rwanda').closest('a')).toHaveAttribute('href', '/command-center?tab=board&task_id=1636')
+  })
+
+  it('lists a failed step and a paused mission as stuck, each opening its mission (F293)', () => {
+    query.data = waiting({
+      stuck: [
+        { ticket_id: 1676, number: '#0352.2', title: 'Welcome email', agent_name: 'Content Creator', mission_id: 'run-352',
+          mission_number: '#0352', mission_title: 'Mission: new café', opens: 'mission', at: null, why: 'step_failed' },
+        { ticket_id: 1681, number: '#0356', title: 'Mission: January club box', agent_name: null, mission_id: 'run-356',
+          mission_number: '#0356', mission_title: 'Mission: January club box', opens: 'mission', at: null, why: 'over_budget' },
+        { ticket_id: 1838, number: '#0458', title: 'Mission: Christmas list', agent_name: null, mission_id: 'run-458',
+          mission_number: '#0458', mission_title: 'Mission: Christmas list', opens: 'mission', at: null, why: 'out_of_credit' },
+      ],
+    })
+    render(<NeedsYouWidget />)
+    const row = (title: string) => screen.getByText(title).closest('a') as HTMLElement
+    expect(row('#0352.2 · Welcome email')).toHaveAttribute('href', '/missions/run-352')
+    expect(row('#0352.2 · Welcome email')).toHaveTextContent("It failed its mission's check, and the mission waits")
+    expect(row('#0356 · Mission: January club box')).toHaveAttribute('href', '/missions/run-356')
+    expect(row('#0356 · Mission: January club box')).toHaveTextContent('Paused at its budget: raise it or resume')
+    expect(row('#0458 · Mission: Christmas list')).toHaveTextContent('Paused: the AI credit ran out. Top up, then resume')
   })
 
   it('says how many more a family has than it lists', () => {
