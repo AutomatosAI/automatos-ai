@@ -127,7 +127,9 @@ def test_an_empty_answer_after_a_claim_with_no_call_says_nothing_changed():
 
 
 def test_an_agent_runs_empty_answer_is_left_to_its_run():
-    result = _loop_turn(LANE_BOARD_TASK, LLMResponse(content="", tool_calls=[_move(231, "done")]), "")
+    """No account for an agent's run. FIXER's F297 asks it once for its answer (the second
+    empty reply); what then comes back empty is the run's to handle."""
+    result = _loop_turn(LANE_BOARD_TASK, LLMResponse(content="", tool_calls=[_move(231, "done")]), "", "")
     assert result.response.content == ""
 
 

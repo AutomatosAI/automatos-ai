@@ -77,7 +77,7 @@ def _already_waiting(db: Session, workspace_id: Any, goal: str) -> Optional[str]
                                                   OrchestrationRun.state.in_(WAITING),
                                                   OrchestrationRun.created_at >= since)
                 .order_by(OrchestrationRun.created_at.desc()).all()):
-        if share_of_words(goal, [run.goal or ""]) >= SAME_GOAL:
+        if share_of_words(goal, [getattr(run, "goal", None) or ""]) >= SAME_GOAL:
             minutes = max(1, int((datetime.now(timezone.utc) - _aware(run.created_at)).total_seconds() // 60))
             return ALREADY_WAITING.format(number=_card_number(db, workspace_id, run) or str(run.id),
                                           goal=_short(run.goal), minutes=minutes)

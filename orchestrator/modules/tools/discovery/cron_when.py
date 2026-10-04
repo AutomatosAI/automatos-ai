@@ -64,4 +64,22 @@ def _plain_days(weekday: str) -> Optional[str]:
     return " and ".join(_DAY_NAME[d] for d in sorted(names, key=_DAY_ORDER.index))
 
 
-__all__ = ["plain_cron"]
+CRON_FIELDS = 5
+NEEDS_A_TIME = ("A new timer needs a time: send cron_expression, written from the owner's words (every weekday "
+                "at 9 is \"0 9 * * 1-5\"). To switch a timer off or back on, send enabled alone.")
+
+
+def cron_refusal(cron_expression: Optional[str]) -> Optional[dict]:
+    """Why a new timer's cron can't be set (none given, or not five fields), or None.
+    F290 (night 8): switching a timer off or on needs no cron, so the schema doesn't
+    require one; only a new timer does, and this says so."""
+    if not cron_expression:
+        return {"success": False, "error": NEEDS_A_TIME}
+    parts = cron_expression.strip().split()
+    if len(parts) != CRON_FIELDS:
+        return {"success": False, "error": f"Invalid cron expression: expected 5 fields, got {len(parts)}. "
+                                           "Format: minute hour day_of_month month day_of_week"}
+    return None
+
+
+__all__ = ["NEEDS_A_TIME", "cron_refusal", "plain_cron"]

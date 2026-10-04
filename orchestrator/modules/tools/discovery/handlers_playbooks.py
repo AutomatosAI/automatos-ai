@@ -586,18 +586,15 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
 async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Set a cron schedule on a playbook so it runs automatically."""
     from core.models.core import WorkflowTemplate
+    from modules.tools.discovery.cron_when import cron_refusal
 
     playbook_id = params.get("playbook_id")
     playbook_name = params.get("playbook_name")
     cron_expression = params.get("cron_expression")
 
-    if not cron_expression:
-        return {"success": False, "error": "Missing required parameter: cron_expression"}
-
-    # Validate cron expression
-    parts = cron_expression.strip().split()
-    if len(parts) != 5:
-        return {"success": False, "error": f"Invalid cron expression: expected 5 fields, got {len(parts)}. Format: minute hour day_of_month month day_of_week"}
+    refused = cron_refusal(cron_expression)  # F290: only a new timer needs a cron
+    if refused:
+        return refused
 
     # Resolve playbook
     query = db.query(WorkflowTemplate).filter(
