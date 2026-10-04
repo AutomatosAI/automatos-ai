@@ -1094,10 +1094,11 @@ def mission_runs_it(db: Session, task: Any) -> Optional[str]:
         run_id = None
     goal = (run.goal or "").strip()[:GOAL_ON_A_REFUSAL_CHARS] if run is not None else ""
     what = "the mission" if task.source_type == "orchestration" else "a step of the mission"
+    from services.run_redo import BOARD_REDO  # F284 (night 8): a step's redo names a button that exists
+    act = BOARD_REDO.get(task.source_type, "Retry or change it from the mission")
     return (
         f"{ticket_label(task, ticket_number(db, task), capital=True)} is {what}{f' “{goal}”' if goal else ''}: "
-        "the mission runs its steps, "
-        f"not the board. Retry or change it from the mission"
+        f"the mission runs its steps, not the board. {act}"
         f"{f' (/missions/{run_id})' if run_id is not None else ''}."
     )
 

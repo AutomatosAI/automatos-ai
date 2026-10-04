@@ -292,18 +292,21 @@ DONE_TASK_STATES: frozenset[TaskState] = frozenset(
 
 ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PENDING: frozenset({TaskState.QUEUED, TaskState.SKIPPED}),
-    TaskState.QUEUED: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
+    TaskState.QUEUED: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED, TaskState.PENDING}),  # F286, below
     TaskState.ASSIGNED: frozenset({TaskState.RUNNING, TaskState.STALLED, TaskState.SKIPPED}),
     TaskState.RUNNING: frozenset({TaskState.COMPLETED, TaskState.STALLED, TaskState.FAILED, TaskState.SKIPPED, TaskState.QUEUED}),
-    TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
-    TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
-    TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # human rejection re-queues for retry
+    # F286 (night 8): a step built from one the owner sent back waits for that redo, then runs
+    # again (modules/coordination/redo_dependents), from QUEUED, COMPLETED, VERIFYING, VERIFIED or RETRYING
+    TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED, TaskState.PENDING}),
+    TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED,
+                                    TaskState.PENDING}),
+    TaskState.VERIFIED: frozenset({TaskState.RETRYING, TaskState.PENDING}),  # human rejection re-queues for retry
     # skip during replan; F247: a retried mission's failed step waits to run again
     TaskState.FAILED: frozenset({TaskState.SKIPPED, TaskState.PENDING}),
     # F268: a retried mission's step skipped for a failed one waits to run again
     TaskState.SKIPPED: frozenset({TaskState.PENDING}),
     TaskState.STALLED: frozenset({TaskState.QUEUED, TaskState.ASSIGNED, TaskState.SKIPPED}),
-    TaskState.RETRYING: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
+    TaskState.RETRYING: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED, TaskState.PENDING}),
 }
 
 ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
@@ -313,9 +316,12 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     RunState.RUNNING: frozenset({RunState.PAUSED, RunState.REPLANNING, RunState.VERIFYING, RunState.FAILED, RunState.CANCELLED}),
     RunState.PAUSED: frozenset({RunState.RUNNING, RunState.CANCELLED}),
     RunState.REPLANNING: frozenset({RunState.RUNNING, RunState.FAILED}),
-    RunState.VERIFYING: frozenset({RunState.COMPLETED, RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED}),
+    # F284 (night 8): a step the owner sends back opens a mission that finished (or stopped while
+    # verifying) again, and it runs (services/mission_reopen); a cancelled one never does
+    RunState.VERIFYING: frozenset({RunState.COMPLETED, RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED,
+                                   RunState.RUNNING}),
     RunState.AWAITING_HUMAN: frozenset({RunState.COMPLETED, RunState.RUNNING, RunState.CANCELLED}),
-    RunState.COMPLETED: frozenset(),   # terminal
+    RunState.COMPLETED: frozenset({RunState.RUNNING}),
     # replannable (PRD-82B US-005); F247: a retry pauses it, and Resume runs it again
     RunState.FAILED: frozenset({RunState.REPLANNING, RunState.PAUSED}),
     RunState.CANCELLED: frozenset(),   # terminal

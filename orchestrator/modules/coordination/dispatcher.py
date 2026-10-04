@@ -53,6 +53,7 @@ from services.orchestration_state import (
     transition_run,
     transition_task,
 )
+from modules.coordination.redo_dependents import runs_again_after_a_redo
 
 logger = logging.getLogger(__name__)
 
@@ -820,6 +821,7 @@ class MissionDispatcher:
         ]
 
     @staticmethod
+    @runs_again_after_a_redo  # F286 (night 8): a run built from a step sent back meanwhile runs again
     @pauses_when_credit_runs_out  # F247: a step stopped by the credit pauses its mission, attempt unspent
     def record_task_completion(
         db: Session,
