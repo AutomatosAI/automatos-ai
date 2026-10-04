@@ -171,3 +171,13 @@ def test_a_timer_set_never_backs_a_run_said_to_have_started(said):
     assert claimed_action_not_done(said, tracker.succeeded) == "started"
     tracker.record_outcome("platform_execute_playbook", {"playbook_id": 115}, {"success": True})
     assert claimed_action_not_done(said, tracker.succeeded) is None             # a run that started backs it
+
+
+def test_the_tool_no_longer_tells_auto_a_step_may_go_without_an_agent():
+    from modules.tools.discovery import get_action_registry
+
+    tool = get_action_registry().get("platform_add_playbook_step")
+    agent_id = tool.parameters["properties"]["agent_id"]["description"]
+
+    assert "default agent if not set" not in agent_id and "no default agent" in agent_id
+    assert tool.parameters["properties"]["agent_name"]["type"] == "string"
