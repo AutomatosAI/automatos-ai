@@ -120,3 +120,14 @@ def test_autos_short_chat_prompt_checks_the_owners_facts_but_a_visitors_does_not
 
     assert AUTO_CHECKS in owners and AUTO_LOOKS_IT_UP in owners
     assert AUTO_CHECKS not in visitors
+
+
+def test_auto_reads_a_document_by_the_file_name_a_search_showed():
+    """F327: platform_read_document fetched the wrong document by id (ca9d92d2)."""
+    from consumers.chatbot.atom_prompt import atom_system_prompt
+    from consumers.chatbot.personality import AutomatosPersonality
+
+    rule = "I pass platform_read_document the file name a search result showed"
+    owners = atom_system_prompt(NS(name="Auto", description="", persona=None), identity="", memory_block="",
+                                facts="## Automatos itself\nLocal edition.")
+    assert rule in AutomatosPersonality.get_anti_patterns() and rule in owners

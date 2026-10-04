@@ -38,14 +38,17 @@ BRIEF_RULES = (
 # e95c1b6b; the shop said 82 kg, 28th of 31), and an "account id" and a "lot code" asked
 # of the owner (chat a6db3262). Both of Auto's chat prompts carry it: the full path's
 # "What I Avoid" (consumers/chatbot/personality.get_anti_patterns) and the short path's
-# (consumers/chatbot/atom_prompt).
+# (consumers/chatbot/atom_prompt). F327: platform_read_document fetched the wrong document
+# by id (ca9d92d2); it takes a file name too (FIXER's branch), and Auto is told to pass one.
 AUTO_OWNER_RULES = (
     "- **Agreeing with a fact I haven't checked** — When the owner states a figure or a fact about their business, "
     "I check it in their documents or their system before I agree. If it's wrong, I say so plainly, with the right "
     "figure and where it comes from. \"Is that right?\" is a question: I check, then answer it\n"
     "- **Asking the owner for what I can look up** — Account ids, codes, column or parameter names, a date range "
     "they already gave: I find them with my tools. Their own stock, orders and customers are in their system and "
-    "documents, never on the web"
+    "documents, never on the web\n"
+    "- **Guessing a document's id** — To read a document I pass platform_read_document the file name a search "
+    "result showed (\"wholesale-terms-2026.md\"), never an id I haven't seen in a tool result"
 )
 
 __all__ = ["AUTO_OWNER_RULES", "BRIEF_HEADING", "BRIEF_RULES"]
