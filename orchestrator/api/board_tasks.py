@@ -141,6 +141,16 @@ _PRIORITY_SLA_HOURS = PRIORITY_SLA_HOURS
 
 
 # ── Auto-report creation (mirrors heartbeat_service._auto_create_report) ───
+TASK_REPORT_TYPE = "task"
+HEARTBEAT_REPORT_TYPE = "heartbeat"  # the view classes it as a heartbeat (outputs_heartbeat_reports)
+HEARTBEAT_SOURCE = "heartbeat"
+
+
+def report_type_for(task: Any) -> str:
+    """A heartbeat ticket's report is a heartbeat report, so the feed hides it like the rest."""
+    return HEARTBEAT_REPORT_TYPE if getattr(task, "source_type", None) == HEARTBEAT_SOURCE else TASK_REPORT_TYPE
+
+
 async def _auto_create_task_report(
     db: Session,
     workspace_id: str,
@@ -253,7 +263,7 @@ async def _auto_create_task_report(
             agent_name=agent_name,
             title=f"Task: {task.title}",
             content=content,
-            report_type="task",
+            report_type=report_type_for(task),
             status=report_status,
             summary=summary,
             metrics=exec_metrics,
