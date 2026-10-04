@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.board_waiting import failed_cards, with_whats_waiting
 from services.ticket_refs import by_ticket_number
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,7 @@ BOARD_SNAPSHOT_TASK_LIMIT = 200
 BOARD_SNAPSHOT_RECENT = 10
 
 
+@with_whats_waiting  # F263: what waits for the owner, as the board's Needs you lists it
 @by_ticket_number  # PRD-252 R4: each ticket listed with its number
 async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Everything a status answer needs, in ONE call.
@@ -308,8 +310,10 @@ async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]
     return snapshot
 
 
+@with_whats_waiting  # F263: what waits for the owner, as the board's Needs you lists it
 async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get a summary of the task board: counts, busiest agents, failures."""
+    """Get a summary of the task board: counts, busiest agents, the cards failed now
+    (F263: by their status, not by an error they once had)."""
     from core.models.core import BoardTask
     from core.models import Agent
 
@@ -321,15 +325,12 @@ async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any])
     by_status: Dict[str, int] = {}
     by_priority: Dict[str, int] = {}
     agent_task_counts: Dict[int, int] = {}
-    failed_tasks = []
 
     for t in all_tasks:
         by_status[t.status] = by_status.get(t.status, 0) + 1
         by_priority[t.priority] = by_priority.get(t.priority, 0) + 1
         if t.assigned_agent_id:
             agent_task_counts[t.assigned_agent_id] = agent_task_counts.get(t.assigned_agent_id, 0) + 1
-        if t.error_message:
-            failed_tasks.append({"id": t.id, "title": t.title, "error": t.error_message[:200]})
 
     # Resolve agent names for busiest
     busiest_agents = []
@@ -357,5 +358,5 @@ async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any])
         "by_status": by_status,
         "by_priority": by_priority,
         "busiest_agents": busiest_agents,
-        "failed_tasks": failed_tasks[:5],
+        "failed_tasks": failed_cards(db, workspace_id, all_tasks),
     }

@@ -89,6 +89,9 @@ class ToolExecutionTracker:
         self.succeeded: Set[str] = set()
         # F205: the actions that answered with a failure this turn.
         self.failed: Set[str] = set()
+        # F264: each call's action, parameters and result, in order: what the owner is
+        # told was done when the answer comes back empty (turn_account).
+        self.outcomes: List[Tuple[str, Dict[str, Any], Any]] = []
         # F120: how many queries per search tool came from EARLIER model responses;
         # None until a caller marks rounds (then every earlier query counts).
         self._round_start: Optional[Dict[str, int]] = None
@@ -182,12 +185,18 @@ class ToolExecutionTracker:
     def record_outcome(self, tool_name: str, tool_args: Dict[str, Any], result: Any) -> None:
         """F108: record an action that succeeded — the inner action for the
         platform_execute dispatcher. A result that says it failed
-        (``success: False``, Composio's ``successful: False``) is not recorded."""
+        (``success: False``, Composio's ``successful: False``) is not recorded.
+        F261 (night 8): a call whose name does not say what it did is recorded
+        with what it did too (``call_effects``: a card moved to done approves it)."""
+        from .call_effects import call_effects, call_params
+
         action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+        self.outcomes.append((action, call_params(tool_name, tool_args), result))
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
             self.failed.add(action)
             return
         self.succeeded.add(action)
+        self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

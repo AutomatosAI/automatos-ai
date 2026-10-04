@@ -16,9 +16,20 @@ was saved as the answer, and the next turn read it as fact. The reply at
   in a sentence about tasks or the board; "Task ID 1100", "agent ID 102" or
   "Playbook ID 101"; and a run token (exec-, cron- or rerun- plus 12 hex
   digits).
-- Tier 3: a claim no successful action backs when tools did run (F108's nudge
-  already acts there), and a passive claim ("has been assigned"), is only
+- Tier 3: a passive claim ("has been assigned") that no family reads is only
   logged, so the families can be tuned night by night.
+
+F261 (night 8): a claim no successful action backs when tools did run was only
+logged too. "I've cancelled Mission #0365" sat beside a playbook run, the owner
+found #0365 still waiting, and nothing in the reply said so. F108's nudge acts
+first; a reply that still claims after it is now corrected too, naming what it
+claimed.
+
+F264 (night 8): "#0226", "#0302", "#0386" are the board's numbers for its cards,
+and the id check read them as ids. Task 226 was no card of this workspace, so a
+right reply was re-prompted, the retry came back empty, and the owner got "I
+apologize, but I encountered an issue" after the work was done. A '#' number
+that is a card's number in the workspace exists.
 """
 from __future__ import annotations
 
@@ -30,6 +41,8 @@ from typing import Dict, List, Optional, Set, Tuple
 logger = logging.getLogger(__name__)
 
 NOTHING_DONE = "Correction: nothing was done yet — no action ran. Ask me to do it and check the board after."
+NOT_DONE = ("Correction: this reply says something was {claim}, but no action in it did that, so it has not "
+            "happened. Ask me to do it and check the board after.")
 NO_SUCH_ID = "Correction: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
     "Your previous reply names {ids}, which {verb} not exist in this workspace. Look it up now with a tool "
@@ -95,6 +108,7 @@ def existing_ids(workspace_id: str, named: List[Tuple[str, str]]) -> Set[Tuple[s
     try:
         # A platform agent or a marketplace playbook has no workspace and still exists.
         numbered = {"task": (BoardTask, False), "agent": (Agent, True), "playbook": (WorkflowTemplate, True)}
+        found.update(_card_numbers(db, ws, wanted.get("task") or []))
         for kind, (model, shared) in numbered.items():
             if wanted.get(kind):
                 owned = or_(model.workspace_id == ws, model.workspace_id.is_(None)) if shared \
@@ -108,6 +122,18 @@ def existing_ids(workspace_id: str, named: List[Tuple[str, str]]) -> Set[Tuple[s
     finally:
         db.close()
     return found
+
+
+def _card_numbers(db, workspace_id: str, values: List[str]) -> Set[Tuple[str, str]]:
+    """The values that are a card's number on this workspace's board (#0226: workspace_seq 226)."""
+    from core.models import BoardTask
+
+    seqs = {int(v): v for v in values}
+    if not seqs:
+        return set()
+    rows = db.query(BoardTask.workspace_seq).filter(BoardTask.workspace_id == workspace_id,
+                                                    BoardTask.workspace_seq.in_(list(seqs))).all()
+    return {("task", seqs[row[0]]) for row in rows}
 
 
 def invented_ids(text: str, owner_text: str, workspace_id: str) -> List[Tuple[str, str]]:
@@ -153,8 +179,8 @@ class Verdict:
     @property
     def correction(self) -> Optional[str]:
         lines = []
-        if self.claim and self.tools == 0:
-            lines.append(NOTHING_DONE)
+        if self.claim:
+            lines.append(NOTHING_DONE if self.tools == 0 else NOT_DONE.format(claim=self.claim))
         if self.ids:
             one = len(self.ids) == 1
             lines.append(NO_SUCH_ID.format(ids=_listed(self.ids), verb="does" if one else "do",
@@ -164,7 +190,7 @@ class Verdict:
     def log(self, reply_id: object) -> None:
         """One [F187] line per finding, for night-by-night tuning."""
         if self.claim:
-            tier, action = (1, "corrected") if self.tools == 0 else (3, "logged")
+            tier, action = (1, "corrected") if self.tools == 0 else (3, "corrected")
             logger.warning(f"[F187] tier={tier} family={self.claim} tools={self.tools} reply={reply_id} "
                            f"action={action}")
         if self.passive and not self.claim:
