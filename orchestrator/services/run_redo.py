@@ -239,12 +239,16 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
 
 def _redo_under_the_lock(db: Any, card: Any, run: Any, *, by: str, label: str) -> None:
     """The redo, its step and its mission locked (at most ``LOCK_WAIT`` each); the
-    mission opens again when it ended. Commits."""
+    mission opens again when it ended, and what was built from the step runs again
+    after its redo (F286). Commits."""
+    from modules.coordination.redo_dependents import its_redo_waits, rerun_what_builds_on
     from services.mission_reopen import reopen, touched
 
     step, run = _held_for_the_redo(db, card, run, label)
     reopen(db, run, by=by, label=label)
     _back_for_revision(db, card, step, by=by)
+    rerun_what_builds_on(db, step, by=by, label=label)  # F286: what was built from it runs again
+    its_redo_waits(db, step, by=by, label=label)  # F286: a redo whose inputs are redone waits for them
     touched(run)  # a tick that read the mission before this redo can't end it on what it read
     db.commit()
 
