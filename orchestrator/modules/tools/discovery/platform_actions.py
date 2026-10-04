@@ -61,14 +61,20 @@ from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + p
 from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials drafts (never approve/publish)
 
 
+def _register_documents_actions(registry: ActionRegistry) -> None:
+    """The documents actions, and the brand kit's update tool (night 9b: it left
+    actions_documents.py to list who signs)."""
+    register_documents_actions(registry)
+    register_brand_kit_update_action(registry)
+
+
 def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     register_agents_actions(registry)
     register_playbooks_actions(registry)
     register_playbook_run_actions(registry)
     register_analytics_actions(registry)
-    register_documents_actions(registry)
-    register_brand_kit_update_action(registry)  # night 9b: the voice says who signs
+    _register_documents_actions(registry)
     register_workspace_actions_defs(registry)
     register_store_memory_action(registry)
     register_monitoring_actions(registry)
