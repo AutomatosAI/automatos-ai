@@ -243,7 +243,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # weekly batches wave (social_posts.batch_key); the guard follows it.
     batches = (versions / "prd251c_wave2.py").read_text()
     assert 'down_revision = "prd251b_wave3"' in batches
-    assert 'EXPECTED_HEAD = "prd251c_wave2"' in guard
+    # 2026-10-04 (PRD-251C Wave 4): prd251c_wave4 chains onto it — the ONE migration of the
+    # results and voice wave (social_post_stats, social_voice_examples); the guard follows it.
+    results = (versions / "prd251c_wave4.py").read_text()
+    assert 'down_revision = "prd251c_wave2"' in results
+    assert 'EXPECTED_HEAD = "prd251c_wave4"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

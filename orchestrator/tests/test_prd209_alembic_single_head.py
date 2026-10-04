@@ -89,7 +89,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # migration of the brand kit wave (the reference_image flag in the media allowlist).
 # 2026-10-04 (PRD-251C Wave 2): prd251c_wave2 chains onto prd251b_wave3 — the ONE
 # migration of the weekly batches wave (social_posts.batch_key).
-EXPECTED_HEAD = "prd251c_wave2"
+# 2026-10-04 (PRD-251C Wave 4): prd251c_wave4 chains onto prd251c_wave2 — the ONE
+# migration of the results and voice wave (social_post_stats, social_voice_examples).
+EXPECTED_HEAD = "prd251c_wave4"
 
 
 def _literal(node: ast.AST):
