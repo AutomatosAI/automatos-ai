@@ -18,8 +18,9 @@ PRD-160 S1 re-enables them as a first-class Auto tool, but *safely*:
     the defense-in-depth backstop if the path is reached without scope (e.g. a
     Playbook step).
 """
+import functools
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,36 @@ def _error(message: str, *, disabled: bool = False) -> Dict[str, Any]:
     return resp
 
 
+def _holds_no_caller_connection(
+    fn: Callable[..., Awaitable[Dict[str, Any]]],
+) -> Callable[..., Awaitable[Dict[str, Any]]]:
+    """F330 (night 9c): the query runs holding none of the caller's connection.
+
+    The query makes model calls lasting seconds and opens sessions of its own
+    (``modules/nl2sql/service.py``: the source, the credentials, the examples).
+    Night 9c's session tools passed the request's session in, and it stayed
+    "idle in transaction" through all of that: 26 calls at once held the whole
+    pool while each waited, on the event loop, for one more connection, and the
+    process froze (``pool._do_get``; /health timed out).
+
+    So the caller's transaction is ended first, if it has only read (one that
+    wrote, locked or sent a NOTIFY is kept: ``core.database.read_release``),
+    and the query is run WITHOUT the caller's session: the source lookup then
+    takes a short session of its own and closes it straight away, instead of
+    re-opening the caller's transaction and keeping it for the whole query.
+    """
+    @functools.wraps(fn)
+    async def wrapper(*, db_session: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
+        if db_session is not None:
+            from core.database.read_release import release_if_read_only
+
+            release_if_read_only(db_session)
+        return await fn(db_session=None, **kwargs)
+
+    return wrapper
+
+
+@_holds_no_caller_connection
 async def run_nl2sql(
     *,
     method: str,
