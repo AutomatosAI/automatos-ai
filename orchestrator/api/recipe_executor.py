@@ -1211,19 +1211,19 @@ async def execute_recipe_direct(
     4. Auto-extract tool results into scratchpad
     5. Upload full log to S3, store compact summary in DB
     6. Handle errors per step.error_handling config
+    Every run passes here: one with a step that has no agent fails first, saying so (F270).
     """
-    # Bounded concurrency per workspace — allows N recipes to run in
-    # parallel (controlled by DEFAULT_MAX_CONCURRENT_RUNNING / plan_limits).
     from config import config as app_config
-    max_concurrent = app_config.DEFAULT_MAX_CONCURRENT_RUNNING
-    semaphore = _get_workspace_semaphore(str(workspace_id), max_concurrent)
+    from services.playbook_run_refusal import refused_before_it_runs
+    if await refused_before_it_runs(recipe_execution_id, recipe_id, workspace_id, db_url):
+        return
+    # Bounded concurrency per workspace (DEFAULT_MAX_CONCURRENT_RUNNING / plan_limits).
+    semaphore = _get_workspace_semaphore(str(workspace_id), app_config.DEFAULT_MAX_CONCURRENT_RUNNING)
 
     waiting = semaphore.locked()
     if waiting:
-        logger.info(
-            "[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
-            workspace_id, recipe_execution_id, recipe_id,
-        )
+        logger.info("[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
+                    workspace_id, recipe_execution_id, recipe_id)
 
     current_task = asyncio.current_task()
     if current_task is not None:

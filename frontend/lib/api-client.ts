@@ -1603,10 +1603,10 @@ class ApiClient {
     })
   }
 
-  async executeRecipe(recipeId: string, inputData?: Record<string, any>) {
+  async executeRecipe(recipeId: string, inputData?: Record<string, any>, waitForMe?: boolean) {
     return this.request(`/api/workflow-recipes/${recipeId}/execute`, {
       method: 'POST',
-      body: JSON.stringify({ input_data: inputData || {} })
+      body: JSON.stringify({ input_data: inputData || {}, ...(waitForMe === undefined ? {} : { wait_for_me: waitForMe }) })
     })
   }
 

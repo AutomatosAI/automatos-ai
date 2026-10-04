@@ -29,6 +29,8 @@ from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from api.playbook_address import playbook_at, run_of
+from api.playbook_run_start import refuse_if_it_cannot_run, runnable_playbook, start_run_row, wait_request
 from services import webhook_dedup
 from config import config
 
@@ -387,23 +389,15 @@ async def get_recipe_stats_dashboard(
 
 
 @router.get("/{recipe_id}")
-async def get_workflow_recipe(
+def get_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get a single workflow recipe by its template_id.
-    Returns recipe data with agent details populated for each step in the steps array."""
+    """Get a single workflow recipe by its template_id, or by the number the list
+    shows (F277). Returns recipe data with agent details populated for each step."""
     try:
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
         result = recipe.to_dict()
         # Enrich steps with agent details
         result['steps'] = _enrich_steps_with_agents(recipe.steps, db)
@@ -666,24 +660,13 @@ async def delete_workflow_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Delete a workflow recipe.
+    Delete a workflow recipe, by its template id or its number (F277).
     System recipes cannot be deleted.
     """
     try:
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
         if recipe.is_system:
-            raise HTTPException(
-                status_code=403,
-                detail="System recipes cannot be deleted"
-            )
+            raise HTTPException(status_code=403, detail="System recipes cannot be deleted")
 
         # Unschedule cron job if any
         if config.RECIPE_SCHEDULER_ENABLED:
@@ -738,7 +721,7 @@ async def delete_workflow_recipe(
 
 
 @router.post("/{recipe_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
-async def record_recipe_usage(
+def record_recipe_usage(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -748,15 +731,7 @@ async def record_recipe_usage(
     Updates use_count and last_used_at.
     """
     try:
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
         recipe.use_count = (recipe.use_count or 0) + 1
         recipe.last_used_at = datetime.now()
         db.commit()
@@ -850,25 +825,16 @@ async def execute_recipe(
 
     Body (optional):
     - input_data: Dict matching the recipe's inputs schema
+    - wait_for_me: true or false. This run's card waits for the owner's check in
+      Review, or closes itself (F242). Left out, the playbook's own setting decides.
+
+    ``recipe_id`` is the playbook's template id or its number (F277). A playbook
+    with a step that has no agent is refused before anything runs (F270).
     """
     try:
         logger.info(f"[execute_recipe] Starting direct execution for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
-
-        # Fetch recipe and validate ownership
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            logger.warning(f"[execute_recipe] Recipe not found: {recipe_id}")
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        if not recipe.steps:
-            raise HTTPException(status_code=400, detail="Recipe has no steps to execute")
-
-        logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
+        recipe = runnable_playbook(db, ctx.workspace_id, recipe_id)
+        wants = wait_request(body)
 
         # F182 (night 6): a declared default fills in a missing input, and ''
         # never does. A required input still missing stops the run before step 1,
@@ -894,29 +860,8 @@ async def execute_recipe(
                 },
             )
 
-        # Create RecipeExecution record
-        recipe_execution_id = f"exec-{uuid4().hex[:12]}"
-        recipe_execution = RecipeExecution(
-            execution_id=recipe_execution_id,
-            recipe_id=recipe.id,
-            workspace_id=ctx.workspace_id,
-            status='pending',
-            input_data=input_data,
-            current_step=0,
-            triggered_by=ctx.user.email if ctx.user else 'anonymous',
-            execution_metadata={
-                'execution_type': 'recipe_direct',
-                'total_steps': len(recipe.steps),
-            },
-        )
-        db.add(recipe_execution)
-
-        # Update recipe usage stats
-        recipe.use_count = (recipe.use_count or 0) + 1
-        recipe.last_used_at = datetime.now()
-
-        db.commit()
-
+        # The run's row (with the owner's "wait for me", F242) and the usage stats
+        recipe_execution_id = start_run_row(db, ctx, recipe, input_data, wants)
         logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
 
         # PRD-142 W3-S12: launches go via the consolidated PlaybookEngine
@@ -948,6 +893,29 @@ async def execute_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _rerun_reply(outcome: Any, rerun_of: str, recipe_id: str, step_overrides: Any) -> Dict[str, Any]:
+    """The rerun route's answer: the rerun started, or it waits for an approval."""
+    if outcome.launched:
+        return {
+            "recipe_execution_id": outcome.execution_id,
+            "rerun_of": rerun_of,
+            "recipe_id": recipe_id,
+            "status": "started",
+            "step_overrides_applied": bool(step_overrides),
+            "approval": outcome.decision.audit_snapshot(),
+            "message": outcome.message,
+        }
+    return {
+        "recipe_execution_id": None,
+        "rerun_of": rerun_of,
+        "recipe_id": recipe_id,
+        "status": "awaiting_approval",
+        "grant_id": outcome.grant_id,
+        "approval": outcome.decision.audit_snapshot(),
+        "message": outcome.message,
+    }
+
+
 @router.post(
     "/{recipe_id}/executions/{execution_id}/rerun",
     dependencies=[Depends(require_workspace_permission("playbooks:execute"))],
@@ -973,32 +941,16 @@ async def rerun_recipe_execution(
 
     Body (optional):
     - step_overrides: {step_id: {"prompt_template": "..."}}
+
+    The playbook and the run are found by id or by number (F277); a playbook
+    with a step that has no agent is refused before anything changes (F270).
     """
     try:
-        from services.watch_rerun import (
-            TRIGGERED_BY_HUMAN,
-            request_rerun,
-            validate_step_overrides,
-        )
+        from services.watch_rerun import TRIGGERED_BY_HUMAN, request_rerun, validate_step_overrides
 
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        original = db.query(RecipeExecution).filter(
-            RecipeExecution.execution_id == execution_id,
-            RecipeExecution.workspace_id == ctx.workspace_id,
-            RecipeExecution.recipe_id == recipe.id,
-        ).first()
-        if not original:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Execution '{execution_id}' not found for this playbook",
-            )
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
+        original = run_of(db, recipe, execution_id)
+        refuse_if_it_cannot_run(recipe)
 
         step_overrides, err = validate_step_overrides(recipe, body.get("step_overrides"))
         if err:
@@ -1023,7 +975,7 @@ async def rerun_recipe_execution(
             db,
             workspace_id=ctx.workspace_id,
             target_type="playbook_execution",
-            target_id=execution_id,
+            target_id=original.execution_id,
         )
 
         outcome = await request_rerun(
@@ -1036,26 +988,7 @@ async def rerun_recipe_execution(
             watch=watch,
         )
         db.commit()  # ask-path rows (grant / watch park) are flush-only
-
-        if outcome.launched:
-            return {
-                "recipe_execution_id": outcome.execution_id,
-                "rerun_of": execution_id,
-                "recipe_id": recipe_id,
-                "status": "started",
-                "step_overrides_applied": bool(step_overrides),
-                "approval": outcome.decision.audit_snapshot(),
-                "message": outcome.message,
-            }
-        return {
-            "recipe_execution_id": None,
-            "rerun_of": execution_id,
-            "recipe_id": recipe_id,
-            "status": "awaiting_approval",
-            "grant_id": outcome.grant_id,
-            "approval": outcome.decision.audit_snapshot(),
-            "message": outcome.message,
-        }
+        return _rerun_reply(outcome, original.execution_id, recipe_id, step_overrides)
 
     except HTTPException:
         raise
@@ -1066,7 +999,7 @@ async def rerun_recipe_execution(
 
 
 @router.get("/{recipe_id}/executions/{execution_id}")
-async def get_recipe_execution_detail(
+def get_recipe_execution_detail(
     recipe_id: str,
     execution_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1079,40 +1012,11 @@ async def get_recipe_execution_detail(
     Used by frontend for polling execution progress.
     """
     try:
-        # Validate recipe ownership — try template_id first, fall back to integer id
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
-        if not recipe and recipe_id.isdigit():
-            recipe = db.query(WorkflowRecipe).filter(
-                WorkflowRecipe.owner_type == 'workspace',
-                WorkflowRecipe.workspace_id == ctx.workspace_id,
-                WorkflowRecipe.id == int(recipe_id)
-            ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        # Get execution — try execution_id string first, fall back to numeric DB id
-        execution = db.query(RecipeExecution).filter(
-            RecipeExecution.execution_id == execution_id,
-            RecipeExecution.recipe_id == recipe.id
-        ).first()
-
-        if not execution and execution_id.isdigit():
-            execution = db.query(RecipeExecution).filter(
-                RecipeExecution.id == int(execution_id),
-                RecipeExecution.recipe_id == recipe.id
-            ).first()
-
-        if not execution:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
-            )
+        # The run by its execution id, or by its number
+        execution = run_of(db, recipe, execution_id)
 
         total_steps = len(recipe.steps or [])
         step_results = execution.step_results or []
@@ -1191,7 +1095,7 @@ async def cancel_execution(
 # ===================================================================
 
 @router.get("/{recipe_id}/executions/{execution_id}/steps/{step_order}/logs")
-async def get_step_full_logs(
+def get_step_full_logs(
     recipe_id: str,
     execution_id: str,
     step_order: int,
@@ -1205,40 +1109,11 @@ async def get_step_full_logs(
     full agent output, tool call results, and message history from S3.
     """
     try:
-        # Validate recipe ownership — try template_id first, fall back to integer id
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
-        if not recipe and recipe_id.isdigit():
-            recipe = db.query(WorkflowRecipe).filter(
-                WorkflowRecipe.owner_type == 'workspace',
-                WorkflowRecipe.workspace_id == ctx.workspace_id,
-                WorkflowRecipe.id == int(recipe_id)
-            ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        # Validate execution — try execution_id string first, fall back to numeric DB id
-        execution = db.query(RecipeExecution).filter(
-            RecipeExecution.execution_id == execution_id,
-            RecipeExecution.recipe_id == recipe.id
-        ).first()
-
-        if not execution and execution_id.isdigit():
-            execution = db.query(RecipeExecution).filter(
-                RecipeExecution.id == int(execution_id),
-                RecipeExecution.recipe_id == recipe.id
-            ).first()
-
-        if not execution:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
-            )
+        # The run by its execution id, or by its number
+        execution = run_of(db, recipe, execution_id)
 
         # Check if step result has a log_url
         step_results = execution.step_results or []
@@ -1288,7 +1163,7 @@ async def get_step_full_logs(
 # ===================================================================
 
 @router.post("/{recipe_id}/learn", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
-async def analyze_execution_learning(
+def analyze_execution_learning(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     body: Dict[str, Any] = Body(...),
@@ -1307,37 +1182,15 @@ async def analyze_execution_learning(
         if not execution_id:
             raise HTTPException(status_code=400, detail="execution_id is required")
 
-        # Validate recipe ownership
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        # Validate execution — try execution_id string first, fall back to numeric DB id
-        execution = db.query(RecipeExecution).filter(
-            RecipeExecution.execution_id == execution_id,
-            RecipeExecution.recipe_id == recipe.id
-        ).first()
-
-        if not execution and execution_id.isdigit():
-            execution = db.query(RecipeExecution).filter(
-                RecipeExecution.id == int(execution_id),
-                RecipeExecution.recipe_id == recipe.id
-            ).first()
-
-        if not execution:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
-            )
+        # The run by its execution id, or by its number
+        execution = run_of(db, recipe, execution_id)
 
         from core.services.playbook_learning_service import PlaybookLearningService
         service = PlaybookLearningService(db=db)
-        result = service.analyze_execution(execution_id)
+        result = service.analyze_execution(execution.execution_id)
 
         return result
 
@@ -1352,7 +1205,7 @@ async def analyze_execution_learning(
 
 
 @router.post("/{recipe_id}/assess-quality", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
-async def assess_execution_quality(
+def assess_execution_quality(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     body: Dict[str, Any] = Body(...),
@@ -1372,39 +1225,17 @@ async def assess_execution_quality(
         if not execution_id:
             raise HTTPException(status_code=400, detail="execution_id is required")
 
-        # Validate recipe ownership
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
-
-        # Validate execution — try execution_id string first, fall back to numeric DB id
-        execution = db.query(RecipeExecution).filter(
-            RecipeExecution.execution_id == execution_id,
-            RecipeExecution.recipe_id == recipe.id
-        ).first()
-
-        if not execution and execution_id.isdigit():
-            execution = db.query(RecipeExecution).filter(
-                RecipeExecution.id == int(execution_id),
-                RecipeExecution.recipe_id == recipe.id
-            ).first()
-
-        if not execution:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
-            )
+        # The run by its execution id, or by its number
+        execution = run_of(db, recipe, execution_id)
 
         learnings = body.get('learnings')
 
         from core.services.playbook_quality_service import PlaybookQualityService
         service = PlaybookQualityService(db=db)
-        result = service.assess_quality(execution_id, learnings=learnings)
+        result = service.assess_quality(execution.execution_id, learnings=learnings)
 
         return result
 
@@ -1419,7 +1250,7 @@ async def assess_execution_quality(
 
 
 @router.get("/{recipe_id}/suggestions")
-async def get_recipe_suggestions(
+def get_recipe_suggestions(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1431,15 +1262,8 @@ async def get_recipe_suggestions(
     extracted from previous learning analyses.
     """
     try:
-        # Validate recipe ownership
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
         learning_data = recipe.learning_data or {}
 
@@ -1461,7 +1285,7 @@ async def get_recipe_suggestions(
 
 
 @router.get("/{recipe_id}/executions")
-async def list_recipe_executions(
+def list_recipe_executions(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     status: Optional[str] = None,
@@ -1480,15 +1304,8 @@ async def list_recipe_executions(
     Returns list of executions with quality scores.
     """
     try:
-        # Validate recipe ownership
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.owner_type == 'workspace',
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
-            WorkflowRecipe.template_id == recipe_id
-        ).first()
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+        # F277: the playbook by its template id or by its number
+        recipe = playbook_at(db, ctx.workspace_id, recipe_id)
 
         query = db.query(RecipeExecution).filter(
             RecipeExecution.recipe_id == recipe.id
