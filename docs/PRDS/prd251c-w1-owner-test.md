@@ -44,7 +44,7 @@ The defaults this wave took while O5 is open:
 
 - [ ] **Research's first read** (the run's transcript): `platform_get_social_plan` answers with `history`.
 - [ ] **The composer:** New post → **Redraft with Auto** on a brief like a recent post's. The opening line differs from the recent posts' openings.
-- [ ] **Auto's Deliverables:** asking Auto to list the workspace's deliverables no longer lists Socials post renders. Asking for the `social_post` deliverables does.
+- [ ] **Research's Deliverables:** the run's `platform_list_deliverables` call passes `exclude_source_types ["social_post"]`, so no Socials post render comes back as new material. Asking Auto to list the workspace's deliverables still lists them, as before.
 
 ## 6. The bank shows near-repeats (US-C106)
 
