@@ -712,6 +712,10 @@ class Config:
     # the model is on the operator's own plan; this stops a looping session from
     # hammering the board. 0 = no cap.
     SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
+    # F330 (night 9c): how many session tool calls run at once in this process. A
+    # burst waits for a slot holding no pool connection; keep it well under the
+    # pool (10 + 20), since each call can hold its own connection plus one more.
+    SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
