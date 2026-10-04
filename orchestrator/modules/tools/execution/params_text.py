@@ -64,7 +64,7 @@ def _kind_of(params: Any) -> str:
         return "text that is not a JSON object" if params.strip() else "empty text"
     if isinstance(params, list):
         return "a list"
-    if isinstance(params, bool) or isinstance(params, (int, float)):
+    if isinstance(params, (bool, int, float)):
         return "a single value"
     return "something other than an object"
 
