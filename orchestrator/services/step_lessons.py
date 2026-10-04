@@ -32,6 +32,14 @@ followed by "Where your facts come from": a "now" question is answered from the 
 system before a dated document, a database's tables and columns are read through its
 tool and never asked of the owner, and only what a tool returned in the run is cited.
 
+Night 9b: answers opened "Perfect! Now I have all the information I need…" (F320:
+#0045, #0046, #0054, #0063, #0065, #0070) and drafts were signed "[Your name]" or
+began "the 'Harbourline voice' skill is not available" (F327: #1971, #0095, #0107).
+"Where your answer goes" now rules out narration anywhere in the answer, puts what
+the owner must know in it, first (#1981 said "not free" only in its working), and
+asks for a draft ready to send. "When the brief or the owner says otherwise"
+(F322 and F323, services/brief_facts.py) follows the facts block.
+
 Three wrappers, for the three ways the platform runs an agent's work through the API
 (a Claude Code session's ticket has its own prompt, which already carries the lessons):
 - ``a_steps_prompt_carries_its_lessons``: a mission step (``build_task_prompt``);
@@ -49,6 +57,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from services.answer_sources import FACTS_RULES
+from services.brief_facts import BRIEF_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +66,17 @@ ON_THE_CARD = (
     "Your reply is the card's answer: the owner reads it on the card as it is. Put the work itself in it (the "
     "email, the table, the figures, the post), in the form the brief and the owner's notes ask for, starting with "
     "the work: no line before it about what you did, a tool or a skill.\n"
+    "No narration anywhere in it: no \"Perfect!\", \"Now I have…\", \"Let me…\" or \"I'll now…\". What the owner "
+    "must know (the brief is wrong, a cost applies, something is missing) goes in the answer, first.\n"
+    "A draft is ready to send: signed and filled in from the owner's documents (their brand voice has the "
+    "sign-off), with no placeholder (\"[Your name]\") and no word about a tool or a skill (\"skill not "
+    "available\").\n"
     "A file, a PDF or a report you save goes alongside the answer, never instead of it: never end with only "
     "\"saved to …\", a description of what you saved, \"see the report\", \"task completed\" or a tool's output.\n"
     "If a tool fails, leave its error and what you tried out of the answer: do the work another way, or say "
     "plainly what is missing.\n\n"
-    f"{FACTS_RULES}"     # F300, F304 and F313 (night 9): the live system first, its schema read, sources read
+    f"{FACTS_RULES}\n\n"     # F300, F304 and F313 (night 9): the live system first, its schema read, sources read
+    f"{BRIEF_RULES}"       # F322 and F323 (night 9b): the brief checked, a question answered, the team's figures
 )
 
 

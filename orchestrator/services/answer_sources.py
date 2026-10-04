@@ -15,6 +15,12 @@ Night 9 ran on a coffee roaster's workspace with a live shop database
   shop system said 118), and #1864, #1865 and #1869 used September stock with the
   database in reach.
 
+Night 9b (F327 and F323): agents asked the owner for an account id, a lot code, a date
+range and parameter names (Friction 2, 15, 33, 46); Auto offered a web search for the
+owner's own stock; the Business Analyst read "this summer" as 2024 (#1984). The block
+now says to look those up, keep the web out of the business's own data, and read a
+season or month against today's date (services/todays_date.py puts it in every prompt).
+
 ``FACTS_RULES`` is what every API run of an agent's work is told about its facts. It
 rides in ``services.step_lessons.ON_THE_CARD``, so a plain card, a mission step and a
 playbook step all get it where they get "Where your answer goes".
@@ -43,7 +49,12 @@ FACTS_RULES = (
     "they don't know them. If the tool can't tell you, say so in your answer.\n"
     "Cite only what a tool returned in this run, by the name the tool gave it (the document's file name, the "
     "database's name). Nothing from an earlier run reaches this one: never write \"a previous query\". A figure "
-    "from the brief, the owner's notes or another card is cited as coming from there."
+    "from the brief, the owner's notes or another card is cited as coming from there.\n"
+    "Look up ids, codes and names yourself with your tools (an account from its name, a lot from the stock): never "
+    "ask the owner for an id, a code, a parameter name or a date range they already gave. The business's own data "
+    "(its stock, orders and customers) is in its database and documents: never search the web for it.\n"
+    "Read \"this summer\", \"last month\" or \"this year\" against today's date in your instructions (\"Today "
+    "is …\"), never a year from memory."
 )
 
 EARLIER_RUN_NOTE = ("\n\nCheck the source before relying on this answer: it cites \"{cited}\", but nothing from an "

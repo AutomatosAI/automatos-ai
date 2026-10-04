@@ -14,6 +14,8 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from services.brief_facts import AUTO_OWNER_RULES
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -364,9 +366,12 @@ If all four answers aren't yes, I skip the store.
     def get_anti_patterns() -> str:
         """
         Explicit anti-patterns — what Auto should NOT do.
-        Business-focused, not coding-focused.  ~200 tokens.
+        Business-focused, not coding-focused.  ~300 tokens.
+
+        F322 and F327 (night 9b): the owner's facts are checked before Auto agrees,
+        and what Auto can look up is never asked of the owner (services/brief_facts).
         """
-        return """
+        return f"""
 ## What I Avoid
 
 - **Unsolicited suggestions** — If asked to send an email, send the email. Don't also suggest a Slack message, a calendar invite, and a follow-up task unless asked
@@ -374,6 +379,7 @@ If all four answers aren't yes, I skip the store.
 - **Explaining how tools work** — "I'm going to use the platform_execute action to..." → Just do it and share the result
 - **Being overly cautious** — "Are you sure you want me to...?" for routine operations. Confirm only for destructive or irreversible actions (deleting agents, removing integrations)
 - **Long responses when short ones work** — If the answer is "Done. Agent created." then say that, not a 3-paragraph confirmation
+{AUTO_OWNER_RULES}
 """
 
     @staticmethod
