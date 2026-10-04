@@ -27,6 +27,7 @@ Stdlib only, like the loop.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,35 @@ MISSING_ANSWER_MSG = (
     "you used. If you saved the work to a file, put the work itself in your answer too."
 )
 
+# F306 (night 9): a reply that ends announcing the step it is about to take, and takes
+# none: "Let me try a more specific query:" (#1879 twice), "Now let me get the total
+# kilograms per account …:" (#1881), "I'll attempt a query to list all tables in"
+# (#1888, cut off). It became the card's answer.
+ANNOUNCED_STEP_MSG = (
+    "Your previous reply ends by announcing a next step (\"{step}\") but made no tool call, "
+    "so the step never ran and there is no answer yet. Make that call now, in this response, "
+    "or write your answer: the finished work itself, or plainly what is missing."
+)
+_STEP_CUE = re.compile(r"\b(?:let me|let's|i'?ll|i will|i'?m going to|i am going to)\b", re.IGNORECASE)
+_NOT_A_STEP = re.compile(r"\blet me know\b", re.IGNORECASE)
+_SENTENCE_END = (".", "!", "?", ")", "\"", "'", "`", "*", "”", "’")
+STEP_SHOWN_CHARS = 160
+
+
+def announced_step(text: str) -> Optional[str]:
+    """The step a reply's last line announces and never took, else None. The line has
+    a cue ("let me", "now let me", "I'll") and either ends on a colon or stops
+    mid-sentence; "let me know" is never a step."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    last = lines[-1]
+    if not _STEP_CUE.search(last) or _NOT_A_STEP.search(last):
+        return None
+    if last.endswith(":") or not last.endswith(_SENTENCE_END):
+        return last[:STEP_SHOWN_CHARS]
+    return None
+
 
 class Nudge(dict):
     """A message the loop wrote in the user's turn. It is sent as any user message
@@ -92,6 +122,15 @@ def kept_if_blank(nudged: Any, retry: Any) -> Any:
         logger.warning("[tool-loop] the nudge got an empty reply — keeping the reply it was about")
         return nudged
     return retry
+
+
+async def nudge_about(llm: LLMCall, reply: Any, messages: Messages, tools: Optional[List[Dict[str, Any]]],
+                      text: str) -> Any:
+    """Nudge ``reply`` once: it stays in the history, the nudge is the user's turn, and
+    the retry is returned, or ``reply`` itself when the retry came back empty."""
+    messages.append({"role": "assistant", "content": getattr(reply, "content", "") or ""})
+    messages.append(nudge(text))
+    return kept_if_blank(reply, await llm(messages, tools))
 
 
 def after_tool_results(messages: Messages) -> bool:
