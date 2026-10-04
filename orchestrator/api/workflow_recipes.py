@@ -29,8 +29,10 @@ from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
-from api.playbook_address import playbook_at, run_of
-from api.playbook_run_start import refuse_if_it_cannot_run, runnable_playbook, start_run_row, wait_request
+from api.playbook_address import edits_it_by_number_too, playbook_at, run_of
+from api.playbook_run_start import (
+    refuse_if_it_cannot_run, run_started, runnable_playbook, start_run_row, wait_request,
+)
 from services import webhook_dedup
 from config import config
 
@@ -399,8 +401,8 @@ def get_workflow_recipe(
     try:
         recipe = playbook_at(db, ctx.workspace_id, recipe_id)
         result = recipe.to_dict()
-        # Enrich steps with agent details
-        result['steps'] = _enrich_steps_with_agents(recipe.steps, db)
+        # Enrich steps with agent details (each step says its order, F292)
+        result['steps'] = _enrich_steps_with_agents(result['steps'], db)
         return result
 
     except HTTPException:
@@ -541,6 +543,7 @@ async def create_workflow_recipe(
 
 
 @router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
+@edits_it_by_number_too  # F292: by the number the list shows, steps as the read gives them
 async def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -881,7 +884,7 @@ async def execute_recipe(
             "recipe_id": recipe_id,
             "status": "started",
             "total_steps": len(recipe.steps),
-            "message": "Recipe execution started (direct mode)",
+            **run_started(db, recipe, recipe_execution_id),  # F294: the card the run works on, by number
         }
 
     except HTTPException as he:
