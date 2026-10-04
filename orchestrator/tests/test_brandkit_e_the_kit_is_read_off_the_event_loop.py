@@ -16,9 +16,9 @@ import pytest
 from core.models.workspaces import Workspace
 
 WS = "6d0b5c1e-8f1a-4c2b-9d3e-0a1b2c3d4e61"
-KIT = {"name": "Harbourline Coffee Roasters",
-       "voice": {"tone": ["warm"], "banned_phrases": ["exquisite"], "sign_off": "Gerard, Harbourline Coffee Roasters"}}
 SIGNED = "Gerard, Harbourline Coffee Roasters"
+KIT = {"name": "Harbourline Coffee Roasters",   # 3 to 5 tone words, or the read keeps the default voice
+       "voice": {"tone": ["warm", "plain", "local"], "banned_phrases": ["exquisite"], "sign_off": SIGNED}}
 
 
 @pytest.fixture(autouse=True)
@@ -109,3 +109,31 @@ def test_a_fresh_cached_kit_is_read_without_a_thread(monkeypatch):
     monkeypatch.setattr(br.asyncio, "to_thread", lambda *a, **k: hops.append(a))
     kit = asyncio.run(br.kit_off_loop(db, WS))
     assert kit and kit["name"] == KIT["name"] and hops == [] and len(db.read_on) == 1
+
+
+def test_a_kit_read_never_flushes_the_callers_pending_changes():
+    from contextlib import contextmanager
+
+    from services import brand_rules as br
+
+    class _Pending(_Session):
+        def __init__(self):
+            super().__init__()
+            self.flush_held, self.read_while_held = False, []
+
+        @property
+        @contextmanager
+        def no_autoflush(self):
+            self.flush_held = True
+            try:
+                yield self
+            finally:
+                self.flush_held = False
+
+        def get(self, model, *a, **k):
+            self.read_while_held.append(self.flush_held)
+            return super().get(model, *a, **k)
+
+    db = _Pending()
+    assert br.stored_kit(db, WS)["voice"]["sign_off"] == SIGNED
+    assert db.read_while_held == [True]

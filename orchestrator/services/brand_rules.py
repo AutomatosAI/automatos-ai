@@ -32,6 +32,7 @@ import asyncio
 import logging
 import re
 import time
+from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
@@ -89,10 +90,21 @@ def _workspace_uuid(workspace_id: Any) -> Optional[UUID]:
         return None
 
 
+def without_flushing(db: Any) -> Any:
+    """A block in which ``db``'s reads never flush the caller's pending changes.
+
+    A read that autoflushed would write them, and take their row locks, in a transaction
+    only the caller ends: ``cli_host_service._ticket_prompt`` clears the card's
+    review_feedback just before its prompt reads the kit, and a caller that never
+    commits then holds the card's row (the PRD-252 Discuss tests hung on it)."""
+    return getattr(db, "no_autoflush", None) or nullcontext()
+
+
 def _settings(db: Any, workspace_id: UUID) -> Optional[Dict[str, Any]]:
     from core.models.workspaces import Workspace
 
-    settings = getattr(db.get(Workspace, workspace_id), "settings", None)
+    with without_flushing(db):
+        settings = getattr(db.get(Workspace, workspace_id), "settings", None)
     return settings if isinstance(settings, dict) else None
 
 
@@ -284,5 +296,5 @@ __all__ = [
     "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "RULES_HEADING", "banned_found", "banned_note", "brand_assets",
     "brand_rules_block", "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result",
     "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
-    "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop",
+    "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
 ]

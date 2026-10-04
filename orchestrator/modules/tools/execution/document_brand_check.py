@@ -49,8 +49,12 @@ def with_document_note(result: Any, note: str) -> Any:
 
 def _agent_workspace(db: Any, agent_id: Any) -> Any:
     from core.models import Agent
+    from services.brand_rules import without_flushing
 
-    agent = db.query(Agent).filter(Agent.id == agent_id).first() if db is not None and agent_id else None
+    if db is None or not agent_id:
+        return None
+    with without_flushing(db):
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
     return getattr(agent, "workspace_id", None)
 
 

@@ -16,6 +16,7 @@ from .actions_playbooks import register_playbooks_actions
 from .actions_playbook_runs import register_playbook_run_actions  # F242: create/update/execute take wait_for_me
 from .actions_analytics import register_analytics_actions
 from .actions_documents import register_documents_actions
+from .actions_brand_kit_update import register_brand_kit_update_action  # night 9b: left actions_documents.py
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
 from .actions_monitoring import register_monitoring_actions
@@ -67,6 +68,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_playbook_run_actions(registry)
     register_analytics_actions(registry)
     register_documents_actions(registry)
+    register_brand_kit_update_action(registry)  # night 9b: the voice says who signs
     register_workspace_actions_defs(registry)
     register_store_memory_action(registry)
     register_monitoring_actions(registry)

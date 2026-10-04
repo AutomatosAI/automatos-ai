@@ -50,8 +50,10 @@ def _mission_workspace(db: Any, task: Any) -> Any:
     from core.models.orchestration import OrchestrationRun
 
     run_id = getattr(task, "run_id", None)
-    run = db.get(OrchestrationRun, run_id) if run_id and callable(getattr(db, "get", None)) else None
-    return getattr(run, "workspace_id", None)
+    if not run_id or not callable(getattr(db, "get", None)):
+        return None
+    with br.without_flushing(db):
+        return getattr(db.get(OrchestrationRun, run_id), "workspace_id", None)
 
 
 def card_prompt_with_brand_rules(prompt: str, task: Any) -> str:
@@ -65,7 +67,10 @@ def _runs_in_a_session(db: Any, agent_id: Any) -> bool:
     """A Claude Code session agent: its ticket's own prompt carries the rules (the claim path)."""
     from services.cli_ticket_lane import is_cli_agent
 
-    return bool(agent_id) and db is not None and is_cli_agent(db, agent_id)
+    if not agent_id or db is None:
+        return False
+    with br.without_flushing(db):
+        return bool(is_cli_agent(db, agent_id))
 
 
 def a_steps_prompt_carries_the_brand_rules(build: Callable[..., str]) -> Callable[..., str]:
