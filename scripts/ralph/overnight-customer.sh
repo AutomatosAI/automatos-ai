@@ -58,6 +58,12 @@ stop_epoch() {
 }
 STOP_EPOCH=$(stop_epoch)
 past_stop() { [[ $(date +%s) -ge $STOP_EPOCH ]]; }
+# NIGHT_COMPLETE counts only as the last line of the persona's final reply. 3 Oct (night 7b): a tool
+# call's text said "so not NIGHT_COMPLETE", and a grep of the whole stream ended the night after 1 of 6.
+night_complete() {
+  grep '^{' <<<"$CLAUDE_OUTPUT" | jq -r 'select(.type == "result") | .result // empty' 2>/dev/null \
+    | sed '/^[[:space:]]*$/d' | tail -1 | grep -qxE '[[:space:]`*]*NIGHT_COMPLETE[[:space:]`*]*'
+}
 
 # --- usage-limit handling (the Ralph kit's) -------------------------------------
 seconds_until_next_hour() { local s=$((10#$(date +%M) * 60 + 10#$(date +%S))); echo $((3600 - s)); }
@@ -141,7 +147,7 @@ for ((iter = START_ITER; iter <= MAX_ITERS; iter++)); do
     # the iteration used its whole window — that is a full iteration, not a failure
     consecutive_failures=0; set_status "ITER$iter" TIMEOUT
     say "${YELLOW}iteration $iter ran to the ${ITER_TIMEOUT} limit; continuing from the diary${NC}"
-    if echo "$CLAUDE_OUTPUT" | grep -q "NIGHT_COMPLETE"; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
+    if night_complete; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
     continue
   fi
   if [[ $CLAUDE_EXIT -ne 0 ]]; then
@@ -151,7 +157,7 @@ for ((iter = START_ITER; iter <= MAX_ITERS; iter++)); do
     countdown $((60 * consecutive_failures)) "Retrying..."; continue
   fi
   consecutive_failures=0; set_status "ITER$iter" DONE
-  if echo "$CLAUDE_OUTPUT" | grep -q "NIGHT_COMPLETE"; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
+  if night_complete; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
 done
 
 # --- morning ------------------------------------------------------------------------
