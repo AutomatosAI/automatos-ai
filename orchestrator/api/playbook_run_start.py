@@ -9,9 +9,14 @@
   ``wait_for_me`` is this run's own choice, kept on the run where
   ``services.playbook_wait`` reads it when the run makes its card; left out, the
   playbook's own setting decides, as it does for a timer's run and for Auto's.
+- What the run is called in the answer (F294, night 8): "Recipe execution started
+  (direct mode)" and an exec code, 10 runs of 10, while the owner works by card
+  number. The run's card is made as the run is started, as Auto's run tool makes
+  it (F241), and the answer names it.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -27,6 +32,9 @@ from services.playbook_wait import WAIT_FOR_ME
 NO_STEPS = "This playbook has no steps to run. Add a step, then run it again."
 WAIT_FOR_ME_IS_TRUE_OR_FALSE = "wait_for_me must be true or false"
 RUN_BUTTON_RUN = "recipe_direct"
+RUN_CARD = "recipe"
+
+logger = logging.getLogger(__name__)
 
 
 def runnable_playbook(db: Session, workspace_id: Any, address: str) -> WorkflowTemplate:
@@ -62,7 +70,7 @@ def start_run_row(db: Session, ctx: Any, playbook: Any, input_data: Dict[str, An
     own). Returns the run's execution id."""
     execution_id = f"exec-{uuid4().hex[:12]}"
     metadata = {"execution_type": RUN_BUTTON_RUN, "total_steps": len(playbook.steps)}
-    db.add(RecipeExecution(
+    execution = RecipeExecution(
         execution_id=execution_id,
         recipe_id=playbook.id,
         workspace_id=ctx.workspace_id,
@@ -71,8 +79,38 @@ def start_run_row(db: Session, ctx: Any, playbook: Any, input_data: Dict[str, An
         current_step=0,
         triggered_by=ctx.user.email if ctx.user else "anonymous",
         execution_metadata=metadata if wants is None else {**metadata, WAIT_FOR_ME: wants},
-    ))
+    )
+    db.add(execution)
     playbook.use_count = (playbook.use_count or 0) + 1
     playbook.last_used_at = datetime.now()
     db.commit()
+    _make_its_card(db, playbook, execution)
     return execution_id
+
+
+def _make_its_card(db: Session, playbook: Any, execution: Any) -> None:
+    """The run's card, made now so the answer can name it (F294). The run makes it a
+    moment later otherwise, and finds it made. A card that can't be made now is
+    the run's to make, as before: the answer then names none."""
+    from services.board_task_bridge import create_recipe_board_task
+
+    try:
+        create_recipe_board_task(db, playbook, execution)
+    except Exception:  # noqa: BLE001 — the run still starts, and makes its card itself
+        db.rollback()
+        logger.exception("[playbook-run] the card of run %s was not made at its start", execution.execution_id)
+
+
+def run_started(db: Session, playbook: Any, execution_id: str) -> Dict[str, Any]:
+    """The Run button's answer in words, naming the card the run works on by its
+    number (F294), with the card's id and number."""
+    from core.models.core import BoardTask
+    from services.ticket_numbers import ticket_number
+
+    card = db.query(BoardTask).filter(BoardTask.workspace_id == playbook.workspace_id,
+                                      BoardTask.source_type == RUN_CARD,
+                                      BoardTask.source_id == execution_id).first()
+    number = ticket_number(db, card) if card is not None else None
+    where = f" on card {number}" if number else ""
+    return {"message": f'Playbook {playbook.id} "{playbook.name}" is running{where}.',
+            "task_id": card.id if card is not None else None, "number": number}

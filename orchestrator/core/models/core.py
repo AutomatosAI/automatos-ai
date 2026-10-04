@@ -21,6 +21,8 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 from uuid import uuid4
+# F292: a playbook's steps say their order on every read.
+from core.playbook_steps import steps_in_order
 
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
@@ -1462,7 +1464,7 @@ class WorkflowTemplate(Base):
             'created_by_user_id': self.created_by_user_id,
             'tags': self.tags or [],
             'template_definition': self.template_definition or {},
-            'steps': self.steps,
+            'steps': steps_in_order(self.steps),
             'inputs': self.inputs,
             'outputs': self.outputs,
             'execution_config': self.execution_config,
