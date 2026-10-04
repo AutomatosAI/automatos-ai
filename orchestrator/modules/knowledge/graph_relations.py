@@ -1,6 +1,6 @@
 """
-Knowledge Graph relations: the controlled vocabulary and the rules an edge passes
-==================================================================================
+Knowledge Graph relations: the controlled vocabulary
+====================================================
 
 LLM extraction (documents + agent reports) used to emit a free-text relation per
 edge, so a workspace graph accrued thousands of singleton relation strings: the
@@ -20,26 +20,18 @@ one, and nothing checked an edge once it had a canonical name. This module now:
 * names those relations, with the direction each one reads in, for the prompt;
 * turns a passive or whole-to-part phrasing ("contains", "supplied by") round,
   so "Harbour Blend contains Brazil Cerrado" becomes Brazil Cerrado ``part_of``
-  Harbour Blend instead of the reverse;
-* refuses a relation the endpoints' declared types rule out (a person is never
-  produced), turning the edge round where only its direction was wrong;
-* refuses a claim of effect (blocks, causes, triggers, enables, mitigates) that
-  the document's own words do not make.
+  Harbour Blend instead of the reverse.
 
-A refused relation keeps the link as ``related_to``, so traversal still finds it,
-and the refused name stays on the edge as ``relation_refused``.
+What an edge's two ends may be, and what is refused or turned round, is in
+``graph_edge_rules``.
 """
 
 from __future__ import annotations
 
-import logging
 import re
-from typing import Any, Mapping, Optional
-
-logger = logging.getLogger(__name__)
+from typing import Optional
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
-_WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
 
 # ---------------------------------------------------------------------------
 # Vocabulary: each relation reads source -> target, as glossed for the prompt.
@@ -169,7 +161,8 @@ _RELATION_KEYWORDS: tuple[tuple[str, str, bool], ...] = (
 _IN_PASSIVE_STEMS = frozenset({"includ", "contain"})
 
 
-def _slug(raw: str) -> str:
+def slug_of(raw: str) -> str:
+    """Lowercase ``raw`` with every run of non-alphanumerics as one ``_``."""
     return _NON_ALNUM.sub("_", raw.lower()).strip("_")
 
 
@@ -194,7 +187,7 @@ def resolve_relation(raw: str | None) -> tuple[str, str, bool]:
     the endpoints. The original phrase is always kept as the label.
     """
     original = (raw or "").strip() or FALLBACK_RELATION
-    slug = _slug(original)
+    slug = slug_of(original)
     if slug in _CANONICAL_SET:
         return slug, original, False
     if slug in _RELATION_SYNONYMS:
@@ -211,118 +204,3 @@ def canonicalize_relation(raw: str | None) -> tuple[str, str]:
     """Map a free-text relation to ``(canonical, original_label)`` (direction ignored)."""
     canonical, original, _inverted = resolve_relation(raw)
     return canonical, original
-
-
-# ---------------------------------------------------------------------------
-# Edge rules: endpoint types and the document's own words.
-# ---------------------------------------------------------------------------
-
-PERSON_TYPE = "person"
-ORGANIZATION_TYPE = "organization"
-_AGENT_TYPES = frozenset({PERSON_TYPE, ORGANIZATION_TYPE})
-# Declared types that are certainly not a supplier, customer or owner. "entity"
-# is the bucket for any other named thing, so it is never ruled out.
-_NON_AGENT_TYPES = frozenset({
-    "product", "concept", "process", "metric", "rule", "action", "outcome", "issue",
-})
-# The relations a person may be the target of; every other one rules it out.
-_PERSON_TARGET_RELATIONS = frozenset({
-    "related_to", "references", "depends_on", "governed_by", "supplies", "responsible_for",
-})
-# Relations whose target can never be an organization ("a coffee produces its importer").
-_NO_ORGANIZATION_TARGET = frozenset({"produces", "has_property"})
-# Relations whose source must be a person or organization, when its type is known.
-# Only these are turned round: for them the direction is the one thing that can be wrong.
-_AGENT_SOURCE_RELATIONS = frozenset({"supplies", "buys", "responsible_for"})
-
-# Claims of effect need the document's words: a cue word in the edge's label.
-# A cue matches a word exactly, or as its stem when the cue has 4+ letters.
-_MIN_STEM_LENGTH = 4
-_CLAIM_CUES: dict[str, tuple[str, ...]] = {
-    "blocks": (
-        "block", "prevent", "stop", "halt", "cannot", "can't", "won't", "don't", "not", "no",
-        "never", "without", "unless", "until", "restrict", "forbid", "ban", "deny", "denied",
-        "refus", "delay", "late", "hold", "held",
-    ),
-    "causes": (
-        "caus", "because", "due", "lead", "leads", "led", "result", "so", "therefore", "hence",
-        "means", "mean", "if", "when", "since", "reason", "driv", "make", "makes", "made", "effect",
-    ),
-    "triggers": (
-        "trigger", "if", "when", "whenever", "once", "after", "fire", "fires", "start", "kick",
-        "prompt", "invok", "call", "calls",
-    ),
-    "enables": (
-        "enabl", "allow", "let", "lets", "permit", "support", "help", "helps", "possible",
-        "unlock", "can", "so", "means",
-    ),
-    "mitigates": (
-        "mitigat", "reduc", "resolv", "fix", "address", "lower", "cut", "avoid", "offset",
-        "compensat", "solv", "cover", "protect", "prevent", "limit",
-    ),
-}
-
-
-def _types_rule_out(relation: str, source_type: Optional[str], target_type: Optional[str]) -> bool:
-    """True when the endpoints' declared types make ``relation`` impossible."""
-    if target_type == PERSON_TYPE and relation not in _PERSON_TARGET_RELATIONS:
-        return True
-    if target_type == ORGANIZATION_TYPE and relation in _NO_ORGANIZATION_TARGET:
-        return True
-    return relation in _AGENT_SOURCE_RELATIONS and source_type in _NON_AGENT_TYPES
-
-
-def _label_makes_claim(relation: str, label: str) -> bool:
-    """True when ``label`` names ``relation`` itself, carries a cue for it, or nothing needs one."""
-    cues = _CLAIM_CUES.get(relation)
-    if cues is None or canonicalize_relation(label)[0] == relation:
-        return True
-    words = _WORD.findall(label.lower().replace("’", "'"))
-    return any(
-        word == cue or (len(cue) >= _MIN_STEM_LENGTH and word.startswith(cue))
-        for word in words for cue in cues
-    )
-
-
-def _turned_round(edge: dict[str, Any]) -> dict[str, Any]:
-    source, target = edge["source"], edge["target"]
-    return {**edge, "source": target, "target": source, "_src": target, "_tgt": source,
-            "direction_repaired": True}
-
-
-def _refused(edge: dict[str, Any]) -> dict[str, Any]:
-    return {**edge, "relation": FALLBACK_RELATION, "relation_refused": edge["relation"]}
-
-
-def enforce_relation_rules(edge: dict[str, Any], node_types: Mapping[str, str]) -> dict[str, Any]:
-    """The edge as the graph keeps it: as extracted, turned round, or refused.
-
-    F312 (night 9): "October 2026 Box produces Priya" and "Guji blocks swaps"
-    reached the graph because nothing checked an edge after its relation was
-    named. ``node_types`` maps the extraction's declared node ids to their
-    ``file_type``; an endpoint it does not declare is unconstrained. A refused
-    edge keeps its link as ``related_to``, so traversal still reaches it.
-    """
-    relation = edge["relation"]
-    source_type = node_types.get(edge["source"])
-    target_type = node_types.get(edge["target"])
-    if _types_rule_out(relation, source_type, target_type):
-        if relation in _AGENT_SOURCE_RELATIONS and not _types_rule_out(relation, target_type, source_type):
-            return _turned_round(edge)
-        return _refused(edge)
-    if not _label_makes_claim(relation, edge.get("relation_label") or relation):
-        return _refused(edge)
-    return edge
-
-
-def log_relation_repairs(edges: list[dict[str, Any]], source_file: str) -> None:
-    """One line per extraction naming how many edges were turned round or refused."""
-    turned = sum(1 for edge in edges if edge.get("direction_repaired"))
-    refused = [edge for edge in edges if edge.get("relation_refused")]
-    if not turned and not refused:
-        return
-    logger.info(
-        "graph extraction %s: %d edge(s) turned round, %d relation(s) refused (%s)",
-        source_file, turned, len(refused),
-        ", ".join(sorted({f"{e['relation_refused']}: {e['source']}->{e['target']}" for e in refused})),
-    )
