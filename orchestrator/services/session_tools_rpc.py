@@ -141,7 +141,8 @@ def initialize_result(requested: Any, *, server_version: str) -> Dict[str, Any]:
         "serverInfo": {"name": SERVER_NAME, "title": SERVER_TITLE, "version": server_version},
         "instructions": (
             "Automatos, the manager that gave you this ticket. These tools reach the board, "
-            "your reports and the workspace's knowledge. Scope is fixed to your own ticket."
+            "your reports, the workspace's knowledge and the owner's database (read-only). "
+            "Scope is fixed to your own ticket."
         ),
     }
 
