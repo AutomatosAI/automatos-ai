@@ -94,12 +94,31 @@ def _is_platform_tool_name(name: str) -> bool:
     return False
 
 
+def _a_session_tool(name: str) -> bool:
+    """#942: a session tool's own name or its API action (``query_database``,
+    ``generate_document``) is a platform tool too, though no family prefix says so."""
+    from services.session_tools import equivalent_of
+
+    return equivalent_of(name) is not None
+
+
+def agent_session_tools(agent: Any) -> Sequence[str]:
+    """#942: the tools THIS agent's sessions have, core first then its groups in their
+    fixed order (FIXER's ``session_tool_groups``), the same list the host advertises and
+    gates on; stable per agent, so the prompt cache holds (PRD-245 D2)."""
+    if agent is None:
+        return SESSION_TOOLS_AVAILABLE
+    from services.session_tool_groups import agent_tool_names
+
+    return agent_tool_names(agent)
+
+
 def tool_names_in(body: str) -> List[str]:
     """The platform tool names a skill body mentions, first appearance, deduped."""
     out: List[str] = []
     for match in _TOOL_NAME_RE.finditer(body or ""):
         name = match.group(1)
-        if name not in out and _is_platform_tool_name(name):
+        if name not in out and (_is_platform_tool_name(name) or _a_session_tool(name)):
             out.append(name)
     return out
 
@@ -152,8 +171,19 @@ def _gap_line(gaps: Sequence[str], instead: Optional[Dict[str, str]] = None) -> 
         swaps = ", ".join(f"`{replacement}` instead of `{mentioned}`" for mentioned, replacement in pairs)
         parts.append(INSTEAD_LINE.format(swaps=swaps))
     if gaps:
-        parts.append(GAP_LINE_PREFIX + ", ".join(f"`{g}`" for g in gaps) + ".")
+        parts.append(GAP_LINE_PREFIX + ", ".join(_named_gap(g) for g in gaps) + ".")
     return " ".join(parts)
+
+
+def _named_gap(name: str) -> str:
+    """``name``, and, for a tool the owner can turn on for this agent, which group
+    gives it (#942): the session says what it lacks and why, never "someone needs to
+    run a SELECT" (F329)."""
+    from services.session_tool_groups import group_of
+    from services.session_tools import equivalent_of
+
+    group = group_of(equivalent_of(name) or name)
+    return f"`{name}`" if group is None else f"`{name}` (its {group.label} tool group is off for this agent)"
 
 
 def skill_entry(skill: Any, budget: int, first: bool, gaps: Sequence[str] = (),
@@ -180,12 +210,14 @@ def _omitted_entry(skill: Any, gaps: Sequence[str], instead: Optional[Dict[str, 
     return "\n".join(line for line in (f"### {name}", desc, _gap_line(gaps, instead), OMITTED_NOTE) if line)
 
 
-def skills_block(agent: Any, max_chars: Optional[int] = None) -> str:
-    """The ``## Skills`` section: every active skill, bodies within the cap."""
+def skills_block(agent: Any, max_chars: Optional[int] = None, available: Optional[Sequence[str]] = None) -> str:
+    """The ``## Skills`` section: every active skill, bodies within the cap. Its gap
+    lines are against ``available``, the agent's own session tools (#942)."""
     skills = _active_skills(agent)
     if not skills:
         return ""
-    by_skill = {g["skill"]: g for g in session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE)}
+    offered = agent_session_tools(agent) if available is None else available
+    by_skill = {g["skill"]: g for g in session_tool_gaps(agent, offered)}
     budget = _skills_max_chars() if max_chars is None else max(0, int(max_chars))
     entries: List[str] = []
     for index, skill in enumerate(skills):
@@ -278,9 +310,10 @@ def session_system_prompt(agent: Any, max_skill_chars: Optional[int] = None, *, 
     persona = IdentitySection._get_persona_text(agent)
     if persona:
         parts.append(f"## Persona & Communication Style\n{persona}")
+    available = agent_session_tools(agent)  # #942: this agent's own tools, in both blocks
     if ticket_session:
-        parts.append(tools_block(agent))
-    skills = skills_block(agent, max_skill_chars)
+        parts.append(tools_block(agent, available))
+    skills = skills_block(agent, max_skill_chars, available=available)
     if skills:
         parts.append(skills)
     return "\n\n".join(parts)

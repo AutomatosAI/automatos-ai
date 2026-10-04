@@ -77,10 +77,11 @@ def _verdict(verifying, task, failures):
     return asyncio.run(MissionReconciler._apply_verdict(verifying.db, task, result))
 
 
-def test_slots_still_in_after_the_revision_fail_the_step_and_name_them(verifying):
+def test_slots_still_in_after_its_attempts_fail_the_step_and_name_them(verifying):
     from core.services.placeholders import UNFINISHED
 
     step = verifying.task(requeues=1)                # its one revision is spent
+    step.max_retries, step.attempt_number = 3, 2     # F283: and so are its attempts (each another revision)
     failure = f"{UNFINISHED}[Number], [Your Name/Company Name]."
 
     assert _verdict(verifying, step, [failure]) is True

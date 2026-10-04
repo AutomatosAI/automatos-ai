@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from modules.rag import RAGService
 from modules.codegraph import CodeGraphService
 from config import config
+from services.past_work_schemas import chat_search_takes_a_scope  # F305 (night 9)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class AgentPlatformTools:
             pass
         return None
 
+    @chat_search_takes_a_scope  # F305: search_knowledge's scope 'past_work'
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools for function calling"""
         from core.models.core import DOCUMENT_TEMPLATE_FORMATS

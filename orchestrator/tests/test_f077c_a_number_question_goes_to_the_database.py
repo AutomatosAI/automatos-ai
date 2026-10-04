@@ -11,6 +11,9 @@ graph".
 Now the graph's description says it holds no live figures and sends counts,
 money, totals, averages and rankings to smart_query_database. The refusal says
 the call is Auto's to make, never a question for the user.
+
+F302/F312 (night 9): the database route the graph names is platform_query_data,
+the one Auto now holds first-class beside a connected database.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ def test_the_graph_says_it_holds_no_figures_and_where_they_are():
     graph = _graph()
     assert "It holds no live figures" in graph.description
     assert "counts, money, totals, averages and rankings" in graph.description
-    assert "smart_query_database" in graph.description
+    assert "platform_query_data" in graph.description
     assert "what metrics track growth" not in graph.parameters["properties"]["question"]["description"]
 
 

@@ -42,6 +42,7 @@ from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
 from config import config
 from core.database.read_release import release_if_read_only
+from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8): the cards the owner named
 
 # Import from consumer's own modules
 from consumers.chatbot.atom_prompt import atom_memory_block, atom_system_prompt, resolve_atom_attachments
@@ -70,6 +71,11 @@ from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passi
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
+from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
+from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
+from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
+from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
+from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +134,12 @@ def unexecuted_claims_notice(
     "I've approved the mission. It's now running" — it wasn't). ``done`` is
     the actions that succeeded. None when the reply claims nothing it did not
     do. Both reply paths ask this: a turn whose first reply calls no tool never
-    enters the tool loop, and that is exactly where night 3's replayed answer was."""
+    enters the tool loop, and that is exactly where night 3's replayed answer was.
+    F314 (night 9): a claimed action is told in Auto's own plain words (``not_done``),
+    never "This reply says something was …"."""
+    from consumers.chatbot.claim_check import not_done
     from modules.tools.execution.tool_loop import (
-        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run,
-        looks_like_narrated_action, offered_tool_names,
+        UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
     )
 
     if not use_tools or not reply:
@@ -143,7 +151,7 @@ def unexecuted_claims_notice(
         return NARRATED_ACTIONS_NOTICE
     claim = claimed_action_not_done(reply, done)
     if claim:
-        return CLAIMED_ACTION_NOTICE.format(claim=claim)
+        return not_done(claim)
     return None
 
 
@@ -289,9 +297,9 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     return None
 
 
-# F185 (night 6): after two delete asks the model said nothing, and the owner was
-# told "encountered an issue … Please try again": the asks were never mentioned.
-NOTHING_SAID = "I apologize, but I encountered an issue generating a response. Please try again."
+# F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
+# a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it.
+NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
 
 
 def nothing_said_fallback(tool_data: Any) -> str:
@@ -1156,10 +1164,14 @@ class StreamingChatService:
         F232: the prompt carries the product facts the full path's section does.
         """
         from modules.context.sections.product_facts import product_facts
+        from modules.tools.data_routes import with_data_routes
 
+        # F302 (night 9): "Have we got enough Guji?" ran in this lane with the dispatcher alone,
+        # tried 10 calls over 55 s; the database and Knowledge Graph routes are held here too.
+        tools = await with_data_routes(atom_tools, self.workspace_id, self.db) if atom_tools else atom_tools
         logger.info(
             "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
-            len(atom_tools or []),
+            len(tools or []),
             "skipped" if force_text_only else "on",
         )
         memory_block = "" if force_text_only else await atom_memory_block(
@@ -1176,13 +1188,13 @@ class StreamingChatService:
             facts=product_facts(self.db, self.workspace_id),
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-            messages, system_prompt=_atom_prompt, available_tools=atom_tools,
+            messages, system_prompt=_atom_prompt, available_tools=tools,
             resolved_attachment_ids=attachment_ids,
         )
         if attachment_ids:
             await resolve_atom_attachments(self.db, llm_messages, attachment_ids,
                                            workspace_id=self.workspace_id, model_id=model_id)
-        return llm_messages, atom_tools, None
+        return llm_messages, tools, None
 
     async def _prepare_full_path(
         self,
@@ -1567,6 +1579,12 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
+    @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
+    @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
+    @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
+    @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
+    @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
+    @tells_the_team_honestly  # F324 (night 9b): memory is Auto's own; the owner's documents reach the team
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
@@ -1578,14 +1596,14 @@ class StreamingChatService:
             return
 
         async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
-            result = await self.tool_router.execute_and_format(
-                tool_name=PREFETCH_TOOL,
-                tool_args=args,
+            from services.draft_guides import owners_own  # F269/F287 (night 8): never an agent's writing as facts
+            result = owners_own(self.db, await self.tool_router.execute_and_format(
+                tool_name=PREFETCH_TOOL, tool_args=args,
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=self.workspace_id,
                 original_intent=latest_text,
                 caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
-            )
+            ), self.workspace_id)
             self._collect_tool_retrieval(PREFETCH_TOOL, result)
             return result
 
@@ -1629,6 +1647,7 @@ class StreamingChatService:
             return False
 
     @staticmethod
+    @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
         """What the answer gains after it streamed, in order: F187's correction
         (a claim its retry kept, an id that does not exist), then F196's note

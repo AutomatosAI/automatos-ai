@@ -9,6 +9,8 @@ import json
 import logging
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Set
+
+from modules.tools.discovery.actions_data_routes import IMPACT_RELATIONS  # F312 (9)
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -29,7 +31,11 @@ _BIDIRECTIONAL_RELATIONS: Set[str] = {
     "semantically_similar_to",
     "conflicts_with",
 }
-_IMPACT_RELATIONS: Set[str] = _DIRECTIONAL_RELATIONS | _BIDIRECTIONAL_RELATIONS
+# F312 (night 9): extraction snaps every edge to the graph's own relations, so a walk over the
+# five names above found almost nothing: "Brazil Cerrado part_of Harbour Blend", "Kiln Bakehouse
+# buys Harbour Blend" were never followed. The relations that carry an effect join them
+# (handle_graph_impact's docstring still names only the older five).
+_IMPACT_RELATIONS: Set[str] = _DIRECTIONAL_RELATIONS | _BIDIRECTIONAL_RELATIONS | set(IMPACT_RELATIONS)
 
 
 # ------------------------------------------------------------------

@@ -2,12 +2,13 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.board_waiting import failed_cards, with_whats_waiting
 from services.ticket_refs import by_ticket_number
 
 logger = logging.getLogger(__name__)
@@ -223,16 +224,17 @@ BOARD_SNAPSHOT_TASK_LIMIT = 200
 BOARD_SNAPSHOT_RECENT = 10
 
 
+@with_whats_waiting  # F263: what waits for the owner, as the board's Needs you lists it
 @by_ticket_number  # PRD-252 R4: each ticket listed with its number
 async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Everything a status answer needs, in ONE call.
 
     Counts by status and priority, the open tickets, what changed recently, and
     what is scheduled — assembled here rather than by the model making six
-    calls and stitching them together.
+    calls and stitching them together. Each part is read in its own savepoint:
+    a part that fails (a workspace with no scheduled-tasks table) leaves the
+    session usable for the rest, Needs you included (F263, night 9b CI).
     """
-    from sqlalchemy import text as sa_text
-
     from core.security.surface import widget_turn
 
     snapshot: Dict[str, Any] = {"success": True}
@@ -246,70 +248,85 @@ async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]
         k: summary.get(k) for k in ("by_status", "by_priority", "busiest_agents", "total")
         if k in summary
     }
-
-    limit = params.get("limit")
-    try:
-        limit = max(1, min(int(limit), BOARD_SNAPSHOT_TASK_LIMIT))
-    except (TypeError, ValueError):
-        limit = BOARD_SNAPSHOT_TASK_LIMIT
-
-    try:
-        rows = db.execute(sa_text("""
-            SELECT bt.id, bt.title, bt.status, bt.priority, bt.updated_at, a.name AS agent_name
-            FROM board_tasks bt
-            LEFT JOIN agents a ON a.id = bt.assigned_agent_id
-            WHERE bt.workspace_id = :ws
-              AND bt.status NOT IN ('done', 'cancelled', 'closed')
-            ORDER BY bt.updated_at DESC
-            LIMIT :limit
-        """), {"ws": str(workspace_id), "limit": limit}).fetchall()
-        snapshot["open_tasks"] = [{
-            "id": r.id, "title": (r.title or "")[:120], "status": r.status,
-            **({} if visitor else {"priority": r.priority, "agent": r.agent_name}),
-        } for r in rows]
-        snapshot["open_task_count"] = len(snapshot["open_tasks"])
-    except Exception as e:  # noqa: BLE001 — a partial snapshot beats no answer
-        logger.warning("[board_snapshot] open tasks unavailable: %s", e)
-        snapshot["open_tasks"] = []
-
-    try:
-        recent = db.execute(sa_text("""
-            SELECT id, title, status, completed_at
-            FROM board_tasks
-            WHERE workspace_id = :ws AND completed_at IS NOT NULL
-            ORDER BY completed_at DESC LIMIT :n
-        """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
-        snapshot["recently_finished"] = [{
-            "id": r.id, "title": (r.title or "")[:120], "status": r.status,
-            "at": r.completed_at.isoformat() if r.completed_at else None,
-        } for r in recent]
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[board_snapshot] recent activity unavailable: %s", e)
-        snapshot["recently_finished"] = []
-
-    if visitor:
-        return snapshot
-
-    try:
-        sched = db.execute(sa_text("""
-            SELECT id, description, schedule, next_run_at
-            FROM agent_scheduled_tasks
-            WHERE workspace_id = :ws AND status = 'active'
-            ORDER BY next_run_at NULLS LAST LIMIT :n
-        """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
-        snapshot["scheduled"] = [{
-            "id": r.id, "what": (r.description or "")[:100], "schedule": r.schedule,
-            "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
-        } for r in sched]
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[board_snapshot] schedule unavailable: %s", e)
-        snapshot["scheduled"] = []
-
+    open_tasks = _snapshot_part(db, "open tasks", _open_tasks, workspace_id, _snapshot_limit(params), visitor)
+    snapshot["open_tasks"] = open_tasks
+    snapshot["open_task_count"] = len(open_tasks)
+    snapshot["recently_finished"] = _snapshot_part(db, "recent activity", _recently_finished, workspace_id)
+    if not visitor:
+        snapshot["scheduled"] = _snapshot_part(db, "schedule", _scheduled, workspace_id)
     return snapshot
 
 
+def _snapshot_limit(params: Dict[str, Any]) -> int:
+    try:
+        return max(1, min(int(params.get("limit")), BOARD_SNAPSHOT_TASK_LIMIT))
+    except (TypeError, ValueError):
+        return BOARD_SNAPSHOT_TASK_LIMIT
+
+
+def _snapshot_part(db: Session, label: str, read: Any, *args: Any) -> List[Dict[str, Any]]:
+    """One part of the snapshot, read in a savepoint; [] when it can't be read
+    (a partial snapshot beats no answer), with the session left usable."""
+    try:
+        with db.begin_nested():
+            return read(db, *args)
+    except Exception as e:  # noqa: BLE001 — logged; the rest of the snapshot still answers
+        logger.warning("[board_snapshot] %s unavailable: %s", label, e)
+        return []
+
+
+def _open_tasks(db: Session, workspace_id: UUID, limit: int, visitor: bool) -> List[Dict[str, Any]]:
+    from sqlalchemy import text as sa_text
+
+    rows = db.execute(sa_text("""
+        SELECT bt.id, bt.title, bt.status, bt.priority, bt.updated_at, a.name AS agent_name
+        FROM board_tasks bt
+        LEFT JOIN agents a ON a.id = bt.assigned_agent_id
+        WHERE bt.workspace_id = :ws
+          AND bt.status NOT IN ('done', 'cancelled', 'closed')
+        ORDER BY bt.updated_at DESC
+        LIMIT :limit
+    """), {"ws": str(workspace_id), "limit": limit}).fetchall()
+    return [{
+        "id": r.id, "title": (r.title or "")[:120], "status": r.status,
+        **({} if visitor else {"priority": r.priority, "agent": r.agent_name}),
+    } for r in rows]
+
+
+def _recently_finished(db: Session, workspace_id: UUID) -> List[Dict[str, Any]]:
+    from sqlalchemy import text as sa_text
+
+    recent = db.execute(sa_text("""
+        SELECT id, title, status, completed_at
+        FROM board_tasks
+        WHERE workspace_id = :ws AND completed_at IS NOT NULL
+        ORDER BY completed_at DESC LIMIT :n
+    """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
+    return [{
+        "id": r.id, "title": (r.title or "")[:120], "status": r.status,
+        "at": r.completed_at.isoformat() if r.completed_at else None,
+    } for r in recent]
+
+
+def _scheduled(db: Session, workspace_id: UUID) -> List[Dict[str, Any]]:
+    from sqlalchemy import text as sa_text
+
+    sched = db.execute(sa_text("""
+        SELECT id, description, schedule, next_run_at
+        FROM agent_scheduled_tasks
+        WHERE workspace_id = :ws AND status = 'active'
+        ORDER BY next_run_at NULLS LAST LIMIT :n
+    """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
+    return [{
+        "id": r.id, "what": (r.description or "")[:100], "schedule": r.schedule,
+        "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
+    } for r in sched]
+
+
+@with_whats_waiting  # F263: what waits for the owner, as the board's Needs you lists it
 async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get a summary of the task board: counts, busiest agents, failures."""
+    """Get a summary of the task board: counts, busiest agents, the cards failed now
+    (F263: by their status, not by an error they once had)."""
     from core.models.core import BoardTask
     from core.models import Agent
 
@@ -321,15 +338,12 @@ async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any])
     by_status: Dict[str, int] = {}
     by_priority: Dict[str, int] = {}
     agent_task_counts: Dict[int, int] = {}
-    failed_tasks = []
 
     for t in all_tasks:
         by_status[t.status] = by_status.get(t.status, 0) + 1
         by_priority[t.priority] = by_priority.get(t.priority, 0) + 1
         if t.assigned_agent_id:
             agent_task_counts[t.assigned_agent_id] = agent_task_counts.get(t.assigned_agent_id, 0) + 1
-        if t.error_message:
-            failed_tasks.append({"id": t.id, "title": t.title, "error": t.error_message[:200]})
 
     # Resolve agent names for busiest
     busiest_agents = []
@@ -357,5 +371,5 @@ async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any])
         "by_status": by_status,
         "by_priority": by_priority,
         "busiest_agents": busiest_agents,
-        "failed_tasks": failed_tasks[:5],
+        "failed_tasks": failed_cards(db, workspace_id, all_tasks),
     }

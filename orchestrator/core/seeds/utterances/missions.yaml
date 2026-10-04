@@ -111,7 +111,7 @@ actions:
     source: example
   - text: create a mission to build a landing page
     source: example
-  - text: run a deep research mission on competitor pricing
+  - text: begin a deep research mission on competitor pricing
     source: example
   - text: launch a mission
     source: phrase_map
@@ -389,6 +389,8 @@ actions:
   - text: reassign that first task to the writer agent
     source: example
   - text: rename task 3 to 'draft the summary'
+    source: example
+  - text: make every step of this mission wait for my check
     source: example
   - text: swap the agent on step 1 to the analyst
     source: authored

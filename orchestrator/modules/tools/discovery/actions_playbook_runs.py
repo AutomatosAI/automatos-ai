@@ -10,6 +10,7 @@ actions_playbooks.py, whose one register function is past the length rule.
 
 from .action_registry import ActionDefinition, ActionRegistry
 from .actions_playbook_schedule import register_playbook_schedule_action
+from .actions_playbook_steps import register_add_playbook_step_action
 from .actions_playbooks import _INPUTS_PARAM
 
 _CREATE_PLAYBOOK_PARAMETERS = {
@@ -67,7 +68,9 @@ _UPDATE_PLAYBOOK_PARAMETERS = {
         },
         "schedule_config": {
             "type": "object",
-            "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
+            "description": ("Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config, "
+                            "timezone, enabled }. To switch a timer off send {enabled: false}: its time is kept, "
+                            "and {enabled: true} switches it back on."),
         },
         "wait_for_me": {
             "type": "boolean",
@@ -120,6 +123,7 @@ def register_playbook_run_actions(registry: ActionRegistry) -> None:
     _register_execute_playbook(registry)
     _register_get_playbook_execution(registry)  # F321: left actions_playbooks.py to take `step`
     register_playbook_schedule_action(registry)  # F266: the timer takes wait_for_me too; left actions_playbooks.py
+    register_add_playbook_step_action(registry)  # F321: a step always has its agent; left actions_playbooks.py
 
 
 def _register_create_playbook(registry: ActionRegistry) -> None:
@@ -183,8 +187,10 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_execute_playbook",
         description=(
-            "Trigger a playbook run asynchronously. Returns an execution_id "
-            "immediately — check status later with platform_get_playbook_execution. "
+            "Trigger a playbook run asynchronously. Returns the run's card number at once "
+            "('number', e.g. #0440): give the owner that number, as the board shows it. The "
+            "execution_id is only for platform_get_playbook_execution. Pass input_data under the "
+            "names platform_get_playbook lists in 'inputs'. "
             "For one-off agent tasks, use platform_create_task instead. "
             "Provide playbook_id or playbook_name."
         ),
@@ -197,6 +203,7 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
             "run the daily digest playbook",
             "execute playbook 5",
             "trigger the bug triage automation",
+            "run my New Cafe Onboarding for a new café",   # F288 (night 8): a named playbook, no word "playbook"
         ],
         accepts=("inputs", "input"),
         # F182: night 6 nested the café's details under "params".

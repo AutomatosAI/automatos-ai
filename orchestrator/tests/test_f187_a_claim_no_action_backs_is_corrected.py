@@ -11,7 +11,8 @@ one 51 s later.
 Now such a first reply goes through the loop. F108 nudges the claim once, and a
 retry that still claims is saved with a correction line (tier 1). An id that did
 not exist when the reply was written gets one re-prompt, then the correction
-(tier 2). A claim no action backs when tools did run is only logged (tier 3).
+(tier 2). A claim no action backs when tools did run is corrected too (F261,
+night 8: it used to be only logged, tier 3).
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from consumers.chatbot import claim_check
-from consumers.chatbot.claim_check import NOTHING_DONE, Verdict, invented_ids, passive_claim
+from consumers.chatbot.claim_check import Verdict, invented_ids, not_done, passive_claim
 from modules.tools.execution.action_claims import claimed_action_not_done
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
@@ -159,8 +160,8 @@ def test_a_retry_that_still_claims_is_saved_with_the_correction(rows):
     assert "has not happened" in sent[-1]["content"]
     verdict = final["_f187"]
     assert (verdict.tools, verdict.claim) == (0, "put on the board")
-    assert verdict.correction == NOTHING_DONE == (
-        "Correction: nothing was done yet — no action ran. Ask me to do it and check the board after.")
+    assert verdict.correction == not_done("put on the board") == (         # F314: in Auto's own words
+        "Just to be clear: I didn't put anything on the board in this reply. Ask me again if you want it done.")
     marks = [json.loads(f[2:]) for f in frames if f.startswith('d:{"type": "narration"')]
     assert {"type": "narration", "data": {"text": claim, "retracted": True}} in marks
 
@@ -176,8 +177,9 @@ def test_the_saved_answer_gains_the_correction():
 
     answer = _round("I've created the task on your board, as I said.")
     assert StreamingChatService._answer_additions(Verdict(tools=0, claim="put on the board"), answer) == [
-        "\n\n" + NOTHING_DONE]
-    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == []   # tier 3: a log
+        "\n\n" + not_done("put on the board")]
+    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == [
+        "\n\n" + not_done("started")]                    # F261: tools ran, the claim still corrected
     assert StreamingChatService._answer_additions(None, answer) == []
 
 
@@ -203,7 +205,7 @@ def test_night_6s_task_1100_is_re_prompted_once_then_corrected(rows):
     verdict = final["_f187"]
     assert verdict.ids == [("task", "1100")] and verdict.reprompted
     assert verdict.claim is None                                      # the last retry claims nothing more
-    assert verdict.correction == "Correction: task 1100 does not exist — I named it without looking it up."
+    assert verdict.correction == "Just to be clear: task 1100 does not exist — I named it without looking it up."
 
 
 def test_an_id_that_exists_or_that_the_owner_named_is_left_alone(rows):
@@ -277,19 +279,26 @@ def test_saying_an_id_does_not_exist_is_not_inventing_it(no_lookup):
 
 
 def test_a_cancel_made_through_the_task_status_is_backed():
-    # N6 02:49:11
-    assert claimed_action_not_done("I have just canceled Task 1099.", {"platform_update_task_status"}) is None
+    # N6 02:49:11. F261 (night 8): the move must be to cancelled; a move to done approves.
+    from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+
+    tracker = ToolExecutionTracker()
+    tracker.record_outcome("platform_execute", {"action": "platform_update_task_status",
+                                                "params": {"task_id": 1099, "status": "cancelled"}}, {"success": True})
+    assert claimed_action_not_done("I have just canceled Task 1099.", tracker.succeeded) is None
 
 
-# ── tier 3: logged, never acted on ──────────────────────────────────────────
+# ── tier 3: tools ran and no action backs the claim ─────────────────────────
 
-def test_a_claim_no_action_backed_when_tools_ran_is_only_logged(caplog):
+def test_a_claim_no_action_backed_when_tools_ran_is_corrected(caplog):
+    """F261 (night 8): "I've cancelled Mission #0365" beside a playbook run was only logged."""
     verdict = Verdict(tools=2, claim="started")
-    assert verdict.correction is None
+    assert verdict.correction == not_done("started") == (                  # F314: in Auto's own words
+        "Just to be clear: I didn't start anything in this reply. Ask me again if you want it done.")
     with caplog.at_level(logging.WARNING, logger="consumers.chatbot.claim_check"):
         verdict.log("92c7ca7a-add4-465a-b93a-516ab7b1ba4a")
     assert [r.getMessage() for r in caplog.records] == [
-        "[F187] tier=3 family=started tools=2 reply=92c7ca7a-add4-465a-b93a-516ab7b1ba4a action=logged"]
+        "[F187] tier=3 family=started tools=2 reply=92c7ca7a-add4-465a-b93a-516ab7b1ba4a action=corrected"]
 
 
 def test_a_passive_claim_is_only_logged(caplog):

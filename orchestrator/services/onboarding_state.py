@@ -39,6 +39,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from services.onboarding_content import answers_alone_never_start_it, not_for_a_workspace_in_use  # F314 (9)
+
 logger = logging.getLogger(__name__)
 
 # Ordered spine (app-level enum, NOT a Postgres enum). ``skipped`` is a terminal
@@ -101,6 +103,7 @@ def current_stage(workspace: Any) -> str:
     return get_onboarding(workspace).get("stage", INITIAL_STAGE)
 
 
+@not_for_a_workspace_in_use  # F314 (night 9): no quiz for a workspace already in use
 def is_onboarding_active(workspace: Any) -> bool:
     """THE definition of "this workspace is onboarding" — the tool router's
     onboarding prior and AutoBrain's classifier both read this one (F064).
@@ -315,6 +318,7 @@ def advance_onboarding_stage(
     return _persist(db, workspace, doc, commit=commit)
 
 
+@answers_alone_never_start_it  # F314 (night 9): answers in a workspace in use don't start the quiz
 def set_segment(
     db: Any, workspace: Any, segment: dict, *, commit: bool = True
 ) -> dict[str, Any]:

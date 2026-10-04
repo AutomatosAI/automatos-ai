@@ -238,22 +238,26 @@ def test_socials_actions_hidden_reads_both_switches_and_fails_closed(app, monkey
 
 
 def test_hidden_categories_resolve_from_the_workspace_or_its_id(app):
+    # F302 (night 9): an integration a workspace has not connected is hidden beside Socials;
+    # no workspace here has a Shopify store, so "shopify" is always among them.
+    no_store = ("shopify",)
+    everything = HIDDEN + no_store
     on = app.session.get(Workspace, WS_ON)
-    assert hidden_categories_for(on) == ()
-    assert hidden_categories_for(None) == HIDDEN
-    assert hidden_categories_for_workspace(WS_ON, app.session) == ()
-    assert hidden_categories_for_workspace(str(WS_ON), app.session) == ()
-    assert hidden_categories_for_workspace(WS_OFF, app.session) == HIDDEN
-    assert hidden_categories_for_workspace(WS_BAD, app.session) == HIDDEN
-    assert hidden_categories_for_workspace(uuid.uuid4(), app.session) == HIDDEN  # no such workspace
-    assert hidden_categories_for_workspace(None) == HIDDEN
-    assert hidden_categories_for_workspace("", app.session) == HIDDEN
-    assert hidden_categories_for_workspace("not-a-uuid", app.session) == HIDDEN
+    assert hidden_categories_for(on) == no_store
+    assert hidden_categories_for(None) == everything
+    assert hidden_categories_for_workspace(WS_ON, app.session) == no_store
+    assert hidden_categories_for_workspace(str(WS_ON), app.session) == no_store
+    assert hidden_categories_for_workspace(WS_OFF, app.session) == everything
+    assert hidden_categories_for_workspace(WS_BAD, app.session) == everything
+    assert hidden_categories_for_workspace(uuid.uuid4(), app.session) == everything  # no such workspace
+    assert hidden_categories_for_workspace(None) == everything
+    assert hidden_categories_for_workspace("", app.session) == everything
+    assert hidden_categories_for_workspace("not-a-uuid", app.session) == everything
 
     def broken_get(model, key):
         raise RuntimeError("connection dropped")
 
-    assert hidden_categories_for_workspace(WS_ON, SimpleNamespace(get=broken_get)) == HIDDEN  # a failed read hides
+    assert hidden_categories_for_workspace(WS_ON, SimpleNamespace(get=broken_get)) == everything  # a failed read hides
     assert exclude_kwargs(()) == {} and exclude_kwargs(None) == {}
     assert exclude_kwargs(HIDDEN) == {"exclude_categories": HIDDEN}
 

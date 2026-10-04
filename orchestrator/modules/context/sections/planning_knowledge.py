@@ -9,6 +9,13 @@ parallel retrieval path to audit.
 
 Output is the budgeter's numbered-citation context ``[1]..[n]`` so planners
 can cite real documents in the plan.
+
+F287 (night 8): the planner wrote "mention a last order date (Friday 27 November
+from [2] is a good reference)" into mission #0352's plan against the owner's
+"Thursday 10 December", and the email step used it; [2] was a document an agent had
+written. Chunks from documents an agent wrote (``source_type`` agent_output) are
+dropped before the plan sees them (services/draft_guides.owners_own_chunks), and the
+section says the owner's words in the goal win over any document (``OWNERS_WORDS_WIN``).
 """
 
 from __future__ import annotations
@@ -24,6 +31,11 @@ logger = logging.getLogger(__name__)
 # every planner (chat classification included) to afford.
 _MAX_CHUNKS = 6
 _SECTION_TOKEN_CAP = 4000
+KNOWLEDGE_HEADING = "### Workspace knowledge (retrieved for this goal)"
+# F287 (night 8): a document's date beat the owner's own (#0352: 27 Nov for 10 Dec).
+OWNERS_WORDS_WIN = ("These passages are background from the workspace's documents. Where one differs from the "
+                    "owner's own words in the goal (a date, a price, a quantity, a name, who does a step), the "
+                    "owner's words win: put theirs in the plan, never the document's.")
 
 
 class PlanningKnowledgeSection(BaseSection):
@@ -48,6 +60,7 @@ class PlanningKnowledgeSection(BaseSection):
             return ""
 
         from modules.rag.service import get_rag_service
+        from services.draft_guides import owners_own_chunks
 
         rag = get_rag_service()
         # PRD-157 path: retrieve() resolves scope via build_retrieval_filters
@@ -60,11 +73,10 @@ class PlanningKnowledgeSection(BaseSection):
             workspace_id=str(ctx.workspace_id),
             team=ctx.kwargs.get("team"),
         )
+        # F287: the owner's documents only, never what an agent wrote.
+        result = owners_own_chunks(ctx.db_session, result, ctx.workspace_id)
 
         if not result or not result.chunks:
             return ""
 
-        return (
-            "### Workspace knowledge (retrieved for this goal)\n\n"
-            f"{result.formatted_context}"
-        )
+        return f"{KNOWLEDGE_HEADING}\n{OWNERS_WORDS_WIN}\n\n{result.formatted_context}"

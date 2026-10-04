@@ -34,6 +34,7 @@ from typing import Any, Optional
 
 from modules.context.sections.base import BaseSection, SectionContext
 from services import onboarding_state
+from services.onboarding_content import quiz_not_wanted
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,8 @@ class OnboardingSection(BaseSection):
             else None
         )
         is_active = stage is not None and stage not in onboarding_state.TERMINAL_STAGES
+        # F314 (night 9): onboarding that has not started is not offered to a workspace in use.
+        is_active = is_active and not quiz_not_wanted(ctx.db_session, workspace, ctx.workspace_id)
         is_manual = self._check_trigger_phrases(ctx)
 
         if not is_active and not is_manual:

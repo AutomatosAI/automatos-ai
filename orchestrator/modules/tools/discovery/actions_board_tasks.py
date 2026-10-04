@@ -344,23 +344,21 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     ))
 
 
-# F241 (night 7b): "Update #0199 with that brief and send it back" came as
-# platform_update_task {"status": "pending", "brief": ...}, and was refused.
-_UPDATE_TASK_MISPLACED = {
-    "status": ("this action changes a ticket's details, not its status. To send the ticket back to its agent "
-               "with a new brief, give the brief in description and send_back: true. Any other move is "
-               "platform_update_task_status's."),
-}
-
-
 def _update_task_parameters() -> dict:
-    """platform_update_task's parameters: the fields it edits, a note, and send_back (F241 night 7b)."""
+    """platform_update_task's parameters: the fields it edits, a note, a status (F309) and send_back (F241 night 7b)."""
     return {
         "type": "object",
         "properties": {
             "task_id": _ticket_ref("The ticket to edit"),
             "title": {"type": "string", "description": "New title."},
-            "description": {"type": "string", "description": "New description."},
+            "description": {
+                "type": "string",
+                "description": (
+                    "A new brief, in the owner's words. On a card its agent has already worked on, this is the "
+                    "board's Re-brief: the card goes back to its agent to redo it from this brief, and the old "
+                    "brief and the last draft stay on record. For 'update #0377 with this brief: …'."
+                ),
+            },
             "priority": {
                 "type": "string",
                 "enum": ["urgent", "high", "medium", "low"],
@@ -373,15 +371,27 @@ def _update_task_parameters() -> dict:
             },
             "note": {
                 "type": "string",
-                "description": "A remark to add to the ticket. Not a rejection.",
+                "description": ("A remark to add to the ticket, in the owner's own words. With send_back, the "
+                                "owner's words that the redo fixes."),
+            },
+            # F309 (night 9): "approve card 1866 with this note" came as {notes, status: "done"}, was
+            # refused here, and became a plain note and a bare move: the approval's note was lost.
+            "status": {
+                "type": "string",
+                "description": (
+                    "Moves the card after any other edit, exactly as platform_update_task_status does, with note "
+                    "kept as that move keeps it: 'done' approves it and note is the owner's approval note "
+                    "('approve #0019 with this note: …'). Never with a new description on a card already worked "
+                    "on: the Re-brief sends it back itself."
+                ),
             },
             "send_back": {
                 "type": "boolean",
                 "description": (
-                    "With a new description: the ticket goes back to its agent to redo it from that "
-                    "brief, on the same card, as the board's 'Update ticket and re-queue' does. The old "
-                    "brief and the last draft stay on record. For 'update #0199 with this brief and "
-                    "send it back'."
+                    "True sends the card back to its agent the way the board's Reject does: its brief stays, "
+                    "and note (the owner's words, as they wrote them) is what the redo fixes, on the same "
+                    "card. For 'send #0347 back: take out …'. Never with a description: for a new brief, "
+                    "send description without send_back."
                 ),
             },
         },
@@ -395,13 +405,13 @@ def _register_update_task(registry: ActionRegistry) -> None:
         description=(
             "Edit a board task's details — title, description, priority, tags, "
             "review_mode — or add a note to it without rejecting it. Use this to "
-            "correct or refine a ticket. To CHANGE ITS STATUS use "
-            "platform_update_task_status instead; this action never moves a task, "
-            "except a re-brief: a new description with send_back sends it back to its agent."
+            "correct or refine a ticket. It moves a card only as the board does: status "
+            "moves it as platform_update_task_status does, its note kept with the move; "
+            "send_back is the board's Reject (the owner's words in note, the brief kept); "
+            "and a new description on a card already worked on is its Re-brief."
         ),
         category="tasks",
         parameters=_update_task_parameters(),
-        misplaced=_UPDATE_TASK_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "edit"],

@@ -36,10 +36,14 @@ OWNER_WORDS_CHARS = 2000
 
 def owner_words(caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
     """What the person typed this turn (``user_query``, set by the chat server-side;
-    never a tool argument), bounded, or None for a lane nobody typed into."""
-    if not isinstance(caller_context, dict):
-        return None
-    return str(caller_context.get("user_query") or "").strip()[:OWNER_WORDS_CHARS] or None
+    never a tool argument), bounded, or None for a lane nobody typed into. F302: a
+    platform action's handler (platform_query_data) builds a context without it; the
+    words the action's turn holds (turn_owner_words) stand in."""
+    from modules.tools.execution.turn_owner_words import held_owner_words
+
+    context = caller_context if isinstance(caller_context, dict) else {}
+    typed = context.get("user_query") or held_owner_words()
+    return str(typed or "").strip()[:OWNER_WORDS_CHARS] or None
 
 
 def _error(message: str, *, disabled: bool = False) -> Dict[str, Any]:

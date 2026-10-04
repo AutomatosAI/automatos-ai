@@ -10,6 +10,9 @@
   answer said a table had been made where there was none. The board moves a card when
   its agent answers, so a sentence of a brief telling the agent to change the card's
   status is taken out before the card is filed, and the result says so.
+- F289 (night 8): Auto made #0251 and #0386 straight into Review (platform_create_task
+  {status: "review"}): nobody had worked on them, and Needs you counted them. A new card
+  starts in the Inbox or with its agent, and reaches Review when its agent answers.
 """
 from __future__ import annotations
 
@@ -45,6 +48,10 @@ _STATUS_ORDER = re.compile(
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 STATUS_TAKEN_OUT = ("A sentence of the brief told the agent to change its card's status, and was taken out: the "
                     "board moves the card when the agent answers. Briefs say what to do and what to hand back.")
+# A new card nobody has worked on is never filed in Review (F289).
+NOT_YET_WORKED = ("review",)
+STARTS_IN_THE_INBOX = ("A new card starts in the Inbox or with its agent, not in Review: it reaches Review when its "
+                       "agent answers. It was filed without the status.")
 
 
 def checks_the_new_card(handler: Handler) -> Handler:
@@ -54,12 +61,21 @@ def checks_the_new_card(handler: Handler) -> Handler:
         refusal = copy_refusal(db, workspace_id, (params or {}).get("title"))
         if refusal:
             return {"success": False, "error": refusal}
-        brief, taken_out = without_status_orders((params or {}).get("description"))
-        if not taken_out:
-            return await handler(db, workspace_id, params)
-        out = await handler(db, workspace_id, {**params, "description": brief})
-        return {**out, "brief_note": STATUS_TAKEN_OUT} if isinstance(out, dict) and out.get("success") else out
+        params, held = _without_a_finished_status(params or {})
+        brief, taken_out = without_status_orders(params.get("description"))
+        out = await handler(db, workspace_id, {**params, "description": brief} if taken_out else params)
+        if not (isinstance(out, dict) and out.get("success")):
+            return out
+        notes = {"brief_note": STATUS_TAKEN_OUT} if taken_out else {}
+        return {**out, **notes, **({"status_note": STARTS_IN_THE_INBOX} if held else {})}
     return wrapped
+
+
+def _without_a_finished_status(params: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """The call without a status saying it was already worked on (F289), and whether one was taken out."""
+    if str(params.get("status") or "").strip().lower() not in NOT_YET_WORKED:
+        return params, False
+    return {k: v for k, v in params.items() if k != "status"}, True
 
 
 def copy_refusal(db: Session, workspace_id: Any, title: Any) -> Optional[str]:

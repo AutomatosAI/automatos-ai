@@ -7,9 +7,10 @@ Review to Done in a second or two: nothing read those keys, and a step's card
 showed only what its mission did with it.
 
 A step waits for the owner when its mission checks each step
-(``check_each_step``, or either spelling night 7 saw) or its card was set to
-wait (``review_mode`` human). Once it passes its own check, it stays in Review
-for the owner, and its mission pauses, saying which step it waits for. Approve
+(``check_each_step``, or any spelling Auto used for it on nights 7 and 8, F282)
+or its card was set to wait (``review_mode`` human). Once it passes its own
+check, it stays in Review for the owner, and its mission pauses, saying which
+step it waits for. Approve
 lets the step through, and the mission carries on; Reject sends it back to be
 redone (F243), and the mission carries on with the redo.
 """
@@ -29,8 +30,28 @@ from services.orchestration_state import ConflictError, transition_run, transiti
 logger = logging.getLogger(__name__)
 
 CHECK_EACH_STEP = "check_each_step"
-# The spellings Auto used on night 7 for the same wish (#0139, #0176).
-SAID_STEP_BY_STEP = (("approval_mode", ("step_by_step", "each_step")), ("review_mode", ("each_task", "each_step")))
+# F282 (night 8): the same wish, written eight ways. The owner's sentence gave
+# check_each_step on #0324, approval_mode step_by_step on #0333 and wait_for_me
+# on #0344, and only the first two stopped a step: 10 of 29 missions where the
+# owner asked checked with them. Each of these keys, when true, means it.
+SAYS_CHECK_EACH_STEP = (
+    CHECK_EACH_STEP, "wait_for_me", "approval_required", "requires_approval", "require_approval",
+    "require_human_approval", "require_human_approval_for_each_step", "human_approval", "review_required",
+    "requires_review", "review_each_step", "approve_each_step", "check_every_step", "pause_after_each_step",
+    "step_approval", "step_by_step",
+)
+# F308 (night 9): #0033, asked for twice, was made with {"auto_approve_steps": false}, the
+# same wish said the other way round, and ran start to finish in a minute. Each of these
+# keys, when false, means it.
+SAYS_STEPS_RUN_ON = (
+    "auto_approve_steps", "auto_approve_each_step", "auto_approve_tasks", "auto_advance", "auto_continue",
+    "auto_proceed", "auto_run_steps", "skip_step_review", "skip_step_approval", "run_unattended",
+)
+FALSE_WORDS = ("false", "no", "off", "0")
+# Keys whose value names the way steps are checked (night 7: #0139, #0176; night 8: #0282).
+STEP_BY_STEP_WORDS = ("step_by_step", "each_step", "every_step", "per_step", "each_task", "human", "manual")
+SAID_STEP_BY_STEP = (("approval_mode", STEP_BY_STEP_WORDS), ("review_mode", STEP_BY_STEP_WORDS))
+TRUE_WORDS = ("true", "yes", "on", "1")
 OWNER_REVIEWS = "human"
 # On a step's input_context while it waits for the owner.
 WAITING_KEY = "waiting_for_owner"
@@ -49,11 +70,38 @@ class WaitsForTheOwnersCheck(ConflictError, ValueError):
 
 
 def checks_each_step(config: Any) -> bool:
-    """Whether a mission's config asks for the owner's check of every step."""
+    """Whether a mission's config asks for the owner's check of every step, in
+    any of the spellings above."""
     config = config if isinstance(config, dict) else {}
-    if config.get(CHECK_EACH_STEP) is True:
+    if any(_said_yes(config.get(key)) for key in SAYS_CHECK_EACH_STEP):
         return True
-    return any(config.get(key) in values for key, values in SAID_STEP_BY_STEP)
+    if any(_said_no(config[key]) for key in SAYS_STEPS_RUN_ON if key in config):
+        return True
+    return any(str(config.get(key) or "").strip().lower() in values for key, values in SAID_STEP_BY_STEP)
+
+
+def with_step_checks(config: Any, on: Optional[bool] = None) -> dict:
+    """A new config that says it one way: ``check_each_step`` true, and none of
+    the other spellings. ``on`` sets it; None keeps what the config already said.
+    Off leaves the key out. Missions are created and changed through this, so
+    the setting has one name wherever it was written (F282)."""
+    config = dict(config) if isinstance(config, dict) else {}
+    wanted = checks_each_step(config) if on is None else bool(on)
+    spellings = set(SAYS_CHECK_EACH_STEP) | set(SAYS_STEPS_RUN_ON) | {key for key, _ in SAID_STEP_BY_STEP}
+    kept = {key: value for key, value in config.items() if key not in spellings}
+    return {**kept, CHECK_EACH_STEP: True} if wanted else kept
+
+
+def _said_yes(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, (str, int)) and str(value).strip().lower() in TRUE_WORDS
+
+
+def _said_no(value: Any) -> bool:
+    if isinstance(value, bool):
+        return not value
+    return isinstance(value, (str, int)) and str(value).strip().lower() in FALSE_WORDS
 
 
 def step_card(db: Session, task: Any) -> Optional[BoardTask]:

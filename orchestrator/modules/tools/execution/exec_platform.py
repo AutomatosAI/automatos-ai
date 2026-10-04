@@ -9,6 +9,11 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+SEARCH_KNOWLEDGE = "search_knowledge"
+# F325 (night 9b): semantic_search reads the same documents as search_knowledge, and
+# F305 left it out of the owner's-documents-only rule.
+DOCUMENT_SEARCHES = frozenset({SEARCH_KNOWLEDGE, "semantic_search"})
+
 
 async def execute_platform_tool(
     executor,
@@ -16,12 +21,25 @@ async def execute_platform_tool(
     parameters: Dict[str, Any],
     agent_id: int,
 ) -> Dict[str, Any]:
-    """Execute research tools via AgentPlatformTools."""
-    return await executor.platform_tools.execute_tool(
+    """Execute research tools via AgentPlatformTools. F269 (night 8, night 9): a
+    search of the documents (search_knowledge, and semantic_search since F325) returns
+    the owner's documents only, never an agent's (services/agents_writing).
+    F305: search_knowledge with ``scope: "past_work"`` searches earlier approved answers,
+    labelled as an agent's (services/past_work)."""
+    from services.past_work import past_work_for_agent, wants_past_work
+
+    if tool_name == SEARCH_KNOWLEDGE and wants_past_work(parameters):
+        return await past_work_for_agent(getattr(executor.platform_tools, "db", None), agent_id, parameters)
+    result = await executor.platform_tools.execute_tool(
         tool_name=tool_name,
         parameters=parameters,
         agent_id=agent_id,
     )
+    if tool_name not in DOCUMENT_SEARCHES:
+        return result
+    from services.agents_writing import owners_search
+
+    return owners_search(getattr(executor.platform_tools, "db", None), result, agent_id)
 
 
 async def execute_platform_action(
@@ -81,8 +99,11 @@ async def execute_platform_action(
 
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
+        from modules.tools.execution.turn_owner_words import owner_words_held
+
         executor_inst = PlatformActionExecutor(db=executor.db, workspace_id=workspace_id)
-        result = await executor_inst.execute(tool_name, parameters, caller_context=caller_context)
+        with owner_words_held(caller_context):  # F302: the turn's words reach platform_query_data's NL2SQL
+            result = await executor_inst.execute(tool_name, parameters, caller_context=caller_context)
         logger.info(
             f"[tool-trace {trace_id or 'no-trace'}] Platform action {tool_name} "
             f"success={result.get('success')}"

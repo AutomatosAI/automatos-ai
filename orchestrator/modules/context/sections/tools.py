@@ -101,7 +101,7 @@ class ToolsSection(BaseSection):
                 )
 
             if strategy == ToolLoadingStrategy.FILTERED:
-                return await self._load_filtered(
+                tools, tool_choice = await self._load_filtered(
                     agent_id,
                     workspace_id,
                     db_session,
@@ -111,6 +111,11 @@ class ToolsSection(BaseSection):
                     conversation_context=conversation_context,
                     prebuilt_tools=prebuilt_tools,
                 )
+                # F302/F312 (night 9): whatever the router kept, Auto holds the
+                # workspace's database and Knowledge Graph routes first-class.
+                from modules.tools.data_routes import with_data_routes
+
+                return await with_data_routes(tools, workspace_id, db_session), tool_choice
 
             logger.warning("Unknown ToolLoadingStrategy %r — returning empty tools", strategy)
             return [], "none"

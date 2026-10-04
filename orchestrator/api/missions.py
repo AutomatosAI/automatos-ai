@@ -63,6 +63,7 @@ from core.models.orchestration_enums import (
     TaskState,
     TERMINAL_RUN_STATES,
 )
+from modules.coordination.owner_checks import checks_each_step
 from modules.coordination.planner import PlanValidationError
 
 from services.chat_messenger import strip_caller_narration_origin
@@ -357,6 +358,9 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "state_type": run.state_type,
         "plan": run.plan,
         "config": run.config,
+        # F282: one normalised name for the owner's "check each step with me",
+        # whatever spelling it was written under (modules/coordination/owner_checks.py).
+        "check_each_step": checks_each_step(run.config),
         "output_summary": run.output_summary,
         "token_budget_estimate": run.token_budget_estimate,
         "tokens_used": run.tokens_used or 0,
@@ -1428,20 +1432,20 @@ async def approve_plan(
                 detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
             )
 
-        # Apply overrides before approval
+        # Apply overrides before approval. F285 (night 8): the plan's own estimate is no
+        # budget; a token budget the owner types here is, as the dollars it is priced at.
         if body.max_concurrent_override is not None:
             run.max_concurrent = body.max_concurrent_override
         if body.token_budget_override is not None:
+            from modules.policy.pricing import price_total_tokens_usd
+
             run.token_budget_estimate = body.token_budget_override
+            run.config = {**(run.config or {}),
+                          "cost_ceiling": price_total_tokens_usd(None, None, body.token_budget_override)}
         if body.skip_verification is not None:
             run.config = {**(run.config or {}), "skip_verification": body.skip_verification}
 
-        coordinator = get_coordinator_service()
-        run = coordinator.approve_plan(
-            db=db,
-            run_id=run.id,
-            actor_id=ctx.user.id or "unknown",
-        )
+        run = get_coordinator_service().approve_plan(db=db, run_id=run.id, actor_id=ctx.user.id or "unknown")
         db.commit()
         return _run_to_response(run)
 

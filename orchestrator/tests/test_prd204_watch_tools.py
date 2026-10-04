@@ -479,14 +479,16 @@ def test_create_mission_tool_auto_creates_watch(workspace, new_session, monkeypa
     from modules.tools.discovery.handlers_missions import create_mission
 
     s = new_session()
-    seeded_run = _seed_run(s, workspace, goal="draft the launch narrative")
-    seeded_run.state = "awaiting_approval"
-    seeded_run.state_type = "blocked"
-    seeded_run.plan = {"tasks": []}
-    s.commit()
+    made = {}
 
     async def _fake_create_mission(self, db, workspace_id, goal, created_by, config=None, staffing=None):
-        return seeded_run
+        # The run is made by the call, as the coordinator makes it: one seeded beforehand
+        # is an earlier mission with the same goal, which F289 (night 8) refuses to copy.
+        run = _seed_run(s, workspace, goal=goal)
+        run.state, run.state_type, run.plan = "awaiting_approval", "blocked", {"tasks": []}
+        s.commit()
+        made["run"] = run
+        return run
 
     monkeypatch.setattr(CoordinatorService, "create_mission", _fake_create_mission)
 
@@ -503,7 +505,7 @@ def test_create_mission_tool_auto_creates_watch(workspace, new_session, monkeypa
         .filter(
             Watch.workspace_id == workspace,
             Watch.target_type == "mission",
-            Watch.target_id == str(seeded_run.id),
+            Watch.target_id == str(made["run"].id),
         )
         .one()
     )

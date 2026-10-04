@@ -197,6 +197,8 @@ actions:
     source: example
   - text: trigger the bug triage automation
     source: example
+  - text: run my New Cafe Onboarding for a new café
+    source: example
   - text: run the recipe
     source: phrase_map
   - text: execute recipe
@@ -358,6 +360,8 @@ actions:
   - text: schedule this playbook on a cron
     source: example
   - text: automate the weekly review playbook
+    source: example
+  - text: switch off the timer on my weekly posts playbook
     source: example
   - text: schedule playbook
     source: phrase_map

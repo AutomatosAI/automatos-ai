@@ -5,8 +5,13 @@ Wiring tests for US-009: Budget admission gate in MissionDispatcher.
 Proves:
 1. Run at >100% budget → heavy task blocked, mission paused
 2. Run at 80-100% budget → synthesis task allowed, heavy task deferred
-3. Run with no token_budget_estimate → all tasks dispatch normally
+3. Run with no ceiling → all tasks dispatch normally
 4. _get_budget_status returns correct thresholds
+
+F285 (night 8): the plan's token estimate is no budget; only a ceiling the
+owner set (config cost_ceiling) pauses a mission. The runs here that are over
+or near budget carry the owner's ceiling: the dollars ``ceiling_tokens`` cost at
+the flat rate, the same figure the estimate used to be priced at.
 """
 import sys
 from pathlib import Path
@@ -28,6 +33,7 @@ from core.models.orchestration_enums import (
     TaskType,
 )
 from modules.coordination.dispatcher import MissionDispatcher, DispatchResult
+from modules.policy.pricing import price_total_tokens_usd
 
 
 # ---------------------------------------------------------------------------
@@ -63,13 +69,15 @@ def _make_task(
     return task
 
 
-def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0, config=None):
+def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0, config=None,
+              ceiling_tokens=None):
     """Create a mock OrchestrationRun.
 
     `config` mirrors the real OrchestrationRun.config JSONB column (DB default
     '{}'). Defaulting to an empty dict is required: the budget gate reads
     ``run.config`` (its cost ceiling, the session-token count) and a bare
-    MagicMock would answer every key with a truthy mock.
+    MagicMock would answer every key with a truthy mock. ``ceiling_tokens``: the
+    owner's ceiling, priced at the flat rate (F285).
     """
     run = MagicMock()
     run.id = run_id or uuid4()
@@ -78,6 +86,8 @@ def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, toke
     run.tokens_used = tokens_used
     run.state = RunState.RUNNING.value
     run.config = {} if config is None else config
+    if ceiling_tokens is not None:
+        run.config = {**run.config, "cost_ceiling": price_total_tokens_usd(None, None, ceiling_tokens)}
     return run
 
 
@@ -128,20 +138,27 @@ class TestGetBudgetStatus:
         assert MissionDispatcher._get_budget_status(run) == BudgetStatus.HEALTHY
 
     def test_under_50_pct_is_healthy(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=4000)
+        run = _make_run(ceiling_tokens=10000, tokens_used=4000)
         assert MissionDispatcher._get_budget_status(run) == BudgetStatus.HEALTHY
 
     def test_at_50_pct_is_warning(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=5000)
+        run = _make_run(ceiling_tokens=10000, tokens_used=5000)
         assert MissionDispatcher._get_budget_status(run) == BudgetStatus.WARNING
 
     def test_at_80_pct_is_critical(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=8000)
+        run = _make_run(ceiling_tokens=10000, tokens_used=8000)
         assert MissionDispatcher._get_budget_status(run) == BudgetStatus.CRITICAL
 
     def test_over_100_pct_is_exceeded(self):
-        run = _make_run(token_budget_estimate=1000, tokens_used=1500)
+        run = _make_run(ceiling_tokens=1000, tokens_used=1500)
         assert MissionDispatcher._get_budget_status(run) == BudgetStatus.EXCEEDED
+
+    def test_the_plans_estimate_alone_is_no_budget(self):
+        """F285 (night 8): #0356 paused at "$0.16 of the $0.14 budget (the plan's
+        45,000-token estimate)" with no budget set."""
+        run = _make_run(token_budget_estimate=1000, tokens_used=1500)
+        assert MissionDispatcher._budget_ceiling_usd(run) == 0.0
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.HEALTHY
 
 
 # ---------------------------------------------------------------------------
@@ -156,14 +173,14 @@ class TestPreDispatchBudgetCheck:
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "allow"
 
     def test_healthy_allows(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=2000)
+        run = _make_run(ceiling_tokens=10000, tokens_used=2000)
         task = _make_task(run_id=run.id, seq=1)
         db = MagicMock()
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "allow"
 
     @patch("modules.coordination.dispatcher.emit_event")
     def test_warning_allows_with_event(self, mock_emit):
-        run = _make_run(token_budget_estimate=10000, tokens_used=6000)
+        run = _make_run(ceiling_tokens=10000, tokens_used=6000)
         task = _make_task(run_id=run.id, seq=1)
         db = MagicMock()
         result = MissionDispatcher._pre_dispatch_budget_check(db, run, task)
@@ -172,25 +189,25 @@ class TestPreDispatchBudgetCheck:
         assert mock_emit.call_args.kwargs["event_type"] == EventType.RUN_BUDGET_WARNING
 
     def test_critical_defers_heavy_task(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=8500)
+        run = _make_run(ceiling_tokens=10000, tokens_used=8500)
         task = _make_task(run_id=run.id, seq=1, task_type="llm_generation")
         db = MagicMock()
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "defer"
 
     def test_critical_allows_synthesis_task(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=8500)
+        run = _make_run(ceiling_tokens=10000, tokens_used=8500)
         task = _make_task(run_id=run.id, seq=1, task_type=TaskType.SYNTHESIS.value)
         db = MagicMock()
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "allow"
 
     def test_critical_allows_review_task(self):
-        run = _make_run(token_budget_estimate=10000, tokens_used=8500)
+        run = _make_run(ceiling_tokens=10000, tokens_used=8500)
         task = _make_task(run_id=run.id, seq=1, task_type=TaskType.REVIEW.value)
         db = MagicMock()
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "allow"
 
     def test_exceeded_blocks(self):
-        run = _make_run(token_budget_estimate=1000, tokens_used=1500)
+        run = _make_run(ceiling_tokens=1000, tokens_used=1500)
         task = _make_task(run_id=run.id, seq=1)
         db = MagicMock()
         assert MissionDispatcher._pre_dispatch_budget_check(db, run, task) == "block"
@@ -216,7 +233,7 @@ class TestDispatchReadyBudgetGate:
         """WIRING: Run at >100% budget — heavy task blocked, mission paused."""
         run = _make_run(
             max_concurrent=2,
-            token_budget_estimate=1000,
+            ceiling_tokens=1000,
             tokens_used=1050,
         )
         agents = [_make_agent()]
@@ -256,7 +273,7 @@ class TestDispatchReadyBudgetGate:
         """WIRING: Run at 85% budget — synthesis task dispatches, heavy task deferred."""
         run = _make_run(
             max_concurrent=3,
-            token_budget_estimate=10000,
+            ceiling_tokens=10000,
             tokens_used=8500,
         )
         agents = [_make_agent(), _make_agent(agent_id=2, name="Agent Two")]
@@ -297,7 +314,7 @@ class TestDispatchReadyBudgetGate:
         self, mock_dep_resolver, mock_matcher, mock_transition_task,
         mock_emit, mock_board, mock_sync, mock_transition_run,
     ):
-        """WIRING: Run with no token_budget_estimate — all tasks dispatch normally."""
+        """WIRING: Run with no ceiling — all tasks dispatch normally."""
         run = _make_run(
             max_concurrent=2,
             token_budget_estimate=None,
@@ -335,8 +352,9 @@ class TestDispatchReadyBudgetGate:
 
 # ---------------------------------------------------------------------------
 # PRD-163 S5: dollar-ceiling budget (replaces the token-estimate pause).
-# An explicit config['cost_ceiling'] (USD) drives the gate; otherwise the token
-# estimate is priced out at COORDINATOR_COST_PER_1K_TOKENS ($0.003/1k).
+# The owner's config['cost_ceiling'] (USD) drives the gate; F285: with none set
+# there is no ceiling (the token estimate is never priced into one). Spend with
+# no llm_usage rows is priced at COORDINATOR_COST_PER_1K_TOKENS ($0.003/1k).
 # ---------------------------------------------------------------------------
 
 class TestDollarCeiling:

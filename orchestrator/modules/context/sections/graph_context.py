@@ -6,6 +6,15 @@ Loads the workspace graph, scores nodes against the current message,
 and formats a relevant subgraph excerpt for the system prompt.
 
 Source: PRD-126 US-009
+
+F312 (night 9): nobody called platform_query_graph all night. "If Meridian's
+Brazil Cerrado arrives late, which cafés' orders are at risk?" was answered from
+one document every time and missed Kiln Bakehouse (L8, L26, L108). The excerpt
+below is injected only when a node's label covers 30% of the message's words,
+which a long question rarely reaches, and nothing else told Auto the workspace
+had a graph. On Auto's chat turns the section now opens with a line saying the
+Knowledge Graph exists and which questions go to platform_query_graph, beside
+the documents and the database, whether or not an excerpt follows.
 """
 
 from __future__ import annotations
@@ -24,6 +33,15 @@ _RELEVANCE_THRESHOLD = 0.3
 _TOP_N = 3
 _BFS_DEPTH = 2
 _TOKEN_BUDGET = 800
+_HEADER = "## Business Context (Knowledge Graph)"
+# F312: first in the section, so the budget's cut from the end never takes it.
+GRAPH_ROUTE_LINE = (
+    "This workspace has a Knowledge Graph of {nodes} things its documents name and how they connect. "
+    "For a question across documents or about how things relate (which customers, orders or products "
+    "something affects, such as a late delivery, a supplier or an ingredient; who supplies or buys what; "
+    "what goes into what), call platform_query_graph with the question beside search_knowledge, then "
+    "check the live orders or figures it points to with platform_query_data."
+)
 
 
 class GraphSection(BaseSection):
@@ -78,10 +96,28 @@ class GraphSection(BaseSection):
         # F227: the team filter copies the graph and the scoring walks every node:
         # CPU work, done off the event loop (the watchdog caught it stalling a turn).
         graph, scored = await asyncio.to_thread(self._visible_and_scored, graph, retrieval_team(agent_team), terms)
-        if graph.number_of_nodes() == 0 or not scored or scored[0][1] < _RELEVANCE_THRESHOLD:
+        if graph.number_of_nodes() == 0:
             return ""
+        excerpt = ""
+        if scored and scored[0][1] >= _RELEVANCE_THRESHOLD:
+            excerpt = await self._excerpt(service, graph, scored)
+        parts = [part for part in (self._route_line(ctx, graph), excerpt) if part]
+        return "\n\n".join([_HEADER, *parts]) if parts else ""
 
-        # 4. BFS from top scoring nodes, merge results
+    @staticmethod
+    def _route_line(ctx: SectionContext, graph: nx.Graph) -> str:
+        """F312: on Auto's own chat turns, the line naming the graph and what it answers.
+        A widget turn is left out: its key's scopes decide what it may call (F155)."""
+        from core.security.surface import widget_turn
+        from modules.context.modes import ContextMode
+
+        if ctx.context_mode != ContextMode.CHATBOT or widget_turn():
+            return ""
+        return GRAPH_ROUTE_LINE.format(nodes=graph.number_of_nodes())
+
+    @staticmethod
+    async def _excerpt(service, graph: nx.Graph, scored: list[tuple[str, float]]) -> str:
+        """The BFS neighbourhood of the top-scoring nodes, as text (empty when none)."""
         top_nodes = [node_id for node_id, _score in scored[:_TOP_N]]
         all_nodes: set = set()
         all_edges: list = []
@@ -93,20 +129,12 @@ class GraphSection(BaseSection):
                 result = await service.bfs(graph, node_id, depth=_BFS_DEPTH)
                 all_nodes |= result["nodes"]
                 all_edges.extend(result["edges"])
-            except Exception:
-                logger.debug("GraphSection: BFS failed for node %s", node_id)
+            except Exception:  # noqa: BLE001 — one node's walk failing leaves the others' excerpt
+                logger.exception("GraphSection: BFS failed for node %s", node_id)
 
         if not all_nodes:
             return ""
-
-        # 5. Format to text
-        text = await service.subgraph_to_text(
-            graph, all_nodes, all_edges, _TOKEN_BUDGET
-        )
-        if not text:
-            return ""
-
-        return f"## Business Context (Knowledge Graph)\n\n{text}"
+        return await service.subgraph_to_text(graph, all_nodes, all_edges, _TOKEN_BUDGET) or ""
 
     @staticmethod
     def _extract_current_message(ctx: SectionContext) -> str:

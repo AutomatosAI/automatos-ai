@@ -21,6 +21,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PermissionModeSelect, WORKSPACE_DEFAULT, isPermissionMode } from '@/components/settings/PermissionModePicker'
+import type { SessionToolGapEntry, SkillToolGap } from '@/types/session-tools'
+import { useConfiguredAgentId } from './configured-agent-context'
+import { loadApiClient } from './lazy-api-client'
+import { SessionToolsPanel } from './session-tools-panel'
+import { sessionGroupsField } from './session-tool-groups-model'
+import { useSessionToolPreview } from './use-session-tool-preview'
 
 export type RuntimeKind = 'api' | 'cli'
 
@@ -33,6 +39,11 @@ export interface RuntimeFields {
   cli_worktree: boolean
   /** Manual, Edit automatically, Plan or Auto; '' = the workspace's default (Settings → Session mode) */
   cli_permission_mode: string
+  /**
+   * #942: the session tool groups the owner ticked. Undefined until they change a box, so an
+   * untouched agent saves nothing and keeps the backend's default (every group).
+   */
+  cli_session_tool_groups?: string[]
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -98,7 +109,7 @@ export function useCliAvailability(enabled: boolean): CliAvailability | null {
     let cancelled = false
     void (async () => {
       try {
-        const { apiClient } = await import('@/lib/api-client')
+        const apiClient = await loadApiClient()
         const health = await apiClient.request<{ registry?: CliRegistryEntry[]; providers_online?: string[] }>('/api/v1/cli-hosts/health')
         if (!cancelled) setAvail({ registry: health.registry ?? [], providers_online: health.providers_online ?? [] })
       } catch {
@@ -119,7 +130,9 @@ function str(value: unknown): string {
 /** Coerce a loosely-typed source (a form state, a decoded JSON) into RuntimeFields. */
 export function normalizeRuntimeFields(source: object | null | undefined): RuntimeFields {
   const src = (source ?? {}) as Record<string, unknown>
+  const groups = sessionGroupsField(src.cli_session_tool_groups)
   return {
+    ...(groups ? { cli_session_tool_groups: groups } : {}),
     runtime: src.runtime === 'cli' ? 'cli' : 'api',
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
@@ -181,7 +194,9 @@ export function runtimeBadge(
 /**
  * The configuration fragment to save. An api agent carries only `runtime: 'api'`;
  * a cli agent carries provider/model/working_directory, blanks as null so the
- * host falls back to the CLI's default model and its default directory.
+ * host falls back to the CLI's default model and its default directory, and
+ * `session_tool_groups` only when the owner changed the boxes (#942). The backend
+ * merges this into the stored configuration, so a key left out keeps its value.
  */
 export function runtimeConfiguration(fields: RuntimeFields): Record<string, unknown> {
   if (fields.runtime !== 'cli') return { runtime: 'api' }
@@ -192,6 +207,7 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
     working_directory: fields.cli_working_directory.trim() || null,
     worktree_per_ticket: fields.cli_worktree,
     permission_mode: fields.cli_permission_mode || null,
+    ...(fields.cli_session_tool_groups ? { session_tool_groups: [...fields.cli_session_tool_groups] } : {}),
   }
 }
 
@@ -260,7 +276,7 @@ function useWorkspaceCheck(path: string, enabled: boolean): { check: WorkspaceCh
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const { apiClient } = await import('@/lib/api-client')
+          const apiClient = await loadApiClient()
           const result = await apiClient.request<WorkspaceCheck>(
             `/api/v1/cli-hosts/workspace-check?path=${encodeURIComponent(trimmed)}`,
           )
@@ -293,16 +309,13 @@ export interface SessionTool {
 
 /**
  * One active skill of the agent whose body calls platform tools the session does
- * not have under that name — the agent detail's `session_tool_gaps` (null for an
- * api agent, [] when its skills need nothing it lacks). `instead` maps the name
- * the skill body uses → the session tool that does the same job; `tools` are the
- * ones a session has no equivalent for. Either may be empty.
+ * not have under that name — a `kind: "skill"` entry of the agent detail's
+ * `session_tool_gaps` (null for an api agent, [] when nothing is missing).
+ * `instead` maps the name the skill body uses → the session tool that does the
+ * same job; `tools` are the ones a session has no equivalent for. Either may be
+ * empty. #942 adds `kind: "workspace"` entries, which the session tools panel shows.
  */
-export interface SessionToolGap {
-  skill: string
-  tools?: string[] | null
-  instead?: Record<string, string> | null
-}
+export type SessionToolGap = SkillToolGap
 
 const SESSION_TOOLS_LABEL = 'Tickets for this agent can use these Automatos tools:'
 
@@ -336,7 +349,8 @@ function backticked(names: string[]): string {
  * cannot do. Information, not an error — the agent is not broken, it will work
  * differently as a session. '' when the entry has nothing to say. Pure.
  */
-export function describeSessionToolGap(gap: SessionToolGap | null | undefined): string {
+export function describeSessionToolGap(gap: SessionToolGapEntry | null | undefined): string {
+  if (gap?.kind === 'workspace') return ''
   const skill = str(gap?.skill).trim() || UNNAMED_SKILL
   const swaps = Object.entries((gap?.instead ?? {}) as Record<string, unknown>)
     .map(([mentioned, replacement]) => [str(mentioned).trim(), str(replacement).trim()] as const)
@@ -368,7 +382,7 @@ function useSessionTools(enabled: boolean): SessionTool[] {
     let cancelled = false
     void (async () => {
       try {
-        const { apiClient } = await import('@/lib/api-client')
+        const apiClient = await loadApiClient()
         const settings = await apiClient.request<{ session_tools?: unknown }>('/api/v1/cli-hosts/settings')
         if (!cancelled) setTools(normalizeSessionTools(settings?.session_tools))
       } catch {
@@ -396,7 +410,7 @@ interface RuntimeSectionProps {
    * about the saved agent, not a form field, so the caller that fetched the
    * agent hands it over; the create wizard has no agent yet and passes nothing.
    */
-  sessionToolGaps?: SessionToolGap[] | null
+  sessionToolGaps?: SessionToolGapEntry[] | null
 }
 
 /** The agent's workspace folder, its worktree choice, its permission mode and what the host says of the folder. */
@@ -467,6 +481,8 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
   // PRD-245 S1.5: the Automatos tools a ticket session gets, and one line per
   // skill of this agent that calls something a session does not have.
   const sessionTools = useSessionTools(sessionMode)
+  // #942: the agent's session tool groups and the workspace gaps of the selection on screen.
+  const toolPreview = useSessionToolPreview(useConfiguredAgentId(), value.cli_session_tool_groups, sessionMode)
   const gapLines = (Array.isArray(sessionToolGaps) ? sessionToolGaps : [])
     .map((gap) => describeSessionToolGap(gap))
     .filter(Boolean)
@@ -527,8 +543,9 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
             Tickets for this agent are run by your paired CLI host as interactive sessions of the CLI you pick,
             under your own login. The model settings below do not apply to sessions.
           </p>
-          {/* PRD-245 S1.5: the Automatos tools a session of this agent can call, in the order it is offered them. */}
-          {sessionTools.length > 0 && (
+          <SessionToolsPanel preview={toolPreview} value={value} onChange={onChange} sessionTools={sessionTools} savedGaps={sessionToolGaps} />
+          {/* PRD-245 S1.5: the Automatos tools a session can call, when the backend has no groups to pick (#942). */}
+          {!toolPreview.groups && sessionTools.length > 0 && (
             <p className="text-xs text-muted-foreground" data-testid="session-tools">
               {SESSION_TOOLS_LABEL}{' '}
               {sessionTools.map((tool, index) => (
