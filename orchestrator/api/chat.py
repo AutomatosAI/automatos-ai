@@ -30,6 +30,7 @@ from core.models.core import User
 from core.session_queue import get_session_queue
 from core.utils.timestamps import utc_iso
 from services.board_events import notify_chat_event
+from services.chat_agent_switch import record_agent_switch
 from services.chat_turns import get_turn_registry, run_detached_turn
 from services.page_context import inject_page_preamble, sanitize_page_context
 
@@ -873,28 +874,6 @@ class SwitchAgentRequest(BaseModel):
     reason: Optional[str] = None
 
 
-def _record_agent_switch(db: Session, chat: Any, old_agent_id: int, request: SwitchAgentRequest) -> None:
-    """Append one switch to the chat's ``agent_switches`` history, stamped in UTC (#935).
-
-    Builds a new list rather than appending to the chat's own, and reads a history
-    stored as JSON text as well as a list."""
-    import json
-
-    existing = getattr(chat, "agent_switches", None) or []
-    if isinstance(existing, str):
-        existing = json.loads(existing)
-    record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "from_agent_id": old_agent_id,
-        "to_agent_id": request.newAgentId,
-        "reason": request.reason or "User requested switch",
-    }
-    db.execute(
-        text("UPDATE chats SET agent_switches = :switches WHERE id = :chat_id"),
-        {"switches": json.dumps([*existing, record]), "chat_id": chat.id},
-    )
-
-
 @router.get("/{chat_id}")
 async def get_chat(
     chat_id: str,
@@ -1049,7 +1028,7 @@ async def switch_agent(
         {"new_agent_id": request.newAgentId, "chat_id": chat.id}
     )
     
-    _record_agent_switch(db, chat, old_agent_id, request)
+    record_agent_switch(db, chat, old_agent_id, request.newAgentId, request.reason)
     db.commit()
     
     return {

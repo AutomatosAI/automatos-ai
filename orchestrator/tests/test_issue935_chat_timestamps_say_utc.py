@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import api.chat as chat_api
+from services.chat_agent_switch import record_agent_switch
 
 NAIVE_UTC = datetime(2026, 10, 4, 15, 49, 41, 311520)
 CTX = SimpleNamespace(workspace_id="00000000-0000-0000-0000-0000000000c1")
@@ -116,7 +117,7 @@ def test_an_agent_switch_is_recorded_in_utc_without_touching_the_chats_list():
     earlier = [{"timestamp": "2026-10-01T09:00:00+00:00", "from_agent_id": 1, "to_agent_id": 2, "reason": "x"}]
     chat = SimpleNamespace(id="chat-1", agent_switches=earlier)
     db = _RecordingDb()
-    chat_api._record_agent_switch(db, chat, 2, chat_api.SwitchAgentRequest(newAgentId=3))
+    record_agent_switch(db, chat, 2, 3, None)
 
     [params] = db.calls
     written = json.loads(params["switches"])
@@ -131,7 +132,7 @@ def test_an_agent_switch_reads_a_history_stored_as_json_text():
 
     chat = SimpleNamespace(id="chat-1", agent_switches=json.dumps([{"to_agent_id": 2}]))
     db = _RecordingDb()
-    chat_api._record_agent_switch(db, chat, 2, chat_api.SwitchAgentRequest(newAgentId=4, reason="asked"))
+    record_agent_switch(db, chat, 2, 4, "asked")
 
     written = json.loads(db.calls[0]["switches"])
     assert [s["to_agent_id"] for s in written] == [2, 4]
