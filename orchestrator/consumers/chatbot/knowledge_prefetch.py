@@ -37,10 +37,19 @@ logger = logging.getLogger(__name__)
 
 PREFETCH_TOOL = "search_knowledge"
 MAX_QUERY_CHARS = 1000
+# F311 (night 9, L1/L93): "the document doesn't specify any delivery charges" in two fresh
+# chats, from passages found for the whole message; the wholesale terms say "carriage", and
+# the answer came only after "are you sure?". An absence is said only after a search of Auto's
+# own, in the thing's own words.
+ABSENCE_RULE = (
+    "Never say a document does not give something on these passages alone: first call search_knowledge "
+    "yourself with the specific words for it, the owner's term and its usual synonyms (carriage or postage "
+    "for delivery charges), and say it is not there only if that search finds nothing either."
+)
 PREFETCH_HEADER = (
     "Passages from this workspace's documents, found for the owner's question before you answered "
     "(search_knowledge ran automatically). Answer from them where they apply and name the file; call "
-    "search_knowledge again if they do not cover the question."
+    f"search_knowledge again if they do not cover the question. {ABSENCE_RULE}"
 )
 # F077/F078 (refresh-3 retest): with a database connected, a summary document's
 # figure answered the number questions (415 for 400, 18 for 19); the database was
@@ -61,7 +70,7 @@ MULTI_HEADER = (
     "Passages from this workspace's documents, found for each of the owner's questions before you answered "
     "(search_knowledge ran automatically, once per question). Answer each question from its own passages and "
     "name the file. Where a question's passages are missing or do not answer it, call search_knowledge for that "
-    "question before you answer it; never answer it from another question's passages."
+    f"question before you answer it; never answer it from another question's passages. {ABSENCE_RULE}"
 )
 QUESTION_HEADING = "Question {number}: {question}"
 NOTHING_FOR_QUESTION = "No passage cleared the relevance floor: search for it yourself before you answer it."
