@@ -13,6 +13,7 @@
  *   it: one post, never a new row per Save, Render or Submit.
  * * PRD-251C (US-C301): a ticked channel that posts stories offers "As a story" for an image or
  *   a video; the story is 9:16, stays a story across those formats and saves as the story kind.
+ *   US-C303: a picture of your own renders (its crops per channel); a video of your own does not.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -29,7 +30,7 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   inferPreviewType: () => 'image',
 }))
 
-import { NEW_POST_STEPS, OWN_FILE_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
+import { NEW_POST_STEPS, OWN_FILE_STEPS, OWN_STILL_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { AUTO_PICK_NOTE, LOOK_HINTS } from '@/components/deliverables/socials/studio/editor-look-card'
 import { FIELDS_LEGEND } from '@/components/deliverables/socials/socials-variables-form'
 import { TEXT_ONLY_NOTE } from '@/components/deliverables/socials/studio/editor-format-card'
@@ -223,14 +224,20 @@ describe('the post editor', () => {
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', { preview: true }))
   })
 
-  it('a post that is your own file has nothing to render: Render preview is off and it says to submit it', async () => {
-    renderEditor(post({ media: { original: ['d-1'] } }))
+  it('a video of your own has nothing to render: Render preview is off and it says to submit it', async () => {
+    renderEditor(post({ format: 'video', media: { original: ['d-1'] } }))
     await screen.findByText('TikTok')
     expect(screen.getByText(OWN_FILE_STEPS)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Render preview' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
     await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-1'))
     expect(api.renderSocialPost).not.toHaveBeenCalled()
+    cleanup()
+
+    renderEditor(post({ media: { original: ['d-1'] } })) // PRD-251C US-C303: a picture of your own is cropped per channel
+    await screen.findByText('TikTok')
+    expect(screen.getByText(OWN_STILL_STEPS)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Render preview' })).toBeEnabled()
     cleanup()
 
     renderEditor(post({ template_id: 'tpl-img', media: { original: ['d-1'] } })) // a template: it renders

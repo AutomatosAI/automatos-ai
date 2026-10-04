@@ -100,7 +100,7 @@ from sqlalchemy.orm import Session
 
 from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
-from api import socials_brand, socials_compose, socials_preview
+from api import socials_brand, socials_compose, socials_preview, socials_render_crops
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_delete import router as delete_router
@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search
+from modules.socials import report_charts, text_search, upload_crops
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -541,11 +541,14 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     (RenderQuotaExceeded, before any call to media-render; a render holds its
     seconds from then until it ends), or there is no storage or renderer to use
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
-    the files in ``media``, or in ``failed`` with the report in ``review_log``:
+    the files in ``media`` (a still of the person's own: its crops, PRD-251C
+    US-C303), or in ``failed`` with the report in ``review_log``:
     a render whose footage or voice would take the post or the workspace over
     its media cap submits nothing more and fails saying why (D13). A post left to
     "Let Auto pick" gets Auto's template first (F253, ``socials_compose.let_auto_pick``).
     """
+    if upload_crops.own_still(post) is not None:  # PRD-251C US-C303: the person's own still, cropped per channel
+        return await socials_render_crops.render_crops(db, workspace, post, actor)
     await socials_compose.let_auto_pick(db, workspace, post, actor, service.assert_can_render)
     status, content_hash = post.status, post.content_hash
     voice = post.voice

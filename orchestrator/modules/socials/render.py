@@ -66,7 +66,7 @@ import asyncio
 import logging
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
@@ -331,6 +331,11 @@ class RenderJob:
     # 3 Oct 2026 (channel_sizes): the same post at the other sizes its channels need, rendered
     # after ``bundle`` with the same footage and voice; their files join ``media`` by aspect.
     extra_bundles: Tuple[Mapping[str, Any], ...] = ()
+    # PRD-251C (US-C303): files already in our storage that a slot shows (slot path → storage
+    # key), linked as the render starts (a still of the person's own, to crop), and the keys
+    # of the post's media the render keeps beside its files (that still: the next crop's source).
+    slot_keys: Mapping[str, str] = field(default_factory=dict)
+    keep_media: Tuple[str, ...] = ()
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -441,9 +446,19 @@ async def _voice_links(
     return links
 
 
+async def _slot_links(job: RenderJob, store: MediaStore) -> Dict[str, str]:
+    """The job's stored slot files (``slot_keys``) as slot path → presigned link."""
+    ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS
+    try:
+        return {path: await asyncio.to_thread(store.presigned_get, key, ttl) for path, key in job.slot_keys.items()}
+    except Exception as exc:  # noqa: BLE001 — storage cannot link the file: fail the render, loudly
+        logger.exception("[Socials] linking the slot files of post %s failed", job.post_id)
+        raise RenderFailure("storage_failed", "The picture could not be handed to the renderer.") from exc
+
+
 async def _dressed(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> List[Mapping[str, Any]]:
     """Every size's bundle with the post's footage and voice, each made once for all of them."""
-    footage = await _footage_links(job, store, session_factory)
+    footage = {**await _footage_links(job, store, session_factory), **await _slot_links(job, store)}
     voice = await _voice_links(job, job.bundle, store, session_factory)  # the same script at every size
     dressed = []
     for bundle in (job.bundle, *job.extra_bundles):
@@ -675,7 +690,8 @@ def _finish(
         if failure is None:
             try:
                 service.finish_render(
-                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits
+                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits,
+                    keep=job.keep_media,
                 )
             except service.InvalidPost as exc:
                 failure = RenderFailure("bad_output", f"The rendered files could not be recorded: {exc}")

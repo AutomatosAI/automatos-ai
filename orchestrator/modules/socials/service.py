@@ -1020,16 +1020,19 @@ def finish_render(
     summary: Optional[str] = None,
     report: Optional[Mapping[str, Any]] = None,
     credits: Sequence[str] = (),
+    keep: Sequence[str] = (),
 ) -> SocialPost:
     """rendering → needs_approval with the rendered files as ``media``.
 
-    ``media`` replaces what the post carried before, and the content hash is
+    ``media`` replaces what the post carried before, but for the aspects in ``keep`` (a still
+    of the person's own, the source of its crops: PRD-251C US-C303), and the content hash is
     recomputed over it, so an approval binds to these exact files (D6).
     ``credits`` are the lines the render's music asks for (S1.6, a CC BY
     track): they join the copy the approver reviews, and the history says so.
     """
     target = _target(post, ACTION_RENDER_DONE)
-    post.media = _rendered_media(media)
+    before = post.media if isinstance(post.media, Mapping) else {}
+    post.media = {**{aspect: before[aspect] for aspect in keep if aspect in before}, **_rendered_media(media)}
     credited = with_credits(post.copy, credits)
     added = credited is not post.copy
     if added:

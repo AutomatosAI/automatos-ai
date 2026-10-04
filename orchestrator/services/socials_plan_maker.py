@@ -54,7 +54,7 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SocialCampaign, SocialPost, SocialTopic
 from core.models.workspaces import Workspace
 from core.social_cuts import cut_to_length
-from modules.socials import batches, compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics
+from modules.socials import batches, compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics, upload_crops
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
 
@@ -307,7 +307,7 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
     changes = {**_changes(proposal, slot), **_visual_changes(db, plan, slot, topic, proposal, visual)}
     anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, changes, agent=PLAN_AGENT))
     socials_targets.set_post_targets(db, post, actor, slot_targets(db, plan.workspace_id, slot), agent=PLAN_AGENT)
-    if post.template_id is not None:
+    if post.template_id is not None or upload_crops.own_still(post) is not None:  # PRD-251C US-C303: a still is cropped
         anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)
     else:
         posts_api.submit_post(db, post, actor, note=READY_NOTE.format(topic=topic.title))
