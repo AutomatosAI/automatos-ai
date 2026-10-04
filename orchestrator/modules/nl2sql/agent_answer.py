@@ -22,7 +22,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
 from .schema.grounding import (
     Facts,
@@ -139,20 +139,35 @@ def _date_ranges(tables: List[Dict[str, Any]], facts: Facts) -> Dict[str, List[T
     return ranges
 
 
-def future_date_notes(sql: str, schema_metadata: Dict[str, Any], facts: Facts) -> List[str]:
-    """A note for each date the query compares a column with that lies after the last
-    value that column has recorded (F301 B1: ``shipped_on = '2026-10-05'`` where
-    shipped_on ends at 2026-09-11)."""
+class PastDate(NamedTuple):
+    """A date a query compares a column with, after the last value that column holds."""
+
+    table: str
+    column: str
+    last: str
+    asked: str
+
+
+def dates_past_the_data(sql: str, schema_metadata: Dict[str, Any], facts: Facts) -> List[PastDate]:
+    """Each date the query compares a column with that lies after the last value that
+    column has recorded (F301 B1: ``shipped_on = '2026-10-05'`` where shipped_on ends at
+    2026-09-11). Any table, any date column: the ranges come from the source's facts."""
     ranges = _date_ranges(tables_in_sql(sql, schema_metadata), facts)
-    notes: List[str] = []
+    found: List[PastDate] = []
     for column, asked in DATE_COMPARISON.findall(sql or ""):
         for table, last in ranges.get(column.lower(), []):
-            if asked <= last[:10]:
-                continue
-            note = FUTURE_DATE_NOTE.format(table=table, column=column, last=last[:10], asked=asked)
-            if note not in notes:
-                notes.append(note)
-    return notes
+            past = PastDate(table, column, last[:10], asked)
+            if asked > past.last and past not in found:
+                found.append(past)
+    return found
+
+
+def future_date_notes(sql: str, schema_metadata: Dict[str, Any], facts: Facts) -> List[str]:
+    """A note for each date in the query past the data (see :func:`dates_past_the_data`)."""
+    return [
+        FUTURE_DATE_NOTE.format(table=p.table, column=p.column, last=p.last, asked=p.asked)
+        for p in dates_past_the_data(sql, schema_metadata, facts)
+    ]
 
 
 def top_groups_notes(sql: str, row_count: Any) -> List[str]:

@@ -33,12 +33,20 @@ SHOP_SCHEMA: Dict[str, Any] = {
             {"name": "ordered_on", "type": "date"}, {"name": "kg", "type": "numeric"},
             {"name": "amount_gbp", "type": "numeric"}, {"name": "delivered_on", "type": "date"},
             {"name": "paid_on", "type": "date"}]},
+        {"name": "subscribers", "columns": [
+            {"name": "subscriber_id", "type": "integer"}, {"name": "plan_code", "type": "text"},
+            {"name": "status", "type": "text"}, {"name": "started_on", "type": "date"},
+            {"name": "cancelled_on", "type": "date"}, {"name": "paused_until", "type": "date"}]},
     ],
     "relationships": [
         {"from_table": "subscription_orders", "from_column": "plan_code",
          "to_table": "subscription_plans", "to_column": "plan_code"},
         {"from_table": "wholesale_orders", "from_column": "account_id",
          "to_table": "wholesale_accounts", "to_column": "account_id"},
+        {"from_table": "subscribers", "from_column": "plan_code",
+         "to_table": "subscription_plans", "to_column": "plan_code"},
+        {"from_table": "subscription_orders", "from_column": "subscriber_id",
+         "to_table": "subscribers", "to_column": "subscriber_id"},
     ],
 }
 
@@ -52,32 +60,40 @@ SHOP_FACTS: Dict[str, Dict[str, List[str]]] = {
     "subscription_plans.plan_code": {"values": ["CLUB", "REGULAR", "TASTER"]},
     "subscription_plans.name": {"values": ["Harvest Club", "Regular", "Taster"]},
     "wholesale_orders.ordered_on": {"range": ["2024-06-02", "2026-09-30"]},
+    "subscribers.plan_code": {"values": ["CLUB", "REGULAR", "TASTER"]},
+    "subscribers.status": {"values": ["active", "cancelled", "paused"]},
+    "subscribers.started_on": {"range": ["2024-04-05", "2026-08-31"]},
+    "subscribers.cancelled_on": {"range": ["2025-02-27", "2026-09-20"]},
+    "subscribers.paused_until": {"range": ["2026-10-05", "2026-11-05"]},
 }
 
 
 class FakeShopService:
-    """The workspace's one source resolves; the query answer is what the test gives."""
+    """The workspace's one source resolves; the query answer is what the test gives.
+    A list of answers is given out in turn (the last one repeats)."""
 
-    def __init__(self, answer: Dict[str, Any]):
-        self.answer = answer
+    def __init__(self, answer: Any):
+        self.answers = list(answer) if isinstance(answer, list) else [answer]
         self.asked: List[Dict[str, Any]] = []
 
     async def resolve_source_id(self, workspace_id, database_name=None, db_session=None):
         return SOURCE_ID
 
-    async def smart_query(self, **kwargs):
+    def _next(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         self.asked.append(kwargs)
-        return self.answer
+        return self.answers[min(len(self.asked), len(self.answers)) - 1]
+
+    async def smart_query(self, **kwargs):
+        return self._next(kwargs)
 
     async def query_database(self, **kwargs):
-        self.asked.append(kwargs)
-        return self.answer
+        return self._next(kwargs)
 
     async def write_nl_audit(self, **kwargs):
         return None
 
 
-def use_shop(monkeypatch, answer: Dict[str, Any], *, schema: Optional[Dict[str, Any]] = SHOP_SCHEMA,
+def use_shop(monkeypatch, answer: Any, *, schema: Optional[Dict[str, Any]] = SHOP_SCHEMA,
              facts: Optional[Dict[str, Any]] = None) -> FakeShopService:
     """Wire the fake service, the source row (``schema``; None = not readable) and the
     facts already read for source 47 (``facts``; None = none read)."""

@@ -19,7 +19,7 @@ PRD-160 S1 re-enables them as a first-class Auto tool, but *safely*:
     Playbook step).
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Optional
 
 from modules.tools.execution.nl2sql_card_words import card_words
@@ -117,6 +117,7 @@ async def run_nl2sql(
     )
     result = await _ask(service, call)
     await _audit(service, call, result)
+    result = await _past_the_data(service, call, result, schema, source_id)
     return shape_answer(result, schema, source_id)
 
 
@@ -185,6 +186,34 @@ async def _audit(service: Any, call: NL2SQLCall, result: Any) -> None:
         )
     except Exception:  # noqa: BLE001 — logged; the audit never decides the answer
         logger.exception("NL2SQL audit row not written for source %s", call.source_id)
+
+
+async def _past_the_data(
+    service: Any, call: NL2SQLCall, result: Any, schema: Dict[str, Any], source_id: str
+) -> Any:
+    """F301 B1 (build 14, #1895): an empty or all-zero answer whose query filters a date
+    past the recorded data is not a count. The SQL writer is asked once more to count
+    from the current state that decides it; that answer comes back saying how it was
+    worked out, or, when it fails too, the agent gets no count and what to answer from.
+    See ``modules.nl2sql.not_recorded``."""
+    from modules.nl2sql import not_recorded
+    from modules.nl2sql.schema.grounding import cached_facts
+
+    facts = cached_facts(source_id)
+    past = not_recorded.past_the_data(result, schema, facts)
+    if not past:
+        return result
+    instruction = not_recorded.redirect_instruction(past, str(result.get("sql") or ""), schema, facts)
+    again = replace(
+        call,
+        query=f"{call.query}\n\n{instruction}",
+        owner_question=f"{call.owner_question}\n\n{instruction}" if call.owner_question else None,
+    )
+    second = await _ask(service, again)
+    await _audit(service, again, second)
+    if isinstance(second, dict) and second.get("success") and not not_recorded.past_the_data(second, schema, facts):
+        return not_recorded.derived(second, past)
+    return not_recorded.withheld(result, past, schema, facts)
 
 
 async def _available_sources(service: Any, ws_id: str, db_session: Optional[Any]) -> str:

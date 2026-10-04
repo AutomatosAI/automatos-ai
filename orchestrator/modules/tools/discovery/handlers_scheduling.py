@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 # F300/F301: what the database tool adds beside the rows (modules.nl2sql.agent_answer).
-ANSWER_CONTEXT_KEYS = ("schema", "notes")
+ANSWER_CONTEXT_KEYS = ("schema", "notes", "derived", "not_recorded")
+NO_ROWS = "Query returned no rows."
 ANSWER_ROWS_SHOWN = 50
 ANSWER_CELL_CHARS = 50
 ANSWER_HEADER_CHARS = 20
@@ -200,12 +201,13 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
         # Format for agent consumption
         data = result.get("data", [])
         columns = result.get("columns", [])
-        row_count = result.get("row_count", len(data))
+        # F301 B1: a date past the data has no count to give, not a count of 0.
+        row_count = None if result.get("not_recorded") else result.get("row_count", len(data))
         display_rows = data[:ANSWER_ROWS_SHOWN]
 
         return {
             "success": True,
-            "answer": answer_table(columns, display_rows, row_count) or "Query returned no rows.",
+            "answer": result.get("answer") or answer_table(columns, display_rows, row_count) or NO_ROWS,
             "sql": result.get("sql"),
             "row_count": row_count,
             "columns": columns,

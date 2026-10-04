@@ -38,7 +38,9 @@ def test_the_first_answer_lists_every_table_with_its_columns_values_and_dates(mo
     assert any(line.startswith("wholesale_orders: order_id integer, account_id integer, ordered_on date")
                for line in schema)
     assert schema[-1] == ("joins: subscription_orders.plan_code -> subscription_plans.plan_code, "
-                          "wholesale_orders.account_id -> wholesale_accounts.account_id")
+                          "wholesale_orders.account_id -> wholesale_accounts.account_id, "
+                          "subscribers.plan_code -> subscription_plans.plan_code, "
+                          "subscription_orders.subscriber_id -> subscribers.subscriber_id")
 
 
 def test_names_and_types_still_come_when_the_values_could_not_be_read(monkeypatch):

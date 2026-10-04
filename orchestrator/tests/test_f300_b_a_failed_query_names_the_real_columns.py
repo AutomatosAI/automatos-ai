@@ -47,7 +47,7 @@ def test_a_guessed_table_comes_back_with_the_tables_that_exist(monkeypatch):
     answer = shop.ask_like_a_board_agent("Total kilos ordered by cafés")
 
     assert ("The tables that exist: retail_orders, subscription_orders, subscription_plans, "
-            "wholesale_accounts, wholesale_orders.") in answer["error"]
+            "wholesale_accounts, wholesale_orders, subscribers.") in answer["error"]
 
 
 def test_platform_query_data_hands_the_schema_on_in_a_failure_and_a_success(monkeypatch):
