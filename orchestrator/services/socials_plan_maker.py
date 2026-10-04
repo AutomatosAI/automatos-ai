@@ -20,6 +20,12 @@ a tick:
    (text). Either way it ends in ``needs_approval`` and approvers are told.
 5. Once per plan and day: "Today's posts are ready".
 
+PRD-251C (C1, US-C203): a weekly or monthly plan makes its whole batch once its moment
+comes (``modules/socials/batches.py``), each post carrying the batch's key. A slot it cannot
+make is skipped and recorded on the plan, so the batch can end; once every slot of a batch
+is made or skipped, "Your week is ready" (or month) goes out once, linked to the Queue,
+instead of the daily notice.
+
 A slot's work runs in a worker thread on its own session; the composer and the render
 start run on the event loop from there, as the routes do (F105).
 
@@ -35,7 +41,7 @@ import functools
 import logging
 from dataclasses import replace
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 from uuid import UUID
 
 import anyio
@@ -48,7 +54,7 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SocialCampaign, SocialPost, SocialTopic
 from core.models.workspaces import Workspace
 from core.social_cuts import cut_to_length
-from modules.socials import compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics
+from modules.socials import batches, compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
 
@@ -129,7 +135,8 @@ def _plan_due(db: Any, plan: SocialCampaign, now: datetime) -> List[plans.Slot]:
     if workspace is None or socials_off_reason(workspace) is not None:
         return []
     taken = plan_store.taken_keys(db, plan)
-    return _within_daily_cap(plan, plans.due_slots(plan, now, taken), taken)
+    found = batches.due_slots(plan, now, taken) if batches.is_batched(plan) else plans.due_slots(plan, now, taken)
+    return _within_daily_cap(plan, found, taken)
 
 
 def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
@@ -214,6 +221,7 @@ def claim(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, n
         format=slot.format, template_id=slot.template_id, length_seconds=slot.length_seconds, agent=PLAN_AGENT,
     )
     post.campaign_id, post.slot_key = plan.id, slot.key
+    post.batch_key = batches.batch_key(plan, slot.local_date)  # PRD-251C: None for a daily plan
     service.set_planned_for(post, slot.at, plan.timezone)
     topics.mark_used(topic, post, now)
     try:
@@ -300,6 +308,15 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
         posts_api.submit_post(db, post, actor, note=READY_NOTE.format(topic=topic.title))
 
 
+def _skip(db: Any, plan: SocialCampaign, slot: plans.Slot, refusal: str, now: datetime) -> None:
+    """A slot the plan cannot make: told once a day. A batch also records it, so it can end."""
+    key = batches.batch_key(plan, slot.local_date)
+    if key is not None:
+        plan.make = batches.with_skip(plan, key, slot.key, refusal, _local_today(plan, now))
+        db.commit()
+    _tell_once(db, plan, plan_notify.SLOT_SKIPPED, f"{plan.name}: {refusal}", now)
+
+
 def _make(db: Any, plan_id: UUID, key: str, now: datetime) -> str:
     plan = db.get(SocialCampaign, plan_id)
     slot = plans.slot_for_key(plan, key) if plan is not None and plan.status == plans.ACTIVE else None
@@ -308,7 +325,7 @@ def _make(db: Any, plan_id: UUID, key: str, now: datetime) -> str:
     workspace = db.get(Workspace, plan.workspace_id)
     refusal = _refusal(db, workspace, slot)
     if refusal is not None:
-        _tell_once(db, plan, plan_notify.SLOT_SKIPPED, f"{plan.name}: {refusal}", now)
+        _skip(db, plan, slot, refusal, now)
         return SKIPPED
     topic = topics.next_topic(db, plan, slot.format, slot.local_date)
     if topic is None:
@@ -341,24 +358,61 @@ def make_slot(plan_id: UUID, key: str, now: datetime) -> str:
 
 
 def tell_ready(made: Mapping[UUID, int], now: datetime) -> None:
-    """"Today's posts are ready", once per plan and day."""
+    """"Today's posts are ready", once per day for each daily plan (a batch has its own notice)."""
     db = _session()
     try:
         for plan_id, count in made.items():
             plan = db.get(SocialCampaign, plan_id)
-            if plan is not None:
+            if plan is not None and not batches.is_batched(plan):
                 _tell_once(db, plan, plan_notify.READY, f"{plan.name}: {count} waiting for approval", now)
     finally:
         db.close()
 
 
-async def run_tick() -> Dict[str, int]:
+def _batch_post_count(db: Any, plan: SocialCampaign, key: str) -> int:
+    return db.query(SocialPost.id).filter(SocialPost.campaign_id == plan.id, SocialPost.batch_key == key).count()
+
+
+def _announce_if_complete(db: Any, plan: SocialCampaign, window: batches.Window, now: datetime) -> None:
+    """"Your week is ready", once, when every slot of the batch is made or skipped."""
+    if batches.announced(plan, window.key) or batches.pending(plan, window.key, now, plan_store.taken_keys(db, plan)):
+        return
+    count = _batch_post_count(db, plan, window.key)
+    if count == 0:
+        return
+    plan.make = batches.with_record(plan, window.key, {batches.ANNOUNCED: now.isoformat()}, _local_today(plan, now))
+    db.commit()
+    event = plan_notify.MONTH_READY if batches.rhythm_of(plan) == plans.MONTHLY else plan_notify.WEEK_READY
+    plan_notify.notify_review(plan.workspace_id, plan.id, event, f"{plan.name}: {count} posts for {batches.label(plan, window)}")
+
+
+def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> None:
+    """Each batch the tick made or skipped slots of, told once it is complete (C1)."""
+    db = _session()
+    try:
+        for plan_id, keys in touched.items():
+            plan = db.get(SocialCampaign, plan_id)
+            if plan is None or not batches.is_batched(plan):
+                continue
+            days = {parsed[1] for parsed in (plans.parse_slot_key(key) for key in keys) if parsed}
+            windows = {window.key: window for window in (batches.window_of(plan, day) for day in days) if window}
+            for window in windows.values():
+                _announce_if_complete(db, plan, window, now)
+    except Exception:  # noqa: BLE001 — a notice never fails the tick; the next tick tries again
+        logger.exception("[Socials] the batch notices could not be sent")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
     """One pass over every active plan's due slots, then due research (US-B204)."""
     from services import socials_plan_research
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     outcomes: Dict[str, int] = {}
     made: Dict[UUID, int] = {}
+    touched: Dict[UUID, Set[str]] = {}
     try:
         due = await anyio.to_thread.run_sync(collect_due, now)
     except Exception:  # noqa: BLE001 — the next tick tries again
@@ -369,8 +423,12 @@ async def run_tick() -> Dict[str, int]:
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
         if outcome == MADE:
             made[plan_id] = made.get(plan_id, 0) + 1
+        if outcome in (MADE, SKIPPED):
+            touched[plan_id] = {*touched.get(plan_id, set()), key}
     if made:
         await anyio.to_thread.run_sync(tell_ready, made, now)
+    if touched:
+        await anyio.to_thread.run_sync(announce_batches, touched, now)
     outcomes["research"] = await anyio.to_thread.run_sync(socials_plan_research.launch_due, now)
     return outcomes
 
