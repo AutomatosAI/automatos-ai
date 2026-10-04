@@ -1421,20 +1421,20 @@ async def approve_plan(
                 detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
             )
 
-        # Apply overrides before approval
+        # Apply overrides before approval. F285 (night 8): the plan's own estimate is no
+        # budget; a token budget the owner types here is, as the dollars it is priced at.
         if body.max_concurrent_override is not None:
             run.max_concurrent = body.max_concurrent_override
         if body.token_budget_override is not None:
+            from modules.policy.pricing import price_total_tokens_usd
+
             run.token_budget_estimate = body.token_budget_override
+            run.config = {**(run.config or {}),
+                          "cost_ceiling": price_total_tokens_usd(None, None, body.token_budget_override)}
         if body.skip_verification is not None:
             run.config = {**(run.config or {}), "skip_verification": body.skip_verification}
 
-        coordinator = get_coordinator_service()
-        run = coordinator.approve_plan(
-            db=db,
-            run_id=run.id,
-            actor_id=ctx.user.id or "unknown",
-        )
+        run = get_coordinator_service().approve_plan(db=db, run_id=run.id, actor_id=ctx.user.id or "unknown")
         db.commit()
         return _run_to_response(run)
 

@@ -376,6 +376,14 @@ class TestWiringParallelGroupValidation:
 # ===========================================================================
 
 
+def _owners_ceiling(tokens):
+    """F285 (night 8): only a ceiling the owner set pauses a mission; the plan's
+    token estimate is no budget. Here, the dollars ``tokens`` cost at the flat rate."""
+    from modules.policy.pricing import price_total_tokens_usd
+
+    return {"cost_ceiling": price_total_tokens_usd(None, None, tokens)}
+
+
 @patch("modules.coordination.dispatcher.transition_run")
 @patch("modules.coordination.dispatcher.sync_board_status")
 @patch("modules.coordination.dispatcher.create_task_board_task")
@@ -391,7 +399,8 @@ class TestWiringBudgetGate:
         mock_emit, mock_board, mock_sync, mock_transition_run,
     ):
         """E2E: >100% budget -> task blocked, run paused via transition_run."""
-        run = _mock_run(max_concurrent=2, token_budget_estimate=1000, tokens_used=1050)
+        run = _mock_run(max_concurrent=2, tokens_used=1050)
+        run.config = _owners_ceiling(1000)
         task = _mock_task(run_id=run.id, seq=1, estimated_tokens=8000)
 
         db = MagicMock()
@@ -420,7 +429,8 @@ class TestWiringBudgetGate:
         mock_emit, mock_board, mock_sync, mock_transition_run,
     ):
         """E2E: 85% budget -> synthesis dispatches, heavy task deferred."""
-        run = _mock_run(max_concurrent=3, token_budget_estimate=10000, tokens_used=8500)
+        run = _mock_run(max_concurrent=3, tokens_used=8500)
+        run.config = _owners_ceiling(10000)
 
         heavy = _mock_task(run_id=run.id, seq=1, estimated_tokens=8000)
         synthesis = _mock_task(

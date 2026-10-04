@@ -489,28 +489,21 @@ class MissionDispatcher:
 
     @staticmethod
     def _budget_ceiling_usd(run: OrchestrationRun) -> float:
-        """PRD-163 S5: the run's DOLLAR budget ceiling — an explicit
-        ``config['cost_ceiling']`` when set, otherwise the plan's token estimate
-        priced through ``modules.policy.pricing`` (PRD-192 S3 — one pricing
-        source; a run aggregates several agents/models so no single model id
-        exists here and pricing's flat last-resort applies). 0 = unlimited."""
-        from modules.policy import pricing as _pricing
-
-        config = run.config or {}
-        ceiling = config.get("cost_ceiling")
+        """PRD-163 S5: the run's DOLLAR budget ceiling, the owner's ``config['cost_ceiling']``;
+        0 = unlimited. F285 (night 8): with none set, the plan's token estimate, priced, was the
+        ceiling, so #0356, #0383 (twice) and #0400 paused on a budget nobody set ("spent $0.16
+        of the $0.14 budget (the plan's 45,000-token estimate)"). The estimate is never a cap."""
+        ceiling = (run.config or {}).get("cost_ceiling")
         if isinstance(ceiling, (int, float)) and ceiling > 0:
             return float(ceiling)
-        return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
+        return 0.0
 
     @staticmethod
     def _budget_pause_detail(run: OrchestrationRun, db: Optional[Session] = None) -> str:
         """F153: what a budget pause tells the owner — the spend the gate
-        measured against the ceiling, in dollars."""
+        measured against the ceiling they set, in dollars."""
         spent = MissionDispatcher._cost_used_usd(run, db)
         detail = f"Paused: spent ${spent:,.2f} of the ${MissionDispatcher._budget_ceiling_usd(run):,.2f} budget"
-        ceiling = (run.config or {}).get("cost_ceiling")
-        if not (isinstance(ceiling, (int, float)) and ceiling > 0):
-            detail += f" (the plan's {run.token_budget_estimate or 0:,}-token estimate)"
         free = session_tokens(run)
         if free:
             detail += f"; {free:,} tokens ran in Claude Code sessions at no cost"
