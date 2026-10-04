@@ -17,7 +17,10 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from tests.test_f277_a_playbook_is_found_by_the_number_the_list_shows import _playbook, cafe  # noqa: F401
+from tests import test_f277_a_playbook_is_found_by_the_number_the_list_shows as f277
+
+cafe = f277.cafe             # F277's workspace with its playbooks, a fixture
+_playbook = f277._playbook
 
 DISPATCH = "Generate the content for Tom's Monday Dispatch Checklist."
 
