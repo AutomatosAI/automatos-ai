@@ -14,7 +14,7 @@ made the turn count from the shop, and nothing checked the reply.
 The remembered figures are Auto's own earlier answers: every chat exchange is distilled into
 durable facts ("preserve specifics … numbers"), and the next chat's prompt carries them under
 "What You Know About This User" with nothing to say they are old (see
-``modules/memory/remembered_figures.py``). A follow-up turn can't see the call behind the
+``modules/context/remembered_figures.py``). A follow-up turn can't see the call behind the
 previous reply either, so "where did that come from?" reached for memory.
 
 Now, in a workspace with a connected database, a turn that asks a figure from the shop (a
@@ -56,7 +56,8 @@ WHERE_FROM_NOTE = (
 
 _COUNT = re.compile(r"\bhow many\b|\bnumber of\b|\bcount(?:s|ed|ing)?\b(?! on\b)|\btotals?\b|\btally\b", re.I)
 _HOW_MUCH = re.compile(r"\bhow much\b", re.I)
-_PRICE = re.compile(r"\b(?:charge[sd]?|costs?|prices?|priced|fees?|pay|paid|spend|budget)\b", re.I)
+# "How much" for a price or a margin is the owner's terms or margin sheet, not a count.
+_PRICE = re.compile(r"\b(?:charge[sd]?|costs?|prices?|priced|fees?|pay|paid|spend|budget|margins?|profit)\b", re.I)
 _STOCK = re.compile(
     r"\b(?:in stock|stock (?:levels?|of|for|left)|green stock|on hand|reorder|"
     r"run(?:s|ning)? (?:out|short|low)|takings|revenue|turnover)\b"

@@ -66,6 +66,7 @@ def test_a_figure_the_shop_holds_is_a_shop_question(said):
 @pytest.mark.parametrize("said", [
     "A café wants 10 kg of coffee next week. What do we charge them for delivery, and is it ever free?",
     "How many cards are in review?", "How many words should the Harbour Log intro be?",
+    "How much margin do we make on a bag of Kirinyaga?",
     "Which importers are behind the coffees in the October club box?", "Is the intro short enough?",
 ])
 def test_a_document_or_board_question_is_not(said):
