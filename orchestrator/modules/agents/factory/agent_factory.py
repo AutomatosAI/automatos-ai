@@ -28,7 +28,7 @@ from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
-
+from modules.agents.factory.answer_check import said_plainly  # F297
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,7 @@ logger = logging.getLogger(__name__)
 INACTIVE_AGENT_STATUSES = frozenset({"inactive", "disabled", "paused", "archived", "suspended"})
 
 
-# ---------------------------------------------------------------------------
 # Lazy imports (avoid circular deps)
-# ---------------------------------------------------------------------------
 
 def get_monitoring_service():
     from core.services.monitoring_service import get_monitoring_service as _get_monitor
@@ -1135,6 +1133,7 @@ class AgentFactory:
                 attachment_ids, start_time, conversation,
             )
 
+    @said_plainly  # F297: a run's raw tool output is never its answer
     async def _execute_with_prompt_scoped(
         self,
         agent_runtime: AgentRuntime,

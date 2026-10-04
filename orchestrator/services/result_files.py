@@ -46,6 +46,10 @@ _BACKTICK_RE = re.compile(r"`([^`\n]{1,300})`")
 _LINK_RE = re.compile(r"\]\(([^)\s]{1,300})\)")
 _BARE_RE = re.compile(rf"(?<![\w/.~:@-])({_PATH})(?![\w/])")
 _WHOLE_PATH_RE = re.compile(rf"^{_PATH}$")
+# F297 (night 8): what agents call the workspace's root when they write a path to a
+# file in it: #0234 wrote `workspace/decaf_colombia_margin.csv` for the file its
+# tool had saved as `decaf_colombia_margin.csv`, and the ticket said no such file.
+WORKSPACE_ROOT_NAME = "workspace"
 
 
 def named_files(text: str) -> List[str]:
@@ -84,6 +88,14 @@ def _session_places(name: str, base: str) -> List[str]:
     return list(dict.fromkeys(places))
 
 
+def _workspace_places(name: str) -> List[str]:
+    """Where an API run's named file can be: as written, and without the root's own
+    name in front of it (F297)."""
+    path = posixpath.normpath(name)
+    head, _, rest = path.partition("/")
+    return [path, rest] if head == WORKSPACE_ROOT_NAME and rest else [path]
+
+
 def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Optional[Dict[str, Any]],
                  projects_dir: Optional[str]) -> List[Tuple[str, str]]:
     """``(as named, as the worker sees it)`` for each place a name may map to in
@@ -103,7 +115,7 @@ def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Option
         elif session:
             places = _session_places(name, base) if base else []
         else:
-            places = [posixpath.normpath(name)]
+            places = _workspace_places(name)
         for rel in places:
             if rel and rel != "." and not rel.startswith(("../", "/")) and rel != "..":
                 out.append((name, rel))

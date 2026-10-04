@@ -49,7 +49,7 @@ def _run(model, tools, first):
     executor = ToolLoopExecutor(llm_callback=model, tool_callback=tools, max_iterations=5)
     messages = [{"role": "user", "content": "approve the Harbourline mission"}]
     result = asyncio.run(executor.run(initial_response=first, messages=messages, tools=TOOLS, workspace_id="ws"))
-    nudges = [m for m in messages if m["role"] == "system" and NUDGE in m["content"]]
+    nudges = [m for m in messages if m["role"] == "user" and NUDGE in m["content"]]  # F295: the user's turn
     return result, nudges
 
 
@@ -103,7 +103,7 @@ def test_a_first_reply_that_claims_is_nudged_too():
     result = asyncio.run(executor.run(initial_response=_reply("I've noted that the Taster plan is now £14."),
                                       messages=messages, tools=TOOLS, workspace_id="ws"))
     assert tools.executed == ["platform_store_memory"] and result.response.content == "Saved."
-    assert any(m["role"] == "system" and "says something was noted" in m["content"] for m in messages)
+    assert any(m["role"] == "user" and "says something was noted" in m["content"] for m in messages)
 
 
 def test_without_tools_offered_nothing_is_nudged():
