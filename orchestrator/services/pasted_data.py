@@ -15,6 +15,7 @@ import re
 from typing import Iterable, Optional
 
 from services.answer_sources import an_answer_names_only_what_it_read
+from services.draft_leftovers import an_answer_leaves_nothing_in
 
 DATA_LINES_MIN = 5
 _NUMBER = re.compile(r"(?<![\w.])[£$€]?\d[\d,]*(?:\.\d+)?%?")
@@ -57,6 +58,7 @@ def pasted_data_rule(brief: object) -> Optional[str]:
 
 
 @an_answer_names_only_what_it_read  # F304 (night 9): a source its run never read says so
+@an_answer_leaves_nothing_in  # F327 (night 9b): a placeholder or a skill's status left in says so
 def unverified_figures_note(result: object, succeeded: Iterable[str]) -> Optional[str]:
     """The note for a result that calls its figures verified or checked when no
     code ran in its run, else None."""
