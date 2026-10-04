@@ -19,7 +19,9 @@ from fastapi import HTTPException
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState
 from services.orchestration_board_bridge import create_mission_board_task
-from tests.test_f170_a_mission_waiting_behind_a_session_says_so import narrated  # noqa: F401 — a fixture
+from tests import test_f170_a_mission_waiting_behind_a_session_says_so as f170
+
+narrated = f170.narrated       # F170's quiet narration and lane, a fixture
 
 GOAL = "Welcome email for The Lantern Room"
 NOTE = "Plan is fine. Use our real Thursday delivery day and keep the email short."
@@ -34,7 +36,7 @@ class _Req:
 
 
 @pytest.fixture
-def plan(db_session, seed_workspace, narrated):  # noqa: F811 — the fixture imported above
+def plan(db_session, seed_workspace, narrated):
     ws = UUID(seed_workspace())
     run = OrchestrationRun(workspace_id=ws, goal=GOAL, state=RunState.AWAITING_APPROVAL.value,
                            created_by="user_test", config={})
