@@ -1894,13 +1894,15 @@ class Config:
     # =============================================================================
     # Socials is gated two ways (D1): the platform master switch is the
     # ``socials.enabled`` system setting, a super-admin toggle in Settings →
-    # System Settings, and each workspace has ``settings['socials'].enabled``
-    # (modules/socials/settings.py). SOCIALS_ENABLED_DEFAULT is only the master
-    # switch's DEFAULT: the prd251_socials migration seeds the row with it, and
-    # it applies wherever no row exists. Every plan gets Socials, so there is no
-    # plan exposure key.
+    # System Settings, and each workspace has ``settings['socials'].enabled``,
+    # the Socials card in its Settings (modules/socials/settings.py).
+    # SOCIALS_ENABLED_DEFAULT is both switches' DEFAULT, on (owner, 2026-10-03; an
+    # install that wants Socials off until asked, such as an enterprise one, sets
+    # it false): the prd251_socials migration seeds the master row with it, it
+    # applies wherever no row exists, and a workspace that never set its switch
+    # takes it. Every plan gets Socials, so there is no plan exposure key.
     SOCIALS_ENABLED_DEFAULT: bool = os.getenv(
-        "SOCIALS_ENABLED_DEFAULT", "false"
+        "SOCIALS_ENABLED_DEFAULT", "true"
     ).strip().lower() == "true"
     # D9: the lifetime of the presigned media URL a channel fetches at publish time.
     SOCIALS_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_URL_TTL_SECONDS", "86400"))

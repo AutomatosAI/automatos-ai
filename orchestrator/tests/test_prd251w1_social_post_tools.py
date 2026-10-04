@@ -280,7 +280,7 @@ def env(monkeypatch):
         conn.exec_driver_sql(f"CREATE TABLE {LLMUsage.__tablename__} ({columns})")
     factory = sessionmaker(bind=engine)
     session = factory()
-    for ws_id, settings in ((WS, SOCIALS_ON), (WS_OTHER, SOCIALS_ON), (WS_OFF, {})):
+    for ws_id, settings in ((WS, SOCIALS_ON), (WS_OTHER, SOCIALS_ON), (WS_OFF, {"socials": {"enabled": False}})):
         session.add(
             Workspace(
                 id=ws_id, name=f"ws-{ws_id.hex[-2:]}", plan="basic", plan_limits={},
