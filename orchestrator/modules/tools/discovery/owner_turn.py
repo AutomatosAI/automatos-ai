@@ -48,14 +48,21 @@ NEW_CARD = re.compile(r"\b(?:new|another|separate|second|extra|fresh)\s+(?:card|
                       r"|\b(?:create|make|add|open|start)\s+(?:a|an)\s+(?:\w+\s+){0,2}(?:card|ticket|task)\b", re.I)
 NEW_MISSION = re.compile(r"\b(?:new|another|second|separate)\s+mission\b|\bstart (?:a|another) mission\b", re.I)
 AGAIN = re.compile(r"\b(?:start|run|do)\s+(?:it|this|that|them|#\S+)\s+again\b|\bstart again\b|\brestart\b", re.I)
-# "Before I approve #0410: is it set to stop after each step?" is not an approval.
-NOT_YET = re.compile(r"\bbefore (?:i|we) approve\b|\b(?:don'?t|do not|not) approve\b", re.I)
+# "Before I approve #0410: is it set to stop after each step?" is not an approval, nor is
+# "No, …" or "Not yet, ok?" to Auto's "Shall I approve it?".
+NOT_YET = re.compile(r"\bbefore (?:i|we) approve\b|\b(?:don'?t|do not|not) approve\b|\bnot yet\b|^\W*no\b"
+                     r"|\bhold (?:on|off)\b|\bhang on\b|\bwait,|\bwait a (?:sec|second|minute|moment)\b", re.I)
+# The owner's other verbs: a message with one of them is not just saying which card.
+OTHER_VERB = re.compile("|".join(f"(?:{pattern.pattern})" for pattern in (CANCEL, SEND_BACK, GIVE, UPDATE)), re.I)
 # The owner taking Auto's own proposal ("Yes, that's it… put that brief on #0204"), unless
 # they said the words are theirs ("I didn't ask you to write it… put what I wrote", #0451).
 AGREES = re.compile(r"\b(?:yes|yep|yeah|that'?s it|that'?s right|exactly|agreed|perfect|sounds good"
                     r"|go with (?:that|it)|use (?:that|it|this|your)|put (?:that|it|this|your))\b", re.I)
 THEIRS = re.compile(r"\bdidn'?t ask you to write\b|\bwhat i wrote\b|\bmy (?:own )?words\b|\bmy brief\b", re.I)
 AUTO_ROLE = "assistant"
+# How many of the owner's messages a note or a brief signed as theirs may come from: on
+# night 8 the owner asked for "the brief I gave you above" two messages after giving it (#0296).
+OWNER_HISTORY = 6
 
 
 @dataclass(frozen=True)
@@ -97,28 +104,50 @@ def owner_turn(db: Session, workspace_id: Any, caller_context: Any) -> Optional[
     if not words or not words[0]:
         return None
     latest, earlier = words[0], (words[1] if len(words) > 1 else "")
-    return OwnerTurn(latest=latest, earlier=earlier or "", cards=_cards_named(db, workspace_id, latest),
+    return OwnerTurn(latest=latest, earlier=earlier or "", cards=cards_named(db, workspace_id, latest),
                      chat_id=chat_id)
 
 
 def autos_proposal(db: Session, workspace_id: Any, turn: OwnerTurn) -> str:
     """Auto's last reply in the chat when the owner's latest words take it as it is
-    ("Yes, that's it"), else "". Read in a savepoint, like the owner's words."""
+    ("Yes, that's it"), else ""."""
+    if not AGREES.search(turn.latest) or THEIRS.search(turn.latest):
+        return ""
+    return autos_last_reply(db, workspace_id, turn)
+
+
+def autos_last_reply(db: Session, workspace_id: Any, turn: OwnerTurn) -> str:
+    """Auto's last reply in the chat, or "". Read in a savepoint, like the owner's words."""
+    texts = _chat_words(db, workspace_id, turn, AUTO_ROLE, 1)
+    return texts[0] if texts else ""
+
+
+def owners_recent_words(db: Session, workspace_id: Any, turn: OwnerTurn) -> Tuple[str, ...]:
+    """The owner's last ``OWNER_HISTORY`` messages in the chat, newest first: a brief
+    they gave a few messages back is still their words."""
+    from modules.tools.discovery.handlers_board_task_review import OWNER_ROLE
+
+    return _chat_words(db, workspace_id, turn, OWNER_ROLE, OWNER_HISTORY)
+
+
+def _chat_words(db: Session, workspace_id: Any, turn: OwnerTurn, role: str, count: int) -> Tuple[str, ...]:
+    """The text of the last ``count`` messages by ``role`` in the turn's chat, newest
+    first. Read in a savepoint: a refused read must not abort the caller's transaction."""
     from core.models.core import Message
     from modules.memory.thread_checkpoint import extract_message_text
 
-    if turn.chat_id is None or not AGREES.search(turn.latest) or THEIRS.search(turn.latest):
-        return ""
+    if turn.chat_id is None:
+        return ()
     try:
         with db.begin_nested():
-            row = (db.query(Message.parts)
-                   .filter(Message.chat_id == turn.chat_id, Message.workspace_id == _as_uuid(workspace_id),
-                           Message.role == AUTO_ROLE)
-                   .order_by(Message.created_at.desc()).first())
+            rows = (db.query(Message.parts)
+                    .filter(Message.chat_id == turn.chat_id, Message.workspace_id == _as_uuid(workspace_id),
+                            Message.role == role)
+                    .order_by(Message.created_at.desc()).limit(count).all())
     except Exception:
-        logger.exception("[owner_turn] could not read Auto's last reply in chat %s", turn.chat_id)
-        return ""
-    return extract_message_text(row.parts) if row is not None else ""
+        logger.exception("[owner_turn] could not read the %s messages in chat %s", role, turn.chat_id)
+        return ()
+    return tuple(extract_message_text(row.parts) for row in rows)
 
 
 def _chat_id(caller_context: Any) -> Optional[UUID]:
@@ -136,7 +165,7 @@ def _as_uuid(value: Any) -> Any:
         return value
 
 
-def _cards_named(db: Session, workspace_id: Any, text: str) -> Tuple[NamedCard, ...]:
+def cards_named(db: Session, workspace_id: Any, text: str) -> Tuple[NamedCard, ...]:
     """Each card the words name by number, found on this workspace's board or not."""
     from core.models.core import BoardTask
     from services.ticket_numbers import format_number, resolve_ticket_ref
@@ -197,5 +226,5 @@ def card_words(card: NamedCard) -> str:
     return f"{card.ref} ('{title}', {status})"
 
 
-__all__ = ["CARD_REF", "NamedCard", "OwnerTurn", "autos_proposal", "card_kind", "card_words", "names_card",
-           "owner_turn", "says", "values_in"]
+__all__ = ["CARD_REF", "NamedCard", "OwnerTurn", "autos_last_reply", "autos_proposal", "card_kind", "card_words",
+           "cards_named", "names_card", "owner_turn", "owners_recent_words", "says", "values_in"]

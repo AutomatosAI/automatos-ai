@@ -29,11 +29,14 @@ def turn(monkeypatch):
 
     said = {}
 
-    def _set(latest, *cards, earlier=""):
-        said["turn"] = OwnerTurn(latest=latest, earlier=earlier, cards=tuple(cards))
+    def _set(latest, *cards, earlier="", recent=(), auto=""):
+        """``recent``: the owner's last few messages; ``auto``: Auto's last reply."""
+        said.update(turn=OwnerTurn(latest=latest, earlier=earlier, cards=tuple(cards)), recent=recent, auto=auto)
 
     monkeypatch.setattr(guard, "owner_turn", lambda db, ws, ctx: said.get("turn") if ctx else None)
     monkeypatch.setattr(guard, "_the_cards_words", lambda db, ws, params: ())
+    monkeypatch.setattr(guard, "owners_recent_words", lambda db, ws, turn: said.get("recent", ()))
+    monkeypatch.setattr(guard, "autos_last_reply", lambda db, ws, turn: said.get("auto", ""))
     return _set
 
 
@@ -148,8 +151,39 @@ def test_the_owners_approval_with_their_note_goes_through(turn):
 
 
 def test_a_yes_to_autos_question_is_the_owners_go_ahead(turn):
-    turn("Yes, go ahead.", earlier="Start a mission to get my wholesale price list ready for December.")
+    turn("Yes, go ahead.", earlier="Start a mission to get my wholesale price list ready for December.",
+         auto="The plan for #0393 has four steps. Shall I approve it so it starts?")
     assert _refused("platform_approve_mission", mission_id=str(uuid4())) is None
+
+
+def test_a_yes_to_another_question_is_not_an_approval(turn):
+    """#0393: 'Yes, go ahead.' answered whether to make the mission, not whether to approve its plan."""
+    turn("Yes, go ahead.", earlier="Start a mission to get my wholesale price list ready for December.",
+         auto="Would you like me to create a mission for the wholesale price list?")
+    assert "hasn't said to approve" in _refused("platform_approve_mission", mission_id=str(uuid4()))
+
+
+def test_an_ok_about_something_else_is_not_an_approval(turn):
+    """An 'ok' in the message before, about the draft's tone, never approves the card named next."""
+    turn("#0329 is the one about Raj Patel.", _card("#0329", "Reply to Raj Patel"),
+         earlier="The tone is ok but it's too long.")
+    assert "hasn't said to approve #0329" in _refused("platform_update_task_status", task_id=329, status="done")
+
+
+def test_no_to_autos_question_is_not_an_approval(turn):
+    turn("No, it's ok for now, I'll read it first.", _card("#0329", "Reply to Raj Patel"),
+         auto="Shall I approve #0329?")
+    assert "yet" in _refused("platform_update_task_status", task_id=329, status="done")
+
+
+def test_approve_said_before_naming_the_card_is_the_owners(turn):
+    turn("#0329, the reply to Raj.", _card("#0329", "Reply to Raj Patel"), earlier="Approve the reply to Raj, please.")
+    assert _refused("platform_update_task_status", task_id=329, status="done") is None
+
+
+def test_approving_one_card_never_approves_the_next_one_named(turn):
+    turn("#0329 is the one about Raj Patel.", _card("#0329", "Reply to Raj Patel"), earlier="Approve #0201, please.")
+    assert "hasn't said to approve #0329" in _refused("platform_update_task_status", task_id=329, status="done")
 
 
 # ── Words signed as the owner's are theirs (F280, F279) ─────────────────────────────
@@ -183,6 +217,37 @@ def test_a_brief_the_owner_took_from_auto_goes_on(turn, monkeypatch):
     turn("Yes, that's it, with 'about 90 words' added. Put that brief on #0204 and send it back.",
          _card("#0204", "Newsletter opening"))
     assert _refused("platform_update_task", task_id=204, description=proposed + " About 90 words.") is None
+
+
+def test_a_brief_the_owner_gave_a_few_messages_back_is_theirs(turn):
+    """#0296: 'Put the brief I gave you above on that ticket, word for word' came two messages after the brief."""
+    brief = ("Shop description for the Peru Cajamarca, about 100 words, no fewer than 90. Start with the taste: "
+             "milk chocolate, red apple and honey.")
+    turn("#0296 is a ticket on my board, in Review. Put the brief I gave you above on that ticket, word for word.",
+         _card("#0296", "Shop description: Peru Cajamarca"),
+         earlier="That was my Support Agent's own description, not a ticket.",
+         recent=("Put the brief I gave you above on that ticket, word for word.",
+                 "That was my Support Agent's own description, not a ticket.", f"Update #0296: {brief}"))
+    assert _refused("platform_update_task", task_id=296, description=brief) is None
+    autos = "Milk chocolate, red apple and honey notes begin this exceptional Peruvian coffee, grown by smallholders."
+    assert "A new brief is the owner's words" in _refused("platform_update_task", task_id=296, description=autos)
+
+
+def test_a_correction_sent_back_in_the_description_is_the_owners_words(turn):
+    """F279: the correction a send-back carries goes on the card as the owner's note."""
+    turn("Send #0347 back: take out the line It starts with To:. Nothing at all before To:.",
+         _card("#0347", "Invoice reminder to Fernhill Bakery"))
+    refusal = _refused("platform_update_task", task_id=347, send_back=True,
+                       description="Remove the line that starts with 'To:'. Ensure clean formatting.")
+    assert "their own words" in refusal
+    assert _refused("platform_update_task", task_id=347, send_back=True,
+                    description="take out the line It starts with To:. Nothing at all before To:.") is None
+
+
+def test_running_a_playbook_cards_playbook_again_is_about_that_card(turn):
+    turn("Run #0440 again for Larder & Loaf, with Tuesday as the delivery day.",
+         _card("#0440", "New Cafe Onboarding: Larder & Loaf", "done", source_type="recipe"))
+    assert _refused("platform_execute_playbook", playbook_id=102, input_data={"delivery_day": "Tuesday"}) is None
 
 
 def test_in_progress_is_not_a_send_back(turn):

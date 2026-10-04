@@ -13,7 +13,9 @@ before it runs, and refused, saying the call that does what they asked, when:
 - it makes a copy instead of acting: a new ticket #0287 for "Give #0285 to …", #0432 for
   "Update #0431 …", a second mission #0268 for "change #0267";
 - it decides for the owner: an approval of #0329 when the owner only named it, an
-  approval of #0422 when they said cancel;
+  approval of #0422 when they said cancel. An approval needs the owner's approving
+  words now, or in the message before when this one only says which card; a bare
+  "yes" or "ok" counts only as the answer to Auto's own question about approving;
 - it writes words as the owner's that they never wrote: notes signed "you", and briefs
   ("The description now reflects exactly what you wrote" over Auto's own checklist);
 - it moves a card to In progress for a send-back, which re-runs the old brief without
@@ -32,8 +34,9 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.owner_turn import (
-    AGAIN, APPROVE, CANCEL, GIVE, GO_AHEAD, MISSION_CARD, NEW_CARD, NEW_MISSION, NOT_YET, SEND_BACK, UPDATE,
-    NamedCard, OwnerTurn, autos_proposal, card_kind, card_words, names_card, owner_turn, says, values_in,
+    AGAIN, APPROVE, CANCEL, CARD_REF, GIVE, GO_AHEAD, MISSION_CARD, NEW_CARD, NEW_MISSION, NOT_YET, OTHER_VERB,
+    RUN_CARD, SEND_BACK, UPDATE, NamedCard, OwnerTurn, autos_last_reply, autos_proposal, card_kind, card_words,
+    names_card, owner_turn, owners_recent_words, says, values_in,
 )
 from modules.tools.discovery.ticket_moves import STATUS_WORDS
 
@@ -65,6 +68,7 @@ KIND_SAID = {
     "an agent": r"\bagent'?s (?:own )?(?:description|settings|name|instructions)\b",
     "a document": r"\bdocuments?\b|\bpdf\b", "a Shopify product": r"\bshopify\b",
 }
+PLAYBOOK = "a playbook"
 NOTE_KEYS = ("note", "notes", "comment", "remark")
 NOTE_SHARE, BRIEF_SHARE = 0.8, 0.6
 QUOTE_CHARS = 240
@@ -138,6 +142,8 @@ def _not_the_card(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, 
         return None
     if re.search(KIND_SAID.get(kind, r"(?!)"), turn.latest, re.I):
         return None
+    if kind == PLAYBOOK and any(card_kind(card) == RUN_CARD for card in found):
+        return None   # a playbook's own run card: running its playbook again is about that card
     card = found[0]
     return (f"The owner named {card_words(card)}, a card on their board, and {kind} isn't what they asked "
             f"about.{NOTHING_DONE} {right_call(turn, card)}{OTHER_ASK.format(kind=kind)}")
@@ -187,12 +193,35 @@ def _not_what_they_said(db: Session, workspace_id: Any, turn: OwnerTurn, action:
         return f"The owner said cancel, not approve.{NOTHING_DONE} {_cancel_call(action, turn)}"
     if decided == "approve" and says(NOT_YET, (turn.latest,)):
         return (f"The owner hasn't approved {_which(turn)} yet: answer what they asked first.{NOTHING_DONE}")
-    if decided == "approve" and not says(APPROVE, turn.said) and not says(GO_AHEAD, turn.said):
+    if decided == "approve" and not _owner_approved(db, workspace_id, turn):
         return (f"The owner hasn't said to approve {_which(turn)}.{NOTHING_DONE} Ask them what they want done "
                 "with it, in their words.")
     if decided == "cancel" and not says(CANCEL, turn.said):
         return f"The owner hasn't said to cancel {_which(turn)}.{NOTHING_DONE} Ask them first."
     return None
+
+
+def _owner_approved(db: Session, workspace_id: Any, turn: OwnerTurn) -> bool:
+    """The owner's go-ahead to approve: their approving words now; or in the message
+    before, when this one only says which card it meant; or a yes to Auto's own question
+    about approving. An "ok" in an earlier message about something else is none of these:
+    #0329 was approved when the owner had only said which card they meant."""
+    if says(APPROVE, (turn.latest,)):
+        return True
+    if says(APPROVE, (turn.earlier,)) and not says(OTHER_VERB, (turn.latest,)) and _same_cards(turn):
+        return True
+    return says(GO_AHEAD, (turn.latest,)) and bool(APPROVE.search(autos_last_reply(db, workspace_id, turn)))
+
+
+def _same_cards(turn: OwnerTurn) -> bool:
+    """The cards the earlier message named, if any, are the ones the latest names."""
+    earlier = _numbers(turn.earlier)
+    return not earlier or earlier <= _numbers(turn.latest)
+
+
+def _numbers(text: str) -> set:
+    """The card numbers in ``text``, as (number, step): "#329" and "#0329" are one card."""
+    return {(int(match.group(1)), match.group(2)) for match in CARD_REF.finditer(text or "")}
 
 
 def _decision(action: str, params: Dict[str, Any]) -> Optional[str]:
@@ -220,19 +249,38 @@ def _cancel_call(action: str, turn: OwnerTurn) -> str:
 def _not_their_words(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
                      params: Dict[str, Any]) -> Optional[str]:
     """A note signed as the owner's, or a new brief, in words the owner never wrote."""
-    note = next((str(params[key]) for key in NOTE_KEYS if params.get(key)), "")
-    if action in ("platform_update_task_status", "platform_update_task") and note:
-        if share_of_words(note, turn.said) < NOTE_SHARE:
-            return ("A note on the card is signed as the owner's, so it is their own words, as they wrote them: "
-                    f"'{_quoted(turn.latest)}'.{NOTHING_DONE} Resend it with their words, or without a note.")
+    if action not in ("platform_update_task_status", "platform_update_task"):
+        return None
+    note = _signed_note(action, params)
+    if note and not _theirs(db, workspace_id, turn, note, NOTE_SHARE):
+        return ("A note on the card is signed as the owner's, so it is their own words, as they wrote them in this "
+                f"chat (their latest message: '{_quoted(turn.latest)}').{NOTHING_DONE} Resend it with their words, "
+                "or without a note.")
     brief = str(params.get("description") or "")
     if action != "platform_update_task" or not brief or params.get("send_back"):
         return None
-    sources = (*turn.said, *_the_cards_words(db, workspace_id, params), autos_proposal(db, workspace_id, turn))
-    if share_of_words(brief, sources) >= BRIEF_SHARE:
+    extra = (*_the_cards_words(db, workspace_id, params), autos_proposal(db, workspace_id, turn))
+    if _theirs(db, workspace_id, turn, brief, BRIEF_SHARE, extra):
         return None
-    return ("A new brief is the owner's words, not yours: put what they wrote as the description, word for "
-            f"word ('{_quoted(turn.latest)}'), or ask them for the brief.{NOTHING_DONE}")
+    return ("A new brief is the owner's words, not yours: put the brief they wrote in this chat as the description, "
+            f"word for word, or ask them for the brief.{NOTHING_DONE}")
+
+
+def _signed_note(action: str, params: Dict[str, Any]) -> str:
+    """The words the call would put on the card as the owner's: its note, or, for a
+    send-back, the description it sends back as their correction (F279)."""
+    note = next((str(params[key]) for key in NOTE_KEYS if params.get(key)), "")
+    if not note and action == "platform_update_task" and params.get("send_back"):
+        return str(params.get("description") or "")
+    return note
+
+
+def _theirs(db: Session, workspace_id: Any, turn: OwnerTurn, text: str, share: float, extra: tuple = ()) -> bool:
+    """Whether ``text`` is the owner's words: from this turn, or from one of their last
+    few messages ("put the brief I gave you above on #0296"), or from ``extra``."""
+    if share_of_words(text, (*turn.said, *extra)) >= share:
+        return True
+    return share_of_words(text, (*owners_recent_words(db, workspace_id, turn), *extra)) >= share
 
 
 def _the_cards_words(db: Session, workspace_id: Any, params: Dict[str, Any]) -> tuple:
