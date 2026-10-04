@@ -12,9 +12,9 @@ NO web search - keep it within platform knowledge bases.
 Uses ToolResultFormatter for consistent result formatting across all tools.
 """
 
+import functools
 import logging
-from typing import Dict, Any, List, Optional
-from uuid import UUID
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,26 @@ from modules.codegraph import CodeGraphService
 from config import config
 
 logger = logging.getLogger(__name__)
+
+
+def _routes_generate_document(execute_tool: Callable[..., Awaitable[Dict[str, Any]]]):
+    """Send generate_document to its own handler, which reads its arguments at the boundary.
+
+    F298 (night 8): the tool's code sat inside execute_tool, whose blanket except
+    put "'str' object has no attribute 'get'" on #0249's card when the model sent
+    ``data`` as text. modules/tools/execution/generate_document_tool.py now reads
+    the arguments and answers every failure in plain words.
+    """
+    @functools.wraps(execute_tool)
+    async def route(self, tool_name: str, parameters: Dict[str, Any], agent_id: int) -> Dict[str, Any]:
+        if tool_name != "generate_document":
+            return await execute_tool(self, tool_name, parameters, agent_id)
+        # Imported here: modules.tools imports this module (UnifiedToolExecutor).
+        from modules.tools.execution.generate_document_tool import run_generate_document
+
+        return await run_generate_document(self.db, parameters, agent_id)
+
+    return route
 
 
 class AgentPlatformTools:
@@ -248,6 +268,7 @@ class AgentPlatformTools:
 
 
 
+    @_routes_generate_document
     async def execute_tool(
         self,
         tool_name: str,
@@ -739,155 +760,6 @@ class AgentPlatformTools:
                     return ToolResultFormatter.standardize_result(
                         {"success": False, "error": str(e)}, tool_name
                     )
-
-            elif tool_name == "generate_document":
-                from core.social_templates import is_social_format
-
-                title = parameters.get("title", "Document")
-                fmt = parameters.get("format", "pdf")
-                data = parameters.get("data", {})
-                template_name = parameters.get("template_name")
-                template_id_raw = parameters.get("template_id")
-                has_template = bool(template_name or template_id_raw)
-
-                # PRD-251 US-117: a social image or video is its template, rendered.
-                if is_social_format(fmt) and not has_template:
-                    return ToolResultFormatter.standardize_result(
-                        {
-                            "success": False,
-                            "error": (
-                                f"A {fmt} is rendered from a {fmt} template: pass its template_id or "
-                                f"template_name (platform_list_templates with format {fmt} lists them)."
-                            ),
-                        },
-                        tool_name,
-                    )
-
-                # Guard: reject empty data only on the NO-template fallback path, where
-                # the document is built purely from sections/content. A chosen template
-                # (block or legacy) defines its own structure and fills data.* fields, so
-                # it must not be blocked by the sections/content requirement (PRD-167 S6).
-                if not has_template and (
-                    not data or (fmt == "pdf" and not data.get("sections") and not data.get("content"))
-                ):
-                    return ToolResultFormatter.standardize_result(
-                        {
-                            "success": False,
-                            "error": (
-                                "Missing document content. Either pass a template_id/template_name, "
-                                "or include 'sections' (a list of {title, content} objects with "
-                                "substantial text) or 'content' (a string) in 'data'."
-                            ),
-                        },
-                        tool_name,
-                    )
-
-                self.logger.info(f"  📄 Generating {fmt.upper()} document: '{title}'")
-
-                # Resolve workspace_id from agent
-                workspace_id = None
-                agent_row = None
-                try:
-                    from core.models import Agent as AgentModel
-                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row and getattr(agent_row, "workspace_id", None):
-                        workspace_id = agent_row.workspace_id
-                except Exception:
-                    pass
-
-                if not workspace_id:
-                    return ToolResultFormatter.standardize_result(
-                        {"success": False, "error": "Cannot resolve workspace for document generation"},
-                        tool_name
-                    )
-
-                # Resolve template_id (UUID) + the requesting user for {{user.*}} chips.
-                template_id = None
-                if template_id_raw:
-                    try:
-                        template_id = UUID(str(template_id_raw))
-                    except (ValueError, TypeError):
-                        return ToolResultFormatter.standardize_result(
-                            {"success": False, "error": f"Invalid template_id: {template_id_raw!r}"},
-                            tool_name,
-                        )
-                agent_user_id = getattr(agent_row, "user_id", None)
-
-                from modules.documents.generation_service import DocumentGenerationService
-                gen_service = DocumentGenerationService(self.db, workspace_id)
-                result = await gen_service.generate(
-                    title=title,
-                    format=fmt,
-                    data=data,
-                    workspace_id=workspace_id,
-                    template_name=template_name,
-                    template_id=template_id,
-                    user_id=agent_user_id,
-                )
-
-                # PRD-167 S6: register the rendered document as a deliverable with
-                # source attribution (template_id + the producing agent).
-                registration = gen_service.register_as_deliverable(
-                    result,
-                    title=title,
-                    source_type="agent_output",
-                    agent_id=agent_id,
-                    agent_name=getattr(agent_row, "name", None),
-                    template_id=template_id,
-                )
-
-                # PRD-164 S3 (Q58 flywheel): the generated document's markdown
-                # becomes retrievable knowledge via the existing ingestion
-                # manager. Opt-out enforced inside ingest_agent_output;
-                # failure never fails the generation.
-                try:
-                    from services.knowledge_flywheel import ingest_agent_output
-
-                    _gen_source_id = (registration or {}).get("deliverable_id") or result.filename
-                    await ingest_agent_output(
-                        self.db,
-                        workspace_id,
-                        content=result.content or "",
-                        filename=f"{(result.filename or title).rsplit('.', 1)[0]}.md",
-                        source="generated_document",
-                        source_id=str(_gen_source_id),
-                        title=title,
-                        description=f"Generated document: {title}"[:500],
-                        agent_name=getattr(agent_row, "name", None),
-                        created_by=getattr(agent_row, "name", None) or "agent",
-                        extra_tags=[f"agent:{agent_id}"],
-                    )
-                except Exception:
-                    self.logger.warning(
-                        "Flywheel ingest failed for generated document '%s' (non-fatal)",
-                        title, exc_info=True,
-                    )
-
-                self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")
-                # PRD-242 S4: the links an agent needs to DELIVER the document, not
-                # just download it — the in-app feed (workspace members) and a
-                # no-sign-in share link for an email/Slack recipient (None when
-                # object storage holds no copy). Plus which template filled it.
-                from modules.documents.generation_service import deliverables_app_url
-                return ToolResultFormatter.standardize_result(
-                    {
-                        "success": True,
-                        "results": [{
-                            "status": "success",
-                            "filename": result.filename,
-                            "format": result.format,
-                            "download_url": result.download_url,
-                            "size_kb": result.size // 1024,
-                            "content": result.content,
-                            "deliverable_id": (registration or {}).get("deliverable_id"),
-                            "app_url": deliverables_app_url(),
-                            "share_url": gen_service.share_link(result),
-                            "template_id": result.template_id,
-                            "template_name": result.template_name,
-                        }],
-                    },
-                    tool_name
-                )
 
             else:
                 self.logger.error(f"  ❌ Unknown tool: {tool_name}")
