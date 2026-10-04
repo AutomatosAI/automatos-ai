@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
+from services.session_data_tools import DATA_TOOL_SPECS
+
 logger = logging.getLogger(__name__)
 
 # The dispatcher every platform action is reached through (PRD-64): it validates
@@ -114,6 +116,8 @@ class SessionTool:
     # What comes BACK, when the action returns more than this tool advertises.
     # The scope functions guard the request; this guards the response.
     project: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    # F329: other actions this tool also does, so a skill naming one is pointed here.
+    also_runs: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -678,7 +682,7 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         runner=_run_read_step_file,
         tags=("mission", "files"),
     ),
-)
+) + tuple(SessionTool(**spec) for spec in DATA_TOOL_SPECS)   # F329: query_database, query_graph
 
 _BY_NAME: Mapping[str, SessionTool] = {t.name: t for t in SESSION_TOOLS}
 
@@ -704,7 +708,7 @@ def equivalent_of(mentioned: Any) -> Optional[str]:
     if not key:
         return None
     for tool in SESSION_TOOLS:
-        if key in (tool.name, tool.action):
+        if key in (tool.name, tool.action, *tool.also_runs):
             return tool.name
     return None
 
