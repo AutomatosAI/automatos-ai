@@ -873,6 +873,28 @@ class SwitchAgentRequest(BaseModel):
     reason: Optional[str] = None
 
 
+def _record_agent_switch(db: Session, chat: Any, old_agent_id: int, request: SwitchAgentRequest) -> None:
+    """Append one switch to the chat's ``agent_switches`` history, stamped in UTC (#935).
+
+    Builds a new list rather than appending to the chat's own, and reads a history
+    stored as JSON text as well as a list."""
+    import json
+
+    existing = getattr(chat, "agent_switches", None) or []
+    if isinstance(existing, str):
+        existing = json.loads(existing)
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "from_agent_id": old_agent_id,
+        "to_agent_id": request.newAgentId,
+        "reason": request.reason or "User requested switch",
+    }
+    db.execute(
+        text("UPDATE chats SET agent_switches = :switches WHERE id = :chat_id"),
+        {"switches": json.dumps([*existing, record]), "chat_id": chat.id},
+    )
+
+
 @router.get("/{chat_id}")
 async def get_chat(
     chat_id: str,
@@ -994,10 +1016,8 @@ async def switch_agent(
     db: Session = Depends(get_db)
 ):
     """Switch to a different agent mid-conversation."""
-    from core.models import Chat, Agent
-    from datetime import datetime
-    import json
-    
+    from core.models import Agent
+
     chat_service = ChatService(db)
     user_id = get_user_id(db, ctx)
     
@@ -1029,24 +1049,7 @@ async def switch_agent(
         {"new_agent_id": request.newAgentId, "chat_id": chat.id}
     )
     
-    switch_record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "from_agent_id": old_agent_id,
-        "to_agent_id": request.newAgentId,
-        "reason": request.reason or "User requested switch"
-    }
-    
-    existing_switches = getattr(chat, 'agent_switches', None) or []
-    if isinstance(existing_switches, str):
-        existing_switches = json.loads(existing_switches)
-    
-    existing_switches.append(switch_record)
-    
-    db.execute(
-        text("UPDATE chats SET agent_switches = :switches WHERE id = :chat_id"),
-        {"switches": json.dumps(existing_switches), "chat_id": chat.id}
-    )
-    
+    _record_agent_switch(db, chat, old_agent_id, request)
     db.commit()
     
     return {

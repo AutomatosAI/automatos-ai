@@ -100,3 +100,39 @@ def test_no_chat_route_serialises_a_naive_timestamp():
     assert ".created_at.isoformat()" not in source
     assert ".updated_at.isoformat()" not in source
     assert "utcnow().isoformat()" not in source
+
+
+class _RecordingDb:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, statement, params):
+        self.calls.append(params)
+
+
+def test_an_agent_switch_is_recorded_in_utc_without_touching_the_chats_list():
+    import json
+
+    earlier = [{"timestamp": "2026-10-01T09:00:00+00:00", "from_agent_id": 1, "to_agent_id": 2, "reason": "x"}]
+    chat = SimpleNamespace(id="chat-1", agent_switches=earlier)
+    db = _RecordingDb()
+    chat_api._record_agent_switch(db, chat, 2, chat_api.SwitchAgentRequest(newAgentId=3))
+
+    [params] = db.calls
+    written = json.loads(params["switches"])
+    assert [s["to_agent_id"] for s in written] == [2, 3]
+    assert datetime.fromisoformat(written[-1]["timestamp"]).utcoffset() == timedelta(0)
+    assert written[-1]["reason"] == "User requested switch"
+    assert chat.agent_switches == earlier and len(earlier) == 1, "the chat's own list is not mutated"
+
+
+def test_an_agent_switch_reads_a_history_stored_as_json_text():
+    import json
+
+    chat = SimpleNamespace(id="chat-1", agent_switches=json.dumps([{"to_agent_id": 2}]))
+    db = _RecordingDb()
+    chat_api._record_agent_switch(db, chat, 2, chat_api.SwitchAgentRequest(newAgentId=4, reason="asked"))
+
+    written = json.loads(db.calls[0]["switches"])
+    assert [s["to_agent_id"] for s in written] == [2, 4]
+    assert written[-1]["reason"] == "asked"
