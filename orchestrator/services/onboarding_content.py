@@ -79,3 +79,37 @@ def not_for_a_workspace_in_use(is_active: Callable[[Any], bool]) -> Callable[[An
 
 
 __all__ = ["in_use", "not_for_a_workspace_in_use", "quiz_not_wanted"]
+
+
+def answers_alone_never_start_it(set_segment: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``onboarding_state.set_segment``: in a workspace already in use whose
+    onboarding has not started, saved answers are kept but do not start it.
+
+    Night 9 (chat 9928b259): the owner, asked about their business in a workspace with
+    12 documents, answered two of the three questions and said "Now please just
+    answer". Saving those answers moved the stage on by itself (``implied_stage``,
+    added for a new workspace whose model forgot ``advance_to``), and from then on
+    the quiz's guidance and AutoBrain's Tier 0 pin rode every turn of the night. In a
+    workspace in use, onboarding starts only when it is started: the owner asks to set
+    up, and Auto advances the stage itself.
+    """
+    @functools.wraps(set_segment)
+    def wrapped(db: Any, workspace: Any, segment: dict, *, commit: bool = True) -> Any:
+        if not quiz_not_wanted(db, workspace, getattr(workspace, "id", None)):
+            return set_segment(db, workspace, segment, commit=commit)
+        return _kept_without_starting(db, workspace, segment, commit)
+    return wrapped
+
+
+def _kept_without_starting(db: Any, workspace: Any, segment: dict, commit: bool) -> Any:
+    """The answers merged into the onboarding document, the stage left as it is."""
+    from services import onboarding_state as state
+
+    cleaned = state._clean_segment(segment)
+    if not cleaned:
+        raise ValueError("set_segment requires at least one of business/goal/comfort")
+    doc = state.get_onboarding(workspace)
+    doc = {**doc, "segment": {**(doc.get("segment") or {}), **cleaned}, "updated_at": state._now_iso()}
+    logger.info("[F314] onboarding answers kept for workspace %s; it is in use, so they don't start onboarding",
+                getattr(workspace, "id", None))
+    return state._persist(db, workspace, doc, commit=commit)
