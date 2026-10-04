@@ -67,7 +67,9 @@ _UPDATE_PLAYBOOK_PARAMETERS = {
         },
         "schedule_config": {
             "type": "object",
-            "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
+            "description": ("Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config, "
+                            "timezone, enabled }. To switch a timer off send {enabled: false}: its time is kept, "
+                            "and {enabled: true} switches it back on."),
         },
         "wait_for_me": {
             "type": "boolean",

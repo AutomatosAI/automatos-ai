@@ -359,6 +359,8 @@ actions:
     source: example
   - text: automate the weekly review playbook
     source: example
+  - text: switch off the timer on my weekly posts playbook
+    source: example
   - text: schedule playbook
     source: phrase_map
   - text: schedule the playbook

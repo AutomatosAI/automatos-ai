@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.wait_for_me import keeps_wait_for_me, updates_wait_for_me
 from modules.tools.discovery.playbook_lookup import CHANGES, READS, RUNS, finds_the_playbook
 from modules.tools.discovery.timer_zones import keeps_the_owners_zone
+from modules.tools.discovery.playbook_schedule_view import adds_each_timer
+from modules.tools.discovery.schedule_merge import merges_the_schedule
+from modules.tools.discovery.timer_off import switches_the_timer
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ def _execution_visitor_view(execution: Any) -> Dict[str, Any]:
             "completed_at": execution.completed_at.isoformat() if execution.completed_at else None}
 
 
+@adds_each_timer  # F290 (night 8): each playbook's timer, and its step count
 async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
@@ -85,6 +89,7 @@ async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]
     }
 
 
+@adds_each_timer  # F290 (night 8): Auto said #101 had no timer while it was on
 @finds_the_playbook(READS)  # F261 (7b): a name two playbooks share gives both, with their agents
 async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
@@ -261,6 +266,7 @@ async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+@merges_the_schedule  # F290 (night 8): {enabled: false} switches the timer off and keeps its time
 @checks_the_schedule  # F271 (7b): the schedule rules the playbook routes keep
 @updates_wait_for_me  # F242: the owner's "wait for me"
 async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -572,6 +578,7 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     }
 
 
+@switches_the_timer  # F290 (night 8): off with no cron, the playbook whose timer it is
 @finds_the_playbook(CHANGES)  # F261 (7b): never the first of two namesakes
 @keeps_the_owners_zone  # F266 (7b): "UTC" the owner never said is the workspace's own zone
 @keeps_wait_for_me  # F266 (7b): the timer's runs wait for the owner, in the same call

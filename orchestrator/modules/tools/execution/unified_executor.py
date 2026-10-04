@@ -92,6 +92,7 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     # F241 (night 7b): "Approve #0177 with this note" arrived as "notes".
     "note": ("notes", "comment", "remark"),
     "step_index": ("step", "index", "step_number", "step_idx", "stepIndex", "step_position"),
+    "schedule_config": ("schedule",),  # F290 (night 8): update_playbook's {"schedule": {"enabled": false}}
 }
 
 # A single dict argument named after the thing itself ({"report": {...}}) is a
