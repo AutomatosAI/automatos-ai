@@ -89,8 +89,8 @@ def test_the_inventory_names_only_what_the_widget_key_may_read(db):
             "## Documents and data in this workspace\n"
             "This workspace has 1 connected database (Shop orders). For the business's own records (counts, "
             "totals, stock, orders, members, sales, rankings), call platform_query_data with the owner's question "
-            "in their words: it reads the tables itself, so never ask the owner for table or field names. With one "
-            "database no name is needed.")
+            "in their words: it returns the database's tables and columns with its answer, so never ask the owner "
+            "for table, column or schema names. With one database no name is needed.")
     with _widget():
         assert documents_summary(db, ws) is None
 

@@ -27,8 +27,8 @@ had no data tool, asked the owner for "the exact names of the fields", or tried
 a store connection the workspace does not have. Auto now holds
 platform_query_data first-class on every turn in a workspace with a database
 (modules/tools/data_routes.py), so the sentence names it, says what belongs to
-it (the business's own records, not only "numbers") and that the tool reads the
-tables itself.
+it (the business's own records, not only "numbers") and that the tool returns
+the database's tables and columns, so the owner is never asked for them.
 """
 from __future__ import annotations
 
@@ -48,8 +48,8 @@ _ASK_DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works
                               "search them with search_knowledge first and name the file you used.")
 # F302 (night 9): what the database answers, and that its tables are the tool's to read.
 _ASK_DATA = ("For the business's own records (counts, totals, stock, orders, members, sales, rankings), "
-             "call platform_query_data with the owner's question in their words: it reads the tables itself, "
-             "so never ask the owner for table or field names.")
+             "call platform_query_data with the owner's question in their words: it returns the database's "
+             "tables and columns with its answer, so never ask the owner for table, column or schema names.")
 # F181 (night 6): #1115 totalled a club's orders from the first pages of the
 # export (47.06 kg; the file says about 100.3). A spreadsheet is counted in code.
 _COUNT_SPREADSHEETS = ("A spreadsheet (CSV or Excel) is counted or totalled with code, never searched: "

@@ -41,8 +41,8 @@ TABLES = ("documents", "database_knowledge_sources")
 # database (smart_query_database was on the chat surface only some turns), and says the tool reads
 # the tables itself.
 ASK_DATA = ("For the business's own records (counts, totals, stock, orders, members, sales, rankings), call "
-            "platform_query_data with the owner's question in their words: it reads the tables itself, so never "
-            "ask the owner for table or field names.")
+            "platform_query_data with the owner's question in their words: it returns the database's tables and "
+            "columns with its answer, so never ask the owner for table, column or schema names.")
 NUMBERS_TO_ONE = f"{ASK_DATA} With one database no name is needed."
 NUMBERS_TO_ONE_OF = f"{ASK_DATA} Name the database (database_id); it lists them when none is named."
 DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, search them with "

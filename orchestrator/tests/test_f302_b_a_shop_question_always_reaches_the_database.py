@@ -141,7 +141,8 @@ def test_the_route_tells_the_model_how_to_ask_and_never_to_ask_for_fields(db, gr
     ))
     [route] = [t for t in tools if t["function"]["name"] == "platform_query_data"]
     description = route["function"]["description"]
-    assert "never ask the user for table, column or field names" in description
+    assert "read the schema it returns" in description
+    assert "never ask the user for table, column or schema names" in description
     assert "one figure per call" in description and "a group's count is never the total" in description
     assert route["function"]["parameters"]["required"] == ["question"]
 
