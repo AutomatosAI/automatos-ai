@@ -2298,10 +2298,15 @@ BOARD_RESULT_MAX_CHARS = 4000
 
 def _final_output(step_results: List[dict], last_step: Dict[str, Any]) -> Optional[str]:
     """The run's output: the last step's full text when it completed (its dict is
-    still in scope), else the newest completed step's stored preview."""
+    still in scope), else the newest completed step's stored preview. F321: with
+    what that step saved with scratchpad_write, which used to stay in the expiring
+    scratchpad while the card said only "saved to the scratchpad"."""
+    from services.playbook_run_result import with_saved_values
+
     final_output = None
     if last_step.get("status") == "completed":
-        final_output = last_step.get("output", "")
+        final_output = with_saved_values(last_step.get("output", ""), last_step.get("order"),
+                                         last_step.get("tool_calls"))
     if not final_output:
         for sr in reversed(step_results):
             if sr.get("status") == "completed":
