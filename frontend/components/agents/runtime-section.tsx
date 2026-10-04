@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PermissionModeSelect, WORKSPACE_DEFAULT, isPermissionMode } from '@/components/settings/PermissionModePicker'
 import type { SessionToolGapEntry, SkillToolGap } from '@/types/session-tools'
 import { useConfiguredAgentId } from './configured-agent-context'
+import { loadApiClient } from './lazy-api-client'
 import { SessionToolsPanel } from './session-tools-panel'
 import { sessionGroupsField } from './session-tool-groups-model'
 import { useSessionToolPreview } from './use-session-tool-preview'
@@ -108,7 +109,7 @@ export function useCliAvailability(enabled: boolean): CliAvailability | null {
     let cancelled = false
     void (async () => {
       try {
-        const { apiClient } = await import('@/lib/api-client')
+        const apiClient = await loadApiClient()
         const health = await apiClient.request<{ registry?: CliRegistryEntry[]; providers_online?: string[] }>('/api/v1/cli-hosts/health')
         if (!cancelled) setAvail({ registry: health.registry ?? [], providers_online: health.providers_online ?? [] })
       } catch {
@@ -275,7 +276,7 @@ function useWorkspaceCheck(path: string, enabled: boolean): { check: WorkspaceCh
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const { apiClient } = await import('@/lib/api-client')
+          const apiClient = await loadApiClient()
           const result = await apiClient.request<WorkspaceCheck>(
             `/api/v1/cli-hosts/workspace-check?path=${encodeURIComponent(trimmed)}`,
           )
@@ -381,7 +382,7 @@ function useSessionTools(enabled: boolean): SessionTool[] {
     let cancelled = false
     void (async () => {
       try {
-        const { apiClient } = await import('@/lib/api-client')
+        const apiClient = await loadApiClient()
         const settings = await apiClient.request<{ session_tools?: unknown }>('/api/v1/cli-hosts/settings')
         if (!cancelled) setTools(normalizeSessionTools(settings?.session_tools))
       } catch {

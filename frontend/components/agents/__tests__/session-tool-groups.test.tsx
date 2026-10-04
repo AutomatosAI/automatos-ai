@@ -115,7 +115,10 @@ describe('Session tools picker', () => {
     expect(picker.textContent).toContain('list_playbooks')
     expect(screen.getByTestId('session-tool-groups-default')).toHaveTextContent('Defaults: all on')
     const alwaysOn = await screen.findByText(/Always on:/)
-    await waitFor(() => expect(alwaysOn.textContent).toContain('board_summary'))
+    // read from the mocked settings, not the SESSION_CORE_TOOLS fallback (which also names ask_human):
+    // before the shared lazy import, this call reached the real client and the fallback hid it
+    await waitFor(() => expect(alwaysOn.textContent).not.toContain('ask_human'))
+    expect(alwaysOn.textContent).toContain('board_summary')
     expect(alwaysOn.textContent).toContain('search_knowledge')
     expect(alwaysOn.textContent).not.toContain('query_database')
     // the old flat tool line gives way to the picker
@@ -207,6 +210,19 @@ describe('An older backend without session_tool_groups', () => {
     await screen.findByTestId('session-tools')
     expect(screen.queryByTestId('session-tool-groups')).not.toBeInTheDocument()
     expect(request.mock.calls.some(([path]) => String(path).startsWith('/api/agents/'))).toBe(false)
+  })
+})
+
+// Two hooks of one module importing the mocked client in the same tick raced in vitest: the second
+// got the real client (CI, 4 Oct). Every runtime hook now shares one lazy import.
+describe('loadApiClient', () => {
+  it('hands concurrent callers the same (mocked) client from one import', async () => {
+    const request = apiMock({})
+    await load(request)
+    const { loadApiClient } = await import('../lazy-api-client')
+    const [first, second] = await Promise.all([loadApiClient(), loadApiClient()])
+    expect(first).toBe(second)
+    expect(first.request).toBe(request)
   })
 })
 

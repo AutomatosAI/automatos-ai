@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import type { SessionToolGapEntry, SessionToolGroups } from '@/types/session-tools'
+import { loadApiClient } from './lazy-api-client'
 import { agentDetailPath, normalizeSessionToolGroups } from './session-tool-groups-model'
 
 export interface SessionToolPreview {
@@ -25,7 +26,7 @@ const UNKNOWN: SessionToolPreview = { groups: null, gaps: null }
 export const PREVIEW_DEBOUNCE_MS = 400
 
 async function readAgentTools(path: string): Promise<SessionToolPreview> {
-  const { apiClient } = await import('@/lib/api-client')
+  const apiClient = await loadApiClient()
   const detail = await apiClient.request<{ session_tool_groups?: unknown; session_tool_gaps?: unknown }>(path)
   const gaps = detail?.session_tool_gaps
   return {
