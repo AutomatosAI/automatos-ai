@@ -5,7 +5,7 @@ ONE choke point that turns agent outputs into retrievable knowledge:
 mission syntheses, generated documents, and submitted reports all route
 through :func:`ingest_agent_output`, which
 
-1. honors the per-workspace opt-out (flywheel is ON by default — Q58);
+1. honors the per-workspace opt-in (F305, night 9: OFF by default, see below);
 2. routes the content through the EXISTING ingestion manager
    (``modules/rag/ingestion/manager.py`` → chunked, embedded, searchable),
    tagged ``source_type='agent_output'``;
@@ -13,10 +13,15 @@ through :func:`ingest_agent_output`, which
    agent-output source type, so the KG learns the three source types it
    used to drop (see ``graph_service.partition_pending_sources``).
 
-Opt-out contract: a workspace with ``settings['knowledge_flywheel_enabled']
-= false`` ingests NOTHING — no document row, no chunks, no KG pending.
+F305 (night 9, Gerard's decision): 28 task reports and 2 mission outputs were filed
+as the owner's documents (#1527–#1555) and Auto cited them back as sources, one
+ticket's own answer among them. The owner adds files to the knowledge base; nothing
+goes in automatically. So the flywheel is now OFF unless the workspace says
+``settings['knowledge_flywheel_enabled'] = true``. Off, it ingests NOTHING: no
+document row, no chunks, no KG pending. The report file, its Execution Metrics,
+the card's answer, Deliverables and the Reports page never depended on it.
 There is deliberately no second gate anywhere else; every caller goes
-through this module so the opt-out is provable at one seam.
+through this module so the opt-in is provable at one seam.
 
 No parallel ingestion path: this module never chunks/embeds itself — it
 hands the content to ``DocumentManager.upload_document`` and cleans up.
@@ -50,7 +55,7 @@ AGENT_OUTPUT_SOURCES = (
 )
 
 # workspace.settings key (same JSONB home as the PRD-167 brand kit — no new
-# table). Absent/None/anything-but-False == enabled: Q58 ON by default.
+# table). F305: only an explicit ``true`` turns it on; absent/None/anything else is off.
 FLYWHEEL_SETTINGS_KEY = "knowledge_flywheel_enabled"
 
 # Cap on report text carried inside a KG pending — mirrors the extraction cap
@@ -187,25 +192,22 @@ def _workspace_setting(db: Session, workspace_id: UUID | str, key: str) -> Any:
 
 
 def flywheel_enabled(db: Session, workspace_id: UUID | str) -> bool:
-    """Q58: ON by default; only an explicit ``false`` opts the workspace out.
+    """F305 (night 9): OFF by default; only an explicit ``true`` opts the workspace in.
 
-    Fail-open by design: a missing workspace row or settings read error keeps
-    the default (enabled) — the flywheel is platform behaviour, the opt-out is
-    the exception.
+    Fail-closed: a missing workspace row or a settings read error keeps the default
+    (off) — an agent's output reaches the owner's documents only when the owner said so.
     """
     try:
         from core.models.workspaces import Workspace
 
         ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
         settings = getattr(ws, "settings", None) or {}
-        return settings.get(FLYWHEEL_SETTINGS_KEY) is not False
+        return settings.get(FLYWHEEL_SETTINGS_KEY) is True
     except Exception:
-        logger.warning(
-            "[Flywheel] Could not read workspace settings for %s — defaulting to enabled",
-            workspace_id,
-            exc_info=True,
+        logger.exception(
+            "[Flywheel] Could not read workspace settings for %s — keeping the default (off)", workspace_id,
         )
-        return True
+        return False
 
 
 def _build_kg_pending(
@@ -297,7 +299,7 @@ async def ingest_agent_output(
     """Route one agent output through the existing ingestion manager.
 
     Returns the ingested document id, or ``None`` when the workspace has
-    opted out (Q58), the output is a report still waiting for its approval
+    not opted in (F305), the output is a report still waiting for its approval
     (F235), or ingestion failed (fail-soft: producing the output must never
     be broken by the knowledge loop).
 
@@ -318,10 +320,10 @@ async def ingest_agent_output(
         logger.debug("[Flywheel] Empty %s content for %s — nothing to ingest", source, workspace_id)
         return None
 
-    # Q58 opt-out: the ONE gate. Nothing below runs for an opted-out workspace.
+    # F305: the ONE gate. Nothing below runs unless the workspace opted in.
     if not flywheel_enabled(db, workspace_id):
         logger.info(
-            "[Flywheel] Workspace %s opted out — skipping %s ingest", workspace_id, source
+            "[Flywheel] Workspace %s has not opted in — skipping %s ingest", workspace_id, source
         )
         return None
     # F235: only approved work becomes knowledge — a job report waits for its approval.

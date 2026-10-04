@@ -58,6 +58,7 @@ from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
 from modules.knowledge.graph_provenance import SOURCE_DOC_ATTR, prune_document_facts, stamp_source_document
 from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
+from services.agent_output_scope import graph_pending_without_agent_outputs, graph_skips_agent_outputs  # F305
 
 logger = logging.getLogger(__name__)
 
@@ -818,6 +819,7 @@ class GraphifyService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @graph_skips_agent_outputs  # F305 (night 9): an agent's writing is not the business's facts
     async def _collect_sources(
         self,
         workspace_id: str,
@@ -1399,6 +1401,7 @@ class GraphifyService:
                 "_debounced_rebuild: failed for workspace %s", workspace_id
             )
 
+    @graph_pending_without_agent_outputs  # F305: nor its reports' or missions' pendings
     async def _incremental_build(
         self,
         workspace_id: str,

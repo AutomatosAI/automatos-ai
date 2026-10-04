@@ -73,6 +73,7 @@ from services.orchestration_board_bridge import (
     create_task_board_task,
     sync_board_status,
 )
+from services.agent_output_scope import ingests_only_when_opted_in  # F305 (night 9)
 from services.orchestration_deps import DependencyResolver
 from services.orchestration_state import (
     ConflictError,
@@ -1149,6 +1150,7 @@ class CoordinatorService:
             except Exception as e:
                 logger.warning("[PRD-108] Failed to seed doc %s into field: %r", doc_id, e, exc_info=True)
 
+    @ingests_only_when_opted_in  # F305: delivered always, filed as a document only on the owner's opt-in
     async def _save_mission_output_as_document(
         self,
         db: Session,
