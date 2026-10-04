@@ -112,6 +112,17 @@ PLAYBOOK_ASK = ("On earlier runs of this playbook the owner sent the work back w
                 "own wording where they differ.")
 
 
+# F309 (night 9): a card with an answer given to another agent runs again with that agent
+# (modules/tools/discovery/handlers_board_task_assign.py), and its run is told so, never
+# that its draft was sent back: #1859 sat in Review with the Analyst's answer.
+GIVEN_WHY = "given to another agent"
+GIVEN_TO_YOU = "The owner gave this card to you after another agent had answered it."
+GIVEN_BLOCK = ("## This card was given to you\n"
+               "The owner gave this card to you after another agent had answered it; that answer is kept in the "
+               "card's history. Answer the brief yourself, from the start.")
+GIVEN_CORRECTIONS = "The owner's corrections on this card, oldest first. All of them still apply:"
+
+
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
     """``planning_data`` with ``note`` added to the ticket's corrections (rebuilt,
     never mutated in place)."""
@@ -176,6 +187,8 @@ def _redo(task: Any) -> Optional[str]:
     data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
     since = _brief_agreed_at(data)   # PRD-252 R2: what came before an agreed brief is settled
     notes = _corrections(data, since)
+    if latest == GIVEN_TO_YOU:
+        return _given_block(notes)
     if latest != SENT_BACK_WITHOUT_A_NOTE and (not notes or notes[-1] != latest):
         notes.append(latest)  # a note set another way (the PATCH, a stop) applies to this run too
     draft = _sent_back_draft(data, since)
@@ -191,6 +204,15 @@ def _redo(task: Any) -> Optional[str]:
         lines.append("This time it came back without a new note." if notes else SENT_BACK_WITHOUT_A_NOTE)
     lines.append("Start from your last attempt: apply every correction and keep everything else as it was."
                  if draft else "Apply every correction.")
+    return "\n".join(lines)
+
+
+def _given_block(notes: List[str]) -> str:
+    """What the run of a card given to a new agent is told (F309): that it is theirs now,
+    and the owner's corrections on it, which still hold."""
+    lines = [GIVEN_BLOCK]
+    if notes:
+        lines += [GIVEN_CORRECTIONS, *(f"{n}. {note}" for n, note in enumerate(notes, 1))]
     return "\n".join(lines)
 
 
