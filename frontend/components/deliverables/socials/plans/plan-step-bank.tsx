@@ -8,7 +8,7 @@
  * without a source, a title the bank holds and the plan's never-say words, with the reason.
  * PRD-251C US-C101: the bank says, in the server's words, when research cannot run. US-C106: a
  * topic close to a post the workspace already has says so ("Posted 5 Oct 2026 as ..."), with a
- * link that opens that post.
+ * link that opens that post. US-C207: it says when research last ran.
  */
 import { useState } from 'react'
 import Link from 'next/link'
@@ -25,6 +25,13 @@ import { socialsHref } from '../studio/studio-route'
 export const SAVE_FIRST = 'Save the plan first: its content bank fills once it exists.'
 const SHOWN_AT_FIRST = 6
 const FORMAT_WORDS: Record<string, string> = { image: 'Image', carousel: 'Carousel', video: 'Video', fact_card: 'Fact card', infographic: 'Infographic', text: 'Text' }
+
+/** "Last researched 17 Oct." from the bank's answer; null before the first run. */
+export function lastResearched(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const when = new Date(iso)
+  return Number.isNaN(when.getTime()) ? null : `Last researched ${when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}.`
+}
 
 export function topicUse(topic: Pick<SocialTopic, 'used_at' | 'pinned_on'>): string {
   if (topic.used_at) return 'Used'
@@ -87,6 +94,7 @@ export function PlanStepBank({ planId, ideas = [], onLeaveOut = () => undefined 
   }
   const topics = data?.topics ?? []
   const shown = all ? topics : topics.slice(0, SHOWN_AT_FIRST)
+  const lastRun = lastResearched(data?.research_last_run_at)
   const actions = (
     <div className="flex gap-2">
       <Button type="button" variant="outline" onClick={() => setAdding(true)}>Add a topic</Button>
@@ -96,7 +104,7 @@ export function PlanStepBank({ planId, ideas = [], onLeaveOut = () => undefined 
   return (
     <div className="flex flex-col gap-4">
       <PlanStepHeading title="Content bank" action={actions}
-        lead={`${data?.total ?? 0} topics, ${data?.unused ?? 0} unused. For each slot Auto takes the next unused topic that suits the slot's format.`} />
+        lead={`${data?.total ?? 0} topics, ${data?.unused ?? 0} unused. For each slot Auto takes the next unused topic that suits the slot's format.${lastRun ? ` ${lastRun}` : ''}`} />
       {data?.research_note && <p role="status" aria-label="Research" className="m-0 rounded-lg bg-secondary/60 px-3 py-2 text-sm text-foreground">{data.research_note}</p>}
       {adding && (
         <PlanTopicForm busy={write.isLoading} onCancel={() => setAdding(false)}

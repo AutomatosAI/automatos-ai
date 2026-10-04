@@ -89,16 +89,36 @@ def create_plan(db: Any, *, workspace_id: UUID, created_by: str, fields: Mapping
         late_policy=plans.SKIP, slot_overrides={},
     )
     _apply(plan, fields, templates_of(db, workspace_id))
+    make = plans.make_settings(plan)
+    if make["rhythm"] == plans.WEEKLY and "day" not in _sent(fields, "research"):  # PRD-251C US-C207
+        plan.research = {**(plan.research or {}), "day": plans.day_before(make["batch_day"])}
     db.add(plan)
     db.flush()
     return plan
+
+
+def _sent(fields: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = fields.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _research_follows(plan: SocialCampaign, fields: Mapping[str, Any], batch_day: str, research_day: str) -> None:
+    """PRD-251C (C4, US-C207): a weekly plan whose research ran the day before its batch day
+    keeps doing so when the batch day moves, unless this save chose another research day."""
+    make = plans.make_settings(plan)
+    if make["rhythm"] != plans.WEEKLY or make["batch_day"] == batch_day or research_day != plans.day_before(batch_day):
+        return
+    if _sent(fields, "research").get("day", research_day) == research_day:
+        plan.research = {**(plan.research or {}), "day": plans.day_before(make["batch_day"])}
 
 
 def update_plan(db: Any, plan: SocialCampaign, fields: Mapping[str, Any]) -> SocialCampaign:
     """``plan`` with ``fields`` changed, each checked; an ended plan is read-only."""
     if plan.status == plans.ENDED:
         raise plans.InvalidPlan("an ended plan cannot change")
+    batch_day, research_day = plans.make_settings(plan)["batch_day"], plans.validate_research(plan.research)["day"]
     _apply(plan, fields, templates_of(db, plan.workspace_id))
+    _research_follows(plan, fields, batch_day, research_day)
     return plan
 
 

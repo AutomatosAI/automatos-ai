@@ -191,7 +191,8 @@ def test_a_plan_is_created_listed_and_read(bank):
     plan = _create(bank)
     assert (plan["kind"], plan["status"], plan["late_policy"], plan["approval_mode"]) == ("plan", "active", "skip", "per_post")
     assert (plan["make"]["rhythm"], plan["make"]["time"]) == ("weekly", "17:00")  # PRD-251C: a new plan's week (O1, O3)
-    assert plan["research"] == {"enabled": True, "day": "mon", "time": "06:00", "repeat_after_days": 60}  # PRD-251C US-C104
+    # PRD-251C: the repeat window (US-C104); a weekly plan researches the day before its batch (US-C207).
+    assert plan["research"] == {"enabled": True, "day": "sat", "time": "06:00", "repeat_after_days": 60}
     assert plan["cadence"][0]["id"] == "r1" and plan["bank"] == {"topics": 0, "unused": 0}
     listed = bank.client.get("/api/socials/plans").json()
     assert [p["id"] for p in listed["plans"]] == [plan["id"]]

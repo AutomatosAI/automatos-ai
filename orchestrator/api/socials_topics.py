@@ -6,8 +6,9 @@ A plan's topics (``modules/socials/topics.py``):
 
 * ``GET /api/socials/plans/{plan_id}/topics``: the bank, unused topics first, each with
   ``repeat`` when the workspace's history holds a post close to it ({post_id, note}, PRD-251C
-  US-C106), and ``research_note``: why research cannot run in the workspace, or null when it
-  can (US-C101, ``services/socials_research_setup.py``).
+  US-C106), ``research_note``: why research cannot run in the workspace, or null when it
+  can (US-C101, ``services/socials_research_setup.py``), and ``research_last_run_at``: when
+  the plan's research last started (US-C207).
 * ``POST`` adds a topic; ``PUT .../topics/{topic_id}`` edits it; ``DELETE`` removes it;
   ``PUT .../topics/{topic_id}/pin`` pins it to a day (or unpins it).
 
@@ -98,6 +99,7 @@ def list_social_plan_topics(plan_id: UUID, db: Session = Depends(get_db), ctx: R
     return {
         "topics": rows, "total": len(rows), "unused": sum(1 for row in rows if not row["used_at"]),
         "research_note": socials_research_setup.research_note(db, plan.workspace_id),
+        "research_last_run_at": (plan.research or {}).get("last_run_at"),
     }
 
 

@@ -189,6 +189,8 @@ export interface SocialTopicsResponse {
   unused: number
   /** Why research cannot run in the workspace (not set up, or its playbook removed); null when it can. */
   research_note?: string | null
+  /** PRD-251C: when the plan's research last started (ISO); null before its first run. */
+  research_last_run_at?: string | null
 }
 
 export interface SocialTopicInput {

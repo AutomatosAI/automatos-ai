@@ -12,7 +12,9 @@ Pinned:
   batch or added after it; across the clock change; the next batch; the records kept;
 * the tick, on the maker harness: a week made across ticks within the per-tick cap and
   announced once; a slot no channel posts skipped and recorded, the batch still announced;
-  a row added after its batch made at the next tick; a daily plan unchanged.
+  a row added after its batch made at the next tick; a daily plan unchanged;
+* US-C207: a weekly plan researches the day before its batch day, follows it when it moves,
+  and keeps a day the owner chose; the bank shows when research last ran.
 """
 from __future__ import annotations
 
@@ -230,3 +232,34 @@ def test_a_daily_plan_is_unchanged(week):
     made = _posts(week, plan)
     assert [post.slot_key for post in made] == ["r1|2026-10-14|09:00"] and made[0].batch_key is None
     assert week.reviews == [] and [event for event, _title in week.told.plan if event == "social_plan_ready"] == ["social_plan_ready"]
+
+
+# ── US-C207: research the day before the batch ─────────────────────────────
+
+
+def _put(api, plan, **fields):
+    resp = api.client.put(f"/api/socials/plans/{plan['id']}", json=fields)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_a_weekly_plan_researches_the_day_before_its_batch_unless_the_owner_chose(bank):  # noqa: F811
+    plan = _create_plan(bank)
+    assert plan["research"]["day"] == "sat"
+    assert _create_plan(bank, name="Midweek", make={"rhythm": "weekly", "batch_day": "wed"})["research"]["day"] == "tue"
+    assert _create_plan(bank, name="Chosen", research={"day": "thu"})["research"]["day"] == "thu"
+    assert _create_plan(bank, name="Daily", make={"rhythm": "daily"})["research"]["day"] == "mon"
+    assert _put(bank, plan, make={"batch_day": "fri"})["research"]["day"] == "thu"  # it follows the batch day
+    # The Plan page sends research's day as shown with every save: unchanged, it still follows.
+    assert _put(bank, plan, make={"batch_day": "mon"}, research={"day": "thu"})["research"]["day"] == "sun"
+    assert _put(bank, plan, research={"day": "wed"})["research"]["day"] == "wed"  # the owner's choice
+    assert _put(bank, plan, make={"batch_day": "tue"})["research"]["day"] == "wed"  # kept
+
+
+def test_the_bank_shows_when_research_last_ran(bank):  # noqa: F811
+    plan = _create_plan(bank)
+    assert bank.client.get(f"/api/socials/plans/{plan['id']}/topics").json()["research_last_run_at"] is None
+    row = bank.session.get(SocialCampaign, uuid.UUID(plan["id"]))
+    row.research = {**row.research, "last_run_at": "2026-10-17T06:00:00+00:00", "last_run_id": "research-1"}
+    bank.session.commit()
+    assert bank.client.get(f"/api/socials/plans/{plan['id']}/topics").json()["research_last_run_at"] == "2026-10-17T06:00:00+00:00"

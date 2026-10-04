@@ -17,7 +17,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
-const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null }))
+const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null, lastRun: null as string | null }))
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/components/workspace-provider', () => ({
@@ -36,7 +36,7 @@ vi.mock('@/lib/api-client', () => {
       { toolkit: 'linkedin', label: 'LinkedIn', post_kinds: [kind('image')], verified: true, setup_note: null, copy_limits: { text: 3000 } },
     ]),
     listSocialTemplates: vi.fn(async () => []),
-    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length, research_note: state.researchNote })),
+    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length, research_note: state.researchNote, research_last_run_at: state.lastRun })),
     addSocialPlanTopic: vi.fn(async (_id: string, input: any) => ({ ...input, id: 't-new' })),
     researchSocialPlan: vi.fn(async () => ({ execution_id: 'research-1' })),
     deleteSocialPlan: vi.fn(async () => undefined),
@@ -76,6 +76,7 @@ beforeEach(() => {
   state.plans = [PLAN]
   state.topics = []
   state.researchNote = null
+  state.lastRun = null
   Object.values(api).forEach((fn) => fn.mockClear())
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
@@ -166,6 +167,13 @@ describe('a saved plan', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
     await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
     expect(api.updateSocialPlan.mock.calls[0][1].research).toEqual({ enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 })
+  })
+
+  it('its bank says when research last ran (PRD-251C US-C207)', async () => {
+    state.lastRun = '2026-10-17T06:00:00Z'
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    expect(await screen.findByText(/Last researched/)).toBeInTheDocument()
   })
 
   it('its bank says when research cannot run, in the server\'s words', async () => {

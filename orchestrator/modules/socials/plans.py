@@ -248,6 +248,11 @@ def validate_make(value: Any) -> Dict[str, Any]:
     return {**settings, **{key: raw[key] for key in MAKE_RECORD_KEYS if raw.get(key)}}
 
 
+def day_before(weekday: str) -> str:
+    """The weekday before ``weekday``: a weekly plan researches the day before its batch (C4)."""
+    return WEEKDAYS[(WEEKDAYS.index(weekday) - 1) % len(WEEKDAYS)]
+
+
 def validate_research(value: Any) -> Dict[str, Any]:
     """The research settings, checked, and the last run's record when the value carries one."""
     raw = {**DEFAULT_RESEARCH, **(value if isinstance(value, Mapping) else {})}
