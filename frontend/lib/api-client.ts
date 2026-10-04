@@ -546,6 +546,8 @@ export interface SocialPost {
   preview?: SocialPostPreview | null
   /** PRD-251B Wave 2: the plan slot the post was made for, and its music (null: the template's). */
   slot_key?: string | null
+  /** PRD-251C: the batch a weekly or monthly plan made it in ("2026-W43", "2026-11"). */
+  batch_key?: string | null
   music?: SocialPostMusic
   created_at: string
   updated_at: string
@@ -878,8 +880,9 @@ export interface SocialCampaign {
   updated_at: string
   /** GET /api/socials/campaigns: how many posts the campaign holds. */
   post_count?: number
-  /** PRD-251B (B6): a plan is a campaign of kind "plan". */
+  /** PRD-251B (B6): a plan is a campaign of kind "plan"; PRD-251C: its rhythm and batch day. */
   kind?: 'campaign' | 'plan'
+  make?: { rhythm?: 'daily' | 'weekly' | 'monthly'; batch_day?: string }
 }
 
 /** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
@@ -901,7 +904,7 @@ export interface SocialSeriesShownPost {
 }
 
 /** Why a series approval left a post unapproved. */
-export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown'
+export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown' | 'not_in_batch'
 
 export interface SocialSeriesLeftPost {
   post_id: string
@@ -3219,6 +3222,13 @@ class ApiClient {
   /** Approve the posts the approver was shown as one series (D6): each with the content_hash
    * on screen. The answer reports the posts approved and each post left, with why; 409 when
    * the workspace's series approval is off or the campaign approves post by post. */
+  /** PRD-251C US-C205: approve a plan's week (or month) in one sitting, each post by the hash shown. */
+  async approveSocialPlanBatch(planId: string, batchKey: string, posts: SocialSeriesShownPost[]): Promise<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }> {
+    return this.request<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }>(
+      `/api/socials/plans/${planId}/batches/${encodeURIComponent(batchKey)}/approve`, { method: 'POST', body: JSON.stringify({ posts }) },
+    )
+  }
+
   async approveSocialCampaignSeries(
     campaignId: string,
     posts: SocialSeriesShownPost[],

@@ -11,6 +11,9 @@
  *   its hash (the series path for one series campaign) and reports one that changed.
  * * F256: a post with no channel publishes nothing: its Approve is disabled and says why, and
  *   Approve all shown leaves it out.
+ * * PRD-251C US-C204: a plan's week is one section, in slot order, first; Approve the week
+ *   approves its posts by their hashes (series switch off) and names one that changed; a
+ *   viewer sees the week without the button.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -32,6 +35,7 @@ vi.mock('@/lib/api-client', () => {
     retakeSocialPost: vi.fn(async (id: string) => ({ id })),
     rejectSocialPost: vi.fn(),
     approveSocialCampaignSeries: vi.fn(),
+    approveSocialPlanBatch: vi.fn(),
     listSocialPosts: vi.fn(async () => ({ posts: [], total: 0 })),
   }
   return { apiClient, default: apiClient }
@@ -190,3 +194,35 @@ describe('the Queue', () => {
     expect(api.approveSocialPost).not.toHaveBeenCalled()
   })
 })
+
+describe('PRD-251C: the week's review', () => {
+  const PLAN = { id: 'p1', name: 'Countdown', kind: 'plan', approval_mode: 'per_post', make: { rhythm: 'weekly', batch_day: 'sun' } }
+  const week = (id: string, slot: string) => waiting(id, slot, { campaign_id: 'p1', batch_key: '2026-W43' })
+  const WEEK = [week('w2', '2026-10-20T09:00:00Z'), week('w1', '2026-10-19T09:00:00Z')]
+  const CHANGED = 'the post changed after you were shown it: review the current version'
+
+  it('shows a plan's week first, in slot order, and approves it in one sitting', async () => {
+    api.listSocialCampaigns.mockResolvedValueOnce({ campaigns: [PLAN] })
+    api.approveSocialPlanBatch.mockResolvedValueOnce({ approved: [{ id: 'w1' }], left: [{ post_id: 'w2', title: 'Post w2', reason: 'changed', message: CHANGED }] })
+    renderQueue([LATER, ...WEEK])
+    const section = await screen.findByRole('region', { name: 'Week of 19 Oct · Countdown · 2 posts' })
+    expect(within(section).getAllByText(/^Post w/).map((node) => node.textContent)).toEqual(['Post w1', 'Post w2'])
+    const regions = screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))
+    expect(regions.indexOf('Week of 19 Oct · Countdown · 2 posts')).toBeLessThan(regions.indexOf('Fri 16 Oct'))
+    fireEvent.click(within(section).getByRole('button', { name: 'Approve the week' }))
+    await waitFor(() => expect(api.approveSocialPlanBatch).toHaveBeenCalledWith('p1', '2026-W43', [
+      { post_id: 'w1', content_hash: 'hash-w1' }, { post_id: 'w2', content_hash: 'hash-w2' },
+    ]))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`Not approved: Post w2, because ${CHANGED}.`))
+    expect(toast.success).toHaveBeenCalledWith('Approved 1 post.')
+  })
+
+  it('a viewer sees the week without Approve the week', async () => {
+    state.role = 'viewer'
+    api.listSocialCampaigns.mockResolvedValueOnce({ campaigns: [PLAN] })
+    renderQueue(WEEK)
+    const section = await screen.findByRole('region', { name: 'Week of 19 Oct · Countdown · 2 posts' })
+    expect(within(section).queryByRole('button', { name: 'Approve the week' })).toBeNull()
+  })
+})
+
