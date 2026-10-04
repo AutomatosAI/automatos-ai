@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict
 
 from services import brand_rules as br
 
