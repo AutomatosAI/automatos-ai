@@ -9,11 +9,11 @@ import json
 import logging
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Set
+
+from modules.tools.discovery.actions_data_routes import IMPACT_RELATIONS  # F312 (9)
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-
-from modules.tools.discovery.actions_data_routes import IMPACT_RELATIONS
 
 logger = logging.getLogger(__name__)
 
