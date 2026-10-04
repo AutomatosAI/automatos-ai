@@ -47,8 +47,7 @@ from modules.tools.discovery.handlers_analytics import (
     board_summary,
     board_snapshot,
 )
-from services.agents_writing import owners_passages_only, says_an_agent_wrote_it, says_who_wrote_each
-from services.past_work import or_past_work
+from services.agents_writing import or_past_work, owners_passages_only, says_an_agent_wrote_it, says_who_wrote_each
 from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
