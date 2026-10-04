@@ -101,7 +101,7 @@ function lengthsOf(row: DraftRow, templates: ReadonlyArray<SocialTemplateSummary
   return Array.from(new Set(all)).sort((a, b) => a - b)
 }
 
-function VideoChoices({ row, index, videoTemplates, onChange }: Omit<RowProps, 'channels' | 'onRemove'>) {
+function VideoChoices({ row, index, videoTemplates, onChange }: Pick<RowProps, 'row' | 'index' | 'videoTemplates' | 'onChange'>) {
   const lengths = lengthsOf(row, videoTemplates)
   return (
     <>
