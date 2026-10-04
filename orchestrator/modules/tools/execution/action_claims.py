@@ -223,6 +223,12 @@ _KINDS: Tuple[Tuple["re.Pattern[str]", Tuple[str, ...]], ...] = (
     (re.compile(r"\b(?:documents?|files?|guides?|csv|spreadsheets?|reports?|deliverables?)\b", re.I),
      ("document", "file", "knowledge", "report", "deliverable", "read", "grep")),
 )
+# F308 (night 9): "Each step will pause for your approval" over a mission made or approved
+# this turn whose answer said its steps run unchecked (#0033 ran through in a minute).
+_STEPS_WAIT = re.compile(
+    r"\b(?:each|every)\s+step\b[^.!?\n]{0,40}\b(?:will|would|is going to|is set to|are set to)\s+(?:\w+\s+){0,2}?"
+    r"(?:pause|wait|stop)\b|\b(?:pause|wait|stop)s?\s+(?:after|before|at|for)\s+(?:each|every)\s+step\b", re.I)
+STEPS_WAIT_CLAIM = "set to wait for the owner's check of each step"
 # A sentence that places the action in the past is a reference, not a claim.
 _BACK_REFERENCE = re.compile(r"\b(?:earlier|previously|yesterday|last (?:time|turn|week|night)|before)\b", re.I)
 # "Once I've installed it, …": the claim is the condition of something later.
@@ -262,6 +268,18 @@ def _first_unbacked(text: str, families: Sequence[_Family], succeeded: List[str]
     return None
 
 
+def _steps_wait_unchecked(text: str, succeeded: List[str]) -> Optional[str]:
+    """F308: the reply says each step waits for the owner, and a mission call this turn
+    said its steps run unchecked (with none switching the check on since)."""
+    from .call_effects import STEPS_CHECKED, STEPS_UNCHECKED
+
+    if STEPS_UNCHECKED not in succeeded or STEPS_CHECKED in succeeded:
+        return None
+    said = any(_STEPS_WAIT.search(sentence) and not _ASKING.search(sentence)
+               for sentence in _SENTENCE.findall(_own_words(text)))
+    return STEPS_WAIT_CLAIM if said else None
+
+
 def _own_words(text: str) -> str:
     """``text`` without what it quotes: "> " lines and fenced blocks, where a
     draft written for the owner speaks in its writer's voice."""
@@ -292,7 +310,7 @@ def claimed_action_not_done(text: str, done: Optional[set] = None, *,
     Night 6: "I'll get that installed for you right away" after an empty copy was
     created; "I've checked the board" with no board read."""
     succeeded = [a.lower() for a in (done or ())]
-    found = _first_unbacked(text or "", _ACTION_CLAIMS, succeeded)
+    found = _first_unbacked(text or "", _ACTION_CLAIMS, succeeded) or _steps_wait_unchecked(text or "", succeeded)
     if found or not (_auto_speaks() if promises is None else promises):
         return found
     return _first_unbacked(_own_words(text or ""), _PASSIVES + _PROMISES, succeeded)

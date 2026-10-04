@@ -188,7 +188,7 @@ class ToolExecutionTracker:
         (``success: False``, Composio's ``successful: False``) is not recorded.
         F261 (night 8): a call whose name does not say what it did is recorded
         with what it did too (``call_effects``: a card moved to done approves it)."""
-        from .call_effects import call_effects, call_params
+        from .call_effects import call_effects, call_params, result_effects
 
         action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
@@ -197,6 +197,7 @@ class ToolExecutionTracker:
             return
         self.succeeded.add(action)
         self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
+        self.succeeded.update(result_effects(result))  # F308: whether a mission's steps wait for the owner
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

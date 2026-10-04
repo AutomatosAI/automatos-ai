@@ -17,6 +17,10 @@ setting the plan reads, so #0410 and #0454 ran start to finish unseen.
   reads, and the answer says so.
 - Edits wrapped as {"changes": {...}} or {"updates": {...}} are unwrapped, and an
   agent named under assigned_agent_name, agent_name or agent is pinned by name.
+
+Night 9 (F308): #0027's step 2 took "85 and 95 words" and its card #1876 kept "100-150":
+an edit now reaches the step's card too, and a started mission's steps that haven't
+started (``step_brief_edits``).
 """
 from __future__ import annotations
 
@@ -26,6 +30,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+
+from modules.tools.discovery.step_brief_edits import edits_reach_the_steps
 
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
@@ -68,9 +74,11 @@ def reads_the_plan_edits(handler: Handler) -> Handler:
             return {"success": False, "error": CHECKS_TOO_LATE}
         note = _check_each_step(db, run) if checks else None
         if not named and note:
-            return {"success": True, "mission_id": str(run.id), "state": run.state, "message": note}
-        out = await handler(db, workspace_id, {**params, "task_edits": named} if named else params)
-        return {**out, "check_note": note} if note and isinstance(out, dict) else out
+            return {"success": True, "mission_id": str(run.id), "state": run.state, "message": note,
+                    "checks_each_step": True}
+        out = await edits_reach_the_steps(handler, db, workspace_id,  # F308: the step and its card, or why not
+                                          {**params, "task_edits": named} if named else params, run, named, steps)
+        return {**out, "check_note": note, "checks_each_step": True} if note and isinstance(out, dict) else out
     return wrapped
 
 

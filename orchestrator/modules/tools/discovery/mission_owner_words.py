@@ -13,12 +13,20 @@
   Manager drafts the email…". Each agent named that way is pinned to its work.
 
 The owner's words are their latest messages in the chat the call came from
-(``_origin_chat_id``, set by the platform executor, never by the model).
+(``_origin_chat_id``, set by the platform executor, never by the model; else the
+turn's own chat, from its usage scope ``chat:<id>``).
+
+Night 9 (F308): "Please set up a mission, and check each step with me before moving
+on …" got Auto's "Each step will pause for your approval before proceeding." and a
+question; the owner's "Yes — that's what I asked for. Go ahead." made #0033, read
+alone, with no check, and it ran start to finish in a minute. A go-ahead takes the
+check from the message before it, or from Auto's own last reply that promised it.
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -30,6 +38,15 @@ ASKS_FOR_CHECKS = re.compile(
     r"|\bdon'?t\s+(?:mark|move on|go on|continue|start)[^.!?\n]{0,60}\buntil\b"
     r"|\bstep[- ]by[- ]step\b", re.I)
 LETS_IT_RUN = re.compile(r"\blet it run\b|\bno need to check\b|\bdon'?t (?:check|stop|wait)\b", re.I)
+# F308 (night 9): the owner saying go ahead to what they, or Auto, said just before.
+GOES_AHEAD = re.compile(r"\b(?:yes|yep|yeah|sure|ok(?:ay)?|go ahead|go on|do it|please do|do that|launch it|"
+                        r"start it|run it|approve\w*)\b|\bthat'?s (?:what i asked|it|right)\b", re.I)
+# Auto's reply saying the steps won't wait ("each step runs without stopping") promises no check.
+NO_PAUSE = re.compile(r"\b(?:won'?t|will not|doesn'?t|does not|don'?t|do not|not|never|no need to)\s+(?:\w+\s+){0,2}?"
+                      r"(?:paus|stop|wait|check)\w*|\bwithout (?:stopping|pausing|waiting|checking)\b"
+                      r"|\bruns? (?:straight )?through\b", re.I)
+_SENTENCES = re.compile(r"[^.!?\n]+")
+CHAT_SCOPE = "chat:"
 # A clause that gives a named agent its work: "works out", "writes", "drafts", "to work out".
 _WORK_START = re.compile(r"^\W*(?:then\s+|also\s+|first\s+)?(?:to\s+[a-z]+|[a-z]+s)\b", re.I)
 _NOT_WORK = frozenset({"is", "was", "has", "keeps", "uses", "says", "seems", "likes", "its", "this", "his"})
@@ -44,15 +61,59 @@ def owners_words(db: Session, workspace_id: Any, params: Dict[str, Any]) -> List
     """The owner's latest messages in the chat the call came from, newest first; []
     outside a chat."""
     from modules.tools.discovery.handlers_board_task_review import owner_words
+
+    return [words for words in owner_words(db, workspace_id, chat_of_the_call(params)) if words]
+
+
+def chat_of_the_call(params: Dict[str, Any]) -> Optional[UUID]:
+    """The chat a call came from: the executor's ``_origin_chat_id``, else the turn's
+    own chat (its usage scope, ``chat:<id>``); None outside a chat."""
+    from core.llm.usage_context import LANE_CHAT, current_usage_scope
     from modules.tools.discovery.handlers_watches import _origin_chat_id
 
-    return [words for words in owner_words(db, workspace_id, _origin_chat_id(params or {})) if words]
+    origin = _origin_chat_id(params or {})
+    if origin is not None:
+        return origin
+    scope = current_usage_scope()
+    where = str(scope.get("execution_id") or "")
+    if scope.get("request_type") != LANE_CHAT or not where.startswith(CHAT_SCOPE):
+        return None
+    try:
+        return UUID(where[len(CHAT_SCOPE):])
+    except ValueError:
+        return None
 
 
-def asks_for_checks(said: Sequence[str]) -> bool:
-    """Whether the owner's latest words ask for every step to wait for their check."""
+def autos_last_words(db: Session, workspace_id: Any, params: Dict[str, Any]) -> str:
+    """Auto's last reply in the chat the call came from, or ""."""
+    from modules.tools.discovery.owner_turn import OwnerTurn, autos_last_reply
+
+    chat_id = chat_of_the_call(params)
+    if chat_id is None:
+        return ""
+    return autos_last_reply(db, workspace_id, OwnerTurn(latest="", earlier="", cards=(), chat_id=chat_id))
+
+
+def asks_for_checks(said: Sequence[str], autos_reply: str = "") -> bool:
+    """Whether the owner's latest words ask for every step to wait for their check:
+    themselves, or as a go-ahead to the message before or to Auto's reply that
+    promised it (F308)."""
     latest = said[0] if said else ""
-    return bool(ASKS_FOR_CHECKS.search(latest)) and not LETS_IT_RUN.search(latest)
+    if LETS_IT_RUN.search(latest):
+        return False
+    if ASKS_FOR_CHECKS.search(latest):
+        return True
+    if not GOES_AHEAD.search(latest):
+        return False
+    earlier = said[1] if len(said) > 1 else ""
+    return bool(ASKS_FOR_CHECKS.search(earlier) and not LETS_IT_RUN.search(earlier)) or promises_checks(autos_reply)
+
+
+def promises_checks(reply: str) -> bool:
+    """Whether a reply of Auto's says the steps will wait for the owner: a sentence
+    about each step pausing for them that doesn't say they won't."""
+    return any(ASKS_FOR_CHECKS.search(sentence) and not NO_PAUSE.search(sentence)
+               for sentence in _SENTENCES.findall(reply or ""))
 
 
 def staffing_from_words(db: Session, workspace_id: Any, said: Sequence[str]) -> List[Dict[str, str]]:
@@ -160,5 +221,5 @@ def chosen_staffing(db: Session, workspace_id: Any, params: Dict[str, Any],
     return from_steps or staffing_from_words(db, workspace_id, said) or None
 
 
-__all__ = ["asks_for_checks", "chosen_staffing", "owners_words", "staffing_from_words",
-           "staffing_names_the_work"]
+__all__ = ["asks_for_checks", "autos_last_words", "chat_of_the_call", "chosen_staffing", "owners_words",
+           "promises_checks", "staffing_from_words", "staffing_names_the_work"]

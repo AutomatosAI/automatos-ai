@@ -354,7 +354,10 @@ def test_a_widget_turn_cannot_change_a_mission(monkeypatch, handler, decision, e
     monkeypatch.setattr("core.services.approval_policy.load_approval_policy",
                         lambda db, ws: {"policy": "auto_below_budget", "approval_dollar_ceiling": 5.0,
                                         "auto_proceed_after_seconds": None})
-    run = NS(id=uuid4(), state="paused", stop_reason="budget_exhausted", goal="g",
+    # F308 (night 9): a started mission's plan is never rejected (that cancelled #0035); its
+    # reject sends a step back. The plan's reject is on a mission still awaiting approval.
+    state = "awaiting_approval" if handler == "reject_mission" else "paused"
+    run = NS(id=uuid4(), state=state, stop_reason="budget_exhausted", goal="g",
              token_budget_estimate=175_000, tokens_used=429_423, config={})
 
     def decide(surface):

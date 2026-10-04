@@ -12,7 +12,9 @@ A mission's id is a UUID, so anything else in ``mission_id`` is a card's number
 - a mission step's card (#0188.3, 188.3) is its mission for reading it, pausing,
   resuming or replanning it, or editing its plan. Approving, rejecting or cancelling
   a step is refused: a step's work is approved or sent back on its own card, and a
-  step stops with its mission. Reading a mission by a step names the step;
+  step stops with its mission. Reading a mission by a step names the step. Night 9
+  (F308): once the mission has started, approving or rejecting a step is that step's
+  Approve or Reject, through its mission (mission_step_verdicts);
 - any other card is no mission. Reading it gives the card itself; anything else is
   refused, naming the card and the call that does what was asked.
 
@@ -55,6 +57,8 @@ ON_ITS_CARD = {
     "platform_cancel_mission": "Cancel it: platform_update_task_status with task_id \"{number}\" and status \"cancelled\".",
 }
 A_STEP_STOPS_WITH_ITS_MISSION = "A step stops with its mission."
+# F308 (night 9): once its mission has started, a step is approved or sent back through it.
+STEP_VERDICTS = ("platform_approve_mission", "platform_reject_mission")
 OTHERWISE = ("Act on it with the ticket tools: platform_update_task_status (run it again with status "
              "\"in_progress\", or cancel it) or platform_update_task (change its brief).")
 NOT_IN_REVIEW = " It is {status}, not in Review, so it has nothing to approve yet."
@@ -74,6 +78,9 @@ def takes_card_numbers(does: str) -> Callable[[Handler], Handler]:
             if refusal:
                 return {"success": False, "error": refusal}
             run_id = _mission_of(db, card)
+            step = _decided_on_its_mission(db, card, run_id, handler, does)
+            if step is not None:  # F308 (night 9): approving or sending back a started mission's step
+                return await handler(db, workspace_id, {**params, "mission_id": str(run_id), "step": step})
             if run_id is not None and (card.source_type == MISSION_CARD or does != DECIDES):
                 out = await handler(db, workspace_id, {**params, "mission_id": str(run_id)})
                 return _naming_the_step(db, out, card) if card.source_type == STEP_CARD else out
@@ -82,6 +89,18 @@ def takes_card_numbers(does: str) -> Callable[[Handler], Handler]:
             return {"success": False, "error": _refusal(db, card, handler, run_id)}
         return wrapped
     return decorate
+
+
+def _decided_on_its_mission(db: Session, card: Any, run_id: Optional[UUID], handler: Handler,
+                            does: str) -> Optional[str]:
+    """F308 (night 9): the step's number when approve or reject names a step of a mission
+    that has started; its mission decides it as the board's Approve or Reject on the
+    step's card would (mission_step_verdicts). None otherwise."""
+    if does != DECIDES or card.source_type != STEP_CARD or run_id is None or _action_of(handler) not in STEP_VERDICTS:
+        return None
+    from modules.tools.discovery.mission_step_verdicts import step_of_a_started_mission
+
+    return step_of_a_started_mission(db, card, run_id)
 
 
 def _is_uuid(value: Any) -> bool:

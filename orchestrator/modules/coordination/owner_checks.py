@@ -40,6 +40,14 @@ SAYS_CHECK_EACH_STEP = (
     "requires_review", "review_each_step", "approve_each_step", "check_every_step", "pause_after_each_step",
     "step_approval", "step_by_step",
 )
+# F308 (night 9): #0033, asked for twice, was made with {"auto_approve_steps": false}, the
+# same wish said the other way round, and ran start to finish in a minute. Each of these
+# keys, when false, means it.
+SAYS_STEPS_RUN_ON = (
+    "auto_approve_steps", "auto_approve_each_step", "auto_approve_tasks", "auto_advance", "auto_continue",
+    "auto_proceed", "auto_run_steps", "skip_step_review", "skip_step_approval", "run_unattended",
+)
+FALSE_WORDS = ("false", "no", "off", "0")
 # Keys whose value names the way steps are checked (night 7: #0139, #0176; night 8: #0282).
 STEP_BY_STEP_WORDS = ("step_by_step", "each_step", "every_step", "per_step", "each_task", "human", "manual")
 SAID_STEP_BY_STEP = (("approval_mode", STEP_BY_STEP_WORDS), ("review_mode", STEP_BY_STEP_WORDS))
@@ -67,6 +75,8 @@ def checks_each_step(config: Any) -> bool:
     config = config if isinstance(config, dict) else {}
     if any(_said_yes(config.get(key)) for key in SAYS_CHECK_EACH_STEP):
         return True
+    if any(_said_no(config[key]) for key in SAYS_STEPS_RUN_ON if key in config):
+        return True
     return any(str(config.get(key) or "").strip().lower() in values for key, values in SAID_STEP_BY_STEP)
 
 
@@ -77,7 +87,7 @@ def with_step_checks(config: Any, on: Optional[bool] = None) -> dict:
     the setting has one name wherever it was written (F282)."""
     config = dict(config) if isinstance(config, dict) else {}
     wanted = checks_each_step(config) if on is None else bool(on)
-    spellings = set(SAYS_CHECK_EACH_STEP) | {key for key, _ in SAID_STEP_BY_STEP}
+    spellings = set(SAYS_CHECK_EACH_STEP) | set(SAYS_STEPS_RUN_ON) | {key for key, _ in SAID_STEP_BY_STEP}
     kept = {key: value for key, value in config.items() if key not in spellings}
     return {**kept, CHECK_EACH_STEP: True} if wanted else kept
 
@@ -86,6 +96,12 @@ def _said_yes(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return isinstance(value, (str, int)) and str(value).strip().lower() in TRUE_WORDS
+
+
+def _said_no(value: Any) -> bool:
+    if isinstance(value, bool):
+        return not value
+    return isinstance(value, (str, int)) and str(value).strip().lower() in FALSE_WORDS
 
 
 def step_card(db: Session, task: Any) -> Optional[BoardTask]:
