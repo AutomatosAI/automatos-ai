@@ -195,13 +195,13 @@ describe('the Queue', () => {
   })
 })
 
-describe('PRD-251C: the week's review', () => {
+describe("PRD-251C: the week's review", () => {
   const PLAN = { id: 'p1', name: 'Countdown', kind: 'plan', approval_mode: 'per_post', make: { rhythm: 'weekly', batch_day: 'sun' } }
   const week = (id: string, slot: string) => waiting(id, slot, { campaign_id: 'p1', batch_key: '2026-W43' })
   const WEEK = [week('w2', '2026-10-20T09:00:00Z'), week('w1', '2026-10-19T09:00:00Z')]
   const CHANGED = 'the post changed after you were shown it: review the current version'
 
-  it('shows a plan's week first, in slot order, and approves it in one sitting', async () => {
+  it("shows a plan's week first, in slot order, and approves it in one sitting", async () => {
     api.listSocialCampaigns.mockResolvedValueOnce({ campaigns: [PLAN] })
     api.approveSocialPlanBatch.mockResolvedValueOnce({ approved: [{ id: 'w1' }], left: [{ post_id: 'w2', title: 'Post w2', reason: 'changed', message: CHANGED }] })
     renderQueue([LATER, ...WEEK])
