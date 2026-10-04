@@ -26,6 +26,7 @@ from config import Config
 from core.llm import create_llm_manager
 from core.utils.exception_telemetry import record_error
 from modules.coordination.deterministic_checks import DeterministicChecker, DeterministicResult
+from modules.coordination.what_was_asked import checked_against_its_brief
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,7 @@ class VerificationService:
             )
         return len(keys_to_remove)
 
+    @checked_against_its_brief  # F283 (night 8): its checks know what the step's brief asked for
     async def verify_task(
         self,
         task_title: str,

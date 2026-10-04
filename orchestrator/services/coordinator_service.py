@@ -53,7 +53,11 @@ from core.models.orchestration_enums import (
 from modules.coordination import progress_ledger
 from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
-from modules.coordination.mission_retry import retries_a_failed_mission
+from modules.coordination.mission_ends import says_what_it_completed
+from modules.coordination.mission_retry import replaces_what_the_failure_skipped, retries_a_failed_mission
+from modules.coordination.step_inputs import (  # F286 (night 8): a summary's inputs
+    a_summary_keeps_its_approved_inputs, with_the_missions_earlier_steps,
+)
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
@@ -2123,6 +2127,7 @@ class CoordinatorService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    @with_the_missions_earlier_steps  # F286 (night 8): a summary step gets its mission's approved steps
     def _collect_upstream_outputs(
         db: Session,
         task: OrchestrationTask,
@@ -2292,6 +2297,7 @@ class CoordinatorService:
 
         return criteria
 
+    @a_summary_keeps_its_approved_inputs  # F286 (night 8): a summary's redo gets the approved steps again
     async def _prepare_task(
         self,
         db: Session,
@@ -3858,6 +3864,7 @@ class CoordinatorService:
     # Lifecycle: replan_mission (PRD-82B US-005)
     # ------------------------------------------------------------------
 
+    @replaces_what_the_failure_skipped  # F283 (night 8): what the failure skipped is replaced too
     async def replan_mission(
         self,
         db: Session,
@@ -4660,6 +4667,7 @@ class CoordinatorService:
 
         return archived_count
 
+    @says_what_it_completed  # F268 (night 8): the completed mission says what ran and what was replaced
     async def _complete_verified_run(
         self,
         db: Session,

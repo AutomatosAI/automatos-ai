@@ -45,8 +45,9 @@ from modules.coordination.verification import (
     VerificationResult,
     VerificationService,
 )
-from modules.coordination.unfinished_work import fail_unfinished, placeholder_failures
-from modules.coordination.mission_ends import counts_only_its_live_steps
+from modules.coordination.unfinished_work import redo_or_fail_unfinished, unfinished_failures
+from modules.coordination.mission_ends import counts_only_its_live_steps, fails_when_nothing_can_move
+from modules.coordination.what_was_asked import checked_against_its_goal
 from services.orchestration_board_bridge import sync_board_status
 from services.orchestration_state import (
     ConflictError,
@@ -279,6 +280,7 @@ class MissionReconciler:
     # -----------------------------------------------------------------------
 
     @staticmethod
+    @checked_against_its_goal  # F283 (night 8): a step's check knows what its mission's goal asked for
     async def _verify_completed_tasks(
         db: Session,
         run: OrchestrationRun,
@@ -509,8 +511,8 @@ class MissionReconciler:
           with the verifier's feedback (via _apply_verdict_fail) so the agent
           revises. Empty output (the judge's hard FAIL) is the highest-value
           catch — it now gets one revision instead of flowing into synthesis.
-        - FAIL at the requeue cap because placeholders are still in the output →
-          FAILED, never VERIFIED (F248); returns True, as it was not verified.
+        - FAIL at the cap with the work unfinished (F248 slots, F286 no work) → its
+          other attempts, then FAILED, never VERIFIED (F283); returns True.
         - FAIL at the requeue cap, PARTIAL, or PASS → VERIFIED. A non-PASS
           verdict has its feedback annotated in output_metadata for downstream
           consumers (advisory — the retreat deliberately kept for PARTIAL and
@@ -520,9 +522,9 @@ class MissionReconciler:
             db, task, result
         ):
             return True
-        unfinished = placeholder_failures(result) if result.verdict == VERDICT_FAIL else []
-        if unfinished:      # F248: slots still in after its revision fail; never "verified"
-            fail_unfinished(db, task, unfinished)
+        unfinished = unfinished_failures(result) if result.verdict == VERDICT_FAIL else []
+        if unfinished:      # F248/F283/F286: slots, or no work, still there: its attempts, then it fails
+            redo_or_fail_unfinished(db, task, result, unfinished)
             return True
 
         if result.verdict != VERDICT_PASS:
@@ -951,6 +953,7 @@ class MissionReconciler:
         return ReconcileResult(**result_kwargs)
 
     @staticmethod
+    @fails_when_nothing_can_move  # F283 (night 8): a failed step fails its mission once nothing else can move
     def _check_fatal_failure(
         db: Session,
         run: OrchestrationRun,
