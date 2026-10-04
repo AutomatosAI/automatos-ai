@@ -31,7 +31,7 @@ if str(_ORCH) not in sys.path:
 
 import api.socials_delete as delete_api  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
-from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
+from core.models.socials import SocialPost, SocialPostTarget, SocialTopic  # noqa: E402
 from modules.socials import plans  # noqa: E402
 from tests.test_prd251_api import WS_A, _create, _ctx  # noqa: E402
 
@@ -55,7 +55,13 @@ def _exists(api, post_id):
 
 
 @pytest.fixture
-def cancelled(monkeypatch):
+def content_bank(api):
+    """The harness with the content bank's table: a deleted post frees the topic it used."""
+    SocialPost.metadata.create_all(api.session.get_bind(), tables=[SocialTopic.__table__])
+
+
+@pytest.fixture
+def cancelled(monkeypatch, content_bank):
     seen = []
     monkeypatch.setattr(delete_api.schedule_jobs, "cancel_job", lambda post_id: seen.append(str(post_id)))
     return seen
