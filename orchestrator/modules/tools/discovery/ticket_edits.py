@@ -98,9 +98,9 @@ def briefs_like_the_board(handler: Handler) -> Handler:
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from modules.tools.discovery.new_card_checks import without_status_orders
-        from modules.tools.discovery.ticket_edit_moves import edited_then_moved, moves_the_card, with_its_note
+        from modules.tools.discovery.ticket_edit_moves import edited_then_moved, moves_the_card
 
-        params = with_its_note(params or {})
+        params = params or {}
         if moves_the_card(params) and not params.get(SEND_BACK):   # F309 (9): a status here is the card's move
             return await edited_then_moved(wrapped, db, workspace_id, params)
         if params.get(SEND_BACK):

@@ -344,17 +344,8 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     ))
 
 
-# F241 (night 7b): "Update #0199 with that brief and send it back" came as
-# platform_update_task {"status": "pending", "brief": ...}, and was refused.
-_UPDATE_TASK_MISPLACED = {
-    "status": ("this action changes a ticket's details, not its status. To send the ticket back to its agent "
-               "with the owner's words, use send_back: true with their words in note; to give it a new brief, "
-               "send description. Any other move is platform_update_task_status's."),
-}
-
-
 def _update_task_parameters() -> dict:
-    """platform_update_task's parameters: the fields it edits, a note, and send_back (F241 night 7b)."""
+    """platform_update_task's parameters: the fields it edits, a note, a status (F309) and send_back (F241 night 7b)."""
     return {
         "type": "object",
         "properties": {
@@ -383,6 +374,17 @@ def _update_task_parameters() -> dict:
                 "description": ("A remark to add to the ticket, in the owner's own words. With send_back, the "
                                 "owner's words that the redo fixes."),
             },
+            # F309 (night 9): "approve card 1866 with this note" came as {notes, status: "done"}, was
+            # refused here, and became a plain note and a bare move: the approval's note was lost.
+            "status": {
+                "type": "string",
+                "description": (
+                    "Moves the card after any other edit, exactly as platform_update_task_status does, with note "
+                    "kept as that move keeps it: 'done' approves it and note is the owner's approval note "
+                    "('approve #0019 with this note: …'). Never with a new description on a card already worked "
+                    "on: the Re-brief sends it back itself."
+                ),
+            },
             "send_back": {
                 "type": "boolean",
                 "description": (
@@ -403,14 +405,13 @@ def _register_update_task(registry: ActionRegistry) -> None:
         description=(
             "Edit a board task's details — title, description, priority, tags, "
             "review_mode — or add a note to it without rejecting it. Use this to "
-            "correct or refine a ticket. To CHANGE ITS STATUS use "
-            "platform_update_task_status instead; this action moves a card only as the "
-            "board does: send_back is the board's Reject (the owner's words in note, the "
-            "brief kept), and a new description on a card already worked on is its Re-brief."
+            "correct or refine a ticket. It moves a card only as the board does: status "
+            "moves it as platform_update_task_status does, its note kept with the move; "
+            "send_back is the board's Reject (the owner's words in note, the brief kept); "
+            "and a new description on a card already worked on is its Re-brief."
         ),
         category="tasks",
         parameters=_update_task_parameters(),
-        misplaced=_UPDATE_TASK_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "edit"],

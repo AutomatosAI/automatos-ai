@@ -2,10 +2,10 @@
 
 #1866, iteration 1: "Please approve card 1866 with this note: Good, this is the figure
 I'll use. Ignore the June review from now on." Auto's first call was platform_update_task
-{task_id: 1866, notes: "…", status: "done"}; the edit tool took no status and no
-``notes``, and answered "Nothing to change". Auto split it into a plain note and a bare
-move to Done, and the approval's note ("Approved: …") was never written. #1879 in
-iteration 2 kept it: one call, platform_update_task_status {status: "done", note}.
+{task_id: 1866, notes: "…", status: "done"}; the edit tool took no status, and the call
+was refused before it ran. Auto split it into a plain note and a bare move to Done, and
+the approval's note ("Approved: …") was never written. #1879 in iteration 2 kept it: one
+call, platform_update_task_status {status: "done", note}.
 """
 from __future__ import annotations
 
@@ -50,8 +50,16 @@ def _in_review(shop):
 
 
 def _edit(shop, **params):
+    """platform_update_task as Auto's call reaches it: the executor's aliases and its
+    check of the params the action takes (unified_executor), then the tool."""
+    from modules.tools.discovery import get_action_registry
     from modules.tools.discovery.handlers_board_tasks import update_board_task
+    from modules.tools.execution.unified_executor import map_optional_aliases, undeclared_params_refusal
 
+    action = get_action_registry().get("platform_update_task")
+    params = map_optional_aliases("platform_update_task", action, params, "f309")
+    refused = undeclared_params_refusal("platform_update_task", action, params, "f309")
+    assert refused is None, refused                                           # night 9: refused here
     return asyncio.run(update_board_task(shop.db, shop.ws, params))
 
 
@@ -80,13 +88,17 @@ def test_an_edit_and_a_status_in_one_call_do_both(shop):
     assert ("you", f"Approved: {NOTE}") in _notes(task)
 
 
-def test_a_note_sent_as_notes_alone_is_still_a_note(shop):
+def test_a_new_brief_on_an_answered_card_takes_no_status(shop):
+    """A Re-brief sends the card back itself: a status beside it would undo that."""
+    from modules.tools.discovery.ticket_edit_moves import REBRIEF_MOVES_IT
+
     task = _in_review(shop)
 
-    out = _edit(shop, task_id=task.id, notes="Supplier replied.", _user_id=OWNER)
+    out = _edit(shop, task_id=task.id, description="Use the September sheet only.", status="done", _user_id=OWNER)
 
     shop.db.refresh(task)
-    assert out["success"] is True and task.status == "review" and ("you", "Supplier replied.") in _notes(task)
+    assert out["success"] is False and out["error"] == REBRIEF_MOVES_IT
+    assert (task.status, task.result) == ("review", MARGIN)
 
 
 def test_the_move_is_recorded_as_the_move_it_made():

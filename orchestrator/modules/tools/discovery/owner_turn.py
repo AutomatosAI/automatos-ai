@@ -48,10 +48,11 @@ GO_AHEAD = re.compile(r"\b(?:yes|yep|yeah|go ahead|go on|do it|please do|ok(?:ay
 # Night 9 (F309): "Card 1869 needs to go back. Correction: …" is a send-back too.
 SEND_BACK = re.compile(r"\bsend\b(?:\W+\w+){0,3}?\W+back\b|\bsent back\b|\breject\w*\b|\bredo\b|\bre-do\b"
                        r"|\btake (?:out|off)\b|\bfix\b|\bwrong\b|\bisn'?t right\b|\bnot right\b|\bshould (?:be|say|start)\b"
-                       r"|\binstead\b|\bgo(?:es|ing)? back\b|\bcorrections?\s*:", re.I)
+                       r"|\binstead\b|\bgo(?:es|ing)? back\b|\bcorrections?\s*:|\b(?:give|hand)\s+(?:it|this|that|them)\s+back\b",
+                       re.I)
 # A send-back said outright, never by "instead" alone ("Give card 1859 to the Analyst instead").
 SENDS_IT_BACK = re.compile(r"\bsend\b(?:\W+\w+){0,3}?\W+back\b|\bsent back\b|\breject\w*\b|\bgo(?:es|ing)? back\b"
-                           r"|\bcorrections?\s*:", re.I)
+                           r"|\bcorrections?\s*:|\b(?:give|hand)\s+(?:it|this|that|them)\s+back\b", re.I)
 # "Give it back" and "hand it back" send a card back; "give card 1859 to …" gives it (F309).
 GIVE = re.compile(r"\b(?:give|assign|hand)\b(?!\s+(?:it|this|that|them)\s+back\b)"
                   r"|\bput\b(?:\W+\w+){0,4}?\W+on (?:the |my )?[A-Z]", re.I)
