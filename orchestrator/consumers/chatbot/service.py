@@ -70,6 +70,8 @@ from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passi
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
+from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
+from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +130,12 @@ def unexecuted_claims_notice(
     "I've approved the mission. It's now running" — it wasn't). ``done`` is
     the actions that succeeded. None when the reply claims nothing it did not
     do. Both reply paths ask this: a turn whose first reply calls no tool never
-    enters the tool loop, and that is exactly where night 3's replayed answer was."""
+    enters the tool loop, and that is exactly where night 3's replayed answer was.
+    F314 (night 9): a claimed action is told in Auto's own plain words (``not_done``),
+    never "This reply says something was …"."""
+    from consumers.chatbot.claim_check import not_done
     from modules.tools.execution.tool_loop import (
-        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run,
-        looks_like_narrated_action, offered_tool_names,
+        UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
     )
 
     if not use_tools or not reply:
@@ -143,7 +147,7 @@ def unexecuted_claims_notice(
         return NARRATED_ACTIONS_NOTICE
     claim = claimed_action_not_done(reply, done)
     if claim:
-        return CLAIMED_ACTION_NOTICE.format(claim=claim)
+        return not_done(claim)
     return None
 
 
@@ -1570,6 +1574,8 @@ class StreamingChatService:
         yield {"_response": await task}
 
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
+    @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
+    @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
@@ -1632,6 +1638,7 @@ class StreamingChatService:
             return False
 
     @staticmethod
+    @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
         """What the answer gains after it streamed, in order: F187's correction
         (a claim its retry kept, an id that does not exist), then F196's note

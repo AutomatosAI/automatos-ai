@@ -39,6 +39,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from services.onboarding_content import not_for_a_workspace_in_use  # F314 (night 9)
+
 logger = logging.getLogger(__name__)
 
 # Ordered spine (app-level enum, NOT a Postgres enum). ``skipped`` is a terminal
@@ -101,6 +103,7 @@ def current_stage(workspace: Any) -> str:
     return get_onboarding(workspace).get("stage", INITIAL_STAGE)
 
 
+@not_for_a_workspace_in_use  # F314 (night 9): no quiz for a workspace already in use
 def is_onboarding_active(workspace: Any) -> bool:
     """THE definition of "this workspace is onboarding" — the tool router's
     onboarding prior and AutoBrain's classifier both read this one (F064).
