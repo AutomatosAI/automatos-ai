@@ -144,9 +144,28 @@ def test_a_retry_runs_the_steps_skipped_for_the_failure_too(mission):
     assert mission.cards[1].status == "inbox"                                 # its card runs again with it
 
 
-def test_a_completed_missions_card_carries_its_result(mission):
+def test_a_completed_missions_card_carries_every_approved_step(mission):
+    """F286 (night 8): #0428's card showed only its last step, the club email."""
+    import re
+
     from services.orchestration_board_bridge import sync_mission_board_status
 
+    for step, output in zip(mission.steps, ("105 kg roasted", "Shop words", "The club email, as approved")):
+        step.state, step.output = TaskState.VERIFIED.value, output
+    mission.run.state = RunState.COMPLETED.value
+    mission.db.flush()
+
+    sync_mission_board_status(mission.db, mission.run)
+    assert mission.card.status == "done"
+    assert re.fullmatch(r"### #\d{4}\.1 Work out the coffee\n\n105 kg roasted\n\n"
+                        r"### #\d{4}\.2 Draft the shop words\n\nShop words\n\n"
+                        r"### #\d{4}\.3 Draft the club email\n\nThe club email, as approved", mission.card.result)
+
+
+def test_a_mission_that_pulls_its_steps_together_carries_that_result(mission):
+    from services.orchestration_board_bridge import sync_mission_board_status
+
+    mission.steps[2].title = "Pull the coffee, the shop words and the email together"
     for step, output in zip(mission.steps, ("105 kg roasted", "Shop words", "The summary, as approved")):
         step.state, step.output = TaskState.VERIFIED.value, output
     mission.run.state = RunState.COMPLETED.value

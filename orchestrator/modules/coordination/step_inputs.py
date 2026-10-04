@@ -16,6 +16,19 @@ So:
   it keep PRD-164's budgeted digest;
 - a step whose brief or mission goal names a file in the owner's Documents is told that
   document's id, and to read it whole.
+
+F286 (night 8): #0383.3, the summary step, could not see its own mission's approved
+steps: "I cannot locate the specific approved content from cards #0383.1 and #0383.2",
+then "the task ID 0383 was not found in this workspace". It declared no steps it built
+on, so nothing reached it, and it only worked after the owner pasted both pieces into a
+reject. A step that builds on its mission's earlier steps now gets their verified
+results (``with_the_missions_earlier_steps``, around
+``CoordinatorService._collect_upstream_outputs``, and ``earlier_results_block`` in its
+prompt): a step whose title or brief asks to summarise, combine, pull together or
+compile, or one that declares no steps it builds on and comes after others. Only
+verified steps count (a step being redone, or one a re-plan replaced, is not
+verified), each under its card number, within the same limits as a synthesis step's
+inputs (8,000 characters each, 30,000 in all).
 """
 from __future__ import annotations
 
@@ -39,6 +52,21 @@ DOCUMENTS_HEADING = "## Documents this work names"
 DOCUMENTS_RULE = ("They are in the owner's Documents. Read each one whole with platform_read_document "
                   "(its document_id) before you use it: a search returns only parts of it.")
 DOCUMENTS_NAMED = 5
+EARLIER_HEADING = "## Approved results of this mission's earlier steps"
+EARLIER_RULE = ("These are the steps of this mission before yours, as they were approved. Use them where your brief "
+                "needs them, and take every figure, name and date from them exactly as they are. They are here: "
+                "don't look for them elsewhere or ask for them.")
+# The limits CoordinatorService._collect_upstream_outputs keeps on a step's inputs.
+RESULT_CHARS = 8000
+ALL_RESULTS_CHARS = 30_000
+DESCRIPTION_CHARS = 500
+TRUNCATED = "\n\n... (truncated)"
+# A brief that asks to summarise, combine, pull (put, bring) together or compile.
+_PULLS_TOGETHER = re.compile(
+    r"\b(?:summari[sz](?:e[sd]?|ing)|summary|combin(?:e[sd]?|ing)|compil(?:e[sd]?|ing)"
+    r"|(?:pull|put|bring)(?:s|ing)?\s+(?:[\w'-]+,?\s+){0,8}?together)\b",
+    re.IGNORECASE,
+)
 # A file named in a brief: a name with no spaces and a document's extension, not part of
 # a path (a path is a workspace file the step may be told to write).
 _FILE_NAME = re.compile(r"(?<![\w./-])([\w][\w.-]{0,150}\.(?:csv|tsv|xlsx|xlsm|xls|ods|pdf|docx|doc|txt|md|json))\b",
@@ -80,13 +108,107 @@ def with_its_inputs(build: Callable[..., str]) -> Callable[..., str]:
 
 
 def results_block(task: Any) -> str:
+    """The results the step builds on: whole for the mission's last step
+    (``RESULTS_KEY``), or else its mission's earlier steps' approved results (F286)."""
     context = getattr(task, "input_context", None)
     results = context.get(RESULTS_KEY) if isinstance(context, dict) else None
     if not results:
+        return earlier_results_block(task)
+    return _block(RESULTS_HEADING, RESULTS_RULE, results)
+
+
+def earlier_results_block(task: Any) -> str:
+    """F286: the verified results of the mission's earlier steps, for a step that builds
+    on them (``builds_on_earlier_steps``)."""
+    db = _session_of(task)
+    if db is None or not builds_on_earlier_steps(db, task):
         return ""
-    parts = [RESULTS_HEADING, RESULTS_RULE]
+    from services.coordinator_service import CoordinatorService
+
+    results = [r for r in CoordinatorService._collect_upstream_outputs(db, task) if r.get("output")]
+    return _block(EARLIER_HEADING, EARLIER_RULE, results) if results else ""
+
+
+def _block(heading: str, rule: str, results: List[Dict[str, Any]]) -> str:
+    parts = [heading, rule]
     parts.extend(f"### {r.get('title') or 'A step'}\n{r.get('output')}" for r in results)
     return "\n\n".join(parts)
+
+
+def asks_to_summarise(task: Any) -> bool:
+    """A step whose title or brief asks to summarise, combine, pull together or compile."""
+    text = f"{getattr(task, 'title', '') or ''}\n{getattr(task, 'description', '') or ''}"
+    return _PULLS_TOGETHER.search(text) is not None
+
+
+def builds_on_earlier_steps(db: Session, task: Any) -> bool:
+    """F286: a step that builds on its mission's earlier steps: it asks to summarise
+    them, or it declares no steps it builds on and comes after others."""
+    if asks_to_summarise(task):
+        return True
+    return not _declares_inputs(db, task) and _comes_after_others(db, task)
+
+
+def _declares_inputs(db: Session, task: Any) -> bool:
+    from core.models.orchestration import OrchestrationTaskDependency
+
+    return db.query(OrchestrationTaskDependency.id).filter(
+        OrchestrationTaskDependency.task_id == task.id).first() is not None
+
+
+def _comes_after_others(db: Session, task: Any) -> bool:
+    from core.models.orchestration import OrchestrationTask
+
+    return db.query(OrchestrationTask.id).filter(
+        OrchestrationTask.run_id == task.run_id, OrchestrationTask.sequence_number < task.sequence_number,
+    ).first() is not None
+
+
+def with_the_missions_earlier_steps(collect: Callable[..., List[Dict[str, Any]]]) -> Callable[..., List[Dict[str, Any]]]:
+    """Wrap ``CoordinatorService._collect_upstream_outputs``: a step that builds on its
+    mission's earlier steps also gets their verified results, after the results of the
+    steps it declares, within what room the limits leave (F286)."""
+    @functools.wraps(collect)
+    def wrapped(db: Session, task: Any) -> List[Dict[str, Any]]:
+        results = collect(db, task)
+        if not builds_on_earlier_steps(db, task):
+            return results
+        room = ALL_RESULTS_CHARS - sum(len(str(r.get("output") or "")) for r in results)
+        return results + earlier_results(db, task, room=room)
+    return wrapped
+
+
+def earlier_results(db: Session, task: Any, *, room: int) -> List[Dict[str, Any]]:
+    """The verified results of the mission's steps before ``task`` that it does not
+    declare, in sequence, each under its card number, within ``room`` characters
+    (``RESULT_CHARS`` each at most). A verified step is a live one: a re-plan replaces
+    only steps that had not passed."""
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask, OrchestrationTaskDependency
+    from core.models.orchestration_enums import TaskState
+    from modules.coordination.mission_ends import step_numbers
+    from services.coordinator_service import _sanitize_for_field
+
+    declared = {row[0] for row in db.query(OrchestrationTaskDependency.depends_on_task_id).filter(
+        OrchestrationTaskDependency.task_id == task.id).all()}
+    earlier = [step for step in db.query(OrchestrationTask).filter(
+        OrchestrationTask.run_id == task.run_id, OrchestrationTask.sequence_number < task.sequence_number,
+        OrchestrationTask.state == TaskState.VERIFIED.value,
+    ).order_by(OrchestrationTask.sequence_number).all() if step.id not in declared and str(step.output or "").strip()]
+    run = db.get(OrchestrationRun, task.run_id) if earlier else None
+    numbers = step_numbers(db, run, earlier) if run is not None else {}
+    results: List[Dict[str, Any]] = []
+    for step in earlier:
+        if room <= 0:
+            break
+        output = _within(_sanitize_for_field(str(step.output)), min(RESULT_CHARS, room))
+        room -= len(output)
+        title = f"{numbers[step.id]} {step.title}" if step.id in numbers else step.title
+        results.append({"title": title, "description": (step.description or "")[:DESCRIPTION_CHARS], "output": output})
+    return results
+
+
+def _within(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + TRUNCATED
 
 
 def documents_block(task: Any, goal: Optional[str]) -> str:
@@ -130,4 +252,5 @@ def _session_of(task: Any) -> Optional[Session]:
     return db if isinstance(db, Session) else None
 
 
-__all__ = ["RESULTS_KEY", "builds_on_whole_results", "documents_block", "results_block", "with_its_inputs"]
+__all__ = ["EARLIER_HEADING", "RESULTS_KEY", "asks_to_summarise", "builds_on_earlier_steps", "builds_on_whole_results",
+           "documents_block", "earlier_results", "results_block", "with_its_inputs", "with_the_missions_earlier_steps"]

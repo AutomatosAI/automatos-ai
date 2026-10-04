@@ -53,14 +53,15 @@ from core.models.orchestration_enums import (
 from modules.coordination import progress_ledger
 from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
-from modules.coordination.mission_retry import retries_a_failed_mission
+from modules.coordination.mission_ends import says_what_it_completed
+from modules.coordination.mission_retry import replaces_what_the_failure_skipped, retries_a_failed_mission
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
     PlanValidationError,
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
-from modules.coordination.step_inputs import builds_on_whole_results
+from modules.coordination.step_inputs import builds_on_whole_results, with_the_missions_earlier_steps
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
@@ -2123,6 +2124,7 @@ class CoordinatorService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    @with_the_missions_earlier_steps  # F286 (night 8): a summary step gets its mission's approved steps
     def _collect_upstream_outputs(
         db: Session,
         task: OrchestrationTask,
@@ -3858,6 +3860,7 @@ class CoordinatorService:
     # Lifecycle: replan_mission (PRD-82B US-005)
     # ------------------------------------------------------------------
 
+    @replaces_what_the_failure_skipped  # F283 (night 8): what the failure skipped is replaced too
     async def replan_mission(
         self,
         db: Session,
@@ -4660,6 +4663,7 @@ class CoordinatorService:
 
         return archived_count
 
+    @says_what_it_completed  # F268 (night 8): the completed mission says what ran and what was replaced
     async def _complete_verified_run(
         self,
         db: Session,
