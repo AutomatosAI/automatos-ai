@@ -59,6 +59,15 @@ CLAIMED_ACTION_RECOVERY_MSG = (
     "plainly that it has not been done and what you need. Never report an action "
     "as done without a tool result."
 )
+# finish_reason "length" mid tool call: the arguments' JSON was cut (moved here from
+# tool_loop.py, which is over its size limit, for F328's decorator).
+LENGTH_RECOVERY_MSG = (
+    "Your previous response was truncated (output token limit reached) "
+    "while writing tool call arguments. The JSON was incomplete and could "
+    "not be parsed. Please retry with SHORTER content — use concise text, "
+    "fewer sections, or summarise instead of writing full prose in the "
+    "tool arguments."
+)
 MISSING_ANSWER_MSG = (
     "Your tool calls have run and their results are above, but your reply had no "
     "answer in it. Write your answer now: the finished work itself (the email, the "
