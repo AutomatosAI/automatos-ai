@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -181,3 +182,36 @@ def grounded(augment: Callable[..., None]) -> Callable[..., None]:
         annotate(schema_metadata, cached_facts(getattr(source, "id", None)))
 
     return run
+
+
+# F301 (night 9, build-14 retest): a question that names a value, not a table or a
+# column ("How many Harvest Club boxes go out…"), never picked the table that holds
+# it (subscription_plans.name), so the writer could not turn the plan's name into
+# its code. A table whose column holds a value the question names is picked too.
+_ALL_VALUES = re.compile(r"one of: (?P<values>.+?) \(every value it holds\)")
+MIN_NAMED_VALUE_CHARS = 3
+
+
+def _names_a_value(question: str, column: Dict[str, Any]) -> bool:
+    """Whether ``question`` names one of the values ``column``'s description lists."""
+    found = _ALL_VALUES.search(str(column.get("description") or ""))
+    values = [v.strip().lower() for v in found["values"].split(",")] if found else []
+    return any(len(v) >= MIN_NAMED_VALUE_CHARS and re.search(rf"\b{re.escape(v)}\b", question) for v in values)
+
+
+def tables_naming(question: str, tables: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The tables with a column holding a value ``question`` names."""
+    asked = (question or "").lower()
+    return [t for t in tables if any(_names_a_value(asked, c) for c in t.get("columns") or [])]
+
+
+def finds_tables_by_value(pick: Callable[..., List[Dict[str, Any]]]) -> Callable[..., List[Dict[str, Any]]]:
+    """Wrap ``NaturalLanguageToSQLService._get_relevant_tables``: the tables it picks,
+    then any table holding a value the question names (F301)."""
+    @functools.wraps(pick)
+    def wrapped(self: Any, question: str, schema_metadata: Dict[str, Any], *args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        picked = pick(self, question, schema_metadata, *args, **kwargs)
+        names = {t.get("name") for t in picked}
+        extra = [t for t in tables_naming(question, schema_metadata.get("tables") or []) if t.get("name") not in names]
+        return [*picked, *extra]
+    return wrapped
