@@ -89,8 +89,9 @@ def _mission_step_lessons(task: Any) -> Optional[str]:
         return None
     run = db.get(OrchestrationRun, task.run_id) if getattr(task, "run_id", None) else None
     own = db.query(BoardTask.id).filter(BoardTask.orchestration_task_id == task.id).first()
+    words = f"{getattr(task, 'title', '') or ''} {getattr(task, 'description', '') or ''}"
     return lessons_block(db, getattr(run, "workspace_id", None), agent_id, but_not=own.id if own else None,
-                         ask=MISSION_STEP_ASK)
+                         ask=MISSION_STEP_ASK, for_text=words)
 
 
 def a_steps_prompt_carries_its_lessons(build: Callable[..., str]) -> Callable[..., str]:
@@ -132,7 +133,7 @@ def _card_of(db: Any, run: Any) -> Optional[int]:
 
 
 def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any, *,
-                    in_a_session: bool) -> List[Optional[str]]:
+                    in_a_session: bool, for_text: str = "") -> List[Optional[str]]:
     """The agent's lessons, then the playbook's own standing notes (F249, night 8), each
     note once. The run's own card is in neither: a redo carries its notes already. A
     session agent's ticket brings its own lessons (the CLI host's ``_ticket_prompt``),
@@ -143,7 +144,8 @@ def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any, *,
     notes = playbook_lessons(db, workspace_id, getattr(run, "recipe_id", None), but_not=card)
     if in_a_session:
         return [playbook_block(notes)]
-    return [lessons_block(db, workspace_id, agent_id, but_not=card, besides=notes), playbook_block(notes)]
+    return [lessons_block(db, workspace_id, agent_id, but_not=card, besides=notes, for_text=for_text),
+            playbook_block(notes)]
 
 
 def _playbook_step_prompt(step: Dict[str, Any]) -> str:
@@ -157,7 +159,8 @@ def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     in_a_session = _runs_in_a_session(db, agent_id)
     run = _run_of(db, workspace_id, step.get("recipe_execution_id"))
     prompt = _with(step["clean_prompt"], given_for_run(db, run, step.get("input_data")),
-                   *_standing_notes(db, workspace_id, agent_id, run, in_a_session=in_a_session))
+                   *_standing_notes(db, workspace_id, agent_id, run, in_a_session=in_a_session,
+                                    for_text=step["clean_prompt"]))
     return prompt if in_a_session else _with(prompt, ON_THE_CARD)
 
 
@@ -213,7 +216,7 @@ def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str
 
     if STANDING_HEADING in prompt or not isinstance(db, Session) or not workspace_id or not agent_id:
         return prompt
-    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id)
+    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id, for_text=prompt)   # F315: the card's own words
     if not lessons:
         return prompt
     if ON_THE_CARD in prompt:
