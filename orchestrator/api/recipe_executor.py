@@ -40,6 +40,7 @@ from core.security.surface import origin_surface, widget_scopes, widget_turn
 from core.security.widget_scopes import widget_tool_surface
 from core.services.playbook_scratchpad import answer_for_next_step
 from core.services.playbook_step_refs import resolve_step_references, step_values
+from services.step_lessons import a_playbook_step_carries_its_lessons
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +436,7 @@ def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str
     return f"{head}: {first}" if first else head
 
 
+@a_playbook_step_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
 async def _execute_step(
     db: Session,
     agent: Agent,
