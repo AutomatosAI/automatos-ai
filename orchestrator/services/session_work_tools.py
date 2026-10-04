@@ -12,6 +12,10 @@ fields its schema declares forwarded.
   agent's ``generate_document`` call is routed, so it is dispatched by name like
   ``composio_execute``. It writes a Deliverable in the agent's own workspace (the
   document service resolves the workspace from the agent, which is the ticket's).
+* ``list_templates`` and ``get_template_schema`` (brand kit at generation, prep for night
+  10): the read-only template tools an API agent has before ``generate_document``
+  (``platform_list_templates``, ``platform_get_template_schema``), so a session fills
+  the owner's branded template instead of guessing its name and its fields.
 * ``run_playbook`` starts a run in the session's workspace: the second write here.
 * Missions: the read tools a mission's step agent uses. ``platform_list_missions``
   and ``platform_get_mission`` read the board's missions; ``platform_field_query``
@@ -93,13 +97,47 @@ GENERATE_DOCUMENT_SPEC: Dict[str, Any] = {
     "input_schema": _schema({
         "title": _string("The document's title."),
         "format": _string(f"The file type: {DOCUMENT_FORMATS_TEXT}"),
-        "template_name": _string("A template to fill, e.g. 'Basic Report' or 'Invoice'. Omit to let it choose."),
+        "template_name": _string("A template to fill, e.g. 'Basic Report' or 'Invoice' (list_templates lists "
+                                 "them, get_template_schema says what data each needs). Omit to let it choose."),
         "template_id": _string("A specific template's id (instead of its name)."),
         "data": {"type": "object", "description": "What goes in the document: the fields the template uses."},
     }, ("title", "format", "data")),
     "scope": forward({k: k for k in ("title", "format", "template_name", "template_id", "data")},
                      ("title", "format", "data"),
                      "generate_document needs a title, a format (pdf, docx or xlsx) and the data to fill it."),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
+TEMPLATE_FORMATS: Tuple[str, ...] = ("pdf", "docx", "xlsx", "social_image", "social_video")
+
+LIST_TEMPLATES_SPEC: Dict[str, Any] = {
+    "name": "list_templates",
+    "action": "platform_list_templates",
+    "description": (
+        "List this workspace's document templates (branded letters, reports, invoices, social "
+        "images): each one's id, name, format and category. Use it before generate_document to "
+        "pick the owner's own template, then get_template_schema for the data it needs."
+    ),
+    "input_schema": _schema({
+        "format": {"type": "string", "enum": list(TEMPLATE_FORMATS), "description": "Only templates of this format."},
+        "category": _string("Only this category, e.g. 'report', 'invoice' or 'letter'."),
+    }),
+    "scope": forward({"format": "format", "category": "category"}),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
+GET_TEMPLATE_SCHEMA_SPEC: Dict[str, Any] = {
+    "name": "get_template_schema",
+    "action": "platform_get_template_schema",
+    "description": (
+        "Read what one document template needs: the data fields you fill in generate_document's "
+        "data, the values the platform fills itself (the brand, the company, the date), and sample data."
+    ),
+    "input_schema": _schema({"template_id": _string("The template's id, from list_templates.")}, ("template_id",)),
+    "scope": forward({"template_id": "template_id"}, ("template_id",),
+                     "get_template_schema needs the template: its template_id from list_templates."),
     "project": project_answer,
     "tags": ("documents",),
 }
@@ -214,7 +252,7 @@ SEARCH_MISSION_FINDINGS_SPEC: Dict[str, Any] = {
 }
 
 WORK_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
-    GENERATE_DOCUMENT_SPEC,
+    GENERATE_DOCUMENT_SPEC, LIST_TEMPLATES_SPEC, GET_TEMPLATE_SCHEMA_SPEC,
     LIST_PLAYBOOKS_SPEC, GET_PLAYBOOK_SPEC, RUN_PLAYBOOK_SPEC,
     GET_LATEST_REPORT_SPEC,
     LIST_MISSIONS_SPEC, GET_MISSION_SPEC, SEARCH_MISSION_FINDINGS_SPEC,

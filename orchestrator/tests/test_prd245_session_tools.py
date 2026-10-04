@@ -52,6 +52,7 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
                      "read_step_file",                          # F161: a later step reads an earlier step's file
                      "query_database", "query_graph",           # F329: the owner's database and the graph
                      "generate_document",                       # #942: the owner-chosen groups' tools,
+                     "list_templates", "get_template_schema",   # brand kit at generation: the template reads
                      "list_playbooks", "get_playbook", "run_playbook",   # in the groups' display order
                      "get_latest_report",
                      "list_missions", "get_mission", "search_mission_findings")
