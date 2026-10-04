@@ -1,5 +1,5 @@
 {
-  "route_count": 889,
+  "route_count": 890,
   "routes": [
     {
       "method": "GET",
@@ -2172,6 +2172,10 @@
     {
       "method": "PUT",
       "path": "/api/socials/plans/{plan_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/batches/{batch_key}/approve"
     },
     {
       "method": "POST",

@@ -59,6 +59,7 @@ LEFT_UNSOURCED = "unsourced"
 LEFT_NOT_WAITING = "not_waiting"
 LEFT_NOT_IN_CAMPAIGN = "not_in_campaign"
 LEFT_NOT_SHOWN = "not_shown"
+LEFT_NOT_IN_BATCH = "not_in_batch"  # PRD-251C (C2): approving a plan's week, a post of another batch
 
 SERIES_OFF_FOR_WORKSPACE = (
     "Series approval is off for this workspace, so each post is approved on its own. "
@@ -282,12 +283,16 @@ def _commit_approval(db: Any, post: SocialPost, campaign_id: UUID, content_hash:
     return post.to_dict()
 
 
-def _precheck(post: Optional[SocialPost], campaign_id: UUID, item: ShownPost) -> Optional[Dict[str, Any]]:
-    """Why a shown post cannot be approved in this series, before anything is tried."""
+def _precheck(
+    post: Optional[SocialPost], campaign_id: UUID, item: ShownPost, batch_key: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Why a shown post cannot be approved in this series (or this batch), before anything is tried."""
     if post is None or post.campaign_id != campaign_id:
         return _left_unknown(item.post_id) if post is None else _left(
             post, LEFT_NOT_IN_CAMPAIGN, "the post is not in this campaign"
         )
+    if batch_key is not None and post.batch_key != batch_key:
+        return _left(post, LEFT_NOT_IN_BATCH, "the post is not in this batch")
     if post.status != service.NEEDS_APPROVAL:
         status = post.status.replace("_", " ")
         return _left(post, LEFT_NOT_WAITING, f"the post is {status}, not waiting for approval")
@@ -295,13 +300,14 @@ def _precheck(post: Optional[SocialPost], campaign_id: UUID, item: ShownPost) ->
 
 
 def _approve_one(
-    db: Any, ids: Tuple[UUID, UUID], actor: str, item: ShownPost, comment: Optional[str]
+    db: Any, ids: Tuple[UUID, UUID], actor: str, item: ShownPost, comment: Optional[str],
+    batch_key: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """One shown post of the campaign ``ids`` (workspace id, campaign id), approved
     exactly as a single approval: (the approved post, None) or (None, why it was left)."""
     workspace_id, campaign_id = ids
     post = service.get_post(db, workspace_id, item.post_id)
-    refused = _precheck(post, campaign_id, item)
+    refused = _precheck(post, campaign_id, item, batch_key)
     if refused is not None:
         return None, refused
     unresolved = post_sources.unresolved(db, workspace_id, post.sources)
@@ -327,13 +333,16 @@ def _approve_one(
         return None, _left_unknown(item.post_id)
 
 
-def _not_shown(db: Any, campaign: SocialCampaign, shown: Sequence[ShownPost]) -> List[Dict[str, Any]]:
-    """The campaign's posts waiting for approval that the approver was not shown."""
+def _not_shown(
+    db: Any, campaign: SocialCampaign, shown: Sequence[ShownPost], batch_key: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """The campaign's (or the batch's) posts waiting for approval that the approver was not shown."""
     shown_ids = {item.post_id for item in shown}
     return [
         _left(post, LEFT_NOT_SHOWN, "you were not shown this post, so it still needs its own approval")
         for post in campaign_posts(db, campaign.workspace_id, campaign.id)
         if post.status == service.NEEDS_APPROVAL and post.id not in shown_ids
+        and (batch_key is None or post.batch_key == batch_key)
     ]
 
 
@@ -344,9 +353,12 @@ def approve_series(
     shown: Sequence[ShownPost],
     *,
     comment: Optional[str] = None,
+    batch_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Approve the shown posts of ``campaign`` as a series (D6), one committed
-    approval each. The caller checks ``assert_series_allowed`` first.
+    approval each. The caller checks ``assert_series_allowed`` first, except for a
+    plan's batch (PRD-251C C2, O2): with ``batch_key``, only the batch's posts are
+    approved, a post of another batch is left, and the posts not shown are the batch's.
 
     Returns ``{"campaign", "approved", "left"}``: the campaign as committed, the
     posts approved, and each post left unapproved with its ``reason`` and
@@ -358,7 +370,7 @@ def approve_series(
     approved: List[Dict[str, Any]] = []
     left: List[Dict[str, Any]] = []
     for item in items:
-        done, why = _approve_one(db, (workspace_id, campaign_id), actor, item, comment)
+        done, why = _approve_one(db, (workspace_id, campaign_id), actor, item, comment, batch_key)
         if done is not None:
             approved.append(done)
         else:
@@ -366,7 +378,7 @@ def approve_series(
     current = get_campaign(db, workspace_id, campaign_id)
     if current is None:
         raise CampaignNotFound()
-    left.extend(_not_shown(db, current, items))
+    left.extend(_not_shown(db, current, items, batch_key))
     logger.info(
         "[Socials] series approval of campaign %s by %s: %d approved, %d left",
         campaign_id, actor, len(approved), len(left),

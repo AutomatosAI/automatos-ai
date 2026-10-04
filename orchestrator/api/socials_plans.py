@@ -24,6 +24,8 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
 * ``GET /api/socials/plans/{plan_id}/slots?start&end``: the planned and made slots in a
   window of at most 62 days; ``PUT .../slots/{slot_key}`` moves a planned slot or skips
   it (``slot_overrides``), the cadence untouched.
+* ``POST /api/socials/plans/{plan_id}/batches/{batch_key}/approve``: approve the week
+  (PRD-251C US-C205, ``api/socials_batches.py``).
 
 The content bank's routes are ``api/socials_topics.py``, included here. Every read and
 write is scoped to the caller's workspace: another workspace's plan is a 404. Every route
@@ -42,6 +44,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.socials_batches import router as batches_router
 from api.socials_plan_draft import router as plan_draft_router
 from api.socials_topics import router as topics_router
 from core.auth.dependencies import RequestContext
@@ -56,6 +59,8 @@ router = APIRouter()
 router.include_router(topics_router)
 # Plan with Auto: a plan drafted from what the person says (api/socials_plan_draft.py).
 router.include_router(plan_draft_router)
+# PRD-251C US-C205: approve the week (api/socials_batches.py).
+router.include_router(batches_router)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
