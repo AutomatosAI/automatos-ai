@@ -8,6 +8,8 @@
 export type SocialPlanStatus = 'active' | 'paused' | 'ended'
 export type SocialLatePolicy = 'skip' | 'next_slot'
 export type SocialWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+/** PRD-251C (C1): a plan's posts are made on their day, a week at a time, or a month at a time. */
+export type SocialPlanRhythm = 'daily' | 'weekly' | 'monthly'
 
 /** One cadence row: a channel group posting one format on some days at one time. */
 export interface SocialPlanCadenceRow {
@@ -20,7 +22,23 @@ export interface SocialPlanCadenceRow {
   days: SocialWeekday[]
   /** HH:MM in the plan's timezone. */
   time: string
+  /** PRD-251C (US-C301): 'story' posts the row's image or video as an Instagram story; absent for the format's own kind. */
+  kind?: SocialPlanRowKind | null
+  /** PRD-251C (US-C302): the row's own visual, over the plan's mix; absent follows the mix. */
+  visual?: SocialPlanRowVisual | null
 }
+
+/** PRD-251C (C6): where a row's visuals come from (the plan mix's sources). */
+export type SocialPlanVisualSource = 'templates' | 'library' | 'ai_images' | 'ai_footage'
+
+export interface SocialPlanRowVisual {
+  source: SocialPlanVisualSource
+  /** The Composio toolkit that makes the row's AI media; null: the workspace's default. */
+  toolkit?: string | null
+}
+
+/** PRD-251C (C6): what a cadence row may post as instead of its format's own kind. */
+export type SocialPlanRowKind = 'story'
 
 export interface SocialPlanSources {
   knowledge: boolean
@@ -38,12 +56,21 @@ export interface SocialPlanMake {
   max_per_day: number | null
   /** Shares of 100 among templates, library, ai_images and ai_footage. */
   visual_mix: Record<string, number>
+  /** PRD-251C: a plan saved before it has no rhythm, and is daily. */
+  rhythm?: SocialPlanRhythm
+  /** A weekly plan's batch day, a monthly plan's batch date (1-28). */
+  batch_day?: SocialWeekday
+  batch_date?: number
+  /** HH:MM, the plan's timezone: the evening-before reminder. */
+  remind_at?: string
 }
 
 export interface SocialPlanResearch {
   enabled: boolean
   day: SocialWeekday
   time: string
+  /** PRD-251C: research adds no topic close to a post of the last this-many days (60 unless set). */
+  repeat_after_days?: number
   last_run_at?: string | null
   last_run_id?: string | null
 }
@@ -71,6 +98,8 @@ export interface SocialPlan {
   updated_at: string | null
   /** The content bank's counts. */
   bank: { topics: number; unused: number }
+  /** PRD-251C: when a weekly or monthly plan's next batch is made (ISO); null for a daily plan. */
+  next_batch_at?: string | null
 }
 
 export interface SocialPlansResponse {
@@ -89,7 +118,7 @@ export interface SocialPlanInput {
   cadence?: Array<Omit<SocialPlanCadenceRow, 'id'> & { id?: string }>
   sources?: Partial<SocialPlanSources>
   make?: Partial<SocialPlanMake>
-  research?: Partial<Pick<SocialPlanResearch, 'enabled' | 'day' | 'time'>>
+  research?: Partial<Pick<SocialPlanResearch, 'enabled' | 'day' | 'time' | 'repeat_after_days'>>
   late_policy?: SocialLatePolicy
   approval_mode?: 'per_post' | 'series'
 }
@@ -177,12 +206,18 @@ export interface SocialTopic {
   created_by: string
   created_at: string | null
   updated_at: string | null
+  /** PRD-251C: a post in the workspace's history close to this topic, and what the bank says of it. */
+  repeat?: { post_id: string; note: string } | null
 }
 
 export interface SocialTopicsResponse {
   topics: SocialTopic[]
   total: number
   unused: number
+  /** Why research cannot run in the workspace (not set up, or its playbook removed); null when it can. */
+  research_note?: string | null
+  /** PRD-251C: when the plan's research last started (ISO); null before its first run. */
+  research_last_run_at?: string | null
 }
 
 export interface SocialTopicInput {

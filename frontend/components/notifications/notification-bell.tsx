@@ -79,6 +79,13 @@ export function linkFor(row: NotificationRow): string | null {
     // PRD-251 US-206: a social post waiting for approval → that post in the Socials tab.
     case 'social_post':
       return link_id ? `/deliverables?tab=socials&post=${link_id}` : '/deliverables?tab=socials'
+    // PRD-251B/C: a plan's notice → its page; a batch to review → the Queue; the weekly note → the plan's Posted.
+    case 'social_plan':
+      return link_id ? `/deliverables?tab=socials&view=plans&plan=${link_id}` : '/deliverables?tab=socials&view=plans'
+    case 'social_batch':
+      return '/deliverables?tab=socials&view=queue'
+    case 'social_posted':
+      return link_id ? `/deliverables?tab=socials&view=posted&plan=${link_id}` : '/deliverables?tab=socials&view=posted'
     default:
       return null
   }

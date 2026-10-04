@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from modules.knowledge.graph_extraction import (
+from modules.knowledge.graph_extraction import _normalise_extraction
+from modules.knowledge.graph_relations import (
     CANONICAL_RELATIONS,
     canonicalize_relation,
-    _normalise_extraction,
 )
 
 

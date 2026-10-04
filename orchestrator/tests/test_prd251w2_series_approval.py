@@ -535,7 +535,7 @@ def test_a_post_whose_status_moves_after_the_check_is_left_and_the_series_goes_o
     moved = _waiting(api, campaign["id"], title="Moved")
     after = _waiting(api, campaign["id"], title="After")
     assert _post(api, moved["id"], "request-changes", {"comment": "Tighter"}).status_code == 200
-    monkeypatch.setattr(campaigns_mod, "_precheck", lambda post, campaign_id, item: None)
+    monkeypatch.setattr(campaigns_mod, "_precheck", lambda post, campaign_id, item, batch_key=None: None)  # PRD-251C: a batch
 
     resp = _approve(api, campaign["id"], _shown(moved, after))
 

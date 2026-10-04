@@ -13,7 +13,7 @@ import type { SocialPost } from '@/lib/api-client'
 import type { SocialPlan } from '@/lib/socials-plan-types'
 import { useSocialPlans } from '@/hooks/use-socials-plans'
 import { SocialsCampaigns } from '../socials-campaigns-view'
-import { canAuthorPosts, channelLabel } from '../socials-status'
+import { canAuthorPosts, canDeletePlan, channelLabel } from '../socials-status'
 import { NEW_PLAN, type GoTo } from '../studio/studio-route'
 import { AUTO_TITLE } from './plan-auto-model'
 import { OFTEN_LABELS, cadenceSummary, oftenOf, statusLine } from './plan-model'
@@ -69,7 +69,8 @@ export function SocialsPlansView({ role, posts, planId, go }: PlansViewProps) {
   if (planId) {
     return (
       <SocialsPlanPage key={planId} planId={planId === NEW_PLAN ? null : planId} canEdit={canEdit}
-        onSaved={(plan) => go({ view: 'plans', plan: plan.id, post: null })} />
+        onSaved={(plan) => go({ view: 'plans', plan: plan.id, post: null })}
+        canDelete={canDeletePlan(role)} onDeleted={() => go({ view: 'plans', plan: null, post: null })} />
     )
   }
   const plans = data?.plans ?? []

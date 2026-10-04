@@ -11,9 +11,9 @@ the file's name or its declared type: anything else is 415, a file over its limi
 The file is stored through the one storage factory (``MediaStore``, the documents
 bucket) under ``social-media/{workspace}/{post}/upload-<sha>.<ext>`` like rendered media,
 registered as a Deliverable (``source_type`` upload), and becomes the post's media
-(``{"original": [deliverable id]}``: each channel crops it, and the preview shows each
-crop) with ``template_id`` null, the format the file is (image or video) and no chosen
-length. Media is content, so the edit goes through ``service.update_post`` and voids an
+(``{"original": [deliverable id]}``; a still is cropped for each channel when the post
+renders, and the preview shows each crop: PRD-251C US-C303, ``modules/socials/upload_crops.py``)
+with ``template_id`` null, the format the file is (image or video) and no chosen length. Media is content, so the edit goes through ``service.update_post`` and voids an
 approval like any edit, committed by the same compare-and-set (409 when another writer
 committed first). A post that is rendering, publishing, published or archived cannot
 change (409), and nothing is stored then.

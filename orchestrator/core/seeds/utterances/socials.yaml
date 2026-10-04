@@ -273,3 +273,38 @@ actions:
     source: authored
   - text: add topics from the docs to the content bank
     source: authored
+  # PRD-251C US-C103: what the workspace already posted, read before researching or writing
+  # so nothing repeats (read-only).
+  platform_get_social_history:
+  - text: what have we already posted on social media?
+    source: example
+  - text: show our social posting history
+    source: example
+  - text: did we post about this before?
+    source: example
+  - text: what went out on LinkedIn last month?
+    source: authored
+  - text: list the posts that already went out
+    source: authored
+  - text: have we covered this topic already?
+    source: authored
+  - text: which topics have we posted about this quarter?
+    source: authored
+  - text: show everything scheduled or published recently
+    source: authored
+  - text: check the posting history before you research
+    source: authored
+  - text: what did we put on Instagram in the last 90 days?
+    source: authored
+  - text: show past social posts so we don't repeat ourselves
+    source: authored
+  - text: what were the opening lines of our recent posts?
+    source: authored
+  - text: list the last 20 social posts across every plan
+    source: authored
+  - text: what's waiting for approval or already live on our channels?
+    source: authored
+  - text: social history please
+    source: authored
+  - text: have we already done a post on missions?
+    source: authored

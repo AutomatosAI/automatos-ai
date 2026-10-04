@@ -1,5 +1,7 @@
 """Board task ActionDefinitions (create, list, get, assign, update status, summary)."""
 
+from typing import Any, Dict
+
 from .action_registry import ActionDefinition, ActionRegistry
 
 
@@ -342,6 +344,51 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     ))
 
 
+# F241 (night 7b): "Update #0199 with that brief and send it back" came as
+# platform_update_task {"status": "pending", "brief": ...}, and was refused.
+_UPDATE_TASK_MISPLACED = {
+    "status": ("this action changes a ticket's details, not its status. To send the ticket back to its agent "
+               "with a new brief, give the brief in description and send_back: true. Any other move is "
+               "platform_update_task_status's."),
+}
+
+
+def _update_task_parameters() -> dict:
+    """platform_update_task's parameters: the fields it edits, a note, and send_back (F241 night 7b)."""
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": _ticket_ref("The ticket to edit"),
+            "title": {"type": "string", "description": "New title."},
+            "description": {"type": "string", "description": "New description."},
+            "priority": {
+                "type": "string",
+                "enum": ["urgent", "high", "medium", "low"],
+                "description": "New priority.",
+            },
+            "review_mode": _review_mode(""),
+            "tags": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Replaces the task's tags.",
+            },
+            "note": {
+                "type": "string",
+                "description": "A remark to add to the ticket. Not a rejection.",
+            },
+            "send_back": {
+                "type": "boolean",
+                "description": (
+                    "With a new description: the ticket goes back to its agent to redo it from that "
+                    "brief, on the same card, as the board's 'Update ticket and re-queue' does. The old "
+                    "brief and the last draft stay on record. For 'update #0199 with this brief and "
+                    "send it back'."
+                ),
+            },
+        },
+        "required": ["task_id"],
+    }
+
+
 def _register_update_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_task",
@@ -349,32 +396,12 @@ def _register_update_task(registry: ActionRegistry) -> None:
             "Edit a board task's details — title, description, priority, tags, "
             "review_mode — or add a note to it without rejecting it. Use this to "
             "correct or refine a ticket. To CHANGE ITS STATUS use "
-            "platform_update_task_status instead; this action never moves a task."
+            "platform_update_task_status instead; this action never moves a task, "
+            "except a re-brief: a new description with send_back sends it back to its agent."
         ),
         category="tasks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": _ticket_ref("The ticket to edit"),
-                "title": {"type": "string", "description": "New title."},
-                "description": {"type": "string", "description": "New description."},
-                "priority": {
-                    "type": "string",
-                    "enum": ["urgent", "high", "medium", "low"],
-                    "description": "New priority.",
-                },
-                "review_mode": _review_mode(""),
-                "tags": {
-                    "type": "array", "items": {"type": "string"},
-                    "description": "Replaces the task's tags.",
-                },
-                "note": {
-                    "type": "string",
-                    "description": "A remark to add to the ticket. Not a rejection.",
-                },
-            },
-            "required": ["task_id"],
-        },
+        parameters=_update_task_parameters(),
+        misplaced=_UPDATE_TASK_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "edit"],
@@ -397,34 +424,13 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "first (platform_assign_task). Moving to 'done' completes it. "
             "'blocked' requires blocked_reason. To cancel a ticket set 'cancelled', never 'done' "
             "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed. "
-            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop."
+            "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop. "
+            "A ticket in review moved to 'done' is approved; moved to 'assigned' it is sent back for a redo "
+            "with its draft kept — put what to fix in 'note'. A ticket with no work on it can't go to "
+            "review or done, and a running one can only be cancelled: the refusal says what the owner can press."
         ),
         category="tasks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": _ticket_ref("The ticket (one ticket)"),
-                "task_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Several tickets (numbers like #0042) to move to the same status in one call "
-                        "(max 100). The result lists 'updated' and 'failed' ids — "
-                        "report both to the user."
-                    ),
-                },
-                "status": {
-                    "type": "string",
-                    "enum": _board_statuses(),
-                    "description": "New status",
-                },
-                "blocked_reason": {
-                    "type": "string",
-                    "description": "Why the task is blocked (required when status is 'blocked')",
-                },
-            },
-            "required": ["status"],
-        },
+        parameters=_status_tool_parameters(),
         permission_level="write",
         requires_confirmation=False,
         tags=["tasks", "write", "status", "trigger", "run"],
@@ -435,3 +441,40 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "run task 5 now",
         ],
     ))
+
+
+def _status_tool_parameters() -> Dict[str, Any]:
+    """platform_update_task_status's parameters: one ticket or many, the status, a
+    block's reason, and the owner's note (F259/F278)."""
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": _ticket_ref("The ticket (one ticket)"),
+            "task_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Several tickets (numbers like #0042) to move to the same status in one call "
+                    "(max 100). The result lists 'updated' and 'failed' ids — "
+                    "report both to the user."
+                ),
+            },
+            "status": {
+                "type": "string",
+                "enum": _board_statuses(),
+                "description": "New status",
+            },
+            "blocked_reason": {
+                "type": "string",
+                "description": "Why the task is blocked (required when status is 'blocked')",
+            },
+            "note": {
+                "type": "string",
+                "description": (
+                    "What the owner said with this move, kept on the ticket as theirs: their approval note "
+                    "on 'done', or what to fix on a send-back to 'assigned' (the redo works from it)."
+                ),
+            },
+        },
+        "required": ["status"],
+    }

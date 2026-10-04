@@ -12,11 +12,17 @@ cancelled ticket does). A step already running stops too: the tick runs a
 mission's steps on the scheduler worker, while the cancel can come from any
 worker, so a running step reads its mission's state from the database while it
 works, and stops when it reads ``cancelled``.
+
+F273 (night 7b): #0191 was cancelled on the board, and neither its card nor its
+three step cards said who cancelled them or when. Each step card now says so in
+its notes, and so does the mission's own card, which the mission's state change
+cancels without knowing who (services/cancel_notes.py).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Dict, List
 
 from sqlalchemy.orm import Session
@@ -35,14 +41,16 @@ OPEN_CARD_STATUSES = ("inbox", "assigned", "in_progress", "review", "blocked", "
 CANCEL_POLL_SECONDS = 3.0
 CANCELLED_WHILE_RUNNING = "The mission was cancelled while this step ran."
 MISSION_CANCELLED_REASON = "the mission was cancelled"
+CANCELLED_CARD = "cancelled"
 
 
 def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[int]:
-    """Skip every unfinished step of the mission and cancel its card. Returns the
-    cards cancelled. Nothing is committed: the caller commits the mission's
-    cancel with its cards. Each card stops in a savepoint of its own (as F224's
+    """Skip every unfinished step of the mission and cancel its card, and say on
+    the mission's own card who cancelled it (F273). Returns the step cards
+    cancelled. Nothing is committed: the caller commits the mission's cancel with
+    its cards. Each card is written in a savepoint of its own (as F224's
     stop_mission_sessions does): a card the database refuses is logged and left
-    open, never costing the mission its cancel."""
+    as it was, never costing the mission its cancel."""
 
     steps = (
         db.query(OrchestrationTask)
@@ -62,18 +70,42 @@ def close_open_steps(db: Session, run_id: Any, *, by: str, reason: str) -> List[
         .order_by(BoardTask.id)
         .all()
     )
-    return [card.id for card in cards if _stopped(db, card, by=by, reason=reason)]
+    stopped = [card.id for card in cards if _stopped(db, card, by=by, reason=reason)]
+    _say_who_cancelled_the_mission(db, run_id, by=by, reason=reason)
+    return stopped
 
 
 def _stopped(db: Session, card: Any, *, by: str, reason: str) -> bool:
     import services.board_cancel as board_cancel
+    from services.cancel_notes import WITH_ITS_MISSION
 
     try:
         with db.begin_nested():
-            return board_cancel.stop_ticket_run(db, card, by=by, reason=reason)
+            return board_cancel.stop_ticket_run(db, card, by=by, reason=reason, note=WITH_ITS_MISSION)
     except Exception:  # noqa: BLE001 -- one card never costs the mission its cancel; it is logged
         logger.exception("[MissionCancel] could not cancel step card %s", card.id)
         return False
+
+
+def _say_who_cancelled_the_mission(db: Session, run_id: Any, *, by: str, reason: str) -> None:
+    """The mission's own card is cancelled by the mission's state change
+    (services/orchestration_board_bridge.sync_mission_board_status), which knows no
+    one: it said neither who nor when (#0191). It says both now, as its steps do. A
+    card that already says who cancelled it is left as it is."""
+    from services.cancel_notes import CANCELLED_KEY, CANCELLED_THE_MISSION, with_cancel_recorded
+    from services.run_cancel import MISSION_CARD
+
+    try:
+        with db.begin_nested():
+            card = db.query(BoardTask).filter(
+                BoardTask.source_type == MISSION_CARD, BoardTask.orchestration_run_id == run_id).first()
+            if card is None or card.status != CANCELLED_CARD or CANCELLED_KEY in (card.runtime_ref or {}):
+                return
+            now = datetime.now(timezone.utc)
+            card.runtime_ref = with_cancel_recorded(db, card, by=by, reason=reason, at=now, note=CANCELLED_THE_MISSION)
+            db.flush()
+    except Exception:  # noqa: BLE001 -- the mission's cancel stands without the note; it is logged
+        logger.exception("[MissionCancel] could not say on mission %s's card who cancelled it", run_id)
 
 
 async def until_mission_cancelled(work: Awaitable[Any], run_id: Any,

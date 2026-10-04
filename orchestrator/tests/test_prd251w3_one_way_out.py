@@ -164,6 +164,7 @@ def test_no_socials_agent_tool_publishes_schedules_or_approves():
         "platform_create_social_post", "platform_update_social_post", "platform_submit_social_post",
         "platform_get_social_post", "platform_list_social_posts",
         "platform_get_social_plan", "platform_add_social_topics",  # PRD-251B (US-B204): the bank only
+        "platform_get_social_history",  # PRD-251C (US-C103): a read of what went out
     }
     for action in tools.values():
         assert not re.search(r"approv|schedul|publish", action.name, re.IGNORECASE)

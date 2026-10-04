@@ -31,7 +31,7 @@ from core.database.database import get_database_url  # noqa: E402
 from api.board_tasks import end_session_claim  # noqa: E402
 from core.models.core import BoardTask  # noqa: E402
 from services import cli_host_service as svc  # noqa: E402
-from services import session_tools as st  # noqa: E402
+from services import session_tool_groups as groups  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -137,7 +137,8 @@ def test_the_claim_hands_the_session_its_own_credential_once(ticket, new_session
     payload = claimed[0]
 
     # the host is told what it may call, where, and with what
-    assert payload["session_tools"] == list(st.tool_names())
+    # #942: the agent's own list (no session_tool_groups set: the default groups, core first)
+    assert payload["session_tools"] == groups.tools_for_groups(groups.DEFAULT_SESSION_TOOL_GROUPS)
     assert payload["session_tools_path"] == svc.SESSION_TOOLS_PATH
     token = payload["session_token"]
     assert token and len(token) > 32

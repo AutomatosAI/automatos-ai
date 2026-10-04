@@ -23,6 +23,15 @@ Perfect!" three times (#0141, #0152, #0161). ``redo_block`` now also carries the
 owner's recent corrections to the ticket's agent on its other tickets, newest
 first and each once, into every run of that agent's tickets. Both claim paths
 read it. The ticket's own corrections stay in its redo part.
+
+F249 (night 7b), partly fixed: the Analyst carried its note, but the Content Creator
+slipped on #0199 and the newsletter helper on #0200. Two of the owner's lessons never
+reached the agent: the ones written in an Approve note ("Next time put the working on
+the card", "next time count"), and every lesson for a mission step or a playbook step,
+whose prompts the coordinator and the playbook runner build without this block. An
+Approve note that says what to do next time is a lesson now (``agent_lessons``), and
+``lessons_block`` gives the same block to the mission's and the playbook's steps
+(services/step_lessons.py).
 """
 from __future__ import annotations
 
@@ -32,6 +41,8 @@ from typing import Any, Dict, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
 SENT_BACK = "sent back"
+# keep_previous_run's reason for Run now (api.board_tasks._start_now).
+RUN_NOW = "run now"
 # The review_feedback a Reject without a note leaves, so the redo still knows it
 # is a redo (and still carries the earlier corrections and the draft).
 SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
@@ -59,8 +70,11 @@ STANDING_KEPT = 5
 STANDING_TICKETS_READ = 30
 STANDING_NOTE_CHARS = 300
 STANDING_HEADING = "## The owner's corrections to your recent work"
-STANDING_ASK = ("On your other tickets the owner sent work back with these notes, newest first. "
-                "Apply them here too wherever they fit:")
+STANDING_ASK = ("On your other work the owner sent drafts back with these notes, or said what to do next time; "
+                "newest first. Follow each one here too, unless this brief says otherwise:")
+# F249 (night 7b): an Approve note that says what to do next time is a lesson too.
+NEXT_TIME = re.compile(r"\b(?:next time|from now on|in (?:the )?future|going forward|keep doing|always|never|"
+                       r"don'?t|do not|no more|stop)\b", re.IGNORECASE)
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -160,6 +174,38 @@ def kept_draft(task: Any) -> Optional[str]:
     return None
 
 
+def redo_again(task: Any) -> Optional[str]:
+    """F294 (night 8, #0273): Run now on a redo that failed before it answered runs
+    that redo again, with the owner's words. The claim had consumed the Reject's note
+    (``review_feedback``), the redo failed ("Empty response from LLM"), and Run now
+    started from the brief alone: "0 kg" again, the reason gone. When the run that Run
+    now replaces was a redo that left no answer (and any Run now since failed the same
+    way), the newest correction goes back on the card, so the next claim folds in the
+    redo block: the draft that was sent back and every correction. Returns it, or None."""
+    if getattr(task, "status", None) != "failed" or getattr(task, "result", None) \
+            or getattr(task, "review_feedback", None):
+        return None
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    if not _last_was_a_redo(data):
+        return None
+    notes = _corrections(data, _brief_agreed_at(data))
+    task.review_feedback = notes[-1] if notes else SENT_BACK_WITHOUT_A_NOTE
+    return task.review_feedback
+
+
+def _last_was_a_redo(data: Dict[str, Any]) -> bool:
+    """Whether the newest run on record was sent back, past any Run now that failed
+    with no answer since."""
+    for run in reversed(data.get("previous_runs") or []):
+        if not isinstance(run, dict):
+            continue
+        if run.get("why") == SENT_BACK:
+            return True
+        if run.get("why") != RUN_NOW or run.get("status") != "failed" or run.get("result"):
+            return False
+    return False
+
+
 def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
     """When the ticket's brief was last agreed in a discussion; None if never."""
     briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
@@ -181,24 +227,44 @@ def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> 
 def standing_corrections(task: Any) -> Optional[str]:
     """The owner's notes on this ticket's agent's other tickets, newest first and
     each once: what one Reject taught applies to the agent's next card."""
-    notes = _agent_corrections(task)
+    return lessons_block(_session_of(task), getattr(task, "workspace_id", None),
+                         getattr(task, "assigned_agent_id", None), but_not=getattr(task, "id", None))
+
+
+def lessons_block(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None) -> Optional[str]:
+    """The block a run of ``agent_id``'s work is given: its lessons, newest first; None without."""
+    notes = agent_lessons(db, workspace_id, agent_id, but_not=but_not)
     if not notes:
         return None
     return "\n".join([STANDING_HEADING, STANDING_ASK, *(f"- {note}" for note in notes)])
 
 
-def _agent_corrections(task: Any) -> List[str]:
-    agent_id, db = getattr(task, "assigned_agent_id", None), _session_of(task)
-    if not agent_id or db is None:
+def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None) -> List[str]:
+    """The owner's lessons for an agent from its recent cards (but ``but_not``), newest
+    first and each once: the notes they sent its work back with, and the Approve notes
+    that say what to do next time (F249)."""
+    if not agent_id or db is None or workspace_id is None:
         return []
     from core.models.core import BoardTask
 
-    rows = (db.query(BoardTask.planning_data)
-            .filter(BoardTask.workspace_id == task.workspace_id, BoardTask.assigned_agent_id == agent_id,
-                    BoardTask.id != task.id, BoardTask.planning_data["owner_corrections"].isnot(None))
-            .order_by(BoardTask.updated_at.desc(), BoardTask.id.desc()).limit(STANDING_TICKETS_READ).all())
-    dated = sorted(((c.get("at") or "", c["note"]) for (data,) in rows for c in _entries(data)), reverse=True)
+    query = db.query(BoardTask.planning_data, BoardTask.runtime_ref).filter(
+        BoardTask.workspace_id == workspace_id, BoardTask.assigned_agent_id == agent_id)
+    if but_not is not None:
+        query = query.filter(BoardTask.id != but_not)
+    rows = query.order_by(BoardTask.updated_at.desc(), BoardTask.id.desc()).limit(STANDING_TICKETS_READ).all()
+    dated = sorted((pair for data, ref in rows for pair in _lessons(data, ref)), reverse=True)
     return _distinct([note for _, note in dated])[:STANDING_KEPT]
+
+
+def _lessons(planning_data: Any, runtime_ref: Any) -> List[tuple]:
+    """(when, note) for a card's corrections, and for its Approve notes that teach."""
+    from services.ticket_verdict import APPROVAL_NOTE_PREFIX
+
+    notes = runtime_ref.get("session_notes") if isinstance(runtime_ref, dict) else None
+    approved = [(n.get("at") or "", n["note"][len(APPROVAL_NOTE_PREFIX):].strip())
+                for n in notes or [] if isinstance(n, dict) and isinstance(n.get("note"), str)
+                and n["note"].startswith(APPROVAL_NOTE_PREFIX) and NEXT_TIME.search(n["note"])]
+    return [(c.get("at") or "", c["note"]) for c in _entries(planning_data)] + approved
 
 
 def _entries(data: Any) -> List[Dict[str, Any]]:

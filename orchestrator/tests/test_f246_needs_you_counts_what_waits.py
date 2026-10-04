@@ -85,7 +85,7 @@ def _missions(s, ws, writer):
     plan = _run(s, ws, "Winter blend launch", "awaiting_approval", "blocked")
     plan_card = _card(s, ws, 31, "Mission: winter blend launch", "review", source="orchestration", run=plan)
     return NS(card=card, stranded=stranded, done_task=done_task, plan=plan, plan_card=plan_card,
-              live=live, live_step=live_step)
+              live=live, live_step=live_step, ended=ended)
 
 
 def _cards(s, ws, writer, mac):
@@ -165,7 +165,10 @@ def test_each_stuck_ticket_says_why(night, new_session):
         ("#0067", "no_agent"), ("#0149", "not_picked_up"), ("#0161", "no_host"), ("#0177", "no_host"),
         ("#0176.2", "mission_ended"), ("#0176.3", "mission_ended")}
     assert next(r for r in stuck if r["number"] == "#0176.2")["ticket_id"] == night.missions.stranded
-    assert all(r["mission_id"] is None for r in stuck)                       # a stuck step opens itself
+    # F274: a step whose mission ended opens its mission, where it is resumed; the rest open themselves.
+    assert {r["number"]: r["mission_id"] for r in stuck if r["why"] == "mission_ended"} == {
+        "#0176.2": night.missions.ended, "#0176.3": night.missions.ended}
+    assert all(r["mission_id"] is None for r in stuck if r["why"] != "mission_ended")
 
 
 def test_a_failure_counts_until_it_is_dealt_with(night, new_session):
@@ -196,10 +199,10 @@ def test_a_mission_plan_and_a_steps_question_carry_their_card_numbers(night, new
     rows = needs_you(new_session(), UUID(night.ws))["rows"]
 
     plan = next(r for r in rows["approval"] if r["source"] == "mission")
-    assert (plan["id"], plan["ticket_id"], plan["ticket_number"]) == (
+    assert (plan["id"], plan["ticket_id"], plan["number"]) == (       # F274: `number`, as on every row
         night.missions.plan, night.missions.plan_card, "#0031")
     asked = next(r for r in rows["question"] if r["id"] == str(night.grants.step_question))
-    assert asked["ticket_number"] == "#0176.1"                         # night: question #1178 had none
+    assert asked["number"] == "#0176.1"                                # night: question #1178 had none
 
 
 def test_a_mission_step_held_for_the_owners_check_is_in_review(night, new_session):

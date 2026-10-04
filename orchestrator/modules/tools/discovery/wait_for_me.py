@@ -21,8 +21,8 @@ def _without(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def keeps_wait_for_me(handler: Handler) -> Handler:
-    """platform_create_playbook / platform_execute_playbook: once the playbook
-    (or the run) exists, it keeps the owner's ``wait_for_me``."""
+    """platform_create_playbook / platform_execute_playbook / platform_schedule_playbook:
+    once the playbook (or the run) exists, it keeps the owner's ``wait_for_me``."""
     @functools.wraps(handler)
     async def wrapped(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         wants = (params or {}).get(WAIT_FOR_ME)
@@ -31,7 +31,8 @@ def keeps_wait_for_me(handler: Handler) -> Handler:
             return out
         if out.get("execution_id"):
             return {**out, **_on_the_run(db, workspace_id, out["execution_id"], wants)}
-        playbook_id = (out.get("playbook") or {}).get("id")
+        # F266 (7b): schedule_playbook names its playbook at the top of its answer.
+        playbook_id = (out.get("playbook") or {}).get("id") or out.get("playbook_id")
         return {**out, **_on_the_playbook(db, workspace_id, playbook_id, wants)} if playbook_id else out
     return wrapped
 

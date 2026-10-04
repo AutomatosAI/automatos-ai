@@ -35,6 +35,7 @@ from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
+from modules.tools.execution.params_text import decodes_nested_params, params_refusal_text
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 from core.database.session_health import rollback_if_aborted
@@ -70,13 +71,18 @@ logger = logging.getLogger(__name__)
 # consulted for a param that is MISSING — never to override what was sent.
 _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "title": ("name", "heading", "subject", "report_title", "task_title"),
+    # F262/F266 (night 7b): what Auto sent for a mission's goal, a timer's cron and the
+    # owner's "wait for me" ({"objective": …}, {"cron_schedule": …}, {"wait_for_approval": true}).
+    "goal": ("objective", "mission_goal"),
+    "cron_expression": ("cron", "cron_schedule", "cron_expr"),
+    "wait_for_me": ("requires_approval", "wait_for_approval", "needs_approval", "approval_required"),
     # The reverse direction too: platform_create_agent requires `name` and was
     # failing 6/6 with "Missing required parameter: name" from callers that sent
     # `title` or `agent_name` (surfaced by the always-failing-actions check).
     "name": ("title", "agent_name", "label", "display_name"),
     "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
     "query": ("q", "search", "question", "prompt"),
-    "description": ("desc", "summary", "details"),
+    "description": ("desc", "summary", "details", "brief"),  # F241 (7b): "Update #0199 with that brief"
     # F027-C (night 3): the playbook-step actions. add_playbook_step's prompt
     # arrived under another name 5 times; update_playbook_step's playbook and
     # step 3 times. ("order" is NOT an alias of step_index: it is update's own
@@ -84,6 +90,8 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "prompt_template": ("prompt", "template", "instructions", "instruction", "step_prompt", "prompt_text",
                         "text", "content"),
     "playbook_id": ("recipe_id", "workflow_id", "playbookId"),
+    # F241 (night 7b): "Approve #0177 with this note" arrived as "notes".
+    "note": ("notes", "comment", "remark"),
     "step_index": ("step", "index", "step_number", "step_idx", "stepIndex", "step_position"),
 }
 
@@ -102,10 +110,12 @@ def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> 
 
     filled = dict(params)
 
-    # Unwrap {"report": {...}} style wrappers first, without losing siblings.
+    # Unwrap {"report": {...}} style wrappers first, without losing siblings. F262
+    # (night 7b): a wrapper can be the JSON text of one, and name a required key by
+    # another of its names ({"params": "{\"objective\": …}"} for a mission's goal).
     for key in _WRAPPER_KEYS:
-        inner = filled.get(key)
-        if isinstance(inner, dict) and any(r in inner for r in required):
+        inner = _as_object(filled.get(key))
+        if isinstance(inner, dict) and any(_names_it(inner, r) for r in required):
             filled = {**inner, **{k: v for k, v in filled.items() if k != key}}
             break
 
@@ -118,6 +128,21 @@ def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> 
                 filled[name] = value
                 break
     return filled
+
+
+def _as_object(value: Any) -> Any:
+    """``value``, or the object its JSON text holds (a model's params sent as text)."""
+    if not isinstance(value, str) or not value.strip().startswith("{"):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return value
+
+
+def _names_it(params: Dict[str, Any], name: str) -> bool:
+    """Whether ``params`` carries ``name``, or a known other name of it."""
+    return name in params or any(alias in params for alias in _PARAM_ALIASES.get(name, ()))
 
 
 def _placeholder(prop: Dict[str, Any]) -> str:
@@ -239,6 +264,7 @@ def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], 
     takes = ", ".join(f"{name} ({(props[name] or {}).get('type', 'any')}{', required' if name in required else ''})"
                       for name in props)
     lines.append(f"'{action_name}' takes: {takes or 'no parameters'}.")
+    lines.append(REFUSED_CALL_IS_YOURS)  # F262/F266 (night 7b): Auto asked the owner instead of sending it again
     return "\n".join(lines)
 
 
@@ -269,11 +295,9 @@ def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, An
 def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
                               via: str = VIA_DISPATCHER) -> Optional[str]:
     """F182: the refusal for the keys in ``params`` the action does not take,
-    each logged to be counted, or None when there are none. F181: a ``params``
-    that is no object (text the model meant as JSON) is refused, never run."""
+    each logged, or None. F181/F321: a ``params`` that is no object is refused in plain words."""
     if not isinstance(params, dict):
-        return (f"{action_name}'s params must be an object of its parameters, e.g. "
-                f"{{\"action\": \"{action_name}\", \"params\": {{...}}}}, not {type(params).__name__}.")
+        return params_refusal_text(action_name, params)
     unknown = undeclared_params(action_def, params)
     for key in unknown:
         logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")
@@ -847,6 +871,7 @@ class UnifiedToolExecutor:
     # Main dispatch
     # ------------------------------------------------------------------
 
+    @decodes_nested_params  # F321 (night 9b): params sent as JSON text run as the object they hold
     async def execute_tool(
         self,
         tool_name: str,

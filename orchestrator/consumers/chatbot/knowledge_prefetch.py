@@ -33,6 +33,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import text
 
+from core.database.read_release import release_if_read_only
+
 logger = logging.getLogger(__name__)
 
 PREFETCH_TOOL = "search_knowledge"
@@ -95,6 +97,15 @@ def is_question(message: Optional[str]) -> bool:
     if len(t) < 4 or _INSTRUCTION.match(t):
         return False
     return "?" in t or bool(_QUESTION_START.match(t)) or bool(_ASKING.search(t))
+
+
+def asks_the_documents(message: Optional[str]) -> bool:
+    """A question the documents may answer. F263 (night 7b): a question about the
+    board or a card is answered from the board, whose tools give its live state;
+    five passages from old reports had named done cards as waiting in Review."""
+    from consumers.chatbot.board_questions import about_the_board
+
+    return is_question(message) and not about_the_board(message)
 
 
 def split_questions(message: Optional[str]) -> List[str]:
@@ -204,7 +215,7 @@ async def prefetch(
     or the search failed. ``search`` runs search_knowledge with the given args
     and returns the tool router's result (``raw_result`` / ``frontend_data``).
     A message asking several questions is searched once per question (F227)."""
-    if not enabled or (question_only and not is_question(message)):
+    if not enabled or (question_only and not asks_the_documents(message)):
         return None
     try:
         if documents_in(db, workspace_id) < 1:
@@ -212,6 +223,10 @@ async def prefetch(
     except Exception:  # noqa: BLE001 — cannot tell: the turn runs as it did
         logger.warning("[F085] retrieval first skipped: could not count documents", exc_info=True)
         return None
+    # F330 (night 9c): the count opened the turn's transaction; the searches
+    # (an embedding call, then a search on sessions of their own) must not keep
+    # its connection "idle in transaction". Kept as is if the turn wrote.
+    release_if_read_only(db)
     # The owner's own questions, each searched; a brief (F201's draft guides) is
     # searched whole: its questions are a customer's, and its query asks for the rules.
     questions = split_questions(message) if question_only else []

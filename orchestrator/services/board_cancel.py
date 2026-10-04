@@ -18,12 +18,17 @@ caller inside a larger transaction (a mission's state change) keeps it whole.
 
 F245 (night 7): a failed ticket can be cancelled too, which closes it: it
 waits in Needs you until the owner deals with it (F246).
+
+F273 (night 7b): a stopped ticket also says who and when among its notes, the
+list the ticket view shows (services/cancel_notes.py).
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from typing import Any, List
+
+from services.cancel_notes import CANCELLED_THIS, WITH_ITS_RUN, with_cancel_recorded
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +56,13 @@ HEARTBEAT_OFF_REASON = "the heartbeat was switched off"
 ROUTINE_BY = "the routine"
 
 
-def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
+def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str, note: str = CANCELLED_THIS) -> bool:
     """End ``task``'s run unless it is done or already closed: terminal
     ``cancelled``, the lease and the session credential gone,
     ``cancel_requested_at`` so the CLI host stops the session at its next event
-    batch, the board told. Does NOT commit. True when the ticket was stopped here."""
+    batch, the board told. The cancel goes on record with its note (F273): who,
+    why and when; ``note`` is what a person or an agent did (services/cancel_notes).
+    Does NOT commit. True when the ticket was stopped here."""
     if task.status in UNCANCELLABLE:
         return False
     from services.board_events import notify_board_event
@@ -69,9 +76,8 @@ def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
     if previous == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
-    ref = dict(task.runtime_ref or {})
+    ref = with_cancel_recorded(db, task, by=by, reason=reason, at=now, note=note)
     ref[CANCEL_REQUESTED_KEY] = now.isoformat()
-    ref["cancelled"] = {"by": by, "reason": reason, "at": now.isoformat()}
     # PRD-245: the run is over, so its session credential is destroyed here too.
     clear_session_token(ref)
     task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
@@ -82,6 +88,28 @@ def stop_ticket_run(db: Any, task: Any, *, by: str, reason: str) -> bool:
     )
     db.flush()
     logger.info("[BoardCancel] task %d stopped (was %s) by %s — %s", task.id, previous, by, reason)
+    return True
+
+
+def call_off_done(db: Any, task: Any, *, by: str, reason: str) -> bool:
+    """F294 (night 8): a Done card the owner calls off is Cancelled, with the cancel on
+    record and its note (F273), as any cancel. Nothing runs a Done card, so nothing
+    stops, and its answer stays on it. #0422: Auto approved the card when asked to
+    cancel it; the board's Cancel then answered ``applied: false`` with no words, and a
+    drag to Cancelled moved it with no note. Does NOT commit. False unless it was Done."""
+    if task.status != "done":
+        return False
+    from services.board_events import notify_board_event
+
+    now = datetime.now(timezone.utc)
+    task.status = "cancelled"
+    task.completed_at = now
+    task.runtime_ref = with_cancel_recorded(db, task, by=by, reason=reason, at=now)
+    notify_board_event(
+        db, workspace_id=task.workspace_id, task_id=task.id, status="cancelled", event="task_cancelled",
+    )
+    db.flush()
+    logger.info("[BoardCancel] done task %d called off by %s — %s", task.id, by, reason)
     return True
 
 
@@ -116,7 +144,7 @@ def stop_run_step_tickets(db: Any, execution_id: str, *, by: str, reason: str) -
     for a run that failed or died). Does NOT commit. Returns the tickets
     stopped; a step that already finished keeps its result."""
     return [task.id for task in run_step_tickets(db, execution_id)
-            if stop_ticket_run(db, task, by=by, reason=reason)]
+            if stop_ticket_run(db, task, by=by, reason=reason, note=WITH_ITS_RUN)]
 
 
 def live_mission_step_cards(db: Any, run_id: Any) -> List[Any]:
@@ -211,7 +239,7 @@ def stop_heartbeat_sessions(db: Any, workspace_id: Any, agent_id: int) -> List[i
 __all__ = [
     "CANCEL_REQUESTED_KEY", "FINISHED", "HEARTBEAT_OFF_REASON", "MISSION_STOP_REASONS", "PLAYBOOK_RUN_BY",
     "ROUTINE_OFF_REASONS", "RUN_DIED_REASON", "RUN_FAILED_REASON", "RUN_STEP_LIVE", "UNCANCELLABLE",
-    "cancel_board_ticket", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
+    "call_off_done", "cancel_board_ticket", "live_mission_step_cards", "run_step_tickets", "stop_heartbeat_sessions",
     "stop_mission_sessions", "stop_routine_sessions", "stop_run_step_tickets", "stop_scheduled_task_sessions",
     "stop_ticket_run",
 ]

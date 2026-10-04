@@ -3,6 +3,7 @@
  * render at its aspect, else the first), whether the preview is out of date, and the note
  * under the frame (what was rendered, or what the full render will cost in minutes).
  */
+import { closestShape } from './channel-shape'
 import type { SocialPost } from '@/lib/api-client'
 import { formatRenderMinutes } from '../socials-status'
 import { lengthLabel } from './socials-calendar-model'
@@ -29,9 +30,10 @@ export function aspectOfSize(width: number | undefined, height: number | undefin
   return `${width / d}:${height / d}`
 }
 
-/** The file a channel shows: the render at the channel's aspect, else the first one. */
+/** The file a channel shows: the render at the channel's aspect, else the one closest in
+ * shape (the one the server publishes to it, channel-shape.ts), else the first one. */
 export function fileForAspect(files: ReadonlyArray<PreviewFile>, aspect: string | null): PreviewFile | null {
-  return files.find((file) => file.aspect === aspect) ?? files[0] ?? null
+  return files.find((file) => file.aspect === aspect) ?? closestShape(files, (file) => file.aspect, aspect) ?? files[0] ?? null
 }
 
 /** What a render reads: an edit to any of these since the render makes it out of date. */

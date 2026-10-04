@@ -4,12 +4,15 @@
  * PRD-251B US-B109 — where a post's visual comes from, beside a template: a file the
  * person drops (POST /api/socials/posts/{id}/media; the server sniffs the type and holds
  * the limits) or one of the workspace's image and video Deliverables (the Library). For a
- * template's photo spot (editor-look-photo.tsx) both take pictures only.
+ * template's photo spot (editor-look-photo.tsx) both take pictures only. A Library picture's
+ * preview_url is an API path behind auth, so it loads as the Outputs gallery loads it (3 Oct
+ * 2026: a plain <img> showed none).
  */
 import { useDropzone } from 'react-dropzone'
 import { Loader2, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 import { cn } from '@/lib/utils'
 import type { DeliverableSummary } from '@/lib/api-client'
 import { HINT, Hint } from './editor-ui'
@@ -56,6 +59,16 @@ export function UploadDrop({ busy, onFile, pictureOnly = false }: UploadDropProp
   )
 }
 
+const THUMB = 'aspect-[4/3] w-full rounded-lg'
+
+/** A Library picture, fetched with the caller's auth; a blank tile until it arrives. */
+function LibraryThumb({ url }: { url: string }) {
+  const { src } = useAuthenticatedBlobUrl(url)
+  if (!src) return <span className={cn(THUMB, 'block bg-muted')} aria-hidden />
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="" className={cn(THUMB, 'object-cover')} />
+}
+
 interface LibraryGridProps {
   items: ReadonlyArray<DeliverableSummary> | undefined
   loading: boolean
@@ -77,10 +90,9 @@ export function LibraryGrid({ items, loading, busy, onPick }: LibraryGridProps) 
             className="flex w-full flex-col gap-1.5 rounded-xl border border-border bg-background/60 p-2 text-left"
           >
             {item.artifact_type === 'image' && item.preview_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.preview_url} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+              <LibraryThumb url={item.preview_url} />
             ) : (
-              <span className="flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-muted font-mono text-xs uppercase text-muted-foreground">
+              <span className={cn(THUMB, 'flex items-center justify-center bg-muted font-mono text-xs uppercase text-muted-foreground')}>
                 {item.artifact_type}
               </span>
             )}

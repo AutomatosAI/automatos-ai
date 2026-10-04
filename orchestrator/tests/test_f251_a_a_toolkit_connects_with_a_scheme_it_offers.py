@@ -32,7 +32,7 @@ class _AuthConfigs:
         self.offered = offered
         self.created = []
 
-    def list(self):
+    def list(self, **query):  # the SDK's signature: toolkit_slug, limit, cursor
         return _Obj(items=[])
 
     def create(self, toolkit, options):

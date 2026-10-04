@@ -11,7 +11,74 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_deliverables_actions(registry: ActionRegistry) -> None:
     """Register deliverable discovery actions (PRD-164 S3)."""
+    _register_list_deliverables(registry)
+    _register_get_deliverable(registry)
 
+
+def _origin_filters() -> dict:
+    """Where a deliverable came from: its origin, the run that made it, and origins to leave out."""
+    return {
+        "source_type": {
+            "type": "string",
+            "description": (
+                "Filter by origin: chat, task, mission, heartbeat, "
+                "playbook, trigger (optional)."
+            ),
+        },
+        "source_id": {
+            "type": "string",
+            "description": (
+                "Filter by the originating mission/task/heartbeat id "
+                "(e.g. a mission id to list that mission's deliverables)."
+            ),
+        },
+        "exclude_source_types": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Leave out deliverables of these origins (optional): "
+                "social_post leaves out a Socials post's own images and videos."
+            ),
+        },
+    }
+
+
+def _list_parameters() -> dict:
+    """platform_list_deliverables' filters."""
+    return {
+        "type": "object",
+        "properties": {
+            "artifact_type": {
+                "type": "string",
+                "enum": [
+                    "report", "image", "document", "code", "slide",
+                    "spreadsheet", "blog_post", "archive", "audio", "video",
+                ],
+                "description": "Filter by artifact type (optional).",
+            },
+            **_origin_filters(),
+            "agent_id": {
+                "type": "integer",
+                "description": "Filter by producing agent id (optional).",
+            },
+            "mine": {
+                "type": "boolean",
+                "description": "true = only deliverables produced by you (the calling agent).",
+            },
+            "search": {
+                "type": "string",
+                "description": "Search in title/summary/file path (optional).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results (default 20, max 50).",
+            },
+        },
+        "required": [],
+    }
+
+
+def _register_list_deliverables(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_deliverables",
         description=(
@@ -23,50 +90,7 @@ def register_deliverables_actions(registry: ActionRegistry) -> None:
             "or to locate an earlier report/document."
         ),
         category="deliverables",
-        parameters={
-            "type": "object",
-            "properties": {
-                "artifact_type": {
-                    "type": "string",
-                    "enum": [
-                        "report", "image", "document", "code", "slide",
-                        "spreadsheet", "blog_post", "archive", "audio", "video",
-                    ],
-                    "description": "Filter by artifact type (optional).",
-                },
-                "source_type": {
-                    "type": "string",
-                    "description": (
-                        "Filter by origin: chat, task, mission, heartbeat, "
-                        "playbook, trigger (optional)."
-                    ),
-                },
-                "source_id": {
-                    "type": "string",
-                    "description": (
-                        "Filter by the originating mission/task/heartbeat id "
-                        "(e.g. a mission id to list that mission's deliverables)."
-                    ),
-                },
-                "agent_id": {
-                    "type": "integer",
-                    "description": "Filter by producing agent id (optional).",
-                },
-                "mine": {
-                    "type": "boolean",
-                    "description": "true = only deliverables produced by you (the calling agent).",
-                },
-                "search": {
-                    "type": "string",
-                    "description": "Search in title/summary/file path (optional).",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default 20, max 50).",
-                },
-            },
-            "required": [],
-        },
+        parameters=_list_parameters(),
         permission_level="read",
         tags=["deliverables", "read", "outputs", "documents", "reports"],
         examples=[
@@ -77,6 +101,8 @@ def register_deliverables_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_get_deliverable(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_deliverable",
         description=(

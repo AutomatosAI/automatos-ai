@@ -66,7 +66,9 @@
       .half { --s: var(--u); position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; background:
         radial-gradient(90% 70% at 50% 0%, color-mix(in srgb, var(--brand) 34%, var(--ink)) 0%, transparent 80%), var(--ink); }
       .half img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      .label { position: absolute; left: calc(26 * var(--u)); bottom: calc(26 * var(--u)); }
+      /* The labels sit at the top of each photo, under the brand row: the words' panel rises from the
+         bottom and grows with its text, so a label there would end up under it on a square card. */
+      .label { position: absolute; left: calc(26 * var(--u)); top: calc(132 * var(--u)); }
       .panel { display: flex; flex-direction: column; gap: calc(18 * var(--s)); padding: calc(70 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u));
         background: linear-gradient(to top, color-mix(in srgb, var(--ink) 95%, transparent) 0%,
           color-mix(in srgb, var(--ink) 90%, transparent) 75%, transparent 100%); }
@@ -79,6 +81,7 @@
         .top { margin: calc(56 * var(--u)) calc(60 * var(--u)) 0 calc(48 * var(--u)); }
         .panel { padding: 0 calc(60 * var(--u)) calc(60 * var(--u)) calc(48 * var(--u)); background: none; }
         .panel .headline { font-size: calc(80 * var(--s)); }
+        .label { top: calc(26 * var(--u)); }
       }
     </style>
   </head>

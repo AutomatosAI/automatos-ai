@@ -60,6 +60,9 @@ def active_plans(db: Any) -> List[SocialCampaign]:
 
 
 def _apply(plan: SocialCampaign, fields: Mapping[str, Any], templates: Mapping[str, plans.TemplateInfo]) -> None:
+    for key in ("research", "make"):  # a save changes what it sends; the rest, and the records, stay
+        if isinstance(fields.get(key), Mapping):
+            fields = {**fields, key: {**(getattr(plan, key) or {}), **fields[key]}}
     clean = plans.validate_fields(fields, templates)
     starts = fields.get("starts_on", plan.starts_on)
     ends = fields.get("ends_on", plan.ends_on)
@@ -81,20 +84,48 @@ def create_plan(db: Any, *, workspace_id: UUID, created_by: str, fields: Mapping
     plan = SocialCampaign(
         workspace_id=workspace_id, created_by=created_by, name="", kind=plans.PLAN, status=plans.ACTIVE,
         approval_mode=campaigns.PER_POST, approved_hash_set=[],
-        sources=plans.validate_sources(None), make=plans.validate_make(None), research=plans.validate_research(None),
+        sources=plans.validate_sources(None), make=_new_make(fields),
+        research=plans.validate_research(None),
         late_policy=plans.SKIP, slot_overrides={},
     )
     _apply(plan, fields, templates_of(db, workspace_id))
+    make = plans.make_settings(plan)
+    if make["rhythm"] == plans.WEEKLY and "day" not in _sent(fields, "research"):  # PRD-251C US-C207
+        plan.research = {**(plan.research or {}), "day": plans.day_before(make["batch_day"])}
     db.add(plan)
     db.flush()
     return plan
+
+
+def _sent(fields: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = fields.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _new_make(fields: Mapping[str, Any]) -> Dict[str, Any]:
+    """A new plan's ``make`` before what it sends: the week's batch on Sunday at 17:00 (O1, O3),
+    or PRD-251B's defaults (made each morning) when it asks to be daily."""
+    daily = _sent(fields, "make").get("rhythm") == plans.DAILY
+    return plans.validate_make({"rhythm": plans.DAILY} if daily else plans.NEW_PLAN_MAKE)
+
+
+def _research_follows(plan: SocialCampaign, fields: Mapping[str, Any], batch_day: str, research_day: str) -> None:
+    """PRD-251C (C4, US-C207): a weekly plan whose research ran the day before its batch day
+    keeps doing so when the batch day moves, unless this save chose another research day."""
+    make = plans.make_settings(plan)
+    if make["rhythm"] != plans.WEEKLY or make["batch_day"] == batch_day or research_day != plans.day_before(batch_day):
+        return
+    if _sent(fields, "research").get("day", research_day) == research_day:
+        plan.research = {**(plan.research or {}), "day": plans.day_before(make["batch_day"])}
 
 
 def update_plan(db: Any, plan: SocialCampaign, fields: Mapping[str, Any]) -> SocialCampaign:
     """``plan`` with ``fields`` changed, each checked; an ended plan is read-only."""
     if plan.status == plans.ENDED:
         raise plans.InvalidPlan("an ended plan cannot change")
+    batch_day, research_day = plans.make_settings(plan)["batch_day"], plans.validate_research(plan.research)["day"]
     _apply(plan, fields, templates_of(db, plan.workspace_id))
+    _research_follows(plan, fields, batch_day, research_day)
     return plan
 
 
@@ -104,6 +135,20 @@ def set_status(plan: SocialCampaign, status: str) -> SocialCampaign:
         raise plans.InvalidPlan(f"a {plan.status} plan cannot become {status}")
     plan.status = status
     return plan
+
+
+def delete_plan(db: Any, plan: SocialCampaign) -> int:
+    """Delete ``plan`` and its content bank (3 Oct 2026, Gerard: "no way to delete plans").
+    The posts it made stay as ordinary posts, unlinked from it (no plan, no slot) and each
+    deleted on its own, as the posts of a deleted campaign stay. How many posts it kept."""
+    kept = (
+        db.query(SocialPost)
+        .filter(SocialPost.campaign_id == plan.id)
+        .update({SocialPost.campaign_id: None, SocialPost.slot_key: None}, synchronize_session=False)
+    )
+    db.query(SocialTopic).filter(SocialTopic.campaign_id == plan.id).delete(synchronize_session=False)
+    db.delete(plan)
+    return int(kept or 0)
 
 
 def made_posts(db: Any, plan: SocialCampaign, keys: Optional[Sequence[str]] = None) -> Dict[str, SocialPost]:

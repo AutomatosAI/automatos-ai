@@ -31,20 +31,28 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
-from services.session_report import session_report_lines  # PRD-234 S2
 from services.board_consent import (  # PRD-234: a human's board action is the approval
-    WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
+    WHY_ASSIGNED_BY_HAND, WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
-from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
+from services.ticket_redo import RUN_NOW, SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, redo_again, with_correction
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
-from services.board_task_view import enrich_with_agents
+from services.board_task_view import board_dict, enrich_with_agents
 from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
+from services.board_drag_rules import (  # PRD-252 R6
+    NO_AGENT_NO_PROGRESS,  # noqa: F401 — Auto's status tool and #1094's tests read it from here
+    UNFINISHED_BY_HAND, drag_refusal, question_refusal,
+)
+from api import board_task_patch  # F259: the general PATCH's checks and writes
+from api.board_card_moves import approve_outside_review, call_off, left_as_it_is  # F294
+from api.board_mission_card import (  # F291: a mission's card waiting for its plan
+    approve_from_its_card, is_mission_card, mission_card_refusal, start_its_mission, starts_its_mission,
+)
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 
@@ -59,9 +67,6 @@ VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done
 # F194: the source kinds a request may file: the board's own create ('user') and a
 # Command Centre follow-up ('activity'). Every other kind is the platform's.
 USER_CREATABLE_SOURCE_TYPES = frozenset({"user", "activity"})
-# #1094: a ticket with no agent cannot run, so it is never in progress. The
-# board's PATCHes and platform_update_task_status refuse it in these words.
-NO_AGENT_NO_PROGRESS = "Assign an agent first: a ticket with no agent cannot be in progress."
 # An operator note is read on a card, not in a document.
 MAX_TASK_NOTE_CHARS = 1000
 # A reviewer's verdict is folded into the next attempt's prompt, so it is read
@@ -145,129 +150,11 @@ async def _auto_create_task_report(
     task: BoardTask,
     exec_result: Dict[str, Any],
 ) -> None:
-    """
-    Persist an agent_reports row for a completed task so it shows up in
-    Reports / Deliverables / Activity Feed — same pattern heartbeats use.
-    Always non-blocking: never raises, just warns on failure.
-    """
-    try:
-        from services.report_service import ReportService, compute_execution_metrics
+    """File the ticket's report: services.task_report (F321: the metrics block every
+    report kind shares). Never raises."""
+    from services.task_report import auto_create_task_report
 
-        agent_name = "Unknown Agent"
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            if agent:
-                agent_name = agent.name
-
-        # Source the body from the agent's actual response, falling back to whatever
-        # text was captured in task.result.
-        llm_text = (
-            exec_result.get("result")
-            or exec_result.get("response")
-            or exec_result.get("output")
-            or exec_result.get("content")
-            or task.result
-            or ""
-        )
-
-        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
-        exec_metrics = compute_execution_metrics(
-            db,
-            workspace_id,
-            agent_id=task.assigned_agent_id,
-            execution_id=getattr(task, "execution_id", None),
-            started_at=getattr(task, "started_at", None),
-            completed_at=getattr(task, "completed_at", None),
-            extra={
-                "task_id": task.id,
-                "task_status": task.status,
-                "trigger": "task",
-            },
-        )
-
-        # Honour upstream-supplied tokens if the rollup found nothing
-        if not exec_metrics.get("tokens_used"):
-            usage = exec_result.get("usage") or {}
-            fallback_tokens = (
-                usage.get("total_tokens")
-                or exec_result.get("tokens_used")
-                or 0
-            )
-            if fallback_tokens:
-                exec_metrics["tokens_used"] = fallback_tokens
-
-        report_status = "ok" if task.status in ("done", "review") else "warning"
-        if task.error_message:
-            report_status = "critical"
-
-        # Render the same shape heartbeat reports use so consumers stay uniform.
-        lines = [
-            f"# {agent_name} — Task Report",
-            f"**Task:** {task.title}",
-            f"**Status:** {task.status}",
-            "",
-        ]
-        if task.error_message:
-            lines.append("## Error")
-            lines.append(str(task.error_message))
-            lines.append("")
-        if llm_text:
-            lines.append("## Result")
-            lines.append(str(llm_text))
-            lines.append("")
-        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
-        lines.append("## Execution Metrics")
-        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
-        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
-        lines.append(f"- Tokens (in/out/total): "
-                     f"{exec_metrics.get('input_tokens', 0)} / "
-                     f"{exec_metrics.get('output_tokens', 0)} / "
-                     f"{exec_metrics.get('tokens_used', 0)}")
-        if exec_result.get("runtime") == RUNTIME_CLI:
-            lines.append("- Cost: plan usage (subscription) — no dollar figure")
-        else:
-            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
-        if exec_metrics.get("duration_ms") is not None:
-            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
-        content = "\n".join(lines)
-
-        # Summary is the first non-empty body line — same convention as heartbeat reports.
-        summary = None
-        for line in str(llm_text).split("\n"):
-            stripped = line.strip().lstrip("#").strip()
-            if stripped:
-                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
-                break
-        # F197: a failed task's result is blank, so its report is summarised by
-        # why it failed. The summary used to fall back to "**Task:** …", and the
-        # bell could not tell a credit outage it had already announced.
-        if summary is None and task.error_message:
-            first = str(task.error_message).strip().splitlines()[0]
-            summary = (first[:497] + "...") if len(first) > 497 else first
-
-        svc = ReportService(db, workspace_id)
-        report_result = await svc.create_report(
-            agent_id=task.assigned_agent_id,
-            agent_name=agent_name,
-            title=f"Task: {task.title}",
-            content=content,
-            report_type="task",
-            status=report_status,
-            summary=summary,
-            metrics=exec_metrics,
-            linked_task_ids=[task.id],
-        )
-        if not report_result.get("success"):
-            logger.warning(
-                "[BoardTasks] Auto-report creation failed for task=%s: %s",
-                task.id, report_result.get("error"),
-            )
-    except Exception:
-        logger.error(
-            "[BoardTasks] _auto_create_task_report raised for task=%s",
-            getattr(task, "id", "?"),
-            exc_info=True,
-        )
+    await auto_create_task_report(db, workspace_id, task, exec_result)
 
 
 # ── PRD-128: Unified notification dispatch ─────────────────────────
@@ -384,76 +271,18 @@ async def create_task(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Create a new board task."""
-    body = await request.json()
+    """Create a new board task. F276: the answer is the ticket as the board lists
+    it, with its number (#0042); what a request may file is checked in
+    api/board_task_create.py."""
+    from api.board_task_create import created_ticket_answer, new_ticket_columns
 
-    title = _text_of(body.get("title"), "title")
-    if not title:
-        raise HTTPException(status_code=422, detail="title is required")
-
-    assigned_agent_id = _agent_id_of(body.get("assigned_agent_id"))
-    if assigned_agent_id is not None:
-        agent = db.query(Agent).filter(
-            Agent.id == assigned_agent_id,
-            Agent.workspace_id == ctx.workspace_id,
-        ).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Assigned agent not found in workspace")
-
-    priority = body.get("priority", "medium")
-    if not _one_of(priority, VALID_PRIORITIES):
-        raise HTTPException(status_code=422, detail=f"Invalid priority: {priority}")
-
-    review_mode = body.get("review_mode", "auto")
-    if not _one_of(review_mode, VALID_REVIEW_MODES):
-        raise HTTPException(status_code=422, detail=f"Invalid review_mode: {review_mode}")
-
-    planning_data = body.get("planning_data")
-    # Auto-set review status when approval_action is present
-    if planning_data and isinstance(planning_data, dict) and planning_data.get("approval_action"):
-        status = "review"
-    else:
-        status = "assigned" if assigned_agent_id else "inbox"
-
-    # PRD-127: ephemeral attachments
-    attachment_ids = body.get("attachment_ids", [])
-    if attachment_ids and not isinstance(attachment_ids, list):
-        raise HTTPException(status_code=422, detail="attachment_ids must be a list")
-
-    # PRD-221 S14: a caller (e.g. a Command Centre activity card) may attach
-    # the source it was created from, so the board card links back. Defaults
-    # to 'user' when absent — unchanged for every existing caller.
-    # F194: only a person's kinds. A mission's or playbook's step, a session or
-    # a lane's ticket is filed by the platform; a request claiming one made a
-    # ticket the dispatcher and the host treat as the platform's own.
-    source_type = body.get("source_type") or "user"
-    if not isinstance(source_type, str):
-        raise HTTPException(status_code=422, detail=(
-            f"source_type is one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or left out."))
-    if source_type not in USER_CREATABLE_SOURCE_TYPES:
-        raise HTTPException(status_code=422, detail=(
-            f"source_type '{source_type}' is filed by the platform, not by a request. "
-            f"Use one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or leave it out."))
-    source_id = body.get("source_id")
-
+    columns = new_ticket_columns(db, ctx.workspace_id, await request.json())
     task = BoardTask(
         workspace_id=ctx.workspace_id,
-        title=title,
-        description=body.get("description"),
-        raw_prompt=body.get("raw_prompt"),
-        status=status,
-        priority=priority,
-        review_mode=review_mode,
-        assigned_agent_id=assigned_agent_id,
         created_by_type="user",
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
-        parent_task_id=body.get("parent_task_id"),
-        source_type=source_type,
-        source_id=source_id,
-        tags=body.get("tags", []),
-        planning_data=planning_data,
-        attachment_ids=attachment_ids,  # PRD-127
-        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
+        **columns,
     )
     db.add(task)
     db.flush()  # the id the notice carries
@@ -483,7 +312,7 @@ async def create_task(
         db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return task.to_dict()
+    return created_ticket_answer(db, task)
 
 
 @router.get("")
@@ -676,7 +505,13 @@ async def update_task(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Update a board task (partial)."""
+    """Update a board task (partial).
+
+    F259: a status in the body moves the ticket as the board's own status route
+    does (PRD-252 R6): the same refusals, judged on the ticket as this PATCH leaves
+    it, Run now's start and Cancel's stop. A refusal comes before anything is
+    committed, and the fields it carried are not stored either.
+    """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
         BoardTask.workspace_id == ctx.workspace_id,
@@ -685,155 +520,18 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     body = await request.json()
-    if body.get("status") == "in_progress" and task.status != "in_progress":
-        _hold_before_starting(db, task)
-    status_before = task.status  # F190 review: a repeat of in_progress launches nothing
-
-    # F060: this route accepted any key, returned 200 and echoed the task back,
-    # while storing only the eleven fields below. `review_feedback` — the field
-    # a reviewer's verdict travels in — went in and vanished, so a rejection
-    # looked accepted and nothing was rejected. A PATCH that silently drops
-    # what it was given is worse than one that refuses: refuse.
-    unknown = sorted(set(body) - PATCHABLE_TASK_FIELDS)
-    if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unknown field(s) for a board task: {unknown}. "
-                f"This route stores exactly: {sorted(PATCHABLE_TASK_FIELDS)}. "
-                "Nothing was changed."
-            ),
-        )
-
-    # #1094: refused before anything changes; an agent this body assigns counts,
-    # read as an id first (review LOW), never by the truth of what was sent.
-    agent_after = task.assigned_agent_id
-    if "assigned_agent_id" in body:
-        agent_after = _agent_id_of(body["assigned_agent_id"])
-    # F195's candidates: a status is checked before anything compares it (a list was a 500).
-    if "status" in body and not _one_of(body["status"], VALID_STATUSES):
-        raise HTTPException(status_code=422, detail=f"Invalid status: {body['status']}")
-    if body.get("status") == "in_progress" and not agent_after:
-        raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)
-    owned = mission_runs_it(db, task) if body.get("status") in STARTING_STATUSES else None
-    if owned:
-        raise HTTPException(status_code=409, detail=owned)
-
-    if "review_feedback" in body:
-        # The reviewer's verdict. The dispatcher folds it into the prompt of the
-        # next attempt (see _ticket_prompt) and clears it once consumed.
-        feedback = body["review_feedback"]
-        task.review_feedback = str(feedback)[:MAX_REVIEW_FEEDBACK_CHARS] if feedback else None
-
-    if "title" in body:
-        title = _text_of(body["title"], "title")
-        if not title:
-            raise HTTPException(status_code=422, detail="title cannot be empty")
-        task.title = title
-
-    if "description" in body:
-        task.description = body["description"]
-
-    if "status" in body:
-        new_status = body["status"]
-        old_status = task.status
-        if new_status == "in_progress" and old_status != "in_progress":
-            # F190: a new run starts clean, as PATCH /status does; the last run's
-            # outcome goes on record (keep_previous_run) and off the card.
-            keep_previous_run(task, why="moved to in progress", by=_operator_ref(ctx))
-            _new_run(task)  # F209: the run this move starts
-            task.started_at = datetime.now(timezone.utc)
-            task.completed_at = None
-            task.error_message = None
-            task.result = None
-        task.status = new_status
-        end_session_claim(task, old_status, new_status)
-        if new_status in ("done", "review", "closed"):
-            task.completed_at = datetime.now(timezone.utc)
-        if new_status == "blocked":
-            # A person blocking a ticket that a machine had ALREADY parked used to
-            # record nothing — the `blocked_at is None` guard kept the park's
-            # reason, so the person's intent was invisible to everything after.
-            if task.blocked_at is None:
-                task.blocked_at = datetime.now(timezone.utc)
-            if body.get("blocked_reason") or old_status != "blocked":
-                task.blocked_reason = body.get("blocked_reason")
-        if new_status != "blocked" and old_status == "blocked":
-            task.blocked_at = None
-            task.blocked_reason = None
-        # F036: an explicit status change through this route is a person's
-        # decision. A stop is recorded so no answer or grant can quietly undo
-        # it; any other status lifts it.
-        from services.operator_stop import apply_explicit_status
-
-        apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
-
-    if "priority" in body:
-        if not _one_of(body["priority"], VALID_PRIORITIES):
-            raise HTTPException(status_code=422, detail=f"Invalid priority: {body['priority']}")
-        task.priority = body["priority"]
-
-    if "review_mode" in body:
-        if not _one_of(body["review_mode"], VALID_REVIEW_MODES):
-            raise HTTPException(status_code=422, detail=f"Invalid review_mode: {body['review_mode']}")
-        task.review_mode = body["review_mode"]
+    was = task.status
+    new_status = board_task_patch.patch_status(db, task, body)
+    agent = board_task_patch.patch_agent(db, ctx.workspace_id, task, body)
+    board_task_patch.refuse_the_patch(db, task, body, new_status, agent)
 
     if "assigned_agent_id" in body:
-        agent_id_val = body["assigned_agent_id"]
-        if agent_id_val is not None:
-            agent_id_val = int(agent_id_val)
-            agent = db.query(Agent).filter(
-                Agent.id == agent_id_val,
-                Agent.workspace_id == ctx.workspace_id,
-            ).first()
-            if not agent:
-                raise HTTPException(status_code=404, detail="Assigned agent not found in workspace")
-        task.assigned_agent_id = agent_id_val
-        # Auto-transition from inbox to assigned when an agent is set
-        if agent_id_val and task.status == "inbox":
-            task.status = "assigned"
-
-    if "result" in body:
-        task.result = body["result"]
-
-    if "error_message" in body:
-        task.error_message = body["error_message"]
-
-    if "tags" in body:
-        task.tags = body["tags"]
-
-    if "planning_data" in body:
-        task.planning_data = body["planning_data"]
-
-    # An operator note — a remark on the ticket that is NOT a rejection.
-    # Night 1 (2026-09-18): the only way to say anything to a ticket was to
-    # reject it into a redo, so a correction and a comment were the same gesture.
-    # Notes land beside the session's own progress notes, in the same list the
-    # card already renders.
-    if body.get("note"):
-        note_text = str(body["note"]).strip()[:MAX_TASK_NOTE_CHARS]
-        if note_text:
-            ref = dict(task.runtime_ref or {})
-            ref["session_notes"] = (ref.get("session_notes") or []) + [{
-                "note": note_text,
-                "at": datetime.now(timezone.utc).isoformat(),
-                "by": "you",
-            }]
-            task.runtime_ref = ref   # rebuilt, never mutated in place (JSONB)
-
-    # Check if we need to trigger execution
-    # PRD-171 F025: only user-owned board tasks self-execute on a status flip.
-    # Recipe + mission-mirror rows are driven by their own engines.
-    trigger_execution = (
-        "status" in body
-        and body["status"] == "in_progress"
-        and status_before != "in_progress"
-        and task.assigned_agent_id
-        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
-    )
-
-    # PRD-128: dispatch task_complete on terminal transition
-    if "status" in body and body["status"] == "done":
+        board_task_patch.note_the_assign(db, task, agent)  # F294: the card says who it went to
+        task.assigned_agent_id = agent
+    board_task_patch.patch_fields(task, body)
+    moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason")) if new_status else None
+    board_task_patch.patch_after_the_move(task, body, was, new_status)
+    if new_status == "done":  # PRD-128: dispatch task_complete on terminal transition
         await _dispatch_task_complete(db, ctx.workspace_id, task)
 
     # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
@@ -842,32 +540,23 @@ async def update_task(
         db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
         event="task_updated",
     )
-    if (
-        not trigger_execution
-        and "assigned_agent_id" in body
-        and task.status == "assigned"
-        and task.assigned_agent_id
-        and task.source_type != "recipe"
-    ):
+    if moved is None and "assigned_agent_id" in body and task.status == "assigned" \
+            and task.assigned_agent_id and task.source_type != "recipe":
+        # F275: the owner's Assign is their approval, as creating it assigned is
+        # (PRD-234 D16): #0192 waited on grant #1220 for the owner's own click.
+        consent_for_created_ticket(db, workspace_id=ctx.workspace_id, task=task,
+                                   actor=_operator_ref(ctx), why=WHY_ASSIGNED_BY_HAND)
+        _note_no_host_for_cli(db, task)  # F272: the line says who it waits for now, as on create
         # PRD-161: assigning notifies the dispatch loop (single spine); the loop
         # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
     db.commit()
     db.refresh(task)
 
-    if trigger_execution:
-        _launch_task_execution(
-            task_id=task.id,
-            agent_id=task.assigned_agent_id,
-            workspace_id=str(ctx.workspace_id),
-            prompt=task.raw_prompt or task.description or task.title,
-            review_mode=task.review_mode or "auto",
-            attachment_ids=task.attachment_ids,  # PRD-127
-            run_id=(task.runtime_ref or {}).get(RUN_ID_KEY),
-        )
-
     logger.info("[BoardTasks] Updated task %d", task.id)
-    return task.to_dict()
+    said = moved.get("message") if moved else None
+    # F276: the ticket as the board lists it, its number included
+    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {})}
 
 
 @router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
@@ -1023,21 +712,22 @@ async def _run_approval_action(db: Session, ctx: RequestContext, approval_action
 # approved or changed. A ticket verdict marked the card done and left the run
 # awaiting approval, never started.
 MISSION_CARD_SOURCE = "orchestration"
-MISSION_CARD_VERDICT = ("This is a mission's card: approve or change its plan on the mission's page. "
-                        "Approving the card here would mark it done without starting the mission.")
+MISSION_CARD_VERDICT = "This is a mission's card: its plan is turned down or changed on the mission's page."
 
 
-def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int) -> BoardTask:
+def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int, *,
+                        its_mission_decides: bool = True) -> BoardTask:
     """The ticket an Approve or Reject decides; 404 when it is not this workspace's,
-    409 for a mission's own card (D6)."""
+    409 for a mission's own card (D6), naming the mission (F291), unless the caller
+    decides one itself (``its_mission_decides`` False: Approve gives a waiting plan)."""
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
         BoardTask.workspace_id == ctx.workspace_id,
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.source_type == MISSION_CARD_SOURCE:
-        raise HTTPException(status_code=409, detail=MISSION_CARD_VERDICT)
+    if task.source_type == MISSION_CARD_SOURCE and its_mission_decides:
+        raise HTTPException(status_code=409, detail=mission_card_refusal(db, task))
     return task
 
 
@@ -1054,12 +744,13 @@ async def approve_task(
     If the task has an approval_action in planning_data, execute it
     (e.g., publish a blog post). Then move the task to done.
     """
-    task = _ticket_for_verdict(db, ctx, task_id)
-    if task.status != "review":
-        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
-
+    task = _ticket_for_verdict(db, ctx, task_id, its_mission_decides=False)
     body = await request.json()
     note = _text_of(body.get("note"), "note")  # PRD-252 R2 (F038): kept on the ticket
+    if is_mission_card(task):  # F291: Approve on a mission's card approves its waiting plan
+        return approve_from_its_card(db, ctx, task, note=note)
+    if task.status != "review":  # F294: in words; a card that finished by itself keeps the note
+        return approve_outside_review(db, task, note)
     action_result = None
     approval_action = (task.planning_data or {}).get("approval_action")
 
@@ -1165,34 +856,8 @@ async def reject_task(
     same way; what it had finished with is kept in its history first.
     """
     task = _ticket_for_verdict(db, ctx, task_id)
-    if task.status not in SENDABLE_BACK:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
-        )
-    refused = redo_refusal(db, task)  # F243: a redo that can't run on this card is refused before anything changes
-    if refused:
-        raise HTTPException(status_code=409, detail=refused)
-    if not task.assigned_agent_id and not takes_its_own_redo(task):
-        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
-
     body = await request.json()
-    feedback = str(body.get("feedback") or "").strip()[:MAX_REVIEW_FEEDBACK_CHARS]
-    seen = task.status
-    # F198: the redo corrects this draft with every note the ticket has had, so
-    # both are kept: the draft from review too (F190), the note beside the others.
-    by = _operator_ref(ctx)
-    keep_previous_run(task, why=SENT_BACK, by=by)
-    if feedback:
-        task.planning_data = with_correction(task.planning_data, feedback, by=by,
-                                             at=datetime.now(timezone.utc).isoformat())
-
-    # Q44: back to the same agent for another attempt, feedback in context.
-    # F195: only from the status this request saw, so a second click (or an
-    # approval that landed first) finds the ticket already decided.
-    if not _decide(db, task, seen=seen, values={"status": _redo_status(task)}):
-        raise already_decided(task)
-    _redo(db, ctx, task, feedback or SENT_BACK_WITHOUT_A_NOTE)
+    feedback = send_back(db, ctx, task, body.get("feedback"), by=_operator_ref(ctx))
     _refreshed(db, task, task_id)
 
     logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
@@ -1205,6 +870,41 @@ async def reject_task(
         "assigned_agent_id": task.assigned_agent_id,
         "feedback": feedback or None,
     }
+
+
+def send_back(db: Session, ctx: Any, task: BoardTask, feedback: Any, *, by: str) -> str:
+    """Reject's core, for the button and for Auto's send-back (F278): the draft
+    goes on record, the correction rides into the redo, and the redo starts on the
+    same card. Refused with an HTTPException before anything changes. ``ctx``
+    carries the workspace (and the person, for a playbook's redo). The feedback
+    as kept."""
+    if task.status not in SENDABLE_BACK:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
+        )
+    refused = redo_refusal(db, task)  # F243: a redo that can't run on this card is refused before anything changes
+    if refused:
+        raise HTTPException(status_code=409, detail=refused)
+    if not task.assigned_agent_id and not takes_its_own_redo(task):
+        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
+
+    feedback = str(feedback or "").strip()[:MAX_REVIEW_FEEDBACK_CHARS]
+    seen = task.status
+    # F198: the redo corrects this draft with every note the ticket has had, so
+    # both are kept: the draft from review too (F190), the note beside the others.
+    keep_previous_run(task, why=SENT_BACK, by=by)
+    if feedback:
+        task.planning_data = with_correction(task.planning_data, feedback, by=by,
+                                             at=datetime.now(timezone.utc).isoformat())
+
+    # Q44: back to the same agent for another attempt, feedback in context.
+    # F195: only from the status this request saw, so a second click (or an
+    # approval that landed first) finds the ticket already decided.
+    if not _decide(db, task, seen=seen, values={"status": _redo_status(task)}):
+        raise already_decided(task)
+    _redo(db, ctx, task, feedback or SENT_BACK_WITHOUT_A_NOTE)
+    return feedback
 
 
 def _redo_status(task: BoardTask) -> str:
@@ -1298,17 +998,19 @@ def _running_now(db: Session, task: BoardTask) -> bool:
     execution, and Run Now answered "already running"."""
     if task.status != "in_progress":
         return False
-    if task.source_type in _NON_EXECUTABLE_SOURCE_TYPES and task.source_type != "recipe":
+    # A partial row (an Auto tool's test double) may carry no source or lease: no run holds it.
+    source_type = getattr(task, "source_type", None)
+    if source_type in _NON_EXECUTABLE_SOURCE_TYPES and source_type != "recipe":
         # A mission's step: the mission engine runs it, never the board (PRD-171
         # F025). It holds no board lease, so the lease cannot speak for it, and
         # re-dispatching it would run the step twice (review HIGH).
         return True
-    lease = task.lease_until
+    lease = getattr(task, "lease_until", None)
     if lease is not None:
         lease = lease if lease.tzinfo else lease.replace(tzinfo=timezone.utc)
         if lease > datetime.now(timezone.utc):
             return True
-    if task.source_type == "recipe" and task.source_id:
+    if source_type == "recipe" and task.source_id:
         from sqlalchemy import text as sa_text
 
         return db.execute(
@@ -1351,6 +1053,8 @@ def _redispatch_task(db: Session, task: BoardTask) -> bool:
     task.attempts = 0
     task.completed_at = None
     task.started_at = None
+    task.blocked_at = None    # F259: a started ticket is not blocked; its old reason
+    task.blocked_reason = None  # ("Awaiting human approval …") stayed on it to Done
     _note_no_host_for_cli(db, task)  # a Claude Code agent's ticket says who it waits for
     # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
     if task.source_type != "recipe":
@@ -1389,6 +1093,9 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     (the dispatcher folds both into the prompt) and the operator's consent is
     on record. A drag used to launch the bare brief directly.
     """
+    started = start_its_mission(db, ctx, task, "in_progress")  # F291: a mission's waiting plan is approved
+    if started is not None:
+        return started
     owned = mission_runs_it(db, task)
     if owned:
         raise HTTPException(status_code=409, detail=owned)
@@ -1406,15 +1113,19 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     if _running_now(db, task):
         raise HTTPException(status_code=409, detail=(
             f"{ticket_label(task, capital=True)} is already running — nothing to start; it reports when it finishes."))
+    asked = question_refusal(db, task)  # F259: its question was "granted" unanswered
+    if asked:
+        raise HTTPException(status_code=409, detail=asked)
     # PRD-234: pressing Run Now (or dragging to In progress) is the operator's
     # approval, so the gate lets the ticket through instead of parking it.
-    record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
-                            agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
+    consent = record_operator_consent(db, workspace_id=ctx.workspace_id, task_id=task.id,
+                                      agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
     was = task.status
     rerun = was in FINISHED
+    redo_again(task)  # F294 (#0273): a redo that failed with no answer runs again with the owner's words
     # F190: a new run starts clean. The last run's result goes on record (a no-op
     # when there is none) and off the card, where the new run's would sit under it.
-    keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    keep_previous_run(task, why=RUN_NOW, by=_operator_ref(ctx))
     task.result = None
     task.error_message = None
     if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
@@ -1424,7 +1135,7 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
                 task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
     return {"success": True, "task_id": task.id, "status": task.status,
             "rerun_of": was if rerun else None, "started": not _waiting_for_a_host(task),
-            "message": _run_now_message(task, was, rerun)}
+            "message": _run_now_message(task, was, rerun, approved=consent == "granted")}
 
 
 def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -> Dict[str, Any]:
@@ -1440,13 +1151,15 @@ def _run_the_playbook_again(db: Session, ctx: RequestContext, task: BoardTask) -
             "rerun_of": was if was in FINISHED else None, "started": True, "message": message}
 
 
-def _run_now_message(task: BoardTask, was: str, rerun: bool) -> str:
+def _run_now_message(task: BoardTask, was: str, rerun: bool, *, approved: bool = False) -> str:
     """What Run Now did, in words (#1115: a Claude Code ticket waits for a host)."""
     if _waiting_for_a_host(task):
         return f"{ticket_label(task, capital=True)} is queued, but nothing can start it yet: {task.blocked_reason}"
     if rerun:
         return (f"Re-running {ticket_label(task)} — it was {was}; its previous result is kept in the "
                 "ticket's history.")
+    if approved:  # F259 (#0059): it waited for an approval, and nothing said this gave it
+        return f"{ticket_label(task, capital=True)} started. It was waiting for your approval; starting it gave it."
     if was == "in_progress":  # F176: the word said running, but no run held it
         return f"{ticket_label(task, capital=True)} said in progress, but nothing was running it — started it now."
     return f"{ticket_label(task, capital=True)} started."
@@ -1481,15 +1194,6 @@ def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
         task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
 
 
-# PRD-252 R6: a drag that needs a decision goes through the decision's button.
-# Review → Done by drag skipped the ticket's approval action (a blog never
-# published), and Review → Assigned sent work back with no note.
-DECISION_DRAGS = {
-    ("review", "done"): "Use Approve on the ticket: a drag to Done would skip its approval step.",
-    ("review", "assigned"): "Use Reject on the ticket: it sends the agent what to fix with the redo.",
-}
-
-
 @router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
@@ -1516,22 +1220,13 @@ async def update_task_status(
         _hold_before_starting(db, task)  # F209: a claim that landed while the body arrived wins
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
-    refusal = DECISION_DRAGS.get((task.status, new_status))
+    refusal = drag_refusal(task, new_status, running=_running_now(db, task),
+                           mission_ticket=task.source_type in MISSION_TICKET_TYPES)
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
-    if new_status == "cancelled" and task.status not in UNCANCELLABLE:
-        return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
-    if new_status == "in_progress" and not task.assigned_agent_id:
-        raise HTTPException(status_code=409, detail=NO_AGENT_NO_PROGRESS)  # #1094
-    # F190 review: a repeat of in_progress on a running ticket (a double drag)
-    # changes nothing; a stuck ticket has Run Now.
-    if new_status == "in_progress" and task.status != "in_progress" \
-            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)):
-        return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
-    owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
-    if owned:
-        raise HTTPException(status_code=409, detail=owned)
-    _set_status_by_hand(task, new_status, body.get("blocked_reason"), by=_operator_ref(ctx))
+    moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason"))
+    if moved is not None:
+        return moved
 
     # PRD-128: dispatch task_complete on drag-to-done transitions
     if new_status == "done":
@@ -1546,6 +1241,29 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
     return {"id": task.id, "status": task.status}
+
+
+def _move_by_hand(db: Session, ctx: RequestContext, task: BoardTask, new_status: str,
+                  blocked_reason: Any) -> Optional[Dict[str, Any]]:
+    """A person's status change, as the board makes it (PRD-252 R6), from a drag
+    or a PATCH: a move into Cancelled is Cancel (F245), a move into In progress is
+    Run now, and any other is the move itself. The answer of a cancel or a start,
+    which commit their own work; None for a move the caller commits."""
+    if new_status == "cancelled" and task.status == "done":
+        return call_off(db, task, by=_operator_ref(ctx))  # F294 (#0422): a Done card, with who and when
+    if new_status == "cancelled" and task.status not in UNCANCELLABLE:
+        return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
+    # F190 review: a repeat of in_progress on a running ticket (a double drag)
+    # changes nothing; a stuck ticket has Run Now.
+    if new_status == "in_progress" and task.status != "in_progress" \
+            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)
+                 or starts_its_mission(db, task, new_status)):  # F291: a mission's waiting plan
+        return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
+    owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
+    if owned:
+        raise HTTPException(status_code=409, detail=owned)
+    _set_status_by_hand(task, new_status, blocked_reason, by=_operator_ref(ctx))
+    return None
 
 
 def _set_status_by_hand(task: BoardTask, new_status: str, blocked_reason: Any, *, by: str) -> None:
@@ -1565,6 +1283,8 @@ def _set_status_by_hand(task: BoardTask, new_status: str, blocked_reason: Any, *
     end_session_claim(task, old_status, new_status)
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
+    if new_status in UNFINISHED_BY_HAND:  # F259: Done → Inbox kept its completion time
+        task.completed_at = None
     if new_status == "review" and old_status != "review":  # PRD-252 R3: why it is there
         task.runtime_ref = with_review_reason(task.runtime_ref, MOVED_BY_YOU, task.completed_at)
     if new_status == "blocked" and task.blocked_at is None:
@@ -1628,8 +1348,10 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == "done":  # F294 (#0422): called off, with who and when, as its drag does
+        return call_off(db, task, by=_operator_ref(ctx))
     if task.status in UNCANCELLABLE:
-        return {"id": task.id, "status": task.status, "applied": False}
+        return left_as_it_is(db, task)  # F294: applied false, in words
     return _cancel_like_the_button(db, ctx, task)
 
 
@@ -1871,31 +1593,34 @@ def _waiting_for_a_host(task: Any) -> bool:
 
 def _note_no_host_for_cli(db: Session, task: "BoardTask") -> bool:
     """A ``cli`` agent's ticket waits for the paired host; while none is online
-    the ticket says so (the lane's own line), cleared once one is back. Returns
-    True when the row changed. No-op for API-runtime agents."""
-    # A test double or a partial row may carry no assignee: nothing to note.
+    the ticket says so (the lane's own line), cleared once one is back. A ticket
+    no CLI agent holds never says it (F272: #0177, moved to the Analyst, kept
+    night 7's line, and Run now answered that nothing could start it as it
+    started). Returns True when the row changed."""
+    # A test double or a partial row may carry no assignee or reason.
     agent_id = getattr(task, "assigned_agent_id", None) if task is not None else None
-    if not agent_id:
-        return False
-    if _agent_runtime_kind(db, agent_id) != RUNTIME_CLI:
-        return False
-    from services.cli_ticket_lane import (
-        NO_HOST_REASON, agent_cli_provider, host_online, is_no_cli_host_reason, no_cli_host_reason_for,
-    )
-    ours = task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason)
-    if not host_online(db, task.workspace_id):
-        wanted = NO_HOST_REASON
-    else:
-        # CLI adapter design §8.2: online, but does any host run THIS agent's CLI?
-        wanted = no_cli_host_reason_for(db, task.workspace_id, agent_cli_provider(db, agent_id))
+    reason = getattr(task, "blocked_reason", None) if task is not None else None
+    cli = bool(agent_id) and _agent_runtime_kind(db, agent_id) == RUNTIME_CLI
+    wanted = _cli_host_line(db, task, agent_id) if cli else None
     if wanted:
-        if task.blocked_reason != wanted:
+        if reason != wanted:
             task.blocked_reason = wanted
             return True
-    elif ours:
+    elif reason and _waiting_for_a_host(task):
         task.blocked_reason = None
         return True
     return False
+
+
+def _cli_host_line(db: Session, task: "BoardTask", agent_id: int) -> Optional[str]:
+    """What a CLI agent's ticket waits for: no paired host online, or none that runs
+    this agent's CLI; None when a host can take it."""
+    from services.cli_ticket_lane import NO_HOST_REASON, agent_cli_provider, host_online, no_cli_host_reason_for
+
+    if not host_online(db, task.workspace_id):
+        return NO_HOST_REASON
+    # CLI adapter design §8.2: online, but does any host run THIS agent's CLI?
+    return no_cli_host_reason_for(db, task.workspace_id, agent_cli_provider(db, agent_id))
 
 
 def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: int) -> None:

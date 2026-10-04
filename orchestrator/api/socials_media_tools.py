@@ -39,7 +39,8 @@ from core.social_templates import IMAGE_SLOT, SocialTemplateError, validate_soci
 from modules.socials import ai_options, media_caps, media_tools, render, service
 from modules.socials.capabilities import media_capabilities
 from modules.socials.media_store import MediaStore
-from modules.socials.recipes.footage import locked_post, route_for
+from modules.socials.recipes.footage import locked_post
+from modules.socials.recipes.footage_routes import route_for
 from modules.socials.settings import KEY_MEDIA_MONTHLY_CAP, KEY_MEDIA_POST_CAP, WORKSPACE_SOCIALS_SETTINGS_KEY
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ def _view(db: Session, workspace: Workspace) -> Dict[str, Any]:
         "defaults": media_tools.defaults_of(workspace.settings),
         "caps": {"monthly_usd": spend.monthly_cap_usd, "per_post_usd": spend.post_cap_usd, "problem": spend.problem},
         "spend": {"month_usd": spend.month_usd, "period_end": spend.period_end.isoformat()},
+        "shot_usd": media_tools.shot_usd(),  # PRD-251C US-C302: the Plan page's spend per row
     }
 
 

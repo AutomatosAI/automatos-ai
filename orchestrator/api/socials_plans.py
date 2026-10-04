@@ -9,15 +9,25 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
 * ``GET /api/socials/plans/{plan_id}``: the plan with its bank's counts; ``PUT`` changes
   any of its fields, each checked (known channels and formats, lengths the chosen
   template declares, times and days); an ended plan is read-only.
+* A cadence row may set its own visual (PRD-251C US-C302); a save naming an AI toolkit the
+  workspace cannot use for it now is a 422 (``modules/socials/plan_row_visuals.py``).
+* A plan's save (``POST`` or ``PUT``) in a workspace that never had research installs the
+  Content bank research playbook once the plan is committed (PRD-251C US-C101,
+  ``services/socials_research_setup.py``); a failure there never fails the save.
 * ``POST /api/socials/plans/{plan_id}/pause`` · ``/resume`` · ``/end``.
+* ``DELETE /api/socials/plans/{plan_id}``: the plan and its content bank are deleted (owners
+  and admins, ``documents:delete``); the posts it made stay as ordinary posts, unlinked.
 * ``POST /api/socials/plans/draft``: **Plan with Auto**, a plan drafted from what the person
   says, not saved (``api/socials_plan_draft.py``).
 * ``POST /api/socials/plans/{plan_id}/research``: **Research again** (US-B204): the
   workspace's Content bank research playbook runs for the plan now (202 with its
-  execution id); 409 when the Socials package that carries it is not installed.
+  execution id). A missing copy is put back from the marketplace first (PRD-251C US-C102);
+  409, with why, only when it cannot be.
 * ``GET /api/socials/plans/{plan_id}/slots?start&end``: the planned and made slots in a
   window of at most 62 days; ``PUT .../slots/{slot_key}`` moves a planned slot or skips
   it (``slot_overrides``), the cadence untouched.
+* ``POST /api/socials/plans/{plan_id}/batches/{batch_key}/approve``: approve the week
+  (PRD-251C US-C205, ``api/socials_batches.py``).
 
 The content bank's routes are ``api/socials_topics.py``, included here. Every read and
 write is scoped to the caller's workspace: another workspace's plan is a 404. Every route
@@ -32,10 +42,12 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, NoReturn, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.socials_batches import router as batches_router
+from api.socials_plan_insights import router as insights_router
 from api.socials_plan_draft import router as plan_draft_router
 from api.socials_topics import router as topics_router
 from core.auth.dependencies import RequestContext
@@ -43,22 +55,34 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign
-from modules.socials import campaigns, plan_store, plans, service
-from services import socials_plan_research
+from modules.socials import batches, campaigns, plan_row_visuals, plan_store, plans, service
+from services import socials_plan_research, socials_research_setup
 
 router = APIRouter()
 router.include_router(topics_router)
 # Plan with Auto: a plan drafted from what the person says (api/socials_plan_draft.py).
 router.include_router(plan_draft_router)
+# PRD-251C US-C205: approve the week (api/socials_batches.py).
+router.include_router(batches_router)
+# PRD-251C US-C404, US-C407: Auto's proposals and the plan's health (api/socials_plan_insights.py).
+router.include_router(insights_router)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
+CAN_DELETE = Depends(require_workspace_permission("documents:delete"))
 PLAN_NOT_FOUND = "Plan not found"
 SLOT_KEY_MAX_CHARS = 160
 
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class RowVisual(_Strict):
+    """PRD-251C (US-C302): a row's own visual, and the toolkit of its AI media."""
+
+    source: str = Field(..., max_length=32)
+    toolkit: Optional[str] = Field(None, max_length=64)
 
 
 class CadenceRow(_Strict):
@@ -69,6 +93,10 @@ class CadenceRow(_Strict):
     template_id: Optional[UUID] = None
     days: List[str] = Field(..., min_length=1, max_length=7)
     time: str
+    # PRD-251C (US-C301): "story" posts the row's image or video as a story.
+    kind: Optional[str] = None
+    # PRD-251C (US-C302): the row's own visual, over the plan's mix.
+    visual: Optional[RowVisual] = None
 
 
 class PlanSources(_Strict):
@@ -86,12 +114,19 @@ class PlanMake(_Strict):
     image_days_early: int = 0
     max_per_day: Optional[int] = None
     visual_mix: Optional[Dict[str, int]] = None
+    # PRD-251C (C1): daily, weekly or monthly; a weekly plan's batch day, a monthly plan's date.
+    rhythm: str = plans.DAILY
+    batch_day: str = plans.DEFAULT_BATCH_DAY
+    batch_date: int = plans.DEFAULT_BATCH_DATE
+    remind_at: str = plans.DEFAULT_REMIND_AT  # the evening before (C3), in the plan's timezone
 
 
 class PlanResearch(_Strict):
     enabled: bool = True
     day: str = "mon"
     time: str = "06:00"
+    # PRD-251C US-C104: research adds no topic close to a post of the last this-many days.
+    repeat_after_days: int = Field(plans.DEFAULT_REPEAT_AFTER_DAYS, ge=1, le=plans.MAX_REPEAT_AFTER_DAYS)
 
 
 class PlanFields(_Strict):
@@ -123,6 +158,13 @@ def _fields(body: PlanFields) -> Dict[str, Any]:
     return fields
 
 
+def _checked(db: Session, workspace_id: UUID, body: PlanFields) -> Dict[str, Any]:
+    """The body's fields, each row's AI toolkit checked against the workspace's tools (US-C302)."""
+    fields = _fields(body)
+    plan_row_visuals.check_toolkits(db, workspace_id, fields.get("cadence") or ())
+    return fields
+
+
 def _posts_api() -> Any:
     """``api/socials.py``: its router includes this one, so it is imported when a request runs."""
     from api import socials
@@ -146,14 +188,24 @@ def load_plan(db: Session, ctx: RequestContext, plan_id: UUID) -> SocialCampaign
 
 
 def plan_view(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
+    """The plan with its bank's counts and, for a weekly or monthly plan, when its next batch
+    is made (PRD-251C US-C202)."""
     counts = plan_store.bank_counts(db, [plan.id]).get(plan.id, {"topics": 0, "unused": 0})
-    return {**plan.to_dict(), "bank": counts}
+    upcoming = batches.next_window(plan, datetime.now(timezone.utc))
+    return {**plan.to_dict(), "bank": counts, "next_batch_at": upcoming.moment.isoformat() if upcoming else None}
 
 
 def _saved(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
     db.commit()
     db.refresh(plan)
     return plan_view(db, plan)
+
+
+def _saved_with_research(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
+    """A plan's save, then research set up in a workspace that never had it (US-C101)."""
+    view = _saved(db, plan)
+    socials_research_setup.after_plan_save(db, plan.workspace_id, datetime.now(timezone.utc))
+    return view
 
 
 @router.get("/plans")
@@ -171,11 +223,12 @@ def create_social_plan(
 ) -> Dict[str, Any]:
     """A new active plan (name, starts_on, ends_on, timezone and cadence required)."""
     try:
-        plan = plan_store.create_plan(db, workspace_id=ctx.workspace_id, created_by=_posts_api()._actor(ctx), fields=_fields(body))
+        fields = _checked(db, ctx.workspace_id, body)
+        plan = plan_store.create_plan(db, workspace_id=ctx.workspace_id, created_by=_posts_api()._actor(ctx), fields=fields)
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
-    return _saved(db, plan)
+    return _saved_with_research(db, plan)
 
 
 @router.get("/plans/{plan_id}")
@@ -190,11 +243,11 @@ def update_social_plan(
     """Change any of the plan's fields, each checked; an ended plan is read-only (422)."""
     plan = load_plan(db, ctx, plan_id)
     try:
-        plan_store.update_plan(db, plan, _fields(body))
+        plan_store.update_plan(db, plan, _checked(db, ctx.workspace_id, body))
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)
-    return _saved(db, plan)
+    return _saved_with_research(db, plan)
 
 
 def _set_status(db: Session, ctx: RequestContext, plan_id: UUID, status: str) -> Dict[str, Any]:
@@ -221,6 +274,16 @@ def resume_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: Reques
 def end_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
     """End the plan for good: no more posts are made; it stays readable."""
     return _set_status(db, ctx, plan_id, plans.ENDED)
+
+
+@router.delete("/plans/{plan_id}", status_code=204, dependencies=[CAN_DELETE])
+def delete_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Response:
+    """Delete the plan and its content bank; the posts it made stay as ordinary posts, unlinked
+    (``plan_store.delete_plan``). No more posts are made for it from the next make tick."""
+    plan = load_plan(db, ctx, plan_id)
+    plan_store.delete_plan(db, plan)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/plans/{plan_id}/slots")
@@ -266,14 +329,15 @@ def move_social_plan_slot(
 
 @router.post("/plans/{plan_id}/research", status_code=202, dependencies=[CAN_UPDATE])
 def research_social_plan(plan_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, Any]:
-    """Research again (US-B204): the plan's research run starts now; its execution id."""
+    """Research again (US-B204): the plan's research run starts now; its execution id. A missing
+    research playbook is put back first (US-C102)."""
     plan = load_plan(db, ctx, plan_id)
     if plan.status == plans.ENDED:
         raise HTTPException(status_code=422, detail="An ended plan is not researched")
+    now = datetime.now(timezone.utc)
     try:
-        execution_id = socials_plan_research.launch(
-            db, plan, triggered_by=f"user:{_posts_api()._actor(ctx)}", now=datetime.now(timezone.utc)
-        )
+        socials_research_setup.restore(db, plan.workspace_id, now)
+        execution_id = socials_plan_research.launch(db, plan, triggered_by=f"user:{_posts_api()._actor(ctx)}", now=now)
     except service.SocialsError as exc:
         db.rollback()
         _raise_for(exc)

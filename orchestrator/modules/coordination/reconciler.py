@@ -46,6 +46,7 @@ from modules.coordination.verification import (
     VerificationService,
 )
 from modules.coordination.unfinished_work import fail_unfinished, placeholder_failures
+from modules.coordination.mission_ends import counts_only_its_live_steps
 from services.orchestration_board_bridge import sync_board_status
 from services.orchestration_state import (
     ConflictError,
@@ -836,6 +837,7 @@ class MissionReconciler:
     # -----------------------------------------------------------------------
 
     @staticmethod
+    @counts_only_its_live_steps  # F268 (7b): steps a re-plan replaced count for nothing
     def _advance_run_on_completion(
         db: Session,
         run: OrchestrationRun,

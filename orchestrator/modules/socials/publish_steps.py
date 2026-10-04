@@ -178,7 +178,7 @@ async def _call(step: ChannelStep, params: Dict[str, Any], ctx: TargetContext, r
         agent_id=PLATFORM_AGENT_ID,
         workspace_id=ctx.workspace_id,
         app_name=ctx.toolkit.upper(),
-        upload_params=step.files,
+        upload_params=tuple(name for name in step.files if name in params),  # a story's one file of two
         way_through=PLATFORM_PUBLISHER,
     )
     if not result.get("success") or _envelope_error(result):

@@ -10,8 +10,8 @@
   fails rolls back and is logged.
 * The copy runs in the background from a route on the event loop and from one in the
   threadpool.
-* Approving a post starts its copy; a series approval starts one for each post it approved,
-  never for a post it left.
+* Approving a post starts its copy; a series approval, or a plan's week approval (PRD-251C),
+  starts one for each post it approved, never for a post it left.
 """
 from __future__ import annotations
 
@@ -41,6 +41,10 @@ from modules.socials import workspace_copies  # noqa: E402
 from modules.socials.media_urls import MediaFile  # noqa: E402
 from tests.test_prd251_api import _approved, _create, _post  # noqa: E402
 from tests.test_prd251w2_series_approval import _approve, _campaign, _series_switch, _shown, _waiting  # noqa: E402
+from tests.test_prd251bw2_plans import _create as _create_plan  # noqa: E402
+from tests.test_prd251bw2_plans import bank  # noqa: E402,F401  (the fixture)
+from tests.test_prd251cw2_approve_week import _post as _week_post  # noqa: E402
+from tests.test_prd251cw2_approve_week import WEEK  # noqa: E402
 
 api = api_harness.api
 POST_ID = uuid.UUID("5153d784-d247-4e99-9df6-c48e7be916ea")
@@ -257,3 +261,14 @@ def test_a_series_approval_copies_the_posts_it_approved_never_one_it_left(api, c
     assert resp.status_code == 200, resp.text
     assert [p["id"] for p in resp.json()["approved"]] == [first["id"]]
     assert copies == [first["id"]]
+
+
+def test_a_weeks_approval_copies_the_posts_it_approved_never_one_it_left(bank, copies):  # noqa: F811
+    plan = _create_plan(bank)
+    kept, changed = _week_post(bank, plan, 19), _week_post(bank, plan, 20)
+    shown = [{"post_id": str(kept.id), "content_hash": kept.content_hash},
+             {"post_id": str(changed.id), "content_hash": "0" * 64}]  # an older version was shown: left
+    resp = bank.client.post(f"/api/socials/plans/{plan['id']}/batches/{WEEK}/approve", json={"posts": shown})
+    assert resp.status_code == 200, resp.text
+    assert [row["id"] for row in resp.json()["approved"]] == [str(kept.id)]
+    assert copies == [str(kept.id)]

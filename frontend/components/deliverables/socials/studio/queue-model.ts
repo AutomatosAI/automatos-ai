@@ -2,6 +2,9 @@
  * PRD-251B US-B111 — the Queue's reading of the posts (pure): what waits for approval, by
  * the day of its slot (today first, then later days, then no slot), the heading, when each
  * publishes and how long is left, and the pane's meta line.
+ *
+ * PRD-251C US-C204: a weekly or monthly plan's batch waiting for approval is one section,
+ * "Week of 19 Oct · Countdown · 7 posts", its posts in slot order, approved in one sitting.
  */
 import type { SocialPost } from '@/lib/api-client'
 import { hasChannels } from '../socials-review'
@@ -11,6 +14,10 @@ import { formatLabel, postTime } from './socials-calendar-model'
 export const QUEUE_STATUS = 'needs_approval'
 export const NO_SLOT = 'No slot'
 const MINUTE_MS = 60_000
+const DAY_MS = 86_400_000
+const WEEK_KEY = /^(\d{4})-W(\d{2})$/
+const MONTH_KEY = /^(\d{4})-(\d{2})$/
+const WEEKDAY_INDEX: Record<string, number> = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 }
 const HOUR_MIN = 60
 const DAY_MIN = 24 * HOUR_MIN
 
@@ -35,6 +42,67 @@ export interface QueueGroup {
   label: string
   today: boolean
   posts: SocialPost[]
+  /** A stable key when the label may repeat (a batch). */
+  id?: string
+}
+
+/** PRD-251C (C2): a plan's batch waiting for approval, reviewed as one section. */
+export interface QueueBatch extends QueueGroup {
+  planId: string
+  batchKey: string
+}
+
+export function inBatch(post: Pick<SocialPost, 'campaign_id' | 'batch_key'>): boolean {
+  return Boolean(post.campaign_id && post.batch_key)
+}
+
+export function isMonthBatch(batchKey: string): boolean {
+  return MONTH_KEY.test(batchKey)
+}
+
+/** A batch's first day (UTC midnight): a week's ISO Monday moved to the day after the plan's
+ * batch day; a month's first. Null for a key it cannot read. */
+export function batchStart(batchKey: string, batchDay = 'sun'): Date | null {
+  const week = WEEK_KEY.exec(batchKey)
+  if (week) {
+    const jan4 = new Date(Date.UTC(Number(week[1]), 0, 4))
+    const monday = jan4.getTime() - ((jan4.getUTCDay() + 6) % 7) * DAY_MS + (Number(week[2]) - 1) * 7 * DAY_MS
+    return new Date(monday + (((WEEKDAY_INDEX[batchDay] ?? 6) + 1) % 7) * DAY_MS)
+  }
+  const month = MONTH_KEY.exec(batchKey)
+  return month ? new Date(Date.UTC(Number(month[1]), Number(month[2]) - 1, 1)) : null
+}
+
+/** "Week of 19 Oct · Countdown · 7 posts", "November 2026 · Countdown · 31 posts". */
+export function batchLabel(batchKey: string, batchDay: string | undefined, planName: string | null, count: number): string {
+  const start = batchStart(batchKey, batchDay)
+  const short = (options: Intl.DateTimeFormatOptions) => start?.toLocaleDateString('en-GB', { ...options, timeZone: 'UTC' })
+  const when = !start ? batchKey : isMonthBatch(batchKey) ? short({ month: 'long', year: 'numeric' }) : `Week of ${short({ day: 'numeric', month: 'short' })}`
+  return [when, planName, `${count} ${count === 1 ? 'post' : 'posts'}`].filter(Boolean).join(' · ')
+}
+
+/** The plans' batches waiting for approval: one group each, its posts in slot order, the earliest first. */
+export function queueBatches(
+  posts: ReadonlyArray<SocialPost>, plans: ReadonlyArray<{ id: string; name: string; make?: { batch_day?: string } }>,
+): QueueBatch[] {
+  const byBatch = new Map<string, SocialPost[]>()
+  for (const post of queuedPosts(posts).filter(inBatch)) {
+    const id = `${post.campaign_id}|${post.batch_key}`
+    byBatch.set(id, [...(byBatch.get(id) ?? []), post])
+  }
+  return Array.from(byBatch, ([id, batch]) => {
+    const [planId, batchKey] = id.split('|')
+    const plan = plans.find((candidate) => candidate.id === planId)
+    return { id, planId, batchKey, today: false, posts: batch, label: batchLabel(batchKey, plan?.make?.batch_day, plan?.name ?? null, batch.length) }
+  })
+}
+
+/** How many queued posts have their slot today, in a batch or not. */
+export function waitingToday(posts: ReadonlyArray<SocialPost>, now: Date): number {
+  return queuedPosts(posts).filter((post) => {
+    const slot = slotOfQueued(post)
+    return slot !== null && new Date(slot).toDateString() === now.toDateString()
+  }).length
 }
 
 /** The queued posts by their slot's day: today first, then the other days in order, then no slot. */

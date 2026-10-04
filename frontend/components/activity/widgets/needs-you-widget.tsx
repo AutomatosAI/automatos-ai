@@ -15,6 +15,10 @@
  *
  * F246: a stuck ticket (one nothing will move until the owner does) is its own
  * family, each row saying why.
+ *
+ * F274: every row is named by its ticket's number, an approval by the ticket it
+ * lets go ahead. The steps a mission left open when it ended are one decision,
+ * the mission's, so they are one row that names each step and opens the mission.
  */
 import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, CircleSlash, ClipboardCheck, HelpCircle, Loader2, ShieldCheck, XCircle } from 'lucide-react'
@@ -36,9 +40,12 @@ export function formatAge(iso: string | null | undefined): string {
   return `${Math.floor(hours / 24)}d`
 }
 
-/** A ticket opens in the board's viewer; a mission's own card opens the mission. */
+/**
+ * A ticket opens in the board's viewer; a row whose decision is its mission's opens the mission.
+ * F293: a mission step's row names its mission but opens the step, where you check it.
+ */
 export function ticketRowHref(row: NeedsYouTicketRow): string {
-  return row.mission_id ? missionHref(row.mission_id) : ticketHref(row.ticket_id)
+  return row.opens === 'mission' && row.mission_id ? missionHref(row.mission_id) : ticketHref(row.ticket_id)
 }
 
 /** A question or approval opens inside its ticket; a mission at its plan; anything else on its tab. */
@@ -73,23 +80,57 @@ export const STUCK_WHY: Record<StuckWhy, string> = {
   no_agent: 'Assigned to no agent',
   not_picked_up: 'Waiting, but nothing will run it',
   mission_ended: 'Its mission has ended',
+  step_failed: 'It failed its mission\'s check, and the mission waits',
+  over_budget: 'Paused at its budget: raise it or resume',
+  out_of_credit: 'Paused: the AI credit ran out. Top up, then resume',
 }
 
+function stuckRow(r: NeedsYouTicketRow): ShownRow {
+  const [shown] = ticketRows([r])
+  return r.why ? { ...shown, meta: `${STUCK_WHY[r.why]} · ${shown.meta}` } : shown
+}
+
+/** F274: the stuck steps that `r`'s mission left open when it ended (`r` alone for any other row). */
+function endedMissionSteps(rows: NeedsYouTicketRow[], r: NeedsYouTicketRow): NeedsYouTicketRow[] {
+  if (r.why !== 'mission_ended' || !r.mission_id) return [r]
+  return rows.filter((s) => s.why === 'mission_ended' && s.mission_id === r.mission_id)
+}
+
+/** F274: one ended mission's open steps as one row: the mission, naming each step, opening the mission. */
+function missionStepsRow(steps: NeedsYouTicketRow[]): ShownRow {
+  const [first] = steps
+  const numbers = [...steps].sort((a, b) => a.ticket_id - b.ticket_id).map((s) => s.number).filter(Boolean)
+  return {
+    key: `m${first.mission_id}`, href: ticketRowHref(first),
+    title: numberedTitle(first.mission_number, first.mission_title ?? 'A mission'),
+    meta: `${steps.length} steps left open when it ended${numbers.length ? `: ${numbers.join(', ')}` : ''}`,
+  }
+}
+
+// F274: a mission's steps are listed once, where its newest one would be.
 function stuckRows(rows: NeedsYouTicketRow[]): ShownRow[] {
-  return ticketRows(rows).map((shown, i) => {
-    const why = rows[i].why
-    return why ? { ...shown, meta: `${STUCK_WHY[why]} · ${shown.meta}` } : shown
+  return rows.flatMap((r): ShownRow[] => {
+    const steps = endedMissionSteps(rows, r)
+    if (steps.length === 1) return [stuckRow(r)]
+    return steps[0] === r ? [missionStepsRow(steps)] : []
   })
 }
 
-// F246: a mission's plan names its card by number, as every ticket row does.
-function askRows(rows: NeedsYouAskRow[], fallback: string): ShownRow[] {
+// A question is titled in its own words; its ticket's number goes beside who asked.
+function questionRows(rows: NeedsYouAskRow[]): ShownRow[] {
   return rows.map((r) => ({
-    key: `${r.source}${r.id}`,
-    href: askRowHref(r, fallback),
-    title: r.source === 'mission' ? numberedTitle(r.ticket_number, r.title ?? 'A mission plan') : questionPreview(r.title ?? ''),
-    meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}`
-      : [r.ticket_number, by(r.agent_name, r.at)].filter(Boolean).join(' · '),
+    key: `${r.source}${r.id}`, href: askRowHref(r, QUESTIONS_HREF),
+    title: questionPreview(r.title ?? ''), meta: [r.number, by(r.agent_name, r.at)].filter(Boolean).join(' · '),
+  }))
+}
+
+// F246, F274: an approval is named as a ticket row is, by number and title: a mission's
+// plan, or the ticket the owner lets go ahead.
+function approvalRows(rows: NeedsYouAskRow[]): ShownRow[] {
+  return rows.map((r) => ({
+    key: `${r.source}${r.id}`, href: askRowHref(r, AUTO_NOW_LINKS.governance),
+    title: numberedTitle(r.number, r.title ?? (r.source === 'mission' ? 'A mission plan' : 'An approval')),
+    meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}` : by(r.agent_name, r.at),
   }))
 }
 
@@ -98,18 +139,21 @@ interface Family {
   href: string
   icon: LucideIcon
   count: number
+  /** How many of `count` the endpoint listed: one shown row can stand for several (F274). */
+  listed: number
   rows: ShownRow[]
 }
 
 /** The five families, in the order the owner acts on them. */
 export function families(data: NeedsYou): Family[] {
   const { counts, rows } = data
+  const board = AUTO_NOW_LINKS.board
   return [
-    { title: 'In review', href: AUTO_NOW_LINKS.board, icon: ClipboardCheck, count: counts.review, rows: ticketRows(rows.review) },
-    { title: 'Questions', href: AUTO_NOW_LINKS.questions, icon: HelpCircle, count: counts.question, rows: askRows(rows.question, QUESTIONS_HREF) },
-    { title: 'Approvals', href: AUTO_NOW_LINKS.governance, icon: ShieldCheck, count: counts.approval, rows: askRows(rows.approval, AUTO_NOW_LINKS.governance) },
-    { title: 'Stuck', href: AUTO_NOW_LINKS.board, icon: CircleSlash, count: counts.stuck, rows: stuckRows(rows.stuck) },
-    { title: 'Failed', href: AUTO_NOW_LINKS.board, icon: XCircle, count: counts.failed, rows: ticketRows(rows.failed) },
+    { title: 'In review', href: board, icon: ClipboardCheck, count: counts.review, listed: rows.review.length, rows: ticketRows(rows.review) },
+    { title: 'Questions', href: AUTO_NOW_LINKS.questions, icon: HelpCircle, count: counts.question, listed: rows.question.length, rows: questionRows(rows.question) },
+    { title: 'Approvals', href: AUTO_NOW_LINKS.governance, icon: ShieldCheck, count: counts.approval, listed: rows.approval.length, rows: approvalRows(rows.approval) },
+    { title: 'Stuck', href: board, icon: CircleSlash, count: counts.stuck, listed: rows.stuck.length, rows: stuckRows(rows.stuck) },
+    { title: 'Failed', href: board, icon: XCircle, count: counts.failed, listed: rows.failed.length, rows: ticketRows(rows.failed) },
   ]
 }
 
@@ -117,9 +161,9 @@ const rowClass = 'block w-full rounded-lg border border-border/50 bg-muted/30 p-
 const linkClass = 'text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline'
 
 function Section({ family }: { family: Family }) {
-  const { title, href, icon: Icon, count, rows } = family
+  const { title, href, icon: Icon, count, listed, rows } = family
   if (count === 0) return null
-  const more = count - rows.length
+  const more = count - listed
   return (
     <div className="space-y-1.5" aria-label={title}>
       <div className="flex items-center justify-between">

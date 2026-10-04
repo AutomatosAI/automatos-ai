@@ -40,6 +40,8 @@ from core.security.surface import origin_surface, widget_scopes, widget_turn
 from core.security.widget_scopes import widget_tool_surface
 from core.services.playbook_scratchpad import answer_for_next_step
 from core.services.playbook_step_refs import resolve_step_references, step_values
+from services.step_lessons import a_playbook_step_carries_its_lessons
+from services.playbook_usage import books_spend_to_the_run, books_the_step_to_its_agent  # F321
 
 logger = logging.getLogger(__name__)
 
@@ -191,141 +193,11 @@ def _apply_step_overrides(
 # ---------------------------------------------------------------------------
 # Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
 # ---------------------------------------------------------------------------
-async def _auto_create_playbook_report(
-    *,
-    db: Session,
-    workspace_id: str,
-    recipe,
-    recipe_execution_id: str,
-    execution,
-    step_results: List[dict],
-    total_duration_ms: int,
-    total_tokens: int,
-    final_output: Any,
-    success: bool,
-) -> None:
-    """Persist an agent_reports row summarising a playbook execution.
+async def _auto_create_playbook_report(**kwargs: Any) -> None:
+    """File the run's report: services.playbook_report (F321: its numbers from llm_usage)."""
+    from services.playbook_report import auto_create_playbook_report
 
-    File path: reports/playbook-{slug}/{date}_{exec_id}.md
-    Always non-blocking — never raises.
-    """
-    try:
-        from services.report_service import ReportService, compute_execution_metrics
-
-        recipe_name = getattr(recipe, "name", None) or f"playbook-{recipe.id}"
-        report_agent_name = f"playbook-{recipe_name}"
-
-        # Roll up cost/model/duration across every LLM call in this execution
-        exec_metrics = compute_execution_metrics(
-            db,
-            workspace_id,
-            execution_id=recipe_execution_id,
-            started_at=getattr(execution, "started_at", None),
-            completed_at=getattr(execution, "completed_at", None),
-            extra={
-                "recipe_id": getattr(recipe, "id", None),
-                "recipe_name": recipe_name,
-                "recipe_execution_id": recipe_execution_id,
-                "steps_count": len(step_results),
-                "trigger": "playbook",
-            },
-        )
-        # Honour totals computed by the executor when llm_usage rollup is sparse
-        if not exec_metrics.get("tokens_used"):
-            exec_metrics["tokens_used"] = total_tokens
-        if exec_metrics.get("duration_ms") is None:
-            exec_metrics["duration_ms"] = total_duration_ms
-
-        report_status = "ok" if success else ("warning" if step_results else "critical")
-        any_failed = any(
-            s.get("status") in ("failed", "error") for s in step_results
-        )
-        if any_failed and report_status == "ok":
-            report_status = "warning"
-
-        # Markdown body
-        lines = [
-            f"# {recipe_name} — Playbook Report",
-            f"**Execution:** {recipe_execution_id}",
-            f"**Status:** {'completed' if success else 'failed'}",
-            "",
-            "## Execution Metrics",
-            f"- Primary model: {exec_metrics.get('model') or 'unknown'}",
-            f"- LLM calls: {exec_metrics.get('llm_calls', 0)}",
-            f"- Tokens (in/out/total): "
-            f"{exec_metrics.get('input_tokens', 0)} / "
-            f"{exec_metrics.get('output_tokens', 0)} / "
-            f"{exec_metrics.get('tokens_used', 0)}",
-            f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}",
-            f"- Duration: {exec_metrics.get('duration_ms', 0)} ms",
-            f"- Steps: {len(step_results)}",
-            "",
-            "## Steps",
-        ]
-        for step in step_results:
-            order = step.get("order") or step.get("step_order") or "?"
-            name = step.get("name") or step.get("agent_name") or "(unnamed)"
-            status = step.get("status", "?")
-            duration = step.get("duration_ms")
-            tokens = step.get("tokens_used", 0)
-            duration_str = f"{duration} ms" if duration is not None else "n/a"
-            lines.append(
-                f"- **#{order} {name}** — {status} · {tokens} tokens · {duration_str}"
-            )
-
-        models_used = exec_metrics.get("models_used") or []
-        if models_used:
-            lines.append("")
-            lines.append("## Models Used")
-            for m in models_used:
-                lines.append(f"- {m}")
-
-        if final_output:
-            preview = str(final_output)[:500]
-            if len(str(final_output)) > 500:
-                preview += "…"
-            lines.append("")
-            lines.append("## Final Output (preview)")
-            lines.append("```")
-            lines.append(preview)
-            lines.append("```")
-
-        content = "\n".join(lines)
-
-        first_step_summary = next(
-            (s.get("output_preview") for s in step_results if s.get("output_preview")),
-            None,
-        )
-        summary = (
-            f"{len(step_results)} steps · "
-            f"${exec_metrics.get('cost_usd', 0):.4f} · "
-            f"{exec_metrics.get('duration_ms', 0)} ms"
-        )
-        if first_step_summary:
-            summary = f"{summary} · {str(first_step_summary)[:100]}"
-
-        svc = ReportService(db, workspace_id)
-        report_result = await svc.create_report(
-            agent_id=None,
-            agent_name=report_agent_name,
-            title=f"Playbook: {recipe_name}",
-            content=content,
-            report_type="summary",
-            status=report_status,
-            summary=summary,
-            metrics=exec_metrics,
-        )
-        if not report_result.get("success"):
-            logger.warning(
-                "[recipe_direct] Playbook auto-report DB insert failed for %s: %s",
-                recipe_execution_id, report_result.get("error"),
-            )
-    except Exception:
-        logger.error(
-            "[recipe_direct] _auto_create_playbook_report raised for %s",
-            recipe_execution_id,
-            exc_info=True,
-        )
+    await auto_create_playbook_report(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +307,8 @@ def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str
     return f"{head}: {first}" if first else head
 
 
+@books_the_step_to_its_agent  # F321: the step's helper calls are booked to its agent
+@a_playbook_step_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
 async def _execute_step(
     db: Session,
     agent: Agent,
@@ -1194,6 +1068,7 @@ def launch_recipe_task(
 # Main executor
 # ---------------------------------------------------------------------------
 
+@books_spend_to_the_run  # F321 (night 9b): booked as the run, never as the chat that started it
 async def execute_recipe_direct(
     recipe_execution_id: str,
     recipe_id: int,
@@ -1211,19 +1086,19 @@ async def execute_recipe_direct(
     4. Auto-extract tool results into scratchpad
     5. Upload full log to S3, store compact summary in DB
     6. Handle errors per step.error_handling config
+    Every run passes here: one with a step that has no agent fails first, saying so (F270).
     """
-    # Bounded concurrency per workspace — allows N recipes to run in
-    # parallel (controlled by DEFAULT_MAX_CONCURRENT_RUNNING / plan_limits).
     from config import config as app_config
-    max_concurrent = app_config.DEFAULT_MAX_CONCURRENT_RUNNING
-    semaphore = _get_workspace_semaphore(str(workspace_id), max_concurrent)
+    from services.playbook_run_refusal import refused_before_it_runs
+    if await refused_before_it_runs(recipe_execution_id, recipe_id, workspace_id, db_url):
+        return
+    # Bounded concurrency per workspace (DEFAULT_MAX_CONCURRENT_RUNNING / plan_limits).
+    semaphore = _get_workspace_semaphore(str(workspace_id), app_config.DEFAULT_MAX_CONCURRENT_RUNNING)
 
     waiting = semaphore.locked()
     if waiting:
-        logger.info(
-            "[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
-            workspace_id, recipe_execution_id, recipe_id,
-        )
+        logger.info("[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
+                    workspace_id, recipe_execution_id, recipe_id)
 
     current_task = asyncio.current_task()
     if current_task is not None:
@@ -2423,10 +2298,15 @@ BOARD_RESULT_MAX_CHARS = 4000
 
 def _final_output(step_results: List[dict], last_step: Dict[str, Any]) -> Optional[str]:
     """The run's output: the last step's full text when it completed (its dict is
-    still in scope), else the newest completed step's stored preview."""
+    still in scope), else the newest completed step's stored preview. F321: with
+    what that step saved with scratchpad_write, which used to stay in the expiring
+    scratchpad while the card said only "saved to the scratchpad"."""
+    from services.playbook_run_result import with_saved_values
+
     final_output = None
     if last_step.get("status") == "completed":
-        final_output = last_step.get("output", "")
+        final_output = with_saved_values(last_step.get("output", ""), last_step.get("order"),
+                                         last_step.get("tool_calls"))
     if not final_output:
         for sr in reversed(step_results):
             if sr.get("status") == "completed":

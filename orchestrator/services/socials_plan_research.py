@@ -11,11 +11,13 @@ is connected, and writes topics through the one draft-only tool
   due: from a week before the plan starts until it ends;
 * on **Research again** (``POST /api/socials/plans/{id}/research``).
 
-The workspace runs its own installed copy of the playbook: without it (the Socials
-package not installed) there is nothing to run, and the plan says so. A trial workspace
-on the hosted edition gets no weekly run (no background burn, PRD-222); Research again
-still works. The run is a ``RecipeExecution`` launched through the playbook engine, as
-a cron playbook is (``playbook_scheduler._fire_playbook``).
+The workspace runs its own installed copy of the playbook. A plan's save installs it in a
+workspace that never had it, and Research again puts a missing one back first
+(PRD-251C US-C101, US-C102: ``services/socials_research_setup.py``). The weekly run never
+installs: without a copy it tells the owner why, once a day, in the content bank's words. A
+trial workspace on the hosted edition gets no weekly run (no background burn, PRD-222);
+Research again still works. The run is a ``RecipeExecution`` launched through the playbook
+engine, as a cron playbook is (``playbook_scheduler._fire_playbook``).
 """
 from __future__ import annotations
 
@@ -40,11 +42,8 @@ logger = logging.getLogger(__name__)
 WEEKLY_TRIGGER = "socials_plan_research"
 EXECUTION_TYPE = "socials_plan_research"
 RESEARCH_LEAD = timedelta(days=7)  # research starts this long before the plan's first day
-NEEDS_PACKAGE = (
-    "research needs the Content bank research playbook: install the Socials package from the Marketplace "
-    "(installing it again adds what is missing)"
-)
-NEEDS_PACKAGE_EVENT = ("social_plan_research_unavailable", "Research could not run: ", "error")
+NO_PLAYBOOK = "Research needs this workspace's Content bank research playbook: Research again puts it back."
+UNAVAILABLE_EVENT = ("social_plan_research_unavailable", "Research could not run: ", "error")
 
 
 class ResearchUnavailable(service.SocialsError):
@@ -107,7 +106,7 @@ def launch(db: Any, plan: SocialCampaign, *, triggered_by: str, now: datetime) -
 
     playbook = installed_playbook(db, plan.workspace_id)
     if playbook is None:
-        raise ResearchUnavailable(NEEDS_PACKAGE)
+        raise ResearchUnavailable(NO_PLAYBOOK)
     execution_id = f"research-{uuid4().hex[:12]}"
     inputs = {"plan_id": str(plan.id), "plan_name": plan.name}
     db.add(RecipeExecution(
@@ -125,8 +124,9 @@ def launch(db: Any, plan: SocialCampaign, *, triggered_by: str, now: datetime) -
     return execution_id
 
 
-def _weekly_allowed(workspace: Optional[Workspace]) -> bool:
-    """Socials on, and no trial workspace's background burn on the hosted edition (PRD-222)."""
+def background_allowed(workspace: Optional[Workspace]) -> bool:
+    """Socials on, and no trial workspace's background burn on the hosted edition (PRD-222):
+    the weekly research run, and the results' reads (PRD-251C US-C402)."""
     if workspace is None or socials_off_reason(workspace) is not None:
         return False
     if (config.AUTH_EDITION or "").strip().lower() == "local":
@@ -134,6 +134,17 @@ def _weekly_allowed(workspace: Optional[Workspace]) -> bool:
     from services.trial_ledger import is_trial_active_workspace
 
     return not is_trial_active_workspace(workspace)
+
+
+def _tell_unavailable(db: Any, plan: SocialCampaign, now: datetime) -> None:
+    """The weekly run without a playbook (C4): it never installs one; it says why, once a day."""
+    from services.socials_research_setup import research_note
+
+    if not plan_notify.once_today(plan, UNAVAILABLE_EVENT[0], now.astimezone(plans.zone_of(plan)).date()):
+        return
+    note = research_note(db, plan.workspace_id) or NO_PLAYBOOK
+    db.commit()
+    plan_notify.notify_plan(plan.workspace_id, plan.id, UNAVAILABLE_EVENT, f"{plan.name}: {note}")
 
 
 def launch_due(now: datetime) -> int:
@@ -144,16 +155,14 @@ def launch_due(now: datetime) -> int:
     started = 0
     try:
         for plan in plan_store.active_plans(db):
-            if not research_due(plan, now) or not _weekly_allowed(db.get(Workspace, plan.workspace_id)):
+            if not research_due(plan, now) or not background_allowed(db.get(Workspace, plan.workspace_id)):
                 continue
             try:
                 launch(db, plan, triggered_by=WEEKLY_TRIGGER, now=now)
                 started += 1
             except ResearchUnavailable:
                 db.rollback()
-                if plan_notify.once_today(plan, NEEDS_PACKAGE_EVENT[0], now.astimezone(plans.zone_of(plan)).date()):
-                    db.commit()
-                    plan_notify.notify_plan(plan.workspace_id, plan.id, NEEDS_PACKAGE_EVENT, f"{plan.name}: {NEEDS_PACKAGE}")
+                _tell_unavailable(db, plan, now)
             except Exception:  # noqa: BLE001 — one plan never stops the pass; logged
                 logger.exception("[Socials] plan %s: the weekly research could not start", plan.id)
                 db.rollback()

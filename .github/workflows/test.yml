@@ -103,9 +103,10 @@ jobs:
           # test runs. The packages below come from Ubuntu's own archive, so a
           # partial update is fine — install fails loudly if THAT index is stale.
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
+          # fonts-dejavu-core: the image's PDF font, so F298's checklist boxes print here too.
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 ghostscript fonts-dejavu-core
 
       - name: Install Python dependencies
         run: |

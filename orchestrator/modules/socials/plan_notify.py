@@ -7,6 +7,8 @@
   no channel connected that posts its format): never half-made.
 * ``social_post_slot_moved``: the late policy moved a post to the plan's next slot
   (linked to the post).
+* ``social_plan_weekly_note`` (PRD-251C US-C403): how the plan's week went, linked to its
+  Posted view.
 
 Like every Socials notice (``notify.py``), it goes out through the platform's
 ``NotificationDispatcher`` on its own session after the write, and a failure is logged,
@@ -19,6 +21,7 @@ from datetime import date, datetime
 from typing import Any, Optional
 from uuid import UUID
 
+from config import config
 from modules.socials import notify
 
 PLAN_LINK_TYPE = "social_plan"
@@ -26,7 +29,14 @@ READY = ("social_plan_ready", "Today's posts are ready: ", "action_required")
 BANK_EMPTY = ("social_plan_bank_empty", "The content bank is empty: ", "error")
 SLOT_SKIPPED = ("social_plan_slot_skipped", "A planned post was not made: ", "error")
 SLOT_MOVED = ("social_post_slot_moved", "Moved to the plan's next slot: ", "ok")
+# PRD-251C (C1, C3): a weekly or monthly plan's batch is made; it links to the week's review.
+WEEK_READY = ("social_plan_batch_ready", "Your week is ready: ", "action_required")
+MONTH_READY = ("social_plan_batch_ready", "Your month is ready: ", "action_required")
+BATCH_LINK_TYPE = "social_batch"
+REVIEW_PATH = "/deliverables?tab=socials&view=queue"
 NOTIFIED = "notified"
+# PRD-251C (US-C403): the weekly note links to the plan's Posted view.
+POSTED_LINK_TYPE = "social_posted"
 
 
 def once_today(plan: Any, event: str, today: date) -> bool:
@@ -40,7 +50,13 @@ def once_today(plan: Any, event: str, today: date) -> bool:
     return True
 
 
-async def _send(workspace_id: UUID | str, link_type: str, link_id: UUID | str, event: tuple, title: str) -> None:
+def review_url() -> str:
+    """The Queue, where a batch is reviewed and approved in one sitting (C2, C3)."""
+    return f"{str(config.FRONTEND_URL).rstrip('/')}{REVIEW_PATH}"
+
+
+async def _send(workspace_id: UUID | str, link_type: str, link_id: UUID | str, event: tuple, title: str,
+                message: Optional[str] = None) -> None:
     event_type, prefix, status = event
     try:
         db = notify._default_session_factory()()
@@ -50,6 +66,7 @@ async def _send(workspace_id: UUID | str, link_type: str, link_id: UUID | str, e
     try:
         await notify._dispatcher(db, str(workspace_id)).dispatch(
             event_type=event_type, title=f"{prefix}{title}", link_type=link_type, link_id=str(link_id), status=status,
+            message=message,
         )
     except Exception:  # noqa: BLE001 — logged, never raised into the tick
         notify.logger.exception("[Socials] the %s notice of %s %s was not sent", event_type, link_type, link_id)
@@ -60,6 +77,20 @@ async def _send(workspace_id: UUID | str, link_type: str, link_id: UUID | str, e
 def notify_plan(workspace_id: UUID | str, plan_id: UUID | str, event: tuple, title: str) -> None:
     """A plan notice, without holding up the caller. Never raises."""
     notify._send_soon(_send(workspace_id, PLAN_LINK_TYPE, plan_id, event, title), plan_id, event[0])
+
+
+def notify_review(workspace_id: UUID | str, plan_id: UUID | str, event: tuple, title: str) -> None:
+    """A notice that asks for the week's review (C3): it links to the Queue, and its message
+    carries the address for Telegram, Slack and webhooks. Never raises."""
+    message = f"Review and approve them in one go: {review_url()}"
+    notify._send_soon(_send(workspace_id, BATCH_LINK_TYPE, plan_id, event, title, message), plan_id, event[0])
+
+
+def notify_weekly_note(workspace_id: UUID | str, plan_id: UUID | str, title: str, message: str) -> None:
+    """The weekly note (US-C403): its words in the message, linked to the plan's Posted view. Never raises."""
+    from modules.socials.weekly_note import NOTE_EVENT
+
+    notify._send_soon(_send(workspace_id, POSTED_LINK_TYPE, plan_id, NOTE_EVENT, title, message), plan_id, NOTE_EVENT[0])
 
 
 def notify_slot_moved(workspace_id: UUID | str, post_id: UUID | str, title: str, at: Optional[datetime]) -> None:

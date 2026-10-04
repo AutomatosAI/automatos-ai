@@ -488,6 +488,9 @@ async def test_the_agent_executor_checks_the_action_validation_resolved(settings
     import core.composio.entity_manager as entity_manager_mod
     import core.composio.linkedin_image_workaround as lw
 
+    # Socials off: with it on, the post gate (test_prd251w1_post_gate.py) refuses a LinkedIn
+    # post before this deny-list check is reached.
+    monkeypatch.setattr(config_module.config, "SOCIALS_ENABLED_DEFAULT", False)
     _set_denied(settings_db, [LINKEDIN_POST])
     assert deny_list.composio_action_denial(asked) is None  # the name asked for is not listed
 

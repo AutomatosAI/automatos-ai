@@ -13,6 +13,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.knowledge.graph_direction import describe_edge, direction_from
+
 logger = logging.getLogger(__name__)
 
 # Directional edge types for impact analysis
@@ -65,6 +67,26 @@ def _get_filtered_graph(graph, agent_team: Optional[str]):
     """Apply PRD-124 team filtering to the graph."""
     from modules.knowledge.graph_service import team_filtered_view
     return team_filtered_view(graph, agent_team)
+
+
+def _neighbor_entry(graph, node_id: Any, u: Any, v: Any, edge_data: Dict[str, Any]) -> Dict[str, Any]:
+    """One neighbour of ``node_id`` and the edge to it, read the way it was extracted.
+
+    F312 (build 14): the graph is undirected, so ``u``/``v`` are storage order;
+    every neighbour used to come back as a bare "target" with the relation and
+    no direction, and "Harbour Blend -buys-> Crane Kitchen" read backwards.
+    """
+    neighbor = v if u == node_id else u
+    return {
+        "neighbor": str(neighbor),
+        "neighbor_label": graph.nodes.get(neighbor, {}).get("label", str(neighbor)),
+        "neighbor_attrs": dict(graph.nodes.get(neighbor, {})),
+        "direction": direction_from(node_id, u, v, edge_data),
+        **describe_edge(graph, u, v, edge_data),
+        "confidence": edge_data.get("confidence", edge_data.get("weight", 1.0)),
+        "weight": edge_data.get("weight"),
+        "edge_attrs": dict(edge_data.get("attrs") or {}),
+    }
 
 
 def _find_node_by_label(graph, label: str) -> Optional[str]:
@@ -216,25 +238,12 @@ async def handle_graph_neighbors(
                 "error": f"Node '{concept_label}' not found in the graph.",
             }
 
-        neighbors: List[Dict[str, Any]] = []
-        for u, v, edge_data in graph.edges(node_id, data=True):
-            relation = edge_data.get("relation", "related_to")
-            if relation_filter and relation.lower() != relation_filter:
-                continue
-            target = v if u == node_id else u
-            target_attrs = dict(graph.nodes.get(target, {}))
-            edge_attrs = dict(edge_data.get("attrs") or {})
-            neighbors.append(
-                {
-                    "target": str(target),
-                    "target_label": target_attrs.get("label", str(target)),
-                    "target_attrs": target_attrs,
-                    "relation": relation,
-                    "confidence": edge_data.get("confidence", edge_data.get("weight", 1.0)),
-                    "weight": edge_data.get("weight"),
-                    "edge_attrs": edge_attrs,
-                }
-            )
+        neighbors: List[Dict[str, Any]] = [
+            _neighbor_entry(graph, node_id, u, v, edge_data)
+            for u, v, edge_data in graph.edges(node_id, data=True)
+            if not relation_filter
+            or str(edge_data.get("relation", "related_to")).lower() == relation_filter
+        ]
 
         node_attrs = dict(graph.nodes.get(node_id, {}))
         return {
@@ -362,6 +371,34 @@ async def handle_graph_communities(
 # ------------------------------------------------------------------
 
 
+def _impact_depth_groups(graph, start: Any, max_depth: int) -> Dict[int, List[Dict[str, Any]]]:
+    """BFS from ``start`` over the impact relations, hops grouped by depth.
+
+    F312 (build 14): each hop's edge reads as extracted (``describe_edge``),
+    not in the walk's order.
+    """
+    visited: Set[str] = {start}
+    queue: deque = deque([(start, 0)])
+    depth_groups: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    while queue:
+        current, current_depth = queue.popleft()
+        if current_depth >= max_depth:
+            continue
+        for u, v, edge_data in graph.edges(current, data=True):
+            neighbor = v if u == current else u
+            if edge_data.get("relation", "") not in _IMPACT_RELATIONS or neighbor in visited:
+                continue
+            visited.add(neighbor)
+            depth_groups[current_depth + 1].append({
+                "node": str(neighbor),
+                "label": graph.nodes.get(neighbor, {}).get("label", str(neighbor)),
+                "from_node": str(current),
+                **describe_edge(graph, u, v, edge_data),
+            })
+            queue.append((neighbor, current_depth + 1))
+    return depth_groups
+
+
 async def handle_graph_impact(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -401,36 +438,7 @@ async def handle_graph_impact(
                 "error": f"Concept '{concept}' not found in the graph.",
             }
 
-        # BFS with relation filtering
-        visited: Set[str] = {start}
-        queue: deque = deque([(start, 0)])
-        depth_groups: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
-
-        while queue:
-            current, current_depth = queue.popleft()
-            if current_depth >= max_depth:
-                continue
-
-            for u, v, edge_data in graph.edges(current, data=True):
-                neighbor = v if u == current else u
-                relation = edge_data.get("relation", "")
-
-                if relation not in _IMPACT_RELATIONS:
-                    continue
-                if neighbor in visited:
-                    continue
-
-                visited.add(neighbor)
-                neighbor_attrs = graph.nodes.get(neighbor, {})
-                depth_groups[current_depth + 1].append(
-                    {
-                        "node": str(neighbor),
-                        "label": neighbor_attrs.get("label", str(neighbor)),
-                        "relation": relation,
-                        "from_node": str(current),
-                    }
-                )
-                queue.append((neighbor, current_depth + 1))
+        depth_groups = _impact_depth_groups(graph, start, max_depth)
 
         # Format output
         impact_layers = [

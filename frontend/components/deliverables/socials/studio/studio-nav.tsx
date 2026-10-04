@@ -17,6 +17,7 @@ const VIEW_ITEMS: ReadonlyArray<{ view: SocialsStudioView; label: string }> = [
   { view: 'calendar', label: 'Calendar' },
   { view: 'queue', label: 'Queue' },
   { view: 'plans', label: 'Plans' },
+  { view: 'posted', label: 'Posted' },  // PRD-251C US-C408
 ]
 
 const ITEM = 'inline-flex min-h-[44px] items-center gap-2 border-b-2 px-3.5 text-sm font-medium transition-colors'

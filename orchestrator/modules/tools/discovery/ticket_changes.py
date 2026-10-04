@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 STATUS, ASSIGN, EDIT = "status", "assign", "edit"
-CLOSED = "closed"
+CLOSED, CANCELLED = "closed", "cancelled"
 STATUS_NAMES = {"inbox": "Inbox", "assigned": "Assigned", "in_progress": "In progress", "review": "Review",
                 "blocked": "Blocked", "done": "Done", "failed": "Failed", "cancelled": "Cancelled",
                 "closed": "Closed"}
@@ -73,9 +73,16 @@ def _snapshot(db: Session, workspace_id: Any, ids: List[int]) -> Dict[int, Dict[
         return {}
     from core.models.core import BoardTask
 
-    rows = db.query(BoardTask.id, BoardTask.status, BoardTask.assigned_agent_id, BoardTask.title).filter(
-        BoardTask.id.in_(ids), BoardTask.workspace_id == workspace_id).all()
-    return {r.id: {"id": r.id, "status": r.status, "agent": r.assigned_agent_id, "title": r.title} for r in rows}
+    rows = db.query(BoardTask.id, BoardTask.status, BoardTask.assigned_agent_id, BoardTask.title,
+                    BoardTask.runtime_ref).filter(BoardTask.id.in_(ids), BoardTask.workspace_id == workspace_id).all()
+    return {r.id: {"id": r.id, "status": r.status, "agent": r.assigned_agent_id, "title": r.title,
+                   "notes": _notes_on(getattr(r, "runtime_ref", None))} for r in rows}
+
+
+def _notes_on(runtime_ref: Any) -> int:
+    """How many notes a ticket carries (``runtime_ref.session_notes``)."""
+    notes = runtime_ref.get("session_notes") if isinstance(runtime_ref, dict) else None
+    return len(notes) if isinstance(notes, list) else 0
 
 
 def _closed_refusal(db: Session, workspace_id: Any, closed: List[Dict[str, Any]]) -> str:
@@ -102,11 +109,23 @@ def _what_changed(db: Session, kind: str, was: Mapping[str, Any], now: Optional[
     if now is None:
         return None
     if kind == STATUS and now["status"] != was["status"]:
+        if now["status"] == CANCELLED and now["notes"] > was["notes"]:
+            return None     # F273: the cancel noted itself on the card (services/cancel_notes), once is enough
         return f"Moved this from {_status(was['status'])} to {_status(now['status'])}"
     if kind == ASSIGN and now["agent"] != was["agent"]:
         return f"Gave this to {_agent_name(db, now['agent']) or 'no one'}"
     fields = [f for f in result.get("updated") or [] if isinstance(f, str)] if kind == EDIT else []
     return f"Changed its {', '.join(fields)}" if fields else None
+
+
+def note_change(db: Session, workspace_id: Any, task_id: int, what: str) -> None:
+    """One change another tool made, noted on its ticket as these tools note theirs
+    ("Auto · Gave this a new brief and sent it back, in chat."). A note that can't be
+    written never undoes the change: it is logged."""
+    try:
+        _append(db, workspace_id, {task_id: what})
+    except Exception:
+        logger.exception("[ticket_changes] the change to %s stands, but its note was not written", task_id)
 
 
 def _append(db: Session, workspace_id: Any, notes: Mapping[int, str]) -> None:
@@ -145,4 +164,4 @@ def _status(value: Any) -> str:
     return STATUS_NAMES.get(str(value), str(value))
 
 
-__all__ = ["ASSIGN", "CLOSED_REFUSAL", "EDIT", "STATUS", "guarded_and_recorded"]
+__all__ = ["ASSIGN", "CLOSED_REFUSAL", "EDIT", "STATUS", "guarded_and_recorded", "note_change"]

@@ -2,12 +2,18 @@
  * PRD-251B US-B207 — the Plan page's model (pure): the five steps (Plan.dc.html), the form's
  * draft and how it maps to and from a plan, the cadence's "how often" presets, the visual
  * mix and late-approval choices, the cadence summary (posts per channel over the plan's
- * days and the render minutes its videos need) and the plan's status line.
+ * days and the render minutes its videos need) and the plan's status line. PRD-251C: a
+ * row's story choice (US-C301).
  */
+import type { SocialChannel } from '@/lib/api-client'
+import { keptVisual } from './plan-row-visual'
 import type {
   SocialLatePolicy,
   SocialPlan,
   SocialPlanInput,
+  SocialPlanRhythm,
+  SocialPlanRowKind,
+  SocialPlanRowVisual,
   SocialPlanSources,
   SocialWeekday,
 } from '@/lib/socials-plan-types'
@@ -18,6 +24,27 @@ export const WEEKDAY_LABELS: Record<SocialWeekday, string> = {
   mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
 }
 export const DEFAULT_PLAN_DAYS = 35
+/** PRD-251C (C5): the server's default repeat window, and the most it takes. */
+export const DEFAULT_REPEAT_AFTER_DAYS = 60
+export const MAX_REPEAT_AFTER_DAYS = 365
+
+/** PRD-251C (C1): a new plan makes its week on Sunday at 17:00, researches the day before
+ * (O1, O3, C4), and reminds at 20:00 the evening before a day's posts (C3). */
+export const DEFAULT_BATCH_DAY: SocialWeekday = 'sun'
+export const DEFAULT_BATCH_DATE = 25
+export const MAX_BATCH_DATE = 28
+export const NEW_PLAN_MAKE_TIME = '17:00'
+export const DEFAULT_REMIND_AT = '20:00'
+
+export function dayBefore(day: SocialWeekday): SocialWeekday {
+  return WEEKDAYS[(WEEKDAYS.indexOf(day) + WEEKDAYS.length - 1) % WEEKDAYS.length]
+}
+
+/** What the repeat window's field says, as a whole number of days the server takes. */
+export function repeatDays(value: string): number {
+  const days = Math.round(Number(value))
+  return Number.isFinite(days) ? Math.min(MAX_REPEAT_AFTER_DAYS, Math.max(1, days)) : 1
+}
 const MS_PER_DAY = 86_400_000
 const SECONDS_PER_MINUTE = 60
 
@@ -39,6 +66,38 @@ export interface DraftRow {
   templateId: string | null
   days: SocialWeekday[]
   time: string
+  /** PRD-251C (US-C301): 'story' when the row posts its image or video as a story. */
+  kind?: SocialPlanRowKind | null
+  /** PRD-251C (US-C302): the row's own visual; null follows the plan's mix. */
+  visual?: SocialPlanRowVisual | null
+}
+
+/** PRD-251C (US-C301): the formats a story row may post, and the format select's story choices. */
+export const STORY_FORMATS: ReadonlyArray<string> = ['image', 'video']
+const STORY_CHOICE_PREFIX = 'story_'
+
+/** The format select's value for a row: its format, or "story_image" / "story_video" for a story row. */
+export function formatChoiceOf(row: Pick<DraftRow, 'format' | 'kind'>): string {
+  return row.kind === 'story' ? `${STORY_CHOICE_PREFIX}${row.format}` : row.format
+}
+
+/** The row after the format select changed: a story choice sets the kind; another clears it. */
+export function withFormatChoice(row: DraftRow, choice: string): DraftRow {
+  const story = choice.startsWith(STORY_CHOICE_PREFIX)
+  const format = story ? choice.slice(STORY_CHOICE_PREFIX.length) : choice
+  const sameFormat = format === row.format
+  return {
+    ...row, format, kind: story ? 'story' : null, visual: keptVisual(format, row.visual),
+    templateId: sameFormat ? row.templateId : null, lengthSeconds: sameFormat ? row.lengthSeconds : null,
+  }
+}
+
+/** The channels of a story row that take no stories: the plan leaves them out of its stories. */
+export function storyless(row: Pick<DraftRow, 'channels' | 'kind'>, channels: ReadonlyArray<SocialChannel>): string[] {
+  if (row.kind !== 'story') return []
+  const takesStories = (toolkit: string) =>
+    channels.some((channel) => channel.toolkit === toolkit && channel.post_kinds.some((kind) => kind.kind === 'story'))
+  return row.channels.filter((toolkit) => !takesStories(toolkit))
 }
 
 export type MixKey = 'templates' | 'mixed' | 'ai'
@@ -69,6 +128,12 @@ export interface PlanDraft {
   researchEnabled: boolean
   researchDay: SocialWeekday
   researchTime: string
+  /** PRD-251C: research adds no topic close to a post of the last this-many days. */
+  repeatAfterDays: number
+  rhythm: SocialPlanRhythm
+  batchDay: SocialWeekday
+  batchDate: number
+  remindAt: string
   makeTime: string
   imagesEarly: number
   videosEarly: number
@@ -106,8 +171,9 @@ export function emptyDraft(timezone: string, today: Date = new Date()): PlanDraf
     startsOn: isoDay(today), endsOn: isoDay(new Date(today.getTime() + (DEFAULT_PLAN_DAYS - 1) * MS_PER_DAY)),
     cadence: [newRow()],
     sources: { knowledge: true, deliverables: true, website: true, github: false, notes: '' },
-    neverSay: '', researchEnabled: true, researchDay: 'mon', researchTime: '06:00',
-    makeTime: '07:00', imagesEarly: 0, videosEarly: 1, mix: 'templates', latePolicy: 'skip',
+    neverSay: '', researchEnabled: true, researchDay: dayBefore(DEFAULT_BATCH_DAY), researchTime: '06:00', repeatAfterDays: DEFAULT_REPEAT_AFTER_DAYS,
+    rhythm: 'weekly', batchDay: DEFAULT_BATCH_DAY, batchDate: DEFAULT_BATCH_DATE, remindAt: DEFAULT_REMIND_AT,
+    makeTime: NEW_PLAN_MAKE_TIME, imagesEarly: 0, videosEarly: 1, mix: 'templates', latePolicy: 'skip',
   }
 }
 
@@ -124,11 +190,14 @@ export function draftFromPlan(plan: SocialPlan): PlanDraft {
     startsOn: plan.starts_on ?? base.startsOn, endsOn: plan.ends_on ?? base.endsOn,
     cadence: plan.cadence.map((row) => ({
       id: row.id, channels: [...row.channels], format: row.format, lengthSeconds: row.length_seconds,
-      templateId: row.template_id, days: [...row.days], time: row.time,
+      templateId: row.template_id, days: [...row.days], time: row.time, kind: row.kind ?? null, visual: row.visual ?? null,
     })),
     sources: { knowledge: plan.sources.knowledge, deliverables: plan.sources.deliverables, website: plan.sources.website, github: plan.sources.github, notes: plan.sources.notes ?? '' },
     neverSay: (plan.sources.never_say ?? []).join(', '),
     researchEnabled: plan.research.enabled, researchDay: plan.research.day, researchTime: plan.research.time,
+    repeatAfterDays: plan.research.repeat_after_days ?? DEFAULT_REPEAT_AFTER_DAYS,
+    rhythm: plan.make.rhythm ?? 'daily', batchDay: plan.make.batch_day ?? DEFAULT_BATCH_DAY,
+    batchDate: plan.make.batch_date ?? DEFAULT_BATCH_DATE, remindAt: plan.make.remind_at ?? DEFAULT_REMIND_AT,
     makeTime: plan.make.time, imagesEarly: plan.make.image_days_early ?? 0, videosEarly: plan.make.video_days_early,
     mix: mixOf(plan.make.visual_mix), latePolicy: plan.late_policy,
   }
@@ -145,13 +214,16 @@ export function inputFromDraft(draft: PlanDraft): SocialPlanInput {
     cadence: draft.cadence.map((row) => ({
       ...(row.id ? { id: row.id } : {}), channels: row.channels, format: row.format,
       length_seconds: row.format === 'video' ? row.lengthSeconds : null, template_id: row.templateId, days: row.days, time: row.time,
+      ...(row.kind === 'story' && STORY_FORMATS.includes(row.format) ? { kind: row.kind } : {}),
+      ...(row.visual && row.format !== 'text' ? { visual: row.visual } : {}),
     })),
     sources: { ...draft.sources, never_say: phrases(draft.neverSay) },
     make: {
       time: draft.makeTime, image_days_early: draft.imagesEarly, video_days_early: draft.videosEarly,
       visual_mix: MIX_PRESETS.find((preset) => preset.key === draft.mix)?.mix ?? { templates: 100 },
+      rhythm: draft.rhythm, batch_day: draft.batchDay, batch_date: draft.batchDate, remind_at: draft.remindAt,
     },
-    research: { enabled: draft.researchEnabled, day: draft.researchDay, time: draft.researchTime },
+    research: { enabled: draft.researchEnabled, day: draft.researchDay, time: draft.researchTime, repeat_after_days: draft.repeatAfterDays },
     late_policy: draft.latePolicy,
   }
 }

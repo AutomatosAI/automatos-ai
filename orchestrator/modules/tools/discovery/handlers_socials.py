@@ -37,7 +37,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.tools.discovery.actions_socials import LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT
+from modules.tools.discovery.actions_socials import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -547,8 +547,9 @@ def _plan(db: Session, workspace_id: UUID, plan_id: Any) -> Any:
 
 
 async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """The plan as its research needs it: goal, audience, dates, cadence, sources and the bank's topics."""
-    from modules.socials import topics
+    """The plan as its research needs it: goal, audience, dates, cadence, sources, the bank's topics,
+    and the workspace's history (PRD-251C C5): what it already posted, so nothing repeats."""
+    from modules.socials import history, topics
 
     from modules.documents.brand_style import style_prompt
 
@@ -562,7 +563,10 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
     keys = ("id", "name", "goal", "audience", "starts_on", "ends_on", "timezone", "cadence", "sources", "status")
     bank = [{"title": t.title, "formats": list(t.formats or []), "used": t.used_at is not None} for t in topics.list_topics(db, plan)]
     plan_view = {key: plan.to_dict()[key] for key in keys}
-    return {"success": True, "plan": plan_view, "bank": bank, "brand_style": style_prompt(workspace.settings)}
+    return {
+        "success": True, "plan": plan_view, "bank": bank, "history": history.history(db, workspace_id),
+        "brand_style": style_prompt(workspace.settings),
+    }
 
 
 async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -589,3 +593,32 @@ async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, A
         "refused": refused,
         "message": f"{len(added)} added to the bank, {len(refused)} refused.",
     }
+
+
+# ---- PRD-251C (C5, US-C103): the workspace's history, for research ----
+
+
+def _whole(value: Any, name: str, most: int) -> Optional[int]:
+    """A whole number from 1 to ``most``, or None when left out (the platform's default)."""
+    if value is None:
+        return None
+    number = int(value) if isinstance(value, str) and value.strip().isdigit() else value
+    if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= most:
+        raise _Refused(f"{name} must be a whole number from 1 to {most}.")
+    return number
+
+
+async def get_social_history(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """What the workspace posted, newest first (``modules/socials/history.py``)."""
+    from modules.socials import history
+
+    _, refusal = _open(db, workspace_id)
+    if refusal:
+        return refusal
+    try:
+        days = _whole(params.get("days"), "days", HISTORY_MAX_DAYS)
+        limit = _whole(params.get("limit"), "limit", HISTORY_MAX_LIMIT)
+    except _Refused as exc:
+        return _refused(str(exc))
+    posts = history.history(db, workspace_id, days=days, limit=limit)
+    return {"success": True, "posts": posts, "count": len(posts)}

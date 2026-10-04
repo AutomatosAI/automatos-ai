@@ -74,6 +74,8 @@ WAVE1B = VERSIONS / "prd251b_wave1.py"
 # PRD-251B Wave 2 (US-B201): the plan columns on social_campaigns, slot_key and music on
 # social_posts, and social_topics are in the models too, so the path runs it last.
 WAVE2B = VERSIONS / "prd251b_wave2.py"
+# PRD-251C Wave 2 (US-C201): social_posts.batch_key is in the model too, so the path runs it after.
+WAVE2C = VERSIONS / "prd251c_wave2.py"
 BASE_HEAD = "prd251w1_merge_heads"
 CAMPAIGN_FK = "social_posts_campaign_id_fkey"
 CAMPAIGN_INDEX = "ix_social_posts_campaign_id"
@@ -156,6 +158,7 @@ def _migrated_engine():
         _run(conn, WAVE2, "upgrade")
         _run(conn, WAVE1B, "upgrade")
         _run(conn, WAVE2B, "upgrade")
+        _run(conn, WAVE2C, "upgrade")
     return engine
 
 
@@ -351,6 +354,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE1B, "upgrade")  # the model carries PRD-251B Wave 1's columns too
             _run(conn, WAVE2B, "upgrade")  # and Wave 2's
+            _run(conn, WAVE2C, "upgrade")  # and PRD-251C Wave 2's
         _assert_same_schema(_schema(engine), _schema(model_engine), f"create_all first, from {start}")
         assert _campaign_keys(engine) == [CAMPAIGN_FK]
     finally:
@@ -537,6 +541,7 @@ def test_create_all_first_then_the_upgrade_twice_on_postgres(pg_engine, start):
             _run(conn, WAVE2, "upgrade")
             _run(conn, WAVE1B, "upgrade")
             _run(conn, WAVE2B, "upgrade")  # PRD-251B: the models carry both waves' columns
+            _run(conn, WAVE2C, "upgrade")  # and PRD-251C Wave 2's
 
             for table in (SocialCampaign.__table__, SocialPost.__table__):
                 assert _reflected(conn, table.name) == _declared(table), f"{table.name}, from {start}"

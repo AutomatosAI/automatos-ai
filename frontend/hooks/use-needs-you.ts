@@ -12,8 +12,13 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
-/** F246: why a ticket is stuck (services/needs_you.py STUCK_*). */
-export type StuckWhy = 'no_host' | 'no_agent' | 'not_picked_up' | 'mission_ended'
+/** F246: why a ticket is stuck (services/needs_you.py STUCK_*). F293: a step that failed its
+ * mission's check, and a mission paused at its budget or when the AI credit ran out. */
+export type StuckWhy =
+  | 'no_host' | 'no_agent' | 'not_picked_up' | 'mission_ended' | 'step_failed' | 'over_budget' | 'out_of_credit'
+
+/** F293: what a row opens: the ticket in the board's viewer, or its mission. */
+export type NeedsYouOpens = 'ticket' | 'mission'
 
 /** A ticket in Review, a stuck one, or one that failed. */
 export interface NeedsYouTicketRow {
@@ -22,8 +27,13 @@ export interface NeedsYouTicketRow {
   number?: string | null
   title: string | null
   agent_name: string | null
-  /** Set on a mission's own card: the row opens the mission. */
+  /** The mission the ticket belongs to (F293: a mission step's too), else null. */
   mission_id: string | null
+  /** F274/F293: that mission's card number and title. */
+  mission_number?: string | null
+  mission_title?: string | null
+  /** F293: what the row opens. A mission's decisions open the mission; a step waiting for your check opens the step. */
+  opens?: NeedsYouOpens
   at: string | null
   /** Set on a stuck ticket: why nothing will move it. */
   why?: StuckWhy
@@ -33,11 +43,16 @@ export interface NeedsYouTicketRow {
 export interface NeedsYouAskRow {
   source: 'grant' | 'mission'
   id: string
+  /** A question's words; an approval's ticket title (F274), or what it is for. */
   title: string | null
   ticket_id: number | null
-  /** PRD-252 R4: the number of the ticket it opens in */
-  ticket_number?: string | null
+  /** PRD-252 R4: the number of the ticket it opens in, named as on every row (F274) */
+  number?: string | null
   agent_name: string | null
+  /** F293: on a question or approval of a mission's step, that mission and its card's number and title. */
+  mission_id?: string | null
+  mission_number?: string | null
+  mission_title?: string | null
   at: string | null
 }
 

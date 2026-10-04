@@ -2,8 +2,9 @@
 
 /**
  * PRD-251B US-B107 — where the Socials Studio is, held in the URL with the house `tab=`
- * convention: /deliverables?tab=socials&view=calendar|queue|plans, with &post=<id>|new for
- * a post, &plan=new for the plan form and &cal=month|week|list for the calendar's layout.
+ * convention: /deliverables?tab=socials&view=calendar|queue|plans|posted, with &post=<id>|new for
+ * a post, &plan=new for the plan form (on Posted, &plan=<id> filters by plan: PRD-251C US-C408)
+ * and &cal=month|week|list for the calendar's layout.
  *
  * A view change is a router.push, never a replace, so the browser's back button returns to
  * the previous view. The route is mirrored in state as well: the click answers at once, and
@@ -13,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export const SOCIALS_VIEWS = ['calendar', 'queue', 'plans'] as const
+export const SOCIALS_VIEWS = ['calendar', 'queue', 'plans', 'posted'] as const
 export type SocialsStudioView = (typeof SOCIALS_VIEWS)[number]
 
 export const CALENDAR_LAYOUTS = ['month', 'week', 'list'] as const

@@ -23,6 +23,7 @@ vi.mock('@/hooks/use-authed-image', () => ({ useAuthedImage: (path: string | nul
 vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   FilePreview: ({ url }: { url: string }) => <div data-testid="file-preview" data-url={url} />,
   inferPreviewType: () => 'image',
+  useAuthenticatedBlobUrl: (url?: string) => ({ src: url ? `blob:${url}` : null, error: null }),
 }))
 
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
@@ -86,6 +87,21 @@ describe('the Look card', () => {
         media: { original: ['d-video'] }, template_id: null, length_seconds: null, format: 'video',
       }),
     )
+  })
+
+  it('a Library picture loads with the auth headers, as Outputs loads it: its preview_url is an API path', async () => {
+    api.listDeliverables.mockImplementation(async ({ artifact_type }: { artifact_type: string }) => ({
+      total: artifact_type === 'image' ? 1 : 0,
+      deliverables: artifact_type === 'image'
+        ? [{ id: 'd-up', title: 'Untitled post (upload)', artifact_type: 'image', file_name: null,
+            preview_url: '/api/socials/posts/p9/media/upload-1.png', created_at: '2026-10-10T09:00:00Z' }]
+        : [],
+    }))
+    renderWith(<SocialsEditor role="owner" post={post()} go={go} />)
+    source('Library')
+    const library = await within(look()).findByRole('list', { name: 'Library' })
+    // 3 Oct 2026: a plain <img src="/api/..."> asked the web app, not the API, without the auth.
+    expect(library.querySelector('img')).toHaveAttribute('src', 'blob:/api/socials/posts/p9/media/upload-1.png')
   })
 
   it('with a Photo template, Upload fills its photo spot, or the whole post when asked', async () => {

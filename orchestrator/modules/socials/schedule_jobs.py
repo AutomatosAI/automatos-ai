@@ -113,6 +113,17 @@ def _leader() -> Any:
     return scheduler if scheduler is not None and getattr(scheduler, "running", False) else None
 
 
+def cancel_job(post_id: Any) -> None:
+    """A deleted post's job, removed when this worker hosts the scheduler (else the
+    reconcile pass drops it: no post holds it). Never raises."""
+    try:
+        scheduler = _leader()
+        if scheduler is not None:
+            unregister(scheduler, post_id)
+    except Exception:  # noqa: BLE001 — the reconcile pass catches up; the delete stands
+        logger.exception("[Socials] the job of deleted post %s was not removed; the reconcile pass will", post_id)
+
+
 def sync_job(post: Any) -> None:
     """After a committed write: the post's job as its status and slot say, when this
     worker hosts the scheduler (else the reconcile pass does it). Never raises."""

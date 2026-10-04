@@ -28,7 +28,9 @@ from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
 from core.models.core import User
 from core.session_queue import get_session_queue
+from core.utils.timestamps import utc_iso
 from services.board_events import notify_chat_event
+from services.chat_agent_switch import record_agent_switch
 from services.chat_turns import get_turn_registry, run_detached_turn
 from services.page_context import inject_page_preamble, sanitize_page_context
 
@@ -627,8 +629,8 @@ async def get_chat_history(
             "id": str(chat.id),
             "userId": chat.user_id,
             "title": chat.title,
-            "createdAt": chat.created_at.isoformat(),
-            "updatedAt": chat.updated_at.isoformat(),
+            "createdAt": utc_iso(chat.created_at),
+            "updatedAt": utc_iso(chat.updated_at),
             "visibility": chat.visibility,
             "lastContext": chat.last_context,
             "lastMessagePreview": previews.get(str(chat.id)),
@@ -774,7 +776,7 @@ async def search_chat_history(
             "chat_title": r.chat_title,
             "role": r.role,
             "content": text_content[:500],
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_at": utc_iso(r.created_at),
         })
 
     return {"query": q, "total": len(results), "results": results}
@@ -893,8 +895,8 @@ async def get_chat(
         "id": str(chat.id),
         "userId": chat.user_id,
         "title": chat.title,
-        "createdAt": chat.created_at.isoformat(),
-        "updatedAt": chat.updated_at.isoformat(),
+        "createdAt": utc_iso(chat.created_at),
+        "updatedAt": utc_iso(chat.updated_at),
         "visibility": chat.visibility,
         "lastContext": chat.last_context,
         # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
@@ -936,7 +938,7 @@ async def get_chat_messages(
             # into the message badge slot ("Auto · background"). null for
             # every in-turn message, incl. all rows predating the column.
             "source": msg.source,
-            "createdAt": msg.created_at.isoformat()
+            "createdAt": utc_iso(msg.created_at)
         }
         for msg in messages
     ]
@@ -993,10 +995,8 @@ async def switch_agent(
     db: Session = Depends(get_db)
 ):
     """Switch to a different agent mid-conversation."""
-    from core.models import Chat, Agent
-    from datetime import datetime
-    import json
-    
+    from core.models import Agent
+
     chat_service = ChatService(db)
     user_id = get_user_id(db, ctx)
     
@@ -1028,24 +1028,7 @@ async def switch_agent(
         {"new_agent_id": request.newAgentId, "chat_id": chat.id}
     )
     
-    switch_record = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "from_agent_id": old_agent_id,
-        "to_agent_id": request.newAgentId,
-        "reason": request.reason or "User requested switch"
-    }
-    
-    existing_switches = getattr(chat, 'agent_switches', None) or []
-    if isinstance(existing_switches, str):
-        existing_switches = json.loads(existing_switches)
-    
-    existing_switches.append(switch_record)
-    
-    db.execute(
-        text("UPDATE chats SET agent_switches = :switches WHERE id = :chat_id"),
-        {"switches": json.dumps(existing_switches), "chat_id": chat.id}
-    )
-    
+    record_agent_switch(db, chat, old_agent_id, request.newAgentId, request.reason)
     db.commit()
     
     return {

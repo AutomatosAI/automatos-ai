@@ -4,11 +4,13 @@ Tests:
 1. Mocked tool execution writes one row with correct fields
 2. Telemetry write failure does not propagate to caller
 3. Composio call produces exactly one log row (no double-write)
+4. The registry module mocked for that call is put back afterwards (F260)
 """
 import asyncio
 import importlib
 import importlib.util
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -62,6 +64,24 @@ def teardown_module(module):
         sys.modules.pop("core.models.composio_cache", None)
     else:
         sys.modules["core.models.composio_cache"] = _saved_composio_cache
+
+
+_REGISTRY_MODULE = "modules.tools.registry.tool_registry"
+
+
+@contextmanager
+def _registry_mocked():
+    """exec_composio imports the tool registry: a mock stands in while it loads,
+    and the real module is put back afterwards (F260). Deleting it instead made
+    the next import run the registry module again, so ``ToolCategory`` existed
+    twice, and every later ``ToolRegistry()`` failed on the specs that
+    app_and_document_tools had built with the first one
+    (``KeyError: ToolCategory.API_TOOLS``)."""
+    mock_registry_mod = MagicMock()
+    mock_registry_mod.ToolSpec = MagicMock()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(sys.modules, _REGISTRY_MODULE, mock_registry_mod)
+        yield
 
 
 @pytest.fixture
@@ -268,12 +288,9 @@ class TestNoDoubleWrite:
         # Import exec_composio directly to avoid triggering full import chain
         _exec_composio_path = Path(_orchestrator_root) / "modules" / "tools" / "execution" / "exec_composio.py"
         _ec_spec = importlib.util.spec_from_file_location("exec_composio_mod", _exec_composio_path)
-        # Need to mock the registry import
-        mock_registry_mod = MagicMock()
-        mock_registry_mod.ToolSpec = MagicMock()
-        sys.modules["modules.tools.registry.tool_registry"] = mock_registry_mod
         exec_composio_mod = importlib.util.module_from_spec(_ec_spec)
-        _ec_spec.loader.exec_module(exec_composio_mod)
+        with _registry_mocked():
+            _ec_spec.loader.exec_module(exec_composio_mod)
 
         # Create a mock executor with a composio_executor that returns success
         mock_executor = MagicMock()
@@ -306,5 +323,15 @@ class TestNoDoubleWrite:
         # The result should still be successful
         assert result.get("success") is True
 
-        # Cleanup
-        del sys.modules["modules.tools.registry.tool_registry"]
+    def test_the_real_registry_module_is_back_after_the_mock(self):
+        """F260: after the mock, the registry is the module the tool specs were
+        built against, so a ToolRegistry built later still registers them."""
+        from modules.tools.registry.tool_registry import ToolRegistry
+
+        ToolRegistry()  # loads app_and_document_tools against the real module
+        real = sys.modules[_REGISTRY_MODULE]
+        with _registry_mocked():
+            assert sys.modules[_REGISTRY_MODULE] is not real
+
+        assert sys.modules[_REGISTRY_MODULE] is real
+        assert ToolRegistry().get_tool("composio_execute") is not None

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
 WHY_RUN_NOW = "the operator pressed Run Now"
 WHY_CREATED_AND_ASSIGNED = "the operator created the ticket and assigned it"
+WHY_ASSIGNED_BY_HAND = "the operator assigned the ticket on the board"  # F275
 WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
 WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
 WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"
@@ -129,14 +130,17 @@ def record_operator_consent(
     ``"error"`` (nothing recorded — the gate will ask as before; never raises).
     """
     try:
-        from core.models.approval_grants import SUBJECT_BOARD_TASK
+        from core.models.approval_grants import KIND_APPROVAL, SUBJECT_BOARD_TASK
         from core.services.approval_grants import (
             create_grant, find_active_grant, find_pending_grant, grant_grant,
         )
         subject = str(task_id)
         if find_active_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject) is not None:
             return "active"
-        pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject)
+        # F259: only an approval is consent. An open question waits for its answer:
+        # granting it here dropped it from the Questions tab unanswered.
+        pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
+                                     kind=KIND_APPROVAL)
         if pending is not None:
             grant_grant(pending, granted_by=actor)
             db.commit()

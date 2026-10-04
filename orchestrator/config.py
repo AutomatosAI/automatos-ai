@@ -712,6 +712,10 @@ class Config:
     # the model is on the operator's own plan; this stops a looping session from
     # hammering the board. 0 = no cap.
     SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
+    # F330 (night 9c): how many session tool calls run at once in this process. A
+    # burst waits for a slot holding no pool connection; keep it well under the
+    # pool (10 + 20), since each call can hold its own connection plus one more.
+    SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
@@ -1690,6 +1694,12 @@ class Config:
     # F086: a document whose stored chunks hold less than this share of its
     # extracted text is shown to the owner as partial ("partial — 61% kept").
     RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
+    # F311 (night 9): a Markdown or text document with headings is chunked by its sections, each
+    # with its heading; a section under the minimum joins the next, one over the maximum
+    # is split at its paragraphs, each piece under its headings. Characters.
+    RAG_SECTION_CHUNKING_ENABLED: bool = os.getenv("RAG_SECTION_CHUNKING_ENABLED", "true").lower() == "true"
+    RAG_SECTION_MIN_CHARS: int = int(os.getenv("RAG_SECTION_MIN_CHARS", "200"))
+    RAG_SECTION_MAX_CHARS: int = int(os.getenv("RAG_SECTION_MAX_CHARS", "1500"))
 
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
@@ -1726,6 +1736,17 @@ class Config:
     RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
     # Only feedback from the last N days shapes ranking (stale opinions decay out).
     RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
+    # F311 (night 9): agents' reports crowded the owner's documents out of the search.
+    # When a search finds an agent's report, the owner's own documents are searched on
+    # their own too (the newest RAG_OWNER_LEG_MAX_DOCUMENTS of them), and up to
+    # RAG_OWNER_PASSAGES_RESERVED of the passages handed over are the owner's, placed first.
+    RAG_OWNER_LEG_ENABLED: bool = os.getenv("RAG_OWNER_LEG_ENABLED", "true").lower() == "true"
+    RAG_OWNER_LEG_MAX_DOCUMENTS: int = int(os.getenv("RAG_OWNER_LEG_MAX_DOCUMENTS", "200"))
+    RAG_OWNER_PASSAGES_RESERVED: int = int(os.getenv("RAG_OWNER_PASSAGES_RESERVED", "3"))
+    # F311: a passage from an owner's document this short (in tokens) is handed over as
+    # the whole document, so the section beside the one that matched comes with it. 0 = off.
+    RAG_WHOLE_DOCUMENT_MAX_TOKENS: int = int(os.getenv("RAG_WHOLE_DOCUMENT_MAX_TOKENS", "800"))
 
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
@@ -1894,13 +1915,15 @@ class Config:
     # =============================================================================
     # Socials is gated two ways (D1): the platform master switch is the
     # ``socials.enabled`` system setting, a super-admin toggle in Settings →
-    # System Settings, and each workspace has ``settings['socials'].enabled``
-    # (modules/socials/settings.py). SOCIALS_ENABLED_DEFAULT is only the master
-    # switch's DEFAULT: the prd251_socials migration seeds the row with it, and
-    # it applies wherever no row exists. Every plan gets Socials, so there is no
-    # plan exposure key.
+    # System Settings, and each workspace has ``settings['socials'].enabled``,
+    # the Socials card in its Settings (modules/socials/settings.py).
+    # SOCIALS_ENABLED_DEFAULT is both switches' DEFAULT, on (owner, 2026-10-03; an
+    # install that wants Socials off until asked, such as an enterprise one, sets
+    # it false): the prd251_socials migration seeds the master row with it, it
+    # applies wherever no row exists, and a workspace that never set its switch
+    # takes it. Every plan gets Socials, so there is no plan exposure key.
     SOCIALS_ENABLED_DEFAULT: bool = os.getenv(
-        "SOCIALS_ENABLED_DEFAULT", "false"
+        "SOCIALS_ENABLED_DEFAULT", "true"
     ).strip().lower() == "true"
     # D9: the lifetime of the presigned media URL a channel fetches at publish time.
     SOCIALS_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_URL_TTL_SECONDS", "86400"))
@@ -1954,6 +1977,22 @@ class Config:
     # most this many slots a tick (the rest wait for the next).
     SOCIALS_PLAN_TICK_SECONDS: int = int(os.getenv("SOCIALS_PLAN_TICK_SECONDS", "300"))
     SOCIALS_PLAN_MAX_SLOTS_PER_TICK: int = int(os.getenv("SOCIALS_PLAN_MAX_SLOTS_PER_TICK", "12"))
+    # PRD-251C US-C103 (C5): the workspace's Socials history, as research reads it: this many
+    # days back and at most this many posts, newest first, unless the caller asks for others.
+    SOCIALS_HISTORY_DAYS: int = int(os.getenv("SOCIALS_HISTORY_DAYS", "90"))
+    SOCIALS_HISTORY_LIMIT: int = int(os.getenv("SOCIALS_HISTORY_LIMIT", "50"))
+    # PRD-251C US-C104 (C5): two titles whose content words overlap this much (shared over all,
+    # 0 to 1) are one topic: research may not add the second (modules/socials/repeats.py).
+    SOCIALS_REPEAT_OVERLAP: float = float(os.getenv("SOCIALS_REPEAT_OVERLAP", "0.75"))
+    # PRD-251C US-C105: the composer is given how this many of the workspace's last posts began.
+    SOCIALS_COMPOSE_RECENT_OPENINGS: int = int(os.getenv("SOCIALS_COMPOSE_RECENT_OPENINGS", "10"))
+    # PRD-251C US-C402 (C7): the leader reads published posts' numbers this often, at most this
+    # many reads a tick, each reading (1 and 7 days after a post went out) for this many days.
+    SOCIALS_RESULTS_TICK_SECONDS: int = int(os.getenv("SOCIALS_RESULTS_TICK_SECONDS", "3600"))
+    SOCIALS_RESULTS_MAX_READS_PER_TICK: int = int(os.getenv("SOCIALS_RESULTS_MAX_READS_PER_TICK", "50"))
+    SOCIALS_RESULTS_READ_WINDOW_DAYS: int = int(os.getenv("SOCIALS_RESULTS_READ_WINDOW_DAYS", "2"))
+    # PRD-251C US-C406 (C8): the workspace keeps this many voice examples, newest first.
+    SOCIALS_VOICE_EXAMPLES: int = int(os.getenv("SOCIALS_VOICE_EXAMPLES", "10"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")

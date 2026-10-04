@@ -61,16 +61,18 @@ def redo_refusal(db: Any, task: Any) -> Optional[str]:
 
 
 def _playbook_refusal(db: Any, task: Any) -> Optional[str]:
+    from services.playbook_run_refusal import run_refusal
     from services.ticket_numbers import ticket_label
 
     run = playbook_run_of(db, task)
-    if run is None or _playbook_of(db, run) is None:
+    playbook = _playbook_of(db, run) if run is not None else None
+    if playbook is None:
         return (f"{ticket_label(task, capital=True)}'s playbook run can no longer be found, so it can't run "
                 "again here. Run the playbook from its page.")
     if run.status in LIVE_RUN_STATUSES:
         return (f"{ticket_label(task, capital=True)}'s playbook is still running. Cancel it first, or wait "
                 "for it to finish.")
-    return None
+    return run_refusal(playbook)  # F270: a step with no agent; #0183's Run now ran 103 again, and failed again
 
 
 def _mission_refusal(db: Any, task: Any) -> Optional[str]:
@@ -192,6 +194,15 @@ def _follow_with_the_watch(db: Any, original: Any, rerun: Any) -> None:
                             reason="the owner sent the run back")
 
 
+def _starts_clean(card: Any) -> None:
+    """F267 (night 7b): a step sent back showed In progress with no start time and the
+    draft the owner had just rejected, for minutes. Its card starts clean, as a
+    playbook's redo does: started now, the old draft off the card (Reject keeps it
+    in the card's history)."""
+    card.started_at = datetime.now(timezone.utc)
+    card.completed_at = card.result = None
+
+
 def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     """The step goes back to its mission for revision, with the owner's words and
     the output they sent back (the dispatcher's revision prompt reads both)."""
@@ -218,6 +229,7 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     transition_task(db=db, task=step, new_state=TaskState.RETRYING, actor_type=ActorType.HUMAN, actor_id=by,
                     reason="the owner sent it back")
     card.review_feedback = None  # the step carries the owner's words now
+    _starts_clean(card)
     sync_board_status(db, step)
     db.commit()
     return f"{ticket_label(card, capital=True)} went back to its mission to be redone."

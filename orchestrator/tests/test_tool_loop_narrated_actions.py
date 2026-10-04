@@ -29,6 +29,7 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 from core.llm.clients.base import LLMResponse  # noqa: E402
+from modules.tools.execution.nudges import as_a_check  # noqa: E402
 from modules.tools.execution.tool_loop import (  # noqa: E402
     _NARRATION_RECOVERY_MSG,
     ToolLoopExecutor,
@@ -118,10 +119,11 @@ def test_narrated_first_reply_is_nudged_once_and_the_retry_runs_the_tool():
     assert tools_cb.executed and tools_cb.executed[0][0] == "platform_create_agent"
     assert result.iterations == 1
     assert result.response.content == "OPS created (id 265)."
-    # the retry saw its own narration followed by the rule
+    # the retry saw its own narration followed by the rule, as the user's turn (F295: a
+    # system message there was moved into Anthropic's system prompt, ending the talk on the reply)
     retry_messages = model.calls[0][0]
     assert retry_messages[-2] == {"role": "assistant", "content": NARRATED_1930}
-    assert retry_messages[-1] == {"role": "system", "content": _NARRATION_RECOVERY_MSG}
+    assert retry_messages[-1] == {"role": "user", "content": as_a_check(_NARRATION_RECOVERY_MSG)}  # 9b: says it is the platform
     assert model.calls[0][1] == [TOOL]  # tools offered again on the retry
 
 
@@ -134,7 +136,7 @@ def test_a_retry_that_still_narrates_is_returned_without_a_second_nudge():
     assert not tools_cb.executed
     assert result.iterations == 0
     assert result.response.content == NARRATED_1948
-    assert sum(1 for m in messages if m.get("content") == _NARRATION_RECOVERY_MSG) == 1
+    assert sum(1 for m in messages if m.get("content") == as_a_check(_NARRATION_RECOVERY_MSG)) == 1
 
 
 def test_no_tools_offered_or_a_real_first_call_is_untouched():
