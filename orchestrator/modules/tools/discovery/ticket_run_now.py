@@ -51,9 +51,9 @@ def _waiting_redo(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Any
     if str(params.get("status") or "").strip().lower() != IN_PROGRESS or params.get("task_ids") or not said.isdigit():
         return None
     task = db.query(BoardTask).filter(BoardTask.id == int(said), BoardTask.workspace_id == workspace_id).first()
-    if task is None or takes_its_own_redo(task) or task.status not in WAITS_FOR_ITS_AGENT:
+    if task is None or takes_its_own_redo(task) or getattr(task, "status", None) not in WAITS_FOR_ITS_AGENT:
         return None
-    return task if task.review_feedback and task.assigned_agent_id else None
+    return task if getattr(task, "review_feedback", None) and getattr(task, "assigned_agent_id", None) else None
 
 
 __all__ = ["LEFT_TO_THE_BOARD", "redo_keeps_the_correction"]

@@ -27,7 +27,7 @@ from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 
-from core.llm import output_budget
+from core.llm import output_budget, usage_status
 
 logger = logging.getLogger(__name__)
 
@@ -676,7 +676,7 @@ class LLMManager:
                     response = await in_owner_words(stream, messages, tools, on_delta)
                 else:
                     response = await self.provider.generate_response(messages, tools)
-            self._track_usage(response, start)
+            self._track_usage(response, start, status=usage_status.call_status(response))  # F295
             self._note_success(budget)
             self._note_cut(response, budget)
             return response
@@ -701,7 +701,7 @@ class LLMManager:
         try:
             with output_budget.call_budget(budget):
                 response = self.provider.generate_response_sync(messages)
-            self._track_usage(response, start)
+            self._track_usage(response, start, status=usage_status.call_status(response))  # F295
             self._note_cut(response, budget)
             return response
         except Exception as exc:

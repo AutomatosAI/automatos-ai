@@ -35,6 +35,7 @@ from modules.tools.execution.tool_loop import (
     ToolPostResult,
 )
 from modules.tools.execution.action_claims import claimed_action_not_done
+from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges are the user's turn
 from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
@@ -72,6 +73,9 @@ from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
+from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
+from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
+from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
 
 logger = logging.getLogger(__name__)
 
@@ -917,11 +921,9 @@ class StreamingChatService:
         return self.workspace_id
 
     def _extract_user_text(self, llm_messages: List[Dict[str, Any]]) -> str:
-        """Extract the latest user message text from LLM messages."""
-        for m in reversed(llm_messages):
-            if m.get("role") == "user":
-                return m.get("content") or ""
-        return ""
+        """The latest message the person wrote (F295: never a nudge of the tool loop's)."""
+        return next((m.get("content") or "" for m in reversed(llm_messages)
+                     if m.get("role") == "user" and not is_nudge(m)), "")
 
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
@@ -1580,6 +1582,9 @@ class StreamingChatService:
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
     @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
+    @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
+    @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
+    @tells_the_team_honestly  # F324 (night 9b): memory is Auto's own; the owner's documents reach the team
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model

@@ -108,3 +108,94 @@ def test_field_memory_success_does_not_emit(monkeypatch):
     asyncio.run(st.ensure_field_memory_collection())
 
     rec.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# warm_action_index_on_startup (#927; subsystem="startup",
+#                               operation="warm_action_index")
+# ---------------------------------------------------------------------------
+
+def _index_with_warm(monkeypatch, warm):
+    import modules.tools.discovery.action_semantic_index as asi_mod
+
+    index = MagicMock()
+    index.warm = warm
+    monkeypatch.setattr(asi_mod, "get_action_semantic_index", lambda: index)
+
+
+def test_warm_action_index_failure_emits_startup_error(monkeypatch):
+    import core.boot.startup_tasks as st
+
+    rec = MagicMock()
+    monkeypatch.setattr(st, "record_error", rec, raising=False)
+
+    async def _boom():
+        raise RuntimeError("embedding upstream down")
+
+    _index_with_warm(monkeypatch, _boom)
+
+    # Must NOT raise — boot proceeds even when the warm-up blows up.
+    asyncio.run(st.warm_action_index_on_startup())
+
+    rec.assert_called_once()
+    kw = rec.call_args.kwargs
+    assert kw["subsystem"] == "startup"
+    assert kw["operation"] == "warm_action_index"
+    assert "embedding upstream down" in str(kw["error"])
+
+
+def test_warm_action_index_without_a_provider_skips_quietly(monkeypatch):
+    """No embedding provider yet (a fresh install) is expected, not an error."""
+    import core.boot.startup_tasks as st
+    from core.llm.clients.base import EmbeddingUnavailableError
+
+    rec = MagicMock()
+    monkeypatch.setattr(st, "record_error", rec, raising=False)
+
+    async def _no_provider():
+        raise EmbeddingUnavailableError("No embedding provider configured/reachable")
+
+    _index_with_warm(monkeypatch, _no_provider)
+
+    asyncio.run(st.warm_action_index_on_startup())
+
+    rec.assert_not_called()
+
+
+def test_warm_action_index_success_does_not_emit(monkeypatch):
+    import core.boot.startup_tasks as st
+
+    rec = MagicMock()
+    monkeypatch.setattr(st, "record_error", rec, raising=False)
+    warmed = []
+
+    async def _warm():
+        warmed.append(True)
+
+    _index_with_warm(monkeypatch, _warm)
+
+    asyncio.run(st.warm_action_index_on_startup())
+
+    assert warmed == [True]
+    rec.assert_not_called()
+
+
+def test_boot_launches_the_action_index_warm_up():
+    """main.py's seed stage starts the warm-up alongside the other boot seeds."""
+    import ast
+
+    tree = ast.parse((ORCH_ROOT / "main.py").read_text())
+    seeds = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_seed_semantic_embeddings"
+    )
+    launched = {
+        c.args[0].func.id
+        for c in ast.walk(seeds)
+        if isinstance(c, ast.Call)
+        and getattr(c.func, "attr", None) == "create_task"
+        and c.args
+        and isinstance(c.args[0], ast.Call)
+        and isinstance(c.args[0].func, ast.Name)
+    }
+    assert "warm_action_index_on_startup" in launched

@@ -13,13 +13,19 @@ All methods return the worker's JSON response dict on success,
 or {"success": False, "error": "..."} on connection/timeout errors.
 """
 
+import base64
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional, Union
 
 import httpx
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# A binary file goes to the worker's /files/write a piece at a time: base64 grows a piece by a
+# third, so each request stays under the worker's 1 MB body limit (aiohttp's default).
+BINARY_PIECE_BYTES = 600 * 1024
+PART_SUFFIX = ".part"
 
 # Singleton client — reused across the orchestrator process
 _client: Optional[httpx.AsyncClient] = None
@@ -79,8 +85,8 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("read_file", err)
 
-    async def write_file(self, path: str, content: str) -> Dict[str, Any]:
-        """Write or create a file in the workspace."""
+    async def write_file(self, path: str, content: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Write or create a file in the workspace (text, or one piece of ``write_binary``)."""
         client = _get_client()
         url = _worker_url(self.workspace_id, "/files/write")
         try:
@@ -92,6 +98,29 @@ class WorkspaceClient:
             return data
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("write_file", err)
+
+    async def write_binary(self, path: str, pieces: AsyncIterator[bytes]) -> Dict[str, Any]:
+        """Write a binary file (a picture, a video) at ``path``, a piece at a time.
+
+        Every piece goes to ``<path>.part``; the last one moves it to ``path``, so the
+        workspace never shows a file half-written. ``pieces`` may come in any sizes: they
+        are cut to ``BINARY_PIECE_BYTES``. The first failure stops the write and is returned.
+        """
+        part, pending, appended = path + PART_SUFFIX, b"", False
+        async for piece in pieces:
+            pending += piece
+            while len(pending) > BINARY_PIECE_BYTES:
+                result = await self._write_piece(part, pending[:BINARY_PIECE_BYTES], appended)
+                if not result.get("success"):
+                    return result
+                pending, appended = pending[BINARY_PIECE_BYTES:], True
+        return await self._write_piece(part, pending, appended, rename_to=path)
+
+    async def _write_piece(self, part: str, data: bytes, append: bool, rename_to: Optional[str] = None) -> Dict[str, Any]:
+        piece: Dict[str, Any] = {"base64": base64.b64encode(data).decode("ascii"), "append": append}
+        if rename_to:
+            piece["rename_to"] = rename_to
+        return await self.write_file(part, piece)
 
     async def list_dir(self, path: str = ".") -> Dict[str, Any]:
         """List directory contents."""

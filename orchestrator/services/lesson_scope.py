@@ -15,6 +15,18 @@ or brief that the card being run doesn't share ("Rosa", "Lantern Kitchen"), is a
 that card. It stays with it: its own redo carries it, and so does any card that shares
 the name. It is never another card's lesson. A rule with no such name ("Leave off
 'Perfect!'", "Just the table: no working under it") is carried as before.
+
+F318 (night 9b): the notes still travelled, because every send-back note was a lesson
+and most notes about one card's facts name nothing particular to it. #0099's "Does the
+30 kg allow for what we lose in the roaster? Where did the figures come from?" came back
+on the Watchdog's #1976 ("Addressing your question about roaster loss") and #1991
+("roasting loss factor (mentioned in your corrections)"); #0072's "the September margin
+sheet is my real costing … £2.87 is per bag … Cerrado and Sumatra go in the blend" on
+the BA's #0088 and #1977 ("not per kg, as you corrected"). A standing lesson is now a
+note the owner said holds in general ("next time", "always", "never", "every time") or
+a note about the form of the work (its length, opening, sign-off, layout, tone, where
+its sources are said): ``is_standing``. A note about one card's facts, a question or a
+pointer to a paper, stays with its card.
 """
 from __future__ import annotations
 
@@ -55,4 +67,33 @@ def is_that_cards(note: str, its_card: Iterable[Optional[str]], this_card: str) 
     return bool(named) and not any(name.lower() in shared for name in named)
 
 
-__all__ = ["is_that_cards", "particulars"]
+# F318: the owner says a note holds beyond its card ("next time count", "never use Perfect!").
+_GENERAL = re.compile(
+    r"\b(?:next time|from now on|in (?:the )?future|going forward|always|never|whenever|each time|any ?time|"
+    r"as a rule|every (?:time|run|card|answer|draft|email|reply|post|letter|report|one)|"
+    r"each (?:figure|number|card|answer|draft)|that(?:'s|’s| is) how (?:every|i want))\b", re.IGNORECASE)
+# F318: a note about the work's form: its length, opening and sign-off, layout, tone, where its
+# sources are said. Not a figure, a fact, a question about this card's answer or a paper to read.
+_FORM = re.compile(
+    r"\b\d+\s*(?:[-–—]|to)\s*\d+\s*words\b|\b\d+\s*words\b|\bhow long\b|\blength\b|\btoo (?:long|short|wordy)\b"
+    r"|\bsign(?:ed|s|ing)?(?:[ -]?off)?\b|\bsignature\b|\bgreeting\b|\bopen(?:s|ing)? (?:with|on)\b"
+    r"|\bstart(?:s|ing)? (?:with|it|the (?:email|reply|draft|answer|post))\b|['\"‘“](?:hi|hello|dear)\b"
+    r"|\bfirst line\b|\b(?:put|move|keep|leave|start|end)\b[^.!?\n]{0,40}\b(?:at|on) the (?:start|top|end|bottom)\b"
+    r"|\b(?:no|nothing)\b(?: \w+){0,2} (?:before|after|under|above|below) (?:it|the (?:answer|table|email|draft|reply))\b"
+    r"|\bjust the (?:email|table|caption|draft|answer|text|post|reply|letter|figures?|numbers?|list)\b"
+    r"|\bno (?:working|notes? to me|preamble|intro(?:duction)?|subject line)\b|\bbold\b|\bbullets?\b|\bheadings?\b"
+    r"|\blayout\b|\bformat(?:ting)?\b|\bparagraphs?\b|\bsubject lines?\b|\bone line\b|\btone\b|\bbrand voice\b"
+    r"|\bbanned\b|\bexclamation|\bemojis?\b|\bleave (?:off|out)\b|\bplain (?:english|words)\b"
+    r"|\b(?:less|fewer|drop|cut|lose|without)\s+(?:the\s+)?['\"‘“]|\bsay (?:which|where)\b[^.!?\n]{0,60}\bfrom\b",
+    re.IGNORECASE)
+
+
+def is_standing(note: Optional[str]) -> bool:
+    """Whether ``note``, written on one card, is a lesson for the agent's other cards: the
+    owner said it holds in general, or it is about the work's form (F318). A note about
+    that card's facts, its figures or a paper to read is that card's alone."""
+    text = note or ""
+    return bool(_GENERAL.search(text) or _FORM.search(text))
+
+
+__all__ = ["is_standing", "is_that_cards", "particulars"]

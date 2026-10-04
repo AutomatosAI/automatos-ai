@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
+import { madeBy } from './made-by'
 
 // ============= STYLE MAPS =============
 
@@ -134,7 +135,7 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
         <h3 className="line-clamp-2 text-sm font-medium text-foreground">{title}</h3>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Bot className="h-3 w-3 shrink-0" />
-          <span className="truncate">{agent_name ?? 'Unknown agent'}</span>
+          <span className="truncate">{madeBy(agent_name, source_type)}</span>
           <span aria-hidden>·</span>
           <span className="shrink-0">{timeAgo}</span>
         </div>

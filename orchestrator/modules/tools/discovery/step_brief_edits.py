@@ -46,8 +46,9 @@ NOTHING_CHANGED = " Nothing was changed."
 
 async def edits_reach_the_steps(handler: Handler, db: Session, workspace_id: Any, params: Dict[str, Any],
                                 run: Any, named: List[Dict[str, Any]], steps: Steps) -> Dict[str, Any]:
-    """platform_update_mission_plan with its edits named by step id (see the module)."""
-    if not named:
+    """platform_update_mission_plan with its edits named by step id (see the module). An
+    edit in the plan's own form ({task_index: 0, …}) goes to the coordinator as it is."""
+    if not named or any("task_id" not in edit for edit in named):
         return await handler(db, workspace_id, params)
     if run.state not in PLAN_STATES:
         return edit_started_steps(db, workspace_id, run, named, steps)

@@ -11,6 +11,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +23,7 @@ def _last_user_text(messages: List[Dict[str, Any]]) -> Any:
     )
 
 
+@labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
 async def atom_memory_block(orchestrator: Any, messages: List[Dict[str, Any]], *, workspace_id: Any,
                             agent_id: Any, widget_mode: bool, viewer_subject_id: Any) -> str:
     """The "What you remember about this user" block, or "" when there is nothing to add."""
@@ -54,14 +57,21 @@ def time_of_day(now: Optional[datetime] = None) -> str:
 
 def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts: str) -> str:
     """The ATOM system prompt: who the agent is, how it talks and, since F232,
-    what Automatos is in this workspace (``facts``, empty on a widget turn)."""
+    what Automatos is in this workspace (``facts``, empty on a widget turn). F323
+    (night 9b): it carried no date, and Auto searched the web for "current date"
+    (chat 32bb645f); it now says today's date, in UTC as its greeting always was."""
+    from services.brief_facts import AUTO_OWNER_RULES
+    from services.todays_date import today_line
+
     description = str(metadata.description).strip() if metadata.description else ""
     description_block = f"\n\n## Agent Description\n{description}\n" if description else ""
     persona_block = f"\n\n{metadata.persona}\n" if metadata.persona else ""
     facts_block = f"\n\n{facts}\n" if facts else ""
+    # F322 and F327 (night 9b): the owner's turns, not a widget visitor's, carry Auto's rules on their facts.
+    owner_block = f"\n\n## What I Avoid\n{AUTO_OWNER_RULES}\n" if facts else ""
     return (
         f"You are {metadata.name}, an AI assistant on the Automatos platform.\n\n"
-        f"{time_of_day()}.{identity} "
+        f"{time_of_day()}. {today_line(None, None)}{identity} "
         "Read the conversation and match the user's energy. "
         "If they're frustrated, be direct — skip the niceties and lead with the answer. "
         "If they're curious, explain the why. If they're casual, be casual back. "
@@ -71,6 +81,7 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
         f"{description_block}"
         f"{persona_block}"
         f"{facts_block}"
+        f"{owner_block}"
         f"{memory_block}"
     )
 

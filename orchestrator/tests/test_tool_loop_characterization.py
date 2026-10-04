@@ -254,8 +254,11 @@ def test_max_iterations_cap_terminates_loop():
         initial_response=rounds[0],
         messages=[], tools=[], workspace_id=None,
     ))
-    # 3 iterations: each appends a round → cap reached, executor must finalize
-    assert llm.call_count <= 3
+    # 3 iterations: each appends a round → cap reached, executor must finalize.
+    # F328: an agent run (no chat lane here) is then asked once more, tools off,
+    # for its answer; that reply still asks for a tool, so the run ends as it stopped.
+    assert llm.call_count <= 3 + 1
+    assert len(tool.calls) == 3
     assert final is not None
 
 

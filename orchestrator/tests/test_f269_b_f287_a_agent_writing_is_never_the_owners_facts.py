@@ -158,8 +158,12 @@ def test_autos_own_search_leaves_out_what_an_agent_wrote(documents):
 
     assert [r["content"] for r in result["results"]] == [DELIVERY_DAYS]       # the owner's own, as it was
     assert len(found["results"]) == 2                                          # a new result, not changed in place
-    other = asyncio.run(exec_platform.execute_platform_tool(executor, "semantic_search", {"query": "x"}, agent.id))
-    assert other is found and calls == ["search_knowledge", "semantic_search"]
+    # F325 (night 9b): semantic_search reads the same documents, so it keeps the owner's only too;
+    # a search that isn't of the documents (search_codebase) is as it was.
+    semantic = asyncio.run(exec_platform.execute_platform_tool(executor, "semantic_search", {"query": "x"}, agent.id))
+    assert [r["content"] for r in semantic["results"]] == [DELIVERY_DAYS]
+    other = asyncio.run(exec_platform.execute_platform_tool(executor, "search_codebase", {"query": "x"}, agent.id))
+    assert other is found and calls == ["search_knowledge", "semantic_search", "search_codebase"]
 
 
 def test_another_workspaces_search_leaves_out_nothing(documents, seed_workspace):

@@ -10,6 +10,13 @@ Auto's ``platform_create_task`` already answered with the number (#0182), throug
 
 What a request may file is checked here, before anything is written. It moved
 out of api/board_tasks.py, which is over 800 lines and does not grow.
+
+F293 (night 8): a new card has had no work on it, so it never starts in Review or
+Done. Auto made #0251 and #0386 straight into Review, with no run and no answer, and
+Needs you counted them as the owner's to judge. The create took no status, so a
+request that asked for Review was quietly filed in the Inbox; it is now refused and
+told where a new card goes. A card that carries an action for the owner to approve
+(publish a post) still starts in Review: that approval is what it asks for.
 """
 from __future__ import annotations
 
@@ -30,6 +37,11 @@ DEFAULT_PRIORITY = "medium"
 DEFAULT_REVIEW_MODE = "auto"
 DEFAULT_SOURCE_TYPE = "user"
 NO_SUCH_AGENT = "Assigned agent not found in workspace"
+# F293: the columns that hold finished work, which no new card starts in.
+FINISHED_COLUMNS = {"review": "Review", "done": "Done"}
+NOTHING_DONE_YET = ("A new card has had no work on it yet, so it can't start in {column}: it goes to the Inbox, "
+                    "or to Assigned when it has an agent, and comes to Review once its agent has worked on it. "
+                    "Nothing was filed.")
 
 
 def new_ticket_columns(db: Session, workspace_id: Any, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -44,6 +56,7 @@ def new_ticket_columns(db: Session, workspace_id: Any, body: Dict[str, Any]) -> 
     priority = _named(body, "priority", VALID_PRIORITIES, DEFAULT_PRIORITY)
     review_mode = _named(body, "review_mode", VALID_REVIEW_MODES, DEFAULT_REVIEW_MODE)
     planning_data = _planning_data(body)
+    _no_finished_start(body.get("status"), planning_data)
     attachment_ids = _attachments(body)
     return {
         "title": title, "description": body.get("description"), "raw_prompt": body.get("raw_prompt"),
@@ -87,6 +100,14 @@ def _planning_data(body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if planning_data is not None and not isinstance(planning_data, dict):
         raise HTTPException(status_code=422, detail="planning_data must be an object, or null")
     return planning_data
+
+
+def _no_finished_start(requested: Any, planning_data: Optional[Dict[str, Any]]) -> None:
+    """A request that asks for a finished column is a 422 (F293: #0251, #0386), unless
+    the card carries an action for the owner to approve, which starts it in Review."""
+    column = FINISHED_COLUMNS.get(requested) if isinstance(requested, str) else None
+    if column and not (planning_data and planning_data.get("approval_action")):
+        raise HTTPException(status_code=422, detail=NOTHING_DONE_YET.format(column=column))
 
 
 def _first_status(planning_data: Optional[Dict[str, Any]], agent_id: Optional[int]) -> str:

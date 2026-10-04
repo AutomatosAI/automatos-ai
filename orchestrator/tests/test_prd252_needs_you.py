@@ -113,8 +113,10 @@ def test_each_row_opens_the_thing_itself(floor, new_session):
 
     rows = needs_you(new_session(), UUID(floor.ws))["rows"]
 
-    assert {(r["ticket_id"], r["mission_id"]) for r in rows["review"]} == {
-        (floor.review, None), (floor.session_step, None)}                      # F225 review: never the mission page
+    assert {(r["ticket_id"], r["opens"]) for r in rows["review"]} == {
+        (floor.review, "ticket"), (floor.session_step, "ticket")}              # F225 review: never the mission page
+    # F293: the session's step names its mission, as every mission step's row does, and still opens itself.
+    assert {r["ticket_id"]: r["mission_id"] for r in rows["review"]} == {floor.review: None, floor.session_step: floor.run}
     assert {r["ticket_id"] for r in rows["question"]} == {floor.blocked}       # opens inside its ticket
     assert {(r["source"], r["ticket_id"]) for r in rows["approval"]} == {("grant", floor.review), ("mission", floor.card)}  # F246: its card
     assert [r["id"] for r in rows["approval"] if r["source"] == "mission"] == [floor.run]

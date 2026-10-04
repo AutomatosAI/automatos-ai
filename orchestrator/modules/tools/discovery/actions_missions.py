@@ -124,6 +124,7 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "approve"],
         examples=["approve that mission", "go ahead and run the plan", "yes, start the mission"],
+        accepts=("reason",),  # F308 (9): a step's approval keeps the owner's words sent as reason too
     ))
 
     registry.register(ActionDefinition(
@@ -148,6 +149,7 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "reject"],
         examples=["reject that plan", "no, don't run that mission", "cancel the proposed plan"],
+        accepts=("note",),  # F308 (9): a step sent back keeps the owner's words sent as note too
     ))
 
 

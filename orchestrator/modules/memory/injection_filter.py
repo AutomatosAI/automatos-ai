@@ -8,9 +8,15 @@ the **merged** candidate set at the one chokepoint that feeds
 (L3 global + agent tiers, and any future L2) AND adds the content-type exclusion
 the search layer lacks (heartbeat digests, playbook execution summaries).
 
+F325 (night 9b): a memory that names an agent's report or output as where a fact came
+from is dropped here too (``modules.memory.agent_sources``, by the names agents file
+under), so Auto's recall and an agent's context never carry it as the owner's facts.
+
 Pure — no I/O — so it unit-tests with plain dicts.
 """
 from typing import Any, Dict, Iterable, List, Optional
+
+from modules.memory.agent_sources import memory_text, names_an_agents_document
 
 # ``content_type`` / ``metadata.type`` values that are operational noise, never
 # user context: heartbeat digests and playbook/recipe execution summaries. These
@@ -86,6 +92,7 @@ def filter_injectable_memories(
     - PRD-206 S7: rows not visible to the viewer (Q7 private scope) are dropped —
       pass ``viewer_subject_id`` (``user:{users.id}``) where the caller knows the
       human; None keeps legacy/workspace rows and drops only private ones.
+    - F325: rows that name a document an agent wrote are dropped.
     """
     excluded = frozenset(excluded_types)
     out: List[Dict[str, Any]] = []
@@ -98,6 +105,8 @@ def filter_injectable_memories(
         if _content_type_of(mem) in excluded:
             continue
         if not visible_to_viewer(mem, viewer_subject_id):
+            continue
+        if names_an_agents_document(memory_text(mem)):
             continue
         out.append(mem)
     return out

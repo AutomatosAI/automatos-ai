@@ -23,7 +23,9 @@ def board(db_session, seed_workspace):
     ws = UUID(seed_workspace())
 
     def card(title, status, error=None):
-        task = BoardTask(workspace_id=ws, title=title, status=status, description="…", error_message=error)
+        # F293 (on main): a card in Review counts once someone worked on it, so it carries an answer.
+        task = BoardTask(workspace_id=ws, title=title, status=status, description="…", error_message=error,
+                         result="Draft ready." if status == "review" else None)
         db_session.add(task)
         db_session.flush()
         return f"#{task.workspace_seq:04d}"

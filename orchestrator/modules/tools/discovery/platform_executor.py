@@ -32,14 +32,13 @@ from modules.tools.discovery.handlers_playbooks import (
     get_playbook,
     create_playbook,
     update_playbook,
-    add_playbook_step,
     update_playbook_step,
     delete_playbook_step,
     schedule_playbook,
-    execute_playbook,
     get_playbook_execution,
     delete_playbook,
 )
+from modules.tools.discovery.playbook_staffing import add_playbook_step, execute_playbook  # F321: an agent on each step
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
     get_cost_breakdown,

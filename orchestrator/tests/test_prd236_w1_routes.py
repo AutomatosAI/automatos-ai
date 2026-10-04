@@ -247,7 +247,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # results and voice wave (social_post_stats, social_voice_examples); the guard follows it.
     results = (versions / "prd251c_wave4.py").read_text()
     assert 'down_revision = "prd251c_wave2"' in results
-    assert 'EXPECTED_HEAD = "prd251c_wave4"' in guard
+    # 2026-10-04 (Deliverables): outputs_heartbeat_reports chains onto it — a CLI heartbeat's
+    # ticket report is a heartbeat in v_workspace_outputs; the guard follows it.
+    heartbeats = (versions / "outputs_heartbeat_reports.py").read_text()
+    assert 'down_revision = "prd251c_wave4"' in heartbeats
+    assert 'EXPECTED_HEAD = "outputs_heartbeat_reports"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

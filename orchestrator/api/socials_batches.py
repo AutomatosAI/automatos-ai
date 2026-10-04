@@ -34,7 +34,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.socials import campaigns, schedule_jobs, service
+from modules.socials import campaigns, schedule_jobs, service, workspace_copies
 
 router = APIRouter()
 
@@ -58,11 +58,13 @@ def _plans_api() -> Any:
 
 
 def _sync_jobs(db: Session, workspace_id: UUID, approved: List[Dict[str, Any]]) -> None:
-    """Each approved post's publish job follows its slot now (the reconcile pass would too)."""
+    """Each approved post's publish job follows its slot now (the reconcile pass would too),
+    and its files go to the workspace's socials folders, as a single approval's do."""
     for row in approved:
         post = service.get_post(db, workspace_id, UUID(row["id"]))
         if post is not None:
             schedule_jobs.sync_job(post)
+            workspace_copies.copy_when_approved(db, post)
 
 
 @router.post("/plans/{plan_id}/batches/{batch_key}/approve", dependencies=[CAN_REVIEW])

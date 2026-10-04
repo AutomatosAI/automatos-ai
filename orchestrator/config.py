@@ -712,6 +712,10 @@ class Config:
     # the model is on the operator's own plan; this stops a looping session from
     # hammering the board. 0 = no cap.
     SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
+    # F330 (night 9c): how many session tool calls run at once in this process. A
+    # burst waits for a slot holding no pool connection; keep it well under the
+    # pool (10 + 20), since each call can hold its own connection plus one more.
+    SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
@@ -1690,6 +1694,12 @@ class Config:
     # F086: a document whose stored chunks hold less than this share of its
     # extracted text is shown to the owner as partial ("partial — 61% kept").
     RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
+    # F311 (night 9): a Markdown or text document with headings is chunked by its sections, each
+    # with its heading; a section under the minimum joins the next, one over the maximum
+    # is split at its paragraphs, each piece under its headings. Characters.
+    RAG_SECTION_CHUNKING_ENABLED: bool = os.getenv("RAG_SECTION_CHUNKING_ENABLED", "true").lower() == "true"
+    RAG_SECTION_MIN_CHARS: int = int(os.getenv("RAG_SECTION_MIN_CHARS", "200"))
+    RAG_SECTION_MAX_CHARS: int = int(os.getenv("RAG_SECTION_MAX_CHARS", "1500"))
 
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
@@ -1726,6 +1736,17 @@ class Config:
     RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
     # Only feedback from the last N days shapes ranking (stale opinions decay out).
     RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
+    # F311 (night 9): agents' reports crowded the owner's documents out of the search.
+    # When a search finds an agent's report, the owner's own documents are searched on
+    # their own too (the newest RAG_OWNER_LEG_MAX_DOCUMENTS of them), and up to
+    # RAG_OWNER_PASSAGES_RESERVED of the passages handed over are the owner's, placed first.
+    RAG_OWNER_LEG_ENABLED: bool = os.getenv("RAG_OWNER_LEG_ENABLED", "true").lower() == "true"
+    RAG_OWNER_LEG_MAX_DOCUMENTS: int = int(os.getenv("RAG_OWNER_LEG_MAX_DOCUMENTS", "200"))
+    RAG_OWNER_PASSAGES_RESERVED: int = int(os.getenv("RAG_OWNER_PASSAGES_RESERVED", "3"))
+    # F311: a passage from an owner's document this short (in tokens) is handed over as
+    # the whole document, so the section beside the one that matched comes with it. 0 = off.
+    RAG_WHOLE_DOCUMENT_MAX_TOKENS: int = int(os.getenv("RAG_WHOLE_DOCUMENT_MAX_TOKENS", "800"))
 
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)

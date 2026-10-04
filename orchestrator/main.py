@@ -372,17 +372,19 @@ async def _seed_semantic_embeddings():
     The seed bodies live in ``core.boot.startup_tasks`` — importable, tested,
     and observable: on failure they report into ``error_events`` via
     ``record_error(subsystem="startup")`` (WS-A sink) instead of dying with
-    only a log line. Both are self-guarding (never raise), so a bare
+    only a log line. All are self-guarding (never raise), so a bare
     ``create_task`` cannot leak an unretrieved exception.
     """
     import asyncio as _asyncio
     from core.boot.startup_tasks import (
         embed_all_agents_on_startup,
         ensure_field_memory_collection,
+        warm_action_index_on_startup,
     )
 
     _asyncio.create_task(embed_all_agents_on_startup())
     _asyncio.create_task(ensure_field_memory_collection())
+    _asyncio.create_task(warm_action_index_on_startup())
 
 
 def _bootstrap_composio_catalog() -> None:

@@ -12,11 +12,9 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-logger = logging.getLogger(__name__)
+from modules.tools.formatting.generated_document_summary import summarises_generated_documents
 
-# What generate_document made, by the file it returned: a social template
-# renders an MP4 or a PNG (PRD-251 US-117); anything else is a document.
-GENERATED_FILE_KINDS = {"mp4": "video", "png": "image"}
+logger = logging.getLogger(__name__)
 
 
 class ToolResultFormatter:
@@ -845,6 +843,7 @@ class ToolResultFormatter:
         return digest
     
     @staticmethod
+    @summarises_generated_documents
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
         """
         Format tool result for LLM context (truncated summary).
@@ -954,29 +953,6 @@ class ToolResultFormatter:
             else:
                 logger.warning("[LLM-Context] Composio returned 0 items - LLM will hallucinate!")
                 summary_parts.append("\nAPI returned 0 items for this query.")
-
-        elif tool_name == "generate_document":
-            doc_result = (result.get('results') or [{}])[0] if isinstance(result.get('results'), list) else result
-            filename = doc_result.get('filename', 'document')
-            fmt = doc_result.get('format', 'pdf')
-            size_kb = doc_result.get('size_kb', 0)
-            download_url = doc_result.get('download_url', '')
-            kind = GENERATED_FILE_KINDS.get(str(fmt).lower(), "document")
-            summary_parts.append(f"\nGenerated {fmt.upper()} {kind}: {filename} ({size_kb} KB)")
-            if doc_result.get('template_name'):
-                summary_parts.append(f"Template used: {doc_result['template_name']}")
-            summary_parts.append(f"Download URL: {download_url}")
-            summary_parts.append("IMPORTANT: Show the download link to the user using the exact URL above. Do NOT invent document:// links.")
-            # PRD-242 S4: the document is already saved; say where, and hand over the
-            # ONE link that works for someone who cannot sign in (email / Slack).
-            if doc_result.get('deliverable_id'):
-                summary_parts.append(f"Saved to Deliverables (id {doc_result['deliverable_id']}); in-app: {doc_result.get('app_url') or 'Deliverables page'}")
-            if doc_result.get('share_url'):
-                summary_parts.append(
-                    f"Share link (no sign-in needed, valid 7 days) — use THIS when emailing or messaging the document: {doc_result['share_url']}"
-                )
-            else:
-                summary_parts.append("No share link is available (object storage has no copy); the download URL requires a signed-in workspace member.")
 
         full_summary = "\n".join(summary_parts)
         

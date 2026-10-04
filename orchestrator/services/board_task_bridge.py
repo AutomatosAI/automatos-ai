@@ -20,6 +20,10 @@ from services.playbook_wait import card_review_mode, why_it_waits
 
 logger = logging.getLogger(__name__)
 
+# What a playbook run's card is titled before the playbook's name. It read
+# "Recipe: …", the old word (night 8, F294); the board and its owner say Playbook.
+PLAYBOOK_CARD_PREFIX = "Playbook: "
+
 
 def create_recipe_board_task(
     db: Session,
@@ -42,7 +46,7 @@ def create_recipe_board_task(
 
     task = BoardTask(
         workspace_id=execution.workspace_id,
-        title=f"Recipe: {recipe.name}",
+        title=f"{PLAYBOOK_CARD_PREFIX}{recipe.name}",  # F294: the word the owner sees is Playbook
         description=recipe.description,
         status='in_progress',
         priority='medium',

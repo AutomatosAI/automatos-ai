@@ -32,6 +32,14 @@ followed by "Where your facts come from": a "now" question is answered from the 
 system before a dated document, a database's tables and columns are read through its
 tool and never asked of the owner, and only what a tool returned in the run is cited.
 
+Night 9b: answers opened "Perfect! Now I have all the information I need…" (F320:
+#0045, #0046, #0054, #0063, #0065, #0070) and drafts were signed "[Your name]" or
+began "the 'Harbourline voice' skill is not available" (F327: #1971, #0095, #0107).
+"Where your answer goes" now rules out narration anywhere in the answer, puts what
+the owner must know in it, first (#1981 said "not free" only in its working), and
+asks for a draft ready to send. "When the brief or the owner says otherwise"
+(F322 and F323, services/brief_facts.py) follows the facts block.
+
 Three wrappers, for the three ways the platform runs an agent's work through the API
 (a Claude Code session's ticket has its own prompt, which already carries the lessons):
 - ``a_steps_prompt_carries_its_lessons``: a mission step (``build_task_prompt``);
@@ -49,6 +57,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from services.answer_sources import FACTS_RULES
+from services.brief_facts import BRIEF_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +66,17 @@ ON_THE_CARD = (
     "Your reply is the card's answer: the owner reads it on the card as it is. Put the work itself in it (the "
     "email, the table, the figures, the post), in the form the brief and the owner's notes ask for, starting with "
     "the work: no line before it about what you did, a tool or a skill.\n"
+    "No narration anywhere in it: no \"Perfect!\", \"Now I have…\", \"Let me…\" or \"I'll now…\". What the owner "
+    "must know (the brief is wrong, a cost applies, something is missing) goes in the answer, first.\n"
+    "A draft is ready to send: signed and filled in from the owner's documents (their brand voice has the "
+    "sign-off), with no placeholder (\"[Your name]\") and no word about a tool or a skill (\"skill not "
+    "available\").\n"
     "A file, a PDF or a report you save goes alongside the answer, never instead of it: never end with only "
     "\"saved to …\", a description of what you saved, \"see the report\", \"task completed\" or a tool's output.\n"
     "If a tool fails, leave its error and what you tried out of the answer: do the work another way, or say "
     "plainly what is missing.\n\n"
-    f"{FACTS_RULES}"     # F300, F304 and F313 (night 9): the live system first, its schema read, sources read
+    f"{FACTS_RULES}\n\n"     # F300, F304 and F313 (night 9): the live system first, its schema read, sources read
+    f"{BRIEF_RULES}"       # F322 and F323 (night 9b): the brief checked, a question answered, the team's figures
 )
 
 
@@ -158,9 +173,11 @@ def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any, *,
 
 def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     """A playbook step's prompt with what its agent is told besides: what the owner gave
-    for the run (F288), the lessons and standing notes (F249) and where its answer goes
-    (F269). A session agent's step gets the run's details and the playbook's notes."""
+    for the run (F288), the lessons and standing notes (F249), that the last agent
+    step's answer is the run's (F321) and where its answer goes (F269). A session
+    agent's step gets the run's details, the playbook's notes and the last-step rule."""
     from services.playbook_given import given_for_run
+    from services.playbook_last_step import last_step_rule
 
     db, workspace_id = step.get("db"), step.get("workspace_id")
     agent_id = getattr(step.get("agent"), "id", None)
@@ -168,7 +185,8 @@ def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     run = _run_of(db, workspace_id, step.get("recipe_execution_id"))
     prompt = _with(step["clean_prompt"], given_for_run(db, run, step.get("input_data")),
                    *_standing_notes(db, workspace_id, agent_id, run, in_a_session=in_a_session,
-                                    for_text=step["clean_prompt"]))
+                                    for_text=step["clean_prompt"]),
+                   last_step_rule(db, run, step))     # F321 (night 9b): the last step's answer is the run's
     return prompt if in_a_session else _with(prompt, ON_THE_CARD)
 
 
@@ -209,13 +227,15 @@ def a_cards_run_carries_its_lessons(read: Callable[..., Awaitable[str]]) -> Call
     @functools.wraps(read)
     async def wrapped(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
         prompt = await read(db, workspace_id, agent_id, brief)
-        return _with_lessons(db, workspace_id, agent_id, prompt)
+        return _with_lessons(db, workspace_id, agent_id, prompt, brief)
     return wrapped
 
 
-def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str:
+def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str, brief: str) -> str:
     """``prompt`` with the agent's lessons before "Where your answer goes", unless it
-    carries them already or there is no database session to read them from."""
+    carries them already or there is no database session to read them from. A card's
+    own names are read from its ``brief``, not the prompt: the guide passages a draft's
+    prompt gains name the owner's people and places, so any draft would share them (F318)."""
     from uuid import UUID
 
     from sqlalchemy.orm import Session
@@ -224,7 +244,7 @@ def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str
 
     if STANDING_HEADING in prompt or not isinstance(db, Session) or not workspace_id or not agent_id:
         return prompt
-    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id, for_text=prompt)   # F315: the card's own words
+    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id, for_text=brief)   # F315: the card's own words
     if not lessons:
         return prompt
     if ON_THE_CARD in prompt:

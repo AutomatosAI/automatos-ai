@@ -10,6 +10,9 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 SEARCH_KNOWLEDGE = "search_knowledge"
+# F325 (night 9b): semantic_search reads the same documents as search_knowledge, and
+# F305 left it out of the owner's-documents-only rule.
+DOCUMENT_SEARCHES = frozenset({SEARCH_KNOWLEDGE, "semantic_search"})
 
 
 async def execute_platform_tool(
@@ -19,7 +22,8 @@ async def execute_platform_tool(
     agent_id: int,
 ) -> Dict[str, Any]:
     """Execute research tools via AgentPlatformTools. F269 (night 8, night 9): a
-    search returns the owner's documents only, never an agent's (services/agents_writing).
+    search of the documents (search_knowledge, and semantic_search since F325) returns
+    the owner's documents only, never an agent's (services/agents_writing).
     F305: search_knowledge with ``scope: "past_work"`` searches earlier approved answers,
     labelled as an agent's (services/past_work)."""
     from services.past_work import past_work_for_agent, wants_past_work
@@ -31,7 +35,7 @@ async def execute_platform_tool(
         parameters=parameters,
         agent_id=agent_id,
     )
-    if tool_name != SEARCH_KNOWLEDGE:
+    if tool_name not in DOCUMENT_SEARCHES:
         return result
     from services.agents_writing import owners_search
 

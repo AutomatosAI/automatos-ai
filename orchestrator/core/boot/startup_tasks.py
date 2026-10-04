@@ -1,12 +1,13 @@
 """Observable boot-time background seeds (PRD-142 Wave 1 · WS-C · W1-S7).
 
-These two coroutines were previously nested closures launched fire-and-forget
-from ``main.py`` whose failures were only ``logger.warning``-ed. Extracted here
-they are importable + unit-testable, and on failure they now also fire
-``record_error(subsystem="startup")`` so a failed boot seed surfaces on the
-ERRORS-by-subsystem dashboard tile instead of dying silently.
+The agent and field-memory seeds were previously nested closures launched
+fire-and-forget from ``main.py`` whose failures were only ``logger.warning``-ed.
+Extracted here they are importable + unit-testable, and on failure they now also
+fire ``record_error(subsystem="startup")`` so a failed boot seed surfaces on the
+ERRORS-by-subsystem dashboard tile instead of dying silently. The action-index
+warm-up (#927) follows the same contract.
 
-Both functions are *self-guarding*: they never raise, so launching them with a
+Every function here is *self-guarding*: it never raises, so launching it with a
 bare ``create_task`` cannot leave an unretrieved task exception.
 """
 from __future__ import annotations
@@ -61,6 +62,30 @@ async def embed_all_agents_on_startup() -> None:
     except Exception as exc:
         logger.warning("PRD-64: Startup embedding seed failed (non-fatal): %s", exc, exc_info=True)
         record_error(subsystem="startup", operation="embed_all_agents", error=exc)
+
+
+async def warm_action_index_on_startup() -> None:
+    """Embed the platform action catalogue before the first chat turn (#927).
+
+    A turn no longer waits for a cold index (it ranks nothing and falls back), so
+    this is what keeps the first turns after a restart, or after an upgrade that
+    rewords actions, on semantic ranking. Texts already in Redis are cache hits;
+    only new or changed ones go upstream. With no embedding provider configured it
+    skips with one line. Non-fatal: any other failure is logged + recorded.
+    """
+    try:
+        from core.llm.clients.base import EmbeddingUnavailableError
+        from modules.tools.discovery.action_semantic_index import get_action_semantic_index
+
+        try:
+            await get_action_semantic_index().warm()
+        except EmbeddingUnavailableError as exc:
+            logger.info("#927: action index not warmed — no embedding provider (%s)", exc)
+            return
+        logger.info("#927: action index warmed")
+    except Exception as exc:
+        logger.warning("#927: warming the action index failed (non-fatal): %s", exc, exc_info=True)
+        record_error(subsystem="startup", operation="warm_action_index", error=exc)
 
 
 async def ensure_field_memory_collection() -> None:

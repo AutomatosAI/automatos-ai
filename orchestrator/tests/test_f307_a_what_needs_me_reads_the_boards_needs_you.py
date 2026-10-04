@@ -50,7 +50,9 @@ def board(db_session, seed_workspace):
     ws = UUID(seed_workspace())
     for title, status in (("Delivery charge on 10 kg", "review"), ("Club cancellations, April to September",
                                                                    "review"), ("Rota for October", "done")):
-        db_session.add(BoardTask(workspace_id=ws, title=title, status=status, source_type="user"))
+        # F293 (on main): a card in Review counts once someone worked on it, so it carries an answer.
+        db_session.add(BoardTask(workspace_id=ws, title=title, status=status, source_type="user",
+                                 result="Draft ready." if status == "review" else None))
     db_session.flush()
     _step_of_a_cancelled_mission(db_session, ws)
     db_session.flush()

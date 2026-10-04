@@ -390,6 +390,8 @@ actions:
     source: example
   - text: rename task 3 to 'draft the summary'
     source: example
+  - text: make every step of this mission wait for my check
+    source: example
   - text: swap the agent on step 1 to the analyst
     source: authored
   - text: change task 2's description before we run

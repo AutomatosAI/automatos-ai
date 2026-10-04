@@ -96,6 +96,9 @@ class WorkspaceManager:
         "analytics",
         "graph",
         "tasks",
+        # Approved Socials posts, copied from object storage (orchestrator modules/socials/workspace_copies.py).
+        "socials/images",
+        "socials/videos",
     )
 
     def ensure_workspace_exists(self) -> bool:

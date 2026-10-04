@@ -57,6 +57,16 @@ A lesson is a rule, never another card's content: a correction that names what i
 particular to its own card (a name in that card's title or brief this card doesn't
 share) stays with that card (``services/lesson_scope.py``), and every block of lessons
 says that a note about another kind of work never changes what this card asks for.
+
+F318 (night 9b): the notes still travelled as the owner's words about the card being
+run: "I found the September margin sheet which the owner mentioned in their corrections"
+(#0088), "the 'September margin sheet' you mentioned" (#0097), "£2.87 per bag (not per
+kg, as you corrected)" (#1977), "mentioned in your corrections" (#1991). Every send-back
+note was a lesson, and the block was headed "The owner's corrections to your recent
+work". Now only a standing lesson is carried (``services/lesson_scope.is_standing``: a
+note the owner said holds in general, or one about the work's form); a note about one
+card's facts stays on that card. The block is headed as the owner's rules, and says that
+none of it was said about this card, so the answer never credits the owner with it.
 """
 from __future__ import annotations
 
@@ -66,6 +76,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
 SENT_BACK = "sent back"
+# keep_previous_run's reason for Run now (api.board_tasks._start_now).
+RUN_NOW = "run now"
 # The review_feedback a Reject without a note leaves, so the redo still knows it
 # is a redo (and still carries the earlier corrections and the draft).
 SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
@@ -92,9 +104,14 @@ DISCUSS_AFTER_REJECTS = 3
 STANDING_KEPT = 5
 STANDING_TICKETS_READ = 30
 STANDING_NOTE_CHARS = 300
-STANDING_HEADING = "## The owner's corrections to your recent work"
-STANDING_ASK = ("On your other work the owner sent drafts back with these notes, or said what to do next time; "
-                "newest first. Follow each one here too, unless this brief says otherwise.")
+# F318 (night 9b): headed as the owner's rules, not "corrections", which agents quoted back as "as you corrected".
+STANDING_HEADING = "## How the owner wants your work done"
+STANDING_ASK = ("Rules the owner gave on your other cards, about how work should be done; newest first. Follow each "
+                "one here too, unless this brief says otherwise.")
+# F318: none of it was said on this card (#0088, #0097, #1977, #1986, #1989, #1991).
+NOT_SAID_HERE = ("None of these was said about this card: follow them without mentioning them, and never tell the "
+                 "owner they said, noted, asked or corrected anything here (no \"as you corrected\", \"as you noted\", "
+                 "\"your corrections\" or \"your previous feedback\").")
 # F249 (night 7b): an Approve note that says what to do next time is a lesson too.
 # F249 (night 8): and one that says how every run should be: "Every run of this playbook like this",
 # "That is how every cafe email should look", "That is how I want it every time". "I like this" is praise.
@@ -110,8 +127,8 @@ PLAYBOOK_NOTES_KEPT = 8
 PLAYBOOK_HEADING = "## Standing notes for this playbook"
 # F249 (night 8): a mission step's brief is the planner's words, not the owner's: the Analyst's
 # "just the table" broke on six mission steps (#0352.1, #0374.1, #0383.1, #0394.1, …).
-MISSION_STEP_ASK = ("On your other work the owner sent drafts back with these notes, or said what to do next time; "
-                    "newest first. This step's text was written by the mission's planner, not the owner: where a "
+MISSION_STEP_ASK = ("Rules the owner gave on your other cards, about how work should be done; newest first. "
+                    "This step's text was written by the mission's planner, not the owner: where a "
                     "note and the step's text differ (the layout, what goes before or after the answer, the words), "
                     "follow the note. Only the mission's goal, in the owner's own words, can say otherwise.")
 # F315 (night 9): #1849, a question, became a letter because a lesson was about one.
@@ -241,6 +258,38 @@ def kept_draft(task: Any) -> Optional[str]:
     return None
 
 
+def redo_again(task: Any) -> Optional[str]:
+    """F294 (night 8, #0273): Run now on a redo that failed before it answered runs
+    that redo again, with the owner's words. The claim had consumed the Reject's note
+    (``review_feedback``), the redo failed ("Empty response from LLM"), and Run now
+    started from the brief alone: "0 kg" again, the reason gone. When the run that Run
+    now replaces was a redo that left no answer (and any Run now since failed the same
+    way), the newest correction goes back on the card, so the next claim folds in the
+    redo block: the draft that was sent back and every correction. Returns it, or None."""
+    if getattr(task, "status", None) != "failed" or getattr(task, "result", None) \
+            or getattr(task, "review_feedback", None):
+        return None
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    if not _last_was_a_redo(data):
+        return None
+    notes = _corrections(data, _brief_agreed_at(data))
+    task.review_feedback = notes[-1] if notes else SENT_BACK_WITHOUT_A_NOTE
+    return task.review_feedback
+
+
+def _last_was_a_redo(data: Dict[str, Any]) -> bool:
+    """Whether the newest run on record was sent back, past any Run now that failed
+    with no answer since."""
+    for run in reversed(data.get("previous_runs") or []):
+        if not isinstance(run, dict):
+            continue
+        if run.get("why") == SENT_BACK:
+            return True
+        if run.get("why") != RUN_NOW or run.get("status") != "failed" or run.get("result"):
+            return False
+    return False
+
+
 def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:
     """When the ticket's brief was last agreed in a discussion; None if never."""
     briefs = [b for b in data.get("previous_briefs") or [] if isinstance(b, dict)]
@@ -288,7 +337,8 @@ def lessons_block(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = N
     notes = agent_lessons(db, workspace_id, agent_id, but_not=but_not, besides=besides, for_text=for_text)
     if not notes:
         return None
-    return "\n".join([STANDING_HEADING, f"{ask} {KIND_STAYS} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
+    return "\n".join([STANDING_HEADING, f"{ask} {NOT_SAID_HERE} {KIND_STAYS} {FIGURES_STAY}",
+                      *(f"- {note}" for note in notes)])
 
 
 def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None,
@@ -333,7 +383,8 @@ def playbook_block(notes: List[str]) -> Optional[str]:
     """The block a playbook's step is given: the playbook's standing notes; None without."""
     if not notes:
         return None
-    return "\n".join([PLAYBOOK_HEADING, f"{PLAYBOOK_ASK} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
+    return "\n".join([PLAYBOOK_HEADING, f"{PLAYBOOK_ASK} {NOT_SAID_HERE} {FIGURES_STAY}",
+                      *(f"- {note}" for note in notes)])
 
 
 def _newest_lessons(query: Any, but_not: Any, kept: int, besides: Iterable[str] = (),
@@ -352,26 +403,30 @@ def _newest_lessons(query: Any, but_not: Any, kept: int, besides: Iterable[str] 
 
 
 def _row_lessons(row: Any, for_text: Optional[str]) -> List[tuple]:
-    """(when, note) for one card's lessons; with ``for_text``, those that are not that
-    card's own content (F315)."""
+    """(when, note) for one card's lessons; with ``for_text``, only its standing lessons
+    (F318) that are not that card's own content (F315)."""
     from services.lesson_scope import is_that_cards
 
-    pairs = _lessons(row.planning_data, row.runtime_ref)
+    pairs = _lessons(row.planning_data, row.runtime_ref, standing_only=for_text is not None)
     if for_text is None:
         return pairs
     its_card = (row.title, row.description)
     return [(at, note) for at, note in pairs if not is_that_cards(note, its_card, for_text)]
 
 
-def _lessons(planning_data: Any, runtime_ref: Any) -> List[tuple]:
-    """(when, note) for a card's corrections, and for its Approve notes that teach."""
+def _lessons(planning_data: Any, runtime_ref: Any, *, standing_only: bool = False) -> List[tuple]:
+    """(when, note) for a card's corrections, and for its Approve notes that teach. With
+    ``standing_only``, a correction counts only when it is a standing lesson (F318); a
+    playbook's notes are all about the same work, so its runs take every one."""
+    from services.lesson_scope import is_standing
     from services.ticket_verdict import APPROVAL_NOTE_PREFIX
 
     notes = runtime_ref.get("session_notes") if isinstance(runtime_ref, dict) else None
     approved = [(n.get("at") or "", n["note"][len(APPROVAL_NOTE_PREFIX):].strip())
                 for n in notes or [] if isinstance(n, dict) and isinstance(n.get("note"), str)
                 and n["note"].startswith(APPROVAL_NOTE_PREFIX) and NEXT_TIME.search(n["note"])]
-    return [(c.get("at") or "", c["note"]) for c in _entries(planning_data)] + approved
+    return [(c.get("at") or "", c["note"]) for c in _entries(planning_data)
+            if not standing_only or is_standing(c["note"])] + approved
 
 
 def _entries(data: Any) -> List[Dict[str, Any]]:
