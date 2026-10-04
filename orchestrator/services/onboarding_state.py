@@ -39,7 +39,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from services.onboarding_content import not_for_a_workspace_in_use  # F314 (night 9)
+from services.onboarding_content import answers_alone_never_start_it, not_for_a_workspace_in_use  # F314 (9)
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +318,7 @@ def advance_onboarding_stage(
     return _persist(db, workspace, doc, commit=commit)
 
 
+@answers_alone_never_start_it  # F314 (night 9): answers in a workspace in use don't start the quiz
 def set_segment(
     db: Any, workspace: Any, segment: dict, *, commit: bool = True
 ) -> dict[str, Any]:
