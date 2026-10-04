@@ -29,8 +29,8 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from config import config
-from services.session_tools import definitions as session_tool_definitions
-from services.session_tools import tool_names as session_tool_names
+from services.session_tool_groups import agent_tool_names as session_tool_names
+from services.session_tool_groups import default_definitions as session_tool_definitions
 from core.cli_runtime import (
     CLI_PRESETS, CONFIG_ALLOWED_TOOLS_KEY, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, CONFIG_WORKTREE_KEY, PROVIDER_CLAUDE, RUNTIME_CLI, registry_public,
 )
@@ -1124,7 +1124,7 @@ def _claim_payload(
         # PRD-245 W1: the Automatos tools this session may call, and how
         # to reach them. The host writes them into the session's own MCP
         # config and allows exactly these names at the gate.
-        "session_tools": list(session_tool_names()),
+        "session_tools": list(session_tool_names(agent)),   # #942: this agent's groups
         # The PATH, not a URL: the host joins it to the backend address
         # it was started with. A container cannot know the address the
         # session on the operator's machine must dial.
