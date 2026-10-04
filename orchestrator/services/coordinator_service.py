@@ -61,7 +61,8 @@ from modules.coordination.planner import (
     PlanValidationError,
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
-from modules.coordination.step_inputs import builds_on_whole_results, with_the_missions_earlier_steps
+from modules.coordination.step_inputs import a_summary_keeps_its_approved_inputs, builds_on_whole_results
+from modules.coordination.step_inputs import with_the_missions_earlier_steps
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
@@ -2294,6 +2295,7 @@ class CoordinatorService:
 
         return criteria
 
+    @a_summary_keeps_its_approved_inputs  # F286 (night 8): a summary's redo gets the approved steps again
     async def _prepare_task(
         self,
         db: Session,

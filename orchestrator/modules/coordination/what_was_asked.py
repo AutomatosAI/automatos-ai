@@ -11,8 +11,10 @@ While a mission's step is checked, the check now knows what was asked: the step'
 brief (its title and description, ``checked_against_its_brief`` around
 ``VerificationService.verify_task``) and its mission's goal (``checked_against_its_goal``
 around ``MissionReconciler._verify_completed_tasks``). A placeholder the brief or the
-goal already holds was asked for, and every placeholder was when either asks for a
-template, placeholders, gaps or fill-in fields. Only the others fail the step
+goal already holds was asked for, and every placeholder was when the brief asks for a
+template, placeholders, gaps or fill-in fields, or the goal asks for placeholders, gaps
+or fill-in fields (a goal that only names a template, "use our welcome template for
+Ruth", still wants Ruth's name in). Only the others fail the step
 (``slots_not_asked_for``).
 """
 from __future__ import annotations
@@ -28,12 +30,11 @@ _BRIEF: ContextVar[str] = ContextVar("checked_step_brief", default="")
 _GOAL: ContextVar[str] = ContextVar("checked_mission_goal", default="")
 # A brief that asks for a template or for gaps to fill: "a reusable welcome template
 # with gaps", "keep the gaps", "fill-in fields", "placeholders for the café name".
-ASKS_FOR_GAPS = re.compile(
-    r"\btemplates?\b|\bplaceholders?\b|\bfill[- ]?in\b"
-    r"|\b(?:with|leave|leaving|keep|keeping|kept|as)\s+(?:the\s+|its\s+|some\s+)?gaps\b"
-    r"|\bgaps?\s+(?:for|to\s+fill|to\s+be\s+filled|kept|left)\b|\bblanks?\s+(?:for|to\s+fill)\b",
-    re.IGNORECASE,
-)
+_GAPS = (r"\bplaceholders?\b|\bfill[- ]?in\b"
+         r"|\b(?:with|leave|leaving|keep|keeping|kept|as)\s+(?:the\s+|its\s+|some\s+)?gaps\b"
+         r"|\bgaps?\s+(?:for|to\s+fill|to\s+be\s+filled|kept|left)\b|\bblanks?\s+(?:for|to\s+fill)\b")
+GOAL_ASKS_FOR_GAPS = re.compile(_GAPS, re.IGNORECASE)
+ASKS_FOR_GAPS = re.compile(r"\btemplates?\b|" + _GAPS, re.IGNORECASE)
 
 
 @contextlib.contextmanager
@@ -53,9 +54,10 @@ def slots_not_asked_for(slots: List[str]) -> List[str]:
     asked for."""
     if not slots:
         return []
-    asked = f"{_BRIEF.get()}\n{_GOAL.get()}"
-    if ASKS_FOR_GAPS.search(asked):
+    brief, goal = _BRIEF.get(), _GOAL.get()
+    if ASKS_FOR_GAPS.search(brief) or GOAL_ASKS_FOR_GAPS.search(goal):
         return []
+    asked = f"{brief}\n{goal}"
     held = asked.lower()
     return [slot for slot in slots if slot.lower() not in held]
 
@@ -79,4 +81,4 @@ def checked_against_its_goal(verify_completed: Callable[..., Any]) -> Callable[.
     return wrapped
 
 
-__all__ = ["ASKS_FOR_GAPS", "asking", "checked_against_its_brief", "checked_against_its_goal", "slots_not_asked_for"]
+__all__ = ["ASKS_FOR_GAPS", "GOAL_ASKS_FOR_GAPS", "asking", "checked_against_its_brief", "checked_against_its_goal", "slots_not_asked_for"]

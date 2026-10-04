@@ -17,18 +17,25 @@ So:
 - a step whose brief or mission goal names a file in the owner's Documents is told that
   document's id, and to read it whole.
 
-F286 (night 8): #0383.3, the summary step, could not see its own mission's approved
-steps: "I cannot locate the specific approved content from cards #0383.1 and #0383.2",
-then "the task ID 0383 was not found in this workspace". It declared no steps it built
-on, so nothing reached it, and it only worked after the owner pasted both pieces into a
-reject. A step that builds on its mission's earlier steps now gets their verified
-results (``with_the_missions_earlier_steps``, around
-``CoordinatorService._collect_upstream_outputs``, and ``earlier_results_block`` in its
-prompt): a step whose title or brief asks to summarise, combine, pull together or
-compile, or one that declares no steps it builds on and comes after others. Only
-verified steps count (a step being redone, or one a re-plan replaced, is not
-verified), each under its card number, within the same limits as a synthesis step's
-inputs (8,000 characters each, 30,000 in all).
+F286 (night 8): a summary built from the wrong pieces.
+- #0383.3, the summary step, could not see its own mission's approved steps: "I cannot
+  locate the specific approved content from cards #0383.1 and #0383.2". It declared no
+  steps it built on, and its redo's prompt (a synthesis step's revision) carried only
+  its last answer and the owner's words. A step that pulls the mission together (a
+  synthesis step, or one whose title or brief asks to summarise, combine, compile or
+  pull together) now gets the verified results of the steps before it as well as the
+  ones it declares (``with_the_missions_earlier_steps`` around
+  ``CoordinatorService._collect_upstream_outputs``, ``earlier_results_block`` in its
+  prompt), each under its card number, within a synthesis step's limits (8,000
+  characters each, 30,000 in all); and a synthesis step's redo is given them again
+  (``a_summary_keeps_its_approved_inputs`` around ``CoordinatorService._prepare_task``).
+- #0446.4 quoted the drafts the owner had sent back. Every step's answer goes into the
+  mission's shared field when it finishes, before it is checked, under the step's
+  title; the last step's results are pinned whole, so its digest no longer carried the
+  steps it builds on, and the field's copies, rejected drafts among them, came back in.
+  Those keys now carry a pointer to the approved result in the prompt instead
+  (``builds_on_whole_results``), and a summary is told that only these results are the
+  approved ones. Only verified steps count: a step being redone is not one.
 """
 from __future__ import annotations
 
@@ -56,14 +63,21 @@ EARLIER_HEADING = "## Approved results of this mission's earlier steps"
 EARLIER_RULE = ("These are the steps of this mission before yours, as they were approved. Use them where your brief "
                 "needs them, and take every figure, name and date from them exactly as they are. They are here: "
                 "don't look for them elsewhere or ask for them.")
+APPROVED_HEADING = "## The approved results you pull together"
+APPROVED_RULE = ("These are the approved versions of the steps you pull together. Drafts that were sent back may "
+                 "still be in the shared field or in earlier answers: never use one in place of these.")
+# What the field digest shows, under a step's own key, for a result pinned whole in the prompt.
+PINNED_BELOW = "Its approved result is in full in this prompt: use that, never an earlier draft of it."
+SYNTHESIS = "synthesis"
 # The limits CoordinatorService._collect_upstream_outputs keeps on a step's inputs.
 RESULT_CHARS = 8000
 ALL_RESULTS_CHARS = 30_000
 DESCRIPTION_CHARS = 500
 TRUNCATED = "\n\n... (truncated)"
-# A brief that asks to summarise, combine, pull (put, bring) together or compile.
+# A brief that asks to summarise, synthesise, combine, pull (put, bring) together or compile.
 _PULLS_TOGETHER = re.compile(
-    r"\b(?:summari[sz](?:e[sd]?|ing)|summary|combin(?:e[sd]?|ing)|compil(?:e[sd]?|ing)"
+    r"\b(?:summari[sz](?:e[sd]?|ing)|summary|synthesi[sz](?:e[sd]?|ing)|synthesis"
+    r"|combin(?:e[sd]?|ing)|compil(?:e[sd]?|ing)"
     r"|(?:pull|put|bring)(?:s|ing)?\s+(?:[\w'-]+,?\s+){0,8}?together)\b",
     re.IGNORECASE,
 )
@@ -75,18 +89,36 @@ _FILE_NAME = re.compile(r"(?<![\w./-])([\w][\w.-]{0,150}\.(?:csv|tsv|xlsx|xlsm|x
 
 def builds_on_whole_results(attach: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap ``CoordinatorService._attach_field_digest``. For the mission's last step,
-    the results it builds on are pinned whole beside the digest instead of inside it."""
+    the results it builds on are pinned whole beside the digest instead of inside it.
+    F286: under a field, the digest's rows for results pinned in the prompt point to
+    them, so the field's copies (rejected drafts among them) stay out."""
     @functools.wraps(attach)
     async def wrapped(self: Any, db: Session, run: Any, task: Any, field_id: Optional[str], agent_id: int,
                       upstream_rows: Optional[List[Dict[str, Any]]] = None) -> None:
+        pinned: List[Dict[str, Any]] = []
         if upstream_rows and _is_last_step(db, task):
-            from services.coordinator_service import CoordinatorService
-
-            results = [r for r in CoordinatorService._collect_upstream_outputs(db, task) if r.get("output")]
-            task.input_context = {**(task.input_context or {}), RESULTS_KEY: results}
+            pinned = _whole_results(db, task)
+            task.input_context = {**(task.input_context or {}), RESULTS_KEY: pinned}
             upstream_rows = []
+        elif field_id and not upstream_rows and builds_on_earlier_steps(db, task):
+            pinned = _whole_results(db, task)
+        if field_id and pinned:
+            upstream_rows = [*(upstream_rows or []), *pointers_to(pinned)]
         return await attach(self, db, run, task, field_id, agent_id, upstream_rows=upstream_rows)
     return wrapped
+
+
+def _whole_results(db: Session, task: Any) -> List[Dict[str, Any]]:
+    from services.coordinator_service import CoordinatorService
+
+    return [r for r in CoordinatorService._collect_upstream_outputs(db, task) if r.get("output")]
+
+
+def pointers_to(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """F286: a digest row under each pinned result's own key (its step's title, the key
+    its answers went into the field under) that points to the result in the prompt."""
+    keys = dict.fromkeys(str(r.get("key") or r.get("title") or "").strip() for r in results)
+    return [{"key": key, "value": PINNED_BELOW} for key in keys if key]
 
 
 def _is_last_step(db: Session, task: Any) -> bool:
@@ -141,19 +173,16 @@ def asks_to_summarise(task: Any) -> bool:
     return _PULLS_TOGETHER.search(text) is not None
 
 
+def pulls_the_mission_together(task: Any) -> bool:
+    """A synthesis step, or one whose title or brief asks to summarise, combine,
+    compile or pull together (``asks_to_summarise``)."""
+    return getattr(task, "task_type", None) == SYNTHESIS or asks_to_summarise(task)
+
+
 def builds_on_earlier_steps(db: Session, task: Any) -> bool:
-    """F286: a step that builds on its mission's earlier steps: it asks to summarise
-    them, or it declares no steps it builds on and comes after others."""
-    if asks_to_summarise(task):
-        return True
-    return not _declares_inputs(db, task) and _comes_after_others(db, task)
-
-
-def _declares_inputs(db: Session, task: Any) -> bool:
-    from core.models.orchestration import OrchestrationTaskDependency
-
-    return db.query(OrchestrationTaskDependency.id).filter(
-        OrchestrationTaskDependency.task_id == task.id).first() is not None
+    """F286: a step that pulls its mission together and comes after other steps
+    builds on their approved results."""
+    return pulls_the_mission_together(task) and _comes_after_others(db, task)
 
 
 def _comes_after_others(db: Session, task: Any) -> bool:
@@ -176,6 +205,28 @@ def with_the_missions_earlier_steps(collect: Callable[..., List[Dict[str, Any]]]
         room = ALL_RESULTS_CHARS - sum(len(str(r.get("output") or "")) for r in results)
         return results + earlier_results(db, task, room=room)
     return wrapped
+
+
+def a_summary_keeps_its_approved_inputs(prepare: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``CoordinatorService._prepare_task``: a synthesis step's prompt says its
+    inputs are the approved versions, and its redo (a revision prompt, which carried
+    only its last answer and the owner's words, #0383.3) is given them again (F286)."""
+    @functools.wraps(prepare)
+    async def wrapped(self: Any, db: Session, run: Any, task: Any, agent_id: Any) -> Any:
+        prep = await prepare(self, db, run, task, agent_id)
+        if not isinstance(prep, dict) or getattr(task, "task_type", None) != SYNTHESIS:
+            return prep
+        return {**prep, "prompt": f"{prep.get('prompt') or ''}\n\n{_approved_block(db, task)}"}
+    return wrapped
+
+
+def _approved_block(db: Session, task: Any) -> str:
+    """The approval rule, and on a redo the approved results themselves."""
+    context = getattr(task, "input_context", None)
+    redo = isinstance(context, dict) and bool(context.get("previous_output") and context.get("verification_feedback"))
+    if not redo:
+        return f"{APPROVED_HEADING}\n\n{APPROVED_RULE}"
+    return _block(APPROVED_HEADING, APPROVED_RULE, _whole_results(db, task))
 
 
 def earlier_results(db: Session, task: Any, *, room: int) -> List[Dict[str, Any]]:
@@ -203,7 +254,8 @@ def earlier_results(db: Session, task: Any, *, room: int) -> List[Dict[str, Any]
         output = _within(_sanitize_for_field(str(step.output)), min(RESULT_CHARS, room))
         room -= len(output)
         title = f"{numbers[step.id]} {step.title}" if step.id in numbers else step.title
-        results.append({"title": title, "description": (step.description or "")[:DESCRIPTION_CHARS], "output": output})
+        results.append({"title": title, "key": step.title, "output": output,
+                        "description": (step.description or "")[:DESCRIPTION_CHARS]})
     return results
 
 
@@ -252,5 +304,7 @@ def _session_of(task: Any) -> Optional[Session]:
     return db if isinstance(db, Session) else None
 
 
-__all__ = ["EARLIER_HEADING", "RESULTS_KEY", "asks_to_summarise", "builds_on_earlier_steps", "builds_on_whole_results",
-           "documents_block", "earlier_results", "results_block", "with_its_inputs", "with_the_missions_earlier_steps"]
+__all__ = ["APPROVED_HEADING", "EARLIER_HEADING", "PINNED_BELOW", "RESULTS_KEY", "a_summary_keeps_its_approved_inputs",
+           "asks_to_summarise", "builds_on_earlier_steps", "builds_on_whole_results", "documents_block",
+           "earlier_results", "pointers_to", "pulls_the_mission_together", "results_block", "with_its_inputs",
+           "with_the_missions_earlier_steps"]
