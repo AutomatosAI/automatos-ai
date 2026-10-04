@@ -184,8 +184,10 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_execute_playbook",
         description=(
-            "Trigger a playbook run asynchronously. Returns an execution_id "
-            "immediately — check status later with platform_get_playbook_execution. "
+            "Trigger a playbook run asynchronously. Returns the run's card number at once "
+            "('number', e.g. #0440): give the owner that number, as the board shows it. The "
+            "execution_id is only for platform_get_playbook_execution. Pass input_data under the "
+            "names platform_get_playbook lists in 'inputs'. "
             "For one-off agent tasks, use platform_create_task instead. "
             "Provide playbook_id or playbook_name."
         ),
