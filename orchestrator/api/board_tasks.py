@@ -151,6 +151,113 @@ def report_type_for(task: Any) -> str:
     return HEARTBEAT_REPORT_TYPE if getattr(task, "source_type", None) == HEARTBEAT_SOURCE else TASK_REPORT_TYPE
 
 
+def _task_agent_name(db: Session, task: BoardTask) -> str:
+    """The assigned agent's name, or "Unknown Agent"."""
+    if task.assigned_agent_id:
+        agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+        if agent:
+            return agent.name
+    return "Unknown Agent"
+
+
+def _task_llm_text(exec_result: Dict[str, Any], task: BoardTask) -> str:
+    """The agent's actual response, falling back to whatever text was captured in task.result."""
+    return (
+        exec_result.get("result")
+        or exec_result.get("response")
+        or exec_result.get("output")
+        or exec_result.get("content")
+        or task.result
+        or ""
+    )
+
+
+def _task_exec_metrics(db: Session, workspace_id: str, task: BoardTask, exec_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Cost/model/duration rollup from llm_usage (window = task started→completed)."""
+    from services.report_service import compute_execution_metrics
+
+    exec_metrics = compute_execution_metrics(
+        db,
+        workspace_id,
+        agent_id=task.assigned_agent_id,
+        execution_id=getattr(task, "execution_id", None),
+        started_at=getattr(task, "started_at", None),
+        completed_at=getattr(task, "completed_at", None),
+        extra={
+            "task_id": task.id,
+            "task_status": task.status,
+            "trigger": "task",
+        },
+    )
+
+    # Honour upstream-supplied tokens if the rollup found nothing
+    if not exec_metrics.get("tokens_used"):
+        usage = exec_result.get("usage") or {}
+        fallback_tokens = (
+            usage.get("total_tokens")
+            or exec_result.get("tokens_used")
+            or 0
+        )
+        if fallback_tokens:
+            exec_metrics["tokens_used"] = fallback_tokens
+    return exec_metrics
+
+
+def _task_report_status(task: BoardTask) -> str:
+    if task.error_message:
+        return "critical"
+    return "ok" if task.status in ("done", "review") else "warning"
+
+
+def _task_report_content(agent_name: str, task: BoardTask, llm_text: str,
+                         exec_result: Dict[str, Any], exec_metrics: Dict[str, Any]) -> str:
+    """Render the same shape heartbeat reports use so consumers stay uniform."""
+    lines = [
+        f"# {agent_name} — Task Report",
+        f"**Task:** {task.title}",
+        f"**Status:** {task.status}",
+        "",
+    ]
+    if task.error_message:
+        lines.append("## Error")
+        lines.append(str(task.error_message))
+        lines.append("")
+    if llm_text:
+        lines.append("## Result")
+        lines.append(str(llm_text))
+        lines.append("")
+    lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
+    lines.append("## Execution Metrics")
+    lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
+    lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
+    lines.append(f"- Tokens (in/out/total): "
+                 f"{exec_metrics.get('input_tokens', 0)} / "
+                 f"{exec_metrics.get('output_tokens', 0)} / "
+                 f"{exec_metrics.get('tokens_used', 0)}")
+    if exec_result.get("runtime") == RUNTIME_CLI:
+        lines.append("- Cost: plan usage (subscription) — no dollar figure")
+    else:
+        lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+    if exec_metrics.get("duration_ms") is not None:
+        lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
+    return "\n".join(lines)
+
+
+def _task_report_summary(llm_text: str, task: BoardTask) -> Optional[str]:
+    """The first non-empty body line — same convention as heartbeat reports."""
+    for line in str(llm_text).split("\n"):
+        stripped = line.strip().lstrip("#").strip()
+        if stripped:
+            return (stripped[:497] + "...") if len(stripped) > 497 else stripped
+    # F197: a failed task's result is blank, so its report is summarised by
+    # why it failed. The summary used to fall back to "**Task:** …", and the
+    # bell could not tell a credit outage it had already announced.
+    if task.error_message:
+        first = str(task.error_message).strip().splitlines()[0]
+        return (first[:497] + "...") if len(first) > 497 else first
+    return None
+
+
 async def _auto_create_task_report(
     db: Session,
     workspace_id: str,
@@ -163,109 +270,20 @@ async def _auto_create_task_report(
     Always non-blocking: never raises, just warns on failure.
     """
     try:
-        from services.report_service import ReportService, compute_execution_metrics
+        from services.report_service import ReportService
 
-        agent_name = "Unknown Agent"
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            if agent:
-                agent_name = agent.name
-
-        # Source the body from the agent's actual response, falling back to whatever
-        # text was captured in task.result.
-        llm_text = (
-            exec_result.get("result")
-            or exec_result.get("response")
-            or exec_result.get("output")
-            or exec_result.get("content")
-            or task.result
-            or ""
-        )
-
-        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
-        exec_metrics = compute_execution_metrics(
-            db,
-            workspace_id,
-            agent_id=task.assigned_agent_id,
-            execution_id=getattr(task, "execution_id", None),
-            started_at=getattr(task, "started_at", None),
-            completed_at=getattr(task, "completed_at", None),
-            extra={
-                "task_id": task.id,
-                "task_status": task.status,
-                "trigger": "task",
-            },
-        )
-
-        # Honour upstream-supplied tokens if the rollup found nothing
-        if not exec_metrics.get("tokens_used"):
-            usage = exec_result.get("usage") or {}
-            fallback_tokens = (
-                usage.get("total_tokens")
-                or exec_result.get("tokens_used")
-                or 0
-            )
-            if fallback_tokens:
-                exec_metrics["tokens_used"] = fallback_tokens
-
-        report_status = "ok" if task.status in ("done", "review") else "warning"
-        if task.error_message:
-            report_status = "critical"
-
-        # Render the same shape heartbeat reports use so consumers stay uniform.
-        lines = [
-            f"# {agent_name} — Task Report",
-            f"**Task:** {task.title}",
-            f"**Status:** {task.status}",
-            "",
-        ]
-        if task.error_message:
-            lines.append("## Error")
-            lines.append(str(task.error_message))
-            lines.append("")
-        if llm_text:
-            lines.append("## Result")
-            lines.append(str(llm_text))
-            lines.append("")
-        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
-        lines.append("## Execution Metrics")
-        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
-        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
-        lines.append(f"- Tokens (in/out/total): "
-                     f"{exec_metrics.get('input_tokens', 0)} / "
-                     f"{exec_metrics.get('output_tokens', 0)} / "
-                     f"{exec_metrics.get('tokens_used', 0)}")
-        if exec_result.get("runtime") == RUNTIME_CLI:
-            lines.append("- Cost: plan usage (subscription) — no dollar figure")
-        else:
-            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
-        if exec_metrics.get("duration_ms") is not None:
-            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
-        content = "\n".join(lines)
-
-        # Summary is the first non-empty body line — same convention as heartbeat reports.
-        summary = None
-        for line in str(llm_text).split("\n"):
-            stripped = line.strip().lstrip("#").strip()
-            if stripped:
-                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
-                break
-        # F197: a failed task's result is blank, so its report is summarised by
-        # why it failed. The summary used to fall back to "**Task:** …", and the
-        # bell could not tell a credit outage it had already announced.
-        if summary is None and task.error_message:
-            first = str(task.error_message).strip().splitlines()[0]
-            summary = (first[:497] + "...") if len(first) > 497 else first
-
+        agent_name = _task_agent_name(db, task)
+        llm_text = _task_llm_text(exec_result, task)
+        exec_metrics = _task_exec_metrics(db, workspace_id, task, exec_result)
         svc = ReportService(db, workspace_id)
         report_result = await svc.create_report(
             agent_id=task.assigned_agent_id,
             agent_name=agent_name,
             title=f"Task: {task.title}",
-            content=content,
+            content=_task_report_content(agent_name, task, llm_text, exec_result, exec_metrics),
             report_type=report_type_for(task),
-            status=report_status,
-            summary=summary,
+            status=_task_report_status(task),
+            summary=_task_report_summary(llm_text, task),
             metrics=exec_metrics,
             linked_task_ids=[task.id],
         )
