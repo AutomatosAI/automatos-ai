@@ -41,6 +41,7 @@ from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
 from config import config
 from core.database.read_release import release_if_read_only
+from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8): the cards the owner named
 
 # Import from consumer's own modules
 from consumers.chatbot.atom_prompt import atom_memory_block, atom_system_prompt, resolve_atom_attachments
@@ -1568,6 +1569,7 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
+    @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
