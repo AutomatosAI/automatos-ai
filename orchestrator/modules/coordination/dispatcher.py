@@ -30,7 +30,7 @@ from config import Config
 from services.step_lessons import a_steps_prompt_carries_its_lessons  # F249/F269
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
-from modules.coordination.one_step_at_a_time import one_step_at_a_time
+from modules.coordination.one_step_at_a_time import one_step_at_a_time, waits_its_turn
 from core.models.orchestration_enums import (
     ActorType,
     BudgetStatus,
@@ -294,6 +294,7 @@ class MissionDispatcher:
         return MissionDispatcher._dispatch_single(db, run, task, agents)
 
     @staticmethod
+    @waits_its_turn  # F267 (night 8): while a step is redone or waits for the owner, no other starts
     @runs_on_the_cards_agent  # F287 (night 8): a step goes to the agent its card was given to
     def _dispatch_single(
         db: Session,
