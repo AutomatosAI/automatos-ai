@@ -186,7 +186,8 @@ def deliverable_open_url(deliverable_id: Optional[str]) -> str:
 
 def failure(message: str) -> Dict[str, Any]:
     """The tool's answer when no document was made."""
-    return ToolResultFormatter.standardize_result({"success": False, "error": message}, TOOL_NAME)
+    # "status" too: standardize_result reads success from it, and a bare False came back None
+    return ToolResultFormatter.standardize_result({"success": False, "status": "error", "error": message}, TOOL_NAME)
 
 
 def _agent_row(db: Session, agent_id: int) -> Any:
