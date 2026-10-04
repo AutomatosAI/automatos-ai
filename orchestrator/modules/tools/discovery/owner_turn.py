@@ -14,6 +14,12 @@ Night 8 (build 12), Auto in the owner's chat:
 This reads the turn once: the owner's latest words (and the message before, for a
 "yes" that answers a question), the cards they name by number, and the verb they
 used. ``follows_the_owner`` checks each call against it.
+
+Night 9 (F309): the owner named cards in words, "card 1879", "Card 1869", "card 27.2",
+and neither the note nor the guard knew them: "card 1879" was looked up as a mission,
+"27.2" as a social post. A card named with a card word counts now
+(``card_words_said``), by its id or its number; and "needs to go back. Correction: …"
+is a send-back.
 """
 from __future__ import annotations
 
@@ -39,10 +45,16 @@ APPROVE = re.compile(r"\bapprov\w*\b|\baccept\w*\b|\bsign(?:ed)? (?:it )?off\b|\
                      r"|\bthat'?s (?:the one|right|it|fine|good)\b|\blooks? (?:good|right|fine)\b|\bgood to go\b", re.I)
 # A yes that answers Auto's question ("Shall I approve it?") counts as the owner's go-ahead.
 GO_AHEAD = re.compile(r"\b(?:yes|yep|yeah|go ahead|go on|do it|please do|ok(?:ay)?)\b", re.I)
+# Night 9 (F309): "Card 1869 needs to go back. Correction: …" is a send-back too.
 SEND_BACK = re.compile(r"\bsend\b(?:\W+\w+){0,3}?\W+back\b|\bsent back\b|\breject\w*\b|\bredo\b|\bre-do\b"
                        r"|\btake (?:out|off)\b|\bfix\b|\bwrong\b|\bisn'?t right\b|\bnot right\b|\bshould (?:be|say|start)\b"
-                       r"|\binstead\b", re.I)
-GIVE = re.compile(r"\b(?:give|assign|hand)\b|\bput\b(?:\W+\w+){0,4}?\W+on (?:the |my )?[A-Z]", re.I)
+                       r"|\binstead\b|\bgo(?:es|ing)? back\b|\bcorrections?\s*:", re.I)
+# A send-back said outright, never by "instead" alone ("Give card 1859 to the Analyst instead").
+SENDS_IT_BACK = re.compile(r"\bsend\b(?:\W+\w+){0,3}?\W+back\b|\bsent back\b|\breject\w*\b|\bgo(?:es|ing)? back\b"
+                           r"|\bcorrections?\s*:", re.I)
+# "Give it back" and "hand it back" send a card back; "give card 1859 to …" gives it (F309).
+GIVE = re.compile(r"\b(?:give|assign|hand)\b(?!\s+(?:it|this|that|them)\s+back\b)"
+                  r"|\bput\b(?:\W+\w+){0,4}?\W+on (?:the |my )?[A-Z]", re.I)
 UPDATE = re.compile(r"\bupdat\w*\b|\bre-?brief\w*\b|\bnew brief\b|\bchange (?:its|the|that) brief\b|\brewrite\b", re.I)
 NEW_CARD = re.compile(r"\b(?:new|another|separate|second|extra|fresh)\s+(?:card|ticket|task)\b"
                       r"|\b(?:create|make|add|open|start)\s+(?:a|an)\s+(?:\w+\s+){0,2}(?:card|ticket|task)\b", re.I)
@@ -68,11 +80,13 @@ OWNER_HISTORY = 6
 @dataclass(frozen=True)
 class NamedCard:
     """A card the owner named: its number as they wrote it, and the card (None when
-    no card on the board has that number)."""
+    no card on the board has that number). ``by_id``: they named it by its id, in
+    words ("card 1879", F309), and ``ref`` is the board's number for it."""
     ref: str
     seq: int
     step: Optional[int]
     task: Any
+    by_id: bool = False
 
 
 @dataclass(frozen=True)
@@ -166,19 +180,58 @@ def _as_uuid(value: Any) -> Any:
 
 
 def cards_named(db: Session, workspace_id: Any, text: str) -> Tuple[NamedCard, ...]:
-    """Each card the words name by number, found on this workspace's board or not."""
-    from core.models.core import BoardTask
+    """Each card the words name, found on this workspace's board or not: by its
+    number ("#0201"), or in words ("card 1879", "step 27.2", F309), each once."""
     from services.ticket_numbers import format_number, resolve_ticket_ref
 
     named: List[NamedCard] = []
     for match in list(CARD_REF.finditer(text or ""))[:MAX_CARDS]:
         seq, step = int(match.group(1)), (int(match.group(2)) if match.group(2) else None)
         ref = format_number(seq, step)
-        task_id = resolve_ticket_ref(db, workspace_id, ref)
-        task = (db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
-                if task_id else None)
-        named.append(NamedCard(ref=ref, seq=seq, step=step, task=task))
-    return tuple(named)
+        named.append(NamedCard(ref=ref, seq=seq, step=step, task=_card(db, workspace_id,
+                                                                       resolve_ticket_ref(db, workspace_id, ref))))
+    if len(named) < MAX_CARDS:
+        named += [card for card in _cards_in_words(db, workspace_id, text) if card.ref not in {n.ref for n in named}]
+    return tuple(named[:MAX_CARDS])
+
+
+def _cards_in_words(db: Session, workspace_id: Any, text: str) -> List[NamedCard]:
+    """The cards named in words ("card 1879", "step 27.2"), as the board numbers them."""
+    from modules.tools.discovery.card_words_said import card_said, word_refs
+    from services.ticket_numbers import ticket_number
+
+    cards: List[NamedCard] = []
+    for said in word_refs(text)[:MAX_CARDS]:
+        task_id, by_id = card_said(db, workspace_id, said.digits)
+        task = _card(db, workspace_id, task_id)
+        ref = (ticket_number(db, task) if task is not None else None) or _as_number(said.digits)
+        seq, step = _seq_and_step(ref)
+        cards.append(NamedCard(ref=ref, seq=seq, step=step, task=task, by_id=by_id))
+    return cards
+
+
+def _seq_and_step(ref: str) -> Tuple[int, Optional[int]]:
+    """(42, None) for "#0042", (51, 3) for "#0051.3"."""
+    parts = re.fullmatch(r"#(\d+)(?:\.(\d+))?", ref)
+    if parts is None:
+        return -1, None
+    return int(parts.group(1)), (int(parts.group(2)) if parts.group(2) else None)
+
+
+def _card(db: Session, workspace_id: Any, task_id: Optional[int]) -> Any:
+    from core.models.core import BoardTask
+
+    if not task_id:
+        return None
+    return db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
+
+
+def _as_number(digits: str) -> str:
+    """The board's form of digits said in words: #0027.2 for "27.2", #1879 for "1879"."""
+    from services.ticket_numbers import format_number
+
+    seq, _, step = digits.partition(".")
+    return format_number(int(seq), int(step) if step else None)
 
 
 def says(pattern: re.Pattern, texts: Sequence[str]) -> bool:
@@ -190,6 +243,8 @@ def names_card(value: Any, card: NamedCard) -> bool:
     "#0201", "0201", "201", 201, or 428.2 for step #0428.2."""
     if isinstance(value, bool) or value is None:
         return False
+    if card.by_id and card.task is not None and str(value).strip() == str(card.task.id):
+        return True   # F309: "card 1879" by its id, and Auto sent 1879
     if isinstance(value, int):
         return card.step is None and value == card.seq
     if isinstance(value, float):
@@ -223,8 +278,9 @@ def card_words(card: NamedCard) -> str:
         return f"{card.ref} (no card on the board has that number)"
     title = str(getattr(task, "title", "") or "").strip()[:80]
     status = str(getattr(task, "status", "") or "").replace("_", " ")
-    return f"{card.ref} ('{title}', {status})"
+    named_by = f" (id {task.id}, as the owner named it)" if card.by_id else ""
+    return f"{card.ref}{named_by} ('{title}', {status})"
 
 
-__all__ = ["CARD_REF", "NamedCard", "OwnerTurn", "autos_last_reply", "autos_proposal", "card_kind", "card_words",
+__all__ = ["CARD_REF", "SENDS_IT_BACK", "NamedCard", "OwnerTurn", "autos_last_reply", "autos_proposal", "card_kind", "card_words",
            "cards_named", "names_card", "owner_turn", "owners_recent_words", "says", "values_in"]

@@ -12,6 +12,12 @@ it, by their verb (``follows_the_owner.right_call``). It goes in last, after eve
 cache-stable block, like the turn's ranked actions.
 
 A widget visitor's turn gets no note: the board is the owner's.
+
+Night 9 (F309): the note read only "#0201". "Card 1869 needs to go back. Correction: …"
+got no note, and Auto asked the owner a question instead of sending the card back;
+"card 1879" was approved as a mission. Cards named in words get their line now
+(``owner_turn.cards_named``), and the call carries the words the owner gave for the
+card ("Correction: …"), quoted, so the first call needs no rewording.
 """
 from __future__ import annotations
 
@@ -28,8 +34,11 @@ from modules.tools.discovery.owner_turn import (
 
 logger = logging.getLogger(__name__)
 
-CARDS_NAMED = ("The owner's message names cards on their board by number. A card's number is never the id of a "
-               "social post, blog post, skill, tool, agent, document, timer or playbook: act on the card itself.")
+# F309 (night 9): "card 1879" and "card 27.2" name cards too, by id or by number.
+CARDS_NAMED = ("The owner's message names cards on their board, by number (#0201) or in words (card 1879, step "
+               "27.2). A card's number or id is never the id of a social post, blog post, skill, tool, agent, "
+               "document, timer or playbook, nor a mission's unless its line says it is a mission's own card: act "
+               "on the card itself, with the call given for it.")
 KIND_WORDS = {MISSION_CARD: "a mission's own card (mission_id takes its number)",
               STEP_CARD: "a step of a mission", RUN_CARD: "a playbook run's card"}
 A_CARD = "a card"
