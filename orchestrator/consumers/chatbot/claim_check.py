@@ -30,6 +30,14 @@ and the id check read them as ids. Task 226 was no card of this workspace, so a
 right reply was re-prompted, the retry came back empty, and the owner got "I
 apologize, but I encountered an issue" after the work was done. A '#' number
 that is a card's number in the workspace exists.
+
+F314 (night 9): the owner read "Correction: this reply says something was under way,
+but no action in it did that, so it has not happened. Ask me to do it and check the
+board after." under Auto's timer reply (chat b8d9121f), a line that read like the
+system talking about Auto. Each line is now Auto's own, in plain words, and says what
+did not happen for the kind of claim it was ("I didn't approve anything in this
+reply", "nothing is still running from this reply, and I won't come back to this on
+my own"): ``not_done``.
 """
 from __future__ import annotations
 
@@ -40,10 +48,28 @@ from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-NOTHING_DONE = "Correction: nothing was done yet — no action ran. Ask me to do it and check the board after."
-NOT_DONE = ("Correction: this reply says something was {claim}, but no action in it did that, so it has not "
-            "happened. Ask me to do it and check the board after.")
-NO_SUCH_ID = "Correction: {ids} {verb} not exist — I named {it} without looking {it} up."
+# F314: what the owner reads under a claim no action backed, by the claim's family
+# (modules/tools/execution/action_claims.py), in Auto's own words.
+NOT_DONE = "Just to be clear: {said}. Ask me again if you want it done."
+NOTHING_DONE = NOT_DONE.format(said="I haven't done that yet, and nothing has changed")
+NOT_DONE_SAID = {
+    "approved": "I didn't approve anything in this reply",
+    "started": "I didn't start anything in this reply",
+    "noted": "I didn't save anything in this reply",
+    "put on the board": "I didn't put anything on the board in this reply",
+    "created": "I didn't create anything in this reply",
+    "installed": "I didn't install anything in this reply",
+    "sent": "I didn't send anything in this reply",
+    "sent back": "I didn't send anything back in this reply",
+    "deleted": "I didn't cancel or remove anything in this reply",
+    "changed": "I didn't change anything in this reply",
+    "assigned": "I didn't assign anything in this reply",
+    "checked": "I didn't actually check that in this reply",
+    "counted exactly": "I didn't count those figures exactly in this reply",
+    "re-checked": "I didn't re-check that figure in this reply, so I can't yet say which one is right",
+    "under way": "nothing is still running from this reply, and I won't come back to this on my own",
+}
+NO_SUCH_ID = "Just to be clear: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
     "Your previous reply names {ids}, which {verb} not exist in this workspace. Look it up now with a tool "
     "(platform_list_tasks, platform_list_agents, platform_list_playbooks) before naming it, or leave the number "
@@ -161,6 +187,12 @@ def id_nudge(ids: List[Tuple[str, str]]) -> str:
     return ID_NUDGE.format(ids=_listed(ids), verb="does" if len(ids) == 1 else "do")
 
 
+def not_done(claim: str) -> str:
+    """The owner's line for a claim of ``claim``'s family that no action backed (F314)."""
+    said = NOT_DONE_SAID.get(claim)
+    return NOT_DONE.format(said=said) if said else NOTHING_DONE
+
+
 def passive_claim(text: str) -> bool:
     return any(_PASSIVE.search(s) and not _INTENT.search(s) for s in _SENTENCE.findall(text or ""))
 
@@ -180,7 +212,7 @@ class Verdict:
     def correction(self) -> Optional[str]:
         lines = []
         if self.claim:
-            lines.append(NOTHING_DONE if self.tools == 0 else NOT_DONE.format(claim=self.claim))
+            lines.append(not_done(self.claim))
         if self.ids:
             one = len(self.ids) == 1
             lines.append(NO_SUCH_ID.format(ids=_listed(self.ids), verb="does" if one else "do",

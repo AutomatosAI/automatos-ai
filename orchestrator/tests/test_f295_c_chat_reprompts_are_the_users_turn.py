@@ -26,7 +26,7 @@ def test_a_reprompt_after_autos_answer_is_the_users_turn():
     sent = as_the_users_turn(chat)
 
     assert [m["role"] for m in sent] == ["system", "user", "assistant", "user"]
-    assert sent[-1]["content"] == id_nudge([("agent", "226")])
+    assert id_nudge([("agent", "226")]) in sent[-1]["content"]       # F314: framed as the platform's check
     assert chat[-1]["role"] == "system"                                   # the chat's own list is unchanged
 
 
@@ -62,5 +62,6 @@ def test_the_manager_sends_it_on_every_route():
     chat = [OWNER, ANSWER, {"role": "system", "content": "Say it in the owner's words."}]
     asyncio.run(reprompts_in_the_users_turn(generate)(None, messages=chat, tools=None))
 
-    assert sent["messages"][-1] == {"role": "user", "content": "Say it in the owner's words."}
+    assert sent["messages"][-1]["role"] == "user"
+    assert "Say it in the owner's words." in sent["messages"][-1]["content"]   # F314: framed as the platform's check
     assert LLMManager.generate_response.__code__ is reprompts_in_the_users_turn(generate).__code__
