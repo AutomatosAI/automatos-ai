@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class MemorySection(BaseSection):
         from config import config
         self.max_tokens = config.MEMORY_SECTION_MAX_TOKENS
 
+    @labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
     async def render(self, ctx: SectionContext) -> str:
         """Return formatted memory + daily-log block for the system prompt."""
         try:

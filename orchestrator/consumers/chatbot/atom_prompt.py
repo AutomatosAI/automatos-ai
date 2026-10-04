@@ -11,6 +11,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +23,7 @@ def _last_user_text(messages: List[Dict[str, Any]]) -> Any:
     )
 
 
+@labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
 async def atom_memory_block(orchestrator: Any, messages: List[Dict[str, Any]], *, workspace_id: Any,
                             agent_id: Any, widget_mode: bool, viewer_subject_id: Any) -> str:
     """The "What you remember about this user" block, or "" when there is nothing to add."""
