@@ -33,6 +33,7 @@ import type {
   SocialPlanProposal,
   SocialPostedFilters,
   SocialPostedResponse,
+  SocialVoiceExample,
 } from './socials-results-types'
 
 interface ApiResponse<T = any> {
@@ -3281,6 +3282,16 @@ class ApiClient {
   /** PRD-251C US-C404: Auto's proposals for the plan, from its results; each applied by updateSocialPlan. */
   async getSocialPlanProposals(planId: string): Promise<{ proposals: SocialPlanProposal[] }> {
     return this.request<{ proposals: SocialPlanProposal[] }>(`/api/socials/plans/${planId}/proposals`)
+  }
+
+  /** PRD-251C US-C406: the owner's voice examples, newest first. */
+  async listSocialVoiceExamples(): Promise<{ examples: SocialVoiceExample[] }> {
+    return this.request<{ examples: SocialVoiceExample[] }>('/api/socials/voice-examples')
+  }
+
+  /** PRD-251C US-C406: remove one voice example; the composer never reads it again. */
+  async deleteSocialVoiceExample(exampleId: string): Promise<void> {
+    await this.request<void>(`/api/socials/voice-examples/${exampleId}`, { method: 'DELETE' })
   }
 
   /** PRD-251C US-C407: what needs the owner in the plan now, each with its action. */

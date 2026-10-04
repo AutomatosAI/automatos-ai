@@ -49,7 +49,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SOCIAL_TEMPLATE_FORMATS
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import compose, history, service
+from modules.socials import compose, history, service, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
@@ -239,6 +239,7 @@ def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> co
         length_seconds=body.length_seconds,
         style=brand_style_text(db, workspace_id),
         recent_openings=tuple(history.recent_openings(db, workspace_id)),  # PRD-251C US-C105
+        voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
     )
 
 

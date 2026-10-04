@@ -35,6 +35,10 @@ SKILL_NAMES = ("social-brand-voice", "social-template-payloads")
 SKILL_MAX_CHARS = 6000
 TEXT_FORMAT = "text"
 WORDS_PER_SECOND = 2.5  # the editor's rule of thumb for a spoken line (PRD-251B mockup)
+VOICE_EXAMPLES_NOTE = (
+    "voice_examples are posts you drafted and the owner rewrote before approving them: write as the "
+    "approved versions do (their length, their words, what they leave out), never as your drafts did."
+)
 RECENT_OPENINGS_NOTE = (
     "recent_openings are how this workspace's last posts began: open this one differently, and never "
     "reuse their hook."
@@ -84,6 +88,8 @@ class ComposeContext:
     visual_slots: Tuple[Mapping[str, str], ...] = ()
     # PRD-251C (C5, US-C105): how the workspace's last posts began, newest first.
     recent_openings: Tuple[str, ...] = ()
+    # PRD-251C (C8, US-C406): copy Auto drafted and the copy the owner approved instead, newest first.
+    voice_examples: Tuple[Mapping[str, str], ...] = ()
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
@@ -128,6 +134,8 @@ def _system(ctx: ComposeContext) -> str:
         parts.append(VISUAL_PROMPTS_NOTE)
     if ctx.recent_openings:
         parts.append(RECENT_OPENINGS_NOTE)
+    if ctx.voice_examples:
+        parts.append(VOICE_EXAMPLES_NOTE)
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -154,6 +162,8 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         material["visual_slots"] = [dict(slot) for slot in ctx.visual_slots]
     if ctx.recent_openings:
         material["recent_openings"] = list(ctx.recent_openings)
+    if ctx.voice_examples:
+        material["voice_examples"] = [dict(example) for example in ctx.voice_examples]
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},

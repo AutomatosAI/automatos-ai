@@ -1,5 +1,5 @@
 {
-  "route_count": 893,
+  "route_count": 895,
   "routes": [
     {
       "method": "GET",
@@ -2340,6 +2340,14 @@
     {
       "method": "GET",
       "path": "/api/socials/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voice-examples"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/voice-examples/{example_id}"
     },
     {
       "method": "GET",

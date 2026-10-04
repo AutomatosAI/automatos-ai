@@ -10,7 +10,9 @@
  * * the style references: added (liked), turned to avoid, noted, removed; the kit full;
  * * what Auto takes from them, Read the references again, and whether liked images go;
  * * the AI tools: the rows, a default changed (only the changed one is sent) and the caps;
- *   a dropdown with one choice says what to connect (F252); with Socials off, a note instead.
+ *   a dropdown with one choice says what to connect (F252); with Socials off, a note instead;
+ * * PRD-251C US-C406: the voice examples, Auto's draft beside the copy approved, removed by an
+ *   owner; a viewer reads them only.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
@@ -26,6 +28,7 @@ const server = vi.hoisted(() => ({
   putError: null as Error | null,
   style: null as any,
   tools: null as any,
+  examples: [] as any[],
 }))
 
 function startingKit() {
@@ -143,6 +146,10 @@ vi.mock('@/lib/api-client', () => {
       server.tools = { ...server.tools, defaults: { ...server.tools.defaults, ...(input.defaults ?? {}) } }
       return server.tools
     }),
+    listSocialVoiceExamples: vi.fn(async () => ({ examples: server.examples })),
+    deleteSocialVoiceExample: vi.fn(async (id: string) => {
+      server.examples = server.examples.filter((example: any) => example.id !== id)
+    }),
     getAuthHeaders: vi.fn(async () => ({})),
     getBaseUrl: vi.fn(() => ''),
   }
@@ -180,6 +187,10 @@ beforeEach(() => {
   server.putError = null
   server.style = startingStyle()
   server.tools = startingTools()
+  server.examples = [
+    { id: 'v2', post_id: 'p2', draft: 'We are at Web Summit!!!', approved: 'Web Summit, stand B12.', created_at: '2026-10-20T09:00:00Z' },
+    { id: 'v1', post_id: 'p1', draft: 'Big news coming.', approved: 'Monday: the local edition.', created_at: '2026-10-19T09:00:00Z' },
+  ]
   Object.values(api).forEach((fn) => fn.mockClear())
   vi.mocked(toast.success).mockClear()
   vi.mocked(toast.error).mockClear()
@@ -351,6 +362,26 @@ describe('the AI tools', () => {
     const section = await screen.findByRole('region', { name: 'AI tools' })
     expect(within(section).getByText(SOCIALS_OFF_NOTE)).toBeInTheDocument()
     expect(api.getSocialMediaTools).not.toHaveBeenCalled()
+  })
+})
+
+describe('the voice examples (PRD-251C US-C406)', () => {
+  it("shows Auto's draft beside the copy approved, and an owner removes one", async () => {
+    renderTab()
+    const card = await screen.findByRole('region', { name: 'Voice examples' })
+    const first = await within(card).findByRole('listitem', { name: 'Web Summit, stand B12.' })
+    expect(first).toHaveTextContent('Auto wrote: We are at Web Summit!!!')
+    fireEvent.click(within(first).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(api.deleteSocialVoiceExample).toHaveBeenCalledWith('v2'))
+    await waitFor(() => expect(within(card).queryByRole('listitem', { name: 'Web Summit, stand B12.' })).toBeNull())
+  })
+
+  it('a viewer reads them and removes nothing', async () => {
+    server.role = 'viewer'
+    renderTab()
+    const card = await screen.findByRole('region', { name: 'Voice examples' })
+    await within(card).findByRole('listitem', { name: 'Monday: the local edition.' })
+    expect(within(card).queryByRole('button', { name: 'Remove' })).toBeNull()
   })
 })
 

@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search, upload_crops
+from modules.socials import report_charts, text_search, upload_crops, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -354,6 +354,7 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
         raise service.StaleContent(service.compute_content_hash(current))
     saved = _save(db, post)
     notify.notify_if_entered(status, post)
+    voice_examples.keep_if_approved(db, status, post)  # PRD-251C US-C406: an approved rewrite teaches the voice
     # D10 (US-306): the post's one-shot job follows its status and slot.
     schedule_jobs.sync_job(post)
     return saved

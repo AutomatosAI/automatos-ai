@@ -24,6 +24,7 @@ export const resultsQueryKeys = {
     [...socialsQueryKeys.all(ws), 'posted', filters.planId ?? '', filters.channel ?? '', filters.format ?? ''] as const,
   proposals: (ws: string | null, planId: string) => [...socialsQueryKeys.all(ws), 'plans', planId, 'proposals'] as const,
   health: (ws: string | null, planId: string) => [...socialsQueryKeys.all(ws), 'plans', planId, 'health'] as const,
+  voice: (ws: string | null) => [...socialsQueryKeys.all(ws), 'voice-examples'] as const,
 }
 
 /** Posted: what went out, newest first, with the filters given. */
@@ -68,5 +69,22 @@ export function useApplyProposal(planId: string, onApplied: (plan: SocialPlan) =
       onApplied(plan)
     },
     onError: (error) => toast.error(reasonOf(error, 'The proposal could not be applied.')),
+  })
+}
+
+/** The owner's voice examples (US-C406), newest first. */
+export function useVoiceExamples() {
+  const ws = useWorkspaceId()
+  return useQuery({ queryKey: resultsQueryKeys.voice(ws), queryFn: () => apiClient.listSocialVoiceExamples(), enabled: !!ws })
+}
+
+/** Remove one voice example; the list refreshes. */
+export function useRemoveVoiceExample() {
+  const ws = useWorkspaceId()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (exampleId: string) => apiClient.deleteSocialVoiceExample(exampleId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: resultsQueryKeys.voice(ws) }),
+    onError: (error) => toast.error(reasonOf(error, 'The example could not be removed.')),
   })
 }

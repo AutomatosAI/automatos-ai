@@ -85,6 +85,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
 from modules.socials import text_search
+from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
 from modules.socials.targets import TARGETS
@@ -732,8 +733,8 @@ def create_draft(
         **clean,
     )
     post.content_hash = compute_content_hash(post)
-    if agent:
-        _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent)
+    if agent:  # PRD-251C US-C406: what the agent wrote is kept with it, the voice examples' draft
+        _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent, **draft_entry(post.copy))
     db.add(post)
     return post
 
@@ -797,7 +798,8 @@ def update_post(
         else:
             setattr(post, name, value)
     if agent and changed:
-        _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed)
+        wrote = draft_entry(post.copy) if "copy" in changed else {}
+        _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed, **wrote)
 
     new_hash = compute_content_hash(post)
     if new_hash == post.content_hash:

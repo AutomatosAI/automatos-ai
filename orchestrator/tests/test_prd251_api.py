@@ -66,7 +66,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.core import DocumentTemplate, WorkflowTemplate  # noqa: E402
-from core.models.socials import SocialCampaign, SocialPost, SocialPostStat, SocialPostTarget  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialPostStat, SocialPostTarget, SocialVoiceExample  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
 
@@ -118,8 +118,9 @@ def api(monkeypatch):
     for table in (Workspace.__table__, DocumentTemplate.__table__, WorkflowTemplate.__table__):  # playbooks: PRD-251C
         _sqlite_copy(table, copies)
     copies.create_all(engine)
-    SocialPost.metadata.create_all(  # PRD-251C: the results' table too (history and the bank read it)
-        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__, SocialPostStat.__table__]
+    SocialPost.metadata.create_all(  # PRD-251C: the results and the voice examples too (read and written on approval)
+        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__, SocialPostStat.__table__,
+                        SocialVoiceExample.__table__],
     )
 
     session = sessionmaker(bind=engine)()
@@ -313,6 +314,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/plans/{plan_id}/batches/{batch_key}/approve"),  # PRD-251C US-C205: approve the week
             ("GET", "/api/socials/plans/{plan_id}/proposals"),  # PRD-251C US-C404: Auto's proposals
             ("GET", "/api/socials/plans/{plan_id}/health"),  # PRD-251C US-C407: the plan's health
+            ("GET", "/api/socials/voice-examples"),  # PRD-251C US-C406: the owner's voice examples
+            ("DELETE", "/api/socials/voice-examples/{example_id}"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

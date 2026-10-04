@@ -71,3 +71,12 @@ export interface SocialPlanHealthItem {
   detail: string
   action: { kind: SocialPlanHealthAction; label: string }
 }
+
+/** GET /api/socials/voice-examples (US-C406): Auto's draft and the copy a person approved instead. */
+export interface SocialVoiceExample {
+  id: string
+  post_id: string | null
+  draft: string
+  approved: string
+  created_at: string | null
+}

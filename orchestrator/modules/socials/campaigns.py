@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func
 
 from core.models.socials import SocialCampaign, SocialPost
-from modules.socials import service
+from modules.socials import service, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.settings import parse_workspace_socials
 
@@ -280,6 +280,7 @@ def _commit_approval(db: Any, post: SocialPost, campaign_id: UUID, content_hash:
     campaign.approved_at = post.approved_at
     db.commit()
     db.refresh(post)
+    voice_examples.keep_if_approved(db, service.NEEDS_APPROVAL, post)  # PRD-251C US-C406
     return post.to_dict()
 
 
