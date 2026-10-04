@@ -1,19 +1,25 @@
-"""What a connected database actually holds, beside its column names (F300, night 9).
+"""What a connected database actually holds, beside its column names (F300/F301, night 9).
 
 The stored schema has names and types and, for some columns, the first five values
 introspection happened to read. That was not enough to write the right query:
 
+* F301 B1 — "How many Harvest Club boxes go out on Monday 5 October?" became
+  ``shipped_on = '2026-10-05'`` and answered 0 (#1891, Auto chat 669bac98). The shop's
+  ``subscription_orders.shipped_on`` runs only to 2026-09-11: October's boxes are not
+  recorded yet, and the right reading is the 63 active Harvest Club members.
 * F300 — board agents asked the owner for "the exact plan_code" (#1886) and for "the
   subscription_orders schema" (#1891), and guessed columns that do not exist
   (``wo.order_date`` on #1888; the column is ``ordered_on``).
 
 For every column this records the complete set of values when it is small (``plan_code``:
 CLUB, REGULAR, TASTER) and, for a date column, the first and last date recorded. The
-facts are read once per source and kept for ``FACTS_TTL_SECONDS``. They reach the agent
+facts are read once per source and kept for ``FACTS_TTL_SECONDS``. They reach the SQL
+writer through :func:`grounded` (each column's description in the prompt) and the agent
 through the tool's answer (``modules.nl2sql.agent_answer``).
 """
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -30,6 +36,8 @@ PROBE_MAX_COLUMNS = 120       # bounds the work on a wide database
 PROBE_BUDGET_SECONDS = 20     # all probes of one source together; what is read by then is kept
 DATE_TYPES = ("date", "timestamp")
 CATEGORY_TYPES = ("char", "text", "enum", "bool", "user-defined")
+VALUES_NOTE = "one of: {values} (every value it holds)"
+RANGE_NOTE = "recorded from {first} to {last}; nothing is recorded after {last} yet"
 
 Facts = Dict[str, Dict[str, List[str]]]
 Quote = Callable[[str, str], str]
@@ -132,3 +140,44 @@ def read_facts(service: Any, source: Any, credentials: Dict[str, Any]) -> Facts:
             return probe_facts(conn, source.dialect, source.schema_metadata or {}, service._quote_ident)
     finally:
         engine.dispose()
+
+
+def _with_note(description: Any, note: str) -> str:
+    """A column description with ``note`` added once."""
+    existing = str(description or "").strip()
+    if note in existing:
+        return existing
+    return f"{existing}; {note}" if existing else note
+
+
+def annotate(schema_metadata: Dict[str, Any], facts: Facts) -> None:
+    """Write each column's facts into its description, in place, so the SQL writer's
+    prompt (``nl2sql_service._build_prompt`` prints every description) carries them.
+
+    In place on purpose: this is the contract of the call it hooks
+    (``_augment_schema_with_samples``), whose caller hands the same dict to the writer."""
+    if not facts:
+        return
+    for table, column in _columns(schema_metadata):
+        fact = facts.get(fact_key(table, column["name"])) or {}
+        if fact.get("values"):
+            note = VALUES_NOTE.format(values=", ".join(fact["values"]))
+        elif fact.get("range"):
+            note = RANGE_NOTE.format(first=fact["range"][0], last=fact["range"][1])
+        else:
+            continue
+        column["description"] = _with_note(column.get("description"), note)
+
+
+def grounded(augment: Callable[..., None]) -> Callable[..., None]:
+    """Hook for ``DatabaseKnowledgeService._augment_schema_with_samples``: after its
+    value sampling, the source's cached facts are written into the schema the SQL
+    writer is about to see (F301). No database work here: the tool reads the facts
+    before the query (``agent_answer.ground_source``)."""
+
+    @functools.wraps(augment)
+    def run(service: Any, source: Any, credentials: Dict[str, Any], schema_metadata: Dict[str, Any], *args: Any, **kwargs: Any) -> None:
+        augment(service, source, credentials, schema_metadata, *args, **kwargs)
+        annotate(schema_metadata, cached_facts(getattr(source, "id", None)))
+
+    return run

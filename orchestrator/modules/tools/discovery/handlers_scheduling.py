@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
-# F300: what the database tool adds beside the rows (modules.nl2sql.agent_answer).
-ANSWER_CONTEXT_KEYS = ("schema",)
+# F300/F301: what the database tool adds beside the rows (modules.nl2sql.agent_answer).
+ANSWER_CONTEXT_KEYS = ("schema", "notes")
 ANSWER_ROWS_SHOWN = 50
 ANSWER_CELL_CHARS = 50
 ANSWER_HEADER_CHARS = 20
@@ -164,9 +164,10 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     ``query_database`` / ``smart_query_database``: the one service construction
     site, workspace-scoped resolution by id OR name, one audit row.
 
-    F300 (night 9): board agents reach this through ``platform_execute`` too
-    (28 of the night's Decimal failures). The database's schema goes out with
-    the answer, as it does from ``smart_query_database``.
+    F300/F301 (night 9): board agents reach this through ``platform_execute``
+    too (28 of the night's Decimal failures). The database's schema and any
+    note on dates past the data go out with the answer, as they do from
+    ``smart_query_database``.
     """
     question = params.get("question")
     if not question or not str(question).strip():

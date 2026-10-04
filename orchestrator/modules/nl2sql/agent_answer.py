@@ -1,4 +1,4 @@
-"""What a database tool hands back to the agent that asked (F299/F300, night 9).
+"""What a database tool hands back to the agent that asked (F299/F300/F301, night 9).
 
 * F299 — the board agents' answer is ``json.dumps(raw)`` (agent_factory's tool
   callback), which raises on the ``Decimal`` and ``date`` values a shop's money, kilos
@@ -10,6 +10,8 @@
 * F300 — every answer lists the database's tables, columns, types, small value sets and
   date ranges, so the agent never has to ask the owner for a table or column name; a
   failed query's error names the real columns of the tables it used.
+* F301 — a query that asks about a date after a column's last recorded value says so:
+  0 there means "not recorded yet", not "none".
 """
 from __future__ import annotations
 
@@ -17,11 +19,12 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .schema.grounding import (
     Facts,
     cached_facts,
+    column_kind,
     fact_key,
     read_facts,
     remember_facts,
@@ -30,7 +33,17 @@ from .schema.grounding import (
 logger = logging.getLogger(__name__)
 
 SCHEMA_DIGEST_MAX_CHARS = 6000
+DATE_LITERAL = r"'(\d{4}-\d{2}-\d{2})"
+# ``col = '2026-10-05'``, ``col >= DATE '2026-10-05'``, ``col BETWEEN '2026-10-05' AND …``
+DATE_COMPARISON = re.compile(
+    r"\b(\w+)\s*(?:=|>=|>|\bBETWEEN\b)\s*(?:DATE\s*)?" + DATE_LITERAL, re.IGNORECASE
+)
 NAMES_ARE_HERE = "Use these names and ask again; the owner does not know the database's names."
+FUTURE_DATE_NOTE = (
+    "{table}.{column} has nothing recorded after {last}, and this query asks about {asked}. "
+    "Rows for that date do not exist yet, so 0 or no rows here means 'not recorded yet', not 'none'. "
+    "Answer from what is recorded now (for example, who is active) and say that is what you did."
+)
 
 
 def json_safe(value: Any) -> Any:
@@ -104,6 +117,33 @@ def real_columns_note(sql: str, schema_metadata: Dict[str, Any]) -> str:
     return f"The tables that exist: {names}. {NAMES_ARE_HERE}"
 
 
+def _date_ranges(tables: List[Dict[str, Any]], facts: Facts) -> Dict[str, List[Tuple[str, str]]]:
+    """Column name → [(table, last recorded value)] for the date columns of ``tables``."""
+    ranges: Dict[str, List[Tuple[str, str]]] = {}
+    for table in tables:
+        for column in table.get("columns") or []:
+            fact = facts.get(fact_key(table["name"], str(column.get("name")))) or {}
+            if column_kind(column.get("type")) == "date" and fact.get("range"):
+                ranges.setdefault(str(column["name"]).lower(), []).append((table["name"], fact["range"][1]))
+    return ranges
+
+
+def future_date_notes(sql: str, schema_metadata: Dict[str, Any], facts: Facts) -> List[str]:
+    """A note for each date the query compares a column with that lies after the last
+    value that column has recorded (F301 B1: ``shipped_on = '2026-10-05'`` where
+    shipped_on ends at 2026-09-11)."""
+    ranges = _date_ranges(tables_in_sql(sql, schema_metadata), facts)
+    notes: List[str] = []
+    for column, asked in DATE_COMPARISON.findall(sql or ""):
+        for table, last in ranges.get(column.lower(), []):
+            if asked <= last[:10]:
+                continue
+            note = FUTURE_DATE_NOTE.format(table=table, column=column, last=last[:10], asked=asked)
+            if note not in notes:
+                notes.append(note)
+    return notes
+
+
 def load_source(source_id: Any, workspace_id: str) -> Any:
     """The source row, only when it belongs to ``workspace_id`` (tenant isolation, as
     ``DatabaseKnowledgeService._get_source`` does), or None. Blocking: run it on a thread."""
@@ -148,7 +188,7 @@ def _read_and_remember(service: Any, source: Any, source_id: Any) -> None:
 
 async def ground_source(service: Any, source_id: Any, workspace_id: str) -> Dict[str, Any]:
     """The source's schema, with its facts read (or taken from the cache) before the
-    query runs. On a thread:
+    query runs, so the SQL writer sees them too (``grounding.grounded``). On a thread:
     it reads the platform database and the owner's (F105). An empty dict when either
     cannot be read: the query still runs, without the extra context, and the failure
     is logged."""
@@ -160,8 +200,8 @@ async def ground_source(service: Any, source_id: Any, workspace_id: str) -> Dict
 
 
 def shape_answer(result: Any, schema_metadata: Dict[str, Any], source_id: Any) -> Any:
-    """The tool's answer for the agent: the schema beside it and the real columns in a
-    failure, as plain JSON (F299)."""
+    """The tool's answer for the agent: the schema beside it, the real columns in a
+    failure, a note on dates past the data, all as plain JSON (F299)."""
     if not isinstance(result, dict):
         return json_safe(result)
     shaped = dict(result)
@@ -171,4 +211,7 @@ def shape_answer(result: Any, schema_metadata: Dict[str, Any], source_id: Any) -
         shaped["schema"] = schema_digest(schema_metadata, facts)
         if not result.get("success") and result.get("error"):
             shaped["error"] = f"{result['error']} {real_columns_note(sql, schema_metadata)}"
+        notes = future_date_notes(sql, schema_metadata, facts)
+        if notes:
+            shaped["notes"] = notes
     return json_safe(shaped)
