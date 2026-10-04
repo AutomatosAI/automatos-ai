@@ -13,6 +13,7 @@ from typing import Tuple, Dict, Any, List, Optional
 from functools import lru_cache
 
 from config import config
+from core.llm.owner_words_stream import in_owner_words
 
 from .clients.base import LLMProvider, LLMConfig
 from .clients.openai_client import OpenAIProvider
@@ -26,7 +27,6 @@ from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 
 from core.llm import output_budget
-from core.llm.owner_words_stream import in_owner_words
 
 logger = logging.getLogger(__name__)
 
