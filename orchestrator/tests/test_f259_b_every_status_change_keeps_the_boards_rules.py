@@ -68,7 +68,7 @@ def test_a_patch_cannot_file_an_untouched_ticket_and_stores_nothing_it_carried(b
     with pytest.raises(HTTPException) as refused:
         _patch(task, {"status": to, "title": "Renamed"})
 
-    assert refused.value.status_code == 409 and "use Run now" in refused.value.detail
+    assert refused.value.status_code == 409 and "give it to an agent, which starts it" in refused.value.detail  # F294
     assert (task.status, task.title, task.completed_at) == ("inbox", "Spring newsletter", None)
     assert board.completed == []
 

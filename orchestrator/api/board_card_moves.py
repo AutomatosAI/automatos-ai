@@ -104,7 +104,7 @@ def assign_note(db: Session, workspace_id: Any, was: Optional[int], now: Optiona
     def name(agent_id: Optional[int]) -> Optional[str]:
         row = db.query(Agent.name).filter(Agent.id == agent_id, Agent.workspace_id == workspace_id).first() \
             if agent_id else None
-        return row.name if row else None
+        return getattr(row, "name", None) if row else None
 
     if now is not None:
         return GAVE_THIS_TO.format(name=name(now) or f"agent {now}") + "."

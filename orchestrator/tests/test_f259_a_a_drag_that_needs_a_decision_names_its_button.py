@@ -114,7 +114,7 @@ def test_dragging_an_untouched_ticket_into_a_finished_column_changes_nothing(boa
     with pytest.raises(HTTPException) as refused:
         board.drag(task, to)
 
-    assert refused.value.status_code == 409 and "Run now" in refused.value.detail
+    assert refused.value.status_code == 409 and "give it to an agent, which starts it" in refused.value.detail  # F294
     assert task.status == "inbox" and task.completed_at is None
     assert board.completed == []                     # #0044: Done, with a completion time and no result
 
