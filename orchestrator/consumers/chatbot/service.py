@@ -73,6 +73,7 @@ from consumers.chatbot.owner_words import internal_names, internal_vocabulary, o
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
 from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
+from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
 
 logger = logging.getLogger(__name__)
 
@@ -1582,6 +1583,7 @@ class StreamingChatService:
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
     @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
     @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
+    @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
