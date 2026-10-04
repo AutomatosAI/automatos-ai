@@ -18,6 +18,7 @@ from .clients.base import LLMProvider, LLMConfig
 from .clients.openai_client import OpenAIProvider
 from .clients.anthropic_client import AnthropicProvider
 from .clients.google_client import GoogleProvider
+from .turn_order import reprompts_in_the_users_turn
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider
@@ -649,6 +650,7 @@ class LLMManager:
 
     # No fallback helpers — errors surface directly to the user.
 
+    @reprompts_in_the_users_turn  # F295 (8): a re-prompt after the model's reply is the user's turn
     async def generate_response(
         self,
         messages: List[Dict[str, str]],
