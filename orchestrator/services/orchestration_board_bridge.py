@@ -134,8 +134,10 @@ def create_mission_board_task(
 
 def _owner_tags(run: OrchestrationRun) -> list:
     """The tags the owner asked for on the mission's card (F262, night 7b:
-    ``config.card_tags``, from platform_create_mission's tags)."""
-    tags = (run.config or {}).get("card_tags") if isinstance(run.config, dict) else None
+    ``config.card_tags``, from platform_create_mission's tags). Night 8: the Missions
+    page's call and some of Auto's put them in ``config.tags`` (#0295, #0333, #0433)."""
+    config = run.config if isinstance(run.config, dict) else {}
+    tags = config.get("card_tags") or config.get("tags")
     return [str(t) for t in tags if str(t).strip()] if isinstance(tags, list) else []
 
 

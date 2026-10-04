@@ -67,7 +67,9 @@ _UPDATE_PLAYBOOK_PARAMETERS = {
         },
         "schedule_config": {
             "type": "object",
-            "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
+            "description": ("Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config, "
+                            "timezone, enabled }. To switch a timer off send {enabled: false}: its time is kept, "
+                            "and {enabled: true} switches it back on."),
         },
         "wait_for_me": {
             "type": "boolean",
@@ -182,8 +184,10 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_execute_playbook",
         description=(
-            "Trigger a playbook run asynchronously. Returns an execution_id "
-            "immediately — check status later with platform_get_playbook_execution. "
+            "Trigger a playbook run asynchronously. Returns the run's card number at once "
+            "('number', e.g. #0440): give the owner that number, as the board shows it. The "
+            "execution_id is only for platform_get_playbook_execution. Pass input_data under the "
+            "names platform_get_playbook lists in 'inputs'. "
             "For one-off agent tasks, use platform_create_task instead. "
             "Provide playbook_id or playbook_name."
         ),
@@ -196,6 +200,7 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
             "run the daily digest playbook",
             "execute playbook 5",
             "trigger the bug triage automation",
+            "run my New Cafe Onboarding for a new café",   # F288 (night 8): a named playbook, no word "playbook"
         ],
         accepts=("inputs", "input"),
         # F182: night 6 nested the café's details under "params".

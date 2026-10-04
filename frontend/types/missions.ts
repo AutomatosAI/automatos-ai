@@ -44,6 +44,8 @@ export interface MissionResponse {
   state_type: StateType
   plan: Record<string, unknown> | null
   config: Record<string, unknown> | null
+  /** F282: check_each_step normalised from config, whatever spelling it was written under. */
+  check_each_step: boolean
   output_summary: Record<string, unknown> | null
   token_budget_estimate: number | null
   tokens_used: number
@@ -143,6 +145,17 @@ export interface MissionTaskEdit {
 
 export interface MissionPlanEditRequest {
   task_edits: MissionTaskEdit[]
+}
+
+// F282: PATCH /api/missions/{id}/settings — the one check_each_step switch,
+// on the New mission form and again on the mission page.
+export interface MissionSettingsRequest {
+  check_each_step: boolean
+}
+
+export interface MissionSettingsResponse {
+  id: string
+  check_each_step: boolean
 }
 
 export interface SaveAsRoutineRequest {

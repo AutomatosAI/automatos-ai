@@ -169,6 +169,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
   const [files, setFiles] = useState<UploadingFile[]>([])
   const [budgetPauseEnabled, setBudgetPauseEnabled] = useState(true)
   const [powerMode, setPowerMode] = useState<PowerMode>('standard')
+  const [checkEachStep, setCheckEachStep] = useState(false)
   const [orchestratorModel, setOrchestratorModel] = useState<string | null>(null)
 
   useEffect(() => {
@@ -300,6 +301,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
     }
     if (!budgetPauseEnabled) config.budget_pause_disabled = true
     if (powerMode !== 'standard') config.power_mode = powerMode
+    if (checkEachStep) config.check_each_step = true
 
     // Add business plan fields to config for downstream agents
     if (isBusinessPlan) {
@@ -339,6 +341,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
     setFiles([])
     setBudgetPauseEnabled(true)
     setPowerMode('standard')
+    setCheckEachStep(false)
     setBusinessName('')
     setBusinessType('')
     setIndustry('')
@@ -629,6 +632,36 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
                 className={cn(
                   'pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform',
                   budgetPauseEnabled ? 'translate-x-4' : 'translate-x-0',
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Check each step toggle (F282) */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="check-each-step" className="text-sm cursor-pointer">
+                Check each step with me
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Every step waits in Review for your OK before the next one starts
+              </p>
+            </div>
+            <button
+              id="check-each-step"
+              type="button"
+              role="switch"
+              aria-checked={checkEachStep}
+              onClick={() => setCheckEachStep((v) => !v)}
+              className={cn(
+                'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+                checkEachStep ? 'bg-primary' : 'bg-muted',
+              )}
+            >
+              <span
+                className={cn(
+                  'pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform',
+                  checkEachStep ? 'translate-x-4' : 'translate-x-0',
                 )}
               />
             </button>

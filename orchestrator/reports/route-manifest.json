@@ -1,5 +1,5 @@
 {
-  "route_count": 895,
+  "route_count": 896,
   "routes": [
     {
       "method": "GET",
@@ -1812,6 +1812,10 @@
     {
       "method": "POST",
       "path": "/api/missions/{mission_id}/save-as-routine"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/missions/{mission_id}/settings"
     },
     {
       "method": "GET",

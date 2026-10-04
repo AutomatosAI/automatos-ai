@@ -61,6 +61,7 @@ from core.models.orchestration_enums import (
     TaskState,
     TERMINAL_RUN_STATES,
 )
+from modules.coordination.owner_checks import checks_each_step
 from modules.coordination.planner import PlanValidationError
 
 from services.chat_messenger import strip_caller_narration_origin
@@ -351,6 +352,9 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "state_type": run.state_type,
         "plan": run.plan,
         "config": run.config,
+        # F282: one normalised name for the owner's "check each step with me",
+        # whatever spelling it was written under (modules/coordination/owner_checks.py).
+        "check_each_step": checks_each_step(run.config),
         "output_summary": run.output_summary,
         "token_budget_estimate": run.token_budget_estimate,
         "tokens_used": run.tokens_used or 0,

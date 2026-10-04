@@ -13,6 +13,14 @@ as ``steps``. This reads those as the mission's own settings before the tool run
 - ``tags`` go on the mission's card (``config.card_tags``), so the owner finds it by tag;
 - staffing that names no agent's work (a list of names, or an object) pins nobody: the
   plan staffs each step by what it needs, and the answer says so.
+
+Night 8 (F282, F287, F288, F289): the check of each step is one setting
+(``owner_checks.with_step_checks``) whichever key the call used, and on whenever the
+owner's own words ask for it; the agents the owner's words give work to are pinned to
+it (``mission_owner_words``); a playbook the owner named, a copy of a mission still
+waiting, and a goal that isn't theirs make no mission (``mission_create_checks``). The
+answer says whether the steps wait for the owner, so Auto can't say they do when they
+don't (#0250: "Yes, it will", with no setting).
 """
 from __future__ import annotations
 
@@ -21,14 +29,18 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from modules.coordination.owner_checks import checks_each_step, with_step_checks
+from modules.tools.discovery.mission_owner_words import staffing_names_the_work
+
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 WAIT_FOR_ME, STEPS, TAGS, STAFFING, CONFIG, GOAL = "wait_for_me", "steps", "tags", "staffing", "config", "goal"
-CHECK_EACH_STEP, CARD_TAGS = "check_each_step", "card_tags"
+CARD_TAGS = "card_tags"
 MAX_CARD_TAGS, MAX_TAG_CHARS = 10, 60
 # What a step object says it is, and what it asks for, in the keys models use.
 STEP_NAME_KEYS = ("name", "title", "step")
-STEP_WORK_KEYS = ("objective", "description", "does", "task", "output")
+STEP_WORK_KEYS = ("objective", "description", "does", "task", "output", "prompt_template", "prompt", "instructions")
+STEP_AGENT_KEYS = ("agent", "agent_name", "agent_id", "assigned_agent", "assigned_agent_name")
 STEP_WAITS_KEYS = ("pause_before_start", "pause_after", WAIT_FOR_ME, "wait", "requires_approval")
 STEPS_HEADING = "The owner's steps, in order:"
 STAFFING_NOT_USED = ("staffing named no agent's work, so it pinned nobody: each step goes to the agent that fits "
@@ -36,16 +48,43 @@ STAFFING_NOT_USED = ("staffing named no agent's work, so it pinned nobody: each 
                      "[{\"agent\": \"Analyst\", \"does\": \"works out the coffee\"}].")
 
 
+CHECKS_EACH_STEP = " Every step waits in Review for the owner's check before the next one starts."
+RUNS_UNCHECKED = (" Its steps run without waiting for the owner's check; if the owner asked to check each step, "
+                  "switch it on with platform_update_mission_plan and check_each_step: true.")
+
+
 def asks_as_the_owner_says(handler: Handler) -> Handler:
-    """Read wait_for_me, steps, tags and loose staffing as the mission's settings (see the module)."""
+    """Read the call, and the owner's own words, as the mission's settings (see the module)."""
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        asked, note = as_the_mission_settings(params or {})
-        out = await handler(db, workspace_id, asked)
-        if note and isinstance(out, dict) and out.get("success"):
-            return {**out, "staffing_note": note}
-        return out
+        from modules.tools.discovery.mission_create_checks import refusal_for_mission
+        from modules.tools.discovery.mission_owner_words import asks_for_checks, chosen_staffing, owners_words
+
+        params = params or {}
+        said = owners_words(db, workspace_id, params)
+        refusal = refusal_for_mission(db, workspace_id, params, said)
+        if refusal:
+            return {"success": False, "error": refusal}
+        asked, note = as_the_mission_settings(params)
+        staffing = chosen_staffing(db, workspace_id, params, said)
+        if staffing:
+            asked, note = {**asked, STAFFING: staffing}, None
+        if asks_for_checks(said):
+            asked = {**asked, CONFIG: with_step_checks(asked.get(CONFIG), on=True)}
+        return _answered(await handler(db, workspace_id, asked), asked, note)
     return wrapped
+
+
+def _answered(out: Any, asked: Dict[str, Any], note: Optional[str]) -> Any:
+    """The tool's answer, saying whether the steps wait for the owner and who was pinned."""
+    if not (isinstance(out, dict) and out.get("success")):
+        return out
+    checks = checks_each_step(asked.get(CONFIG))
+    said = {"checks_each_step": checks,
+            "message": f"{out.get('message', '')}{CHECKS_EACH_STEP if checks else RUNS_UNCHECKED}"}
+    if asked.get(STAFFING):
+        said["staffed_by_the_owner"] = [entry["agent"] for entry in asked[STAFFING]]
+    return {**out, **said, **({"staffing_note": note} if note else {})}
 
 
 def as_the_mission_settings(params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -53,8 +92,7 @@ def as_the_mission_settings(params: Dict[str, Any]) -> Tuple[Dict[str, Any], Opt
     for staffing that pinned nobody (None when there was none)."""
     steps, step_waits = _steps_text(params.get(STEPS))
     config = dict(params.get(CONFIG) or {}) if isinstance(params.get(CONFIG), dict) else {}
-    if params.get(WAIT_FOR_ME) is True or step_waits:
-        config[CHECK_EACH_STEP] = True
+    config = with_step_checks(config, on=True if (params.get(WAIT_FOR_ME) is True or step_waits) else None)
     tags = _tags(params.get(TAGS))
     if tags:
         config[CARD_TAGS] = tags
@@ -64,7 +102,7 @@ def as_the_mission_settings(params: Dict[str, Any]) -> Tuple[Dict[str, Any], Opt
     if config:
         asked[CONFIG] = config
     staffing = params.get(STAFFING)
-    if staffing and not _names_the_work(staffing):
+    if staffing and not staffing_names_the_work(staffing):
         return {k: v for k, v in asked.items() if k != STAFFING}, STAFFING_NOT_USED
     return asked, None
 
@@ -95,12 +133,6 @@ def _tags(tags: Any) -> List[str]:
         return []
     kept = [str(t).strip()[:MAX_TAG_CHARS] for t in tags if str(t).strip()]
     return list(dict.fromkeys(kept))[:MAX_CARD_TAGS]
-
-
-def _names_the_work(staffing: Any) -> bool:
-    """Staffing the coordinator can pin: a list of {agent, does}."""
-    return isinstance(staffing, list) and all(isinstance(e, dict) and e.get("agent") and e.get("does")
-                                              for e in staffing)
 
 
 __all__ = ["CARD_TAGS", "STAFFING_NOT_USED", "as_the_mission_settings", "asks_as_the_owner_says"]

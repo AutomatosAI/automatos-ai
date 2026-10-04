@@ -15,6 +15,8 @@ import type {
   MissionPlanEditRequest,
   MissionCreateRequest,
   MissionResponse,
+  MissionSettingsRequest,
+  MissionSettingsResponse,
   RunState,
   SaveAsRoutineRequest,
   SaveAsRoutineResponse,
@@ -224,6 +226,24 @@ export function useUpdateMissionPlan() {
   return useMutation<MissionResponse, Error, { id: string; body: MissionPlanEditRequest }>({
     mutationFn: ({ id, body }) =>
       apiClient.request<MissionResponse>(`/api/missions/${id}/plan`, {
+        method: 'PATCH',
+        body: body as unknown as BodyInit,
+      }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
+    },
+  })
+}
+
+// ── Update Settings (F282: "Check each step with me") ────────
+
+export function useUpdateMissionSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation<MissionSettingsResponse, Error, { id: string; body: MissionSettingsRequest }>({
+    mutationFn: ({ id, body }) =>
+      apiClient.request<MissionSettingsResponse>(`/api/missions/${id}/settings`, {
         method: 'PATCH',
         body: body as unknown as BodyInit,
       }),

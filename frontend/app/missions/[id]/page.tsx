@@ -1,5 +1,6 @@
 import { MainLayout } from '@/components/layout/main-layout'
 import { MissionDetailPage } from '@/components/missions/mission-detail-page'
+import { MissionStepCheckToggle } from '@/components/missions/mission-step-check-toggle'
 
 export default async function MissionDetailRoute({
   params,
@@ -10,7 +11,12 @@ export default async function MissionDetailRoute({
 
   return (
     <MainLayout>
-      <MissionDetailPage missionId={id} />
+      <div className="flex flex-col h-full min-h-0">
+        <MissionStepCheckToggle missionId={id} />
+        <div className="flex-1 min-h-0">
+          <MissionDetailPage missionId={id} />
+        </div>
+      </div>
     </MainLayout>
   )
 }
