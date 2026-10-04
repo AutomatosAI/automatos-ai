@@ -18,6 +18,16 @@ pointer to the answer (``question_refusal``) instead of being started over.
 A mission's tickets keep only the decision drags: the mission engine runs them,
 and its own refusals (``mission_runs_it``) say where to act.
 
+F291 (night 8): a mission's card is never told to get an agent. Dragged into In
+progress while its plan waited for approval, it said "Assign an agent first" (11 of
+11), and doing that only led to the next refusal (#0282). The drag now approves the
+plan (``api/board_mission_card``), or the mission's own refusal names its page.
+
+F294 (night 8): a card with no answer is never let into Review or Done, a mission's
+included: #0250.1, a step cancelled with nothing on it, was dragged into Review. And
+"assign an agent and use Run now" told the owner a step too many: Assign starts the
+card, so the Run now after it was refused ("…is starting or finishing a run").
+
 The same rules hold wherever a status changes: the general ``PATCH /{task_id}``
 judges the ticket as that PATCH leaves it (``as_patched``), and Auto's status
 tool keeps ``move_refusal`` (``modules/tools/discovery/ticket_moves.py``).
@@ -60,7 +70,8 @@ def drag_refusal(task: Any, new_status: str, *, running: bool, mission_ticket: b
     decision = DECISION_DRAGS.get((task.status, new_status))
     if decision:
         return decision
-    if new_status == "in_progress" and not task.assigned_agent_id and not is_playbook_card(task):
+    if new_status == "in_progress" and not mission_ticket and not task.assigned_agent_id \
+            and not is_playbook_card(task):
         return NO_AGENT_NO_PROGRESS
     return move_refusal(task, new_status, running=running, mission_ticket=mission_ticket)
 
@@ -69,15 +80,31 @@ def move_refusal(task: Any, new_status: str, *, running: bool, mission_ticket: b
     """The rules every status change keeps, Auto's as well as a drag: a running
     ticket waits for its result or is cancelled first, and a finished column
     needs work on the card. None when the move goes ahead."""
-    if mission_ticket:
-        return None
     label = ticket_label(task, capital=True)
+    if mission_ticket:
+        return _missions_without_an_answer(task, label, new_status)
     if running and new_status not in WHILE_RUNNING:
         return (f"{label} is running: wait for its result, which lands on the card, "
                 "or use Cancel to stop it first.")
     if new_status in NEEDS_A_RESULT and not (task.result or "").strip():
-        return _nothing_to_show(task, label, "approve" if new_status == "done" else "review")
+        return _nothing_to_show(task, label, _what_it_takes(new_status))
     return None
+
+
+def _what_it_takes(new_status: str) -> str:
+    return "approve" if new_status == "done" else "review"
+
+
+def _missions_without_an_answer(task: Any, label: str, new_status: str) -> Optional[str]:
+    """A mission's ticket with no answer has nothing to review or approve (F294:
+    #0250.1, a step cancelled with nothing on it, went into Review). The mission runs
+    its tickets, so nothing else is refused here (``mission_runs_it`` says where)."""
+    if new_status not in NEEDS_A_RESULT or (task.result or "").strip():
+        return None
+    what = _what_it_takes(new_status)
+    if task.status == "cancelled":
+        return f"{label} was cancelled with no answer on it, so there is nothing to {what}."
+    return f"{label} has no answer yet, so there is nothing to {what}: its mission runs it."
 
 
 class _AsPatched:
@@ -104,7 +131,7 @@ def _nothing_to_show(task: Any, label: str, what: str) -> str:
     if task.status == "failed":
         return f"{label}'s run failed and left nothing to {what}: use Run now to try again, or Cancel it."
     if task.status in NOT_STARTED:
-        start = "use Run now" if task.assigned_agent_id else "assign an agent and use Run now"
+        start = "use Run now" if task.assigned_agent_id else "give it to an agent, which starts it"
         return (f"No one has worked on {ticket_label(task)} yet, so there is nothing to {what}: {start}, "
                 "or Cancel it if it isn't needed.")
     return f"{label} has nothing to {what} yet: use Run now, or Cancel it."

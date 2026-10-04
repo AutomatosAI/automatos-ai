@@ -52,6 +52,15 @@ describe('MissionVerdict', () => {
     expect(onDecided).toHaveBeenCalled()
   })
 
+  it("sends the owner's note with the approval, for every step (F291)", () => {
+    show(card())
+    fireEvent.change(screen.getByRole('textbox', { name: /A note for every step/ }),
+      { target: { value: ' Use our real Thursday delivery day. ' } })
+    fireEvent.click(screen.getByRole('button', { name: /Approve the plan/ }))
+    expect(mission.approve.mutate).toHaveBeenCalledWith(
+      { id: 'run-9', body: { note: 'Use our real Thursday delivery day.' } }, expect.anything())
+  })
+
   it('rejects the plan only with a reason, and says the mission is cancelled', () => {
     show(card())
     fireEvent.click(screen.getByRole('button', { name: /Reject the plan/ }))
