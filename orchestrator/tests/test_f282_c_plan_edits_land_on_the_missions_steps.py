@@ -101,3 +101,19 @@ def test_the_tool_takes_check_each_step():
     assert action.parameters["properties"]["check_each_step"]["type"] == "boolean"
     assert action.parameters["required"] == ["mission_id"]
     assert "check_each_step: true" in action.misplaced["plan_updates"]
+
+
+def test_an_edit_by_the_plans_own_index_goes_on_as_it_is(plan):
+    """{"task_index": 0, …} is the form the coordinator's update_mission_plan reads."""
+    out, reached = _edit(plan, mission_id=str(plan.run.id), task_edits=[{"task_index": 0, "agent_id": 7}])
+
+    assert out["success"] and reached[0]["task_edits"] == [{"task_index": 0, "agent_id": 7}]
+
+
+def test_a_widget_visitors_edit_goes_to_the_handler_which_refuses_it(plan):
+    from core.security.surface import WIDGET, turn_surface
+
+    with turn_surface(WIDGET):
+        out, reached = _edit(plan, mission_id=str(plan.run.id), task_edits=[{"step": "email_draft", "title": "x"}])
+
+    assert out["success"] and reached[0]["task_edits"] == [{"step": "email_draft", "title": "x"}]
