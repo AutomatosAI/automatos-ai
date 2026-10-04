@@ -56,6 +56,7 @@ from graphify.serve import (
 from config import config
 from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
+from modules.knowledge.graph_direction import edge_payload, oriented_pairs
 from modules.knowledge.graph_provenance import SOURCE_DOC_ATTR, prune_document_facts, stamp_source_document
 from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
 
@@ -617,10 +618,11 @@ class GraphifyService:
         edges: list,
         token_budget: int = 2000,
     ) -> str:
-        """Convert a subgraph (nodes + edges) to a text summary."""
+        """Convert a subgraph (nodes + edges) to a text summary. F312: each EDGE
+        line reads source -> target as extracted, not in the walk's order."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, partial(_subgraph_to_text, graph, nodes, edges, token_budget)
+            None, lambda: _subgraph_to_text(graph, nodes, oriented_pairs(graph, edges), token_budget)
         )
 
     # ------------------------------------------------------------------
@@ -638,6 +640,7 @@ class GraphifyService:
             "id": str(node_id),
             "label": attrs.get("label", str(node_id)),
             "file_type": attrs.get("file_type"),
+            "kind": attrs.get("kind"),
             "community": attrs.get("community"),
             "source_file": attrs.get("source_file"),
             "confidence": attrs.get("confidence"),
@@ -645,21 +648,9 @@ class GraphifyService:
 
     @staticmethod
     def _edge_payload(u: Any, v: Any, data: Dict[str, Any]) -> Dict[str, Any]:
-        """A single link in the renderer's edge shape."""
-        score = data.get("confidence_score")
-        if score is None:
-            score = data.get("confidence", data.get("weight", 1.0))
-        try:
-            score = float(score)
-        except (TypeError, ValueError):
-            score = 1.0
-        return {
-            "source": str(u),
-            "target": str(v),
-            "relation": data.get("relation", "related_to"),
-            "confidence": data.get("confidence", score),
-            "confidence_score": score,
-        }
+        """A single link in the renderer's edge shape, read from ``_src``/``_tgt``
+        (F312: storage order showed "Harbour Blend buys Crane Kitchen")."""
+        return edge_payload(u, v, data)
 
     def _serialize_subgraph(self, graph: "nx.Graph", node_ids: List[Any]) -> Dict[str, Any]:
         """Induced subgraph: the given nodes + every edge between them, in
