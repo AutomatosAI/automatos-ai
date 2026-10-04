@@ -134,7 +134,9 @@ describe('a new plan', () => {
 describe('a saved plan', () => {
   it('a row may set its own visual and AI tool, shows its AI spend, and saves them (PRD-251C US-C302)', async () => {
     renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
-    const row = await screen.findByRole('group', { name: 'Cadence row 1' })
+    // The plan first: until it arrives the form is a new plan's, whose row the plan's then replaces.
+    await screen.findByRole('button', { name: 'Pause plan' })
+    const row = screen.getByRole('group', { name: 'Cadence row 1' })
     expect(within(row).queryByLabelText('Row 1 AI tool')).toBeNull()  // the plan's mix: templates only
     fireEvent.change(within(row).getByLabelText('Row 1 visual'), { target: { value: 'ai_images' } })
     fireEvent.change(within(row).getByLabelText('Row 1 AI tool'), { target: { value: 'fal_ai' } })
