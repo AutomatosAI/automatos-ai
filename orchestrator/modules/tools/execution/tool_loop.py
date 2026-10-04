@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .action_claims import claimed_action_not_done
+from .turn_account import said_or_accounted
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 
@@ -195,7 +196,6 @@ class ToolLoopExecutor:
         tracker: Optional[ToolExecutionTracker] = None,
         promises: Optional[bool] = None,
     ) -> None:
-        self._llm = llm_callback
         self._tool = tool_callback
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
@@ -203,6 +203,7 @@ class ToolLoopExecutor:
         # F187: work said to be under way is a claim in Auto's own chat replies
         # (an agent's draft promises in its writer's voice). None: the turn's lane decides.
         self.promises = promises
+        self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
         # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
         self._stuck = StuckDetector()
 
@@ -559,7 +560,6 @@ class ToolLoopExecutor:
         )
         messages.append({"role": "system", "content": _LENGTH_RECOVERY_MSG})
         return await self._llm(messages, tools)
-
 
     async def _recover_narrated_actions(
         self,

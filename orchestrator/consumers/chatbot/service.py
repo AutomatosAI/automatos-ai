@@ -288,9 +288,9 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     return None
 
 
-# F185 (night 6): after two delete asks the model said nothing, and the owner was
-# told "encountered an issue … Please try again": the asks were never mentioned.
-NOTHING_SAID = "I apologize, but I encountered an issue generating a response. Please try again."
+# F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
+# a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it.
+NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
 
 
 def nothing_said_fallback(tool_data: Any) -> str:
