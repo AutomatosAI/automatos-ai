@@ -79,7 +79,8 @@ def test_asking_each_step_to_wait_switches_on_the_missions_check(plan, asked):
     out, reached = _edit(plan, **asked)
 
     plan.db.refresh(plan.run)
-    assert out == {"success": True, "mission_id": str(plan.run.id), "state": plan.run.state, "message": CHECKS_ON}
+    assert out == {"success": True, "mission_id": str(plan.run.id), "state": plan.run.state, "message": CHECKS_ON,
+                   "checks_each_step": True}                 # F308 (night 9): the answer says the steps wait
     assert plan.run.config["check_each_step"] is True and reached == []
 
 
