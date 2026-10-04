@@ -146,9 +146,9 @@ from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     list_board_tasks,
     get_board_task,
-    assign_board_task,
     update_board_task,
 )
+from modules.tools.discovery.handlers_board_task_assign import assign_board_task  # F309 (9): an answered card reruns
 from modules.tools.discovery.handlers_board_task_done import update_board_task_status  # F235: done files its report
 from modules.tools.discovery.handlers_scheduling import (
     schedule_task,

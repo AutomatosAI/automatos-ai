@@ -25,6 +25,10 @@ board's Reject keeps the brief and adds the owner's words. So now, as on the boa
   #0377's description, kept no old brief and re-ran nothing);
 - any other edit is the handler's.
 
+Night 9 (F309): a status on this call is the card's move (``ticket_edit_moves``), its
+note kept as platform_update_task_status keeps one: #1866's approval note was lost when
+the edit tool refused ``status`` and Auto split the call in two.
+
 ``_user_id`` is the server-injected driver (platform executor, OPERATOR_CONSENT_ACTIONS),
 never a model argument.
 """
@@ -94,8 +98,11 @@ def briefs_like_the_board(handler: Handler) -> Handler:
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from modules.tools.discovery.new_card_checks import without_status_orders
+        from modules.tools.discovery.ticket_edit_moves import edited_then_moved, moves_the_card
 
         params = params or {}
+        if moves_the_card(params) and not params.get(SEND_BACK):   # F309 (9): a status here is the card's move
+            return await edited_then_moved(wrapped, db, workspace_id, params)
         if params.get(SEND_BACK):
             return await _sent_back(handler, db, workspace_id, params)
         brief, _ = without_status_orders(params.get(DESCRIPTION))   # F265: the board moves the card

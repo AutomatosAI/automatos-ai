@@ -18,6 +18,15 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+# F309 (night 9): what an identical repeat is told. "already executed" after a REFUSED call
+# read as done: Auto told the owner "the action *was* indeed taken". A repeat of a call
+# that failed says so, and what refused it; one of a call that worked says it ran once.
+REFUSED_AGAIN = ("Skipped: this exact call already failed in this reply: {error} Nothing was done, by it or by this "
+                 "repeat. Change the call as that says, or tell the owner it could not be done.")
+RAN_ONCE = ("Tool '{tool}' was already executed with identical parameters in this reply and did its work: its "
+            "result is above. It was not run a second time.")
+REFUSAL_CHARS = 400
+
 
 def _normalize_query(query: str) -> str:
     """Normalize a search query for deduplication comparison."""
@@ -92,6 +101,8 @@ class ToolExecutionTracker:
         # F264: each call's action, parameters and result, in order: what the owner is
         # told was done when the answer comes back empty (turn_account).
         self.outcomes: List[Tuple[str, Dict[str, Any], Any]] = []
+        # F309: each identical call that failed this turn, with what it was told.
+        self.refused: Dict[Tuple[str, str], str] = {}
         # F120: how many queries per search tool came from EARLIER model responses;
         # None until a caller marks rounds (then every earlier query counts).
         self._round_start: Optional[Dict[str, int]] = None
@@ -156,7 +167,7 @@ class ToolExecutionTracker:
         if exec_key in self.exact_executions:
             if query:
                 return True, f'Not searched again: "{query}" — the same search already ran in this reply; use its result.'
-            return True, f"Tool '{tool_name}' was already executed with identical parameters"
+            return True, self._repeat_reason(tool_name, exec_key)
 
         if query:
             earlier = self.search_queries.get(tool_name, [])
@@ -170,6 +181,12 @@ class ToolExecutionTracker:
                     )
 
         return False, ""
+
+    def _repeat_reason(self, tool_name: str, exec_key: Tuple[str, str]) -> str:
+        """F309: why an identical call is skipped: the refusal it met, or that it ran once."""
+        if exec_key in self.refused:
+            return REFUSED_AGAIN.format(error=self.refused[exec_key])
+        return RAN_ONCE.format(tool=tool_name)
 
     def record_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
         """Record that a tool was executed (updates dedup + count + query state)."""
@@ -194,6 +211,8 @@ class ToolExecutionTracker:
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
             self.failed.add(action)
+            said = str(result.get("error") or result.get("message") or "it reported a failure").strip()
+            self.refused[(tool_name, self._hash_args(tool_args))] = said[:REFUSAL_CHARS]
             return
         self.succeeded.add(action)
         self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))

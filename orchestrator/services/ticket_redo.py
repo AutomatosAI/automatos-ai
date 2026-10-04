@@ -50,6 +50,13 @@ from a playbook run's card (playbook 102's prices and sign-off had become the An
 card's or a mission step's redo no longer carries the agent's lessons in its redo
 words, because its steps carry them already. A mission step is told that its text is
 the planner's, so the owner's notes win over it (``MISSION_STEP_ASK``).
+
+F315 (night 9): #1849, a general delivery question, re-ran as a letter "Hi Rosa": the
+Support Agent's lessons carried #1871's correction "Start 'Hi Rosa,' and sign off …".
+A lesson is a rule, never another card's content: a correction that names what is
+particular to its own card (a name in that card's title or brief this card doesn't
+share) stays with that card (``services/lesson_scope.py``), and every block of lessons
+says that a note about another kind of work never changes what this card asks for.
 """
 from __future__ import annotations
 
@@ -107,9 +114,23 @@ MISSION_STEP_ASK = ("On your other work the owner sent drafts back with these no
                     "newest first. This step's text was written by the mission's planner, not the owner: where a "
                     "note and the step's text differ (the layout, what goes before or after the answer, the words), "
                     "follow the note. Only the mission's goal, in the owner's own words, can say otherwise.")
+# F315 (night 9): #1849, a question, became a letter because a lesson was about one.
+KIND_STAYS = ("A note written on a different kind of work (a reply to a customer, a letter, a post) applies only to "
+              "that kind of work: it never changes what this card asks for.")
 PLAYBOOK_ASK = ("On earlier runs of this playbook the owner sent the work back with these notes, or said how every "
                 "run should be; newest first. Follow each one on this run too, whoever started it, over the step's "
                 "own wording where they differ.")
+
+
+# F309 (night 9): a card with an answer given to another agent runs again with that agent
+# (modules/tools/discovery/handlers_board_task_assign.py), and its run is told so, never
+# that its draft was sent back: #1859 sat in Review with the Analyst's answer.
+GIVEN_WHY = "given to another agent"
+GIVEN_TO_YOU = "The owner gave this card to you after another agent had answered it."
+GIVEN_BLOCK = ("## This card was given to you\n"
+               "The owner gave this card to you after another agent had answered it; that answer is kept in the "
+               "card's history. Answer the brief yourself, from the start.")
+GIVEN_CORRECTIONS = "The owner's corrections on this card, oldest first. All of them still apply:"
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -176,6 +197,8 @@ def _redo(task: Any) -> Optional[str]:
     data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
     since = _brief_agreed_at(data)   # PRD-252 R2: what came before an agreed brief is settled
     notes = _corrections(data, since)
+    if latest == GIVEN_TO_YOU:
+        return _given_block(notes)
     if latest != SENT_BACK_WITHOUT_A_NOTE and (not notes or notes[-1] != latest):
         notes.append(latest)  # a note set another way (the PATCH, a stop) applies to this run too
     draft = _sent_back_draft(data, since)
@@ -191,6 +214,15 @@ def _redo(task: Any) -> Optional[str]:
         lines.append("This time it came back without a new note." if notes else SENT_BACK_WITHOUT_A_NOTE)
     lines.append("Start from your last attempt: apply every correction and keep everything else as it was."
                  if draft else "Apply every correction.")
+    return "\n".join(lines)
+
+
+def _given_block(notes: List[str]) -> str:
+    """What the run of a card given to a new agent is told (F309): that it is theirs now,
+    and the owner's corrections on it, which still hold."""
+    lines = [GIVEN_BLOCK]
+    if notes:
+        lines += [GIVEN_CORRECTIONS, *(f"{n}. {note}" for n, note in enumerate(notes, 1))]
     return "\n".join(lines)
 
 
@@ -234,8 +266,9 @@ def standing_corrections(task: Any) -> Optional[str]:
     carry the lessons already (services/step_lessons.py), so they were given twice."""
     if _runs_its_own_lessons(task):
         return None
+    words = " ".join(str(getattr(task, f, None) or "") for f in ("title", "description", "raw_prompt"))
     return lessons_block(_session_of(task), getattr(task, "workspace_id", None),
-                         getattr(task, "assigned_agent_id", None), but_not=getattr(task, "id", None))
+                         getattr(task, "assigned_agent_id", None), but_not=getattr(task, "id", None), for_text=words)
 
 
 def _runs_its_own_lessons(task: Any) -> bool:
@@ -246,23 +279,27 @@ def _runs_its_own_lessons(task: Any) -> bool:
 
 
 def lessons_block(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None,
-                  besides: Iterable[str] = (), ask: str = STANDING_ASK) -> Optional[str]:
+                  besides: Iterable[str] = (), ask: str = STANDING_ASK, for_text: str = "") -> Optional[str]:
     """The block a run of ``agent_id``'s work is given: its lessons, newest first, but
     those already given in ``besides``; None without. ``ask`` says how they weigh
-    against the brief (a mission step's is the planner's: MISSION_STEP_ASK)."""
-    notes = agent_lessons(db, workspace_id, agent_id, but_not=but_not, besides=besides)
+    against the brief (a mission step's is the planner's: MISSION_STEP_ASK).
+    ``for_text``: the words of the work being run, which a card's own names must share
+    for its notes to come along (F315)."""
+    notes = agent_lessons(db, workspace_id, agent_id, but_not=but_not, besides=besides, for_text=for_text)
     if not notes:
         return None
-    return "\n".join([STANDING_HEADING, f"{ask} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
+    return "\n".join([STANDING_HEADING, f"{ask} {KIND_STAYS} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
 
 
 def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None,
-                  besides: Iterable[str] = ()) -> List[str]:
+                  besides: Iterable[str] = (), for_text: str = "") -> List[str]:
     """The owner's lessons for an agent from its recent cards (but ``but_not``), newest
     first and each once: the notes they sent its work back with, and the Approve notes
     that say what to do next time (F249). A note in ``besides`` is left for the block
     that already gives it. A playbook run's own card is not the agent's: its notes are
-    the playbook's (``playbook_lessons``), given only to that playbook's runs."""
+    the playbook's (``playbook_lessons``), given only to that playbook's runs. A note that
+    names what is particular to its own card, and not to ``for_text``, is that card's
+    (F315: "Start 'Hi Rosa,'" from #1871 turned #1849 into a letter)."""
     if not agent_id or db is None or workspace_id is None:
         return []
     from sqlalchemy import or_
@@ -270,10 +307,10 @@ def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = N
     from core.models.core import BoardTask
     from services.run_cancel import PLAYBOOK_CARD, PLAYBOOK_STEP_PREFIX
 
-    query = db.query(BoardTask.planning_data, BoardTask.runtime_ref).filter(
+    query = db.query(BoardTask.planning_data, BoardTask.runtime_ref, BoardTask.title, BoardTask.description).filter(
         BoardTask.workspace_id == workspace_id, BoardTask.assigned_agent_id == agent_id,
         or_(BoardTask.source_type != PLAYBOOK_CARD, BoardTask.source_id.like(f"{PLAYBOOK_STEP_PREFIX}%")))
-    return _newest_lessons(query, but_not, STANDING_KEPT, besides)
+    return _newest_lessons(query, but_not, STANDING_KEPT, besides, for_text=for_text or "")
 
 
 def playbook_lessons(db: Any, workspace_id: Any, playbook_id: Any, *, but_not: Any = None) -> List[str]:
@@ -299,17 +336,31 @@ def playbook_block(notes: List[str]) -> Optional[str]:
     return "\n".join([PLAYBOOK_HEADING, f"{PLAYBOOK_ASK} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
 
 
-def _newest_lessons(query: Any, but_not: Any, kept: int, besides: Iterable[str] = ()) -> List[str]:
+def _newest_lessons(query: Any, but_not: Any, kept: int, besides: Iterable[str] = (),
+                    for_text: Optional[str] = None) -> List[str]:
     """The lessons on the last cards ``query`` reads (but ``but_not``), newest first,
-    each once and none of ``besides``; at most ``kept``."""
+    each once and none of ``besides``; at most ``kept``. With ``for_text``, none that
+    names what is particular to its own card (``lesson_scope``)."""
     from core.models.core import BoardTask
 
     if but_not is not None:
         query = query.filter(BoardTask.id != but_not)
     rows = query.order_by(BoardTask.updated_at.desc(), BoardTask.id.desc()).limit(STANDING_TICKETS_READ).all()
-    dated = sorted((pair for data, ref in rows for pair in _lessons(data, ref)), reverse=True)
+    dated = sorted((pair for row in rows for pair in _row_lessons(row, for_text)), reverse=True)
     given = {_key(note) for note in besides}
     return [note for note in _distinct([note for _, note in dated]) if _key(note) not in given][:kept]
+
+
+def _row_lessons(row: Any, for_text: Optional[str]) -> List[tuple]:
+    """(when, note) for one card's lessons; with ``for_text``, those that are not that
+    card's own content (F315)."""
+    from services.lesson_scope import is_that_cards
+
+    pairs = _lessons(row.planning_data, row.runtime_ref)
+    if for_text is None:
+        return pairs
+    its_card = (row.title, row.description)
+    return [(at, note) for at, note in pairs if not is_that_cards(note, its_card, for_text)]
 
 
 def _lessons(planning_data: Any, runtime_ref: Any) -> List[tuple]:
