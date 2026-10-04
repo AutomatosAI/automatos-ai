@@ -56,9 +56,10 @@ from core.observability.substrate_metrics import (
 )
 
 # F311 (night 9): the owner's documents searched on their own beside agents' reports,
-# and the owner's passages kept and first.
+# the owner's passages kept and first, and a short owner's document handed over whole.
 from modules.rag.owner_leg import owners_documents_searched
 from modules.rag.owner_passages import owners_passages_kept
+from modules.rag.whole_documents import short_documents_whole
 
 
 @dataclass
@@ -363,6 +364,7 @@ class RAGService:
                 workspace_id=workspace_id,
             )
 
+    @short_documents_whole  # F311: a short owner's document is handed over whole
     async def _retrieve_impl(
         self,
         query: str,

@@ -1740,6 +1740,9 @@ class Config:
     RAG_OWNER_LEG_ENABLED: bool = os.getenv("RAG_OWNER_LEG_ENABLED", "true").lower() == "true"
     RAG_OWNER_LEG_MAX_DOCUMENTS: int = int(os.getenv("RAG_OWNER_LEG_MAX_DOCUMENTS", "200"))
     RAG_OWNER_PASSAGES_RESERVED: int = int(os.getenv("RAG_OWNER_PASSAGES_RESERVED", "3"))
+    # F311: a passage from an owner's document this short (in tokens) is handed over as
+    # the whole document, so the section beside the one that matched comes with it. 0 = off.
+    RAG_WHOLE_DOCUMENT_MAX_TOKENS: int = int(os.getenv("RAG_WHOLE_DOCUMENT_MAX_TOKENS", "800"))
 
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
