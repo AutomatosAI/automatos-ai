@@ -51,9 +51,31 @@ _CREATE_MISSION_PARAMETERS = {
                 "required": ["agent", "does"],
             },
         },
+        # F262 (night 7b): the owner's words, as Auto sent them (mission_asks.py reads them).
+        "wait_for_me": {
+            "type": "boolean",
+            "description": ("True when the owner wants to check each step before the mission goes on "
+                            "('stop after every step for my approval'). The same as config.check_each_step."),
+        },
+        "steps": {
+            "type": "array",
+            "description": ("The owner's own steps, in order, when they listed them, each a line of text. "
+                            "They join the goal, and the plan follows them."),
+            "items": {"type": "string"},
+        },
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Tags for the mission's card, so the owner finds it by tag.",
+        },
     },
     "required": ["goal"],
 }
+
+# F262 (night 7b): Auto sent a name ("sim-night-2026-10-03", the owner's tag) and a label.
+_NAMED_BY_ITS_GOAL = ("a mission has no name of its own: its card is titled from its goal. Say what it is for in "
+                      "goal, and put a tag in tags.")
+_CREATE_MISSION_MISPLACED = {"name": _NAMED_BY_ITS_GOAL, "title": _NAMED_BY_ITS_GOAL, "label": _NAMED_BY_ITS_GOAL}
 
 
 def register_mission_create_action(registry: ActionRegistry) -> None:
@@ -68,6 +90,7 @@ def register_mission_create_action(registry: ActionRegistry) -> None:
         ),
         category="missions",
         parameters=_CREATE_MISSION_PARAMETERS,
+        misplaced=_CREATE_MISSION_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["missions", "write", "orchestration", "multi-agent", "research", "content"],

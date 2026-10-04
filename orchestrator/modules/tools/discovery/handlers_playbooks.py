@@ -11,6 +11,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.wait_for_me import keeps_wait_for_me, updates_wait_for_me
+from modules.tools.discovery.playbook_lookup import CHANGES, READS, RUNS, finds_the_playbook
+from modules.tools.discovery.timer_zones import keeps_the_owners_zone
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]
     }
 
 
+@finds_the_playbook(READS)  # F261 (7b): a name two playbooks share gives both, with their agents
 async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
@@ -569,6 +572,9 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     }
 
 
+@finds_the_playbook(CHANGES)  # F261 (7b): never the first of two namesakes
+@keeps_the_owners_zone  # F266 (7b): "UTC" the owner never said is the workspace's own zone
+@keeps_wait_for_me  # F266 (7b): the timer's runs wait for the owner, in the same call
 async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Set a cron schedule on a playbook so it runs automatically."""
     from core.models.core import WorkflowTemplate
@@ -691,6 +697,7 @@ def _sync_schedule(playbook) -> tuple:
     return None, notes.get(outcome, "Active now.")
 
 
+@finds_the_playbook(RUNS)  # F261 (7b): of two namesakes, the one whose steps all have an agent
 @keeps_wait_for_me  # F242: the owner's "wait for me"
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""

@@ -9,6 +9,7 @@ actions_playbooks.py, whose one register function is past the length rule.
 """
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_playbook_schedule import register_playbook_schedule_action
 from .actions_playbooks import _INPUTS_PARAM
 
 _CREATE_PLAYBOOK_PARAMETERS = {
@@ -117,6 +118,7 @@ def register_playbook_run_actions(registry: ActionRegistry) -> None:
     _register_create_playbook(registry)
     _register_update_playbook(registry)
     _register_execute_playbook(registry)
+    register_playbook_schedule_action(registry)  # F266: the timer takes wait_for_me too; left actions_playbooks.py
 
 
 def _register_create_playbook(registry: ActionRegistry) -> None:

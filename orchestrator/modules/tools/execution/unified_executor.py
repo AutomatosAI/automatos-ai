@@ -70,6 +70,11 @@ logger = logging.getLogger(__name__)
 # consulted for a param that is MISSING — never to override what was sent.
 _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "title": ("name", "heading", "subject", "report_title", "task_title"),
+    # F262/F266 (night 7b): what Auto sent for a mission's goal, a timer's cron and the
+    # owner's "wait for me" ({"objective": …}, {"cron_schedule": …}, {"wait_for_approval": true}).
+    "goal": ("objective", "mission_goal"),
+    "cron_expression": ("cron", "cron_schedule", "cron_expr"),
+    "wait_for_me": ("requires_approval", "wait_for_approval", "needs_approval", "approval_required"),
     # The reverse direction too: platform_create_agent requires `name` and was
     # failing 6/6 with "Missing required parameter: name" from callers that sent
     # `title` or `agent_name` (surfaced by the always-failing-actions check).
@@ -104,10 +109,12 @@ def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> 
 
     filled = dict(params)
 
-    # Unwrap {"report": {...}} style wrappers first, without losing siblings.
+    # Unwrap {"report": {...}} style wrappers first, without losing siblings. F262
+    # (night 7b): a wrapper can be the JSON text of one, and name a required key by
+    # another of its names ({"params": "{\"objective\": …}"} for a mission's goal).
     for key in _WRAPPER_KEYS:
-        inner = filled.get(key)
-        if isinstance(inner, dict) and any(r in inner for r in required):
+        inner = _as_object(filled.get(key))
+        if isinstance(inner, dict) and any(_names_it(inner, r) for r in required):
             filled = {**inner, **{k: v for k, v in filled.items() if k != key}}
             break
 
@@ -120,6 +127,21 @@ def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> 
                 filled[name] = value
                 break
     return filled
+
+
+def _as_object(value: Any) -> Any:
+    """``value``, or the object its JSON text holds (a model's params sent as text)."""
+    if not isinstance(value, str) or not value.strip().startswith("{"):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return value
+
+
+def _names_it(params: Dict[str, Any], name: str) -> bool:
+    """Whether ``params`` carries ``name``, or a known other name of it."""
+    return name in params or any(alias in params for alias in _PARAM_ALIASES.get(name, ()))
 
 
 def _placeholder(prop: Dict[str, Any]) -> str:
@@ -241,6 +263,7 @@ def unknown_params_error(action_name: str, action_def: Any, unknown: List[str], 
     takes = ", ".join(f"{name} ({(props[name] or {}).get('type', 'any')}{', required' if name in required else ''})"
                       for name in props)
     lines.append(f"'{action_name}' takes: {takes or 'no parameters'}.")
+    lines.append(REFUSED_CALL_IS_YOURS)  # F262/F266 (night 7b): Auto asked the owner instead of sending it again
     return "\n".join(lines)
 
 

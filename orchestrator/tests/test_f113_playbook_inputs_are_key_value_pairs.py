@@ -51,8 +51,14 @@ class _Query:
     def filter(self, *args, **kwargs):
         return self
 
+    def order_by(self, *args, **kwargs):   # F261: a name's lookup reads every playbook that has it
+        return self
+
     def first(self):
         return self.found
+
+    def all(self):
+        return [self.found] if self.found is not None else []
 
 
 class _DB:
