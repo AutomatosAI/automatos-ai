@@ -42,7 +42,7 @@ def test_it_is_dispatched_as_a_tool_name_not_as_a_platform_action():
     tool = st.get_tool("composio_execute")
     assert tool.dispatch == st.DISPATCH_TOOL_NAME
     for other in st.SESSION_TOOLS:
-        if other.name not in ("composio_execute",):
+        if other.name not in ("composio_execute", "generate_document"):   # #942: both routed by name
             assert other.dispatch == st.DISPATCH_PLATFORM_ACTION, other.name
 
 

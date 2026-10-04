@@ -263,7 +263,7 @@ def test_the_claim_folds_the_answer_in_and_keeps_the_ask_ledger(monkeypatch):
     monkeypatch.setattr(svc, "default_session_folder", lambda db, ws: "/tmp/projects")
     monkeypatch.setattr(svc, "explorer_root_for", lambda *a, **k: None)
     monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
-    monkeypatch.setattr(svc, "session_tool_names", lambda: ("board_summary",))
+    monkeypatch.setattr(svc, "session_tool_names", lambda agent: ("board_summary",))  # #942: per agent
 
     claimed = svc.claim_for_host(_Db(None), host, limit=1)["tasks"][0]
 
