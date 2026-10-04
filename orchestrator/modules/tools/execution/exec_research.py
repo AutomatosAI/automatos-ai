@@ -71,8 +71,8 @@ async def run_nl2sql(
     ``database_name`` may be a source's name or its id.
 
     The answer is plain JSON (F299: the agent lane serialises it with a bare
-    ``json.dumps``, which raised on money, kilos and dates) — see
-    ``modules.nl2sql.agent_answer``.
+    ``json.dumps``, which raised on money, kilos and dates) and carries the
+    database's schema (F300) — see ``modules.nl2sql.agent_answer``.
     """
     # Fail-closed: NL2SQL must never run without a workspace scope.
     if not workspace_id:
@@ -103,8 +103,9 @@ async def run_nl2sql(
     if not source_id:
         return await _no_source(service, ws_id, database_name, db_session)
 
-    from modules.nl2sql.agent_answer import json_safe
+    from modules.nl2sql.agent_answer import ground_source, shape_answer
 
+    schema = await ground_source(service, source_id, ws_id)
     call = NL2SQLCall(
         method=method, query=str(query), source_id=source_id, workspace_id=ws_id, agent_id=agent_id,
         user_id=str((caller_context or {}).get("user_id") or ""),
@@ -112,7 +113,7 @@ async def run_nl2sql(
     )
     result = await _ask(service, call)
     await _audit(service, call, result)
-    return json_safe(result)
+    return shape_answer(result, schema, source_id)
 
 
 async def _no_source(service: Any, ws_id: str, database_name: Any, db_session: Optional[Any]) -> Dict[str, Any]:

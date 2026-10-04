@@ -77,10 +77,20 @@ class FakeShopService:
         return None
 
 
-def use_shop(monkeypatch, answer: Dict[str, Any]) -> FakeShopService:
-    """Wire the fake service in place of the shared one."""
+def use_shop(monkeypatch, answer: Dict[str, Any], *, schema: Optional[Dict[str, Any]] = SHOP_SCHEMA,
+             facts: Optional[Dict[str, Any]] = None) -> FakeShopService:
+    """Wire the fake service, the source row (``schema``; None = not readable) and the
+    facts already read for source 47 (``facts``; None = none read)."""
+    from modules.nl2sql import agent_answer
+    from modules.nl2sql.schema import grounding
+
     service = FakeShopService(answer)
     monkeypatch.setattr("modules.nl2sql.get_database_knowledge_service", lambda: service)
+    monkeypatch.setattr(grounding, "_FACTS", {})
+    if facts is not None:
+        grounding.remember_facts(SOURCE_ID, facts)
+    row = SimpleNamespace(id=int(SOURCE_ID), dialect="postgresql", schema_metadata=schema) if schema else None
+    monkeypatch.setattr(agent_answer, "load_source", lambda source_id, workspace_id: row)
     return service
 
 

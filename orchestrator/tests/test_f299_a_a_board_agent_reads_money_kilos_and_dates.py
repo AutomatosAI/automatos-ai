@@ -43,7 +43,7 @@ TOP_CAFES = {
 
 
 def test_september_takings_reach_the_agent_as_plain_json(monkeypatch):
-    shop.use_shop(monkeypatch, TAKINGS)
+    shop.use_shop(monkeypatch, TAKINGS, facts=shop.SHOP_FACTS)
 
     answer = shop.ask_like_a_board_agent("What did the shop take in retail orders in September 2026?")
 
@@ -54,7 +54,7 @@ def test_september_takings_reach_the_agent_as_plain_json(monkeypatch):
 
 
 def test_kilos_dates_times_and_ids_reach_the_agent_written_as_autos_chat_writes_them(monkeypatch):
-    shop.use_shop(monkeypatch, TOP_CAFES)
+    shop.use_shop(monkeypatch, TOP_CAFES, facts=shop.SHOP_FACTS)
 
     answer = shop.ask_like_a_board_agent("Which three cafés ordered the most coffee by weight over June to August?")
 
@@ -65,11 +65,19 @@ def test_kilos_dates_times_and_ids_reach_the_agent_written_as_autos_chat_writes_
     assert row["ref"] == "febae41b-374b-4580-a5ef-f698bdd382e4"
 
 
+def test_the_answer_is_plain_json_even_when_the_schema_cannot_be_read(monkeypatch):
+    shop.use_shop(monkeypatch, TAKINGS, schema=None)
+
+    answer = shop.ask_like_a_board_agent("What did the shop take in September?")
+
+    assert "936.00" in json.dumps(answer) and "schema" not in answer
+
+
 def test_platform_query_data_through_platform_execute_reads_them_too(monkeypatch):
     """28 of the night's Decimal failures were ``platform_execute`` → platform_query_data."""
     from modules.tools.discovery.handlers_scheduling import query_data
 
-    shop.use_shop(monkeypatch, TAKINGS)
+    shop.use_shop(monkeypatch, TAKINGS, facts=shop.SHOP_FACTS)
 
     answer = asyncio.run(query_data(db=None, workspace_id=shop.WORKSPACE,
                                     params={"question": "September retail takings by channel", "_agent_id": 343}))
