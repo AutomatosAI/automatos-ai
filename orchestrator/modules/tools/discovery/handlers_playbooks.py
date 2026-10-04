@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
+from modules.tools.discovery.playbook_run_results import gives_the_runs_results
 from modules.tools.discovery.playbook_schedule_check import checks_the_schedule
 
 from sqlalchemy import func
@@ -861,6 +862,7 @@ execute_playbook = says_the_run_card(execute_playbook)
 
 
 @names_the_run_cards  # F241: each run's card, by number
+@gives_the_runs_results  # F321: by card number too; the final output, previews and a step's whole output
 async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Check status/results of a playbook execution."""
     from core.models.core import RecipeExecution

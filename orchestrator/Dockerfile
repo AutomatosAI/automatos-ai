@@ -67,7 +67,9 @@ WORKDIR /app
 
 # Runtime-only system deps. git: repo tooling; postgresql-client: the compose
 # entrypoint's psql checks; libmagic1: python-magic; tesseract/ghostscript: OCR
-# and PDF; pango/cairo/gdk-pixbuf: WeasyPrint (PRD-63). No compilers.
+# and PDF; pango/cairo/gdk-pixbuf: WeasyPrint (PRD-63); fonts-dejavu-core: the
+# ballot boxes (U+2610/U+2611) a printed checklist carries (F298), named rather than left to
+# whichever font fontconfig happens to pull in. No compilers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
@@ -78,6 +80,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libgdk-pixbuf-2.0-0 \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

@@ -42,6 +42,8 @@ from sqlalchemy import and_, func, text as sa_text
 from sqlalchemy.orm import Session
 
 from api.mission_retry import resume_retries_a_failed_mission
+from api.mission_approve_note import keeps_the_owners_note
+from modules.coordination.owner_note import OWNER_NOTE_CHARS
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
@@ -140,6 +142,10 @@ class MissionApproveRequest(BaseModel):
     )
     skip_verification: Optional[bool] = Field(
         None, description="Skip task verification (for benchmarks/testing)",
+    )
+    note: Optional[str] = Field(
+        None, max_length=OWNER_NOTE_CHARS,
+        description="F291: the owner's note on the plan; every step's prompt carries it",
     )
 
     @model_validator(mode="before")
@@ -1409,6 +1415,7 @@ async def update_mission_plan(
 
 
 @router.post("/{mission_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
+@keeps_the_owners_note  # F291: the owner's note on the plan reaches every step
 async def approve_plan(
     mission_id: UUID,
     body: MissionApproveRequest = MissionApproveRequest(),

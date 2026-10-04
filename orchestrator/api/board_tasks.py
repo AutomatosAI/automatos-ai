@@ -31,13 +31,12 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
-from services.session_report import session_report_lines  # PRD-234 S2
 from services.board_consent import (  # PRD-234: a human's board action is the approval
     WHY_ASSIGNED_BY_HAND, WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
-from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
+from services.ticket_redo import RUN_NOW, SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, redo_again, with_correction
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
@@ -50,6 +49,10 @@ from services.board_drag_rules import (  # PRD-252 R6
     UNFINISHED_BY_HAND, drag_refusal, question_refusal,
 )
 from api import board_task_patch  # F259: the general PATCH's checks and writes
+from api.board_card_moves import approve_outside_review, call_off, left_as_it_is  # F294
+from api.board_mission_card import (  # F291: a mission's card waiting for its plan
+    approve_from_its_card, is_mission_card, mission_card_refusal, start_its_mission, starts_its_mission,
+)
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
@@ -148,129 +151,11 @@ async def _auto_create_task_report(
     task: BoardTask,
     exec_result: Dict[str, Any],
 ) -> None:
-    """
-    Persist an agent_reports row for a completed task so it shows up in
-    Reports / Deliverables / Activity Feed — same pattern heartbeats use.
-    Always non-blocking: never raises, just warns on failure.
-    """
-    try:
-        from services.report_service import ReportService, compute_execution_metrics
+    """File the ticket's report: services.task_report (F321: the metrics block every
+    report kind shares). Never raises."""
+    from services.task_report import auto_create_task_report
 
-        agent_name = "Unknown Agent"
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            if agent:
-                agent_name = agent.name
-
-        # Source the body from the agent's actual response, falling back to whatever
-        # text was captured in task.result.
-        llm_text = (
-            exec_result.get("result")
-            or exec_result.get("response")
-            or exec_result.get("output")
-            or exec_result.get("content")
-            or task.result
-            or ""
-        )
-
-        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
-        exec_metrics = compute_execution_metrics(
-            db,
-            workspace_id,
-            agent_id=task.assigned_agent_id,
-            execution_id=getattr(task, "execution_id", None),
-            started_at=getattr(task, "started_at", None),
-            completed_at=getattr(task, "completed_at", None),
-            extra={
-                "task_id": task.id,
-                "task_status": task.status,
-                "trigger": "task",
-            },
-        )
-
-        # Honour upstream-supplied tokens if the rollup found nothing
-        if not exec_metrics.get("tokens_used"):
-            usage = exec_result.get("usage") or {}
-            fallback_tokens = (
-                usage.get("total_tokens")
-                or exec_result.get("tokens_used")
-                or 0
-            )
-            if fallback_tokens:
-                exec_metrics["tokens_used"] = fallback_tokens
-
-        report_status = "ok" if task.status in ("done", "review") else "warning"
-        if task.error_message:
-            report_status = "critical"
-
-        # Render the same shape heartbeat reports use so consumers stay uniform.
-        lines = [
-            f"# {agent_name} — Task Report",
-            f"**Task:** {task.title}",
-            f"**Status:** {task.status}",
-            "",
-        ]
-        if task.error_message:
-            lines.append("## Error")
-            lines.append(str(task.error_message))
-            lines.append("")
-        if llm_text:
-            lines.append("## Result")
-            lines.append(str(llm_text))
-            lines.append("")
-        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
-        lines.append("## Execution Metrics")
-        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
-        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
-        lines.append(f"- Tokens (in/out/total): "
-                     f"{exec_metrics.get('input_tokens', 0)} / "
-                     f"{exec_metrics.get('output_tokens', 0)} / "
-                     f"{exec_metrics.get('tokens_used', 0)}")
-        if exec_result.get("runtime") == RUNTIME_CLI:
-            lines.append("- Cost: plan usage (subscription) — no dollar figure")
-        else:
-            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
-        if exec_metrics.get("duration_ms") is not None:
-            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
-        content = "\n".join(lines)
-
-        # Summary is the first non-empty body line — same convention as heartbeat reports.
-        summary = None
-        for line in str(llm_text).split("\n"):
-            stripped = line.strip().lstrip("#").strip()
-            if stripped:
-                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
-                break
-        # F197: a failed task's result is blank, so its report is summarised by
-        # why it failed. The summary used to fall back to "**Task:** …", and the
-        # bell could not tell a credit outage it had already announced.
-        if summary is None and task.error_message:
-            first = str(task.error_message).strip().splitlines()[0]
-            summary = (first[:497] + "...") if len(first) > 497 else first
-
-        svc = ReportService(db, workspace_id)
-        report_result = await svc.create_report(
-            agent_id=task.assigned_agent_id,
-            agent_name=agent_name,
-            title=f"Task: {task.title}",
-            content=content,
-            report_type="task",
-            status=report_status,
-            summary=summary,
-            metrics=exec_metrics,
-            linked_task_ids=[task.id],
-        )
-        if not report_result.get("success"):
-            logger.warning(
-                "[BoardTasks] Auto-report creation failed for task=%s: %s",
-                task.id, report_result.get("error"),
-            )
-    except Exception:
-        logger.error(
-            "[BoardTasks] _auto_create_task_report raised for task=%s",
-            getattr(task, "id", "?"),
-            exc_info=True,
-        )
+    await auto_create_task_report(db, workspace_id, task, exec_result)
 
 
 # ── PRD-128: Unified notification dispatch ─────────────────────────
@@ -642,6 +527,7 @@ async def update_task(
     board_task_patch.refuse_the_patch(db, task, body, new_status, agent)
 
     if "assigned_agent_id" in body:
+        board_task_patch.note_the_assign(db, task, agent)  # F294: the card says who it went to
         task.assigned_agent_id = agent
     board_task_patch.patch_fields(task, body)
     moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason")) if new_status else None
@@ -827,21 +713,22 @@ async def _run_approval_action(db: Session, ctx: RequestContext, approval_action
 # approved or changed. A ticket verdict marked the card done and left the run
 # awaiting approval, never started.
 MISSION_CARD_SOURCE = "orchestration"
-MISSION_CARD_VERDICT = ("This is a mission's card: approve or change its plan on the mission's page. "
-                        "Approving the card here would mark it done without starting the mission.")
+MISSION_CARD_VERDICT = "This is a mission's card: its plan is turned down or changed on the mission's page."
 
 
-def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int) -> BoardTask:
+def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int, *,
+                        its_mission_decides: bool = True) -> BoardTask:
     """The ticket an Approve or Reject decides; 404 when it is not this workspace's,
-    409 for a mission's own card (D6)."""
+    409 for a mission's own card (D6), naming the mission (F291), unless the caller
+    decides one itself (``its_mission_decides`` False: Approve gives a waiting plan)."""
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
         BoardTask.workspace_id == ctx.workspace_id,
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.source_type == MISSION_CARD_SOURCE:
-        raise HTTPException(status_code=409, detail=MISSION_CARD_VERDICT)
+    if task.source_type == MISSION_CARD_SOURCE and its_mission_decides:
+        raise HTTPException(status_code=409, detail=mission_card_refusal(db, task))
     return task
 
 
@@ -858,12 +745,13 @@ async def approve_task(
     If the task has an approval_action in planning_data, execute it
     (e.g., publish a blog post). Then move the task to done.
     """
-    task = _ticket_for_verdict(db, ctx, task_id)
-    if task.status != "review":
-        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
-
+    task = _ticket_for_verdict(db, ctx, task_id, its_mission_decides=False)
     body = await request.json()
     note = _text_of(body.get("note"), "note")  # PRD-252 R2 (F038): kept on the ticket
+    if is_mission_card(task):  # F291: Approve on a mission's card approves its waiting plan
+        return approve_from_its_card(db, ctx, task, note=note)
+    if task.status != "review":  # F294: in words; a card that finished by itself keeps the note
+        return approve_outside_review(db, task, note)
     action_result = None
     approval_action = (task.planning_data or {}).get("approval_action")
 
@@ -1207,6 +1095,9 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     (the dispatcher folds both into the prompt) and the operator's consent is
     on record. A drag used to launch the bare brief directly.
     """
+    started = start_its_mission(db, ctx, task, "in_progress")  # F291: a mission's waiting plan is approved
+    if started is not None:
+        return started
     owned = mission_runs_it(db, task)
     if owned:
         raise HTTPException(status_code=409, detail=owned)
@@ -1233,9 +1124,10 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
                                       agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
     was = task.status
     rerun = was in FINISHED
+    redo_again(task)  # F294 (#0273): a redo that failed with no answer runs again with the owner's words
     # F190: a new run starts clean. The last run's result goes on record (a no-op
     # when there is none) and off the card, where the new run's would sit under it.
-    keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    keep_previous_run(task, why=RUN_NOW, by=_operator_ref(ctx))
     task.result = None
     task.error_message = None
     if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
@@ -1359,12 +1251,15 @@ def _move_by_hand(db: Session, ctx: RequestContext, task: BoardTask, new_status:
     or a PATCH: a move into Cancelled is Cancel (F245), a move into In progress is
     Run now, and any other is the move itself. The answer of a cancel or a start,
     which commit their own work; None for a move the caller commits."""
+    if new_status == "cancelled" and task.status == "done":
+        return call_off(db, task, by=_operator_ref(ctx))  # F294 (#0422): a Done card, with who and when
     if new_status == "cancelled" and task.status not in UNCANCELLABLE:
         return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
     # F190 review: a repeat of in_progress on a running ticket (a double drag)
     # changes nothing; a stuck ticket has Run Now.
     if new_status == "in_progress" and task.status != "in_progress" \
-            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)):
+            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)
+                 or starts_its_mission(db, task, new_status)):  # F291: a mission's waiting plan
         return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
     owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
     if owned:
@@ -1455,8 +1350,10 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == "done":  # F294 (#0422): called off, with who and when, as its drag does
+        return call_off(db, task, by=_operator_ref(ctx))
     if task.status in UNCANCELLABLE:
-        return {"id": task.id, "status": task.status, "applied": False}
+        return left_as_it_is(db, task)  # F294: applied false, in words
     return _cancel_like_the_button(db, ctx, task)
 
 

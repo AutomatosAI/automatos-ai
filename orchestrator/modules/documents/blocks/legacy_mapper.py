@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .markdown_body import blocks_from_markdown, section_text
 from .schema import (
     BlockDocument,
     HeadingBlock,
@@ -40,6 +41,45 @@ def _heading(text: str, level: int) -> HeadingBlock:
     return HeadingBlock(id=_bid("h"), level=level, content=[TextRun(text=text)])
 
 
+def _list_section(heading: str, items: Any) -> List[Any]:
+    """A titled list (highlights, recommendations): one line per item, its bold kept."""
+    if not isinstance(items, list) or not items:
+        return []
+    text = section_text([str(item) for item in items])
+    return [_heading(heading, 2), *blocks_from_markdown(text, _bid("md"))]
+
+
+def _section_blocks(section: Any) -> List[Any]:
+    """F298: a section's text is markdown, read into headings, lines and tables."""
+    if isinstance(section, str):
+        return blocks_from_markdown(section, _bid("md"))
+    if not isinstance(section, dict):
+        return []
+    blocks = [_heading(str(section["title"]), 2)] if section.get("title") else []
+    content = section.get("content")
+    text = section_text(content) if section_text(content) is not None else str(content or "")
+    return blocks + (blocks_from_markdown(text, _bid("md")) if text.strip() else [])
+
+
+def _body(data: Dict[str, Any]) -> List[Any]:
+    """The sections, or the body sent as ``content`` alone."""
+    sections = data.get("sections") or []
+    if isinstance(sections, str):
+        sections = [sections]
+    if not sections and section_text(data.get("content")):
+        sections = [section_text(data.get("content"))]
+    return [block for section in sections for block in _section_blocks(section)]
+
+
+def _metrics(data: Dict[str, Any]) -> List[Any]:
+    metrics = data.get("metrics") or {}
+    if not isinstance(metrics, dict) or not metrics:
+        return []
+    rows = [[[TextRun(text="Metric")], [TextRun(text="Value")]]]
+    rows += [[[TextRun(text=str(key))], [TextRun(text=str(value))]] for key, value in metrics.items()]
+    return [_heading("Key Metrics", 2), TableBlock(id=_bid("tbl"), header=True, rows=rows)]
+
+
 def blocks_from_legacy(data: Dict[str, Any]) -> BlockDocument:
     """Build a BlockDocument from the common legacy report-data shape."""
     blocks: List[Any] = []
@@ -55,39 +95,10 @@ def blocks_from_legacy(data: Dict[str, Any]) -> BlockDocument:
     if meta_bits:
         blocks.append(_text_block(" · ".join(meta_bits)))
 
-    # Highlights (bulleted)
-    highlights = data.get("highlights") or []
-    if highlights:
-        blocks.append(_heading("Highlights", 2))
-        for item in highlights:
-            blocks.append(_text_block(f"• {item}"))
-
-    # Metrics table
-    metrics = data.get("metrics") or {}
-    if isinstance(metrics, dict) and metrics:
-        blocks.append(_heading("Key Metrics", 2))
-        rows = [[[TextRun(text="Metric")], [TextRun(text="Value")]]]
-        for key, value in metrics.items():
-            rows.append([[TextRun(text=str(key))], [TextRun(text=str(value))]])
-        blocks.append(TableBlock(id=_bid("tbl"), header=True, rows=rows))
-
-    # Sections (title + content)
-    for section in data.get("sections") or []:
-        if isinstance(section, dict):
-            if section.get("title"):
-                blocks.append(_heading(str(section["title"]), 2))
-            if section.get("content"):
-                blocks.append(_text_block(str(section["content"])))
-        elif isinstance(section, str):
-            blocks.append(_text_block(section))
-
-    # Recommendations (bulleted)
-    recs = data.get("recommendations") or []
-    if recs:
-        blocks.append(_heading("Recommendations", 2))
-        for item in recs:
-            blocks.append(_text_block(f"• {item}"))
-
+    blocks += _list_section("Highlights", data.get("highlights"))
+    blocks += _metrics(data)
+    blocks += _body(data)
+    blocks += _list_section("Recommendations", data.get("recommendations"))
     return BlockDocument(blocks=blocks)
 
 

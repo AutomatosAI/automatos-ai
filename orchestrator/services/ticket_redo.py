@@ -76,6 +76,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
 SENT_BACK = "sent back"
+# keep_previous_run's reason for Run now (api.board_tasks._start_now).
+RUN_NOW = "run now"
 # The review_feedback a Reject without a note leaves, so the redo still knows it
 # is a redo (and still carries the earlier corrections and the draft).
 SENT_BACK_WITHOUT_A_NOTE = "The owner sent it back without a note."
@@ -254,6 +256,38 @@ def kept_draft(task: Any) -> Optional[str]:
         if isinstance(run, dict) and run.get("result"):
             return run["result"]
     return None
+
+
+def redo_again(task: Any) -> Optional[str]:
+    """F294 (night 8, #0273): Run now on a redo that failed before it answered runs
+    that redo again, with the owner's words. The claim had consumed the Reject's note
+    (``review_feedback``), the redo failed ("Empty response from LLM"), and Run now
+    started from the brief alone: "0 kg" again, the reason gone. When the run that Run
+    now replaces was a redo that left no answer (and any Run now since failed the same
+    way), the newest correction goes back on the card, so the next claim folds in the
+    redo block: the draft that was sent back and every correction. Returns it, or None."""
+    if getattr(task, "status", None) != "failed" or getattr(task, "result", None) \
+            or getattr(task, "review_feedback", None):
+        return None
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    if not _last_was_a_redo(data):
+        return None
+    notes = _corrections(data, _brief_agreed_at(data))
+    task.review_feedback = notes[-1] if notes else SENT_BACK_WITHOUT_A_NOTE
+    return task.review_feedback
+
+
+def _last_was_a_redo(data: Dict[str, Any]) -> bool:
+    """Whether the newest run on record was sent back, past any Run now that failed
+    with no answer since."""
+    for run in reversed(data.get("previous_runs") or []):
+        if not isinstance(run, dict):
+            continue
+        if run.get("why") == SENT_BACK:
+            return True
+        if run.get("why") != RUN_NOW or run.get("status") != "failed" or run.get("result"):
+            return False
+    return False
 
 
 def _brief_agreed_at(data: Dict[str, Any]) -> Optional[datetime]:

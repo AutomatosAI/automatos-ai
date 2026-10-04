@@ -7,16 +7,26 @@ routes under ``/api/workflow-recipes/{recipe_id}`` now find the caller's
 workspace playbook by either. The template id is tried first, so an address
 that is a playbook's template id still means that playbook. A run under it is
 found by its execution id (exec-…) or by its number, the same way.
+
+F292 (night 8): the edit (``PUT``) is found by either too. 10 of 10 edits by
+number answered 404 "Recipe '113' not found" while reading 113 worked: a timer
+switched off from outside the app needed the template id. The edit also takes
+the steps as the read gives them (``core.playbook_steps``).
 """
 from __future__ import annotations
 
+import functools
+import inspect
 import re
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from core.models.core import RecipeExecution, WorkflowTemplate
+from core.playbook_steps import steps_as_written
+
+Route = Callable[..., Awaitable[Dict[str, Any]]]
 
 WORKSPACE_PLAYBOOK = "workspace"
 # A listed number: ASCII digits that fit the id column (a Postgres integer).
@@ -62,3 +72,23 @@ def run_of(db: Session, playbook: Any, execution_id: str) -> RecipeExecution:
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run '{execution_id}' not found for this playbook")
     return run
+
+
+def edits_it_by_number_too(update: Route) -> Route:
+    """The playbook edit route (``PUT /api/workflow-recipes/{recipe_id}``) at its
+    address, by template id or by number, a 404 naming the address when the
+    workspace has neither (F292). The steps it is sent are taken as written: each
+    with its order, none with the agent summary only a read adds."""
+    signature = inspect.signature(update)
+
+    @functools.wraps(update)
+    async def edited(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        call = signature.bind(*args, **kwargs)
+        given = call.arguments
+        playbook = playbook_at(given["db"], given["ctx"].workspace_id, given["recipe_id"])
+        data = given["recipe_data"]
+        if isinstance(data, dict) and "steps" in data:
+            data = {**data, "steps": steps_as_written(data["steps"])}
+        given["recipe_id"], given["recipe_data"] = playbook.template_id, data
+        return await update(*call.args, **call.kwargs)
+    return edited

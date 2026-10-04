@@ -126,6 +126,8 @@ export interface MissionCreateRequest {
 export interface MissionApproveRequest {
   max_concurrent_override?: number
   token_budget_override?: number
+  /** F291: the owner's note on the plan; every step's prompt carries it. */
+  note?: string
 }
 
 export interface MissionRejectRequest {

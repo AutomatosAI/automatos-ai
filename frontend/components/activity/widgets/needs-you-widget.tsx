@@ -40,9 +40,12 @@ export function formatAge(iso: string | null | undefined): string {
   return `${Math.floor(hours / 24)}d`
 }
 
-/** A ticket opens in the board's viewer; a row whose decision is its mission's opens the mission. */
+/**
+ * A ticket opens in the board's viewer; a row whose decision is its mission's opens the mission.
+ * F293: a mission step's row names its mission but opens the step, where you check it.
+ */
 export function ticketRowHref(row: NeedsYouTicketRow): string {
-  return row.mission_id ? missionHref(row.mission_id) : ticketHref(row.ticket_id)
+  return row.opens === 'mission' && row.mission_id ? missionHref(row.mission_id) : ticketHref(row.ticket_id)
 }
 
 /** A question or approval opens inside its ticket; a mission at its plan; anything else on its tab. */
@@ -77,6 +80,9 @@ export const STUCK_WHY: Record<StuckWhy, string> = {
   no_agent: 'Assigned to no agent',
   not_picked_up: 'Waiting, but nothing will run it',
   mission_ended: 'Its mission has ended',
+  step_failed: 'It failed its mission\'s check, and the mission waits',
+  over_budget: 'Paused at its budget: raise it or resume',
+  out_of_credit: 'Paused: the AI credit ran out. Top up, then resume',
 }
 
 function stuckRow(r: NeedsYouTicketRow): ShownRow {

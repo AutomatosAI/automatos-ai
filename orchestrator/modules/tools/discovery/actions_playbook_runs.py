@@ -121,6 +121,7 @@ def register_playbook_run_actions(registry: ActionRegistry) -> None:
     _register_create_playbook(registry)
     _register_update_playbook(registry)
     _register_execute_playbook(registry)
+    _register_get_playbook_execution(registry)  # F321: left actions_playbooks.py to take `step`
     register_playbook_schedule_action(registry)  # F266: the timer takes wait_for_me too; left actions_playbooks.py
     register_add_playbook_step_action(registry)  # F321: a step always has its agent; left actions_playbooks.py
 
@@ -207,4 +208,47 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
         accepts=("inputs", "input"),
         # F182: night 6 nested the café's details under "params".
         misplaced={key: "input_data" for key in ("params", "parameters", "variables", "data")},
+    ))
+
+
+def _register_get_playbook_execution(registry: ActionRegistry) -> None:
+    """F321 (night 9b): Auto asked for run #0102 as "0102" and was told it did not
+    exist; by its id it got empty step previews and no final output. The run is
+    found by its card number too, and ``step`` reads a step's whole output."""
+    registry.register(ActionDefinition(
+        name="platform_get_playbook_execution",
+        description=(
+            "Check status and results of a running or completed playbook execution. "
+            "Returns the run's final output, each step's status and a short preview. "
+            "Pass step to read that step's whole output and what it saved. "
+            "Provide execution_id (or the run's card number, e.g. #0102) or playbook_id."
+        ),
+        category="playbooks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "execution_id": {
+                    "type": "string",
+                    "description": ("The execution_id returned from platform_execute_playbook, "
+                                    "or the run's card number (e.g. #0102)."),
+                },
+                "step": {
+                    "type": "integer",
+                    "description": "A step number (1 is the first): its whole output and what it saved.",
+                },
+                "playbook_id": {
+                    "type": "integer",
+                    "description": "Playbook ID to list recent executions for (if no execution_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["playbooks", "execution", "status", "results"],
+        examples=[
+            "what's the status of that playbook run?",
+            "check playbook execution abc123",
+            "did the playbook run successfully?",
+            "show me everything step 2 of run #0102 produced",
+        ],
     ))

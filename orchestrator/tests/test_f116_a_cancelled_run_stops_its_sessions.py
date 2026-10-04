@@ -129,9 +129,13 @@ def test_the_boards_own_cancel_now_says_who_and_why(workspace, new_session):
 
     ctx = SimpleNamespace(workspace_id=uuid.UUID(workspace), user_id="2")
     assert asyncio.run(cancel_task(working, ctx=ctx, db=new_session()))["applied"] is True
-    assert asyncio.run(cancel_task(finished, ctx=ctx, db=new_session()))["applied"] is False
-    ref = _tickets(new_session, [working])[working].runtime_ref
+    # F294 (night 8, #0422): a Done card is called off, as its drag does, and says so
+    called_off = asyncio.run(cancel_task(finished, ctx=ctx, db=new_session()))
+    assert (called_off["applied"], called_off["previous_status"]) == (True, "done")
+    rows = _tickets(new_session, [working, finished])
+    ref = rows[working].runtime_ref
     assert ref["cancelled"]["by"] == "user:2" and ref["cancelled"]["reason"] == "cancelled on the board"
+    assert rows[finished].runtime_ref["cancelled"]["reason"] == "called off on the board"
 
 
 def test_a_run_that_died_with_the_backend_stops_its_sessions_too(workspace, new_session):

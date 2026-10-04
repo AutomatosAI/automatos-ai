@@ -443,3 +443,192 @@ def test_rank_query_embed_timeout_disabled_with_nonpositive_budget():
     finally:
         _fake_em.generate_embedding = orig
     assert results and results[0][0] == "platform_agent_thing"
+
+
+# ---- #927: a cold index never holds a turn ----
+# The first turn after an embedding key is added (or after an upgrade that rewords
+# actions, or an evicted Redis) used to embed the whole catalogue inside the turn —
+# 4½ minutes on a slow upstream. The build now waits within the query-embed budget,
+# runs once in the background, and fills the cache for the next turn.
+
+
+def _slow_batch(delay: float, calls: List[List[str]]):
+    async def _batch(texts, max_concurrent: int = 5):
+        calls.append(list(texts))
+        await asyncio.sleep(delay)
+        return [_FakeEmbeddingManager._vec(t) for t in texts]
+
+    return _batch
+
+
+def test_a_cold_index_ranks_nothing_within_the_budget_and_warms_in_the_background():
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    calls: List[List[str]] = []
+    orig = _fake_em.generate_embeddings_batch
+    _fake_em.generate_embeddings_batch = _slow_batch(0.3, calls)
+    try:
+        async def _scenario():
+            started = asyncio.get_running_loop().time()
+            first = await idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0.05)
+            waited = asyncio.get_running_loop().time() - started
+            assert first == [], "a cold index must rank nothing, not hold the turn"
+            assert waited < 0.25, f"the turn waited {waited:.2f}s for the index build"
+            await asyncio.sleep(0.4)  # the abandoned build finishes on this loop
+            assert "platform_agent_thing" in idx._action_embeddings
+            assert any(
+                v for v in _fake_cache.store.get(_MODEL_KEY, {}).values()
+            ), "the background build must fill the cache"
+            second = await idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0.05)
+            assert second and second[0][0] == "platform_agent_thing"
+
+        _run(_scenario())
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert len(calls) == 1, "the catalogue is embedded once, not once per turn"
+
+
+def test_turns_that_arrive_during_a_build_share_it():
+    actions = [_make("platform_agent_thing", category="agents"), _make("platform_mission_thing", category="missions")]
+    idx = _make_index(actions)
+    calls: List[List[str]] = []
+    orig = _fake_em.generate_embeddings_batch
+    _fake_em.generate_embeddings_batch = _slow_batch(0.2, calls)
+    try:
+        async def _scenario():
+            results = await asyncio.gather(
+                idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0.05),
+                idx.rank_actions(query="mission stuff", top_k=5, embed_timeout_s=0.05),
+                idx.rank_actions(query="anything else", top_k=5, embed_timeout_s=0.05),
+            )
+            assert results == [[], [], []]
+            await asyncio.sleep(0.3)
+
+        _run(_scenario())
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert len(calls) == 1, f"one upstream build expected, got {len(calls)}"
+
+
+def test_with_the_budget_disabled_a_turn_still_waits_for_the_build():
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    calls: List[List[str]] = []
+    orig = _fake_em.generate_embeddings_batch
+    _fake_em.generate_embeddings_batch = _slow_batch(0.05, calls)
+    try:
+        results = _run(idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0))
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert results and results[0][0] == "platform_agent_thing"
+
+
+def test_a_build_that_fails_while_the_turn_waits_reaches_the_turn():
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    orig = _fake_em.generate_embeddings_batch
+
+    async def _broken(texts, max_concurrent: int = 5):
+        raise RuntimeError("upstream said no")
+
+    _fake_em.generate_embeddings_batch = _broken
+    try:
+        with pytest.raises(RuntimeError, match="upstream said no"):
+            _run(idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=1.0))
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+
+
+def test_a_build_that_fails_after_the_turn_moved_on_is_logged(caplog):
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    orig = _fake_em.generate_embeddings_batch
+
+    async def _slow_then_broken(texts, max_concurrent: int = 5):
+        await asyncio.sleep(0.1)
+        raise RuntimeError("upstream timed out late")
+
+    _fake_em.generate_embeddings_batch = _slow_then_broken
+    try:
+        async def _scenario():
+            assert await idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0.02) == []
+            await asyncio.sleep(0.2)
+
+        with caplog.at_level("WARNING"):
+            _run(_scenario())
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert "background index build failed: upstream timed out late" in caplog.text
+    assert "never retrieved" not in caplog.text
+    assert not getattr(idx, "_index_builds", {}), "a finished build is forgotten, so the next turn retries"
+
+
+def test_warm_indexes_the_widest_view_ahead_of_the_first_turn():
+    actions = [
+        _make("platform_agent_thing", category="agents"),
+        _make("platform_admin_thing", category="admin", admin_only=True),
+        _make("platform_promoted_thing", category="agents", promoted=True),
+    ]
+    idx = _make_index(actions)
+    _run(idx.warm())
+    assert set(idx._action_embeddings) == {
+        "platform_agent_thing",
+        "platform_admin_thing",
+        "platform_promoted_thing",
+    }
+
+
+def test_a_slow_build_is_waited_on_once_not_once_per_ranking():
+    """A turn ranks several times (narrowing, the shadow surface, the prompt catalog),
+    and not all inside one rank scope. Once one waiter has spent the budget on a build,
+    later rankings, in that turn or another, return at once until the build ends."""
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    calls: List[List[str]] = []
+    orig = _fake_em.generate_embeddings_batch
+    _fake_em.generate_embeddings_batch = _slow_batch(0.6, calls)
+    try:
+        async def _scenario():
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            for query in ("agent stuff", "mission stuff", "anything else"):
+                assert await idx.rank_actions(query=query, top_k=5, embed_timeout_s=0.1) == []
+            waited = loop.time() - started
+            assert waited < 0.25, f"three rankings waited {waited:.2f}s; one budget is 0.1s"
+            await asyncio.sleep(0.7)  # the build ends and is forgotten
+            assert not idx._overdue_builds(), "an ended build is no longer overdue"
+            ranked = await idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0.1)
+            assert ranked and ranked[0][0] == "platform_agent_thing"
+
+        _run(_scenario())
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert len(calls) == 1
+
+
+def test_one_build_serves_every_view_and_ranking_still_gates_super_admin_actions():
+    """The boot warm-up and a turn without super-admin share one build of the widest
+    view; who may see a super-admin-only action is still decided when ranking."""
+    su_only = _make("platform_agent_su_thing", category="agents")
+    su_only.super_admin_only = True
+    actions = [_make("platform_agent_thing", category="agents"), su_only]
+    idx = _make_index(actions)
+    calls: List[List[str]] = []
+    orig = _fake_em.generate_embeddings_batch
+    _fake_em.generate_embeddings_batch = _slow_batch(0.1, calls)
+    try:
+        async def _scenario():
+            warm = asyncio.ensure_future(idx.warm())
+            plain = await idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=1.0)
+            await warm
+            su = await idx.rank_actions(
+                query="agent stuff", top_k=5, embed_timeout_s=1.0, include_super_admin=True
+            )
+            return plain, su
+
+        plain, su = _run(_scenario())
+    finally:
+        _fake_em.generate_embeddings_batch = orig
+    assert len(calls) == 1, "one build for the warm-up and both views"
+    assert [n for n, _ in plain] == ["platform_agent_thing"]
+    assert {n for n, _ in su} == {"platform_agent_thing", "platform_agent_su_thing"}

@@ -65,6 +65,7 @@ from modules.coordination.planner import (
 )
 from modules.coordination.primitive_heartbeat import _emit_missions_primitive
 from modules.coordination.step_inputs import builds_on_whole_results
+from modules.coordination.owner_note import a_steps_prompt_carries_the_owners_note
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
@@ -2224,6 +2225,7 @@ class CoordinatorService:
         ]
 
     @staticmethod
+    @a_steps_prompt_carries_the_owners_note  # F291: the owner's note on the plan reaches the synthesis too
     def _build_synthesis_prompt(
         task: OrchestrationTask,
         upstream_outputs: List[Dict[str, Any]],
