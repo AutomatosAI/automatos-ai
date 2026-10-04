@@ -37,6 +37,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
 from services.ticket_redo import RUN_NOW, SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, redo_again, with_correction
+from services.brand_hooks import a_cards_answer_is_on_brand  # brand kit at generation (night 9b)
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
@@ -1705,6 +1706,7 @@ def _kept_result(existing: Optional[str], incoming: Optional[str]) -> Optional[s
     return f"{existing}\n\n---\n\n_A later run reported:_ {incoming}"
 
 
+@a_cards_answer_is_on_brand  # the kit's sign-off fills "[Your name]" before the notes below read the answer
 async def finalize_board_task_run(
     db: Session,
     *,

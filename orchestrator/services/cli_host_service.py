@@ -933,6 +933,7 @@ def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[st
 def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     from services.session_plans import plan_fold_in
     from services.ticket_owner_ask import ticket_answers_block
+    from services.brand_hooks import card_prompt_with_brand_rules
     from services.ticket_redo import redo_block
 
     prompt = task.raw_prompt or task.description or task.title or ""
@@ -954,7 +955,7 @@ def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     if redo:
         prompt = f"{prompt}\n\n{redo}"
         task.review_feedback = None
-    return prompt
+    return card_prompt_with_brand_rules(prompt, task)  # brand kit at generation (night 9b), as the dispatcher's
 
 
 def _claim_attempt(task: BoardTask, prior: Dict[str, Any]) -> int:

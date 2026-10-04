@@ -42,6 +42,7 @@ from core.services.playbook_scratchpad import answer_for_next_step
 from core.services.playbook_step_refs import resolve_step_references, step_values
 from services.step_lessons import a_playbook_step_carries_its_lessons
 from services.playbook_usage import books_spend_to_the_run, books_the_step_to_its_agent  # F321
+from services.brand_hooks import a_playbook_step_is_on_brand
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +310,7 @@ def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str
 
 @books_the_step_to_its_agent  # F321: the step's helper calls are booked to its agent
 @a_playbook_step_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
+@a_playbook_step_is_on_brand  # brand kit at generation (night 9b): the brand's rules; the answer on brand
 async def _execute_step(
     db: Session,
     agent: Agent,
