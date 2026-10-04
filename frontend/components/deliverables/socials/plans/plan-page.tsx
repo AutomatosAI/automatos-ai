@@ -28,6 +28,13 @@ import { PlanStepMaking } from './plan-step-making'
 import { PlanStepResearch } from './plan-step-research'
 import { PlanWithAuto } from './plan-with-auto'
 
+// PRD-251C: the header's line follows the plan's rhythm.
+const RHYTHM_LINES: Record<PlanDraft['rhythm'], string> = {
+  daily: 'the plan sets the rhythm and the topics; each post is made on its day.',
+  weekly: 'the plan sets the rhythm and the topics; each week is made at once and approved in one sitting.',
+  monthly: 'the plan sets the rhythm and the topics; each month is made at once and approved in one sitting.',
+}
+
 export const PLAN_DELETE_CONFIRM =
   'Delete this plan? Its content bank goes with it, and it cannot be undone. The posts it made stay, as ordinary posts.'
 const STEP_BUTTON = 'flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 text-left text-sm font-medium'
@@ -56,13 +63,15 @@ interface StepBodyProps {
   set: (c: Partial<PlanDraft>) => void
   planId: string | null
   auto: AutoState
+  /** PRD-251C: the saved plan's next batch, for the Making step. */
+  nextBatchAt?: string | null
 }
 
-function StepBody({ step, draft, set, planId, auto }: StepBodyProps) {
+function StepBody({ step, draft, set, planId, auto, nextBatchAt }: StepBodyProps) {
   if (step === 0) return <PlanStepGoal draft={draft} set={set} />
   if (step === 1) return <PlanStepCadence draft={draft} set={set} />
   if (step === 2) return <PlanStepResearch draft={draft} set={set} />
-  if (step === 3) return <PlanStepMaking draft={draft} set={set} />
+  if (step === 3) return <PlanStepMaking draft={draft} set={set} nextBatchAt={nextBatchAt} />
   return <PlanStepBank planId={planId} ideas={auto.draft?.topics} onLeaveOut={auto.leaveOut} />
 }
 
@@ -149,7 +158,7 @@ export function SocialsPlanPage({ planId, canEdit, onSaved, canDelete = false, o
             {plan && <span className="rounded-full border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground">{statusLine(plan)}</span>}
           </div>
           <p className="m-0 text-sm text-muted-foreground">
-            {draft.startsOn} – {draft.endsOn} · {draft.timezone} · the plan sets the rhythm and the topics; each post is made on its day.
+            {draft.startsOn} – {draft.endsOn} · {draft.timezone} · {RHYTHM_LINES[draft.rhythm]}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -169,7 +178,7 @@ export function SocialsPlanPage({ planId, canEdit, onSaved, canDelete = false, o
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
         <StepsNav step={step} onStep={setStep} />
         <section aria-label={PLAN_STEPS[step]} className="flex min-h-[520px] flex-col gap-5 rounded-xl border border-border bg-background p-5">
-          <StepBody step={step} draft={draft} set={set} planId={planId} auto={auto} />
+          <StepBody step={step} draft={draft} set={set} planId={planId} auto={auto} nextBatchAt={plan?.next_batch_at} />
           <footer className="mt-auto flex gap-2 border-t border-border pt-3.5">
             <Button type="button" variant="ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</Button>
             {last ? saveButton : <Button type="button" variant="outline" onClick={() => setStep(step + 1)}>Next</Button>}

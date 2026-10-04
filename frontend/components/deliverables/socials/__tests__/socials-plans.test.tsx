@@ -109,6 +109,8 @@ describe('a new plan', () => {
     await waitFor(() => expect(api.createSocialPlan).toHaveBeenCalled())
     const input = api.createSocialPlan.mock.calls[0][0]
     expect(input).toMatchObject({ name: 'Launch week', timezone: expect.any(String), late_policy: 'skip', starts_on: '2026-10-14', ends_on: '2026-11-17' })
+    expect(input.make).toMatchObject({ rhythm: 'weekly', batch_day: 'sun', time: '17:00' })  // PRD-251C (O1, O3)
+    expect(input.research).toMatchObject({ day: 'sat' })
     expect(input.cadence).toEqual([{ channels: ['linkedin'], format: 'image', length_seconds: null, template_id: null, days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '09:00' }])
     await waitFor(() => expect(state.go).toHaveBeenCalledWith({ view: 'plans', plan: 'new-plan-id', post: null }))
   })
@@ -148,6 +150,19 @@ describe('a saved plan', () => {
     fireEvent.change(within(form).getByLabelText('Title'), { target: { value: 'What is a mission' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Add to the bank' }))
     await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Added. Posted 5 Oct 2026 as "What is a Mission?".'))
+  })
+
+  it('its Making step sets the rhythm, says when the next batch is made, and saves it (PRD-251C)', async () => {
+    state.plans = [{ ...PLAN, make: { ...PLAN.make, rhythm: 'weekly', batch_day: 'sun', time: '17:00' }, next_batch_at: '2026-10-18T16:00:00Z' }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Making and approving' }))
+    expect(await screen.findByText(/The next batch is made Sun,? 18 Oct/)).toBeInTheDocument()
+    expect(screen.getByLabelText('The week is made on')).toHaveValue('sun')
+    fireEvent.click(within(screen.getByRole('group', { name: 'Rhythm' })).getByRole('button', { name: 'Monthly' }))
+    fireEvent.change(screen.getByLabelText('The month is made on the'), { target: { value: '1' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].make).toMatchObject({ rhythm: 'monthly', batch_date: 1, time: '17:00' })
   })
 
   it('a topic close to a post the workspace has says so, with a link that opens the post', async () => {

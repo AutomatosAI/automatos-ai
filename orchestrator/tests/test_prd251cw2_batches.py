@@ -263,3 +263,16 @@ def test_the_bank_shows_when_research_last_ran(bank):  # noqa: F811
     row.research = {**row.research, "last_run_at": "2026-10-17T06:00:00+00:00", "last_run_id": "research-1"}
     bank.session.commit()
     assert bank.client.get(f"/api/socials/plans/{plan['id']}/topics").json()["research_last_run_at"] == "2026-10-17T06:00:00+00:00"
+
+
+# ── US-C202: the next batch on the Plan page ───────────────────────────────
+
+
+def test_the_plan_says_when_its_next_batch_is_made(bank):  # noqa: F811
+    future = {"starts_on": "2030-01-07", "ends_on": "2030-02-03", "timezone": "UTC"}  # Monday 7 Jan 2030
+    weekly = _create_plan(bank, name="Next year", **future)
+    assert weekly["next_batch_at"] == "2030-01-06T17:00:00+00:00"  # the Sunday before, at 17:00
+    assert bank.client.get(f"/api/socials/plans/{weekly['id']}").json()["next_batch_at"] == weekly["next_batch_at"]
+    daily = _create_plan(bank, name="Every day", make={"rhythm": "daily"}, **future)
+    assert daily["next_batch_at"] is None
+

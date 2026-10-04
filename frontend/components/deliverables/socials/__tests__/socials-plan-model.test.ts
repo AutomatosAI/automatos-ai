@@ -7,7 +7,9 @@
  *   minutes its videos need; the status line says where the plan is.
  * * A planned slot's id names its plan and key; only slots not made become chips.
  * * The music picker's three choices map to the post's music and back.
- * * PRD-251C: the repeat window round-trips, and the form keeps it within what the server takes.
+ * * PRD-251C: the repeat window round-trips, and the form keeps it within what the server takes;
+ *   a new plan makes its week on Sunday at 17:00 and researches on Saturday; a plan saved
+ *   before PRD-251C is daily; the batch day pulls the research day while it was the day before.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -15,6 +17,7 @@ import type { SocialPlan } from '@/lib/socials-plan-types'
 import {
   cadenceSummary, daysFor, draftFromPlan, emptyDraft, inputFromDraft, missingFields, mixOf, oftenOf, repeatDays, statusLine,
 } from '@/components/deliverables/socials/plans/plan-model'
+import { batchDayChange, nextBatchLine, ordinal, rhythmSummary } from '@/components/deliverables/socials/plans/plan-rhythm'
 import {
   parsePlannedId, plannedEvents, plannedId, plannedSlots, planRailLine,
 } from '@/components/deliverables/socials/studio/plan-calendar-model'
@@ -68,6 +71,20 @@ describe('the draft', () => {
     const kept = plan({ research: { enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 } })
     expect(inputFromDraft(draftFromPlan(kept)).research?.repeat_after_days).toBe(45)
     expect([repeatDays('0'), repeatDays('90'), repeatDays('9999'), repeatDays('x')]).toEqual([1, 90, 365, 1])
+  })
+
+  it('a new plan makes its week on Sunday at 17:00 and researches the day before (PRD-251C)', () => {
+    const draft = emptyDraft('UTC', new Date('2026-10-14T07:00:00Z'))
+    expect([draft.rhythm, draft.batchDay, draft.makeTime, draft.researchDay, draft.remindAt]).toEqual(['weekly', 'sun', '17:00', 'sat', '20:00'])
+    expect(inputFromDraft(draft).make).toMatchObject({ rhythm: 'weekly', batch_day: 'sun', batch_date: 25, time: '17:00', remind_at: '20:00' })
+    expect(draftFromPlan(plan()).rhythm).toBe('daily')  // a plan saved before PRD-251C
+    expect(batchDayChange(draft, 'fri')).toEqual({ batchDay: 'fri', researchDay: 'thu' })
+    expect(batchDayChange({ ...draft, researchDay: 'mon' }, 'fri')).toEqual({ batchDay: 'fri' })  // the owner's day stays
+    expect(rhythmSummary(draft)).toBe("Every Sunday at 17:00 the next 7 days' posts are made, and you approve the week in one go in the Queue.")
+    expect(rhythmSummary({ ...draft, rhythm: 'monthly', batchDate: 1 })).toContain('On the 1st of each month at 17:00')
+    expect([ordinal(2), ordinal(3), ordinal(11), ordinal(22), ordinal(25)]).toEqual(['2nd', '3rd', '11th', '22nd', '25th'])
+    expect(nextBatchLine('2026-10-18T16:00:00Z', 'Europe/London')).toMatch(/^The next batch is made Sun,? 18 Oct,? 17:00\.$/)
+    expect(nextBatchLine(null, 'UTC')).toBeNull()
   })
 
   it('a new plan runs 35 days from today and needs a name and a channel', () => {

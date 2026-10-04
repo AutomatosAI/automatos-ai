@@ -8,6 +8,7 @@ import type {
   SocialLatePolicy,
   SocialPlan,
   SocialPlanInput,
+  SocialPlanRhythm,
   SocialPlanSources,
   SocialWeekday,
 } from '@/lib/socials-plan-types'
@@ -21,6 +22,18 @@ export const DEFAULT_PLAN_DAYS = 35
 /** PRD-251C (C5): the server's default repeat window, and the most it takes. */
 export const DEFAULT_REPEAT_AFTER_DAYS = 60
 export const MAX_REPEAT_AFTER_DAYS = 365
+
+/** PRD-251C (C1): a new plan makes its week on Sunday at 17:00, researches the day before
+ * (O1, O3, C4), and reminds at 20:00 the evening before a day's posts (C3). */
+export const DEFAULT_BATCH_DAY: SocialWeekday = 'sun'
+export const DEFAULT_BATCH_DATE = 25
+export const MAX_BATCH_DATE = 28
+export const NEW_PLAN_MAKE_TIME = '17:00'
+export const DEFAULT_REMIND_AT = '20:00'
+
+export function dayBefore(day: SocialWeekday): SocialWeekday {
+  return WEEKDAYS[(WEEKDAYS.indexOf(day) + WEEKDAYS.length - 1) % WEEKDAYS.length]
+}
 
 /** What the repeat window's field says, as a whole number of days the server takes. */
 export function repeatDays(value: string): number {
@@ -80,6 +93,10 @@ export interface PlanDraft {
   researchTime: string
   /** PRD-251C: research adds no topic close to a post of the last this-many days. */
   repeatAfterDays: number
+  rhythm: SocialPlanRhythm
+  batchDay: SocialWeekday
+  batchDate: number
+  remindAt: string
   makeTime: string
   imagesEarly: number
   videosEarly: number
@@ -117,8 +134,9 @@ export function emptyDraft(timezone: string, today: Date = new Date()): PlanDraf
     startsOn: isoDay(today), endsOn: isoDay(new Date(today.getTime() + (DEFAULT_PLAN_DAYS - 1) * MS_PER_DAY)),
     cadence: [newRow()],
     sources: { knowledge: true, deliverables: true, website: true, github: false, notes: '' },
-    neverSay: '', researchEnabled: true, researchDay: 'mon', researchTime: '06:00', repeatAfterDays: DEFAULT_REPEAT_AFTER_DAYS,
-    makeTime: '07:00', imagesEarly: 0, videosEarly: 1, mix: 'templates', latePolicy: 'skip',
+    neverSay: '', researchEnabled: true, researchDay: dayBefore(DEFAULT_BATCH_DAY), researchTime: '06:00', repeatAfterDays: DEFAULT_REPEAT_AFTER_DAYS,
+    rhythm: 'weekly', batchDay: DEFAULT_BATCH_DAY, batchDate: DEFAULT_BATCH_DATE, remindAt: DEFAULT_REMIND_AT,
+    makeTime: NEW_PLAN_MAKE_TIME, imagesEarly: 0, videosEarly: 1, mix: 'templates', latePolicy: 'skip',
   }
 }
 
@@ -141,6 +159,8 @@ export function draftFromPlan(plan: SocialPlan): PlanDraft {
     neverSay: (plan.sources.never_say ?? []).join(', '),
     researchEnabled: plan.research.enabled, researchDay: plan.research.day, researchTime: plan.research.time,
     repeatAfterDays: plan.research.repeat_after_days ?? DEFAULT_REPEAT_AFTER_DAYS,
+    rhythm: plan.make.rhythm ?? 'daily', batchDay: plan.make.batch_day ?? DEFAULT_BATCH_DAY,
+    batchDate: plan.make.batch_date ?? DEFAULT_BATCH_DATE, remindAt: plan.make.remind_at ?? DEFAULT_REMIND_AT,
     makeTime: plan.make.time, imagesEarly: plan.make.image_days_early ?? 0, videosEarly: plan.make.video_days_early,
     mix: mixOf(plan.make.visual_mix), latePolicy: plan.late_policy,
   }
@@ -162,6 +182,7 @@ export function inputFromDraft(draft: PlanDraft): SocialPlanInput {
     make: {
       time: draft.makeTime, image_days_early: draft.imagesEarly, video_days_early: draft.videosEarly,
       visual_mix: MIX_PRESETS.find((preset) => preset.key === draft.mix)?.mix ?? { templates: 100 },
+      rhythm: draft.rhythm, batch_day: draft.batchDay, batch_date: draft.batchDate, remind_at: draft.remindAt,
     },
     research: { enabled: draft.researchEnabled, day: draft.researchDay, time: draft.researchTime, repeat_after_days: draft.repeatAfterDays },
     late_policy: draft.latePolicy,

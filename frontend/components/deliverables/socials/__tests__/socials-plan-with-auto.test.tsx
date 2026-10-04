@@ -135,6 +135,7 @@ describe('a new plan drafted by Auto', () => {
     expect(input).toMatchObject({ name: 'Autumn colour week', starts_on: '2026-10-14', ends_on: '2026-10-20', timezone: 'Europe/London' })
     expect(input.sources).toMatchObject({ knowledge: true, website: false, deliverables: true, notes: `What the person asked for: ${WORDS}` })
     expect(input.cadence).toEqual([DRAFT.plan.cadence[0]])
+    expect(input.make).toMatchObject({ rhythm: 'weekly', batch_day: 'sun' })  // PRD-251C: Auto drafts a weekly plan
     expect(api.addSocialPlanTopic.mock.calls).toEqual([['new-plan-id', { ...OFFER, facts: [] }]])
     expect(api.researchSocialPlan).toHaveBeenCalledWith('new-plan-id')
     expect(toast.success).toHaveBeenCalledWith("Plan saved. 1 of Auto's ideas is in its content bank. Research has started on the sources you picked.")

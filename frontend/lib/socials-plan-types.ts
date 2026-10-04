@@ -8,6 +8,8 @@
 export type SocialPlanStatus = 'active' | 'paused' | 'ended'
 export type SocialLatePolicy = 'skip' | 'next_slot'
 export type SocialWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+/** PRD-251C (C1): a plan's posts are made on their day, a week at a time, or a month at a time. */
+export type SocialPlanRhythm = 'daily' | 'weekly' | 'monthly'
 
 /** One cadence row: a channel group posting one format on some days at one time. */
 export interface SocialPlanCadenceRow {
@@ -38,6 +40,13 @@ export interface SocialPlanMake {
   max_per_day: number | null
   /** Shares of 100 among templates, library, ai_images and ai_footage. */
   visual_mix: Record<string, number>
+  /** PRD-251C: a plan saved before it has no rhythm, and is daily. */
+  rhythm?: SocialPlanRhythm
+  /** A weekly plan's batch day, a monthly plan's batch date (1-28). */
+  batch_day?: SocialWeekday
+  batch_date?: number
+  /** HH:MM, the plan's timezone: the evening-before reminder. */
+  remind_at?: string
 }
 
 export interface SocialPlanResearch {
@@ -73,6 +82,8 @@ export interface SocialPlan {
   updated_at: string | null
   /** The content bank's counts. */
   bank: { topics: number; unused: number }
+  /** PRD-251C: when a weekly or monthly plan's next batch is made (ISO); null for a daily plan. */
+  next_batch_at?: string | null
 }
 
 export interface SocialPlansResponse {

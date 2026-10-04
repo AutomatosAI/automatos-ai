@@ -52,7 +52,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign
-from modules.socials import campaigns, plan_store, plans, service
+from modules.socials import batches, campaigns, plan_store, plans, service
 from services import socials_plan_research, socials_research_setup
 
 router = APIRouter()
@@ -165,8 +165,11 @@ def load_plan(db: Session, ctx: RequestContext, plan_id: UUID) -> SocialCampaign
 
 
 def plan_view(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
+    """The plan with its bank's counts and, for a weekly or monthly plan, when its next batch
+    is made (PRD-251C US-C202)."""
     counts = plan_store.bank_counts(db, [plan.id]).get(plan.id, {"topics": 0, "unused": 0})
-    return {**plan.to_dict(), "bank": counts}
+    upcoming = batches.next_window(plan, datetime.now(timezone.utc))
+    return {**plan.to_dict(), "bank": counts, "next_batch_at": upcoming.moment.isoformat() if upcoming else None}
 
 
 def _saved(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
