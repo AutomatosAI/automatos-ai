@@ -2651,16 +2651,16 @@ class CoordinatorService:
         agent_id: int,
         result: Dict[str, Any],
     ) -> None:
-        """Record task completion/failure — runs serially on shared session.
-        F245: a step whose mission was cancelled while it ran is not recorded:
-        the cancel skipped it and cancelled its card."""
+        """Record task completion/failure, serially on the shared session. F245: a step whose
+        mission was cancelled while it ran is not recorded. F297: one that wrote no answer failed."""
         from modules.coordination.mission_cancel import cancelled_while_it_ran
+        from services.result_substance import as_step_failure
 
         if cancelled_while_it_ran(db, run):
             logger.info("Task %s finished after mission %s was cancelled: not recorded", task.id, run.id)
             return
         await _park_if_the_step_asked(db, run, task, agent_id, result)
-        MissionDispatcher.record_task_completion(db, task, result)
+        MissionDispatcher.record_task_completion(db, task, as_step_failure(result))
         await self._remember_task_failure(db, run, task)
         await self._announce_task_result(db, run, task, agent_id, result)
         self._count_task_tokens(db, run, result)
