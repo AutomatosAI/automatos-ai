@@ -167,7 +167,7 @@ def test_auto_cannot_file_an_untouched_ticket(shop):
 
     assert out["success"] is False
     assert out["error"] == (f"No one has worked on {ticket_label(task)} yet, so there is nothing to approve: "
-                            "assign an agent and use Run now, or Cancel it if it isn't needed.")
+                            "give it to an agent, which starts it, or Cancel it if it isn't needed.")  # F294
     assert (_row(shop, task).status, task.completed_at) == ("inbox", None)
 
 

@@ -42,6 +42,7 @@ from core.models.orchestration_enums import (
     TaskType,
 )
 from modules.coordination.step_inputs import with_its_inputs
+from modules.coordination.owner_note import a_steps_prompt_carries_the_owners_note
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from modules.coordination.credit_pause import pauses_when_credit_runs_out
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
@@ -998,6 +999,7 @@ class MissionDispatcher:
     @staticmethod
     @a_steps_prompt_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
     @with_its_inputs  # F248: the last step's whole results, and the documents it names
+    @a_steps_prompt_carries_the_owners_note  # F291: the owner's note on the plan, after the goal
     def build_task_prompt(
         task: OrchestrationTask,
         goal: Optional[str] = None,

@@ -56,7 +56,8 @@ def test_a_ticket_nobody_worked_on_has_nothing_to_approve_or_review(to, what):
     refusal = drag_refusal(_never_worked(), to, running=False, mission_ticket=False)
 
     assert refusal.startswith(f"No one has worked on ticket #0044 yet, so there is nothing to {what}")
-    assert "assign an agent and use Run now" in refusal and "Cancel" in refusal
+    # F294 (night 8): Assign starts the card, so "assign an agent and use Run now" was a step too many
+    assert "give it to an agent, which starts it" in refusal and "Cancel" in refusal
 
 
 def test_a_failed_run_with_nothing_left_points_to_run_now():
@@ -88,7 +89,8 @@ def test_a_card_that_holds_an_answer_can_still_be_filed():
 
 
 def test_a_missions_ticket_keeps_its_own_refusals():
-    step = _never_worked(source_type="orchestration_task", assigned_agent_id=5)
+    # F294 (night 8): one with no answer has nothing to approve (test_f294_a); this one has its draft
+    step = _never_worked(source_type="orchestration_task", assigned_agent_id=5, result="Step 1's draft.")
 
     assert drag_refusal(step, "done", running=True, mission_ticket=True) is None    # mission_runs_it says where
     assert drag_refusal(_ticket("review"), "done", running=False, mission_ticket=True).startswith("Use Approve")
