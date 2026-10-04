@@ -81,9 +81,14 @@ _TOLD = re.compile(
     r"|\b(?:make|made|making) sure (?:that )?" + _GROUP + r"\b[^.!?\n]{0,30}\b(?:knows?|aware|informed)\b"
     r"|\bensures? (?:that )?" + _GROUP + r"\b[^.!?\n]{0,60}?\b(?:knows?|aware|informed)\b",
     re.I)
-# Not a claim: an offer or a question, or the reply saying they don't know yet.
+# Not a claim: an offer or a question, the reply saying they don't know yet, the knowing made the
+# condition of something Auto would do ("the team will know once I post the note"), or the purpose
+# of a plan ("I'll write it into a note so every agent knows").
 _OFFER = re.compile(r"\?|\b(?:if you|would you|do you want|shall i|should i|want me to|i can|i could)\b", re.I)
 _NEGATED = re.compile(r"\b(?:not|never|no longer)\b|n't\b", re.I)
+_CONDITION = re.compile(r"\b(?:once|if|when|after|as soon as|until)\s+(?:i|you|we)\b", re.I)
+_PLAN = re.compile(r"\b(?:i'll|i will|i'm going to|i am going to|let me)\b", re.I)
+_PURPOSE = re.compile(r"\bso(?: that)?\s+" + _GROUP + r"\b", re.I)
 
 # The turn asks the owner's shop for a figure (set by the chat, per turn).
 _SHOP_TURN: contextvars.ContextVar[bool] = contextvars.ContextVar("f316_shop_figure_turn", default=False)
@@ -128,7 +133,10 @@ def _shop_claim(sentence: str) -> bool:
 
 
 def _team_claim(sentence: str) -> bool:
-    return bool(_TOLD.search(sentence)) and not (_OFFER.search(sentence) or _NEGATED.search(sentence))
+    if not _TOLD.search(sentence) or _OFFER.search(sentence) or _NEGATED.search(sentence):
+        return False
+    planned = bool(_PLAN.search(sentence) and _PURPOSE.search(sentence))
+    return not (planned or _CONDITION.search(sentence))
 
 
 def _ran(succeeded: List[str], stems: tuple) -> bool:

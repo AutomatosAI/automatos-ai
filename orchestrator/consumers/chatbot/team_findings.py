@@ -53,7 +53,7 @@ TITLE_CHARS = 100
 
 _ASKS_THE_TEAM = re.compile(
     r"\b(?:the|my|our) team\b|\b(?:check|look at|read|go through) (?:the|my|our) (?:board|cards)\b"
-    r"|\bon (?:the|my|our) board\b|\b(?:already|have) (?:found|counted|worked out|looked at|done)\b"
+    r"|\bon (?:the|my|our) board\b"
     r"|\bwhat did (?:the|my|our) (?:\w+ ){0,2}(?:find|say|get|give|count|work out)\b",
     re.IGNORECASE)
 

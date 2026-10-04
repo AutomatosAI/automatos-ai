@@ -83,9 +83,7 @@ _WHERE_FROM = re.compile(
 def asks_a_shop_figure(text: object) -> bool:
     """Whether the owner's message asks a figure the shop holds: a count, a total, stock,
     takings, or whether there were any orders, boxes, cancellations."""
-    said = str(text or "").replace("’", "'")
-    if _NOT_THE_SHOP.search(said):
-        return False
+    said = _NOT_THE_SHOP.sub(" ", str(text or "").replace("’", "'"))   # "how many cards …" is the board's
     how_much = bool(_HOW_MUCH.search(said)) and not _PRICE.search(said)
     return bool(_COUNT.search(said) or _STOCK.search(said) or _ANY_RECORDS.search(said)) or how_much
 

@@ -58,6 +58,7 @@ def _in_a_turn(fn, *args, **kwargs):
     Q5, Q8, "So how many cancelled in total, all reasons?", "Were any Harvest Club boxes late in September?",
     "Do I need to reorder any Kirinyaga?", "What did the shop take in retail orders in September?",
     "Have we got enough Guji for October's club boxes?", "The members are in the shop system. Please count them.",
+    "How many Harvest Club boxes ship Monday, and how many cards are still open?",
 ])
 def test_a_figure_the_shop_holds_is_a_shop_question(said):
     assert asks_a_shop_figure(said) is True
@@ -145,6 +146,35 @@ def test_the_reply_is_nudged_to_count_then_corrected_if_it_still_has_not():
     assert final["_f187"].claim == SHOP_LABEL
     assert final["_f187"].correction == not_done(SHOP_LABEL) == SHOP_LINE
     assert SHOP_LINE.startswith("Just to be clear: I didn't count this from your shop system in this reply")
+
+
+def test_the_turn_s_mark_reaches_the_tool_loop_s_check(shop):
+    """The seam itself: the mark is set by the decorator on _retrieval_first and read by the claim
+    check inside the tool loop, which runs its rounds in a task of its own (F196: contextvars)."""
+    from consumers.chatbot.service import StreamingChatService
+    from consumers.chatbot.streaming import get_streaming_handler
+
+    svc = StreamingChatService.__new__(StreamingChatService)
+    svc.db, svc.workspace_id, svc.widget_mode = None, f187.WS, False
+    svc.streaming_handler, svc.tool_router = get_streaming_handler(), None
+    svc._release_db_dial, svc._turn_document_ids, svc._turn_chunk_ids = False, set(), set()
+    model, first = f187._Model(UNCOUNTED), f187._round(UNCOUNTED)
+    runtime = NS(llm_manager=model, agent_id=322, workspace_id=f187.WS, metadata=NS(name="Auto"))
+    messages = [{"role": "system", "content": "You are Auto."}, {"role": "user", "content": Q5}]
+
+    async def retrieval_first(self, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
+        yield "searched"
+
+    async def turn():
+        async for _frame in counts_from_the_shop(retrieval_first)(svc, Q5, messages, runtime, "c", []):
+            pass
+        chunks = [c async for c in svc._stream_tool_loop(first, messages, runtime, {}, f187.TOOLS,
+                                                         streamed_rounds=[first], reasoning_log=[])]
+        return next(c for c in chunks if isinstance(c, dict) and c.get("_final_response"))
+
+    with usage_scope(request_type=LANE_CHAT):
+        final = asyncio.run(turn())
+    assert final["_f187"].claim == SHOP_LABEL and final["_f187"].correction == SHOP_LINE
 
 
 def test_the_chat_runs_retrieval_first_through_it():

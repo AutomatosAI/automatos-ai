@@ -79,6 +79,18 @@ def test_saying_the_team_knows_after_only_a_memory_is_a_claim():
     assert claimed_action_not_done(SAID, {"platform_store_memory"}, promises=False) is None    # an agent's draft
 
 
+@pytest.mark.parametrize("said", ["I'll write it into a note so every agent knows.",
+                                  "The team will know once I post the note.",
+                                  "If I write the note, the team will know."])
+def test_the_offer_the_turn_asks_for_is_no_claim(said):
+    assert claimed_action_not_done(said, {"platform_store_memory"}, promises=True) is None
+
+
+def test_memory_said_to_reach_them_is_a_claim():
+    said = "I've stored it in my memory so that all agents know."
+    assert claimed_action_not_done(said, {"platform_store_memory"}, promises=True) == TEAM_LABEL
+
+
 def test_the_reply_is_nudged_then_corrected_if_it_still_says_so():
     model = f187._Model(TOLD)
     with usage_scope(request_type=LANE_CHAT):
