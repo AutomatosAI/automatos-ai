@@ -20,6 +20,11 @@ first-class tool, went unnamed. And F085-A's prefetch put a summary document's
 figures (415 for 400) in front of every number question, headed "answer from
 them". The sentence now names smart_query_database, and with a database the
 prefetched passages say a number comes from it.
+
+Night 9 (F302): smart_query_database was on the chat surface only on a turn whose
+words looked like a data question. Auto now holds platform_query_data first-class
+beside a database (modules/tools/data_routes.py), and the sentence and the
+prefetch note name it.
 """
 from __future__ import annotations
 
@@ -32,11 +37,14 @@ from sqlalchemy.orm import Session
 from modules.context.sections.documents_inventory import DocumentsInventorySection, documents_summary
 
 TABLES = ("documents", "database_knowledge_sources")
-NUMBERS_TO_ONE = ("For numbers about the business (counts, totals, rankings, trends), call "
-                  "smart_query_database with the question; with one database no name is needed.")
-NUMBERS_TO_ONE_OF = ("For numbers about the business (counts, totals, rankings, trends), call "
-                     "smart_query_database with the question and the database's name (it lists them when "
-                     "none is named).")
+# F302 (night 9): the sentence names platform_query_data, which Auto now holds first-class beside a
+# database (smart_query_database was on the chat surface only some turns), and says the tool reads
+# the tables itself.
+ASK_DATA = ("For the business's own records (counts, totals, stock, orders, members, sales, rankings), call "
+            "platform_query_data with the owner's question in their words: it reads the tables itself, so never "
+            "ask the owner for table or field names.")
+NUMBERS_TO_ONE = f"{ASK_DATA} With one database no name is needed."
+NUMBERS_TO_ONE_OF = f"{ASK_DATA} Name the database (database_id); it lists them when none is named."
 DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, search them with "
                          "search_knowledge first and name the file you used.")
 

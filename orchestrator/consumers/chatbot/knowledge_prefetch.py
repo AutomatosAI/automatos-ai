@@ -45,9 +45,13 @@ PREFETCH_HEADER = (
 # F077/F078 (refresh-3 retest): with a database connected, a summary document's
 # figure answered the number questions (415 for 400, 18 for 19); the database was
 # never asked. The passages stay; for a number they say where the number lives.
+# F302 (night 9): it names platform_query_data, the data tool Auto now holds on every
+# turn beside a database; "how many boxes go out on 5 October" was answered twice from
+# the club box document ("doesn't specify the total number") with the database in reach.
 PREFETCH_DATABASE_NOTE = (
-    "This workspace also has a connected database: for current counts, totals or rankings, call "
-    "smart_query_database rather than answering from these passages; a document's figure may be out of date."
+    "This workspace also has a connected database: for current counts, totals, stock, orders or rankings, call "
+    "platform_query_data rather than answering from these passages; a document's figure may be out of date, and "
+    "a document that does not give the number is no answer while the database may hold it."
 )
 # F227: several questions in one message, each searched on its own.
 MAX_QUESTIONS = 8

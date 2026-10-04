@@ -133,17 +133,24 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
     ))
 
     # ── NL2SQL / Query Data ──────────────────────────────────────────
+    # F301 (night 9): Auto asked "how many members cancelled April to September, and the
+    # most common reason?" in one call and three times reported the top reason's 4 as the
+    # total (11). The description now says how to ask (one figure per call, the owner's
+    # qualifiers) and how to report (the figure the rows show, and what they count).
 
     registry.register(ActionDefinition(
         name="platform_query_data",
         description=(
-            "Query business data using natural language. Converts your question "
-            "into SQL and executes it against a connected database. Use this when "
-            "the user asks about metrics, counts, trends, revenue, users, or any "
-            "data that lives in their connected databases. Returns results as a "
-            "formatted table with row count and the generated SQL. With one "
-            "database connected, pass only the question: that one is used. Name a "
-            "database (database_id) only when several are connected."
+            "Answer a question about the business's own records (orders, subscriptions, "
+            "members, stock, sales, customers) from a connected database. It reads the "
+            "schema itself, turns the question into SQL, runs it and returns the rows, "
+            "the SQL and what they count: never ask the user for table, column or field "
+            "names. Ask in the user's words, with every qualifier they gave (active, "
+            "cancelled, a plan, a date range), and ask one figure per call: a total and "
+            "a breakdown (how many cancelled, and the most common reason) are two calls. "
+            "Report the figure the rows show and say what it counts; a group's count is "
+            "never the total. With one database connected, pass only the question: that "
+            "one is used. Name a database (database_id) only when several are connected."
         ),
         category="database",
         parameters={

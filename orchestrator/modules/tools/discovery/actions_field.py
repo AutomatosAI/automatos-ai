@@ -13,7 +13,9 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "Use this to find what other agents have discovered, analyzed, or produced "
             "during the current mission. Returns ranked results by relevance — "
             "patterns that resonate with your query surface first, stale patterns fade. "
-            "Always query the field before starting work to see what's already known."
+            "Always query the field before starting work to see what's already known. "
+            # F302 (night 9): Auto called this four times for the shop's stock.
+            "It holds no business records: a connected database is read with platform_query_data."
         ),
         category="field",
         promoted=True,
