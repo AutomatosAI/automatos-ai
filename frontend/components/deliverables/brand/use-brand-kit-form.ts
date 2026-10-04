@@ -34,7 +34,11 @@ export function withD5Fields(kit: BrandKit): BrandKit {
     font_files: kit.font_files ?? [],
     logo_mark_url: kit.logo_mark_url ?? '',
     logo_mark_path: kit.logo_mark_path ?? '',
-    voice: { tone: kit.voice?.tone ?? [], banned_phrases: kit.voice?.banned_phrases ?? [] },
+    voice: {
+      tone: kit.voice?.tone ?? [],
+      banned_phrases: kit.voice?.banned_phrases ?? [],
+      sign_off: kit.voice?.sign_off ?? '',
+    },
   }
 }
 

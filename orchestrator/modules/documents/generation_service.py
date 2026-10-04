@@ -89,6 +89,8 @@ from modules.documents.blocks import (
     validate_blocks,
 )
 from modules.documents.variables import VariableResolver
+from modules.documents.xlsx_render import write_xlsx
+from modules.documents.brand_signing import a_document_is_signed
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,7 @@ class DocumentGenerationService:
     # Public dispatch
     # ------------------------------------------------------------------
 
+    @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
     async def generate(
         self,
         title: str,
@@ -512,59 +515,14 @@ class DocumentGenerationService:
         title: str = "Export",
         template: Optional[DocumentTemplate] = None,
     ) -> GeneratedDocument:
-        """Generate an Excel spreadsheet from tabular data."""
-        try:
-            import xlsxwriter
-        except ImportError:
-            raise ImportError(
-                "xlsxwriter is required for XLSX generation. "
-                "Install with: pip install xlsxwriter>=3.2.0"
-            )
+        """Generate an Excel spreadsheet from tabular data, in the brand kit's colours,
+        font and logo when the workspace has a kit (``modules.documents.xlsx_render``)."""
+        from services.brand_rules import brand_assets
 
-        columns = data.get("columns", [])
-        rows = data.get("rows", [])
-        if not columns:
+        if not data.get("columns"):
             raise ValueError("XLSX generation requires 'columns' in data.")
-
         output_path = self._output_path(workspace_id, title, "xlsx")
-        workbook = xlsxwriter.Workbook(output_path)
-        worksheet = workbook.add_worksheet(title[:31])  # Excel 31-char limit
-
-        # Header formatting
-        header_fmt = workbook.add_format(
-            {
-                "bold": True,
-                "bg_color": "#1a1a2e",
-                "font_color": "white",
-                "border": 1,
-                "text_wrap": True,
-            }
-        )
-
-        # Write headers
-        for col, name in enumerate(columns):
-            worksheet.write(0, col, name, header_fmt)
-
-        # Write data with type detection
-        for row_idx, row in enumerate(rows, 1):
-            for col_idx, value in enumerate(row):
-                if col_idx >= len(columns):
-                    break
-                if isinstance(value, (int, float)):
-                    worksheet.write_number(row_idx, col_idx, value)
-                elif isinstance(value, datetime):
-                    date_fmt = workbook.add_format({"num_format": "yyyy-mm-dd"})
-                    worksheet.write_datetime(row_idx, col_idx, value, date_fmt)
-                else:
-                    worksheet.write_string(row_idx, col_idx, str(value) if value is not None else "")
-
-        # Auto-fit column widths
-        for col, name in enumerate(columns):
-            col_values = [str(r[col]) if col < len(r) and r[col] is not None else "" for r in rows]
-            max_width = max(len(str(name)), max((len(v) for v in col_values), default=0))
-            worksheet.set_column(col, col, min(max_width + 2, 50))
-
-        workbook.close()
+        write_xlsx(output_path, title, data, brand_assets(self.db, workspace_id))
         return self._build_result(output_path, "xlsx", title, workspace_id)
 
     # ------------------------------------------------------------------

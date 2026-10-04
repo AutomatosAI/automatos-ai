@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from config import Config
 from services.step_lessons import a_steps_prompt_carries_its_lessons  # F249/F269
+from services.brand_hooks import a_mission_steps_answer_is_on_brand, a_steps_prompt_carries_the_brand_rules
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from modules.coordination.one_step_at_a_time import one_step_at_a_time, waits_its_turn
@@ -820,6 +821,7 @@ class MissionDispatcher:
     @staticmethod
     @runs_again_after_a_redo  # F286 (night 8): a run built from a step sent back meanwhile runs again
     @pauses_when_credit_runs_out  # F247: a step stopped by the credit pauses its mission, attempt unspent
+    @a_mission_steps_answer_is_on_brand  # brand kit at generation (night 9b): the kit's sign-off, banned words said
     def record_task_completion(
         db: Session,
         task: OrchestrationTask,
@@ -995,6 +997,7 @@ class MissionDispatcher:
         sync_board_status(db, task)
 
     @staticmethod
+    @a_steps_prompt_carries_the_brand_rules  # brand kit at generation (night 9b): the brand's rules
     @a_steps_prompt_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
     @with_its_inputs  # F248: the last step's whole results, and the documents it names
     @a_steps_prompt_carries_the_owners_note  # F291: the owner's note on the plan, after the goal

@@ -167,6 +167,8 @@ export interface BrandFontFile {
 export interface BrandVoice {
   tone: string[]
   banned_phrases: string[]
+  // Who signs what the agents draft; the platform fills a "[Your name]" with it.
+  sign_off?: string
 }
 
 // GET /api/documents/brand-kit/suggestions — prefill candidates with provenance.

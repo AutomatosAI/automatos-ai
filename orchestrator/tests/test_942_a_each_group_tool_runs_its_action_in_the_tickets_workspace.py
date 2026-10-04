@@ -19,6 +19,11 @@ CTX = st.SessionContext(task_id=2001, agent_id=268, agent_name="Business Analyst
 SMUGGLED = {"workspace_id": "ws-other", "agent_id": 1, "_agent_id": 1, "field_id": "field-other", "task_id": 9}
 
 CASES = [
+    # Brand kit at generation (night 10 prep): the documents group reads the owner's templates.
+    ("list_templates", {"format": "docx", "category": "letter"}, "platform_list_templates",
+     {"format": "docx", "category": "letter"}),
+    ("get_template_schema", {"template_id": "6f1c0d1e-2b7a-4c55-9a1e-1d2f3a4b5c6d"}, "platform_get_template_schema",
+     {"template_id": "6f1c0d1e-2b7a-4c55-9a1e-1d2f3a4b5c6d"}),
     ("list_playbooks", {"status": "active"}, "platform_list_playbooks", {"status_filter": "active"}),
     ("get_playbook", {"playbook_name": "Weekly digest"}, "platform_get_playbook", {"playbook_name": "Weekly digest"}),
     ("run_playbook", {"playbook_id": 12, "inputs": {"input": "October"}, "wait_for_me": True},
@@ -107,6 +112,7 @@ def test_the_two_writes_say_so_and_the_rest_only_read():
     ("get_mission", {}, "needs the mission"),
     ("search_mission_findings", {"query": "  "}, "needs a query"),
     ("generate_document", {"title": "t"}, "needs a title, a format"),
+    ("get_template_schema", {"template_id": " "}, "needs the template"),
 ])
 def test_a_call_missing_what_it_needs_is_refused_and_runs_nothing(executor, name, arguments, words):
     with pytest.raises(st.SessionToolRefused) as refused:
@@ -121,3 +127,14 @@ def test_the_document_formats_the_tool_names_are_the_ones_the_platform_renders()
     text = st.get_tool("generate_document").input_schema["properties"]["format"]["description"]
     for fmt in DOCUMENT_TEMPLATE_FORMATS:
         assert fmt in text, fmt
+
+
+def test_the_documents_group_reads_the_templates_beside_generate_document():
+    from core.models.core import DOCUMENT_TEMPLATE_FORMATS
+    from services import session_tool_groups as groups
+
+    documents = next(g for g in groups.SESSION_TOOL_GROUPS if g.id == "documents")
+    assert documents.tools == ("generate_document", "list_templates", "get_template_schema")
+    assert st.get_tool("list_templates").reads_only and st.get_tool("get_template_schema").reads_only
+    listed = st.get_tool("list_templates").input_schema["properties"]["format"]["enum"]
+    assert tuple(listed) == DOCUMENT_TEMPLATE_FORMATS

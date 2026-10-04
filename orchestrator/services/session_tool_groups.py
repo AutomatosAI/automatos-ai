@@ -41,8 +41,9 @@ SESSION_TOOL_GROUPS: Tuple[ToolGroup, ...] = (
               "Who supplies, buys or is part of what, from the owner's documents; read-only.",
               ("query_graph",)),
     ToolGroup("documents", "Documents",
-              "Make PDF, Word and Excel files, and social images from templates, saved to Deliverables.",
-              ("generate_document",)),
+              "Make PDF, Word and Excel files, and social images from templates, saved to Deliverables; "
+              "list the templates and read what each needs.",
+              ("generate_document", "list_templates", "get_template_schema")),
     ToolGroup("playbooks", "Playbooks",
               "List and read the workspace's playbooks, and start a run of one.",
               ("list_playbooks", "get_playbook", "run_playbook")),

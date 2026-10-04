@@ -37,6 +37,7 @@ from services.daily_spend_guard import release_spend_holds
 from services.pasted_data import pasted_data_rule
 from services.ticket_owner_ask import ticket_answers_block
 from services.ticket_redo import redo_block
+from services.brand_hooks import card_prompt_with_brand_rules
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +662,7 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
             if redo:
                 prompt = f"{prompt}\n\n{redo}"
                 t.review_feedback = None
+            prompt = card_prompt_with_brand_rules(prompt, t)  # brand kit at generation (night 9b)
             out.append(
                 {
                     "task_id": t.id,

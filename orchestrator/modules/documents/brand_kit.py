@@ -18,6 +18,12 @@ PRD-251 D5 (S1.3) adds what a social render reads (``core/media_render_bundle.py
   network's own handle rule;
 * ``voice``: three to five tone words and the phrases the brand never uses.
 
+Brand kit at generation (night 9b, prep for night 10): ``voice.sign_off`` is who signs
+what the agents draft ("Gerard, Harbourline Coffee Roasters"). Drafts came back signed
+"[Your name]" (#1971, #0095) and "The Harbourline Team" (#0067.3) though the sign-off
+was in the owner's brand voice paper; the platform now fills a placeholder signature
+with it (``services/brand_rules.py``).
+
 PRD-251 US-115 gives agents the kit through ``platform_get_brand_kit`` and
 ``platform_update_brand_kit``. Those tools and the REST routes
 (``api/document_brand_kit.py``) share what is here: :func:`update_brand_kit`
@@ -65,6 +71,7 @@ MIN_TONE_WORDS, MAX_TONE_WORDS = 3, 5
 MAX_TONE_WORD_CHARS = 32
 MAX_BANNED_PHRASES = 50
 MAX_BANNED_PHRASE_CHARS = 120
+MAX_SIGN_OFF_CHARS = 120
 
 # PRD-251 D5: the handles, keyed by Composio toolkit slug. A network with a rule
 # below is checked against it; any other connected toolkit takes the generic
@@ -137,6 +144,8 @@ class BrandVoice(BaseModel):
 
     tone: List[str] = Field(default_factory=list)
     banned_phrases: List[str] = Field(default_factory=list)
+    # Who signs what the agents draft, as it is written under a letter; empty: none set.
+    sign_off: str = ""
 
     @field_validator("tone")
     @classmethod
@@ -155,6 +164,11 @@ class BrandVoice(BaseModel):
         if len(kept) > MAX_BANNED_PHRASES:
             raise ValueError(f"at most {MAX_BANNED_PHRASES} banned phrases (got {len(kept)})")
         return kept
+
+    @field_validator("sign_off")
+    @classmethod
+    def _sign_off(cls, value: str) -> str:
+        return _one_line(value, "sign-off", MAX_SIGN_OFF_CHARS)
 
 
 class BrandFontFile(BaseModel):
