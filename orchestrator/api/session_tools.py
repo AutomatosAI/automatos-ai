@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.database.database import get_db
 from services import cli_host_service as svc
-from services import session_tools, session_tools_rpc
+from services import session_tool_groups, session_tools, session_tools_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ async def require_session(
         agent_name=getattr(agent, "name", None),
         workspace_id=task.workspace_id,
         mission_field_id=mission_field_id(db, task),
+        offered=session_tool_groups.agent_tool_names(agent),   # #942: the agent's own groups
     )
     return task, ctx
 
@@ -288,5 +289,5 @@ async def session_tools_manifest(
     return {
         "task_id": ctx.task_id,
         "agent": ctx.agent_name,
-        "tools": [dict(t) for t in session_tools.definitions()],
+        "tools": session_tool_groups.offered_definitions(ctx),
     }

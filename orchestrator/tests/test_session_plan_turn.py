@@ -334,7 +334,7 @@ def _claim(monkeypatch, ref, workspace_mode="plan"):
     monkeypatch.setattr(svc, "default_session_folder", lambda db, ws: "/tmp/projects")
     monkeypatch.setattr(svc, "explorer_root_for", lambda *a, **k: None)
     monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
-    monkeypatch.setattr(svc, "session_tool_names", lambda: ("board_summary",))
+    monkeypatch.setattr(svc, "session_tool_names", lambda agent: ("board_summary",))  # #942: per agent
     return task, svc.claim_for_host(_Db(None), NS(id="h1", workspace_id="ws-c1"), limit=1)["tasks"][0]
 
 

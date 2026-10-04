@@ -27,7 +27,7 @@ async def _unused(tool, arguments, ctx):
 
 
 def test_the_list_ends_with_the_two_data_tools_after_every_earlier_one():
-    assert st.tool_names() == EARLIER + ("query_database", "query_graph")
+    assert st.tool_names()[:12] == EARLIER + ("query_database", "query_graph")   # #942 appends groups' tools after
     assert st.get_tool("query_database").action == "platform_query_data"
     assert st.get_tool("query_graph").action == "platform_query_graph"
 
@@ -49,7 +49,7 @@ def test_the_wire_lists_them_and_says_what_the_tools_reach():
     listed = asyncio.run(rpc.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, CTX,
                                             server_version="1.0", call=_unused))
     names = [t["name"] for t in listed["result"]["tools"]]
-    assert names[-2:] == ["query_database", "query_graph"]
+    assert names[10:12] == ["query_database", "query_graph"]
     hello = asyncio.run(rpc.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {}},
                                            CTX, server_version="1.0", call=_unused))
     assert "the owner's database" in hello["result"]["instructions"]

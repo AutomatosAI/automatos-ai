@@ -50,7 +50,11 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
                      "ask_human", "composio_execute", "search_knowledge",
                      "search_documents", "record_memory",       # night-1 95f261a1f: document + memory parity
                      "read_step_file",                          # F161: a later step reads an earlier step's file
-                     "query_database", "query_graph")           # F329: the owner's database and the graph
+                     "query_database", "query_graph",           # F329: the owner's database and the graph
+                     "generate_document",                       # #942: the owner-chosen groups' tools,
+                     "list_playbooks", "get_playbook", "run_playbook",   # in the groups' display order
+                     "get_latest_report",
+                     "list_missions", "get_mission", "search_mission_findings")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)
@@ -74,7 +78,8 @@ def test_every_platform_tool_runs_an_action_that_exists():
         assert registry.get(tool.action) is not None, f"{tool.name} → unknown action {tool.action}"
     # …and the ones dispatched by name are names the executor really handles
     by_name = [t.action for t in st.SESSION_TOOLS if t.dispatch == st.DISPATCH_TOOL_NAME]
-    assert by_name == ["composio_execute"], by_name
+    # #942: generate_document is an executor tool, not a platform action; an API agent's call is routed by name too
+    assert by_name == ["composio_execute", "generate_document"], by_name
 
 
 def test_a_skill_that_names_the_api_spelling_is_pointed_at_the_session_one():
@@ -166,7 +171,13 @@ def test_a_notification_is_never_answered():
 def test_tools_list_is_what_the_registry_says():
     reply = _run(rpc.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, CTX,
                                     server_version="1.0", call=_ok))
-    assert [t["name"] for t in reply["result"]["tools"]] == list(st.tool_names())
+    assert [t["name"] for t in reply["result"]["tools"]] == list(st.tool_names())   # offered=None: every tool
+    # #942: a session is offered its agent's list, in that list's order
+    mine = st.SessionContext(task_id=119, agent_id=268, agent_name="TRACKER", workspace_id="ws-c1",
+                             offered=("board_summary", "list_tasks", "query_database"))
+    reply = _run(rpc.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, mine,
+                                    server_version="1.0", call=_ok))
+    assert [t["name"] for t in reply["result"]["tools"]] == ["board_summary", "list_tasks", "query_database"]
 
 
 def test_tools_call_runs_the_tool_with_the_tickets_scope():
