@@ -85,8 +85,9 @@ _COUNTS = text("""
     SELECT
       (SELECT COUNT(*) FROM board_tasks bt
         WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
-          AND NOT (bt.started_at IS NULL AND bt.completed_at IS NULL AND COALESCE(btrim(bt.result), '') = ''
-                   AND (bt.planning_data -> 'approval_action') IS NULL)
+          AND (bt.source_type IN ('orchestration_task', 'orchestration', 'mission') OR bt.started_at IS NOT NULL
+               OR bt.completed_at IS NOT NULL OR COALESCE(btrim(bt.result), '') <> ''
+               OR (bt.planning_data -> 'approval_action') IS NOT NULL)
           AND (bt.source_type NOT IN ('orchestration_task', 'orchestration')
                OR (bt.source_type = 'orchestration_task' AND bt.review_mode = 'human' AND NOT EXISTS (
                    SELECT 1 FROM orchestration_tasks ot JOIN orchestration_runs r ON r.id = ot.run_id
@@ -123,14 +124,16 @@ _ASKS = text("""
 # check it (F242: review_mode human, a step held for the owner while its mission
 # waits). A step whose mission ended can no longer be let through: it is stuck. A
 # card nobody worked on (never started or finished, no answer) has nothing to judge
-# (F293), unless what it asks is an approval of its action (publish a post).
+# (F293), unless what it asks is an approval of its action (publish a post). A
+# mission's ticket always counts: its mission waits on it.
 _REVIEW_ROWS = text("""
     SELECT bt.id, bt.title, bt.workspace_seq, bt.source_type, bt.parent_task_id, bt.orchestration_run_id,
            a.name AS agent_name, COALESCE(bt.completed_at, bt.updated_at) AS at
       FROM board_tasks bt LEFT JOIN agents a ON a.id = bt.assigned_agent_id AND a.workspace_id = bt.workspace_id
      WHERE bt.workspace_id = CAST(:ws AS uuid) AND bt.status = 'review'
-       AND NOT (bt.started_at IS NULL AND bt.completed_at IS NULL AND COALESCE(btrim(bt.result), '') = ''
-                AND (bt.planning_data -> 'approval_action') IS NULL)
+       AND (bt.source_type IN ('orchestration_task', 'orchestration', 'mission') OR bt.started_at IS NOT NULL
+            OR bt.completed_at IS NOT NULL OR COALESCE(btrim(bt.result), '') <> ''
+            OR (bt.planning_data -> 'approval_action') IS NOT NULL)
        AND (bt.source_type NOT IN ('orchestration_task', 'orchestration')
             OR (bt.source_type = 'orchestration_task' AND bt.review_mode = 'human' AND NOT EXISTS (
                 SELECT 1 FROM orchestration_tasks ot JOIN orchestration_runs r ON r.id = ot.run_id
