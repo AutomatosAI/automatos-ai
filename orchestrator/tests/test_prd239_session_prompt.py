@@ -314,3 +314,46 @@ def test_host_contract_version_moved_with_the_claim_shape():
     # 0.7.0 (2026-09-11, CLI adapter design): capabilities carry every CLI under
     # ``clis`` with served/reason; ``providers`` = the served ids.
     assert svc.EXPECTED_CLI_HOST_VERSION == "0.11.0"
+
+
+# ── #942: each agent's sessions are told the tools THEY have ─────────────────────
+
+def _analyst(groups):
+    """An analyst whose skills name the graph and the database, its session groups set."""
+    body = "Call `platform_query_graph` first, then `query_database` for the figures."
+    return _agent(id=88, name="ANALYST", configuration={"session_tool_groups": groups},
+                  skills=[_skill(20, "shop-analysis", "Analyses the shop.", body)])
+
+
+def test_a_session_lists_only_the_tools_its_agent_has():
+    block = session_system_prompt(_analyst(["data"]))
+    tools = next(line for line in block.splitlines() if line.startswith("- Automatos:"))
+
+    assert "`query_database`" in tools
+    assert "`query_graph`" not in tools and "`generate_document`" not in tools
+
+
+def test_a_skill_naming_a_tool_its_agent_has_off_says_which_group_gives_it():
+    text = session_system_prompt(_analyst(["data"]))
+
+    assert "`platform_query_graph` (its Knowledge Graph tool group is off for this agent)" in text
+    assert "query_database` (its" not in text                       # on: no gap for the database
+
+
+def test_a_tool_without_a_family_prefix_is_named_when_its_group_is_off():
+    """F329: 'someone needs to run a SELECT'. query_database has no platform_ prefix."""
+    text = session_system_prompt(_analyst([]))
+
+    assert "`query_database` (its Data tool group is off for this agent)" in text
+
+
+def test_an_agent_with_every_group_offers_the_graph_under_its_session_name():
+    text = session_system_prompt(_analyst(None))
+
+    assert "`query_graph` instead of `platform_query_graph`" in text
+    assert "tool group is off" not in text
+
+
+def test_the_prompt_is_the_same_in_every_session_of_one_agent():
+    """PRD-245 D2: the advertised list is fixed per agent, so the prompt cache holds."""
+    assert session_system_prompt(_analyst(["graph", "data"])) == session_system_prompt(_analyst(["data", "graph"]))
