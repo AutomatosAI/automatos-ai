@@ -26,6 +26,7 @@ from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 
 from core.llm import output_budget
+from core.llm.owner_words_stream import in_owner_words
 
 logger = logging.getLogger(__name__)
 
@@ -660,9 +661,8 @@ class LLMManager:
         No silent fallbacks — errors surface directly to the user with
         actionable messages so they can fix their configuration.
 
-        PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning
-        deltas live when the provider can stream; providers without a
-        ``stream_response`` answer whole, exactly as before.
+        PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning deltas live when the
+        provider can stream (F264: in Auto's words); providers without ``stream_response`` answer whole.
         """
         self._ensure_provider_initialized()
         start = time.monotonic()
@@ -671,7 +671,7 @@ class LLMManager:
             with output_budget.call_budget(budget):
                 stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
                 if stream is not None:
-                    response = await stream(messages, tools, on_delta=on_delta)
+                    response = await in_owner_words(stream, messages, tools, on_delta)
                 else:
                     response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
