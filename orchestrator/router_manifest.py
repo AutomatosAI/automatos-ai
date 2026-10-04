@@ -72,6 +72,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.board_task_rebrief"),  # PRD-252 R2 — Discuss: "Update ticket and re-queue"
     RouterSpec("api.missions"),
     RouterSpec("api.missions", attr="agent_telemetry_router"),
+    RouterSpec("api.mission_settings"),  # F282 — PATCH .../settings: the one check_each_step switch
     RouterSpec("api.assignments"),
     RouterSpec("api.scheduled_tasks"),
     # PRD-181 W11 governance + compliance surfaces.
