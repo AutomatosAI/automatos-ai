@@ -70,6 +70,7 @@ from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passi
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
+from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 
 logger = logging.getLogger(__name__)
 
@@ -1570,6 +1571,7 @@ class StreamingChatService:
         yield {"_response": await task}
 
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
+    @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
@@ -1632,6 +1634,7 @@ class StreamingChatService:
             return False
 
     @staticmethod
+    @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
         """What the answer gains after it streamed, in order: F187's correction
         (a claim its retry kept, an id that does not exist), then F196's note
