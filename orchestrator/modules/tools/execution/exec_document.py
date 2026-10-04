@@ -8,9 +8,12 @@ from pathlib import Path as _Path
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from modules.tools.execution.document_brand_check import a_documents_banned_words_are_said
+
 logger = logging.getLogger(__name__)
 
 
+@a_documents_banned_words_are_said  # brand kit at generation (night 9b): banned words said to the agent
 async def execute_generate_document(
     executor,
     tool_name: str,
