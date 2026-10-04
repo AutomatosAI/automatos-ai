@@ -10,8 +10,8 @@ Pinned:
 * the library picks the image or video Deliverable that shares most words with the topic,
   as the editor's Library does (the post's media, no template); nothing fitting leaves the
   template's visuals;
-* the plan maker writes the post with that visual, then renders it (a template) or sends it
-  for approval (a library file);
+* the plan maker writes the post with that visual, then renders it (a template, or a library
+  still: cropped for each channel, PRD-251C US-C303) or sends it for approval (a library video);
 * the plan's research reads the brand kit's style profile with the plan.
 """
 from __future__ import annotations
@@ -182,8 +182,9 @@ class _PostsApi:
 
     async def edit_post(self, db, post, actor, changes, *, agent=None):
         self.edits.append(changes)
-        if "template_id" in changes:
-            post.template_id = changes["template_id"]
+        for field in ("template_id", "format", "media"):  # as service.update_post sets them
+            if field in changes:
+                setattr(post, field, changes[field])
 
     async def render_post(self, db, workspace, post, actor):
         self.renders.append(post.id)
@@ -218,7 +219,7 @@ def test_the_maker_writes_ai_images_into_the_slots_then_renders(monkeypatch):
     assert posts_api.renders == [post.id] and posts_api.submits == []
 
 
-def test_the_maker_sends_a_library_post_for_approval_without_a_render(monkeypatch):
+def test_the_maker_sends_a_library_video_for_approval_without_a_render(monkeypatch):
     posts_api, asked, post = _write(monkeypatch, {"library": 100}, rows=[{"id": "d-9", "title": "Lisbon stand", "summary": ""}])
     assert asked == [()]
     (changes,) = posts_api.edits

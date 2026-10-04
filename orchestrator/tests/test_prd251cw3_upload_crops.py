@@ -149,14 +149,8 @@ def test_publishing_gives_each_channel_its_own_crop():
     assert [f.name for f in publish_sources.media_for(files[:1], "linkedin", "image")] == ["upload.png"]  # not cropped yet: as it is
 
 
-class _ApplyingPostsApi(_PostsApi):
-    async def edit_post(self, db, post, actor, changes, *, agent=None):
-        await super().edit_post(db, post, actor, changes, agent=agent)
-        post.format, post.media = changes.get("format", post.format), changes.get("media", post.media)
-
-
 def test_the_plan_maker_crops_a_library_still_instead_of_sending_it_as_it_is(monkeypatch):
-    posts_api = _ApplyingPostsApi()
+    posts_api = _PostsApi()  # applies the template, format and media as service.update_post does
     monkeypatch.setattr(maker_mod, "_posts_api", lambda: posts_api)
     monkeypatch.setattr(maker_mod, "_propose", lambda db, plan, slot, topic, now, visual_slots=(): {
         "title": "Lisbon", "copy": {"base": "See you there."}, "variables": {}, "sources": {}, "template_id": None, "visual_prompts": {}})

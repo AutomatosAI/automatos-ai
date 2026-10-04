@@ -6,8 +6,8 @@ Pinned:
   cadence channel not connected; no video in the next seven days; a cap at 80% or more; each
   with its one action; all well, no items.
 * **Proposals:** a better time moves the weaker row, a better format turns the weaker row (its
-  template left to Auto), the best post's topic becomes research's note; too few posts or no
-  lift propose nothing.
+  template left to Auto), the best post's topic becomes research's note (replacing an earlier
+  one, never past the notes' limit); too few posts or no lift propose nothing.
 * **Through the API** (the S0.3b harness): ``GET /plans/{id}/proposals`` proposes from the
   plan's read posts; a proposal applied through ``PUT /plans/{id}`` changes the plan; a
   proposal ignored changes nothing; ``GET /plans/{id}/health`` lists the items; another
@@ -108,6 +108,15 @@ def test_a_better_format_turns_the_weaker_row_and_the_best_topic_becomes_a_note(
     row = found["format"].changes["cadence"][0]
     assert (row["format"], row["template_id"], row["length_seconds"]) == ("video", None, None)
     assert found["angle"].changes["sources"]["notes"] == 'Lead with the stand.\nMore like "The stand": it did best.'
+
+
+def test_a_new_angle_replaces_the_earlier_one_so_the_notes_stay_bounded():
+    plan = _plan(_row("r1"))
+    plan.sources = plans.validate_sources({"notes": 'Lead with the stand.\nMore like "Old topic": it did best.'})
+    (angle,) = [item for item in proposals.proposals(plan, [_read("x", "image", "r1", "09:00", 9, topic="New topic")]) if item.kind == "angle"]
+    assert angle.changes["sources"]["notes"] == 'Lead with the stand.\nMore like "New topic": it did best.'
+    plan.sources = plans.validate_sources({"notes": "x" * (plans.NOTES_MAX_CHARS - 5)})
+    assert [item.kind for item in proposals.proposals(plan, [_read("x", "image", "r1", "09:00", 9, topic="New topic")])] == []
 
 
 def test_few_posts_or_no_lift_propose_no_change_of_time_or_format():

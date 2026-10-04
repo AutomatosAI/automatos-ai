@@ -700,7 +700,7 @@ async def submit_social_post(
 
 
 @router.post("/posts/{post_id}/approve", dependencies=[CAN_REVIEW])
-async def approve_social_post(
+def approve_social_post(  # a plain def (F105): it awaits nothing, and its writes are synchronous
     post_id: UUID,
     body: ApproveRequest,
     db: Session = Depends(get_db),

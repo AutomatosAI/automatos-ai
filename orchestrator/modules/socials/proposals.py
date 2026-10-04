@@ -28,6 +28,7 @@ LOOKBACK_DAYS = 28
 MIN_POSTS = 3
 LIFT = 1.5
 ANGLE_NOTE = 'More like "{title}": it did best.'
+ANGLE_NOTE_START, ANGLE_NOTE_END = 'More like "', '": it did best.'
 
 
 @dataclass(frozen=True)
@@ -108,10 +109,15 @@ def _angle_proposal(sources: Mapping[str, Any], posts: Sequence[ReadPost]) -> Op
     notes = str(sources.get("notes") or "")
     if note in notes:
         return None
+    # The newest angle replaces an earlier one, so the notes never grow past their limit by proposals.
+    kept = [line for line in notes.splitlines() if not (line.startswith(ANGLE_NOTE_START) and line.endswith(ANGLE_NOTE_END))]
+    changed = "\n".join([*kept, note]).strip()
+    if len(changed) > plans.NOTES_MAX_CHARS:
+        return None
     return Proposal(
         f"angle:{best.topic or best.title}", "angle", f'More topics like "{best.topic or best.title}"',
         f"It got {best.engagement} engagements, the most of the plan's recent posts. Research reads the note.",
-        {"sources": {**dict(sources), "notes": f"{notes}\n{note}".strip()}},
+        {"sources": {**dict(sources), "notes": changed}},
     )
 
 
