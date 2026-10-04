@@ -53,7 +53,6 @@ ignore_imports =
     modules.agents.factory.agent_factory -> modules.memory.memory_tool
     modules.agents.services.agent_platform_tools -> modules.codegraph
     modules.agents.services.agent_platform_tools -> modules.codegraph.ranking
-    modules.agents.services.agent_platform_tools -> modules.documents.generation_service
     modules.agents.services.agent_platform_tools -> modules.rag
     modules.agents.services.agent_platform_tools -> modules.rag.config
     modules.context.planning -> modules.rag.budget
