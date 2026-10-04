@@ -7,6 +7,8 @@
   no channel connected that posts its format): never half-made.
 * ``social_post_slot_moved``: the late policy moved a post to the plan's next slot
   (linked to the post).
+* ``social_plan_weekly_note`` (PRD-251C US-C403): how the plan's week went, linked to its
+  Posted view.
 
 Like every Socials notice (``notify.py``), it goes out through the platform's
 ``NotificationDispatcher`` on its own session after the write, and a failure is logged,
@@ -33,6 +35,8 @@ MONTH_READY = ("social_plan_batch_ready", "Your month is ready: ", "action_requi
 BATCH_LINK_TYPE = "social_batch"
 REVIEW_PATH = "/deliverables?tab=socials&view=queue"
 NOTIFIED = "notified"
+# PRD-251C (US-C403): the weekly note links to the plan's Posted view.
+POSTED_LINK_TYPE = "social_posted"
 
 
 def once_today(plan: Any, event: str, today: date) -> bool:
@@ -80,6 +84,13 @@ def notify_review(workspace_id: UUID | str, plan_id: UUID | str, event: tuple, t
     carries the address for Telegram, Slack and webhooks. Never raises."""
     message = f"Review and approve them in one go: {review_url()}"
     notify._send_soon(_send(workspace_id, BATCH_LINK_TYPE, plan_id, event, title, message), plan_id, event[0])
+
+
+def notify_weekly_note(workspace_id: UUID | str, plan_id: UUID | str, title: str, message: str) -> None:
+    """The weekly note (US-C403): its words in the message, linked to the plan's Posted view. Never raises."""
+    from modules.socials.weekly_note import NOTE_EVENT
+
+    notify._send_soon(_send(workspace_id, POSTED_LINK_TYPE, plan_id, NOTE_EVENT, title, message), plan_id, NOTE_EVENT[0])
 
 
 def notify_slot_moved(workspace_id: UUID | str, post_id: UUID | str, title: str, at: Optional[datetime]) -> None:

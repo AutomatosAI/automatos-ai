@@ -82,3 +82,22 @@ def _numbers_of(items: list) -> PostNumbers:
         numbers=_summed(by_channel.values()), by_channel=by_channel,
         reading=max(stat.reading for stat in stats), read_at=max((stat.read_at for stat in stats if stat.read_at), default=None),
     )
+
+
+NUMBER_WORDS = {
+    "views": ("view", "views"), "reach": ("reach", "reach"), "likes": ("like", "likes"), "comments": ("comment", "comments"),
+    "shares": ("share", "shares"), "saves": ("save", "saves"), "replies": ("reply", "replies"), "reposts": ("repost", "reposts"),
+    "quotes": ("quote", "quotes"), "reactions": ("reaction", "reactions"),
+}
+NOT_READ = "no numbers yet"
+
+
+def numbers_line(numbers: Optional[Mapping[str, int]]) -> str:
+    """A post's numbers as one line in the Posted view's words ("940 views · 12 likes"); or that none were read."""
+    if numbers is None:
+        return NOT_READ
+    parts = [
+        f"{numbers[key]:,} {NUMBER_WORDS[key][0] if numbers[key] == 1 else NUMBER_WORDS[key][1]}"
+        for key in result_reads.NUMBER_KEYS if key in numbers
+    ]
+    return " · ".join(parts) if parts else "the channels gave no numbers"
