@@ -11,8 +11,8 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_deliverables_actions(registry: ActionRegistry) -> None:
     """Register deliverable discovery actions (PRD-164 S3)."""
-    registry.register(_list_deliverables_action())
-    registry.register(_get_deliverable_action())
+    _register_list_deliverables(registry)
+    _register_get_deliverable(registry)
 
 
 def _origin_filters() -> dict:
@@ -78,8 +78,8 @@ def _list_parameters() -> dict:
     }
 
 
-def _list_deliverables_action() -> ActionDefinition:
-    return ActionDefinition(
+def _register_list_deliverables(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_list_deliverables",
         description=(
             "List deliverables (agent outputs) in the workspace: reports, "
@@ -99,11 +99,11 @@ def _list_deliverables_action() -> ActionDefinition:
             "show the outputs from that mission",
             "find the report you wrote yesterday",
         ],
-    )
+    ))
 
 
-def _get_deliverable_action() -> ActionDefinition:
-    return ActionDefinition(
+def _register_get_deliverable(registry: ActionRegistry) -> None:
+    registry.register(ActionDefinition(
         name="platform_get_deliverable",
         description=(
             "Fetch one deliverable by id — metadata plus (optionally) its "
@@ -132,4 +132,4 @@ def _get_deliverable_action() -> ActionDefinition:
             "read the generated report",
             "show me the contents of deliverable X",
         ],
-    )
+    ))
