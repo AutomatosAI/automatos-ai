@@ -1338,8 +1338,7 @@ class PlatformActionExecutor:
             return {"success": False, "error": f"Action '{action_name}' failed"}
 
 
-# Every platform action's handler, by action name. PlatformActionExecutor copies it per
-# instance. Kept at module level so a new tool adds one entry here.
+# Every platform action's handler, by name; PlatformActionExecutor copies it per instance. A new tool adds one entry.
 PLATFORM_HANDLERS: Dict[str, Callable] = {
     # Read actions
     "platform_list_agents": list_agents,
