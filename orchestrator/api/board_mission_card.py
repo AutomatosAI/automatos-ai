@@ -75,10 +75,10 @@ def approve_the_plan(db: Session, ctx: Any, task: Any, run: Any, *, note: str = 
     try:
         get_coordinator_service().approve_plan(db=db, run_id=run.id, actor_id=ctx.user.id or "unknown")
         db.flush()
-    except (ConflictError, InvalidTransitionError):
+    except (ConflictError, InvalidTransitionError) as decided:
         db.rollback()
         db.refresh(run)
-        raise HTTPException(status_code=409, detail=mission_card_refusal(db, task, run))
+        raise HTTPException(status_code=409, detail=mission_card_refusal(db, task, run)) from decided
     said = f"{PLAN_APPROVED_NOTE}: {note_text(note)}" if kept else f"{PLAN_APPROVED_NOTE}."
     append_session_note(db, task_id=task.id, workspace_id=task.workspace_id, note=said, by=OPERATOR_NOTE_BY)
     db.commit()
