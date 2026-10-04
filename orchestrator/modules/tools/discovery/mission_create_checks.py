@@ -21,6 +21,9 @@ from sqlalchemy.orm import Session
 # The owner asking for a mission outright, which no playbook's name overrules.
 ASKS_FOR_A_MISSION = re.compile(r"\b(?:start|create|make|set up|launch|begin|new)\s+(?:a\s+|another\s+|the\s+)?"
                                 r"mission\b", re.I)
+# Night 8: "Don't make a mission this time. Run my saved playbook…" is no ask for one.
+NOT_A_MISSION = re.compile(r"\b(?:don'?t|do not|never|no need to|not)\s+(?:\w+\s+){0,2}?(?:start|create|make|set up|"
+                           r"launch|begin|new)\s+(?:a\s+|another\s+|the\s+)?mission\b", re.I)
 RUNS_A_PLAYBOOK = re.compile(r"\b(?:run|use|start|kick off|do)\b[^.!?\n]{0,40}\bplaybook\b", re.I)
 MIN_PLAYBOOK_NAME = 4
 WAITING = ("pending", "planning", "awaiting_approval")
@@ -51,7 +54,7 @@ def refusal_for_mission(db: Session, workspace_id: Any, params: Dict[str, Any], 
 
 def _a_playbook(db: Session, workspace_id: Any, goal: str, said: Sequence[str]) -> Optional[str]:
     latest = said[0] if said else ""
-    if not latest or ASKS_FOR_A_MISSION.search(latest):
+    if not latest or ASKS_FOR_A_MISSION.search(NOT_A_MISSION.sub(" ", latest)):
         return None
     from core.models.core import WorkflowTemplate
 

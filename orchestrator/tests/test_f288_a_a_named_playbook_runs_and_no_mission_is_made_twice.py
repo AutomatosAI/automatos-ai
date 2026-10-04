@@ -38,6 +38,8 @@ def _refusal(shop, goal, *said):
     "Please run New Cafe Onboarding for a new wholesale cafe: The Lantern Room, contact Priya Shah.",
     "Run my New Cafe Onboarding playbook for Bramble & Co: contact Jess Moore.",
     "Use the new cafe onboarding playbook for a new café: The Copper Kettle.",
+    "Don't make a mission this time. Run my saved playbook called New Cafe Onboarding, the one I set up.",
+    "I asked for my playbook, not a mission. Please cancel #0384 and run my saved New Cafe Onboarding playbook.",
 ])
 def test_a_playbook_the_owner_names_runs_and_no_mission_is_made(shop, said):
     refusal = _refusal(shop, "Onboard new wholesale cafe", said)
