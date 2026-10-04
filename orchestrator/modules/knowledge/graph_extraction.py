@@ -17,12 +17,8 @@ from typing import Any, Optional
 
 from config import Config
 from core.llm import create_llm_manager
-from modules.knowledge.graph_relations import (
-    ALLOWED_RELATIONS_PROMPT,
-    enforce_relation_rules,
-    log_relation_repairs,
-    resolve_relation,
-)
+from modules.knowledge.graph_edge_rules import check_extracted_graph
+from modules.knowledge.graph_relations import ALLOWED_RELATIONS_PROMPT, resolve_relation
 
 def _get_graph_extraction_model() -> str:
     """Read graph extraction model from system_settings (knowledge_graph category)."""
@@ -337,26 +333,21 @@ def _parse_llm_json(raw: str) -> dict[str, list] | None:
     return None
 
 
-def _normalise_edges(
-    raw_edges: list[dict], nodes: list[dict[str, Any]], source_file: str,
-) -> list[dict[str, Any]]:
-    """Every extracted edge in the vocabulary, the right way round, and checked.
+def _normalise_edges(raw_edges: list[dict], source_file: str) -> list[dict[str, Any]]:
+    """Every extracted edge in the vocabulary, read the right way round.
 
-    F312 (night 9): each edge is checked against the types this extraction
-    declared ("October 2026 Box produces Priya" is refused: a person is never
-    produced) and against its own wording ("Guji blocks swaps" from "swap the
-    Guji"); a phrase that reads target -> source ("contains") is turned round.
-    The model's own phrasing (explicit relation_label if given, else the raw
-    relation) is kept for display.
+    F312 (night 9): a phrase that reads target -> source ("contains") is turned
+    round. The model's own phrasing (explicit relation_label if given, else the
+    raw relation) is kept for display. ``check_extracted_graph`` then checks
+    each edge against what its two ends are.
     """
-    node_types = {n["id"]: str(n["file_type"]).strip().lower() for n in nodes}
     edges: list[dict[str, Any]] = []
     for e in raw_edges:
         canonical, raw_label, inverted = resolve_relation(e.get("relation"))
         src, tgt = e.get("source", ""), e.get("target", "")
         if inverted:
             src, tgt = tgt, src
-        edges.append(enforce_relation_rules(_edge(
+        edges.append(_edge(
             source=src,
             target=tgt,
             relation=canonical,
@@ -365,8 +356,7 @@ def _normalise_edges(
             confidence=e.get("confidence", "INFERRED"),
             confidence_score=float(e.get("confidence_score", 0.5)),
             weight=float(e.get("weight", 1.0)),
-        ), node_types))
-    log_relation_repairs(edges, source_file)
+        ))
     return edges
 
 
@@ -396,7 +386,11 @@ def _normalise_extraction(
             team_access=team_access,
         ))
 
-    result["edges"] = _normalise_edges(raw.get("edges", []), result["nodes"], source_file)
+    # F312: each edge is checked against what its two ends are ("October 2026
+    # Box produces Priya" is refused: a person is never produced).
+    result["nodes"], result["edges"] = check_extracted_graph(
+        result["nodes"], _normalise_edges(raw.get("edges", []), source_file), source_file,
+    )
 
     for h in raw.get("hyperedges", []):
         result["hyperedges"].append({
