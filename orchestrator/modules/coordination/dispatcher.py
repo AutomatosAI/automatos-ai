@@ -44,6 +44,7 @@ from core.models.orchestration_enums import (
 from modules.coordination.step_inputs import with_its_inputs
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from modules.coordination.credit_pause import pauses_when_credit_runs_out
+from modules.coordination.step_card_agent import runs_on_the_cards_agent
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
@@ -293,6 +294,7 @@ class MissionDispatcher:
         return MissionDispatcher._dispatch_single(db, run, task, agents)
 
     @staticmethod
+    @runs_on_the_cards_agent  # F287 (night 8): a step goes to the agent its card was given to
     def _dispatch_single(
         db: Session,
         run: OrchestrationRun,
