@@ -13,6 +13,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import create_engine, text
 import logging
 
+from modules.nl2sql.schema.grounding import finds_tables_by_value
+
 logger = logging.getLogger(__name__)
 
 # Stopwords excluded from keyword overlap scoring
@@ -294,6 +296,7 @@ Database Dialect: {dialect}
                 extra.append(by_name[target])
         return list(chosen) + extra[:LOOKUP_TABLES_KEPT]
 
+    @finds_tables_by_value  # F301: a table holding a value the question names
     def _get_relevant_tables(
         self,
         question: str,

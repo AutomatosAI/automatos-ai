@@ -30,9 +30,10 @@ What a client needs answered, in the order Claude Code 2.1.267 sends it:
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from services import session_tool_groups, session_tools
 from services.session_tools import SessionContext, SessionToolRefused
@@ -71,6 +72,10 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 MAX_RESULT_CHARS = session_tools.MAX_TOOL_RESULT_CHARS
+
+# Asked before each tool call: a refusal reason, or None. It may be a coroutine
+# function: F330 counts the call on a worker thread, off the event loop.
+OnCall = Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]
 
 
 def _error(rpc_id: Any, code: int, message: str, data: Any = None) -> Dict[str, Any]:
@@ -158,7 +163,7 @@ async def handle_message(
     *,
     server_version: str,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]] = None,
+    on_call: Optional[OnCall] = None,
 ) -> Optional[Dict[str, Any]]:
     """One JSON-RPC message → the reply, or ``None`` for a notification.
 
@@ -204,7 +209,7 @@ async def _handle_tools_call(
     ctx: SessionContext,
     *,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]],
+    on_call: Optional[OnCall],
 ) -> Dict[str, Any]:
     name = str(params.get("name") or "")
     tool = session_tool_groups.offered_tool(ctx, name)   # #942: only this agent's groups' tools
@@ -213,6 +218,8 @@ async def _handle_tools_call(
     # session could call the endpoint without limit and never be refused.
     if on_call is not None:
         refusal = on_call(tool.name if tool is not None else name)
+        if inspect.isawaitable(refusal):
+            refusal = await refusal
         if refusal:
             return _result(rpc_id, _text_content(refusal, is_error=True))
     if tool is None:
@@ -235,7 +242,7 @@ async def handle_payload(
     *,
     server_version: str,
     call: Callable[[session_tools.SessionTool, Any, SessionContext], Awaitable[Dict[str, Any]]],
-    on_call: Optional[Callable[[str], Optional[str]]] = None,
+    on_call: Optional[OnCall] = None,
 ) -> Optional[Any]:
     """A whole request body: one message, or a batch. ``None`` = nothing to
     answer (every message was a notification), which the route sends as 202."""

@@ -12,7 +12,6 @@ This demonstrates how the Database Knowledge Source integrates with:
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 from typing import Dict, List, Optional, Any, Tuple
@@ -23,7 +22,6 @@ logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
-# import pandas as pd
 
 # Automatos imports (from existing system)
 from core.best_effort import awaitable_off_loop
@@ -37,6 +35,7 @@ from core.services.audit_service import AuditService
 from .query.nl2sql_service import NaturalLanguageToSQLService
 from .query.validator import SQLValidator
 from .primitive_heartbeat import _emit_nl2sql_primitive
+from .schema.grounding import grounded
 from modules.tools.services.pandas_ai_service import get_pandasai_service
 
 
@@ -301,6 +300,7 @@ class DatabaseKnowledgeService:
         )
         return rows
 
+    @grounded  # F301: each column's full value set and date range reach the SQL writer
     def _augment_schema_with_samples(
         self,
         source,

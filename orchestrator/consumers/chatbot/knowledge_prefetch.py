@@ -33,6 +33,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import text
 
+from core.database.read_release import release_if_read_only
+
 logger = logging.getLogger(__name__)
 
 PREFETCH_TOOL = "search_knowledge"
@@ -221,6 +223,10 @@ async def prefetch(
     except Exception:  # noqa: BLE001 — cannot tell: the turn runs as it did
         logger.warning("[F085] retrieval first skipped: could not count documents", exc_info=True)
         return None
+    # F330 (night 9c): the count opened the turn's transaction; the searches
+    # (an embedding call, then a search on sessions of their own) must not keep
+    # its connection "idle in transaction". Kept as is if the turn wrote.
+    release_if_read_only(db)
     # The owner's own questions, each searched; a brief (F201's draft guides) is
     # searched whole: its questions are a customer's, and its query asks for the rules.
     questions = split_questions(message) if question_only else []
