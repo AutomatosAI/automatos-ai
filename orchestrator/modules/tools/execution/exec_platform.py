@@ -89,8 +89,11 @@ async def execute_platform_action(
 
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
+        from modules.tools.execution.turn_owner_words import owner_words_held
+
         executor_inst = PlatformActionExecutor(db=executor.db, workspace_id=workspace_id)
-        result = await executor_inst.execute(tool_name, parameters, caller_context=caller_context)
+        with owner_words_held(caller_context):  # F302: the turn's words reach platform_query_data's NL2SQL
+            result = await executor_inst.execute(tool_name, parameters, caller_context=caller_context)
         logger.info(
             f"[tool-trace {trace_id or 'no-trace'}] Platform action {tool_name} "
             f"success={result.get('success')}"
