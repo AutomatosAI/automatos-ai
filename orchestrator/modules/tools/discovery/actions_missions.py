@@ -14,6 +14,17 @@ _MISSION_ID_PARAM = {
 # F241 (night 7b): "Approve #0177" reached platform_approve_mission for a task card.
 NOT_FOR_A_CARD = (" A card in Review is approved or sent back on the board with "
                   "platform_update_task_status, never here.")
+# F308 (night 9): "approve step 1" re-approved #0027's plan and left the step waiting;
+# "send step 1 back" cancelled #0035. Once a mission has started, these decide its step.
+_STEP_PARAM = {"step": {"type": "string", "description": (
+    "Once the mission has started: the step, by its card's number (#0027.1) or its place in the plan (1). "
+    "Left out, the one step waiting for the owner's check.")}}
+STARTED_APPROVE = (" Once the mission has started, this approves its step that waits for the owner's check, "
+                   "exactly as the board's Approve on that step's card: the owner's note stays on the card and the "
+                   "mission carries on.")
+STARTED_REJECT = (" Once the mission has started, this never cancels it: the step (step, or the one waiting for the "
+                  "owner's check) is sent back with the owner's words, as the board's Reject on its card, and the "
+                  "mission redoes it, opening again if it had finished.")
 
 
 def register_mission_actions(registry: ActionRegistry) -> None:
@@ -91,7 +102,8 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         name="platform_approve_mission",
         description=(
             "Approve an awaiting-approval mission plan and start execution. Use when "
-            "the user approves the plan you proposed (or says 'go ahead', 'run it')." + NOT_FOR_A_CARD
+            "the user approves the plan you proposed (or says 'go ahead', 'run it')." + STARTED_APPROVE
+            + NOT_FOR_A_CARD
         ),
         category="missions",
         parameters={
@@ -102,6 +114,9 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
                 # agent_overrides believed it had pinned staff when it had not.
                 # Plan edits go through platform_update_mission_plan.
                 **_MISSION_ID_PARAM,
+                **_STEP_PARAM,
+                "note": {"type": "string", "description": (
+                    "For a step: the owner's own words to keep on its card, word for word.")},
             },
             "required": ["mission_id"],
         },
@@ -114,15 +129,18 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_reject_mission",
         description=("Reject an awaiting-approval mission plan: it never runs and is closed as cancelled, "
-                     "with the reason. Use when the user declines the proposed plan." + NOT_FOR_A_CARD),
+                     "with the reason. Use when the user declines the proposed plan." + STARTED_REJECT
+                     + NOT_FOR_A_CARD),
         category="missions",
         parameters={
             "type": "object",
             "properties": {
                 **_MISSION_ID_PARAM,
+                **_STEP_PARAM,
                 "reason": {"type": "string", "description": (
-                    "Why the owner turned the plan down, in the owner's own words: quote what they "
-                    "asked to change, do not summarise it. The next plan for this conversation reads it.")},
+                    "Why the owner turned the plan down, or what the step must fix, in the owner's own words: "
+                    "quote what they asked to change, do not summarise it. The next plan for this conversation "
+                    "reads it; a step's redo works from it.")},
             },
             "required": ["mission_id"],
         },
@@ -249,7 +267,9 @@ def _register_update_mission_plan(registry: ActionRegistry) -> None:
             "Edit an awaiting-approval mission's plan before it runs — reassign a "
             "task's agent or revise a task title/description — or make every step "
             "wait for the owner's check (check_each_step). Use when the user tweaks "
-            "the proposed plan ('have the researcher do step 2 instead')."
+            "the proposed plan ('have the researcher do step 2 instead'). Once the mission "
+            "has started, a step that hasn't started yet takes a new title or description; a "
+            "step that has started is redone with the owner's words through platform_reject_mission."
         ),
         category="missions",
         parameters=_update_mission_plan_parameters(),

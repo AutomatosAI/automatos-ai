@@ -6,6 +6,10 @@ Approve and a drag to done file it through the board's own completion path; Auto
 moving a ticket to done in chat is the owner's word too, and its status tool is a
 plain write that never passes there. So the tool's result says which tickets ended
 done, and their reports are filed after it, single or bulk.
+
+Night 9 (F308): a mission step's card moved to done this way stayed held: its step
+waited for the owner's check and its mission stayed paused. The move lets a held step
+through, as the board's Approve does (``mission_step_verdicts``).
 """
 from __future__ import annotations
 
@@ -20,8 +24,11 @@ from modules.tools.discovery.handlers_board_tasks import update_board_task_statu
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """The status move (``handlers_board_tasks``), then the report of every ticket it
     moved to done."""
+    from modules.tools.discovery.mission_step_verdicts import lets_held_steps_through
+
     result = await _move_status(db, workspace_id, params)
     if result.get("status") == "done":
+        lets_held_steps_through(db, workspace_id, moved_to_done(result), params)  # F308: a held step goes on
         await _file_done(db, workspace_id, moved_to_done(result))
     return result
 

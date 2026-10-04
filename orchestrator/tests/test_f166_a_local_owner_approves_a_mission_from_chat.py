@@ -104,6 +104,8 @@ def test_a_local_owner_approves_a_mission_from_chat(mission):
 
 @pytest.mark.parametrize("action", sorted(LIFECYCLE))
 def test_every_mission_action_from_a_local_chat_is_made_for_its_person(mission, action):
+    if action == "platform_reject_mission":   # F308 (night 9): a started mission's plan is never rejected
+        mission.run.state = "awaiting_approval"
     reply = _execute(mission, action, LIFECYCLE[action][1], _local_chat(mission.owner.id))
     assert reply["success"] is True, reply
     assert _actor(mission, action) == mission.owner.email

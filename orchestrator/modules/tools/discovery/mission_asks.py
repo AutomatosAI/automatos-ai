@@ -21,6 +21,11 @@ it (``mission_owner_words``); a playbook the owner named, a copy of a mission st
 waiting, and a goal that isn't theirs make no mission (``mission_create_checks``). The
 answer says whether the steps wait for the owner, so Auto can't say they do when they
 don't (#0250: "Yes, it will", with no setting).
+
+Night 9 (F308): #0033 was made from "Yes — that's what I asked for. Go ahead.", after the
+owner's "check each step with me" and Auto's "Each step will pause for your approval",
+with {"auto_approve_steps": false}. Neither the go-ahead alone nor that key set the
+check. Both do now (``mission_owner_words.asks_for_checks``, ``owner_checks``).
 """
 from __future__ import annotations
 
@@ -58,7 +63,9 @@ def asks_as_the_owner_says(handler: Handler) -> Handler:
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from modules.tools.discovery.mission_create_checks import refusal_for_mission
-        from modules.tools.discovery.mission_owner_words import asks_for_checks, chosen_staffing, owners_words
+        from modules.tools.discovery.mission_owner_words import (
+            asks_for_checks, autos_last_words, chosen_staffing, owners_words,
+        )
 
         params = params or {}
         said = owners_words(db, workspace_id, params)
@@ -69,7 +76,7 @@ def asks_as_the_owner_says(handler: Handler) -> Handler:
         staffing = chosen_staffing(db, workspace_id, params, said)
         if staffing:
             asked, note = {**asked, STAFFING: staffing}, None
-        if asks_for_checks(said):
+        if asks_for_checks(said, autos_last_words(db, workspace_id, params)):  # F308: a go-ahead to it too
             asked = {**asked, CONFIG: with_step_checks(asked.get(CONFIG), on=True)}
         return _answered(await handler(db, workspace_id, asked), asked, note)
     return wrapped
