@@ -54,7 +54,11 @@ def executor(monkeypatch):
 
 def _call(name, arguments):
     tool = st.get_tool(name)
-    return asyncio.run(st.call_tool(None, tool, st.resolve_parameters(tool, {**arguments, **SMUGGLED}, CTX), CTX))
+    # What a tool doesn't declare is smuggled in, and must be dropped. A field it does
+    # declare is its own: get_latest_report's agent_id names whose report, not the caller.
+    declared = set(tool.input_schema.get("properties") or {})
+    smuggled = {key: value for key, value in SMUGGLED.items() if key not in declared}
+    return asyncio.run(st.call_tool(None, tool, st.resolve_parameters(tool, {**arguments, **smuggled}, CTX), CTX))
 
 
 def _only(executor):
