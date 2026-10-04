@@ -37,7 +37,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
-from services.ticket_redo import SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, with_correction
+from services.ticket_redo import RUN_NOW, SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, redo_again, with_correction
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
@@ -50,6 +50,10 @@ from services.board_drag_rules import (  # PRD-252 R6
     UNFINISHED_BY_HAND, drag_refusal, question_refusal,
 )
 from api import board_task_patch  # F259: the general PATCH's checks and writes
+from api.board_card_moves import approve_outside_review, call_off, left_as_it_is  # F294
+from api.board_mission_card import (  # F291: a mission's card waiting for its plan
+    approve_from_its_card, is_mission_card, mission_card_refusal, start_its_mission, starts_its_mission,
+)
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 
@@ -641,6 +645,7 @@ async def update_task(
     board_task_patch.refuse_the_patch(db, task, body, new_status, agent)
 
     if "assigned_agent_id" in body:
+        board_task_patch.note_the_assign(db, task, agent)  # F294: the card says who it went to
         task.assigned_agent_id = agent
     board_task_patch.patch_fields(task, body)
     moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason")) if new_status else None
@@ -826,21 +831,22 @@ async def _run_approval_action(db: Session, ctx: RequestContext, approval_action
 # approved or changed. A ticket verdict marked the card done and left the run
 # awaiting approval, never started.
 MISSION_CARD_SOURCE = "orchestration"
-MISSION_CARD_VERDICT = ("This is a mission's card: approve or change its plan on the mission's page. "
-                        "Approving the card here would mark it done without starting the mission.")
+MISSION_CARD_VERDICT = "This is a mission's card: its plan is turned down or changed on the mission's page."
 
 
-def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int) -> BoardTask:
+def _ticket_for_verdict(db: Session, ctx: RequestContext, task_id: int, *,
+                        its_mission_decides: bool = True) -> BoardTask:
     """The ticket an Approve or Reject decides; 404 when it is not this workspace's,
-    409 for a mission's own card (D6)."""
+    409 for a mission's own card (D6), naming the mission (F291), unless the caller
+    decides one itself (``its_mission_decides`` False: Approve gives a waiting plan)."""
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
         BoardTask.workspace_id == ctx.workspace_id,
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.source_type == MISSION_CARD_SOURCE:
-        raise HTTPException(status_code=409, detail=MISSION_CARD_VERDICT)
+    if task.source_type == MISSION_CARD_SOURCE and its_mission_decides:
+        raise HTTPException(status_code=409, detail=mission_card_refusal(db, task))
     return task
 
 
@@ -857,12 +863,13 @@ async def approve_task(
     If the task has an approval_action in planning_data, execute it
     (e.g., publish a blog post). Then move the task to done.
     """
-    task = _ticket_for_verdict(db, ctx, task_id)
-    if task.status != "review":
-        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
-
+    task = _ticket_for_verdict(db, ctx, task_id, its_mission_decides=False)
     body = await request.json()
     note = _text_of(body.get("note"), "note")  # PRD-252 R2 (F038): kept on the ticket
+    if is_mission_card(task):  # F291: Approve on a mission's card approves its waiting plan
+        return approve_from_its_card(db, ctx, task, note=note)
+    if task.status != "review":  # F294: in words; a card that finished by itself keeps the note
+        return approve_outside_review(db, task, note)
     action_result = None
     approval_action = (task.planning_data or {}).get("approval_action")
 
@@ -1205,6 +1212,9 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
     (the dispatcher folds both into the prompt) and the operator's consent is
     on record. A drag used to launch the bare brief directly.
     """
+    started = start_its_mission(db, ctx, task, "in_progress")  # F291: a mission's waiting plan is approved
+    if started is not None:
+        return started
     owned = mission_runs_it(db, task)
     if owned:
         raise HTTPException(status_code=409, detail=owned)
@@ -1231,9 +1241,10 @@ def _start_now(db: Session, ctx: RequestContext, task: BoardTask, *, why: str) -
                                       agent_id=task.assigned_agent_id, actor=_operator_ref(ctx), why=why)
     was = task.status
     rerun = was in FINISHED
+    redo_again(task)  # F294 (#0273): a redo that failed with no answer runs again with the owner's words
     # F190: a new run starts clean. The last run's result goes on record (a no-op
     # when there is none) and off the card, where the new run's would sit under it.
-    keep_previous_run(task, why="run now", by=_operator_ref(ctx))
+    keep_previous_run(task, why=RUN_NOW, by=_operator_ref(ctx))
     task.result = None
     task.error_message = None
     if _redispatch_task(db, task) is False:  # F209: a run claimed or is finishing it since the check above
@@ -1357,12 +1368,15 @@ def _move_by_hand(db: Session, ctx: RequestContext, task: BoardTask, new_status:
     or a PATCH: a move into Cancelled is Cancel (F245), a move into In progress is
     Run now, and any other is the move itself. The answer of a cancel or a start,
     which commit their own work; None for a move the caller commits."""
+    if new_status == "cancelled" and task.status == "done":
+        return call_off(db, task, by=_operator_ref(ctx))  # F294 (#0422): a Done card, with who and when
     if new_status == "cancelled" and task.status not in UNCANCELLABLE:
         return _cancel_like_the_button(db, ctx, task)  # F245: a drag to Cancelled stops the run too
     # F190 review: a repeat of in_progress on a running ticket (a double drag)
     # changes nothing; a stuck ticket has Run Now.
     if new_status == "in_progress" and task.status != "in_progress" \
-            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)):
+            and (task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES or is_playbook_card(task)
+                 or starts_its_mission(db, task, new_status)):  # F291: a mission's waiting plan
         return {"id": task.id, **_start_now(db, ctx, task, why=WHY_MOVED_TO_IN_PROGRESS)}
     owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
     if owned:
@@ -1453,8 +1467,10 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == "done":  # F294 (#0422): called off, with who and when, as its drag does
+        return call_off(db, task, by=_operator_ref(ctx))
     if task.status in UNCANCELLABLE:
-        return {"id": task.id, "status": task.status, "applied": False}
+        return left_as_it_is(db, task)  # F294: applied false, in words
     return _cancel_like_the_button(db, ctx, task)
 
 
