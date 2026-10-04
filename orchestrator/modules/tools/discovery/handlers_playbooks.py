@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 from modules.tools.discovery.card_numbers import names_the_run_cards, says_the_run_card
 from modules.tools.discovery.playbook_schedule_check import checks_the_schedule
@@ -579,37 +579,36 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     }
 
 
+def _playbook_to_schedule(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Tuple[Any, Optional[Dict[str, Any]]]:
+    """The playbook a timer goes on, by id or by name, or the refusal that says why not."""
+    from core.models.core import WorkflowTemplate
+
+    query = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == workspace_id)
+    if params.get("playbook_id"):
+        query = query.filter(WorkflowTemplate.id == params["playbook_id"])
+    elif params.get("playbook_name"):
+        query = query.filter(WorkflowTemplate.name.ilike(f"%{params['playbook_name']}%"))
+    else:
+        return None, {"success": False, "error": "Provide playbook_id or playbook_name"}
+    playbook = query.first()
+    return (playbook, None) if playbook else (None, {"success": False, "error": "Playbook not found"})
+
+
 @switches_the_timer  # F290 (night 8): off with no cron, the playbook whose timer it is
 @finds_the_playbook(CHANGES)  # F261 (7b): never the first of two namesakes
 @keeps_the_owners_zone  # F266 (7b): "UTC" the owner never said is the workspace's own zone
 @keeps_wait_for_me  # F266 (7b): the timer's runs wait for the owner, in the same call
 async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Set a cron schedule on a playbook so it runs automatically."""
-    from core.models.core import WorkflowTemplate
     from modules.tools.discovery.cron_when import cron_refusal
 
-    playbook_id = params.get("playbook_id")
-    playbook_name = params.get("playbook_name")
     cron_expression = params.get("cron_expression")
-
     refused = cron_refusal(cron_expression)  # F290: only a new timer needs a cron
     if refused:
         return refused
-
-    # Resolve playbook
-    query = db.query(WorkflowTemplate).filter(
-        WorkflowTemplate.workspace_id == workspace_id
-    )
-    if playbook_id:
-        query = query.filter(WorkflowTemplate.id == playbook_id)
-    elif playbook_name:
-        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
-    else:
-        return {"success": False, "error": "Provide playbook_id or playbook_name"}
-
-    playbook = query.first()
-    if not playbook:
-        return {"success": False, "error": "Playbook not found"}
+    playbook, refused = _playbook_to_schedule(db, workspace_id, params)
+    if refused:
+        return refused
 
     from services.playbook_scheduler import cron_trigger, default_schedule_zone
 
