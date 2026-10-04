@@ -40,6 +40,11 @@ from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_en
 # descriptions share ONE dispatch-contract fragment (single source, never copied).
 from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
 
+# F265 (night 7b): Auto's brief for #0182 told the agent to set its own status; the
+# move was refused and the answer said a table was made where there was none.
+BOARD_MOVES_THE_CARD = ("The board moves the card when the agent answers: the brief never tells the agent "
+                        "to change its card's status or how to file its work.")
+
 logger = logging.getLogger(__name__)
 
 # Tier-3 classification uses a cheap active-agent roster (not the planners'
@@ -134,7 +139,7 @@ def build_assign_directive(
             "then state its supervision status by echoing the platform_create_task "
             "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
             "outcome). Do NOT claim it is supervised unless that field says so.\n"
-            f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
+            f"\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
         )
     return (
         "\n\n## Manager directive — confirm the agent first\n"
@@ -148,7 +153,7 @@ def build_assign_directive(
         "to confirm. Once they choose, file the ticket (platform_create_task with "
         "assigned_agent_name), written as the 4-part dispatch contract below, start "
         "it unless they deferred, and confirm in one line with the task id.\n"
-        f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
+        f"\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
     )
 
 

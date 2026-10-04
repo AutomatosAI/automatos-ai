@@ -76,7 +76,7 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "name": ("title", "agent_name", "label", "display_name"),
     "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
     "query": ("q", "search", "question", "prompt"),
-    "description": ("desc", "summary", "details"),
+    "description": ("desc", "summary", "details", "brief"),  # F241 (7b): "Update #0199 with that brief"
     # F027-C (night 3): the playbook-step actions. add_playbook_step's prompt
     # arrived under another name 5 times; update_playbook_step's playbook and
     # step 3 times. ("order" is NOT an alias of step_index: it is update's own
@@ -84,6 +84,8 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "prompt_template": ("prompt", "template", "instructions", "instruction", "step_prompt", "prompt_text",
                         "text", "content"),
     "playbook_id": ("recipe_id", "workflow_id", "playbookId"),
+    # F241 (night 7b): "Approve #0177 with this note" arrived as "notes".
+    "note": ("notes", "comment", "remark"),
     "step_index": ("step", "index", "step_number", "step_idx", "stepIndex", "step_position"),
 }
 
