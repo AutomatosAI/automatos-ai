@@ -60,8 +60,9 @@ def active_plans(db: Any) -> List[SocialCampaign]:
 
 
 def _apply(plan: SocialCampaign, fields: Mapping[str, Any], templates: Mapping[str, plans.TemplateInfo]) -> None:
-    if isinstance(fields.get("research"), Mapping):  # a save changes what it sends; the rest, and the last run, stay
-        fields = {**fields, "research": {**(plan.research or {}), **fields["research"]}}
+    for key in ("research", "make"):  # a save changes what it sends; the rest, and the records, stay
+        if isinstance(fields.get(key), Mapping):
+            fields = {**fields, key: {**(getattr(plan, key) or {}), **fields[key]}}
     clean = plans.validate_fields(fields, templates)
     starts = fields.get("starts_on", plan.starts_on)
     ends = fields.get("ends_on", plan.ends_on)
@@ -83,7 +84,8 @@ def create_plan(db: Any, *, workspace_id: UUID, created_by: str, fields: Mapping
     plan = SocialCampaign(
         workspace_id=workspace_id, created_by=created_by, name="", kind=plans.PLAN, status=plans.ACTIVE,
         approval_mode=campaigns.PER_POST, approved_hash_set=[],
-        sources=plans.validate_sources(None), make=plans.validate_make(None), research=plans.validate_research(None),
+        sources=plans.validate_sources(None), make=plans.validate_make(plans.NEW_PLAN_MAKE),
+        research=plans.validate_research(None),
         late_policy=plans.SKIP, slot_overrides={},
     )
     _apply(plan, fields, templates_of(db, workspace_id))

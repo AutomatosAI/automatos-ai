@@ -93,6 +93,10 @@ class PlanMake(_Strict):
     image_days_early: int = 0
     max_per_day: Optional[int] = None
     visual_mix: Optional[Dict[str, int]] = None
+    # PRD-251C (C1): daily, weekly or monthly; a weekly plan's batch day, a monthly plan's date.
+    rhythm: str = plans.DAILY
+    batch_day: str = plans.DEFAULT_BATCH_DAY
+    batch_date: int = plans.DEFAULT_BATCH_DATE
 
 
 class PlanResearch(_Strict):

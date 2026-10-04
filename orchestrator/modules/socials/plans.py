@@ -4,7 +4,10 @@ A plan is a campaign of kind ``plan`` (B6): dates, a timezone, a cadence, what t
 research, how and when its posts are made, and what a passed slot does. Series
 approval works on it as on any campaign.
 
-Nothing is generated ahead (B7). The cadence expands into slots on the fly
+Nothing is generated ahead (B7), unless the plan's rhythm says so (PRD-251C C1): a
+``daily`` plan makes each post on its day; a ``weekly`` one makes the coming week's posts
+on its batch day, a ``monthly`` one the next month's on its batch date
+(``modules/socials/batches.py``). The cadence expands into slots on the fly
 (:func:`expand_slots`, pure): a slot is one cadence row on one local day at its time,
 in the plan's timezone. Its key ``<row id>|<YYYY-MM-DD>|<HH:MM>`` is unique within the
 plan, and the post made for it carries the key (``social_posts.slot_key``).
@@ -34,6 +37,16 @@ CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 DEFAULT_MAKE_TIME = "07:00"
+# PRD-251C (C1): how a plan's posts are made. A plan saved before PRD-251C has no rhythm:
+# daily. A new plan makes its week on Sunday at 17:00 (O1, O3).
+DAILY, WEEKLY, MONTHLY = "daily", "weekly", "monthly"
+RHYTHMS = (DAILY, WEEKLY, MONTHLY)
+DEFAULT_BATCH_DAY = "sun"
+DEFAULT_BATCH_DATE = 25
+MAX_BATCH_DATE = 28
+NEW_PLAN_MAKE = {"rhythm": WEEKLY, "time": "17:00"}
+# What the make tick records on the plan (notices sent, batches made): a save keeps it.
+MAKE_RECORD_KEYS = ("notified", "batches")
 DEFAULT_VIDEO_DAYS_EARLY = 1
 MAX_VIDEO_DAYS_EARLY = 3
 # A post is made at least this long before its slot, or a day earlier.
@@ -203,18 +216,33 @@ def _days_early(raw: Mapping[str, Any], key: str, default: int) -> int:
     return early
 
 
+def _rhythm(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """PRD-251C (C1): the rhythm, a weekly plan's batch day and a monthly plan's batch date."""
+    rhythm, day, day_of_month = raw.get("rhythm", DAILY), raw.get("batch_day", DEFAULT_BATCH_DAY), raw.get("batch_date", DEFAULT_BATCH_DATE)
+    if rhythm not in RHYTHMS:
+        raise InvalidPlan(f"make.rhythm must be one of {', '.join(RHYTHMS)}")
+    if day not in WEEKDAYS:
+        raise InvalidPlan(f"make.batch_day must be one of {', '.join(WEEKDAYS)}")
+    if isinstance(day_of_month, bool) or not isinstance(day_of_month, int) or not 1 <= day_of_month <= MAX_BATCH_DATE:
+        raise InvalidPlan(f"make.batch_date must be a day of the month from 1 to {MAX_BATCH_DATE}")
+    return {"rhythm": rhythm, "batch_day": day, "batch_date": day_of_month}
+
+
 def validate_make(value: Any) -> Dict[str, Any]:
+    """How and when the plan's posts are made, checked, and what the make tick recorded."""
     raw = value if isinstance(value, Mapping) else {}
     per_day = raw.get("max_per_day")
     if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int) or not 0 < per_day <= MAX_PER_DAY):
         raise InvalidPlan(f"make.max_per_day must be 1 to {MAX_PER_DAY}")
-    return {
+    settings = {
         "time": _clock(raw.get("time", DEFAULT_MAKE_TIME), "make.time"),
         "video_days_early": _days_early(raw, "video_days_early", DEFAULT_VIDEO_DAYS_EARLY),
         "image_days_early": _days_early(raw, "image_days_early", 0),
         "max_per_day": per_day,
         "visual_mix": _visual_mix(raw.get("visual_mix")),
+        **_rhythm(raw),
     }
+    return {**settings, **{key: raw[key] for key in MAKE_RECORD_KEYS if raw.get(key)}}
 
 
 def validate_research(value: Any) -> Dict[str, Any]:

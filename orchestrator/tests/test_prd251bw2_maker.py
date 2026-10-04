@@ -90,7 +90,9 @@ def maker(api, monkeypatch):
 
 def _text_plan(api, **overrides):
     cadence = [{"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "09:00"}]
-    body = {"timezone": "UTC", "starts_on": "2026-10-12", "ends_on": "2026-11-08", "cadence": cadence, **overrides}
+    # A daily plan, as PRD-251B made them: PRD-251C's new plans are weekly unless asked.
+    body = {"timezone": "UTC", "starts_on": "2026-10-12", "ends_on": "2026-11-08", "cadence": cadence,
+            "make": {"rhythm": "daily", "time": "07:00"}, **overrides}
     return _create_plan(api, **body)
 
 
@@ -184,7 +186,7 @@ def test_the_render_quota_check():
 def test_max_per_day_holds_per_local_day(maker):
     rows = [{"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "09:00"},
             {"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "12:00"}]
-    plan = _text_plan(maker, cadence=rows, make={"max_per_day": 1})
+    plan = _text_plan(maker, cadence=rows, make={"rhythm": "daily", "time": "07:00", "max_per_day": 1})
     assert maker_mod.collect_due(NOW) == [(uuid.UUID(plan["id"]), "r1|2026-10-14|09:00")]
 
 

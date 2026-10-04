@@ -68,6 +68,7 @@ WAVE1_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave1.py"
 WAVE2_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave2.py"
 WAVE1B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave1.py"
 WAVE2B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave2.py"
+WAVE2C_MIGRATION = _ORCH / "alembic" / "versions" / "prd251c_wave2.py"
 MODELS = _ORCH / "core" / "models" / "socials.py"
 TABLES = ("social_posts", "social_post_targets")
 
@@ -127,6 +128,10 @@ def _migration_engine():
         wave2b = _load_migration(WAVE2B_MIGRATION, "prd251b_wave2_migration_models")
         with Operations.context(MigrationContext.configure(conn)):
             wave2b.upgrade()
+        # PRD-251C Wave 2 (US-C201): batch_key, indexed with the plan.
+        wave2c = _load_migration(WAVE2C_MIGRATION, "prd251c_wave2_migration_models")
+        with Operations.context(MigrationContext.configure(conn)):
+            wave2c.upgrade()
     return engine
 
 
@@ -199,6 +204,8 @@ def test_social_posts_carries_every_d2_column():
         "planned_for", "length_seconds",
         # PRD-251B Wave 2 (US-B201): the plan slot a post was made for, and the music choice.
         "slot_key", "music",
+        # PRD-251C Wave 2 (US-C201): the batch a weekly or monthly plan made it in.
+        "batch_key",
     }
 
 

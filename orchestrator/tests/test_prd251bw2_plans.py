@@ -190,7 +190,7 @@ def _create(api, **overrides):
 def test_a_plan_is_created_listed_and_read(bank):
     plan = _create(bank)
     assert (plan["kind"], plan["status"], plan["late_policy"], plan["approval_mode"]) == ("plan", "active", "skip", "per_post")
-    assert plan["make"]["time"] == "07:00"
+    assert (plan["make"]["rhythm"], plan["make"]["time"]) == ("weekly", "17:00")  # PRD-251C: a new plan's week (O1, O3)
     assert plan["research"] == {"enabled": True, "day": "mon", "time": "06:00", "repeat_after_days": 60}  # PRD-251C US-C104
     assert plan["cadence"][0]["id"] == "r1" and plan["bank"] == {"topics": 0, "unused": 0}
     listed = bank.client.get("/api/socials/plans").json()
