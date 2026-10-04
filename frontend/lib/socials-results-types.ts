@@ -51,3 +51,23 @@ export interface SocialPostedFilters {
   channel?: string | null
   format?: string | null
 }
+
+/** GET /api/socials/plans/{id}/proposals (US-C404): a plan change and why; applied only by a click. */
+export interface SocialPlanProposal {
+  id: string
+  kind: 'time' | 'format' | 'angle'
+  title: string
+  why: string
+  /** The plan's fields as the PUT takes them (the whole cadence, or the whole sources). */
+  changes: Record<string, unknown>
+}
+
+export type SocialPlanHealthAction = 'research' | 'cadence' | 'connect' | 'ai_tools'
+
+/** GET /api/socials/plans/{id}/health (US-C407): what needs the owner, and the one action that fixes it. */
+export interface SocialPlanHealthItem {
+  id: string
+  title: string
+  detail: string
+  action: { kind: SocialPlanHealthAction; label: string }
+}

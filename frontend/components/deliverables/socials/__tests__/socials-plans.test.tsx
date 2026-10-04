@@ -11,6 +11,8 @@
  *   says so, linked to the post (US-C106).
  * * A cadence row may set its own visual and the AI tool that makes it, shows its AI spend over
  *   a month, and the plan saves it (PRD-251C US-C302).
+ * * A saved plan shows its health, each item with its action, and Auto's proposals; Apply sends
+ *   the proposal's changes through the plan's PUT, and nothing is applied by itself (US-C404, C407).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
@@ -19,7 +21,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
-const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null, lastRun: null as string | null }))
+const state = vi.hoisted(() => ({
+  go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null, lastRun: null as string | null,
+  health: [] as any[], proposals: [] as any[],
+}))
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/components/workspace-provider', () => ({
@@ -44,6 +49,8 @@ vi.mock('@/lib/api-client', () => {
     deleteSocialPlan: vi.fn(async () => undefined),
     listSocialMusic: vi.fn(async () => ({ available: true, tracks: [{ id: 'spring-of-2026', title: 'Spring of 2026', artist: 'S', style: 'tropical house', duration: 120, licence: 'CC BY 4.0', credit_required: true }] })),
     updateSocialPost: vi.fn(async (id: string, changes: any) => ({ id, ...changes })),
+    getSocialPlanHealth: vi.fn(async () => ({ items: state.health })),
+    getSocialPlanProposals: vi.fn(async () => ({ proposals: state.proposals })),
     getSocialMediaTools: vi.fn(async () => ({
       toolkits: [],
       offered: { images: [], ai_images: [{ value: 'fal_ai', label: 'fal.ai' }, { value: 'ask', label: 'Ask each time' }], footage: [{ value: 'off', label: 'Off' }], voice: [] },
@@ -86,6 +93,8 @@ beforeEach(() => {
   state.topics = []
   state.researchNote = null
   state.lastRun = null
+  state.health = []
+  state.proposals = []
   Object.values(api).forEach((fn) => fn.mockClear())
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
@@ -132,6 +141,26 @@ describe('a new plan', () => {
 })
 
 describe('a saved plan', () => {
+  it('shows its health with each action and Auto\'s proposals; Apply sends the changes (PRD-251C US-C404, US-C407)', async () => {
+    state.health = [
+      { id: 'bank_low', title: 'The content bank is running low', detail: '5 unused topics for the 14 posts of the next two batches.',
+        action: { kind: 'research', label: 'Research again' } },
+      { id: 'no_video', title: 'No video this week', detail: 'Add a video row.', action: { kind: 'cadence', label: 'Add a video row' } },
+    ]
+    const cadence = [{ ...PLAN.cadence[0], time: '18:00' }]
+    state.proposals = [{ id: 'time:r1:18:00', kind: 'time', title: 'Post the image row at 18:00', why: 'Evenings did better.', changes: { cadence } }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    const health = await screen.findByRole('region', { name: 'Plan health' })
+    fireEvent.click(within(health).getByRole('button', { name: 'Research again' }))
+    await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
+    fireEvent.click(within(health).getByRole('button', { name: 'Add a video row' }))
+    expect(screen.getByRole('region', { name: 'Cadence' })).toBeInTheDocument()
+    const proposals = screen.getByRole('region', { name: "Auto's proposals" })
+    expect(api.updateSocialPlan).not.toHaveBeenCalled()  // nothing is applied by itself
+    fireEvent.click(within(proposals).getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalledWith('p1', { cadence }))
+  })
+
   it('a row may set its own visual and AI tool, shows its AI spend, and saves them (PRD-251C US-C302)', async () => {
     renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
     // The plan first: until it arrives the form is a new plan's, whose row the plan's then replaces.

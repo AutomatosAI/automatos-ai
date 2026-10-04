@@ -417,7 +417,8 @@ def _days_between(first: date, last: date) -> Iterable[date]:
         yield first + timedelta(days=offset)
 
 
-def _rows(plan: Any) -> List[Mapping[str, Any]]:
+def cadence_rows(plan: Any) -> List[Mapping[str, Any]]:
+    """The plan's saved cadence rows, each with its id."""
     return [row for row in (getattr(plan, "cadence", None) or []) if isinstance(row, Mapping) and row.get("id")]
 
 
@@ -431,7 +432,7 @@ def expand_slots(plan: Any, start: datetime, end: datetime, rows: Optional[Seque
     pad = timedelta(days=MAX_MOVE_DAYS + 1)
     first = max(starts_on, (start - pad).astimezone(zone).date())
     last = min(ends_on, (end + pad).astimezone(zone).date())
-    wanted = [row for row in _rows(plan) if rows is None or row["id"] in rows]
+    wanted = [row for row in cadence_rows(plan) if rows is None or row["id"] in rows]
     found = []
     for day in _days_between(first, last):
         weekday = WEEKDAYS[day.weekday()]
@@ -443,7 +444,7 @@ def slot_for_key(plan: Any, key: str) -> Optional[Slot]:
     """The plan's slot with ``key`` (moved as its override says), or ``None``: no such
     slot in the cadence and dates, or it is skipped."""
     parsed = parse_slot_key(key)
-    row = next((r for r in _rows(plan) if parsed and r["id"] == parsed[0]), None)
+    row = next((r for r in cadence_rows(plan) if parsed and r["id"] == parsed[0]), None)
     if parsed is None or row is None:
         return None
     _, day, clock = parsed

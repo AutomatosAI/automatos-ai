@@ -7,7 +7,8 @@
  * bank) and the chosen one on the right, with Back and Next. A new plan is created on Save,
  * then opens as itself; the content bank fills once the plan exists. A new plan starts with
  * Plan with Auto: Auto drafts the steps from what the person says, and saving that draft also
- * adds Auto's ideas to the bank and starts research.
+ * adds Auto's ideas to the bank and starts research. PRD-251C (US-C404, US-C407): a saved plan
+ * shows its health and Auto's proposals above the steps (plan-insights.tsx).
  */
 import { useEffect, useState } from 'react'
 
@@ -19,6 +20,7 @@ import { useSaveDraftedPlan } from '@/hooks/use-socials-plan-draft'
 import { useDeleteSocialPlan, useSaveSocialPlan, useSetSocialPlanStatus, useSocialPlan } from '@/hooks/use-socials-plans'
 import { DeleteAskedFirst } from '../studio/delete-asked-first'
 import { PlanAutoNotes } from './plan-auto-notes'
+import { PlanInsights } from './plan-insights'
 import { autoChanges, researchAsked, topicInputs } from './plan-auto-model'
 import { PLAN_STEPS, draftFromPlan, emptyDraft, inputFromDraft, missingFields, statusLine, type PlanDraft } from './plan-model'
 import { PlanStepBank } from './plan-step-bank'
@@ -175,6 +177,7 @@ export function SocialsPlanPage({ planId, canEdit, onSaved, canDelete = false, o
       {!planId && <PlanWithAuto canEdit={canEdit} drafted={!!auto.draft} onDrafted={auto.adopt} />}
       {auto.draft && <PlanAutoNotes warnings={auto.draft.warnings} />}
       {missing.length > 0 && <p className="m-0 text-[12.5px] text-muted-foreground">Before saving, the plan needs {missing.join(', ')}.</p>}
+      {plan && <PlanInsights planId={plan.id} canEdit={canEdit} onCadence={() => setStep(1)} onApplied={(saved) => set(draftFromPlan(saved))} />}
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
         <StepsNav step={step} onStep={setStep} />
         <section aria-label={PLAN_STEPS[step]} className="flex min-h-[520px] flex-col gap-5 rounded-xl border border-border bg-background p-5">

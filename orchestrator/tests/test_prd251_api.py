@@ -311,6 +311,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/history"),  # PRD-251C US-C103: what the workspace posted (api/socials_history.py)
             ("GET", "/api/socials/posted"),  # PRD-251C US-C408: Posted, what went out (api/socials_history.py)
             ("POST", "/api/socials/plans/{plan_id}/batches/{batch_key}/approve"),  # PRD-251C US-C205: approve the week
+            ("GET", "/api/socials/plans/{plan_id}/proposals"),  # PRD-251C US-C404: Auto's proposals
+            ("GET", "/api/socials/plans/{plan_id}/health"),  # PRD-251C US-C407: the plan's health
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

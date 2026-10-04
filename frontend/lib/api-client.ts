@@ -28,7 +28,12 @@ import type {
   SocialTopicInput,
   SocialTopicsResponse,
 } from './socials-plan-types'
-import type { SocialPostedFilters, SocialPostedResponse } from './socials-results-types'
+import type {
+  SocialPlanHealthItem,
+  SocialPlanProposal,
+  SocialPostedFilters,
+  SocialPostedResponse,
+} from './socials-results-types'
 
 interface ApiResponse<T = any> {
   data: T
@@ -3271,6 +3276,16 @@ class ApiClient {
 
   async updateSocialPlan(planId: string, input: SocialPlanInput): Promise<SocialPlan> {
     return this.request<SocialPlan>(`/api/socials/plans/${planId}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  /** PRD-251C US-C404: Auto's proposals for the plan, from its results; each applied by updateSocialPlan. */
+  async getSocialPlanProposals(planId: string): Promise<{ proposals: SocialPlanProposal[] }> {
+    return this.request<{ proposals: SocialPlanProposal[] }>(`/api/socials/plans/${planId}/proposals`)
+  }
+
+  /** PRD-251C US-C407: what needs the owner in the plan now, each with its action. */
+  async getSocialPlanHealth(planId: string): Promise<{ items: SocialPlanHealthItem[] }> {
+    return this.request<{ items: SocialPlanHealthItem[] }>(`/api/socials/plans/${planId}/health`)
   }
 
   async pauseSocialPlan(planId: string): Promise<SocialPlan> {

@@ -1,5 +1,5 @@
 {
-  "route_count": 891,
+  "route_count": 893,
   "routes": [
     {
       "method": "GET",
@@ -2182,8 +2182,16 @@
       "path": "/api/socials/plans/{plan_id}/end"
     },
     {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/health"
+    },
+    {
       "method": "POST",
       "path": "/api/socials/plans/{plan_id}/pause"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/proposals"
     },
     {
       "method": "POST",

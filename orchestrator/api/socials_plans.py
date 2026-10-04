@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.socials_batches import router as batches_router
+from api.socials_plan_insights import router as insights_router
 from api.socials_plan_draft import router as plan_draft_router
 from api.socials_topics import router as topics_router
 from core.auth.dependencies import RequestContext
@@ -63,6 +64,8 @@ router.include_router(topics_router)
 router.include_router(plan_draft_router)
 # PRD-251C US-C205: approve the week (api/socials_batches.py).
 router.include_router(batches_router)
+# PRD-251C US-C404, US-C407: Auto's proposals and the plan's health (api/socials_plan_insights.py).
+router.include_router(insights_router)
 
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
