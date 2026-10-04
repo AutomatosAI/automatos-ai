@@ -28,6 +28,13 @@ import type {
   SocialTopicInput,
   SocialTopicsResponse,
 } from './socials-plan-types'
+import type {
+  SocialPlanHealthItem,
+  SocialPlanProposal,
+  SocialPostedFilters,
+  SocialPostedResponse,
+  SocialVoiceExample,
+} from './socials-results-types'
 
 interface ApiResponse<T = any> {
   data: T
@@ -546,6 +553,8 @@ export interface SocialPost {
   preview?: SocialPostPreview | null
   /** PRD-251B Wave 2: the plan slot the post was made for, and its music (null: the template's). */
   slot_key?: string | null
+  /** PRD-251C: the batch a weekly or monthly plan made it in ("2026-W43", "2026-11"). */
+  batch_key?: string | null
   music?: SocialPostMusic
   created_at: string
   updated_at: string
@@ -878,8 +887,9 @@ export interface SocialCampaign {
   updated_at: string
   /** GET /api/socials/campaigns: how many posts the campaign holds. */
   post_count?: number
-  /** PRD-251B (B6): a plan is a campaign of kind "plan". */
+  /** PRD-251B (B6): a plan is a campaign of kind "plan"; PRD-251C: its rhythm and batch day. */
   kind?: 'campaign' | 'plan'
+  make?: { rhythm?: 'daily' | 'weekly' | 'monthly'; batch_day?: string }
 }
 
 /** GET /api/socials/campaigns/{id}: the campaign with its posts, oldest first. */
@@ -901,7 +911,7 @@ export interface SocialSeriesShownPost {
 }
 
 /** Why a series approval left a post unapproved. */
-export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown'
+export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown' | 'not_in_batch'
 
 export interface SocialSeriesLeftPost {
   post_id: string
@@ -3016,6 +3026,11 @@ class ApiClient {
     })
   }
 
+  /** Delete a post that has not gone out (owner or admin); 409 while it renders or publishes. */
+  async deleteSocialPost(postId: string): Promise<void> {
+    await this.request<void>(`/api/socials/posts/${postId}`, { method: 'DELETE' })
+  }
+
   async submitSocialPost(postId: string): Promise<SocialPost> {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/submit`, { method: 'POST' })
   }
@@ -3211,6 +3226,13 @@ class ApiClient {
     return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'DELETE' })
   }
 
+  /** PRD-251C US-C205: approve a plan's week (or month) in one sitting, each post by the hash shown. */
+  async approveSocialPlanBatch(planId: string, batchKey: string, posts: SocialSeriesShownPost[]): Promise<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }> {
+    return this.request<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }>(
+      `/api/socials/plans/${planId}/batches/${encodeURIComponent(batchKey)}/approve`, { method: 'POST', body: JSON.stringify({ posts }) },
+    )
+  }
+
   /** Approve the posts the approver was shown as one series (D6): each with the content_hash
    * on screen. The answer reports the posts approved and each post left, with why; 409 when
    * the workspace's series approval is off or the campaign approves post by post. */
@@ -3223,6 +3245,16 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ posts, comment: comment || null }),
     })
+  }
+
+  /** PRD-251C US-C408: Posted, what went out, newest first, filtered by plan, channel and format. */
+  async listSocialPosted(filters: SocialPostedFilters = {}): Promise<SocialPostedResponse> {
+    const query = new URLSearchParams()
+    if (filters.planId) query.set('plan_id', filters.planId)
+    if (filters.channel) query.set('channel', filters.channel)
+    if (filters.format) query.set('format', filters.format)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return this.request<SocialPostedResponse>(`/api/socials/posted${suffix}`)
   }
 
   // PRD-251B Wave 2: plans (a campaign of kind plan), their slots and their content bank.
@@ -3247,6 +3279,26 @@ class ApiClient {
     return this.request<SocialPlan>(`/api/socials/plans/${planId}`, { method: 'PUT', body: JSON.stringify(input) })
   }
 
+  /** PRD-251C US-C404: Auto's proposals for the plan, from its results; each applied by updateSocialPlan. */
+  async getSocialPlanProposals(planId: string): Promise<{ proposals: SocialPlanProposal[] }> {
+    return this.request<{ proposals: SocialPlanProposal[] }>(`/api/socials/plans/${planId}/proposals`)
+  }
+
+  /** PRD-251C US-C406: the owner's voice examples, newest first. */
+  async listSocialVoiceExamples(): Promise<{ examples: SocialVoiceExample[] }> {
+    return this.request<{ examples: SocialVoiceExample[] }>('/api/socials/voice-examples')
+  }
+
+  /** PRD-251C US-C406: remove one voice example; the composer never reads it again. */
+  async deleteSocialVoiceExample(exampleId: string): Promise<void> {
+    await this.request<void>(`/api/socials/voice-examples/${exampleId}`, { method: 'DELETE' })
+  }
+
+  /** PRD-251C US-C407: what needs the owner in the plan now, each with its action. */
+  async getSocialPlanHealth(planId: string): Promise<{ items: SocialPlanHealthItem[] }> {
+    return this.request<{ items: SocialPlanHealthItem[] }>(`/api/socials/plans/${planId}/health`)
+  }
+
   async pauseSocialPlan(planId: string): Promise<SocialPlan> {
     return this.request<SocialPlan>(`/api/socials/plans/${planId}/pause`, { method: 'POST' })
   }
@@ -3259,7 +3311,12 @@ class ApiClient {
     return this.request<SocialPlan>(`/api/socials/plans/${planId}/end`, { method: 'POST' })
   }
 
-  /** Research again (US-B204): 409 while the Socials package's research playbook is missing. */
+  /** Delete the plan and its content bank (owners and admins); the posts it made stay, unlinked. */
+  async deleteSocialPlan(planId: string): Promise<void> {
+    await this.request<void>(`/api/socials/plans/${planId}`, { method: 'DELETE' })
+  }
+
+  /** Research again (US-B204): a missing research playbook is put back first; 409, with why, when it cannot be (PRD-251C US-C102). */
   async researchSocialPlan(planId: string): Promise<{ plan_id: string; execution_id: string }> {
     return this.request<{ plan_id: string; execution_id: string }>(`/api/socials/plans/${planId}/research`, { method: 'POST' })
   }
@@ -3282,8 +3339,8 @@ class ApiClient {
     return this.request<SocialTopicsResponse>(`/api/socials/plans/${planId}/topics`)
   }
 
-  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic> {
-    return this.request<SocialTopic>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
+  async addSocialPlanTopic(planId: string, input: SocialTopicInput): Promise<SocialTopic & { warning?: string | null }> {
+    return this.request<SocialTopic & { warning?: string | null }>(`/api/socials/plans/${planId}/topics`, { method: 'POST', body: JSON.stringify(input) })
   }
 
   async updateSocialPlanTopic(planId: string, topicId: string, input: SocialTopicInput): Promise<SocialTopic> {

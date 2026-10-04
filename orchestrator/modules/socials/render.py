@@ -66,7 +66,7 @@ import asyncio
 import logging
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
@@ -97,7 +97,7 @@ from core.social_cuts import cut_to_length, slots_cut_out
 from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
 from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
-from modules.socials import notify, service
+from modules.socials import channel_sizes, notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -112,6 +112,7 @@ MAX_REPORTED_FINDINGS = 20
 FINDING_KEYS = ("section", "severity", "code", "message", "selector", "containerSelector", "time", "fixHint", "source", "line")
 FINDING_TEXT_CHARS = 300
 DEFAULT_ASPECT = "original"
+STORY_KIND = "story"  # PRD-251C (US-C301): a target posted as an Instagram story
 # US-208: a preview's files never share a name with the post's rendered media.
 PREVIEW_FILE_PREFIX = "preview-"
 
@@ -186,8 +187,10 @@ def bundle_for(
     *,
     fallback_name: str = "",
     footage_slots: Sequence[str] = (),
+    size: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """The render bundle media-render takes (``services/media-render/media_render/bundle.py``).
+    """The render bundle media-render takes (``services/media-render/media_render/bundle.py``),
+    at ``size`` (one of the template's; its default when ``None``, ``channel_sizes``).
 
     ``brand_kit`` is the workspace's, render-ready; ``fallback_name`` (the
     workspace's name) is the brand name when the kit has none. ``footage_slots``
@@ -226,7 +229,31 @@ def bundle_for(
         fallback_name=fallback_name,
         keep_slots=footage_slots,
         fmt=template.format,
+        size=size,
+        story_safe=is_story(post),
     )
+
+
+def is_story(post: Any) -> bool:
+    """PRD-251C (US-C301): a post with a story among its channels renders its 9:16 size
+    inside the story's safe zone (``core.media_render_bundle.story_safe_css``)."""
+    return any(getattr(target, "post_kind", None) == STORY_KIND for target in getattr(post, "targets", None) or ())
+
+
+def template_sizes(template: Any) -> List[str]:
+    """The sizes a social template declares, its default first (``core/social_templates.py``)."""
+    sizes = (composition_of(template) or {}).get("sizes")
+    return [str(size) for size in sizes] if isinstance(sizes, list) else []
+
+
+def sizes_for(post: Any, template: Any) -> List[Optional[str]]:
+    """The sizes a render makes: a still post each size its channels need (``channel_sizes``);
+    a video one, its template's default, as before: a video's render minutes, its quota hold
+    and its wait are one render's. ``[None]`` (the default) when the template names none."""
+    sizes = template_sizes(template)
+    if getattr(template, "format", None) == SOCIAL_VIDEO:
+        return list(sizes[:1]) or [None]
+    return list(channel_sizes.render_sizes(sizes, post.targets)) or [None]
 
 
 def at_chosen_length(blocks: Mapping[str, Any], post: Any) -> Dict[str, Any]:
@@ -301,6 +328,14 @@ class RenderJob:
     # US-208: a preview render (half resolution) is stored as the post's preview:
     # its files are named ``preview-…`` and registered as no Deliverable.
     preview: bool = False
+    # 3 Oct 2026 (channel_sizes): the same post at the other sizes its channels need, rendered
+    # after ``bundle`` with the same footage and voice; their files join ``media`` by aspect.
+    extra_bundles: Tuple[Mapping[str, Any], ...] = ()
+    # PRD-251C (US-C303): files already in our storage that a slot shows (slot path → storage
+    # key), linked as the render starts (a still of the person's own, to crop), and the keys
+    # of the post's media the render keeps beside its files (that still: the next crop's source).
+    slot_keys: Mapping[str, str] = field(default_factory=dict)
+    keep_media: Tuple[str, ...] = ()
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -351,13 +386,13 @@ def _poll_failure(exc: MediaRenderError) -> RenderFailure:
 
 
 # ── the background render ───────────────────────────────────────────────────
-async def _footaged(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> Mapping[str, Any]:
-    """The bundle with the footage its post asks for (US-114): each shot generated
-    now, or reused from an earlier render, a file in our storage that media-render
-    reaches through a presigned link. A render asking for none: the bundle as it is."""
+async def _footage_links(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> Dict[str, str]:
+    """The footage its post asks for (US-114), as slot path → presigned link: each shot
+    generated now, or reused from an earlier render, a file in our storage. Made ONCE per
+    render, whatever its sizes (a generation is paid). None asked for: no links."""
     plan = job.footage
     if plan is None or not plan.shown:
-        return job.bundle
+        return {}
     try:
         made = await footage_recipes.generate(
             plan, workspace_id=job.workspace_id, post_id=job.post_id, title=job.title,
@@ -377,18 +412,19 @@ async def _footaged(job: RenderJob, store: MediaStore, session_factory: Callable
     except Exception as exc:  # noqa: BLE001 — storage cannot link the footage: fail the render, loudly
         logger.exception("[Socials] linking the footage of post %s failed", job.post_id)
         raise RenderFailure("storage_failed", "The footage could not be handed to the renderer.") from exc
-    return with_slot_files(job.bundle, links)
+    return links
 
 
-async def _voiced(
+async def _voice_links(
     job: RenderJob, bundle: Mapping[str, Any], store: MediaStore, session_factory: Callable[[], Any]
-) -> Mapping[str, Any]:
-    """The bundle, its script spoken by the post's voice toolkit when it chose one
-    (US-111): each line now a file in our storage, reached by media-render through
-    a presigned link. Kokoro speaks inside media-render: the bundle as it is."""
+) -> Dict[str, Tuple[str, str]]:
+    """The script of ``bundle`` spoken by the post's voice toolkit when it chose one
+    (US-111), as line id → (extension, presigned link): each line a file in our storage.
+    Spoken ONCE per render, whatever its sizes (it is paid). Kokoro speaks inside
+    media-render: no links."""
     lines = voice_script(bundle)
     if job.voice is None or not lines:
-        return bundle
+        return {}
     try:
         spoken = await voice_recipes.speak(
             job.voice, workspace_id=job.workspace_id, post_id=job.post_id, lines=lines,
@@ -407,7 +443,44 @@ async def _voiced(
     except Exception as exc:  # noqa: BLE001 — storage cannot link the lines: fail the render, loudly
         logger.exception("[Socials] linking the voice lines of post %s failed", job.post_id)
         raise RenderFailure("storage_failed", "The spoken lines could not be handed to the renderer.") from exc
-    return with_voice_files(bundle, links)
+    return links
+
+
+async def _slot_links(job: RenderJob, store: MediaStore) -> Dict[str, str]:
+    """The job's stored slot files (``slot_keys``) as slot path → presigned link."""
+    ttl = config.SOCIALS_RENDER_MEDIA_URL_TTL_SECONDS
+    try:
+        return {path: await asyncio.to_thread(store.presigned_get, key, ttl) for path, key in job.slot_keys.items()}
+    except Exception as exc:  # noqa: BLE001 — storage cannot link the file: fail the render, loudly
+        logger.exception("[Socials] linking the slot files of post %s failed", job.post_id)
+        raise RenderFailure("storage_failed", "The picture could not be handed to the renderer.") from exc
+
+
+async def _dressed(job: RenderJob, store: MediaStore, session_factory: Callable[[], Any]) -> List[Mapping[str, Any]]:
+    """Every size's bundle with the post's footage and voice, each made once for all of them."""
+    footage = {**await _footage_links(job, store, session_factory), **await _slot_links(job, store)}
+    voice = await _voice_links(job, job.bundle, store, session_factory)  # the same script at every size
+    dressed = []
+    for bundle in (job.bundle, *job.extra_bundles):
+        bundle = with_slot_files(bundle, footage) if footage else bundle
+        dressed.append(with_voice_files(bundle, voice) if voice else bundle)
+    return dressed
+
+
+async def _render_sizes(
+    job: RenderJob, client: MediaRenderClient, store: MediaStore, session_factory: Callable[[], Any], deadline: float,
+) -> Tuple[Dict[str, Any], Optional[MusicCredit], Dict[str, List[Dict[str, Any]]]]:
+    """Render every size first, then store each one's files: a later size that fails leaves
+    nothing of an earlier one in storage or in Deliverables. The first size's record and
+    music; every size's files by aspect."""
+    finished = [await _wait(client, job, await _submit(client, bundle, deadline), deadline)
+                for bundle in await _dressed(job, store, session_factory)]
+    music = _music_of(job, finished[0])
+    media: Dict[str, List[Dict[str, Any]]] = {}
+    for record in finished:
+        stored = await _store_outputs(client, store, session_factory, job, record, music)
+        media = {**media, **{aspect: [*media.get(aspect, []), *files] for aspect, files in stored.items()}}
+    return finished[0], music, media
 
 
 async def _submit(client: MediaRenderClient, bundle: Mapping[str, Any], deadline: float) -> Dict[str, Any]:
@@ -617,7 +690,8 @@ def _finish(
         if failure is None:
             try:
                 service.finish_render(
-                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits
+                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits,
+                    keep=job.keep_media,
                 )
             except service.InvalidPost as exc:
                 failure = RenderFailure("bad_output", f"The rendered files could not be recorded: {exc}")
@@ -676,17 +750,9 @@ async def _render(job: RenderJob, client: MediaRenderClient, store: MediaStore, 
     budget = config.SOCIALS_RENDER_MAX_WAIT_SECONDS
     deadline = started + budget
 
-    async def render_and_store():
-        bundle = await _footaged(job, store, factory)
-        bundle = await _voiced(job, bundle, store, factory)
-        accepted = await _submit(client, bundle, deadline)
-        finished = await _wait(client, job, accepted, deadline)
-        music = _music_of(job, finished)
-        return finished, music, await _store_outputs(client, store, factory, job, finished, music)
-
     try:
         try:
-            finished, music, media = await asyncio.wait_for(render_and_store(), timeout=budget)
+            finished, music, media = await asyncio.wait_for(_render_sizes(job, client, store, factory, deadline), timeout=budget)
         except asyncio.TimeoutError:
             raise RenderFailure("timed_out", f"The render did not finish within {budget // 60} minutes.") from None
     except RenderFailure as failure:

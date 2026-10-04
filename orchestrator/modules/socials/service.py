@@ -85,6 +85,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
 from modules.socials import text_search
+from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
 from modules.socials.targets import TARGETS
@@ -201,7 +202,9 @@ VOICE_TEXT_MAX_CHARS = 200
 # D12 (S1.8): footage a post asks for, per slot, and what a render recorded for
 # it. A client writes the prompt; the rest is the server's, and a client that
 # sends it back has it ignored.
-FOOTAGE_REQUEST_KEYS = ("prompt",)
+# PRD-251C (US-C302): ``via`` names the toolkit that makes the slot (a plan row's), never another.
+FOOTAGE_REQUEST_KEYS = ("prompt", "via")
+FOOTAGE_VIA = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 FOOTAGE_RECORD_KEYS = (
     "status", "toolkit", "model", "deliverable_id", "name", "sha256", "bytes", "content_type",
     "estimate_usd", "cost_usd", "generated_at",
@@ -525,23 +528,28 @@ def validate_footage(value: Any) -> Optional[Dict[str, Dict[str, str]]]:
         return None
     if len(footage) > MAX_SLOTS:
         raise InvalidPost(f"footage names at most {MAX_SLOTS} slots")
-    clean: Dict[str, Dict[str, str]] = {}
-    for slot, request in footage.items():
-        if not isinstance(slot, str) or not VARIABLE_NAME.match(slot):
-            raise InvalidPost(f"footage.{slot} is not a slot name (letters, digits and _, not starting with a digit)")
-        if not isinstance(request, dict):
-            raise InvalidPost(f'footage.{slot} must be an object such as {{"prompt": "a calm sea at dawn"}}')
-        unknown = [k for k in request if k not in FOOTAGE_REQUEST_KEYS + FOOTAGE_RECORD_KEYS]
-        if unknown:
-            raise InvalidPost(f"footage.{slot} takes a prompt, got {unknown!r}")
-        prompt = request.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            raise InvalidPost(f"footage.{slot}.prompt is required")
-        text = prompt.strip()
-        if len(text) > FOOTAGE_PROMPT_MAX_CHARS:
-            raise InvalidPost(f"footage.{slot}.prompt must be at most {FOOTAGE_PROMPT_MAX_CHARS} characters")
-        clean[slot] = {"prompt": text}
-    return clean
+    return {slot: _footage_request(slot, request) for slot, request in footage.items()}
+
+
+def _footage_request(slot: Any, request: Any) -> Dict[str, str]:
+    """One slot's ask: its prompt, and the toolkit that makes it when one is named (``via``)."""
+    if not isinstance(slot, str) or not VARIABLE_NAME.match(slot):
+        raise InvalidPost(f"footage.{slot} is not a slot name (letters, digits and _, not starting with a digit)")
+    if not isinstance(request, dict):
+        raise InvalidPost(f'footage.{slot} must be an object such as {{"prompt": "a calm sea at dawn"}}')
+    unknown = [k for k in request if k not in FOOTAGE_REQUEST_KEYS + FOOTAGE_RECORD_KEYS]
+    if unknown:
+        raise InvalidPost(f"footage.{slot} takes a prompt, got {unknown!r}")
+    prompt = request.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise InvalidPost(f"footage.{slot}.prompt is required")
+    text = prompt.strip()
+    if len(text) > FOOTAGE_PROMPT_MAX_CHARS:
+        raise InvalidPost(f"footage.{slot}.prompt must be at most {FOOTAGE_PROMPT_MAX_CHARS} characters")
+    via = request.get("via")
+    if via is not None and (not isinstance(via, str) or not FOOTAGE_VIA.match(via)):
+        raise InvalidPost(f"footage.{slot}.via names a Composio toolkit, e.g. fal_ai")
+    return {"prompt": text, **({"via": via} if via else {})}
 
 
 def validate_targets(value: Any) -> List[Dict[str, Any]]:
@@ -725,8 +733,8 @@ def create_draft(
         **clean,
     )
     post.content_hash = compute_content_hash(post)
-    if agent:
-        _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent)
+    if agent:  # PRD-251C US-C406: what the agent wrote is kept with it, the voice examples' draft
+        _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent, **draft_entry(post.copy))
     db.add(post)
     return post
 
@@ -790,7 +798,8 @@ def update_post(
         else:
             setattr(post, name, value)
     if agent and changed:
-        _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed)
+        wrote = draft_entry(post.copy) if "copy" in changed else {}
+        _log(post, actor, ACTION_EDIT, f"Edited by {agent}: {', '.join(changed)}.", agent=agent, fields=changed, **wrote)
 
     new_hash = compute_content_hash(post)
     if new_hash == post.content_hash:
@@ -1013,16 +1022,19 @@ def finish_render(
     summary: Optional[str] = None,
     report: Optional[Mapping[str, Any]] = None,
     credits: Sequence[str] = (),
+    keep: Sequence[str] = (),
 ) -> SocialPost:
     """rendering → needs_approval with the rendered files as ``media``.
 
-    ``media`` replaces what the post carried before, and the content hash is
+    ``media`` replaces what the post carried before, but for the aspects in ``keep`` (a still
+    of the person's own, the source of its crops: PRD-251C US-C303), and the content hash is
     recomputed over it, so an approval binds to these exact files (D6).
     ``credits`` are the lines the render's music asks for (S1.6, a CC BY
     track): they join the copy the approver reviews, and the history says so.
     """
     target = _target(post, ACTION_RENDER_DONE)
-    post.media = _rendered_media(media)
+    before = post.media if isinstance(post.media, Mapping) else {}
+    post.media = {**{aspect: before[aspect] for aspect in keep if aspect in before}, **_rendered_media(media)}
     credited = with_credits(post.copy, credits)
     added = credited is not post.copy
     if added:

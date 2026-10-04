@@ -113,6 +113,7 @@ TOOLS = (
     # PRD-251B (US-B204): the research playbook reads a plan and adds topics to its bank.
     "platform_get_social_plan",
     "platform_add_social_topics",
+    "platform_get_social_history",  # PRD-251C (US-C103): what the workspace already posted
 )
 # The steps no tool may reach: the review, the schedule and the way out (D6, D14).
 NOT_FOR_AGENTS = {
@@ -691,6 +692,7 @@ def test_no_registered_tool_approves_schedules_or_publishes_a_post():
         "platform_list_social_posts": "read",
         "platform_get_social_plan": "read",
         "platform_add_social_topics": "write",
+        "platform_get_social_history": "read",
     }
     # Every tool is routed to its handler here, and nothing a tool runs reaches a review, a
     # schedule or the way out: neither the handlers nor the flows they share with the routes.

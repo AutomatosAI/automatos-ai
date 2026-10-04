@@ -9,7 +9,9 @@
  *   which approves with override_unsourced. The server may name claims whose
  *   source has since gone (a 422), which asks the same way.
  * - Request changes needs a comment; reject takes an optional reason.
- * - F256: a post with no channel publishes nothing, so Approve waits for one and says why.
+ * - F256: a post with no channel publishes nothing, so Approve waits for one and says why;
+ *   with ``onEdit`` (the Queue) the hint opens the post to add one (3 Oct 2026).
+ * - Approve & post now approves and publishes at once (socials-approve-post-now.tsx).
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
@@ -23,6 +25,7 @@ import {
   useSocialPostAction,
   type SocialPostAction,
 } from '@/hooks/use-socials-api'
+import { ApproveAndPostNow } from './socials-approve-post-now'
 import { SOCIAL_COMMENT_MAX_CHARS } from './socials-status'
 import { hasChannels, unsourcedClaims } from './socials-review'
 
@@ -105,12 +108,26 @@ interface SocialsPostReviewProps {
   sendBack?: SendBack
   /** PRD-251B US-B111: more actions beside these (the Queue's Make another take). */
   extra?: ReactNode
+  /** Opens the post in the editor (the Queue): the no-channel hint links to it. */
+  onEdit?: () => void
 }
 
 /** F256: a post with no channel publishes nothing, so Approve waits for one. */
 export const NO_CHANNEL_HINT = 'Nothing would post: no channel is chosen. Open the post, tick a channel, then approve it.'
+export const NO_CHANNEL_LEAD = 'Nothing would post: no channel is chosen.'
+export const ADD_A_CHANNEL = 'Open the post to add a channel'
 
-export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra }: SocialsPostReviewProps) {
+function NoChannelHint({ onEdit }: { onEdit?: () => void }) {
+  if (!onEdit) return <p className="text-xs text-muted-foreground">{NO_CHANNEL_HINT}</p>
+  return (
+    <p className="text-xs text-muted-foreground">
+      {NO_CHANNEL_LEAD}{' '}
+      <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={onEdit}>{ADD_A_CHANNEL}</button>
+    </p>
+  )
+}
+
+export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra, onEdit }: SocialsPostReviewProps) {
   const [asking, setAsking] = useState<Asking>(null)
   const [confirmClaims, setConfirmClaims] = useState<string[] | null>(null)
   const [stale, setStale] = useState(false)
@@ -146,6 +163,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
         <Button size="sm" onClick={startApprove} disabled={busy || dirty || confirmClaims !== null || goesNowhere}>
           {approveLabel}
         </Button>
+        <ApproveAndPostNow post={post} disabled={busy || dirty || confirmClaims !== null || goesNowhere} />
         <Button size="sm" variant="outline" onClick={() => setAsking('changes')} disabled={busy}>
           Request changes
         </Button>
@@ -160,7 +178,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
           Reject
         </Button>
       </div>
-      {goesNowhere && <p className="text-xs text-muted-foreground">{NO_CHANNEL_HINT}</p>}
+      {goesNowhere && <NoChannelHint onEdit={onEdit} />}
       {confirmClaims && (
         <UnsourcedConfirmation
           claims={confirmClaims}

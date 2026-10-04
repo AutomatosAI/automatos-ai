@@ -20,6 +20,13 @@ holds them and the model together. D2 creates the campaigns table in Wave 2,
 because series approval ships there: the ``prd251_wave2`` migration builds it
 and links ``social_posts.campaign_id`` to it, and
 ``tests/test_prd251w2_campaigns.py`` holds that migration and the model together.
+
+PRD-251C Wave 4 (US-C401, the ``prd251c_wave4`` migration):
+
+* ``social_post_stats``: a published target's numbers, read at 1 and 7 days
+  (``services/socials_results.py``), one row per target and reading.
+* ``social_voice_examples``: a post's copy as Auto drafted it and as a person approved
+  it, when they differ (C8): the composer learns the owner's voice from them.
 """
 
 from __future__ import annotations
@@ -202,6 +209,8 @@ class SocialPost(Base):
         Index("ix_social_posts_workspace_planned_for", "workspace_id", "planned_for"),
         # PRD-251B (B7): one post per planned slot of a plan; a NULL key never collides.
         Index("uq_social_posts_campaign_slot_key", "campaign_id", "slot_key", unique=True),
+        # PRD-251C (C1, US-C201): a plan's batch of posts, approved as one week or month.
+        Index("ix_social_posts_campaign_batch", "campaign_id", "batch_key"),
         {"extend_existing": True},
     )
 
@@ -285,6 +294,10 @@ class SocialPost(Base):
     # a track of media-render's library; {"track": null} no music. A render setting
     # like voice: outside the content hash. Both added by the prd251b_wave2 migration.
     music = Column(_json_type(), nullable=True)
+    # PRD-251C (C1, US-C201): the batch a weekly or monthly plan made the post in, as
+    # "2026-W42" or "2026-11"; NULL for a daily plan's post and every other post. Not
+    # content. Added by the prd251c_wave2 migration.
+    batch_key = Column(String(16), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -328,6 +341,7 @@ class SocialPost(Base):
             "length_seconds": self.length_seconds,
             "slot_key": self.slot_key,
             "music": self.music or None,
+            "batch_key": self.batch_key,
             "targets": [
                 target.to_dict()
                 for target in sorted(self.targets or [], key=lambda t: (t.toolkit, t.post_kind))
@@ -455,3 +469,76 @@ class SocialPostTarget(Base):
         plan = self.action_plan if isinstance(self.action_plan, dict) else {}
         notes = plan.get("notes")
         return [str(note) for note in notes] if isinstance(notes, list) else []
+
+
+class SocialPostStat(Base):
+    """A published target's numbers at one reading (PRD-251C C7, US-C401/C402).
+
+    The results job reads each target 1 and 7 days after it went out through its channel's
+    read action in Composio (``modules/socials/result_reads.py``) and keeps what the platform
+    gave: ``numbers`` holds only the numbers it gave (likes, reach, …), never a guessed zero.
+    One row per target and reading; deleting the post deletes them.
+    """
+
+    __tablename__ = "social_post_stats"
+    __table_args__ = (
+        UniqueConstraint("target_id", "reading", name="uq_social_post_stats_target_reading"),
+        Index("ix_social_post_stats_post_id", "post_id"),
+        Index("ix_social_post_stats_workspace_read", "workspace_id", "read_at"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(Uuid(as_uuid=True), ForeignKey("social_posts.id", ondelete="CASCADE"), nullable=False)
+    target_id = Column(Uuid(as_uuid=True), ForeignKey("social_post_targets.id", ondelete="CASCADE"), nullable=False)
+    # The days after the target went out that this reading is for: 1 or 7.
+    reading = Column(Integer, nullable=False)
+    read_at = Column(DateTime(timezone=True), nullable=False)
+    # {"likes": 12, "reach": 340, …}: only what the platform gave.
+    numbers = Column(_json_type(), nullable=False, default=dict)
+    source_action = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "post_id": str(self.post_id),
+            "target_id": str(self.target_id),
+            "reading": self.reading,
+            "read_at": _iso(self.read_at),
+            "numbers": dict(self.numbers or {}),
+            "source_action": self.source_action,
+        }
+
+
+class SocialVoiceExample(Base):
+    """A post's copy as Auto drafted it and as a person approved it (PRD-251C C8, US-C401/C406).
+
+    Kept when a person approves a post whose copy differs from Auto's draft; the workspace
+    keeps its newest ``SOCIALS_VOICE_EXAMPLES`` and the composer reads them with the brand
+    kit's voice. The owner removes any of them in Brand kit, Voice. A deleted post leaves its
+    example.
+    """
+
+    __tablename__ = "social_voice_examples"
+    __table_args__ = (
+        Index("ix_social_voice_examples_workspace_created", "workspace_id", "created_at"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(Uuid(as_uuid=True), ForeignKey("social_posts.id", ondelete="SET NULL"), nullable=True)
+    draft = Column(Text, nullable=False)
+    approved = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "post_id": str(self.post_id) if self.post_id else None,
+            "draft": self.draft,
+            "approved": self.approved,
+            "created_at": _iso(self.created_at),
+        }

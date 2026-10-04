@@ -458,7 +458,7 @@ def test_put_refuses_a_kind_the_registry_marks_unavailable_with_its_reason(api):
     "target, message",
     [
         ({"toolkit": "youtube", "post_kind": "video"}, "youtube is not a channel connected in this workspace"),
-        ({"toolkit": "instagram", "post_kind": "text"}, "Instagram does not post a text: it posts image, reel, carousel"),
+        ({"toolkit": "instagram", "post_kind": "text"}, "Instagram does not post a text: it posts image, reel, story, carousel"),  # PRD-251C: stories
         ({"toolkit": "linkedin", "post_kind": "text", "options": {"privacy_level": "PUBLIC"}}, "LinkedIn text takes author, not privacy_level"),
         ({"toolkit": "linkedin", "post_kind": "video", "options": {"author": "urn:li:person:1"}}, "LinkedIn video takes no options, not author"),
         ({"toolkit": "linkedin", "post_kind": "carousel"}, "LinkedIn does not post a carousel"),

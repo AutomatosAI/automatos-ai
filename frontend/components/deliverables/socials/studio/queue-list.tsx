@@ -3,8 +3,10 @@
 /**
  * PRD-251B US-B111 — the Queue's list (Queue.dc.html): the posts waiting for approval by the
  * day of their slot, each with its channel badges, its time, "Needs you", its title and its
- * format.
+ * format. PRD-251C: a group may carry an action in its header (a plan's batch: Approve the week).
  */
+import type { ReactNode } from 'react'
+
 import { cn } from '@/lib/utils'
 import type { SocialPost } from '@/lib/api-client'
 import { CHANNEL_BADGE, CHIP_KEY, TONES } from './socials-calendar-chip'
@@ -15,6 +17,8 @@ interface QueueListProps {
   groups: ReadonlyArray<QueueGroup>
   selectedId: string | null
   onSelect: (postId: string) => void
+  /** What a group's header offers, if anything. */
+  action?: (group: QueueGroup) => ReactNode
 }
 
 function QueueItem({ post, selected, onSelect }: { post: SocialPost; selected: boolean; onSelect: () => void }) {
@@ -46,12 +50,15 @@ function QueueItem({ post, selected, onSelect }: { post: SocialPost; selected: b
   )
 }
 
-export function QueueList({ groups, selectedId, onSelect }: QueueListProps) {
+export function QueueList({ groups, selectedId, onSelect, action }: QueueListProps) {
   return (
     <aside aria-label="Waiting for approval" className="flex flex-col gap-2.5">
       {groups.map((group) => (
-        <section key={group.label} aria-label={group.label} className="flex flex-col gap-2.5">
-          <h2 className="text-[11.5px] font-semibold uppercase tracking-[.07em] text-muted-foreground">{group.label}</h2>
+        <section key={group.id ?? group.label} aria-label={group.label} className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[11.5px] font-semibold uppercase tracking-[.07em] text-muted-foreground">{group.label}</h2>
+            {action?.(group)}
+          </div>
           {group.posts.map((post) => (
             <QueueItem key={post.id} post={post} selected={post.id === selectedId} onSelect={() => onSelect(post.id)} />
           ))}

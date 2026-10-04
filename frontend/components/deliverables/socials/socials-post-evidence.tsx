@@ -12,6 +12,7 @@ import { badgeVariants } from '@/components/ui/badge'
 import type { SocialPost } from '@/lib/api-client'
 import { useSocialPostMedia } from '@/hooks/use-socials-api'
 import { channelCopies, claimRows } from './socials-review'
+import { channelLabel } from './socials-status'
 
 const SECTION_TITLE = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 
@@ -30,8 +31,8 @@ function SocialsPostChannels({ post }: { post: SocialPost }) {
         <ul className="space-y-2">
           {channels.map((channel) => (
             <li key={channel.toolkit} className="rounded-lg border border-border/60 px-3 py-2">
-              <p className="text-sm font-medium capitalize text-foreground">
-                {channel.toolkit.replace(/_/g, ' ')}
+              <p className="text-sm font-medium text-foreground">
+                {channelLabel(channel.toolkit)}
                 <span className="font-normal text-muted-foreground"> · {channel.kinds.join(', ')}</span>
               </p>
               <p className="whitespace-pre-wrap text-sm text-foreground">{channel.text || 'No copy yet.'}</p>

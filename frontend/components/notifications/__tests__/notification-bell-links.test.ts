@@ -36,6 +36,9 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'watch', // services/watch_notifications.py
   'question', // PRD-225: modules/tools/discovery/handlers_asks.py (question_pending)
   'social_post', // PRD-251 US-206: modules/socials/notify.py (approval_pending)
+  'social_plan', // PRD-251B US-B205: modules/socials/plan_notify.py (a plan's notices)
+  'social_batch', // PRD-251C US-C204: plan_notify.notify_review (a batch to review)
+  'social_posted', // PRD-251C US-C403: plan_notify.notify_weekly_note (the weekly note)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {
@@ -70,6 +73,12 @@ describe('PRD-227 US-003 — bell deep-link drift guard', () => {
   it('routes approval_grant → Governance and watch → Watchlist (the new cases)', () => {
     expect(linkFor(row('approval_grant'))).toBe('/command-center?tab=governance')
     expect(linkFor(row('watch'))).toBe('/command-center?tab=watchlist')
+  })
+
+  it('routes a plan notice to its page, a batch to the Queue and the weekly note to the plan\'s Posted (PRD-251B/C)', () => {
+    expect(linkFor(row('social_plan', 'p1'))).toBe('/deliverables?tab=socials&view=plans&plan=p1')
+    expect(linkFor(row('social_batch', 'p1'))).toBe('/deliverables?tab=socials&view=queue')
+    expect(linkFor(row('social_posted', 'p1'))).toBe('/deliverables?tab=socials&view=posted&plan=p1')
   })
 
   it('routes question → the Questions tab (PRD-225)', () => {

@@ -100,11 +100,11 @@ from sqlalchemy.orm import Session
 
 from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
-from api import socials_preview
+from api import socials_brand, socials_compose, socials_preview, socials_render_crops
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
-from api import socials_compose
-from api import socials_brand
+from api.socials_delete import router as delete_router
+from api.socials_history import router as history_router
 from api.socials_media_upload import router as media_upload_router
 from api.socials_plans import router as plans_router
 from api.socials_retake import router as retake_router
@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search
+from modules.socials import report_charts, text_search, upload_crops, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -148,6 +148,8 @@ for sub_router in (
     channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router,
     slots_router, media_upload_router,  # PRD-251B: planned slots (US-B105), an uploaded visual (US-B109)
     retake_router, plans_router,  # PRD-251B: another take (US-B111); plans and their bank (US-B202, US-B203)
+    delete_router,  # 3 Oct 2026: deleting a post that has not gone out
+    history_router,  # PRD-251C US-C103: what the workspace posted
 ):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)
 
@@ -352,6 +354,7 @@ def _commit_unchanged(db: Session, post: SocialPost, *, status: str, content_has
         raise service.StaleContent(service.compute_content_hash(current))
     saved = _save(db, post)
     notify.notify_if_entered(status, post)
+    voice_examples.keep_if_approved(db, status, post)  # PRD-251C US-C406: an approved rewrite teaches the voice
     # D10 (US-306): the post's one-shot job follows its status and slot.
     schedule_jobs.sync_job(post)
     return saved
@@ -539,11 +542,14 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     (RenderQuotaExceeded, before any call to media-render; a render holds its
     seconds from then until it ends), or there is no storage or renderer to use
     (RendererUnavailable). The render ends the post in ``needs_approval`` with
-    the files in ``media``, or in ``failed`` with the report in ``review_log``:
+    the files in ``media`` (a still of the person's own: its crops, PRD-251C
+    US-C303), or in ``failed`` with the report in ``review_log``:
     a render whose footage or voice would take the post or the workspace over
     its media cap submits nothing more and fails saying why (D13). A post left to
     "Let Auto pick" gets Auto's template first (F253, ``socials_compose.let_auto_pick``).
     """
+    if upload_crops.own_still(post) is not None:  # PRD-251C US-C303: the person's own still, cropped per channel
+        return await socials_render_crops.render_crops(db, workspace, post, actor)
     await socials_compose.let_auto_pick(db, workspace, post, actor, service.assert_can_render)
     status, content_hash = post.status, post.content_hash
     voice = post.voice
@@ -556,10 +562,12 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # PRD-251B (US-B303..B305): the brand kit's style and liked references, the default toolkits.
     brand = await asyncio.to_thread(socials_brand.generation_inputs, db, workspace) if caps is not None else {}
     footage_plan = render.footage_plan_for(post, template, caps, **brand) if caps is not None else None
-    bundle = render.bundle_for(
-        post, template, brand_kit, fallback_name=workspace.name or "",
-        footage_slots=footage_plan.shown if footage_plan is not None else (),
-    )
+    # 3 Oct 2026: a still post renders each size its channels need; a video one (render.sizes_for).
+    bundle, *other_sizes = [
+        render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "", size=size,
+                          footage_slots=footage_plan.shown if footage_plan is not None else ())
+        for size in render.sizes_for(post, template)
+    ]
     # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
     await report_charts.check_bound_chart(
         db, workspace.id, render.composition_of(template), post.sources, bundle["variables"]
@@ -586,6 +594,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             title=post.title,
             format=post.format,
             bundle=bundle,
+            extra_bundles=tuple(other_sizes),
             voice=voice_plan,
             footage=footage_plan,
             reservation=reservation,
@@ -691,7 +700,7 @@ async def submit_social_post(
 
 
 @router.post("/posts/{post_id}/approve", dependencies=[CAN_REVIEW])
-async def approve_social_post(
+def approve_social_post(  # a plain def (F105): it awaits nothing, and its writes are synchronous
     post_id: UUID,
     body: ApproveRequest,
     db: Session = Depends(get_db),

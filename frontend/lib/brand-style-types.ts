@@ -67,6 +67,8 @@ export interface SocialMediaToolsResponse {
   defaults: Record<SocialMediaType, string>
   caps: { monthly_usd: number; per_post_usd: number; problem: string | null }
   spend: { month_usd: number; period_end: string }
+  /** PRD-251C (US-C302): what a still or a clip is booked at when its toolkit prices nothing ahead. */
+  shot_usd?: { image: number; video: number }
 }
 
 /** PUT /api/socials/media-tools: a cap of null goes back to the platform's default. */

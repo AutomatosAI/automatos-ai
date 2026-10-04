@@ -5,17 +5,28 @@
  * * A new plan: five steps; Save waits for a name and a channel on every row; it creates the
  *   plan with what the form says, then opens the plan as itself.
  * * The content bank says to save first on a new plan; on a saved one it lists the topics and
- *   adds one through the bank (the server refuses with its reason).
+ *   adds one through the bank (the server refuses with its reason), and says when research
+ *   cannot run (PRD-251C US-C101). A topic close to one the workspace has is added with the
+ *   server's warning, and the plan saves its repeat window (US-C104); a topic close to a post
+ *   says so, linked to the post (US-C106).
+ * * A cadence row may set its own visual and the AI tool that makes it, shows its AI spend over
+ *   a month, and the plan saves it (PRD-251C US-C302).
+ * * A saved plan shows its health, each item with its action, and Auto's proposals; Apply sends
+ *   the proposal's changes through the plan's PUT, and nothing is applied by itself (US-C404, C407).
  * * The editor's Music picker saves the post's music (a render setting).
+ * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
-const state = vi.hoisted(() => ({ go: vi.fn(), plans: [] as any[], topics: [] as any[] }))
+const state = vi.hoisted(() => ({
+  go: vi.fn(), plans: [] as any[], topics: [] as any[], researchNote: null as string | null, lastRun: null as string | null,
+  health: [] as any[], proposals: [] as any[],
+}))
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: { id: 'w1', name: 'Acme', role: 'owner', socials: { available: true, enabled: true } } }),
 }))
@@ -32,18 +43,30 @@ vi.mock('@/lib/api-client', () => {
       { toolkit: 'linkedin', label: 'LinkedIn', post_kinds: [kind('image')], verified: true, setup_note: null, copy_limits: { text: 3000 } },
     ]),
     listSocialTemplates: vi.fn(async () => []),
-    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length })),
+    listSocialPlanTopics: vi.fn(async () => ({ topics: state.topics, total: state.topics.length, unused: state.topics.length, research_note: state.researchNote, research_last_run_at: state.lastRun })),
     addSocialPlanTopic: vi.fn(async (_id: string, input: any) => ({ ...input, id: 't-new' })),
     researchSocialPlan: vi.fn(async () => ({ execution_id: 'research-1' })),
+    deleteSocialPlan: vi.fn(async () => undefined),
     listSocialMusic: vi.fn(async () => ({ available: true, tracks: [{ id: 'spring-of-2026', title: 'Spring of 2026', artist: 'S', style: 'tropical house', duration: 120, licence: 'CC BY 4.0', credit_required: true }] })),
     updateSocialPost: vi.fn(async (id: string, changes: any) => ({ id, ...changes })),
+    getSocialPlanHealth: vi.fn(async () => ({ items: state.health })),
+    getSocialPlanProposals: vi.fn(async () => ({ proposals: state.proposals })),
+    getSocialMediaTools: vi.fn(async () => ({
+      toolkits: [],
+      offered: { images: [], ai_images: [{ value: 'fal_ai', label: 'fal.ai' }, { value: 'ask', label: 'Ask each time' }], footage: [{ value: 'off', label: 'Off' }], voice: [] },
+      defaults: { images: 'templates', ai_images: 'ask', footage: 'off', voice: 'kokoro' },
+      caps: { monthly_usd: 30, per_post_usd: 10, problem: null }, spend: { month_usd: 0, period_end: '2026-11-01T00:00:00Z' },
+      shot_usd: { image: 0.3, video: 2.5 },
+    })),
   }
   return { apiClient, default: apiClient }
 })
 
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { SocialsPlansView } from '@/components/deliverables/socials/plans/socials-plans-view'
 import { SAVE_FIRST } from '@/components/deliverables/socials/plans/plan-step-bank'
+import { PLAN_DELETE_CONFIRM } from '@/components/deliverables/socials/plans/plan-page'
 import { SocialsMusicPicker } from '@/components/deliverables/socials/socials-music-picker'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -68,6 +91,10 @@ beforeEach(() => {
   state.go.mockReset()
   state.plans = [PLAN]
   state.topics = []
+  state.researchNote = null
+  state.lastRun = null
+  state.health = []
+  state.proposals = []
   Object.values(api).forEach((fn) => fn.mockClear())
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
@@ -100,6 +127,8 @@ describe('a new plan', () => {
     await waitFor(() => expect(api.createSocialPlan).toHaveBeenCalled())
     const input = api.createSocialPlan.mock.calls[0][0]
     expect(input).toMatchObject({ name: 'Launch week', timezone: expect.any(String), late_policy: 'skip', starts_on: '2026-10-14', ends_on: '2026-11-17' })
+    expect(input.make).toMatchObject({ rhythm: 'weekly', batch_day: 'sun', time: '17:00' })  // PRD-251C (O1, O3)
+    expect(input.research).toMatchObject({ day: 'sat' })
     expect(input.cadence).toEqual([{ channels: ['linkedin'], format: 'image', length_seconds: null, template_id: null, days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '09:00' }])
     await waitFor(() => expect(state.go).toHaveBeenCalledWith({ view: 'plans', plan: 'new-plan-id', post: null }))
   })
@@ -112,6 +141,42 @@ describe('a new plan', () => {
 })
 
 describe('a saved plan', () => {
+  it('shows its health with each action and Auto\'s proposals; Apply sends the changes (PRD-251C US-C404, US-C407)', async () => {
+    state.health = [
+      { id: 'bank_low', title: 'The content bank is running low', detail: '5 unused topics for the 14 posts of the next two batches.',
+        action: { kind: 'research', label: 'Research again' } },
+      { id: 'no_video', title: 'No video this week', detail: 'Add a video row.', action: { kind: 'cadence', label: 'Add a video row' } },
+    ]
+    const cadence = [{ ...PLAN.cadence[0], time: '18:00' }]
+    state.proposals = [{ id: 'time:r1:18:00', kind: 'time', title: 'Post the image row at 18:00', why: 'Evenings did better.', changes: { cadence } }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    const health = await screen.findByRole('region', { name: 'Plan health' })
+    fireEvent.click(within(health).getByRole('button', { name: 'Research again' }))
+    await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
+    fireEvent.click(within(health).getByRole('button', { name: 'Add a video row' }))
+    expect(screen.getByRole('region', { name: 'Cadence' })).toBeInTheDocument()
+    const proposals = screen.getByRole('region', { name: "Auto's proposals" })
+    expect(api.updateSocialPlan).not.toHaveBeenCalled()  // nothing is applied by itself
+    fireEvent.click(within(proposals).getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalledWith('p1', { cadence }))
+  })
+
+  it('a row may set its own visual and AI tool, shows its AI spend, and saves them (PRD-251C US-C302)', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    // The plan first: until it arrives the form is a new plan's, whose row the plan's then replaces.
+    await screen.findByRole('button', { name: 'Pause plan' })
+    const row = screen.getByRole('group', { name: 'Cadence row 1' })
+    expect(within(row).queryByLabelText('Row 1 AI tool')).toBeNull()  // the plan's mix: templates only
+    fireEvent.change(within(row).getByLabelText('Row 1 visual'), { target: { value: 'ai_images' } })
+    fireEvent.change(within(row).getByLabelText('Row 1 AI tool'), { target: { value: 'fal_ai' } })
+    // mon, wed and fri: about 13 posts in 30 days, one AI still each at $0.30.
+    await waitFor(() => expect(row).toHaveTextContent('AI media: about 13 shots a month (about $3.86).'))
+    expect(screen.getByRole('region', { name: 'Cadence summary' })).toHaveTextContent("The workspace's cap of $30.00 a month still holds.")
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].cadence[0].visual).toEqual({ source: 'ai_images', toolkit: 'fal_ai' })
+  })
+
   it('opens on its cadence, and its bank adds a topic through the server', async () => {
     state.topics = [{ id: 't1', plan_id: 'p1', title: 'Three weeks to Lisbon', angle: 'Why visit', facts: [{ text: 'Stand B12.', source: { kind: 'web', ref: 'https://x.test', label: 'Stand page' } }], formats: ['image'], pinned_on: null, used_at: null, used_post_id: null, origin: 'research' }]
     renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
@@ -127,6 +192,83 @@ describe('a saved plan', () => {
     await waitFor(() => expect(api.addSocialPlanTopic).toHaveBeenCalledWith('p1', { title: 'The roadmap', angle: null, formats: [], facts: [] }))
     fireEvent.click(screen.getByRole('button', { name: 'Research again' }))
     await waitFor(() => expect(api.researchSocialPlan).toHaveBeenCalledWith('p1'))
+    expect(screen.queryByRole('status', { name: 'Research' })).not.toBeInTheDocument()  // research can run: nothing to say
+  })
+
+  it('a topic close to one the workspace has is added, with the server\'s warning', async () => {
+    api.addSocialPlanTopic.mockResolvedValueOnce({ id: 't-new', title: 'What is a mission', warning: 'Posted 5 Oct 2026 as "What is a Mission?".' })
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a topic' }))
+    const form = screen.getByRole('form', { name: 'Add a topic' })
+    fireEvent.change(within(form).getByLabelText('Title'), { target: { value: 'What is a mission' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Add to the bank' }))
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Added. Posted 5 Oct 2026 as "What is a Mission?".'))
+  })
+
+  it('its Making step sets the rhythm, says when the next batch is made, and saves it (PRD-251C)', async () => {
+    state.plans = [{ ...PLAN, make: { ...PLAN.make, rhythm: 'weekly', batch_day: 'sun', time: '17:00' }, next_batch_at: '2026-10-18T16:00:00Z' }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Making and approving' }))
+    expect(await screen.findByText(/The next batch is made Sun,? 18 Oct/)).toBeInTheDocument()
+    expect(screen.getByLabelText('The week is made on')).toHaveValue('sun')
+    fireEvent.click(within(screen.getByRole('group', { name: 'Rhythm' })).getByRole('button', { name: 'Monthly' }))
+    fireEvent.change(screen.getByLabelText('The month is made on the'), { target: { value: '1' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].make).toMatchObject({ rhythm: 'monthly', batch_date: 1, time: '17:00' })
+  })
+
+  it('a topic close to a post the workspace has says so, with a link that opens the post', async () => {
+    state.topics = [{ id: 't1', plan_id: 'p1', title: "what's a mission", angle: null, facts: [], formats: [], pinned_on: null, used_at: null, used_post_id: null, origin: 'person',
+      repeat: { post_id: 'post-9', note: 'Posted 5 Oct 2026 as "What is a Mission?".' } }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    const card = await screen.findByRole('article', { name: "what's a mission" })
+    const link = within(card).getByRole('link', { name: 'Posted 5 Oct 2026 as "What is a Mission?".' })
+    expect(link).toHaveAttribute('href', '/deliverables?tab=socials&view=calendar&post=post-9')
+  })
+
+  it('saves how long a posted idea stays off research\'s list', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'What to research' }))
+    fireEvent.change(screen.getByLabelText('Not again for (days)'), { target: { value: '45' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
+    await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
+    expect(api.updateSocialPlan.mock.calls[0][1].research).toEqual({ enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 })
+  })
+
+  it('its bank says when research last ran (PRD-251C US-C207)', async () => {
+    state.lastRun = '2026-10-17T06:00:00Z'
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    expect(await screen.findByText(/Last researched/)).toBeInTheDocument()
+  })
+
+  it('its bank says when research cannot run, in the server\'s words', async () => {
+    state.researchNote = 'Research is not set up in this workspace yet. Research again sets it up and runs it.'
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Content bank' }))
+    expect(await screen.findByRole('status', { name: 'Research' })).toHaveTextContent('Research is not set up in this workspace yet. Research again sets it up and runs it.')
+  })
+})
+
+describe('deleting a plan', () => {
+  it('an owner deletes it from its page after one question, then the plans list opens', async () => {
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    const ask = screen.getByRole('alertdialog', { name: 'Delete plan' })
+    expect(ask).toHaveTextContent(PLAN_DELETE_CONFIRM)
+    expect(api.deleteSocialPlan).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Delete plan' }))
+    await waitFor(() => expect(api.deleteSocialPlan).toHaveBeenCalledWith('p1'))
+    await waitFor(() => expect(state.go).toHaveBeenCalledWith({ view: 'plans', plan: null, post: null }))
+  })
+
+  it('an editor sees no Delete', async () => {
+    renderWithClient(<SocialsPlansView role="editor" posts={[]} planId="p1" go={state.go} />)
+    await screen.findByRole('button', { name: 'Pause plan' })
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   })
 })
 

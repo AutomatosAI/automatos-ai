@@ -36,8 +36,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 # PRD-251B (US-B304, US-B305): the AI tools and the AI-made visuals, under the same gate.
 from api.socials_media_tools import router as media_tools_router  # noqa: E402
+from api.socials_voice_examples import router as voice_examples_router  # noqa: E402
 
 router.include_router(media_tools_router)
+router.include_router(voice_examples_router)  # PRD-251C US-C406: the owner's voice examples
 MUSIC_UNAVAILABLE = "The music library cannot be read now: the renderer is not answering. Try again."
 
 

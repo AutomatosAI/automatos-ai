@@ -2,9 +2,10 @@
 
 A param's value in the adapter data (``channel_adapters.py``) is a literal, a list,
 a choice (``{"choose", "among", "else"}``), or ``$`` sources joined by ``|``:
-``$copy``, ``$title``, ``$media``, ``$media[]``, ``$thumbnail``, ``$generated``,
-``$idempotency_key``, ``$option.<name>`` and ``$steps.<id>[.<name>]`` (what an
-earlier step returned). ``capabilities.py`` checks the data against it when it
+``$copy``, ``$title``, ``$media``, ``$media[]``, ``$media.image`` and ``$media.video``
+(PRD-251C: the first file when it is of that kind; a story's step names both),
+``$thumbnail``, ``$generated``, ``$idempotency_key``, ``$option.<name>`` and
+``$steps.<id>[.<name>]`` (what an earlier step returned). ``capabilities.py`` checks the data against it when it
 loads; ``publish_sources.py`` resolves it at publish.
 """
 from __future__ import annotations
@@ -14,14 +15,14 @@ from typing import Any, FrozenSet, Mapping
 
 STEPS_SOURCE = "$steps."
 SOURCE = re.compile(
-    r"\$(?:copy|title|thumbnail|idempotency_key|generated|media(?:\[\]|\.content_type|\.bytes)?"
+    r"\$(?:copy|title|thumbnail|idempotency_key|generated|media(?:\[\]|\.content_type|\.bytes|\.image|\.video)?"
     r"|option\.[a-z][a-z0-9_]*|steps\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)"
 )
 # A choice (US-304): the ``choose`` source's value when ``among`` holds it, else the
 # first of ``else`` that ``among`` holds (``else``'s first when ``among`` is unknown).
 CHOICE_KEYS = frozenset({"choose", "among", "else"})
 # The sources that name a media FILE: a param reading one takes a file or a link.
-FILE_SOURCES = ("$media", "$media[]", "$thumbnail")
+FILE_SOURCES = ("$media", "$media[]", "$media.image", "$media.video", "$thumbnail")
 
 
 def _check_choice(value: Mapping[str, Any], earlier: FrozenSet[str], where: str) -> None:

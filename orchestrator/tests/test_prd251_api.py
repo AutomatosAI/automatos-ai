@@ -65,8 +65,8 @@ import modules.socials.settings as socials_settings  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.core import DocumentTemplate  # noqa: E402
-from core.models.socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: E402
+from core.models.core import DocumentTemplate, WorkflowTemplate  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialPostStat, SocialPostTarget, SocialVoiceExample  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
 
@@ -115,11 +115,12 @@ def api(monkeypatch):
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     copies = sa.MetaData()
-    _sqlite_copy(Workspace.__table__, copies)
-    _sqlite_copy(DocumentTemplate.__table__, copies)
+    for table in (Workspace.__table__, DocumentTemplate.__table__, WorkflowTemplate.__table__):  # playbooks: PRD-251C
+        _sqlite_copy(table, copies)
     copies.create_all(engine)
-    SocialPost.metadata.create_all(
-        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__]
+    SocialPost.metadata.create_all(  # PRD-251C: the results and the voice examples too (read and written on approval)
+        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__, SocialPostStat.__table__,
+                        SocialVoiceExample.__table__],
     )
 
     session = sessionmaker(bind=engine)()
@@ -235,6 +236,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/posts"),
             ("GET", "/api/socials/posts/{post_id}"),
             ("PATCH", "/api/socials/posts/{post_id}"),
+            # Deleting a post that has not gone out (api/socials_delete.py).
+            ("DELETE", "/api/socials/posts/{post_id}"),
             # Wave 1 (S1.1c): rendering, the rendered files, the render minutes.
             ("POST", "/api/socials/posts/{post_id}/render"),
             ("GET", "/api/socials/posts/{post_id}/media/{file_name}"),
@@ -283,6 +286,8 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("POST", "/api/socials/plans/draft"),
             ("GET", "/api/socials/plans/{plan_id}"),
             ("PUT", "/api/socials/plans/{plan_id}"),
+            # Deleting a plan and its content bank; its posts stay, unlinked (3 Oct 2026).
+            ("DELETE", "/api/socials/plans/{plan_id}"),
             ("POST", "/api/socials/plans/{plan_id}/pause"),
             ("POST", "/api/socials/plans/{plan_id}/resume"),
             ("POST", "/api/socials/plans/{plan_id}/end"),
@@ -304,6 +309,13 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"),
             # A Library picture in a template's photo spot (api/socials_media_upload.py).
             ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"),
+            ("GET", "/api/socials/history"),  # PRD-251C US-C103: what the workspace posted (api/socials_history.py)
+            ("GET", "/api/socials/posted"),  # PRD-251C US-C408: Posted, what went out (api/socials_history.py)
+            ("POST", "/api/socials/plans/{plan_id}/batches/{batch_key}/approve"),  # PRD-251C US-C205: approve the week
+            ("GET", "/api/socials/plans/{plan_id}/proposals"),  # PRD-251C US-C404: Auto's proposals
+            ("GET", "/api/socials/plans/{plan_id}/health"),  # PRD-251C US-C407: the plan's health
+            ("GET", "/api/socials/voice-examples"),  # PRD-251C US-C406: the owner's voice examples
+            ("DELETE", "/api/socials/voice-examples/{example_id}"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

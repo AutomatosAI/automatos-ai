@@ -1,5 +1,5 @@
 {
-  "route_count": 886,
+  "route_count": 895,
   "routes": [
     {
       "method": "GET",
@@ -2135,6 +2135,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/history"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/media-tools"
     },
     {
@@ -2158,6 +2162,10 @@
       "path": "/api/socials/plans/draft"
     },
     {
+      "method": "DELETE",
+      "path": "/api/socials/plans/{plan_id}"
+    },
+    {
       "method": "GET",
       "path": "/api/socials/plans/{plan_id}"
     },
@@ -2167,11 +2175,23 @@
     },
     {
       "method": "POST",
+      "path": "/api/socials/plans/{plan_id}/batches/{batch_key}/approve"
+    },
+    {
+      "method": "POST",
       "path": "/api/socials/plans/{plan_id}/end"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/health"
     },
     {
       "method": "POST",
       "path": "/api/socials/plans/{plan_id}/pause"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/plans/{plan_id}/proposals"
     },
     {
       "method": "POST",
@@ -2211,11 +2231,19 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/posted"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/posts"
     },
     {
       "method": "POST",
       "path": "/api/socials/posts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/posts/{post_id}"
     },
     {
       "method": "GET",
@@ -2312,6 +2340,14 @@
     {
       "method": "GET",
       "path": "/api/socials/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/voice-examples"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/socials/voice-examples/{example_id}"
     },
     {
       "method": "GET",

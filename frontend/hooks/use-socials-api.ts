@@ -260,6 +260,22 @@ function runAction(postId: string, action: SocialPostAction): Promise<SocialPost
   }
 }
 
+export const POST_DELETED = 'Post deleted.'
+
+/** Delete a post (owner or admin): the lists refresh; a refusal shows the server's reason. */
+export function useDeleteSocialPost() {
+  const invalidate = useInvalidateSocials()
+  const onError = usePostWriteErrorHandler('The post could not be deleted')
+  return useMutation<void, Error, { postId: string }>({
+    mutationFn: ({ postId }) => apiClient.deleteSocialPost(postId),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success(POST_DELETED)
+    },
+    onError,
+  })
+}
+
 export function useSocialPostAction() {
   const invalidate = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('The action failed')

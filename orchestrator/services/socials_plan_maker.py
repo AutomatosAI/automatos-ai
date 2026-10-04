@@ -20,6 +20,12 @@ a tick:
    (text). Either way it ends in ``needs_approval`` and approvers are told.
 5. Once per plan and day: "Today's posts are ready".
 
+PRD-251C (C1, US-C203): a weekly or monthly plan makes its whole batch once its moment
+comes (``modules/socials/batches.py``), each post carrying the batch's key. A slot it cannot
+make is skipped and recorded on the plan, so the batch can end; once every slot of a batch
+is made or skipped, "Your week is ready" (or month) goes out once, linked to the Queue,
+instead of the daily notice.
+
 A slot's work runs in a worker thread on its own session; the composer and the render
 start run on the event loop from there, as the routes do (F105).
 
@@ -35,7 +41,7 @@ import functools
 import logging
 from dataclasses import replace
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 from uuid import UUID
 
 import anyio
@@ -48,7 +54,7 @@ from core.models.core import DocumentTemplate
 from core.models.socials import SocialCampaign, SocialPost, SocialTopic
 from core.models.workspaces import Workspace
 from core.social_cuts import cut_to_length
-from modules.socials import compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics
+from modules.socials import batches, compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics, upload_crops
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
 
@@ -58,6 +64,8 @@ PLAN_TICK_JOB_ID = "socials_plan_tick"
 PLAN_AGENT = "the plan"
 MADE, TAKEN, GONE, NO_TOPIC, SKIPPED, FAILED = "made", "taken", "gone", "no_topic", "skipped", "failed"
 READY_NOTE = "Made from the plan's content bank: {topic}."
+# PRD-251C (C1): why a batch slot whose time came before the tick made it is recorded as skipped.
+PASSED_UNMADE = "its time came before it could be made"
 # The post kinds a post format publishes as, most fitting first (the composer's order).
 FORMAT_KINDS: Mapping[str, Tuple[str, ...]] = {
     "video": ("video", "reel", "short"),
@@ -129,7 +137,8 @@ def _plan_due(db: Any, plan: SocialCampaign, now: datetime) -> List[plans.Slot]:
     if workspace is None or socials_off_reason(workspace) is not None:
         return []
     taken = plan_store.taken_keys(db, plan)
-    return _within_daily_cap(plan, plans.due_slots(plan, now, taken), taken)
+    found = batches.due_slots(plan, now, taken) if batches.is_batched(plan) else plans.due_slots(plan, now, taken)
+    return _within_daily_cap(plan, found, taken)
 
 
 def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
@@ -147,15 +156,18 @@ def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
 # ── one slot ───────────────────────────────────────────────────────────────
 
 
-def _kind_for(channel: Any, post_format: str) -> Optional[str]:
+def _kind_for(channel: Any, post_format: str, row_kind: Optional[str] = None) -> Optional[str]:
+    """The kind a channel posts the slot as: a story row's story (PRD-251C), else the
+    format's most fitting kind the channel offers now."""
     available = [kind.kind for kind in channel.post_kinds if kind.available]
-    return next((kind for kind in FORMAT_KINDS.get(post_format, ()) if kind in available), None)
+    wanted = (row_kind,) if row_kind else FORMAT_KINDS.get(post_format, ())
+    return next((kind for kind in wanted if kind in available), None)
 
 
 def slot_targets(db: Any, workspace_id: UUID, slot: plans.Slot) -> List[Dict[str, Any]]:
-    """The slot's channels that are connected and post its format, each with its kind."""
+    """The slot's channels that are connected and post its format (or its row's kind), each with its kind."""
     channels = {channel.toolkit: channel for channel in social_channels(db, workspace_id)}
-    found = [(toolkit, _kind_for(channels[toolkit], slot.format)) for toolkit in slot.channels if toolkit in channels]
+    found = [(toolkit, _kind_for(channels[toolkit], slot.format, slot.kind)) for toolkit in slot.channels if toolkit in channels]
     return [{"toolkit": toolkit, "post_kind": kind, "options": {}} for toolkit, kind in found if kind]
 
 
@@ -182,7 +194,7 @@ def fits_quota(db: Any, workspace: Workspace, seconds: int) -> bool:
 
 def _refusal(db: Any, workspace: Workspace, slot: plans.Slot) -> Optional[str]:
     if not slot_targets(db, workspace.id, slot):
-        return f"no connected channel posts a {slot.format} for {', '.join(slot.channels)}"
+        return f"no connected channel posts a {slot.kind or slot.format} for {', '.join(slot.channels)}"
     if not fits_quota(db, workspace, render_seconds(db, workspace.id, slot)):
         return "this month's render minutes are used up"
     return None
@@ -214,6 +226,7 @@ def claim(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, n
         format=slot.format, template_id=slot.template_id, length_seconds=slot.length_seconds, agent=PLAN_AGENT,
     )
     post.campaign_id, post.slot_key = plan.id, slot.key
+    post.batch_key = batches.batch_key(plan, slot.local_date)  # PRD-251C: None for a daily plan
     service.set_planned_for(post, slot.at, plan.timezone)
     topics.mark_used(topic, post, now)
     try:
@@ -279,7 +292,7 @@ def _visual_changes(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: Soci
     if not asked:
         return {}
     fallback = plan_visuals.topic_prompt(topic.title, topic.angle)
-    return {"footage": plan_visuals.footage_asks(asked, proposal.get("visual_prompts") or {}, fallback)}
+    return {"footage": plan_visuals.footage_asks(asked, proposal.get("visual_prompts") or {}, fallback, slot.visual_toolkit)}
 
 
 def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, post: SocialPost, now: datetime) -> None:
@@ -288,16 +301,25 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
     from api import socials_targets
 
     posts_api, actor = _posts_api(), plan.created_by
-    visual = plan_visuals.visual_for(plans.make_settings(plan)["visual_mix"], slot.key)
+    visual = slot.visual_source or plan_visuals.visual_for(plans.make_settings(plan)["visual_mix"], slot.key)  # PRD-251C US-C302
     known = plan_visuals.ai_slots(template_blocks(db, plan.workspace_id, slot.template_id), visual) if visual in plan_visuals.SLOT_KIND else []
     proposal = _propose(db, plan, slot, topic, now, known)
     changes = {**_changes(proposal, slot), **_visual_changes(db, plan, slot, topic, proposal, visual)}
     anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, changes, agent=PLAN_AGENT))
     socials_targets.set_post_targets(db, post, actor, slot_targets(db, plan.workspace_id, slot), agent=PLAN_AGENT)
-    if post.template_id is not None:
+    if post.template_id is not None or upload_crops.own_still(post) is not None:  # PRD-251C US-C303: a still is cropped
         anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)
     else:
         posts_api.submit_post(db, post, actor, note=READY_NOTE.format(topic=topic.title))
+
+
+def _skip(db: Any, plan: SocialCampaign, slot: plans.Slot, refusal: str, now: datetime) -> None:
+    """A slot the plan cannot make: told once a day. A batch also records it, so it can end."""
+    key = batches.batch_key(plan, slot.local_date)
+    if key is not None:
+        plan.make = batches.with_skip(plan, key, slot.key, refusal, _local_today(plan, now))
+        db.commit()
+    _tell_once(db, plan, plan_notify.SLOT_SKIPPED, f"{plan.name}: {refusal}", now)
 
 
 def _make(db: Any, plan_id: UUID, key: str, now: datetime) -> str:
@@ -308,7 +330,7 @@ def _make(db: Any, plan_id: UUID, key: str, now: datetime) -> str:
     workspace = db.get(Workspace, plan.workspace_id)
     refusal = _refusal(db, workspace, slot)
     if refusal is not None:
-        _tell_once(db, plan, plan_notify.SLOT_SKIPPED, f"{plan.name}: {refusal}", now)
+        _skip(db, plan, slot, refusal, now)
         return SKIPPED
     topic = topics.next_topic(db, plan, slot.format, slot.local_date)
     if topic is None:
@@ -341,24 +363,76 @@ def make_slot(plan_id: UUID, key: str, now: datetime) -> str:
 
 
 def tell_ready(made: Mapping[UUID, int], now: datetime) -> None:
-    """"Today's posts are ready", once per plan and day."""
+    """"Today's posts are ready", once per day for each daily plan (a batch has its own notice)."""
     db = _session()
     try:
         for plan_id, count in made.items():
             plan = db.get(SocialCampaign, plan_id)
-            if plan is not None:
+            if plan is not None and not batches.is_batched(plan):
                 _tell_once(db, plan, plan_notify.READY, f"{plan.name}: {count} waiting for approval", now)
     finally:
         db.close()
 
 
-async def run_tick() -> Dict[str, int]:
-    """One pass over every active plan's due slots, then due research (US-B204)."""
-    from services import socials_plan_research
+def _batch_post_count(db: Any, plan: SocialCampaign, key: str) -> int:
+    return db.query(SocialPost.id).filter(SocialPost.campaign_id == plan.id, SocialPost.batch_key == key).count()
 
-    now = datetime.now(timezone.utc)
+
+def _ready_title(plan: SocialCampaign, window: batches.Window, count: int, passed: int) -> str:
+    """"Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made"."""
+    title = f"{plan.name}: {count} post{'' if count == 1 else 's'} for {batches.label(plan, window)}"
+    if not passed:
+        return title
+    return f"{title}; {passed} passed before {'it' if passed == 1 else 'they'} could be made"
+
+
+def _announce_if_complete(db: Any, plan: SocialCampaign, window: batches.Window, now: datetime) -> None:
+    """"Your week is ready", once, when every slot of the batch is made or skipped. A slot whose
+    time came before the tick made it is recorded as skipped then, and the notice names it."""
+    taken = plan_store.taken_keys(db, plan)
+    if batches.announced(plan, window.key) or batches.pending(plan, window.key, now, taken):
+        return
+    passed = [slot.key for slot in batches.passed_unmade(plan, window.key, now, taken)]
+    count = _batch_post_count(db, plan, window.key)
+    if count == 0 and not passed:
+        return
+    today = _local_today(plan, now)
+    if passed:
+        plan.make = batches.with_skips(plan, window.key, passed, PASSED_UNMADE, today)
+    plan.make = batches.with_record(plan, window.key, {batches.ANNOUNCED: now.isoformat()}, today)
+    db.commit()
+    event = plan_notify.MONTH_READY if batches.rhythm_of(plan) == plans.MONTHLY else plan_notify.WEEK_READY
+    plan_notify.notify_review(plan.workspace_id, plan.id, event, _ready_title(plan, window, count, len(passed)))
+
+
+def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> None:
+    """Each batch the tick made or skipped slots of, told once it is complete (C1)."""
+    db = _session()
+    try:
+        for plan_id, keys in touched.items():
+            plan = db.get(SocialCampaign, plan_id)
+            if plan is None or not batches.is_batched(plan):
+                continue
+            days = {parsed[1] for parsed in (plans.parse_slot_key(key) for key in keys) if parsed}
+            windows = {window.key: window for window in (batches.window_of(plan, day) for day in days) if window}
+            for window in windows.values():
+                _announce_if_complete(db, plan, window, now)
+    except Exception:  # noqa: BLE001 — a notice never fails the tick; the next tick tries again
+        logger.exception("[Socials] the batch notices could not be sent")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
+    """One pass over every active plan's due slots, the batches', the evening reminders and the
+    weekly notes (PRD-251C), then due research (US-B204)."""
+    from services import socials_plan_reminders, socials_plan_research, socials_weekly_notes
+
+    now = now or datetime.now(timezone.utc)
     outcomes: Dict[str, int] = {}
     made: Dict[UUID, int] = {}
+    touched: Dict[UUID, Set[str]] = {}
     try:
         due = await anyio.to_thread.run_sync(collect_due, now)
     except Exception:  # noqa: BLE001 — the next tick tries again
@@ -369,8 +443,14 @@ async def run_tick() -> Dict[str, int]:
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
         if outcome == MADE:
             made[plan_id] = made.get(plan_id, 0) + 1
+        if outcome in (MADE, SKIPPED):
+            touched[plan_id] = {*touched.get(plan_id, set()), key}
     if made:
         await anyio.to_thread.run_sync(tell_ready, made, now)
+    if touched:
+        await anyio.to_thread.run_sync(announce_batches, touched, now)
+    outcomes["reminded"] = await anyio.to_thread.run_sync(socials_plan_reminders.remind_due, _session, now)
+    outcomes["weekly_notes"] = await anyio.to_thread.run_sync(socials_weekly_notes.send_due, _session, now)
     outcomes["research"] = await anyio.to_thread.run_sync(socials_plan_research.launch_due, now)
     return outcomes
 

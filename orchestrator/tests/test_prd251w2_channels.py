@@ -68,6 +68,7 @@ import core.database.database as database_mod  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.composio.tool_executor import UPLOAD_ACTIONS  # noqa: E402
+from modules.socials.step_sources import FILE_SOURCES  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.composio import ComposioConnection, ComposioEntity  # noqa: E402
 from core.models.composio_cache import ComposioActionCache  # noqa: E402
@@ -272,7 +273,7 @@ def test_linkedin_x_and_instagram_connected_are_listed_with_their_post_kinds(cha
     assert {toolkit: list(_kinds(channel)) for toolkit, channel in listed.items()} == {
         "linkedin": ["text", "image", "video"],
         "twitter": ["text", "image", "video"],
-        "instagram": ["image", "reel", "carousel"],
+        "instagram": ["image", "reel", "story", "carousel"],  # PRD-251C US-C301: stories
     }
     for channel in listed.values():
         assert channel["verified"] is True
@@ -351,7 +352,7 @@ def test_every_kind_needing_a_missing_publish_action_names_it(channels):
     kinds = _kinds(_listed(channels)["instagram"])
 
     assert {kind: (k["available"], "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH" in k["reason"]) for kind, k in kinds.items()} == {
-        "image": (False, True), "reel": (False, True), "carousel": (False, True),
+        "image": (False, True), "reel": (False, True), "story": (False, True), "carousel": (False, True),  # PRD-251C: stories
     }
 
 
@@ -530,7 +531,7 @@ def test_publishing_is_file_first_and_the_global_upload_list_is_not_widened():
         "TWITTER_APPEND_MEDIA_UPLOAD", "LINKEDIN_CREATE_LINKED_IN_POST", "LINKEDIN_CREATE_IMAGE_POST",
         "LINKEDIN_CREATE_SHARE", "LINKEDIN_INITIALIZE_IMAGE_UPLOAD", "LINKEDIN_REGISTER_IMAGE_UPLOAD",
     }
-    media_sources = {"$media", "$media[]", "$thumbnail"}
+    media_sources = set(FILE_SOURCES)  # PRD-251C: a story's $media.image and $media.video too
     for adapter in SEEDED_CHANNELS.values():
         for steps in adapter.kinds.values():
             for step in steps:
