@@ -61,6 +61,22 @@ Night 9 (F314, F303), what the families still missed:
   up why. A figure said to be right or wrong, or what it "was based on", is a
   "re-checked" claim in Auto's own words; a count, a query or a read of the source
   backs it (reading the card that holds the other figure does not).
+
+Night 9b (F319), lines that said the opposite of what happened:
+
+- "I've sent card 67.1 back to the Analyst" (chat ba4628f8) after the send-back went
+  through: the reply was cut into sentences at every full stop, so "67." made "I've sent
+  card 67." an email claim ("I didn't send anything in this reply"), and no claim's words
+  could run past "67.1". A full stop between digits (a step's number, £8.68) is read as
+  part of the number (``_MID_NUMBER``), so it ends no sentence and no claim.
+- "I've assigned the Shopify Inventory Watchdog to both steps" (chat a0475f96) after two
+  platform_update_playbook_step calls with its agent: a write that names an agent backs
+  "assigned" (``call_effects``: ``…:agent_set``). The false nudge had the model call the
+  steps again and repeat its paragraph.
+- 'Card #0044, "Minimum wholesale order and cut-off," has been cancelled.' (chat 6d4e45fe)
+  after the move to done was refused: a change told in passing allowed only a few
+  characters between the card and "has been", so a quoted title hid it. A card's title
+  between them is read now, so the claim is nudged and corrected like any other.
 """
 from __future__ import annotations
 
@@ -100,7 +116,7 @@ _STARTS = ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger"
            "update_task_status:in_progress")
 _REMOVES = ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_", "update_task_status:cancelled")
 _CHANGES = ("update_", "assign_", "set_", "configure_", "rename", "move")
-_ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan")
+_ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan", ":agent_set")   # F319: an agent written on
 _SETS = ("update_", "set_", "configure_", "schedule_", "pause_", "create_")
 _SWITCHES_OFF = ("update_", "schedule_", "pause_", "set_", "configure_")
 _SENDS_BACK = ("send_back", "update_task_status:assigned", "reject")
@@ -146,7 +162,10 @@ _SENT_BACK = _I_HAVE + r"(?:sent|passed|handed)\b[^.!?\n]{0,80}?\bback\b"
 # a timer or a tool, or a card by its number ("Task #0422 has been moved to 'cancelled'").
 _SUBJECT = (r"(?:\b(?:the|your|this|that)\s+)?(?:\b(?:it|this|that|task|ticket|card|mission|playbook|timer|"
             r"schedule|tool|step)\b|#\d{3,6}(?:\.\d{1,3})?)")
-_HAS_BEEN = r"[^.!?\n]{0,12}?\s(?:has|have)\s+(?:(?:now|also|just|already)\s+)*been\s+(?:successfully\s+)?"
+# F319 (night 9b): 'Card #0044, "Minimum wholesale order and cut-off," has been cancelled.'
+_TITLE = r"(?:[\s,]*(?:\*\*)?[\"“‘][^\"”’\n]{1,120}[\"”’](?:\*\*)?,?)?"
+_HAS_BEEN = (r"[^.!?\n]{0,12}?" + _TITLE
+             + r"\s(?:has|have)\s+(?:(?:now|also|just|already)\s+)*been\s+(?:successfully\s+)?")
 # A card moved to a column by name: "moved #0422 to 'cancelled'", "marked it as done".
 _TO_COLUMN = r"(?:moved|marked|set|put|changed)\b[^.!?\n]{0,60}?\b(?:to|as|into|in)\s+[\"'“‘*]*(?:the\s+)?"
 
@@ -258,6 +277,10 @@ _BACK_REFERENCE = re.compile(r"\b(?:earlier|previously|yesterday|last (?:time|tu
 # "Once I've installed it, …": the claim is the condition of something later.
 _CONDITION = re.compile(r"\b(?:after|once|when|whenever|as soon as|until|if)$", re.I)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+# F319 (night 9b): a full stop between digits ("card 67.1", "£8.68") is part of the number,
+# read as a one-dot leader, so it ends no sentence and no claim's words.
+_MID_NUMBER = re.compile(r"(?<=\d)\.(?=\d)")
+_IN_A_NUMBER = "\u2024"
 
 
 def _kinds(text: str) -> Tuple[str, ...]:
@@ -334,10 +357,11 @@ def claimed_action_not_done(text: str, done: Optional[set] = None, *,
     Night 6: "I'll get that installed for you right away" after an empty copy was
     created; "I've checked the board" with no board read."""
     succeeded = [a.lower() for a in (done or ())]
-    found = _first_unbacked(text or "", _ACTION_CLAIMS, succeeded) or _steps_wait_unchecked(text or "", succeeded)
+    text = _MID_NUMBER.sub(_IN_A_NUMBER, text or "")
+    found = _first_unbacked(text, _ACTION_CLAIMS, succeeded) or _steps_wait_unchecked(text, succeeded)
     if found or not (_auto_speaks() if promises is None else promises):
         return found
-    return _first_unbacked(_own_words(text or ""), _PASSIVES + _PROMISES + _FIGURES, succeeded)
+    return _first_unbacked(_own_words(text), _PASSIVES + _PROMISES + _FIGURES, succeeded)
 
 
 __all__ = ["claimed_action_not_done"]

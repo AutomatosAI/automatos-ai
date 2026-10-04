@@ -21,6 +21,20 @@ before it runs, and refused, saying the call that does what they asked, when:
 - it moves a card to In progress for a send-back, which re-runs the old brief without
   the owner's words (#0425).
 
+Night 9b (F318): "Send card #0081 back to the Business Analyst with this: I only wanted
+this September …" (chat 6586c8bf) became platform_update_task {description: …}: the
+board's Re-brief. #1938 re-ran with Auto's rewording as its brief, and the card showed
+times_sent_back 0 and no note: the owner's words were nowhere on it. A new brief for a
+card the owner said to send back, when they asked for no new brief, is refused with the
+send-back that carries their words.
+
+Night 9b (F319): "My Business Analyst just worked out we're about 97 kg short … (card
+1970). Can you get the Operations Manager to draft a reorder email …" (chat 8578eeaf):
+the new card was refused as a copy of #1970, a card the owner named only as where the
+figure came from, and Auto said it had assigned the work. A new card is a copy only when
+the owner asked for something done to the card they named (give, send back, update,
+cancel, approve, run again).
+
 Night 9 (F309):
 - "Card 1869 needs to go back. Correction: …" became a question to the owner
   (platform_ask_human, ask #1460) and parked #1869 in Blocked; a question or a stop on a
@@ -52,7 +66,6 @@ from modules.tools.discovery.owner_turn import (
     RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD, UPDATE, NamedCard, OwnerTurn, autos_last_reply, autos_proposal,
     card_kind, card_words, names_card, owner_turn, owners_recent_words, says, values_in,
 )
-from modules.tools.discovery.ticket_moves import STATUS_WORDS
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +109,8 @@ MISSION_CALLS = frozenset(action for action in CARD_ACTIONS if "_mission" in act
 MISSION_REF_KEYS = ("mission_id", "run_id", "id")
 # A card the owner can send back: one its agent has answered.
 SENDABLE_BACK = ("review", "done")
+# F318 (night 9b): the owner asking for a new brief, which a send-back keeps ("Put that brief on #0204").
+NEW_BRIEF = re.compile(r"\bbrief\b|\bdescription\b", re.I)
 # How much of the owner's words a refusal or a card's call quotes for the call to carry.
 WORDS_QUOTED = 1000
 OTHER_ASK = (" If the owner also asked for {kind}, ask them to confirm that in their next message.")
@@ -187,6 +202,8 @@ def _a_question_for_a_send_back(db: Session, workspace_id: Any, turn: OwnerTurn,
 
 
 def _status_of(params: Dict[str, Any]) -> str:
+    from modules.tools.execution.call_effects import STATUS_WORDS   # read the board's way, as the move is
+
     status = str(params.get("status") or "").strip().lower()
     return STATUS_WORDS.get(status, status)
 
@@ -218,7 +235,7 @@ def _writes(action: str) -> bool:
 def _a_copy(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, params: Dict[str, Any]) -> Optional[str]:
     """A new card or mission made for a card or mission the owner named."""
     found = turn.found()
-    if action == "platform_create_task" and found and not says(NEW_CARD, turn.said):
+    if action == "platform_create_task" and found and not says(NEW_CARD, turn.said) and _acts_on_it(turn):
         card = found[0]
         return (f"{card_words(card)} is already on the owner's board: act on that card, don't make a new one."
                 f"{NOTHING_DONE} {right_call(turn, card)}")
@@ -232,6 +249,12 @@ def _a_copy(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, params
         return f"Start {card.ref} again with its own goal, word for word: '{goal}'.{NOTHING_DONE}"
     return (f"{card_words(card)} is the owner's mission: change it with platform_update_mission_plan "
             f"{{mission_id: \"{card.ref}\", ...}} instead of making a second one.{NOTHING_DONE}")
+
+
+def _acts_on_it(turn: OwnerTurn) -> bool:
+    """The owner's latest message asks for something done to the card it names: a new card
+    for it would be a copy. A card named as a source ("(card 1970)") is not acted on (F319)."""
+    return says(OTHER_VERB, (turn.latest,)) or says(APPROVE, (turn.latest,)) or says(AGAIN, (turn.latest,))
 
 
 def _mission_goal(db: Session, card: NamedCard) -> str:
@@ -354,14 +377,35 @@ def _the_cards_words(db: Session, workspace_id: Any, params: Dict[str, Any]) -> 
 
 def _a_rerun_for_a_send_back(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
                              params: Dict[str, Any]) -> Optional[str]:
-    """In Progress for a card the owner sent back: it would re-run the old brief without their words."""
+    """In Progress for a card the owner sent back: it would re-run the old brief without their words.
+    With their words as its note it is the board's Reject (ticket_moves, F318), so it goes on."""
     if action not in STATUS_CALLS or _status_of(params) != "in_progress" or not says(SEND_BACK, (turn.latest,)):
+        return None
+    if str(params.get("note") or "").strip():
         return None
     card = next((c for c in turn.found() if getattr(c.task, "status", None) in SENDABLE_BACK), None)
     if card is None:
         return None
     return (f"Moving {card.ref} to In progress would run its old brief again without the owner's words."
             f"{NOTHING_DONE} {_send_back_call(card.ref, _words_for_card(turn))}")
+
+
+def _a_new_brief_for_a_send_back(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
+                                 params: Dict[str, Any]) -> Optional[str]:
+    """A new brief for a card the owner sent back with their words (F318, chat 6586c8bf):
+    the board's Re-brief, which puts no note on the card. Theirs when they asked for one."""
+    if action != "platform_update_task" or not str(params.get("description") or "").strip():
+        return None
+    if params.get("send_back") or params.get("status") or not says(SENDS_IT_BACK, (turn.latest,)):
+        return None
+    if says(UPDATE, (turn.latest,)) or NEW_BRIEF.search(turn.latest):
+        return None
+    card = next((c for c in turn.found() if getattr(c.task, "status", None) in SENDABLE_BACK), None)
+    if card is None:
+        return None
+    return (f"A new description would give {card.ref} a new brief, and the owner asked to send it back: their words "
+            f"go on the card as the correction its redo fixes.{NOTHING_DONE} "
+            f"{_send_back_call(card.ref, _words_for_card(turn))}")
 
 
 def _words_for_card(turn: OwnerTurn) -> str:
@@ -441,6 +485,6 @@ def _quoted(text: str) -> str:
 
 
 RULES = (_wrong_kind, _not_a_mission, _a_question_for_a_send_back, _not_the_card, _a_copy, _not_what_they_said,
-         _not_their_words, _a_rerun_for_a_send_back)
+         _not_their_words, _a_rerun_for_a_send_back, _a_new_brief_for_a_send_back)
 
 __all__ = ["CARD_ACTIONS", "follows_the_owner", "refusal_for", "right_call", "share_of_words"]

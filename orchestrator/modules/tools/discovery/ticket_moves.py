@@ -19,6 +19,12 @@ Done stays Auto's approval (F235 files the deliverable); its ``note`` is kept as
 board's Approve keeps one. The words Auto reaches for ("approved", "send back") mean
 those two moves. A bulk call refuses only the tickets the board would, and moves the
 rest.
+
+Night 9b (F318): a move of an answered ticket to In progress with a note re-ran its old
+brief, and the note was dropped (only a move to Done kept one): the owner's words were
+nowhere on the card, and times_sent_back stayed 0. A note on that move is the owner's
+correction, so it is the board's Reject too. F319: a send-back's answer says so
+(``sent_back``), which is what backs Auto's "I've sent it back".
 """
 from __future__ import annotations
 
@@ -31,15 +37,11 @@ from sqlalchemy.orm import Session
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 SEND_BACK = "assigned"
+RERUN = "in_progress"
+ANSWERED = ("review", "done")
 BY_AN_AGENT = "platform_tool"
 AN_AGENTS_NOTE_BY = "an agent"
 MAX_NOTE_CHARS = 1000  # an operator note on the board (api/board_tasks.MAX_TASK_NOTE_CHARS)
-# Night 7b: Auto asked for 'approved' (#0177) and for a send-back in words.
-STATUS_WORDS = {
-    "approved": "done", "approve": "done",
-    "rejected": SEND_BACK, "reject": SEND_BACK,
-    "send back": SEND_BACK, "send_back": SEND_BACK, "sent back": SEND_BACK, "sent_back": SEND_BACK,
-}
 SENT_BACK_WITH_A_NOTE = "Sent back: its draft is kept in the ticket's history, and the redo works from your note."
 SENT_BACK_WITHOUT_ONE = ("Sent back: its draft is kept in the ticket's history. With no note the agent "
                          "only knows to try again; add one to say what to fix.")
@@ -85,6 +87,8 @@ def _listed(params: Dict[str, Any]) -> Optional[List[Any]]:
 
 def _in_the_boards_words(params: Dict[str, Any]) -> Dict[str, Any]:
     """The call with its status said the board's way: "approved" is Done, "send back" Assigned."""
+    from modules.tools.execution.call_effects import STATUS_WORDS   # night 7b: the words Auto reaches for
+
     status = params.get("status")
     meant = STATUS_WORDS.get(status.strip().lower()) if isinstance(status, str) else None
     return {**params, "status": meant} if meant else params
@@ -101,13 +105,21 @@ def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dic
     for task in _tickets(db, workspace_id, refs):
         if task.status == new_status:
             continue
-        if new_status == SEND_BACK and task.status in ("review", "done"):
+        if _sends_it_back(task, new_status, params):
             answers[task.id] = _send_back(db, workspace_id, task, params)
             continue
         refusal = _refusal(db, task, new_status)
         if refusal:
             answers[task.id] = _refused(task, refusal)
     return answers
+
+
+def _sends_it_back(task: Any, new_status: str, params: Dict[str, Any]) -> bool:
+    """An answered ticket moved to Assigned, or (F318) to In progress with a note: the
+    board's Reject, the note its correction."""
+    if task.status not in ANSWERED:
+        return False
+    return new_status == SEND_BACK or (new_status == RERUN and bool(str(params.get("note") or "").strip()))
 
 
 def _tickets(db: Session, workspace_id: Any, refs: List[Any]) -> List[Any]:
@@ -136,6 +148,7 @@ def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]
     from fastapi import HTTPException
 
     from api.board_tasks import MISSION_CARD_SOURCE, MISSION_CARD_VERDICT, send_back
+    from modules.tools.execution.call_effects import SENT_BACK_SAID
     from services.board_consent import actor_from_user_id
 
     if getattr(task, "source_type", None) == MISSION_CARD_SOURCE:
@@ -148,7 +161,7 @@ def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]
     except HTTPException as refused:
         return _refused(task, str(refused.detail))
     return {"success": True, "task_id": task.id, "status": task.status, "triggered_execution": True,
-            "message": SENT_BACK_WITH_A_NOTE if note else SENT_BACK_WITHOUT_ONE}
+            SENT_BACK_SAID: True, "message": SENT_BACK_WITH_A_NOTE if note else SENT_BACK_WITHOUT_ONE}
 
 
 def _keep_the_note(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any) -> None:
@@ -199,4 +212,4 @@ def _bulk_answer(status: Any, requested: int, decided: Dict[int, Dict[str, Any]]
             "requested": requested, "updated_count": len(updated), "updated": updated, "failed": failed}
 
 
-__all__ = ["STATUS_WORDS", "keeps_the_board_rules"]
+__all__ = ["keeps_the_board_rules"]
