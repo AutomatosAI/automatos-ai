@@ -30,6 +30,7 @@ import {
   type DeliverableType,
 } from '@/components/icons/deliverable-icon'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
+import { madeBy } from './made-by'
 
 // ============= STYLE MAPS =============
 
@@ -148,7 +149,7 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
         <span className="truncate text-sm font-medium text-foreground">{title}</span>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Bot className="h-3 w-3 shrink-0" />
-          <span className="truncate">{agent_name ?? 'Unknown agent'}</span>
+          <span className="truncate">{madeBy(agent_name, source_type)}</span>
         </div>
       </div>
 

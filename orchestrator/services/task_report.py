@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 SUMMARY_MAX_CHARS = 497
+TASK_REPORT_TYPE = "task"
+HEARTBEAT_REPORT_TYPE = "heartbeat"  # v_workspace_outputs classes it as a heartbeat (outputs_heartbeat_reports)
+HEARTBEAT_SOURCE = "heartbeat"
 RESULT_KEYS = ("result", "response", "output", "content")
 
 
@@ -81,6 +84,11 @@ def _report_status(task: Any) -> str:
     return "ok" if task.status in ("done", "review") else "warning"
 
 
+def report_type_for(task: Any) -> str:
+    """A heartbeat ticket's report is a heartbeat report, so the feed hides it like the rest."""
+    return HEARTBEAT_REPORT_TYPE if getattr(task, "source_type", None) == HEARTBEAT_SOURCE else TASK_REPORT_TYPE
+
+
 async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exec_result: Dict[str, Any]) -> None:
     """File an agent_reports row for a finished ticket, so it shows in Reports,
     Deliverables and the Activity Feed. Never raises: a failure is logged."""
@@ -97,7 +105,7 @@ async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exe
         )
         filed = await ReportService(db, workspace_id).create_report(
             agent_id=task.assigned_agent_id, agent_name=agent_name, title=f"Task: {task.title}",
-            content=task_report_content(task, agent_name, answer, exec_result, metrics), report_type="task",
+            content=task_report_content(task, agent_name, answer, exec_result, metrics), report_type=report_type_for(task),
             status=_report_status(task), summary=_summary(answer, task.error_message), metrics=metrics,
             linked_task_ids=[task.id],
         )
@@ -107,4 +115,4 @@ async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exe
         logger.exception("[BoardTasks] the task report for task=%s was not filed", getattr(task, "id", "?"))
 
 
-__all__ = ["auto_create_task_report", "task_report_content"]
+__all__ = ["auto_create_task_report", "report_type_for", "task_report_content"]
