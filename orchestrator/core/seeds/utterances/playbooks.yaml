@@ -197,6 +197,8 @@ actions:
     source: example
   - text: trigger the bug triage automation
     source: example
+  - text: run my New Cafe Onboarding for a new café
+    source: example
   - text: run the recipe
     source: phrase_map
   - text: execute recipe

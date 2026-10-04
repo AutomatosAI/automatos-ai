@@ -111,7 +111,7 @@ actions:
     source: example
   - text: create a mission to build a landing page
     source: example
-  - text: run a deep research mission on competitor pricing
+  - text: begin a deep research mission on competitor pricing
     source: example
   - text: launch a mission
     source: phrase_map
