@@ -13,6 +13,12 @@ candidates (the model cannot invent a figure's source), and each channel's copy
 fits its limits. JSON the model gets wrong is asked for once more; a second
 failure is :class:`ComposeFailed` (the API answers 502). A call that outlasts
 ``SOCIALS_COMPOSE_TIMEOUT_SECONDS`` is :class:`ComposeTimedOut` (504).
+
+An answer that leaves its template's required variables empty (a video template has
+dozens) is followed up (``_filled``): those variables are asked for by name, at most
+``FILL_BATCH`` a call so each answer fits the output budget, and merged in. A post Auto
+writes is then one the render can make; what the model still leaves empty stays in
+the warnings ("No value yet for: ...").
 """
 from __future__ import annotations
 
@@ -23,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from core.social_templates import resolve_variables
 from modules.socials import compose_checks
 from modules.socials.copy_limits import limits_for
 
@@ -50,6 +57,13 @@ VISUAL_PROMPTS_NOTE = (
 )
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
 
+FILL_BATCH = 25  # the most variables one follow-up asks for: its answer stays inside the output budget
+FILL_NOTE = (
+    "Your answer left these variables of the template you chose without a value, and the post cannot be "
+    'made without them. Answer with ONE JSON object only, shaped {"variables": {"<name>": "<value>"}}, giving '
+    "each of them a value that fits its schema below, from the brief and in the brand voice. The rules above "
+    "still hold: never invent a source, a URL or a number."
+)
 RETRY_NOTE = (
     "Your answer was not the JSON object asked for. Answer again with ONLY that "
     "JSON object, no prose and no code fence."
@@ -210,14 +224,55 @@ async def _ask(llm: Any, messages: List[Dict[str, str]], timeout: float) -> Opti
     return parse_answer(getattr(response, "content", None))
 
 
+def _missing(proposal: Mapping[str, Any]) -> List[str]:
+    """The chosen template's variables with neither a value nor a default: the render's own test."""
+    schema = (proposal.get("template") or {}).get("variables_schema") or {}
+    supplied = {name: spec.get("value") for name, spec in (proposal.get("variables") or {}).items()}
+    return resolve_variables(schema, supplied).missing if schema else []
+
+
+async def _fills(llm: Any, history: List[Dict[str, str]], schema: Mapping[str, Any], names: Sequence[str],
+                 timeout: float) -> Dict[str, Any]:
+    """The values one follow-up gives for ``names``; nothing when its answer is unusable or late."""
+    ask = FILL_NOTE + "\n" + json.dumps({name: schema[name] for name in names}, ensure_ascii=False, default=str)
+    try:
+        raw = await _ask(llm, [*history, {"role": "user", "content": ask}], timeout)
+    except ComposeTimedOut:
+        logger.warning("[Socials] compose follow-up for %d variables timed out", len(names))
+        return {}
+    values = raw.get("variables") if isinstance(raw, dict) else None
+    return {name: values[name] for name in names if name in values} if isinstance(values, dict) else {}
+
+
+async def _filled(raw: Mapping[str, Any], proposal: Dict[str, Any], ctx: ComposeContext, llm: Any,
+                  messages: List[Dict[str, str]], timeout: float) -> Dict[str, Any]:
+    """The proposal with the required variables its answer left empty asked for by name
+    (``FILL_BATCH`` a call), merged over the answer (a value it gave that holds is never
+    replaced), and the whole checked again."""
+    missing = _missing(proposal)
+    if not missing:
+        return proposal
+    schema = proposal["template"]["variables_schema"]
+    history = [*messages, {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False, default=str)}]
+    fills: Dict[str, Any] = {}
+    for start in range(0, len(missing), FILL_BATCH):
+        fills.update(await _fills(llm, history, schema, missing[start:start + FILL_BATCH], timeout))
+    if not fills:
+        return proposal
+    given = raw.get("variables") if isinstance(raw.get("variables"), dict) else {}
+    merged = {**raw, "template_id": proposal["template_id"], "variables": {**given, **fills}}
+    return compose_checks.checked_proposal(merged, ctx)
+
+
 async def propose(ctx: ComposeContext, llm_factory: Callable[[], Any], timeout: float) -> Dict[str, Any]:
-    """The proposal for ``ctx``: one call, and one retry when the JSON is unusable."""
+    """The proposal for ``ctx``: one call, one retry when the JSON is unusable, and a
+    follow-up for the template's required variables the answer left empty."""
     llm = llm_factory()
     messages = build_messages(ctx)
     for attempt in range(ATTEMPTS):
         raw = await _ask(llm, messages, timeout)
         if raw is not None:
-            return compose_checks.checked_proposal(raw, ctx)
+            return await _filled(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
         logger.warning("[Socials] compose answer %d was not JSON", attempt + 1)
         messages = [*messages, {"role": "user", "content": RETRY_NOTE}]
     raise ComposeFailed("The model's answer could not be read as a proposal. Try again, or start from a blank draft.")
