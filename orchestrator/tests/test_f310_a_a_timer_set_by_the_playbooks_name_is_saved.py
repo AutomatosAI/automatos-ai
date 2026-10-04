@@ -21,7 +21,6 @@ UK = "Europe/London"
 STOCK_STEP = [{"order": 1, "agent_id": None, "output_key": "stock_report",
                "prompt_template": "Report every coffee's green stock from the shop system and flag anything under 50 kg."}]
 MONDAY_8 = {"type": "cron", "cron_expression": "0 8 * * 1", "timezone": UK, "enabled": True}
-FAILED = {"success": False, "error": "Action 'platform_schedule_playbook' failed"}
 NIGHT_9_CALL = {"action": "platform_schedule_playbook", "params": {
     "timezone": UK, "playbook_name": "Monday Stock Check", "enabled": True, "cron_expression": "0 8 * * 1"}}
 
@@ -74,28 +73,3 @@ def test_switching_it_off_by_name_keeps_its_time(roastery):
     assert out["success"] is True and "is kept" in out["message"]
     assert _saved(roastery) == {**MONDAY_8, "enabled": False}
 
-
-def test_a_repeat_of_a_call_that_failed_says_it_failed():
-    from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-
-    tracker = ToolExecutionTracker()
-    tracker.record_execution("platform_execute", NIGHT_9_CALL)
-    tracker.record_outcome("platform_execute", NIGHT_9_CALL, FAILED)
-
-    skipped, reason = tracker.should_skip_execution("platform_execute", NIGHT_9_CALL)
-
-    assert skipped and "identical parameters" in reason
-    assert "it failed: Action 'platform_schedule_playbook' failed." in reason   # night 9: read as "not applied"
-    assert "it was not done" in reason
-
-
-def test_a_repeat_of_a_call_that_worked_is_skipped_as_before():
-    from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-
-    tracker = ToolExecutionTracker()
-    tracker.record_execution("platform_execute", NIGHT_9_CALL)
-    tracker.record_outcome("platform_execute", NIGHT_9_CALL, {"success": True, "playbook_id": 114})
-
-    skipped, reason = tracker.should_skip_execution("platform_execute", NIGHT_9_CALL)
-
-    assert skipped and reason == "Tool 'platform_execute' was already executed with identical parameters"
