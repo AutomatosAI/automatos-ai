@@ -44,6 +44,11 @@ empty, so the documented parameters are carried here.
 - ``never_offered``: publish actions the registry never offers (stale, deprecated,
   or pulling media from a URL on a domain the app owner verified, and Composio owns
   the app). The post gate refuses them all the same.
+- ``results`` (PRD-251C US-C402): the channel's read of a published post's numbers: its
+  ``action``, its ``params`` (``$remote_id`` is the target's id on the platform; a kind's
+  own in ``kind_params``) and where each number sits in the answer (``numbers``: a path,
+  ``a.b|c.d``, or with ``insights`` a metric name). TikTok has none
+  (``modules/socials/result_reads.py``).
 
 A source is ``$copy`` (the channel's copy), ``$title`` (the post's title),
 ``$media`` (the post's media file), ``$media[]`` (all its media files),
@@ -124,6 +129,13 @@ CHANNEL_ADAPTERS = {
                 },
             ],
         },
+        # PRD-251C (US-C402): a member's post gives its reactions only; the share statistics
+        # action is an organisation's, not a post's (docs.composio.dev/toolkits, 2026-10-04).
+        "results": {
+            "action": "LINKEDIN_LIST_REACTIONS",
+            "params": {"entity": "$remote_id", "count": 1},
+            "numbers": {"reactions": "paging.total|data.paging.total|response_dict.paging.total"},
+        },
     },
     "twitter": {
         "label": "X",
@@ -199,6 +211,18 @@ CHANNEL_ADAPTERS = {
             ],
         },
         "never_offered": ["TWITTER_CREATE_TWEET"],  # stale: never offered, and refused by the post gate
+        # PRD-251C (US-C402): the post's public metrics (docs.composio.dev/toolkits, 2026-10-04).
+        "results": {
+            "action": "TWITTER_POST_LOOKUP_BY_POST_ID",
+            "params": {"id": "$remote_id", "tweet_fields": ["public_metrics"]},
+            "numbers": {
+                "views": "data.public_metrics.impression_count|public_metrics.impression_count",
+                "likes": "data.public_metrics.like_count|public_metrics.like_count",
+                "reposts": "data.public_metrics.retweet_count|public_metrics.retweet_count",
+                "replies": "data.public_metrics.reply_count|public_metrics.reply_count",
+                "quotes": "data.public_metrics.quote_count|public_metrics.quote_count",
+            },
+        },
     },
     "instagram": {
         "label": "Instagram",
@@ -391,6 +415,17 @@ CHANNEL_ADAPTERS = {
             ],
         },
         "never_offered": ["INSTAGRAM_CREATE_POST"],  # deprecated: never offered, and refused by the post gate
+        # PRD-251C (US-C402): the media's insights by metric name; a story has its own metrics.
+        "results": {
+            "action": "INSTAGRAM_GET_IG_MEDIA_INSIGHTS",
+            "params": {"ig_media_id": "$remote_id", "metric": ["views", "reach", "likes", "comments", "shares", "saved"]},
+            "kind_params": {"story": {"metric": ["views", "reach", "replies", "shares"]}},
+            "insights": True,
+            "numbers": {
+                "views": "views", "reach": "reach", "likes": "likes", "comments": "comments", "shares": "shares",
+                "saves": "saved", "replies": "replies",
+            },
+        },
     },
     "tiktok": {
         "label": "TikTok",
@@ -473,6 +508,16 @@ CHANNEL_ADAPTERS = {
                     "optional": True,
                 },
             ],
+        },
+        # PRD-251C (US-C402): the video's statistics (docs.composio.dev/toolkits, 2026-10-04).
+        "results": {
+            "action": "YOUTUBE_GET_VIDEO_DETAILS_BATCH",
+            "params": {"id": ["$remote_id"], "parts": ["statistics"]},
+            "numbers": {
+                "views": "items.0.statistics.viewCount|data.items.0.statistics.viewCount",
+                "likes": "items.0.statistics.likeCount|data.items.0.statistics.likeCount",
+                "comments": "items.0.statistics.commentCount|data.items.0.statistics.commentCount",
+            },
         },
     },
 }

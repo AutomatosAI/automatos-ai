@@ -102,7 +102,7 @@ async def _read(executor: Any, due: DueRead) -> Tuple[Dict[str, int], Optional[s
     read = result_reads.READS[due.toolkit]
     result = await executor.execute_with_uploads(
         read.action, result_reads.params_for(read, due.remote_id, due.post_kind), agent_id=PLATFORM_AGENT_ID,
-        workspace_id=due.workspace_id, app_name=due.toolkit.upper(), upload_params=(), way_through=None,
+        workspace_id=due.workspace_id, app_name=due.toolkit.upper(),
     )
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     if not result.get("success") or data.get("successful") is False:

@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
@@ -41,7 +41,8 @@ def list_social_voice_examples(
 @router.delete("/voice-examples/{example_id}", status_code=204, dependencies=[CAN_MANAGE])
 def delete_social_voice_example(
     example_id: UUID, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid),
-) -> None:
+) -> Response:
     """Remove one example: the composer never reads it again."""
     if not voice_examples.remove(db, ctx.workspace_id, example_id):
         raise HTTPException(status_code=404, detail=NOT_FOUND)
+    return Response(status_code=204)

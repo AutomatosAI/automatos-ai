@@ -1,9 +1,10 @@
 """PRD-251C (C7, US-C402): a published post's numbers, read through its channel's own read
 action in Composio (Composio only, D15: no client of our own).
 
-:data:`READS` holds each channel's read: its action, the params (``$remote_id`` is the
-target's id on the platform, as its publish recorded it) and where each number sits in the
-answer. The actions (docs.composio.dev/toolkits, checked 2026-10-04):
+:data:`READS` holds each channel's read, from its adapter's ``results`` (the channel data,
+``channel_adapters.py``): its action, the params (``$remote_id`` is the target's id on the
+platform, as its publish recorded it) and where each number sits in the answer. The actions
+(docs.composio.dev/toolkits, checked 2026-10-04):
 
 * X: ``TWITTER_POST_LOOKUP_BY_POST_ID`` with ``tweet_fields`` ``public_metrics``: views
   (impressions), likes, reposts, replies and quotes.
@@ -24,7 +25,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
+
+from modules.socials.channel_adapters import CHANNEL_ADAPTERS
 
 REMOTE_ID = "$remote_id"
 READINGS: Tuple[int, ...] = (1, 7)  # days after a target went out
@@ -32,12 +35,7 @@ READINGS: Tuple[int, ...] = (1, 7)  # days after a target went out
 NUMBER_KEYS = ("views", "reach", "likes", "comments", "shares", "saves", "replies", "reposts", "quotes", "reactions")
 # The ones that are someone acting on the post: their sum is its engagement (O7, open: this wave's measure).
 ENGAGEMENT_KEYS = ("likes", "comments", "shares", "saves", "replies", "reposts", "quotes", "reactions")
-_TWEET = ("data.public_metrics.{key}", "public_metrics.{key}")
-_VIDEO = ("items.0.statistics.{key}", "data.items.0.statistics.{key}")
-
-
-def _paths(templates: Sequence[str], key: str) -> str:
-    return "|".join(template.format(key=key) for template in templates)
+_READ_KEYS = frozenset({"action", "params", "numbers", "insights", "kind_params"})
 
 
 @dataclass(frozen=True)
@@ -52,28 +50,22 @@ class ResultRead:
     kind_params: Mapping[str, Mapping[str, Any]] = field(default_factory=lambda: MappingProxyType({}))
 
 
+def parse_read(toolkit: str, raw: Any) -> ResultRead:
+    """A channel's ``results`` entry, checked; ``ValueError`` naming what is wrong."""
+    if not isinstance(raw, Mapping) or set(raw) - _READ_KEYS or not isinstance(raw.get("action"), str):
+        raise ValueError(f"{toolkit}.results is an object of {sorted(_READ_KEYS)} with an action")
+    numbers = raw.get("numbers")
+    if not isinstance(numbers, Mapping) or not numbers or set(numbers) - set(NUMBER_KEYS):
+        raise ValueError(f"{toolkit}.results.numbers maps numbers among {', '.join(NUMBER_KEYS)} to where they are")
+    return ResultRead(
+        toolkit=toolkit, action=raw["action"].upper(), params=MappingProxyType(dict(raw.get("params") or {})),
+        numbers=MappingProxyType({key: str(where) for key, where in numbers.items()}), insights=raw.get("insights") is True,
+        kind_params=MappingProxyType({kind: MappingProxyType(dict(extra)) for kind, extra in (raw.get("kind_params") or {}).items()}),
+    )
+
+
 READS: Mapping[str, ResultRead] = MappingProxyType({
-    "twitter": ResultRead(
-        "twitter", "TWITTER_POST_LOOKUP_BY_POST_ID", {"id": REMOTE_ID, "tweet_fields": ["public_metrics"]},
-        {"views": _paths(_TWEET, "impression_count"), "likes": _paths(_TWEET, "like_count"),
-         "reposts": _paths(_TWEET, "retweet_count"), "replies": _paths(_TWEET, "reply_count"), "quotes": _paths(_TWEET, "quote_count")},
-    ),
-    "instagram": ResultRead(
-        "instagram", "INSTAGRAM_GET_IG_MEDIA_INSIGHTS",
-        {"ig_media_id": REMOTE_ID, "metric": ["views", "reach", "likes", "comments", "shares", "saved"]},
-        {"views": "views", "reach": "reach", "likes": "likes", "comments": "comments", "shares": "shares", "saves": "saved",
-         "replies": "replies"},
-        insights=True,
-        kind_params={"story": {"metric": ["views", "reach", "replies", "shares"]}},
-    ),
-    "linkedin": ResultRead(
-        "linkedin", "LINKEDIN_LIST_REACTIONS", {"entity": REMOTE_ID, "count": 1},
-        {"reactions": "paging.total|data.paging.total|response_dict.paging.total"},
-    ),
-    "youtube": ResultRead(
-        "youtube", "YOUTUBE_GET_VIDEO_DETAILS_BATCH", {"id": [REMOTE_ID], "parts": ["statistics"]},
-        {"views": _paths(_VIDEO, "viewCount"), "likes": _paths(_VIDEO, "likeCount"), "comments": _paths(_VIDEO, "commentCount")},
-    ),
+    toolkit: parse_read(toolkit, adapter["results"]) for toolkit, adapter in CHANNEL_ADAPTERS.items() if adapter.get("results")
 })
 
 

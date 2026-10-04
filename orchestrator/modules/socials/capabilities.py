@@ -340,7 +340,7 @@ NEEDS_PUBLIC_LINK = (
 _STEP_KEYS = frozenset(
     {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink", "jpeg"}
 )
-_ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
+_ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered", "results"})  # results: result_reads.py
 _NOT_A_WORD = re.compile(r"[^A-Z0-9]+")
 
 

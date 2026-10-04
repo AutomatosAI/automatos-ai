@@ -441,8 +441,9 @@ def test_the_migration_round_trips_on_postgres(pg_engine):
             conn.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
             insp = sa.inspect(conn)
             if all(insp.has_table(t) for t in TABLES):
-                # PRD-251B's content bank refers to the posts: a later wave's table goes first.
-                conn.execute(sa.text("DROP TABLE IF EXISTS social_topics"))
+                # Later waves' tables refer to the posts and their targets: they go first (PRD-251B's
+                # content bank; PRD-251C Wave 4's post stats and voice examples).
+                conn.execute(sa.text("DROP TABLE IF EXISTS social_post_stats, social_voice_examples, social_topics"))
                 _run_migration(conn, "downgrade")  # the create_all-built tables go first
             assert not any(sa.inspect(conn).has_table(t) for t in TABLES)
 

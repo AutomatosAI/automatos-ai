@@ -12,17 +12,13 @@ On the S0.3b API harness (SQLite). Pinned:
 """
 from __future__ import annotations
 
-import functools
 import sys
 from pathlib import Path
-
-import anyio
 
 _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-import api.socials as socials_api  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
 from config import config  # noqa: E402
 from core.models.socials import SocialPost, SocialVoiceExample  # noqa: E402
@@ -34,8 +30,11 @@ AGENT = "Social Media Director"
 
 
 def _created(api, base, agent=None):
-    fields = {"title": "Lisbon", "format": "text", "copy": {"base": base, "channels": {}}}
-    return anyio.run(functools.partial(socials_api.create_post, api.session, WS_A, "member-1", fields, agent=agent))
+    """A draft, as the plan maker or an agent tool writes one (``agent``), or a person (none)."""
+    row = service.create_draft(api.session, workspace_id=WS_A, created_by="member-1", title="Lisbon", format="text",
+                               copy={"base": base, "channels": {}}, agent=agent)
+    api.session.commit()
+    return row
 
 
 def _drafted_by_auto(api, base):
