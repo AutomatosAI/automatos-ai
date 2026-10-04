@@ -271,6 +271,8 @@ actions:
   platform_get_playbook_execution:
   - text: what's the status of that playbook run?
     source: example
+  - text: 'show me everything step 2 of run #0102 produced'
+    source: example
   - text: check playbook execution abc123
     source: example
   - text: did the playbook run successfully?
