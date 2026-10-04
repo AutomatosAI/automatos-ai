@@ -150,7 +150,6 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     if reference is not None and (isinstance(reference, bool) or not isinstance(reference, (int, str))):
         return {"success": False, "error": "database_id must be a database source's id or its name"}
 
-    from modules.tools.discovery.query_data_reading import readable_result
     from modules.tools.execution.exec_research import run_nl2sql
 
     try:
@@ -168,8 +167,36 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
                 "error": result.get("error", "Query execution failed"),
                 "sql": result.get("sql"),
             }
-        # F301 (night 9): the rows as a table, and a line saying what they count.
-        return readable_result(result)
+
+        # Format for agent consumption
+        data = result.get("data", [])
+        columns = result.get("columns", [])
+        row_count = result.get("row_count", len(data))
+
+        # Build readable table (truncate large results)
+        display_rows = data[:50]
+        table_text = ""
+        if columns and display_rows:
+            header = " | ".join(str(c) for c in columns)
+            separator = "-+-".join("-" * min(len(str(c)), 20) for c in columns)
+            rows_text = "\n".join(
+                " | ".join(str(row.get(c, ""))[:50] for c in columns)
+                for row in display_rows
+            )
+            table_text = f"{header}\n{separator}\n{rows_text}"
+            if row_count > 50:
+                table_text += f"\n... ({row_count - 50} more rows)"
+
+        return {
+            "success": True,
+            "answer": table_text or "Query returned no rows.",
+            "sql": result.get("sql"),
+            "row_count": row_count,
+            "columns": columns,
+            "data": display_rows,
+            "explanation": result.get("explanation"),
+            "confidence": result.get("confidence"),
+        }
 
     except Exception as e:
         # The request session is shared with every other tool in this turn:
