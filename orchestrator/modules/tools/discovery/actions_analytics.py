@@ -1,8 +1,10 @@
 """Analytics/usage ActionDefinitions (LLM usage, costs, workspace stats, activity feed, NL2SQL)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_data_routes import register_query_data_action, registers_with
 
 
+@registers_with(after=[register_query_data_action])  # F301/F302: the data route moved there
 def register_analytics_actions(registry: ActionRegistry) -> None:
     """Register analytics and usage platform actions."""
 
@@ -129,62 +131,5 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
             "show recent activity",
             "activity feed for the last week",
             "what has been running?",
-        ],
-    ))
-
-    # ── NL2SQL / Query Data ──────────────────────────────────────────
-    # F301 (night 9): Auto asked "how many members cancelled April to September, and the
-    # most common reason?" in one call and three times reported the top reason's 4 as the
-    # total (11). The description now says how to ask (one figure per call, the owner's
-    # qualifiers) and how to report (the figure the rows show, and what they count).
-
-    registry.register(ActionDefinition(
-        name="platform_query_data",
-        description=(
-            "Answer a question about the business's own records (orders, subscriptions, "
-            "members, stock, sales, customers) from a connected database. It reads the "
-            "schema itself, turns the question into SQL, runs it and returns the rows, "
-            "the SQL and what they count: never ask the user for table, column or field "
-            "names. Ask in the user's words, with every qualifier they gave (active, "
-            "cancelled, a plan, a date range), and ask one figure per call: a total and "
-            "a breakdown (how many cancelled, and the most common reason) are two calls. "
-            "Report the figure the rows show and say what it counts; a group's count is "
-            "never the total. With one database connected, pass only the question: that "
-            "one is used. Name a database (database_id) only when several are connected."
-        ),
-        category="database",
-        parameters={
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": (
-                        "Natural language question about business data "
-                        "(e.g. 'How many active users this month?', "
-                        "'Top 10 customers by revenue')."
-                    ),
-                },
-                "database_id": {
-                    "type": "string",
-                    "description": (
-                        "The database source to query: its name (e.g. 'sales_db') "
-                        "or its numeric id. Omit it when the workspace has one "
-                        "database — that one is used. With several, name one; "
-                        "the error lists them."
-                    ),
-                },
-            },
-            "required": ["question"],
-        },
-        permission_level="read",
-        requires_confirmation=False,
-        tags=["database", "query", "analytics", "metrics", "nl2sql", "data"],
-        examples=[
-            "how many active users do we have",
-            "what's our current MRR",
-            "show revenue trend for last 6 months",
-            "top 5 products by sales",
-            "how many users signed up last week",
-            "query the database for average order value",
         ],
     ))

@@ -1,75 +1,12 @@
 """Graph ActionDefinitions — knowledge graph query, traversal, and analytics."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_data_routes import register_query_graph_action, registers_with
 
 
+@registers_with(before=[register_query_graph_action])  # F312: the graph route moved there
 def register_graph_actions(registry: ActionRegistry) -> None:
     """Register knowledge-graph platform actions."""
-
-    # F312 (night 9): never called all night; "Brazil Cerrado is late: which cafés?" was
-    # answered from one document and missed a café another document names. The description
-    # now says which questions are the graph's, beside the documents and the database.
-    registry.register(ActionDefinition(
-        name="platform_query_graph",
-        description=(
-            "Query the business knowledge graph to find connections between concepts, "
-            "trace dependencies, and discover relationships across documents. The graph "
-            "contains the entities, processes, named metrics and rules the workspace's "
-            "documents describe, and how they connect. Use it for a question that spans "
-            "documents or asks how things relate: which customers, orders or products are "
-            "affected if something is late or changes, who supplies or buys what, what goes "
-            "into what; and search_knowledge for what one document says. It holds no live "
-            "figures: counts, money, totals, averages and rankings come from the workspace's "
-            "databases, so use platform_query_data for those (and for the live orders a "
-            "graph answer points to). Returns a traversal-based answer with source nodes and "
-            "edges. Use 'bfs' mode (default) for broad context or 'dfs' to trace a specific chain."
-        ),
-        category="graph",
-        parameters={
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": (
-                        "Natural-language question to answer from the knowledge graph. "
-                        "Examples: 'how does pricing connect to retention?', "
-                        "'what processes depend on the API?', 'which rules govern refunds?'"
-                    ),
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": ["bfs", "dfs"],
-                    "description": (
-                        "Traversal strategy. 'bfs' (default) explores broadly — best for "
-                        "'what is connected to X?'. 'dfs' follows one path deep — best for "
-                        "'how does X reach Y?' or tracing dependency chains."
-                    ),
-                },
-                "depth": {
-                    "type": "integer",
-                    "description": "Maximum traversal depth in hops (default 3). Higher = more context but slower.",
-                },
-                "token_budget": {
-                    "type": "integer",
-                    "description": "Maximum tokens for the returned context window (default 2000).",
-                },
-            },
-            "required": ["question"],
-        },
-        permission_level="read",
-        promoted=True,
-        tags=["graph", "knowledge", "query", "search", "relationships", "dependencies"],
-        examples=[
-            "query the knowledge graph about our pricing strategy",
-            "what does the graph say about customer onboarding?",
-            "search graph for marketing dependencies",
-            "how are authentication and user management connected?",
-            "what processes depend on the payment system?",
-            "which customers are affected if a supplier's delivery is late?",
-            "who supplies the products in this gift box?",
-            "which of our products use this ingredient?",
-        ],
-    ))
 
     registry.register(ActionDefinition(
         name="platform_graph_neighbors",
