@@ -52,6 +52,7 @@ from services.board_drag_rules import (  # PRD-252 R6
 from api import board_task_patch  # F259: the general PATCH's checks and writes
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
+from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -2026,6 +2027,7 @@ def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
         db.rollback()
 
 
+@a_cards_answer_goes_on_the_card  # F297 (night 8): the answer goes on the card; a failed tool's error never does
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
