@@ -17,6 +17,12 @@ from typing import Any, Optional
 
 from config import Config
 from core.llm import create_llm_manager
+from modules.knowledge.graph_relations import (
+    ALLOWED_RELATIONS_PROMPT,
+    enforce_relation_rules,
+    log_relation_repairs,
+    resolve_relation,
+)
 
 def _get_graph_extraction_model() -> str:
     """Read graph extraction model from system_settings (knowledge_graph category)."""
@@ -40,112 +46,6 @@ def _make_id(*parts: str) -> str:
     """Join *parts*, lowercase, replace non-alphanumeric runs with ``_``."""
     raw = "_".join(parts).lower()
     return _NON_ALNUM.sub("_", raw).strip("_")
-
-
-# ---------------------------------------------------------------------------
-# Controlled relation vocabulary
-# ---------------------------------------------------------------------------
-# LLM extraction (documents + agent reports) used to emit a free-text relation
-# per edge, so a workspace graph accrued thousands of singleton relation strings:
-# the legend flooded and the graph-neighbors ``relation_filter`` tool was
-# unusable (no caller could guess the exact phrase). We snap every LLM-extracted
-# relation to this bounded set — the node-type and hyperedge vocabularies in the
-# prompts already set the precedent — and keep the model's original phrase on the
-# edge as ``relation_label`` for display. Deterministic mappers (shopify / agents
-# / blueprints) own their own clean relations and build edges without passing
-# through here, so they are unaffected.
-
-CANONICAL_RELATIONS: tuple[str, ...] = (
-    "uses", "part_of", "member_of", "depends_on", "produces", "causes",
-    "enables", "blocks", "mitigates", "measures", "governed_by", "precedes",
-    "triggers", "has_property", "references", "related_to",
-)
-_CANONICAL_SET = frozenset(CANONICAL_RELATIONS)
-_ALLOWED_RELATIONS_STR = ", ".join(CANONICAL_RELATIONS)
-_FALLBACK_RELATION = "related_to"
-
-# Exact slugified phrase -> canonical. Deterministic, no LLM cost.
-_RELATION_SYNONYMS: dict[str, str] = {
-    "used_as": "uses", "used_by": "uses", "using": "uses", "used": "uses",
-    "utilizes": "uses", "consumes": "uses", "leverages": "uses",
-    "belongs_to": "part_of", "is_part_of": "part_of", "contained_in": "part_of",
-    "has_part": "part_of", "includes": "part_of", "component_of": "part_of",
-    "is_a": "part_of", "type_of": "part_of", "located_in": "part_of",
-    "instance_of": "member_of", "member": "member_of", "part_of_team": "member_of",
-    "assigned_to": "member_of", "reassigns": "member_of",
-    "requires": "depends_on", "needs": "depends_on", "needing": "depends_on",
-    "depends": "depends_on", "contingent_on": "depends_on", "backed_by": "depends_on",
-    "is_blind_without": "depends_on",
-    "produced": "produces", "produced_output": "produces", "generates": "produces",
-    "creates": "produces", "outputs": "produces", "returns": "produces",
-    "returned_agent": "produces",
-    "caused_by": "causes", "is_caused_by": "causes", "results_from": "causes",
-    "resulted_from": "causes", "due_to": "causes", "leads_to": "causes",
-    "resulting_in": "causes", "results_in": "causes", "resulted_in_issue": "causes",
-    "enabled_by": "enables", "allows": "enables", "supports": "enables",
-    "aims_to_achieve": "enables",
-    "prevents": "blocks", "prevents_all": "blocks", "blocked_by": "blocks",
-    "stops": "blocks", "restricts": "blocks", "restricted_to": "blocks",
-    "mitigated_by": "mitigates", "reduces": "mitigates", "resolves": "mitigates",
-    "fixes": "mitigates", "to_fix": "mitigates", "addresses": "mitigates",
-    "measured_by": "measures", "tracks": "measures", "tracks_metric": "measures",
-    "quantifies": "measures", "has_impact": "measures",
-    "constrained_by": "governed_by", "governs": "governed_by",
-    "regulated_by": "governed_by", "controlled_by": "governed_by",
-    "determines": "governed_by",
-    "before": "precedes", "after": "precedes", "followed_by": "precedes",
-    "stopped_after": "precedes", "then": "precedes", "next": "precedes",
-    "at_step": "precedes",
-    "triggered_by": "triggers", "invokes": "triggers", "calls": "triggers",
-    "fires": "triggers", "feed": "triggers", "feeds": "triggers",
-    "has": "has_property", "is": "has_property", "has_status": "has_property",
-    "is_unavailable": "has_property", "is_rated_as": "has_property",
-    "described_as": "has_property", "is_described_as": "has_property",
-    "has_description": "has_property", "is_a_value_of": "has_property",
-    "has_tags": "has_property", "has_summary": "has_property",
-    "mentions": "references", "refers_to": "references", "about": "references",
-    "is_about": "references", "contrasts_with": "references",
-    "referencing": "references", "relates_to": "related_to",
-}
-
-# Ordered substring heuristics for phrases not matched exactly (first hit wins).
-# Broad stems ("use") come last so specific ones ("caus" -> causes) win first.
-_RELATION_KEYWORDS: tuple[tuple[str, str], ...] = (
-    ("depend", "depends_on"), ("requir", "depends_on"),
-    ("caus", "causes"),
-    ("produc", "produces"), ("generat", "produces"), ("creat", "produces"),
-    ("trigger", "triggers"), ("invok", "triggers"),
-    ("enabl", "enables"),
-    ("prevent", "blocks"), ("block", "blocks"),
-    ("mitigat", "mitigates"), ("resolv", "mitigates"),
-    ("measur", "measures"), ("metric", "measures"),
-    ("govern", "governed_by"), ("constrain", "governed_by"), ("regulat", "governed_by"),
-    ("member", "member_of"),
-    ("belong", "part_of"), ("includ", "part_of"), ("contain", "part_of"), ("part", "part_of"),
-    ("precede", "precedes"), ("before", "precedes"), ("after", "precedes"),
-    ("mention", "references"), ("referenc", "references"), ("contrast", "references"),
-    ("propert", "has_property"), ("status", "has_property"), ("attribut", "has_property"),
-    ("utili", "uses"), ("use", "uses"),
-)
-
-
-def canonicalize_relation(raw: str | None) -> tuple[str, str]:
-    """Map a free-text relation to ``(canonical, original_label)``.
-
-    Deterministic and LLM-free: exact canonical -> slug synonym -> substring
-    heuristic -> ``related_to``. The original phrase is always preserved as the
-    label so the UI keeps its readable wording.
-    """
-    original = (raw or "").strip() or _FALLBACK_RELATION
-    slug = _NON_ALNUM.sub("_", original.lower()).strip("_")
-    if slug in _CANONICAL_SET:
-        return slug, original
-    if slug in _RELATION_SYNONYMS:
-        return _RELATION_SYNONYMS[slug], original
-    for needle, canon in _RELATION_KEYWORDS:
-        if needle in slug:
-            return canon, original
-    return _FALLBACK_RELATION, original
 
 
 def _empty_graph() -> dict[str, list]:
@@ -224,7 +124,7 @@ object, no array, no code fence, no commentary. Each line must be independently
 valid JSON and must fit on one line, so that if your answer is cut short only
 the final line is lost:
 
-{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule"}}
+{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|person|organization|product|process|metric|rule"}}
 {{"kind": "edge", "source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the document>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
 {{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9}}
 
@@ -242,7 +142,10 @@ Rules:
 - Mark uncertain relationships as AMBIGUOUS (confidence_score: 0.1–0.3)
 - Do not hallucinate entities not present in the document
 - Prefer specific labels over generic ones ("30-Day Refund Window" not "Time Limit")
-- RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the document in "relation_label" (e.g. relation "produces", relation_label "ships with every order").
+- NODE TYPES: "person" for a named individual, "organization" for a company, supplier, importer, café or other customer, "product" for something made or sold; "entity" for any other named thing.
+- RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS, each read from "source" (A) to "target" (B): {allowed_relations}. Never invent a new relation type. Keep the exact wording from the document in "relation_label" (e.g. relation "supplies", relation_label "Supplies: Brazil Cerrado").
+- When the document names several things as parts of one whole (a list, "i.e.", "both halves of", "made of"), write one part_of edge from EACH part to the whole, and declare the whole as a node.
+- Spend the BUDGET on relationships between named things (who supplies what, what is part of what, who buys what, who is responsible for what) before attribute values such as terms, lead times, prices and contact details.
 - Add a hyperedge when 3+ nodes participate in a shared concept/flow/pattern, within the BUDGET below.
 
 {output_budget}
@@ -434,6 +337,39 @@ def _parse_llm_json(raw: str) -> dict[str, list] | None:
     return None
 
 
+def _normalise_edges(
+    raw_edges: list[dict], nodes: list[dict[str, Any]], source_file: str,
+) -> list[dict[str, Any]]:
+    """Every extracted edge in the vocabulary, the right way round, and checked.
+
+    F312 (night 9): each edge is checked against the types this extraction
+    declared ("October 2026 Box produces Priya" is refused: a person is never
+    produced) and against its own wording ("Guji blocks swaps" from "swap the
+    Guji"); a phrase that reads target -> source ("contains") is turned round.
+    The model's own phrasing (explicit relation_label if given, else the raw
+    relation) is kept for display.
+    """
+    node_types = {n["id"]: str(n["file_type"]).strip().lower() for n in nodes}
+    edges: list[dict[str, Any]] = []
+    for e in raw_edges:
+        canonical, raw_label, inverted = resolve_relation(e.get("relation"))
+        src, tgt = e.get("source", ""), e.get("target", "")
+        if inverted:
+            src, tgt = tgt, src
+        edges.append(enforce_relation_rules(_edge(
+            source=src,
+            target=tgt,
+            relation=canonical,
+            relation_label=e.get("relation_label") or raw_label,
+            source_file=e.get("source_file", source_file),
+            confidence=e.get("confidence", "INFERRED"),
+            confidence_score=float(e.get("confidence_score", 0.5)),
+            weight=float(e.get("weight", 1.0)),
+        ), node_types))
+    log_relation_repairs(edges, source_file)
+    return edges
+
+
 def _normalise_extraction(
     raw: dict,
     source_file: str,
@@ -460,23 +396,7 @@ def _normalise_extraction(
             team_access=team_access,
         ))
 
-    for e in raw.get("edges", []):
-        src = e.get("source", "")
-        tgt = e.get("target", "")
-        # Snap the free-text relation to the controlled vocabulary; keep the
-        # model's own phrasing (explicit relation_label if given, else the raw
-        # relation) for display.
-        canonical, raw_label = canonicalize_relation(e.get("relation"))
-        result["edges"].append(_edge(
-            source=src,
-            target=tgt,
-            relation=canonical,
-            relation_label=e.get("relation_label") or raw_label,
-            source_file=e.get("source_file", source_file),
-            confidence=e.get("confidence", "INFERRED"),
-            confidence_score=float(e.get("confidence_score", 0.5)),
-            weight=float(e.get("weight", 1.0)),
-        ))
+    result["edges"] = _normalise_edges(raw.get("edges", []), result["nodes"], source_file)
 
     for h in raw.get("hyperedges", []):
         result["hyperedges"].append({
@@ -562,7 +482,7 @@ async def extract_from_document(
         return _empty_graph()
 
     prompt = _DOCUMENT_EXTRACTION_PROMPT.format(
-        doc_path=doc_path, doc_text=doc_text, allowed_relations=_ALLOWED_RELATIONS_STR,
+        doc_path=doc_path, doc_text=doc_text, allowed_relations=ALLOWED_RELATIONS_PROMPT,
         output_budget=_output_budget(),
     )
 
@@ -603,7 +523,7 @@ async def extract_from_report(
         report_path=report_path,
         report_text=report_text,
         agent_name=agent_name,
-        allowed_relations=_ALLOWED_RELATIONS_STR,
+        allowed_relations=ALLOWED_RELATIONS_PROMPT,
         output_budget=_output_budget(),
     )
 
