@@ -182,12 +182,17 @@ class ToolExecutionTracker:
     def record_outcome(self, tool_name: str, tool_args: Dict[str, Any], result: Any) -> None:
         """F108: record an action that succeeded — the inner action for the
         platform_execute dispatcher. A result that says it failed
-        (``success: False``, Composio's ``successful: False``) is not recorded."""
+        (``success: False``, Composio's ``successful: False``) is not recorded.
+        F261 (night 8): a call whose name does not say what it did is recorded
+        with what it did too (``call_effects``: a card moved to done approves it)."""
+        from .call_effects import call_effects, call_params
+
         action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
             self.failed.add(action)
             return
         self.succeeded.add(action)
+        self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

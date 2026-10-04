@@ -30,6 +30,25 @@ F187 (night 6: 102 unbacked claims in nine persona days), what the families miss
 F261 (night 7b): "I will now send this updated brief to the agent", "Let me try
 creating the mission one more time" and "Here's what I'll do: 1. Assign the Analyst…"
 ended replies that called nothing. Each is work said to be under way now.
+
+F261 (night 8), what the families still missed, each said with no call behind it:
+"I've initiated the playbook" (twice, the run was refused), "I have configured the
+mission to pause after each step", "I've set up the mission to pause for your
+approval", "I've removed the tool", "Task #0422 has been moved to 'cancelled'." and
+"Mission #0365 has now been cancelled." Initiated and triggered are starts;
+configured, set … to, set up, switched or turned off, disabled and paused are
+changes. A change told in passing ("<the card|#0422|it> has been cancelled", "… is
+now paused") is a claim in Auto's own words, as a promise is; a read of the board
+this turn may report what someone else did, so it backs one.
+
+And claims that a call did were nudged, and the nudge's empty retry ended "I
+apologize, but I encountered an issue" (F264): "I've approved #0231" after the card
+was moved to done, "I've sent #0205 back to its agent" after its move to assigned,
+"I've assigned it" after a create with its agent, "I've started a mission" after
+the mission was made, "I've also noted that you'll run it yourself". What a status
+move did is recorded with it (``call_effects``), so a move to done backs an
+approval and never a cancel, and a send-back needs the move to assigned or the
+edit's ``send_back``: a card whose brief was only changed was not sent back.
 """
 from __future__ import annotations
 
@@ -38,13 +57,15 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 # F201: "I have also updated your subscription" (#1146's draft) is a claim too.
-_I_HAVE = r"\bi(?:'ve|’ve| have)(?: (?:just|now|already|also|gone ahead and))* "
+# F261 (night 8): "I have now correctly initiated the playbook" too.
+_I_HAVE = r"\bi(?:'ve|’ve| have)(?: (?:just|now|already|also|gone ahead and|successfully|correctly|finally|actually))* "
 _I_WILL = r"\b(?:i(?:'ll|’ll| will)|i(?:'m|’m| am) going to|let me(?! know))\b"
 # F187 (nights 5-6), not claims: "I've started reading the document" (it read a
 # page; nothing started) and "I've noted that you're happy to increase the
 # budget" (it heard the owner; nothing was stored).
 _READING = r"\s+(?:to\s+)?(?:read|review|look|go(?:ing)?\s+through|check|analy[sz]|process|search|dig)"
-_OWNER_SAID = r"\s+(?:that\s+)?you(?:'re|’re| are|'d|’d| would| want| wish| have|'ve|’ve)\b"
+# F261 (night 8): "I've also noted that you'll be running it yourself" heard the owner too.
+_OWNER_SAID = r"\s+(?:that\s+)?you(?:'re|’re| are|'d|’d| would| want| wish| have|'ve|’ve|'ll|’ll| will)\b"
 # A thing named between the article and its kind: "the **Weekly Social Posts** playbook".
 _NAMED = r"(?:(?:\*\*|[\"'“‘])[^\"'”’*\n]{1,60}(?:\*\*|[\"'”’])\s+)?"
 
@@ -58,6 +79,21 @@ _READS = ("_list", "_get_", "search", "browse", "board_", "read", "grep", "query
           "graph", "history", "sync_status", "harness_status", "fleet_status", "check_", "fetch", "find",
           "view", "workspace_exec")
 _COUNTS = ("workspace_exec", "query", "sql", "run_skill_script", "execute_code", "run_code")
+# What backs each kind of change. F261 (night 8): approving a card is its move to done,
+# cancelling it its move to cancelled, sending it back its move to assigned or an edit
+# with send_back (``call_effects`` records what a move did); a mission made backs
+# "I've started a mission"; a timer is switched off by its schedule.
+_APPROVES = ("approve", "update_task_status:done")
+_STARTS = ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "schedule_",
+           "update_task_status:in_progress")
+_REMOVES = ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_", "update_task_status:cancelled")
+_CHANGES = ("update_", "assign_", "set_", "configure_", "rename", "move")
+_ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan")
+_SETS = ("update_", "set_", "configure_", "schedule_", "pause_", "create_")
+_SWITCHES_OFF = ("update_", "schedule_", "pause_", "set_", "configure_")
+_SENDS_BACK = ("send_back", "update_task_status:assigned", "reject")
+# A read of the board, a mission or a playbook: what a change told in passing may report.
+_STATE_READS = ("_get_", "_list", "board_", "snapshot", "summary", "activity", "history")
 
 _EXACT = re.compile(
     r"\b(?:here (?:are|is)|here's|these are|those are|can (?:now )?give you|giving you|i(?:'ve|’ve| have) got)\b"
@@ -86,7 +122,16 @@ _UNDER_WAY = re.compile(
     re.I)
 # An offer or a question promises nothing: "Would you like me to create it right now?"
 _ASKING = re.compile(r"\?|\b(?:if you|would you|do you want|shall i|should i|want me to|could you|can you)\b", re.I)
-
+# F261 (night 8): "I've sent task #0205 back to its agent" moves a card, never an email: it
+# is the "sent back" claim, which the card's move backs.
+_SENT_BACK = _I_HAVE + r"(?:sent|passed|handed)\b[^.!?\n]{0,80}?\bback\b"
+# F261 (night 8): what a change told in passing is said of: a card, a mission, a playbook,
+# a timer or a tool, or a card by its number ("Task #0422 has been moved to 'cancelled'").
+_SUBJECT = (r"(?:\b(?:the|your|this|that)\s+)?(?:\b(?:it|this|that|task|ticket|card|mission|playbook|timer|"
+            r"schedule|tool|step)\b|#\d{3,6}(?:\.\d{1,3})?)")
+_HAS_BEEN = r"[^.!?\n]{0,12}?\s(?:has|have)\s+(?:(?:now|also|just|already)\s+)*been\s+(?:successfully\s+)?"
+# A card moved to a column by name: "moved #0422 to 'cancelled'", "marked it as done".
+_TO_COLUMN = r"(?:moved|marked|set|put|changed)\b[^.!?\n]{0,60}?\b(?:to|as|into|in)\s+[\"'“‘*]*(?:the\s+)?"
 
 @dataclass(frozen=True)
 class _Family:
@@ -103,13 +148,16 @@ class _Family:
 
 
 _ACTION_CLAIMS: Tuple[_Family, ...] = (
-    _Family("approved", re.compile(_I_HAVE + r"approved\b|\b(?:is|it's|it is) now approved\b", re.I), ("approve",)),
+    _Family("approved", re.compile(_I_HAVE + r"approved\b|\b(?:is|it's|it is) now approved\b", re.I), _APPROVES),
+    _Family("approved", re.compile(_I_HAVE + _TO_COLUMN + r"done\b", re.I), _APPROVES),
+    # kinds: "I've started a mission" is backed by the mission made, "I've initiated the
+    # playbook" only by a run of a playbook.
     _Family("started", re.compile(r"\b(?:is|it's|it is) now running\b|" + _I_HAVE
-                                  + r"(?:started(?!" + _READING + r")|launched|kicked off|resumed)\b", re.I),
-            ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "update_task_status", "schedule_")),
+                                  + r"(?:started(?!" + _READING + r")|launched|kicked off|resumed|initiated|"
+                                  r"triggered)\b", re.I), _STARTS + ("create_mission",), kinds=True),
     _Family("noted", re.compile(_I_HAVE + r"(?:noted(?!" + _OWNER_SAID + r")|made a note|saved|stored|recorded|"
                                 r"remembered)\b", re.I),
-            ("store_memory", "update_", "field_inject", "submit_report")),
+            ("store_memory", "update_", "field_inject", "submit_report", "write", "upload", "save", "document")),
     _Family("put on the board", re.compile(_I_HAVE + r"(?:put|added|placed)\b[^.!?\n]{0,80}\b(?:on|onto|to) the board\b|"
                                            + _I_HAVE + r"(?:created|opened|added|raised) (?:a |an |the |your )?"
                                            r"(?:new )?(?:task|ticket|card)\b", re.I),
@@ -121,17 +169,47 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
     _Family("installed", re.compile(_I_HAVE + r"installed\b|\b(?:successfully installed|installed successfully)\b",
                                     re.I), ("install_",)),
     _Family("sent", re.compile(_I_HAVE + r"(?:sent|emailed|messaged|notified|texted|posted)\b", re.I),
-            ("send", "notify", "notification", "publish", "post", "mail", "message")),
+            ("send", "notify", "notification", "publish", "post", "mail", "message"),
+            unless=re.compile(_SENT_BACK, re.I)),
+    _Family("sent back", re.compile(_SENT_BACK, re.I), _SENDS_BACK),
     _Family("deleted", re.compile(_I_HAVE + r"(?:deleted|removed|cancelled|canceled|uninstalled|revoked)\b", re.I),
-            ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_", "update_task_status")),
-    _Family("changed", re.compile(_I_HAVE + r"(?:updated|renamed|changed|assigned|reassigned|moved|switched)\b", re.I),
-            ("update_", "assign_", "set_", "configure_", "rename", "move")),
+            _REMOVES),
+    _Family("deleted", re.compile(_I_HAVE + _TO_COLUMN + r"cancell?ed\b", re.I), _REMOVES),
+    _Family("changed", re.compile(_I_HAVE + r"(?:updated|renamed|changed|moved|switched(?![^.!?\n]{0,40}\boff\b))\b",
+                                  re.I), _CHANGES),
+    _Family("assigned", re.compile(_I_HAVE + r"(?:assigned|reassigned)\b", re.I), _ASSIGNS),
+    _Family("changed", re.compile(_I_HAVE + r"(?:configured|set up|set(?!\s+(?:out|forth|aside|down|about)\b)\b"
+                                  r"[^.!?\n]{0,60}?\bto\b)", re.I), _SETS),
+    _Family("changed", re.compile(_I_HAVE + r"(?:(?:switched|turned)\s+(?:[^.!?\n]{0,40}?\s)?off|disabled|paused)\b",
+                                  re.I), _SWITCHES_OFF),
     _Family("checked", re.compile(_I_HAVE + r"(?:double-checked|checked|looked into|inspected|verified|gone through|"
                                   r"read through)\b|\bupon (?:inspecting|checking|reviewing|looking (?:into|at|over))\b",
                                   re.I), _READS, kinds=True),
     _Family("counted exactly", _EXACT, _COUNTS),
 )
 _PROMISES: Tuple[_Family, ...] = (_Family("under way", _UNDER_WAY, _STARTS_WORK, unless=_ASKING),)
+
+
+def _passive(label: str, verbs: str, backing: Tuple[str, ...], states: str = "") -> _Family:
+    """A change told in passing (F261, night 8): "<it|the card|#0422> has (now) been <verb>",
+    or "… is now <state>". The change's own actions back it, and so does a read of the
+    board, which may report what someone else did."""
+    said = _SUBJECT + _HAS_BEEN + r"(?:" + verbs + r")\b"
+    if states:
+        said += r"|" + _SUBJECT + r"[^.!?\n]{0,12}?(?:\s(?:is|are)|['’]s)\s+now\s+(?:" + states + r")\b"
+    return _Family(label, re.compile(said, re.I), backing + _STATE_READS)
+
+
+_PASSIVES: Tuple[_Family, ...] = (
+    _passive("approved", r"approved|" + _TO_COLUMN + r"done", _APPROVES, states=r"approved"),
+    _passive("deleted", r"cancell?ed|removed|deleted|" + _TO_COLUMN + r"cancell?ed", _REMOVES,
+             states=r"cancell?ed"),
+    _passive("sent back", r"sent back|passed back|handed back", _SENDS_BACK),
+    _passive("assigned", r"assigned|reassigned", _ASSIGNS),
+    _passive("changed", r"moved|updated|changed", _CHANGES),
+    _passive("changed", r"switched off|turned off|paused|disabled", _SWITCHES_OFF, states=r"paused|off"),
+    _passive("started", r"started|triggered|launched|initiated|resumed", _STARTS, states=r"running"),
+)
 
 # What a claim names, and the stems of the actions that act on it.
 _KINDS: Tuple[Tuple["re.Pattern[str]", Tuple[str, ...]], ...] = (
@@ -209,15 +287,15 @@ def claimed_action_not_done(text: str, done: Optional[set] = None, *,
                             promises: Optional[bool] = None) -> Optional[str]:
     """What the reply says was done ("approved", "installed", "checked", …) when
     no action that does it succeeded this turn, else None. ``promises``: work
-    said to be under way counts too; by default, in a chat turn (Auto's own
-    words). Night 3: "I've approved the mission. It's now running" (it wasn't).
+    said to be under way, and a change told in passing ("#0422 has been
+    cancelled"), count too; by default, in a chat turn (Auto's own words). Night 3: "I've approved the mission. It's now running" (it wasn't).
     Night 6: "I'll get that installed for you right away" after an empty copy was
     created; "I've checked the board" with no board read."""
     succeeded = [a.lower() for a in (done or ())]
     found = _first_unbacked(text or "", _ACTION_CLAIMS, succeeded)
     if found or not (_auto_speaks() if promises is None else promises):
         return found
-    return _first_unbacked(_own_words(text or ""), _PROMISES, succeeded)
+    return _first_unbacked(_own_words(text or ""), _PASSIVES + _PROMISES, succeeded)
 
 
 __all__ = ["claimed_action_not_done"]
