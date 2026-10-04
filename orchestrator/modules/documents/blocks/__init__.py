@@ -1,12 +1,13 @@
 """Document template block system (PRD-167 S2).
 
 Canonical, editor-independent block schema + renderers (HTML→PDF and DOCX) and the
-legacy-data → blocks mapper.
+legacy-data → blocks mapper; a document body's markdown read for both lanes (F298).
 """
 
 from .docx_renderer import RenderedDocx, render_document_docx
 from .html_renderer import RenderedHtml, render_document_html
 from .legacy_mapper import blocks_from_legacy
+from .markdown_body import blocks_from_markdown, legacy_render_data, markdown_html
 from .schema import SCHEMA_VERSION, BlockDocument
 from .validation import BlockValidationError, collect_list_fields, collect_variable_paths, validate_blocks
 
@@ -22,4 +23,7 @@ __all__ = [
     "render_document_docx",
     "RenderedDocx",
     "blocks_from_legacy",
+    "blocks_from_markdown",
+    "legacy_render_data",
+    "markdown_html",
 ]
