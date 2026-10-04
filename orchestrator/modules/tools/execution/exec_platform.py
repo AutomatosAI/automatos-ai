@@ -19,7 +19,13 @@ async def execute_platform_tool(
     agent_id: int,
 ) -> Dict[str, Any]:
     """Execute research tools via AgentPlatformTools. F269 (night 8, night 9): a
-    search returns the owner's documents only, never an agent's (services/agents_writing)."""
+    search returns the owner's documents only, never an agent's (services/agents_writing).
+    F305: search_knowledge with ``scope: "past_work"`` searches earlier approved answers,
+    labelled as an agent's (services/past_work)."""
+    from services.past_work import past_work_for_agent, wants_past_work
+
+    if tool_name == SEARCH_KNOWLEDGE and wants_past_work(parameters):
+        return await past_work_for_agent(getattr(executor.platform_tools, "db", None), agent_id, parameters)
     result = await executor.platform_tools.execute_tool(
         tool_name=tool_name,
         parameters=parameters,

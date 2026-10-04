@@ -1,8 +1,11 @@
 """Document ActionDefinitions (list, upload, read, search, delete, reprocess, templates, brand kit)."""
 
+from services.past_work_schemas import documents_search_takes_a_scope
+
 from .action_registry import ActionDefinition, ActionRegistry
 
 
+@documents_search_takes_a_scope  # F305 (night 9): scope 'past_work'
 def register_documents_actions(registry: ActionRegistry) -> None:
     """Register document-related platform actions."""
 
