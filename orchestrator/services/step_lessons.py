@@ -209,13 +209,15 @@ def a_cards_run_carries_its_lessons(read: Callable[..., Awaitable[str]]) -> Call
     @functools.wraps(read)
     async def wrapped(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
         prompt = await read(db, workspace_id, agent_id, brief)
-        return _with_lessons(db, workspace_id, agent_id, prompt)
+        return _with_lessons(db, workspace_id, agent_id, prompt, brief)
     return wrapped
 
 
-def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str:
+def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str, brief: str) -> str:
     """``prompt`` with the agent's lessons before "Where your answer goes", unless it
-    carries them already or there is no database session to read them from."""
+    carries them already or there is no database session to read them from. A card's
+    own names are read from its ``brief``, not the prompt: the guide passages a draft's
+    prompt gains name the owner's people and places, so any draft would share them (F318)."""
     from uuid import UUID
 
     from sqlalchemy.orm import Session
@@ -224,7 +226,7 @@ def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str
 
     if STANDING_HEADING in prompt or not isinstance(db, Session) or not workspace_id or not agent_id:
         return prompt
-    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id, for_text=prompt)   # F315: the card's own words
+    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id, for_text=brief)   # F315: the card's own words
     if not lessons:
         return prompt
     if ON_THE_CARD in prompt:
