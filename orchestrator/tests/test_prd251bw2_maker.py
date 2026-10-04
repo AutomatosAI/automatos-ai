@@ -17,7 +17,8 @@ notifications faked. Pinned:
   is scheduled into the next free slot under ``next_slot`` and stays approved under
   ``skip``;
 * research is due once a week from a week before the plan starts; Research again starts
-  the workspace's installed playbook now, and is 409 without it.
+  the workspace's installed playbook now, and is 409 when there is none and the marketplace
+  has none to put back (PRD-251C US-C102).
 """
 from __future__ import annotations
 
@@ -89,7 +90,9 @@ def maker(api, monkeypatch):
 
 def _text_plan(api, **overrides):
     cadence = [{"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "09:00"}]
-    body = {"timezone": "UTC", "starts_on": "2026-10-12", "ends_on": "2026-11-08", "cadence": cadence, **overrides}
+    # A daily plan, as PRD-251B made them: PRD-251C's new plans are weekly unless asked.
+    body = {"timezone": "UTC", "starts_on": "2026-10-12", "ends_on": "2026-11-08", "cadence": cadence,
+            "make": {"rhythm": "daily", "time": "07:00"}, **overrides}
     return _create_plan(api, **body)
 
 
@@ -183,7 +186,7 @@ def test_the_render_quota_check():
 def test_max_per_day_holds_per_local_day(maker):
     rows = [{"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "09:00"},
             {"channels": ["linkedin"], "format": "text", "days": EVERY_DAY, "time": "12:00"}]
-    plan = _text_plan(maker, cadence=rows, make={"max_per_day": 1})
+    plan = _text_plan(maker, cadence=rows, make={"rhythm": "daily", "time": "07:00", "max_per_day": 1})
     assert maker_mod.collect_due(NOW) == [(uuid.UUID(plan["id"]), "r1|2026-10-14|09:00")]
 
 
@@ -278,10 +281,10 @@ def _install(api, workspace_id):
                                              workspace_id=workspace_id, cloned_from_id=1, steps=[{"step_id": "research"}]))
 
 
-def test_research_again_starts_the_installed_playbook_and_is_409_without_it(playbooks):
+def test_research_again_starts_the_installed_playbook_and_is_409_without_one_to_put_back(playbooks):
     plan = _text_plan(playbooks)
     missing = playbooks.client.post(f"/api/socials/plans/{plan['id']}/research")
-    assert missing.status_code == 409 and "Socials package" in missing.text
+    assert missing.status_code == 409 and "the Marketplace does not have it" in missing.text
     _install(playbooks, WS_A)
     started = playbooks.client.post(f"/api/socials/plans/{plan['id']}/research")
     assert started.status_code == 202, started.text

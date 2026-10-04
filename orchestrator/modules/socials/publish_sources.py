@@ -8,14 +8,18 @@ them (``modules/socials/targets.py``), each param mapped to a source
   title; ``$option.<name>``: the target's option; ``$idempotency_key``: the target's
   key; ``$steps.<id>``: the ``id`` an earlier step returned (``step_results.py``).
 * ``$media`` / ``$media[]``: the post's rendered file(s) of the target's kind (a
-  video for a video, reel or short, an image for an image or carousel), in media
-  order; ``$media.content_type`` and ``$media.bytes`` are facts of the first;
+  video for a video, reel or short, an image for an image or carousel, either for a
+  story), in media order; ``$media.image`` / ``$media.video``: the first file when it is
+  of that kind (PRD-251C: a story's step names both, and sends the one its file is);
+  ``$media.content_type`` and ``$media.bytes`` are facts of the first;
   ``$thumbnail``: the post's first image. A media source becomes a
   :class:`MediaParam`: the publisher stages it as a file, or links it, by the step's
   ``files`` and ``urls`` (``publish_steps.py``).
 * ``a|b`` takes the first that resolves; a list resolves each item; anything else
   is passed as it is. A source that resolves to nothing leaves the param out, except
-  a media param, which fails the step (:class:`SourceMissing`).
+  a media param, which fails the step (:class:`SourceMissing`) unless another media
+  param of the step resolved: a step's file params are alternatives (a story's
+  ``image_file`` or ``video_file``), and every seeded step but the story's has one.
 
 Pure: no database, no storage, no Composio.
 """
@@ -25,6 +29,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from modules.socials import channel_sizes
 from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
 from modules.socials.service import footage_generated
@@ -89,6 +94,15 @@ def _family(media: MediaFile) -> str:
     return (media.content_type or "").split("/", 1)[0]
 
 
+def media_for(files: Sequence[MediaFile], toolkit: str, post_kind: str) -> Tuple[MediaFile, ...]:
+    """The files of the target's kind, of its own size when the post rendered several
+    (``channel_sizes``: the aspect closest to the channel's), in media order."""
+    families = KIND_MEDIA.get(post_kind, ())
+    mine = [f for f in files if _family(f) in families]
+    aspect = channel_sizes.aspect_for_target([f.aspect for f in mine], toolkit, post_kind)
+    return tuple(f for f in mine if aspect is None or f.aspect == aspect)
+
+
 def copy_for(copy: Any, toolkit: str) -> str:
     """The channel's own copy, else the base copy."""
     copy = copy if isinstance(copy, Mapping) else {}
@@ -98,7 +112,6 @@ def copy_for(copy: Any, toolkit: str) -> str:
 
 def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetContext:
     """A target's context: ``files`` are the post's media (``media_urls.resolve_post_media``)."""
-    families = KIND_MEDIA.get(target.post_kind, ())
     return TargetContext(
         workspace_id=post.workspace_id,
         post_id=post.id,
@@ -108,7 +121,7 @@ def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetCon
         title=post.title or "",
         options=MappingProxyType(dict(target.options)),
         idempotency_key=target.idempotency_key,
-        media=tuple(f for f in files if _family(f) in families),
+        media=media_for(files, target.toolkit, target.post_kind),
         thumbnail=next((f for f in files if _family(f) == IMAGE), None),
         generated=footage_generated(post.footage),
         setup_note=_setup_note(target.toolkit),
@@ -146,8 +159,14 @@ def steps_of(action_plan: Any) -> Tuple[ChannelStep, ...]:
     )
 
 
+# PRD-251C: a story's step names both files; only the family of the target's first file resolves.
+FAMILY_SOURCES = {"$media.image": "image", "$media.video": "video"}
+
+
 def _media(ctx: TargetContext, ref: str) -> Any:
     first = ctx.media[0] if ctx.media else None
+    if ref in FAMILY_SOURCES:
+        return MediaParam((first,), many=False) if first is not None and _family(first) == FAMILY_SOURCES[ref] else None
     if ref == "$thumbnail":
         return MediaParam((ctx.thumbnail,), many=False) if ctx.thumbnail else None
     if ref == "$media[]":
@@ -209,15 +228,24 @@ def resolve_params(step: ChannelStep, ctx: TargetContext, outputs: Mapping[str, 
     (an X post without the media id its upload returned would publish without its
     image): those raise :class:`SourceMissing`, and the step is never called."""
     params: Dict[str, Any] = {}
+    missing = []
     for name, source in step.params.items():
         value = resolve_value(source, ctx, outputs)
         if value is None and name in step.files + step.urls:
-            wanted = " or ".join(KIND_MEDIA.get(ctx.post_kind, ())) or "media"
-            raise SourceMissing(f"{step.action} needs a {wanted} file for {name}, and the post has none")
+            missing.append(name)
+            continue
         if value is None and isinstance(source, Mapping):
             raise SourceMissing(f"{step.action}: none of {', '.join(source['else'])} is allowed for {name} on this account")
         if value is None and reads_steps(source):
             raise SourceMissing(f"{step.action}: {name} reads what an earlier step returned ({source}), and it returned nothing")
         if value is not None:
             params[name] = value
+    if missing and not any(name in params for name in step.files + step.urls):
+        wanted = " or ".join(_a(family) for family in KIND_MEDIA.get(ctx.post_kind, ())) or "a media"
+        raise SourceMissing(f"{step.action} needs {wanted} file for {' or '.join(missing)}, and the post has none")
     return params
+
+
+def _a(word: str) -> str:
+    """The word with its article, for a message: "an image", "a video"."""
+    return f"an {word}" if word[:1] in "aeiou" else f"a {word}"

@@ -58,6 +58,7 @@ vi.mock('@/lib/api-client', () => {
 
 import { apiClient } from '@/lib/api-client'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
+import { SERIES_LEFT_LABELS } from '@/components/deliverables/socials/socials-series'
 
 function seed(title: string, status: string, hash: string, extra: Record<string, unknown> = {}) {
   const at = new Date(Date.UTC(2026, 9, 1, 9, 0)).toISOString()
@@ -234,5 +235,14 @@ describe('Approve series', () => {
     expect(result).toHaveTextContent('0 posts approved.')
     expect(result).toHaveTextContent('Three weeks to go — Changed since you saw it')
     expect(within(result).queryByRole('alertdialog')).toBeNull()
+  })
+})
+
+describe('why a series approval left a post', () => {
+  it("has a label for every reason the server gives (modules/socials/campaigns.py LEFT_*; PRD-251C: a post of another batch)", () => {
+    expect(SERIES_LEFT_LABELS).toEqual({
+      changed: 'Changed since you saw it', unsourced: 'Unsourced claims to confirm', not_waiting: 'Not waiting for approval',
+      not_in_campaign: 'Not in this campaign', not_shown: 'Not shown to you', not_in_batch: 'Not in this batch',
+    })
   })
 })

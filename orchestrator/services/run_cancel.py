@@ -76,10 +76,11 @@ def cancel_playbook_run(db: Any, execution: Any, *, by: str, reason: str) -> boo
 
 
 def _cancel_playbook_cards(db: Any, execution: Any, *, by: str, reason: str) -> None:
-    """The run's card, then its session step tickets (F116), each saying who; the
-    caller commits them with the run."""
+    """The run's card, then its session step tickets (F116), each saying who (and,
+    in its notes, when: F273); the caller commits them with the run."""
     from core.models.core import BoardTask
     from services.board_cancel import stop_run_step_tickets, stop_ticket_run
+    from services.cancel_notes import CANCELLED_THE_RUN
 
     card = db.query(BoardTask).filter(
         BoardTask.source_type == PLAYBOOK_CARD,
@@ -87,7 +88,7 @@ def _cancel_playbook_cards(db: Any, execution: Any, *, by: str, reason: str) -> 
         BoardTask.workspace_id == execution.workspace_id,
     ).first()
     if card is not None:
-        stop_ticket_run(db, card, by=by, reason=reason)
+        stop_ticket_run(db, card, by=by, reason=reason, note=CANCELLED_THE_RUN)
     stopped = stop_run_step_tickets(db, execution.execution_id, by=by,
                                     reason=f"cancelled with run {execution.execution_id}")
     if stopped:

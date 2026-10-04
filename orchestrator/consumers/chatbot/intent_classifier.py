@@ -104,6 +104,9 @@ class SmartIntentClassifier:
         r"\bbrowse\b.*\b(marketplace|skills|plugins|agents)\b",
         r"\bcreate\b.*\b(blueprint|playbook)\b",
         r"\bplatform_\w+\b",  # Direct platform tool name reference
+        # F263 (night 7b): the board's state, or a card by its number, needs the board's tools.
+        r"\b(?:on|in) (?:my|the|our) board\b", r"\bmy board\b", r"\bwaiting (?:for|on) me\b",
+        r"(?<![\w&#])#0\d{3,5}(?:\.\d{1,3})?\b", r"\b(?:card|ticket|task)\s+#?\d{1,6}\b",
     ]
 
     # Search patterns - need knowledge base tools
@@ -438,6 +441,12 @@ class SmartIntentClassifier:
         if any(w in query_lower for w in ["workspace", "connected app", "connected apps", "integration"]):
             hints.append("platform_get_workspace_info")
             hints.append("platform_list_connected_apps")
+
+        # F263 (night 7b): the board, or a card by its number
+        from consumers.chatbot.board_questions import about_the_board
+
+        if about_the_board(query_lower):
+            hints += ["platform_board_snapshot", "platform_get_task", "platform_update_task_status"]
 
         return hints
 

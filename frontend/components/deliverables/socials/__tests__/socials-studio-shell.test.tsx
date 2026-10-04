@@ -1,6 +1,6 @@
 /**
  * PRD-251B US-B107 — the Socials Studio shell: the sub-navigation Calendar · Queue (its
- * count) · Plans with New plan and New post (F250: the brand kit is its own Deliverables
+ * count) · Plans · Posted (PRD-251C US-C408) with New plan and New post (F250: the brand kit is its own Deliverables
  * tab, with no second entry here), and the view held in the URL
  * (/deliverables?tab=socials&view=…&post=…&plan=…). A view change is a router.push, so
  * back returns to it; an unknown view is the calendar; ?post=<id> opens that post.
@@ -43,7 +43,10 @@ vi.mock('@/components/deliverables/socials/plans/socials-plans-view', () => ({
   ),
 }))
 vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({
-  SocialsPostPage: ({ postId }: { postId: string }) => <div data-testid="post-page">{postId}</div>,
+  // The editor's own move once a save has made the post (socials-editor.tsx: go({ post })).
+  SocialsPostPage: ({ postId, go }: { postId: string; go: (next: { post: string }) => void }) => (
+    <div data-testid="post-page">{postId}<button type="button" onClick={() => go({ post: 'p-saved' })}>Saved</button></div>
+  ),
 }))
 vi.mock('@/components/deliverables/socials/studio/queue-pane', () => ({
   QueuePane: ({ post }: { post: any }) => <article aria-label={`Post to approve: ${post.title}`} />,
@@ -81,10 +84,10 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the Socials Studio shell', () => {
-  it('has Calendar, Queue with its count and Plans, and New plan and New post', async () => {
+  it('has Calendar, Queue with its count, Plans and Posted, and New plan and New post', async () => {
     renderStudio()
     const items = within(nav()).getAllByRole('button').map((b) => b.textContent)
-    expect(items).toEqual(['Calendar', 'Queue', 'Plans'])
+    expect(items).toEqual(['Calendar', 'Queue', 'Plans', 'Posted'])  // PRD-251C US-C408: Posted
     expect(await within(nav()).findByText('2 posts need you')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /New post/ })).toBeInTheDocument()
@@ -146,14 +149,25 @@ describe('the Socials Studio shell', () => {
     expect(screen.getByTestId('view-plans')).toHaveTextContent('plan form open')
 
     fireEvent.click(screen.getByRole('button', { name: /New post/ }))
-    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=plans&post=new')
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=new')
     expect(screen.getByTestId('post-page')).toHaveTextContent('new')
+  })
+
+  it('New post from the Queue opens the editor, and the post a save makes stays open there, not in the Queue', () => {
+    state.search = 'tab=socials&view=queue'
+    renderStudio()
+    fireEvent.click(screen.getByRole('button', { name: /New post/ }))
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=new')
+    // 3 Oct 2026: the upload saved the post, and the Queue (where a draft never shows) opened.
+    fireEvent.click(screen.getByRole('button', { name: 'Saved' }))
+    expect(state.push).toHaveBeenLastCalledWith('/deliverables?tab=socials&view=calendar&post=p-saved')
+    expect(screen.getByTestId('post-page')).toHaveTextContent('p-saved')
   })
 
   it('a viewer sees the views but neither action nor the brand kit', () => {
     state.role = 'viewer'
     renderStudio()
-    expect(within(nav()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Calendar', 'Queue', 'Plans'])
+    expect(within(nav()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Calendar', 'Queue', 'Plans', 'Posted'])
     expect(screen.queryByRole('button', { name: 'New plan' })).toBeNull()
     expect(screen.queryByRole('button', { name: /New post/ })).toBeNull()
   })

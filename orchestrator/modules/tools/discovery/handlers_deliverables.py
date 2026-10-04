@@ -5,7 +5,7 @@ Thin wrappers over the existing ``DeliverableService`` (v_workspace_outputs)
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -14,6 +14,22 @@ logger = logging.getLogger(__name__)
 
 _MAX_LIST_LIMIT = 50
 _DEFAULT_LIST_LIMIT = 20
+# platform_list_deliverables' exclude_source_types: at most this many origins, each a plain name.
+_MAX_EXCLUDED_ORIGINS = 10
+EXCLUDED_ORIGINS_REFUSED = 'exclude_source_types must be a list of origins, such as ["social_post"]'
+
+
+def excluded_origins(value: Any) -> Optional[str]:
+    """The origins a call leaves out, as the service takes them (comma-separated); None for none.
+    PRD-251C US-C105: Socials research leaves out ``social_post``, a post's own files."""
+    if value in (None, "", []):
+        return None
+    origins = [value] if isinstance(value, str) else value
+    if not isinstance(origins, (list, tuple)) or len(origins) > _MAX_EXCLUDED_ORIGINS:
+        raise ValueError(EXCLUDED_ORIGINS_REFUSED)
+    if not all(isinstance(origin, str) and origin.strip() and "," not in origin for origin in origins):
+        raise ValueError(EXCLUDED_ORIGINS_REFUSED)
+    return ",".join(origin.strip() for origin in origins)
 
 
 def _compact_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,11 +78,16 @@ async def list_deliverables(
         limit = max(1, min(int(params.get("limit") or _DEFAULT_LIST_LIMIT), _MAX_LIST_LIMIT))
     except (TypeError, ValueError):
         limit = _DEFAULT_LIST_LIMIT
+    try:
+        excluded = excluded_origins(params.get("exclude_source_types"))
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
 
     svc = DeliverableService(db, workspace_id)
     result = svc.list_deliverables(
         artifact_type=params.get("artifact_type"),
         source_type=params.get("source_type"),
+        source_type_exclude=excluded,
         source_id=params.get("source_id"),
         agent_id=agent_id,
         search=params.get("search"),

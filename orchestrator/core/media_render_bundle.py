@@ -41,7 +41,12 @@ The template becomes the composition, with two things done to it here:
 * a ``social_image`` renders as stills (US-107): the bundle asks media-render
   for a PNG snapshot at each of the template's still moments whose ``when``
   variable has a value (``core.social_templates.still_moments``): one for a
-  card, one per slide for a carousel.
+  card, one per slide for a carousel;
+* a 9:16 render for a story (PRD-251C US-C301, ``story_safe``) keeps the page
+  clear of the bar Instagram draws at the top of a story and the reply box at the
+  bottom: the composition's css gains a rule that moves a template's ``.page`` box
+  inside them (every still template lays its words out in one; a video template,
+  made at 9:16 for reels, has none and renders as authored).
 
 Kokoro speaks the voice lines from their text inside media-render. When a post
 chooses a voice toolkit instead (US-111, ``modules/socials/recipes/voice.py``),
@@ -57,6 +62,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -172,6 +178,20 @@ def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str,
     return files, faces
 
 
+# PRD-251C (US-C301): a story's safe zone at 1080x1920, scaled to the size rendered.
+STORY_SAFE_TOP, STORY_SAFE_BOTTOM, STORY_SAFE_HEIGHT = 250, 340, 1920
+STORY_RATIO = 9 / 16
+STORY_SAFE_CSS = "\n/* PRD-251C: a story's safe zone */\n.page {{ top: {top}px !important; bottom: {bottom}px !important; }}\n"
+
+
+def story_safe_css(width: int, height: int) -> str:
+    """The rule that keeps a 9:16 story's page clear of Instagram's own bars; "" for another shape."""
+    if not width or not height or not math.isclose(width / height, STORY_RATIO, rel_tol=0.01):
+        return ""
+    scale = height / STORY_SAFE_HEIGHT
+    return STORY_SAFE_CSS.format(top=round(STORY_SAFE_TOP * scale), bottom=round(STORY_SAFE_BOTTOM * scale))
+
+
 def brand_name(kit: Mapping[str, Any], fallback: str = "") -> str:
     """The name a template shows: the kit's, its company's, else ``fallback`` (the workspace's)."""
     company = kit.get("company") if isinstance(kit.get("company"), Mapping) else {}
@@ -232,6 +252,7 @@ def build_bundle(
     slot_media: Optional[Mapping[str, str]] = None,
     keep_slots: Iterable[str] = (),
     fmt: str = SOCIAL_VIDEO,
+    story_safe: bool = False,
 ) -> Dict[str, Any]:
     """The bundle for one render of ``blocks`` (a checked social template of format ``fmt``) at ``size``.
 
@@ -241,7 +262,8 @@ def build_bundle(
     slots with footage or stills already in our storage (presigned GET URLs,
     which media-render checks against its allowlist); a slot in ``keep_slots``
     is shown and gets its file later (:func:`with_slot_files`); every other slot
-    is empty. A ``social_image`` asks for stills instead of a film.
+    is empty. A ``social_image`` asks for stills instead of a film. ``story_safe``: the render
+    is a story's, so a 9:16 size keeps its page inside the story's safe zone.
     """
     kit = brand_kit or {}
     width, height = render_size(blocks, size)
@@ -260,10 +282,11 @@ def build_bundle(
     brand: Dict[str, Any] = {"tokens": brand_tokens(kit)}
     if faces:
         brand["fonts"] = faces
+    css = (blocks.get("css") or "") + (story_safe_css(width, height) if story_safe else "")
     bundle: Dict[str, Any] = {
         "workspace_id": str(workspace_id),
         "reference": reference,
-        "composition": {"html": html, "css": blocks.get("css") or ""},
+        "composition": {"html": html, "css": css},
         "variables": variables,
         "brand": brand,
     }

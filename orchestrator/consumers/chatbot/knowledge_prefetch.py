@@ -97,6 +97,15 @@ def is_question(message: Optional[str]) -> bool:
     return "?" in t or bool(_QUESTION_START.match(t)) or bool(_ASKING.search(t))
 
 
+def asks_the_documents(message: Optional[str]) -> bool:
+    """A question the documents may answer. F263 (night 7b): a question about the
+    board or a card is answered from the board, whose tools give its live state;
+    five passages from old reports had named done cards as waiting in Review."""
+    from consumers.chatbot.board_questions import about_the_board
+
+    return is_question(message) and not about_the_board(message)
+
+
 def split_questions(message: Optional[str]) -> List[str]:
     """The separate questions of a message that asks several: a numbered or
     bulleted list, else the sentences ending in "?". [] for a single question."""
@@ -204,7 +213,7 @@ async def prefetch(
     or the search failed. ``search`` runs search_knowledge with the given args
     and returns the tool router's result (``raw_result`` / ``frontend_data``).
     A message asking several questions is searched once per question (F227)."""
-    if not enabled or (question_only and not is_question(message)):
+    if not enabled or (question_only and not asks_the_documents(message)):
         return None
     try:
         if documents_in(db, workspace_id) < 1:

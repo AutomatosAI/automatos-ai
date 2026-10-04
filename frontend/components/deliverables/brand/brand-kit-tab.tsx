@@ -5,7 +5,7 @@
  * Templates and Socials alike (it replaces the BrandKitDialog everywhere; Template Studio
  * and Socials link here). Always visible: everyone in the workspace reads it, and owners
  * and admins (workspace:manage) change it. The basics, the style references and what Auto
- * takes from them, and the AI tools.
+ * takes from them, the owner's voice examples (PRD-251C US-C406), and the AI tools.
  */
 import { useWorkspace } from '@/components/workspace-provider'
 import { useBrandStyle } from '@/hooks/use-brand-style'
@@ -14,6 +14,7 @@ import { BrandAiTools } from './brand-ai-tools'
 import { BrandKitBasics } from './brand-kit-basics'
 import { BrandReferences } from './brand-references'
 import { BrandStyleProfileCard } from './brand-style-profile'
+import { BrandVoiceExamples } from './brand-voice-examples'
 import { useBrandKitForm } from './use-brand-kit-form'
 
 export const READ_ONLY_NOTE = 'Only owners and admins change the brand kit.'
@@ -37,6 +38,7 @@ export function BrandKitTab() {
         <BrandReferences style={style} canEdit={canEdit} />
         <BrandStyleProfileCard style={style} canEdit={canEdit} />
       </div>
+      <BrandVoiceExamples canEdit={canEdit} />
       <BrandAiTools canEdit={canEdit} />
     </div>
   )

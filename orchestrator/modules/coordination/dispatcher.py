@@ -27,8 +27,10 @@ from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from config import Config
+from services.step_lessons import a_steps_prompt_carries_its_lessons  # F249/F269
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
+from modules.coordination.one_step_at_a_time import one_step_at_a_time
 from core.models.orchestration_enums import (
     ActorType,
     BudgetStatus,
@@ -622,6 +624,7 @@ class MissionDispatcher:
         return "block"
 
     @staticmethod
+    @one_step_at_a_time  # F267 (7b): a mission that checks each step runs one at a time
     def dispatch_ready(
         db: Session,
         run: OrchestrationRun,
@@ -993,6 +996,7 @@ class MissionDispatcher:
         sync_board_status(db, task)
 
     @staticmethod
+    @a_steps_prompt_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
     @with_its_inputs  # F248: the last step's whole results, and the documents it names
     def build_task_prompt(
         task: OrchestrationTask,

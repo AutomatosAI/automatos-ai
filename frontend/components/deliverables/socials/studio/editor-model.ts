@@ -3,7 +3,9 @@
  * fields, channels and slot it saves as, and what each card derives from it (the format's
  * channels and why one cannot take it, the size each channel gets, the ratios the post
  * renders in, the spoken words a length fits). The server checks all of it again.
+ * PRD-251C (US-C301): a ticked channel that posts stories may take an image or a video as one.
  */
+import { closestShape, sizeAspect } from './channel-shape'
 import type {
   CreateSocialPostInput,
   SocialChannel,
@@ -34,6 +36,9 @@ export const SLIDES_VARIABLE = 'slides'
 /** Spoken words per second of video: the composer's budget (US-B103). */
 export const WORDS_PER_SECOND = 2.5
 export const NEW_POST_TITLE = 'Untitled post'
+
+/** The media key of the person's own file as the whole post: an upload or a Library pick. */
+export const OWN_FILE_ASPECT = 'original'
 
 export interface EditorSlot {
   /** YYYY-MM-DD and HH:mm, wall time in `timezone`. */
@@ -159,6 +164,12 @@ export function slotChanged(post: SocialPost | null, slot: EditorSlot | null): b
   return !same || (slot !== null && (post?.timezone ?? null) !== slot.timezone)
 }
 
+/** The post's visual is the person's own file, with no template (3 Oct 2026): there is nothing
+ * to render, so it goes for approval as it is (the server refuses to render it). */
+export function isOwnFilePost(post: Pick<SocialPost, 'media'> | null, draft: Pick<EditorDraft, 'templateId'>): boolean {
+  return !draft.templateId && !!post?.media && OWN_FILE_ASPECT in post.media
+}
+
 export function slidesOf(draft: Pick<EditorDraft, 'variables'>): number {
   const value = Number(draft.variables[SLIDES_VARIABLE]?.value)
   return Number.isFinite(value) && value >= MIN_SLIDES ? Math.min(value, MAX_SLIDES) : DEFAULT_SLIDES
@@ -190,13 +201,33 @@ export function channelBlock(channel: SocialChannel, format: string): string | n
   return kinds.some((k) => VISUAL_KINDS.includes(k)) ? null : 'Takes video only'
 }
 
+const STORY_FORMATS: ReadonlyArray<string> = ['image', 'video']
+const STORY_KIND: SocialPostKind = 'story'
+
+/** Whether `channel` can post a post of `format` as a story (PRD-251C, US-C301). */
+export function canStory(channel: SocialChannel, format: string): boolean {
+  return STORY_FORMATS.includes(format) && availableKinds(channel).includes(STORY_KIND)
+}
+
+/** The draft with a ticked channel posting as a story, or back as the format's own kind. */
+export function withStory(draft: EditorDraft, channel: SocialChannel, on: boolean): EditorDraft {
+  if (!(channel.toolkit in draft.kinds)) return draft
+  const kind = on && canStory(channel, draft.format) ? STORY_KIND : defaultKind(channel, draft.format)
+  return kind ? { ...draft, kinds: { ...draft.kinds, [channel.toolkit]: kind } } : draft
+}
+
+/** A ticked channel's kind in `format`: a story stays one where the format can be a story. */
+function kindIn(channel: SocialChannel, format: string, current: SocialPostKind | undefined): SocialPostKind | null {
+  return current === STORY_KIND && canStory(channel, format) ? STORY_KIND : defaultKind(channel, format)
+}
+
 /** The draft in `format`: a new kind of visual drops the template and the length, and
- * each ticked channel takes the format's kind, or is left out when it cannot. */
+ * each ticked channel takes the format's kind (a story stays one), or is left out when it cannot. */
 export function withFormat(draft: EditorDraft, format: string, channels: ReadonlyArray<SocialChannel>): EditorDraft {
   const kinds: Record<string, SocialPostKind> = {}
   for (const toolkit of Object.keys(draft.kinds)) {
     const channel = channels.find((c) => c.toolkit === toolkit)
-    const kind = channel && !channelBlock(channel, format) ? defaultKind(channel, format) : null
+    const kind = channel && !channelBlock(channel, format) ? kindIn(channel, format, draft.kinds[toolkit]) : null
     if (kind) kinds[toolkit] = kind
   }
   const sameKind = (format === 'video') === (draft.format === 'video')
@@ -230,24 +261,24 @@ export function aspectOf(toolkit: string, kind: string): string | null {
   return KIND_ASPECT[`${toolkit}:${kind}`] ?? DEFAULT_ASPECT[kind] ?? null
 }
 
-function ratioOfSize(size: string): string | null {
-  const [w, h] = size.split('x').map(Number)
-  if (!w || !h) return null
-  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
-  return `${w / gcd(w, h)}:${h / gcd(w, h)}`
-}
-
-/** "1080 × 1920": the template's size at the channel's aspect, else the aspect itself. */
+/** "1080 × 1920": the template's size the channel gets (its closest shape, channel-shape.ts),
+ * else the channel's aspect itself. */
 export function sizeFor(toolkit: string, kind: string, templateSizes: ReadonlyArray<string>): string {
   if (kind === 'text') return 'Text'
   const aspect = aspectOf(toolkit, kind)
-  const size = templateSizes.find((s) => ratioOfSize(s) === aspect)
+  const size = closestShape(templateSizes, (s) => s, aspect)
   return size ? size.replace('x', ' × ') : aspect ?? kind
 }
 
 /** The distinct aspect ratios the ticked channels render in, in channel order. */
-export function renderRatios(draft: Pick<EditorDraft, 'kinds'>): string[] {
-  const ratios = Object.entries(draft.kinds).map(([toolkit, kind]) => (kind === 'text' ? null : aspectOf(toolkit, kind)))
+/** The ratios a render makes, one per size the ticked channels get (their closest of the
+ * template's sizes); before a template is chosen, the channels' own aspects. */
+export function renderRatios(draft: Pick<EditorDraft, 'kinds'>, templateSizes: ReadonlyArray<string> = []): string[] {
+  const ratios = Object.entries(draft.kinds).map(([toolkit, kind]) => {
+    const aspect = kind === 'text' ? null : aspectOf(toolkit, kind)
+    const size = templateSizes.length ? closestShape(templateSizes, (s) => s, aspect) : null
+    return size ? sizeAspect(size) : aspect
+  })
   return Array.from(new Set(ratios.filter((r): r is string => !!r)))
 }
 

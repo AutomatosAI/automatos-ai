@@ -12,8 +12,9 @@ Pins D1 (Socials is gated two ways, on every plan) and the D6 permission:
   (P251-RVW-8);
 * the migration seed — ``prd251_socials`` seeds the row from the config
   default, insert-if-absent, never overwriting a super-admin's choice;
-* the workspace switch — ``parse_workspace_socials`` / ``validate_socials_update``
-  are fail-closed;
+* the workspace switch — one never set takes ``SOCIALS_ENABLED_DEFAULT`` (on by
+  default, owner 2026-10-03; an install that defaults Socials off keeps it off); a
+  malformed one is off, and ``validate_socials_update`` is fail-closed;
 * ``require_socials_enabled`` — 404 unless BOTH switches are on;
 * ``PUT /api/workspaces/current/socials`` — ``workspace:manage`` (a viewer or
   editor gets 403), rejects what the voice-live route rejects, persists with
@@ -456,19 +457,26 @@ def test_migration_seed_never_overwrites_the_super_admins_choice(monkeypatch):
 @pytest.mark.parametrize(
     "settings, expected",
     [
-        (None, False),
-        ({}, False),
-        ({"socials": None}, False),
         ({"socials": "on"}, False),
-        ({"socials": {}}, False),
         ({"socials": {"enabled": "true"}}, False),
         ({"socials": {"enabled": 1}}, False),
         ({"socials": {"enabled": False}}, False),
         ({"socials": {"enabled": True}}, True),
     ],
 )
-def test_parse_workspace_socials_is_fail_closed(settings, expected):
+@pytest.mark.parametrize("default", [True, False])
+def test_parse_workspace_socials_is_fail_closed(monkeypatch, settings, expected, default):
+    """A switch that is set decides, whatever the default; a malformed one is off."""
+    monkeypatch.setattr(socials_settings.config, "SOCIALS_ENABLED_DEFAULT", default)
     assert socials_settings.parse_workspace_socials(settings).enabled is expected
+
+
+@pytest.mark.parametrize("settings", [None, {}, {"socials": None}, {"socials": {}}, {"socials": {"series_approval": True}}])
+@pytest.mark.parametrize("default", [True, False])
+def test_a_switch_never_set_takes_the_install_default(monkeypatch, settings, default):
+    """Socials is on by default; an install that defaults it off keeps a workspace off until it is turned on."""
+    monkeypatch.setattr(socials_settings.config, "SOCIALS_ENABLED_DEFAULT", default)
+    assert socials_settings.parse_workspace_socials(settings).enabled is default
 
 
 @pytest.mark.parametrize("enabled", [True, False])
@@ -516,6 +524,16 @@ def test_gate_is_404_when_the_master_is_on_but_the_workspace_switch_is_off(maste
         with pytest.raises(HTTPException) as exc:
             _gate(_FakeDB(_workspace(settings)))
         assert exc.value.status_code == 404
+
+
+def test_gate_passes_for_a_workspace_that_never_set_its_switch_while_the_default_is_on(master, monkeypatch):
+    master["value"] = "true"
+    monkeypatch.setattr(socials_settings.config, "SOCIALS_ENABLED_DEFAULT", True)
+    ctx = _member_ctx()
+    assert _gate(_FakeDB(_workspace({})), ctx) is ctx
+    with pytest.raises(HTTPException) as exc:  # turned off, it stays off
+        _gate(_FakeDB(_workspace({"socials": {"enabled": False}})))
+    assert exc.value.status_code == 404
 
 
 def test_gate_is_404_when_the_workspace_is_missing(master):

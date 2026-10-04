@@ -37,6 +37,7 @@ TICKET_LISTS = ("tasks", "open_tasks", "recently_finished")
 NO_SUCH_NUMBER = "No ticket {ref} in this workspace. platform_list_tasks shows each ticket's number."
 NO_SUCH_TICKET = ("No ticket {number} (and no ticket with id {ref}) in this workspace. "
                   "platform_list_tasks shows each ticket's number.")
+NO_TICKET_SAID = "'{ref}' is not a ticket's number. Give it as the board shows it, e.g. #0042 (a mission step: #0051.3)."
 
 
 def by_ticket_number(handler: Handler) -> Handler:
@@ -79,8 +80,13 @@ def _resolve(db: Session, workspace_id: Any, refs: List[Any], *, one: bool) -> T
     that names no ticket is refused when it is the one ticket asked for; in a list
     it stays as given, and the bulk handler lists it as failed. So does a ref that
     is neither a number nor digits, and bare digits that name no ticket."""
-    from services.ticket_numbers import is_bare_ref, is_number_ref, read_bare_refs, resolve_ticket_ref
+    from services.ticket_numbers import is_bare_ref, is_number_ref, read_bare_refs, resolve_ticket_ref, spoken_ref
 
+    spoken = [spoken_ref(db, workspace_id, r) for r in refs]
+    error = next((why for _, why in spoken if why), None)
+    if error:
+        return refs, error
+    refs = [ref for ref, _ in spoken]
     bare, error = read_bare_refs(db, workspace_id, [r for r in refs if is_bare_ref(r)])
     if error:
         return refs, error
@@ -94,6 +100,22 @@ def _resolve(db: Session, workspace_id: Any, refs: List[Any], *, one: bool) -> T
         else:
             out.append(bare.get(int(str(ref).strip()), ref) if is_bare_ref(ref) else ref)
     return out, None
+
+
+def ticket_id_named(db: Session, workspace_id: Any, ref: Any) -> Tuple[Optional[int], Optional[str]]:
+    """The id of the one ticket ``ref`` names in this workspace (its number, a
+    step's, or its id), read as the ticket tools read it, or why there is none."""
+    found, error = _resolve(db, workspace_id, [ref], one=True)
+    if error:
+        return None, error
+    if isinstance(found[0], int) and not isinstance(found[0], bool) and found[0] != ref:
+        return found[0], None
+    from services.ticket_numbers import format_number, is_bare_ref
+
+    if is_bare_ref(found[0]):
+        n = int(str(found[0]).strip())
+        return None, NO_SUCH_TICKET.format(number=format_number(n), ref=n)
+    return None, NO_TICKET_SAID.format(ref=ref)
 
 
 def _not_found_by_number(result: Any, params: Dict[str, Any]) -> Any:

@@ -29,6 +29,10 @@ AMBIGUOUS_REF = ("{said} is both the id of {as_ids} and the number of {as_number
                  "Give the number with its '#', as the board shows it.")
 AMBIGUOUS_REFS = ("{said} could be ids or numbers without their '#'. As ids they are {as_ids}; as numbers, "
                   "{as_numbers}. Nothing was done. Give each ticket's number with its '#', as the board shows it.")
+# F241 (night 7b): a step's number sent as a JSON number ("task_id": 188.3).
+_FRACTION = re.compile(r"^(\d+)\.(\d+)$")
+FRACTION_DROPPED_A_ZERO = ("{said} could be {short} or {long}: sent as a number, it lost the 0 at its end. "
+                           "Nothing was done. Give the step's number as text with its '#', as the board shows it.")
 
 
 def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[str]:
@@ -140,6 +144,34 @@ def is_bare_ref(ref: Any) -> bool:
     if isinstance(ref, bool):
         return False
     return isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit() and not is_number_ref(ref))
+
+
+def spoken_ref(db: Session, workspace_id: Any, ref: Any) -> Tuple[Any, Optional[str]]:
+    """``ref`` as the ticket tools read it, or why it can't be read.
+
+    F241 (night 7b): Auto sent #0188.3 as the JSON number 188.3, and it was read as
+    ticket 188. An id is never fractional, so a fraction is a mission step's number
+    with its '#' gone. The number has dropped any 0 at its end, so 176.1 is refused
+    when ticket #0176 has a tenth step. A whole number (188.0) is that integer."""
+    if isinstance(ref, bool) or not isinstance(ref, float):
+        return ref, None
+    if ref.is_integer():
+        return int(ref), None
+    match = _FRACTION.match(repr(ref))
+    if not match:
+        return ref, None
+    seq, step = int(match.group(1)), match.group(2)
+    if len(step) == 1 and _step_count(db, workspace_id, seq) >= int(step) * 10:
+        return ref, FRACTION_DROPPED_A_ZERO.format(said=repr(ref), short=format_number(seq, int(step)),
+                                                   long=format_number(seq, int(step) * 10))
+    return format_number(seq, int(step)), None
+
+
+def _step_count(db: Session, workspace_id: Any, seq: int) -> int:
+    """How many steps ticket ``seq`` (a mission's card) has."""
+    card = db.query(BoardTask.id).filter(BoardTask.workspace_id == workspace_id,
+                                         BoardTask.workspace_seq == seq).first()
+    return len(_steps_in_order(db, workspace_id, [card.id]).get(card.id, [])) if card else 0
 
 
 def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple[Dict[int, int], Optional[str]]:

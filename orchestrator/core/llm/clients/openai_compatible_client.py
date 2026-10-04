@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover — the SDK is a hard dependency in prod
     OpenAI = None
 
 from core.llm.web_citations import citations_from_annotations, sources_markdown  # PRD-240
+from core.llm.clients.search_recovery import SearchRecoveringClient  # F264
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +317,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         headers = registry.headers_for(self.spec.slug)
         if headers:
             client_kwargs["default_headers"] = headers
-        self.client = OpenAI(**client_kwargs)
+        self.client = SearchRecoveringClient(OpenAI(**client_kwargs))  # F264: a failed web search fails no call
         logger.info("Initialized %s client with model: %s", self.spec.label, self.config.model)
 
     def _require_client(self):

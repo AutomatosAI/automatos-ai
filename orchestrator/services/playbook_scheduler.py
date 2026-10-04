@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 JOB_PREFIX = "playbook_cron_"
 # What a schedule saved without a zone has always fired in: the servers run UTC.
 SERVER_ZONE = "UTC"
+# The names UTC goes by, upper case (F266: a timer in one of them says nothing of where the owner is).
+UTC_ZONES = frozenset({"UTC", "ETC/UTC", "GMT", "ETC/GMT", "Z", "ZULU", "UNIVERSAL", "ETC/UNIVERSAL"})
 SYNC_SCHEDULED, SYNC_REMOVED, SYNC_DEFERRED, SYNC_OFF = "scheduled", "removed", "deferred", "off"
 
 
@@ -48,13 +50,29 @@ def is_live_cron(schedule_config: Optional[Dict[str, Any]]) -> bool:
 
 def default_schedule_zone(db, workspace_id) -> str:
     """The zone a schedule saved without one fires in (F132): the workspace's
-    orchestrator heartbeat timezone when set, else UTC."""
+    orchestrator heartbeat timezone when set, else the zone most of its other
+    playbook timers use (F266, night 7b: the owner's timers were all on UK
+    time and Auto's new one fired in UTC), else UTC."""
     from core.models.workspaces import Workspace
 
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     settings = (getattr(workspace, "settings", None) or {}) if workspace is not None else {}
     heartbeat = (settings.get("orchestrator") or {}).get("heartbeat") or {}
-    return heartbeat.get("timezone") or SERVER_ZONE
+    return heartbeat.get("timezone") or _timers_zone(db, workspace_id) or SERVER_ZONE
+
+
+def _timers_zone(db, workspace_id) -> Optional[str]:
+    """The zone most of the workspace's playbook timers name, UTC aside (a UTC timer
+    may be the very assumption this replaces); None when none names another."""
+    from collections import Counter
+
+    from core.models.core import WorkflowTemplate
+
+    rows = db.query(WorkflowTemplate.schedule_config).filter(
+        WorkflowTemplate.workspace_id == workspace_id, WorkflowTemplate.schedule_config.isnot(None)).all()
+    zones = Counter(str(sc.get("timezone")) for (sc,) in rows
+                    if isinstance(sc, dict) and sc.get("timezone") and str(sc["timezone"]).upper() not in UTC_ZONES)
+    return zones.most_common(1)[0][0] if zones else None
 
 
 def with_explicit_zone(schedule_config: Optional[Dict[str, Any]], db, workspace_id) -> Dict[str, Any]:

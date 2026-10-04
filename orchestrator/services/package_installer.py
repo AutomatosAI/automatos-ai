@@ -301,8 +301,12 @@ def _clone_recipe_to_workspace(db: Any, workspace_id: UUID, marketplace_recipe: 
     return cloned, recipe_name
 
 
-async def _install_playbook(db: Any, workspace_id: UUID, ref: str,
-                            user_id: Optional[int] = None) -> InstallManifest:
+async def install_playbook(db: Any, workspace_id: UUID, ref: str,
+                           user_id: Optional[int] = None) -> InstallManifest:
+    """Install one marketplace playbook (``ref``: its template id, or its row id) with the
+    agents its steps run, workspace-owned. Idempotent: the workspace's existing copy is left
+    as it is. Also used alone: a Socials plan's save installs the Content bank research
+    playbook this way (PRD-251C US-C101, ``services/socials_research_setup.py``)."""
     from modules.tools.discovery.cascade_installer import cascade_recipe_dependencies
     from core.models.core import WorkflowTemplate
 
@@ -393,7 +397,7 @@ async def _install_member(db: Any, workspace_id: UUID, mtype: str, ref: str,
     if mtype == "agent":
         return await install_marketplace_agent(db, workspace_id, ref, user_id)
     if mtype == "playbook":
-        return await _install_playbook(db, workspace_id, ref, user_id)
+        return await install_playbook(db, workspace_id, ref, user_id)
     if mtype in ("skill", "plugin", "llm", "tool"):
         return await _install_leaf(db, workspace_id, mtype, ref)
     raise PackageInstallError(f"Unknown member type: {mtype!r}")

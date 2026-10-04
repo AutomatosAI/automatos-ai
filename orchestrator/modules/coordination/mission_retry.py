@@ -53,16 +53,22 @@ def retry_failed(db: Session, run: Any, actor_id: str) -> List[Any]:
     from core.models.orchestration_enums import ActorType, RunState, TaskState
     from services.orchestration_state import transition_run
 
-    failed = db.query(OrchestrationTask).filter(
-        OrchestrationTask.run_id == run.id, OrchestrationTask.state == TaskState.FAILED.value,
+    from modules.coordination.mission_ends import skipped_for_a_failure
+
+    # F268 (night 7b): the steps skipped because a step failed run again too; #0176
+    # retried its four failed steps, and its eight skipped ones failed it again.
+    steps = db.query(OrchestrationTask).filter(
+        OrchestrationTask.run_id == run.id,
+        OrchestrationTask.state.in_([TaskState.FAILED.value, TaskState.SKIPPED.value]),
     ).order_by(OrchestrationTask.sequence_number).all()
+    failed = [t for t in steps if t.state == TaskState.FAILED.value or skipped_for_a_failure(t)]
     transition_run(db=db, run=run, new_state=RunState.PAUSED, actor_type=ActorType.HUMAN,
                    actor_id=actor_id, reason=RETRY_REASON)
     run.completed_at = None
     run.config = {key: value for key, value in (run.config or {}).items() if key != LEDGER_KEY}
     for task in failed:
         _wait_again(db, task, actor_id)
-    logger.info("[coordinator] run %s retried by %s: %d failed step(s) wait to run again",
+    logger.info("[coordinator] run %s retried by %s: %d failed or skipped step(s) wait to run again",
                 run.id, actor_id, len(failed))
     return failed
 
@@ -86,12 +92,16 @@ def _wait_again(db: Session, task: Any, actor_id: str) -> None:
 
 
 def _card_without_the_failure(db: Session, task: Any) -> None:
-    """A step card back in the Inbox no longer shows the failure: the step waits to run again."""
+    """A step card back in the Inbox no longer shows the failure: the step waits to run again.
+    F268: a step skipped for the failure shows Cancelled, which no mission sync reopens
+    (F245); the owner never cancels a step alone, so the retry reopens it."""
     from core.models.core import BoardTask
     from services.orchestration_board_bridge import STEP_CARD_SOURCE_TYPE
 
     card = db.query(BoardTask).filter(BoardTask.source_type == STEP_CARD_SOURCE_TYPE,
                                       BoardTask.orchestration_task_id == task.id).first()
+    if card is not None and card.status == "cancelled":
+        card.status = "inbox"
     if card is not None and card.status == "inbox":
         card.error_message = None
         card.completed_at = None

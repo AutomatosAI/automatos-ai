@@ -10,7 +10,8 @@ Pinned:
 * the cadence check: known formats and channels, a template of the right kind and a length
   it declares, days and times; the dates, the zone and the late policy;
 * the routes: create (the fields required), list with the bank's counts, get, update (an
-  ended plan is read-only), pause/resume/end (only the moves a status allows), the slots
+  ended plan is read-only; a save keeps when research last ran), pause/resume/end (only the moves a status allows), delete (owners
+  and admins; its bank goes, its posts stay unlinked), the slots
   in a window (planned and made), a slot moved, put back or skipped (a made one is 409);
   another workspace's plan is a 404.
 """
@@ -29,7 +30,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 import tests.test_prd251_api as api_harness  # noqa: E402
-from core.models.socials import SocialPost, SocialTopic  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialTopic  # noqa: E402
 from modules.socials import plans  # noqa: E402
 from tests.test_prd251_api import WS_A, WS_B, _ctx  # noqa: E402
 
@@ -140,7 +141,8 @@ def test_a_good_cadence_is_cleaned():
         {"channels": ["linkedin"], "format": "image", "days": ["tue"], "time": "08:00"},
     ], TEMPLATES)
     assert rows[0] == {"id": "r1", "channels": ["instagram", "tiktok"], "format": "video", "length_seconds": 30,
-                       "template_id": VIDEO_TEMPLATE, "days": ["mon", "fri"], "time": "17:30"}
+                       "template_id": VIDEO_TEMPLATE, "days": ["mon", "fri"], "time": "17:30", "kind": None,
+                       "visual": None}
     assert rows[1]["id"] == "r2" and rows[1]["length_seconds"] is None
     with pytest.raises(plans.InvalidPlan):
         plans.validate_cadence([{**rows[0], "id": "same"}, {**rows[1], "id": "same"}], TEMPLATES)
@@ -189,7 +191,9 @@ def _create(api, **overrides):
 def test_a_plan_is_created_listed_and_read(bank):
     plan = _create(bank)
     assert (plan["kind"], plan["status"], plan["late_policy"], plan["approval_mode"]) == ("plan", "active", "skip", "per_post")
-    assert plan["make"]["time"] == "07:00" and plan["research"] == {"enabled": True, "day": "mon", "time": "06:00"}
+    assert (plan["make"]["rhythm"], plan["make"]["time"]) == ("weekly", "17:00")  # PRD-251C: a new plan's week (O1, O3)
+    # PRD-251C: the repeat window (US-C104); a weekly plan researches the day before its batch (US-C207).
+    assert plan["research"] == {"enabled": True, "day": "sat", "time": "06:00", "repeat_after_days": 60}
     assert plan["cadence"][0]["id"] == "r1" and plan["bank"] == {"topics": 0, "unused": 0}
     listed = bank.client.get("/api/socials/plans").json()
     assert [p["id"] for p in listed["plans"]] == [plan["id"]]
@@ -214,6 +218,46 @@ def test_update_pause_resume_end(bank):
     assert bank.client.post(f"/api/socials/plans/{plan['id']}/end").json()["status"] == "ended"
     assert bank.client.put(f"/api/socials/plans/{plan['id']}", json={"goal": "x"}).status_code == 422
     assert bank.client.post(f"/api/socials/plans/{plan['id']}/resume").status_code == 422
+
+
+def test_a_save_keeps_when_research_last_ran_and_the_settings_it_did_not_send(bank):
+    """Every save of the Plan page sends research's day and time. It used to drop the last run's
+    record, so the weekly research ran again at the next tick after any save."""
+    plan = _create(bank)
+    row = bank.session.get(SocialCampaign, uuid.UUID(plan["id"]))
+    row.research = {**row.research, "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1"}
+    bank.session.commit()
+    saved = bank.client.put(f"/api/socials/plans/{plan['id']}", json={"research": {"day": "tue"}})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["research"] == {
+        "enabled": True, "day": "tue", "time": "06:00", "repeat_after_days": 60,
+        "last_run_at": "2026-10-12T06:05:00+00:00", "last_run_id": "research-1",
+    }
+
+
+def test_deleting_a_plan_takes_its_bank_and_keeps_its_posts_as_ordinary_posts(bank):
+    """3 Oct 2026 (Gerard: "no way to delete plans"): an owner or admin deletes a plan; an editor
+    cannot (403). Its content bank goes; the posts it made stay, with no plan and no slot."""
+    plan = _create(bank)
+    plan_id = uuid.UUID(plan["id"])
+    fact = {"text": "We demo on stand B12.", "source": {"kind": "web", "ref": "https://example.com/launch", "label": "Launch page"}}
+    assert bank.client.post(f"/api/socials/plans/{plan['id']}/topics", json={"title": "An idea", "facts": [fact]}).status_code == 201
+    post = SocialPost(id=uuid.uuid4(), workspace_id=WS_A, created_by="u", title="Made", content_hash="0" * 64,
+                      campaign_id=plan_id, slot_key="r1|2026-10-12|09:00", status="needs_approval")
+    bank.session.add(post)
+    bank.session.commit()
+
+    bank.role = "editor"
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 403
+    bank.role = "owner"
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 204
+
+    assert bank.client.get(f"/api/socials/plans/{plan['id']}").status_code == 404
+    assert bank.client.get("/api/socials/plans").json()["plans"] == []
+    bank.session.expire_all()
+    kept = bank.session.get(SocialPost, post.id)
+    assert (kept.status, kept.campaign_id, kept.slot_key) == ("needs_approval", None, None)
+    assert bank.session.query(SocialTopic).filter(SocialTopic.campaign_id == plan_id).count() == 0
 
 
 def test_the_slots_of_a_window_and_a_slot_moved_put_back_and_skipped(bank):
@@ -258,4 +302,5 @@ def test_another_workspaces_plan_is_not_found(bank):
     bank.ctx = _ctx(WS_B)
     assert bank.client.get(f"/api/socials/plans/{plan['id']}").status_code == 404
     assert bank.client.put(f"/api/socials/plans/{plan['id']}", json={"goal": "x"}).status_code == 404
+    assert bank.client.delete(f"/api/socials/plans/{plan['id']}").status_code == 404
     assert bank.client.get("/api/socials/plans").json()["plans"] == []

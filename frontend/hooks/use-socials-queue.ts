@@ -7,7 +7,8 @@
  * shown post by the content hash on screen: through the series path when the shown posts
  * are one series campaign's, otherwise one approve each. Nothing is approved implicitly: a
  * post whose hash moved (409) or whose claims need a second confirmation (422) is left, and
- * said so.
+ * said so. PRD-251C US-C204: a plan's week (or month) is approved in one sitting the same way,
+ * each post by its hash; a post that changed is left and named.
  */
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -88,22 +89,52 @@ async function approveSeries(campaign: SocialCampaign, posts: ReadonlyArray<Soci
   }
 }
 
+/** What an approval of several posts says once done: how many were approved, and each one left. */
+function useApprovalOutcome() {
+  const invalidate = useInvalidateSocials()
+  return {
+    onSuccess: async ({ approved, left }: ShownApproval) => {
+      await invalidate()
+      toast.success(`Approved ${approved} ${approved === 1 ? 'post' : 'posts'}.`)
+      left.forEach((entry) => toast.error(`Not approved: ${entry.title}, because ${entry.why}.`))
+    },
+    onError: async (error: Error) => {
+      await invalidate()
+      toast.error(error.message || 'Could not approve the shown posts')
+    },
+  }
+}
+
 /** Approve all shown: each post by the hash on screen (the series path for one series campaign). */
 export function useApproveShown(campaigns: ReadonlyArray<SocialCampaign>) {
-  const invalidate = useInvalidateSocials()
+  const outcome = useApprovalOutcome()
   return useMutation<ShownApproval, Error, ReadonlyArray<SocialPost>>({
     mutationFn: (posts) => {
       const series = sharedSeries(posts, campaigns)
       return series ? approveSeries(series, posts) : approveEach(posts)
     },
-    onSuccess: async ({ approved, left }) => {
-      await invalidate()
-      toast.success(`Approved ${approved} ${approved === 1 ? 'post' : 'posts'}.`)
-      left.forEach((entry) => toast.error(`Not approved: ${entry.title}, because ${entry.why}.`))
+    ...outcome,
+  })
+}
+
+export interface BatchApproval {
+  planId: string
+  batchKey: string
+  posts: ReadonlyArray<SocialPost>
+}
+
+/** Approve the week: the batch's shown posts, each by the hash on screen (PRD-251C US-C205). */
+export function useApproveBatch() {
+  const outcome = useApprovalOutcome()
+  return useMutation<ShownApproval, Error, BatchApproval>({
+    mutationFn: async ({ planId, batchKey, posts }) => {
+      const answer = await apiClient.approveSocialPlanBatch(planId, batchKey, posts.map((post) => ({ post_id: post.id, content_hash: post.content_hash })))
+      const titles = new Map(posts.map((post) => [post.id, post.title]))
+      return {
+        approved: answer.approved.length,
+        left: answer.left.map((entry) => ({ title: entry.title ?? titles.get(entry.post_id) ?? entry.post_id, why: entry.message })),
+      }
     },
-    onError: async (error) => {
-      await invalidate()
-      toast.error(error.message || 'Could not approve the shown posts')
-    },
+    ...outcome,
   })
 }

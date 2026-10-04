@@ -1894,13 +1894,15 @@ class Config:
     # =============================================================================
     # Socials is gated two ways (D1): the platform master switch is the
     # ``socials.enabled`` system setting, a super-admin toggle in Settings →
-    # System Settings, and each workspace has ``settings['socials'].enabled``
-    # (modules/socials/settings.py). SOCIALS_ENABLED_DEFAULT is only the master
-    # switch's DEFAULT: the prd251_socials migration seeds the row with it, and
-    # it applies wherever no row exists. Every plan gets Socials, so there is no
-    # plan exposure key.
+    # System Settings, and each workspace has ``settings['socials'].enabled``,
+    # the Socials card in its Settings (modules/socials/settings.py).
+    # SOCIALS_ENABLED_DEFAULT is both switches' DEFAULT, on (owner, 2026-10-03; an
+    # install that wants Socials off until asked, such as an enterprise one, sets
+    # it false): the prd251_socials migration seeds the master row with it, it
+    # applies wherever no row exists, and a workspace that never set its switch
+    # takes it. Every plan gets Socials, so there is no plan exposure key.
     SOCIALS_ENABLED_DEFAULT: bool = os.getenv(
-        "SOCIALS_ENABLED_DEFAULT", "false"
+        "SOCIALS_ENABLED_DEFAULT", "true"
     ).strip().lower() == "true"
     # D9: the lifetime of the presigned media URL a channel fetches at publish time.
     SOCIALS_MEDIA_URL_TTL_SECONDS: int = int(os.getenv("SOCIALS_MEDIA_URL_TTL_SECONDS", "86400"))
@@ -1954,6 +1956,22 @@ class Config:
     # most this many slots a tick (the rest wait for the next).
     SOCIALS_PLAN_TICK_SECONDS: int = int(os.getenv("SOCIALS_PLAN_TICK_SECONDS", "300"))
     SOCIALS_PLAN_MAX_SLOTS_PER_TICK: int = int(os.getenv("SOCIALS_PLAN_MAX_SLOTS_PER_TICK", "12"))
+    # PRD-251C US-C103 (C5): the workspace's Socials history, as research reads it: this many
+    # days back and at most this many posts, newest first, unless the caller asks for others.
+    SOCIALS_HISTORY_DAYS: int = int(os.getenv("SOCIALS_HISTORY_DAYS", "90"))
+    SOCIALS_HISTORY_LIMIT: int = int(os.getenv("SOCIALS_HISTORY_LIMIT", "50"))
+    # PRD-251C US-C104 (C5): two titles whose content words overlap this much (shared over all,
+    # 0 to 1) are one topic: research may not add the second (modules/socials/repeats.py).
+    SOCIALS_REPEAT_OVERLAP: float = float(os.getenv("SOCIALS_REPEAT_OVERLAP", "0.75"))
+    # PRD-251C US-C105: the composer is given how this many of the workspace's last posts began.
+    SOCIALS_COMPOSE_RECENT_OPENINGS: int = int(os.getenv("SOCIALS_COMPOSE_RECENT_OPENINGS", "10"))
+    # PRD-251C US-C402 (C7): the leader reads published posts' numbers this often, at most this
+    # many reads a tick, each reading (1 and 7 days after a post went out) for this many days.
+    SOCIALS_RESULTS_TICK_SECONDS: int = int(os.getenv("SOCIALS_RESULTS_TICK_SECONDS", "3600"))
+    SOCIALS_RESULTS_MAX_READS_PER_TICK: int = int(os.getenv("SOCIALS_RESULTS_MAX_READS_PER_TICK", "50"))
+    SOCIALS_RESULTS_READ_WINDOW_DAYS: int = int(os.getenv("SOCIALS_RESULTS_READ_WINDOW_DAYS", "2"))
+    # PRD-251C US-C406 (C8): the workspace keeps this many voice examples, newest first.
+    SOCIALS_VOICE_EXAMPLES: int = int(os.getenv("SOCIALS_VOICE_EXAMPLES", "10"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")

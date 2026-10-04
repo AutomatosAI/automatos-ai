@@ -223,7 +223,9 @@ def test_a_source_that_is_not_a_candidate_is_dropped_and_the_claim_stays_unsourc
 
 def test_variables_outside_the_schema_or_of_the_wrong_type_are_dropped(composer):
     answer = _answer(composer, variables={"headline": "x" * 61, "members": "lots", "logo": "mine"})
-    proposal = _compose(composer, [answer]).json()
+    # The two required ones it dropped are asked for once more (F253 follow-up); this answer is unusable.
+    proposal = _compose(composer, [answer, "no idea"]).json()
+    assert '"headline"' in composer.model.asked[1][-1]["content"] and '"members"' in composer.model.asked[1][-1]["content"]
     assert proposal["variables"] == {}
     warnings = " ".join(proposal["warnings"])
     assert "logo" in warnings and "headline is longer than 60 characters" in warnings and "members must be a number" in warnings

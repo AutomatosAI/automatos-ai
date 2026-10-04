@@ -340,7 +340,7 @@ NEEDS_PUBLIC_LINK = (
 _STEP_KEYS = frozenset(
     {"id", "action", "class", "params", "files", "urls", "optional", "returns", "until", "permalink", "jpeg"}
 )
-_ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered"})
+_ADAPTER_KEYS = frozenset({"label", "setup_note", "kinds", "never_offered", "results"})  # results: result_reads.py
 _NOT_A_WORD = re.compile(r"[^A-Z0-9]+")
 
 
@@ -623,6 +623,20 @@ def social_channels(db: Session, workspace_id: Any) -> Tuple[SocialChannel, ...]
         for adapter in seeded
     )
     return channels + _generic_channels(db, workspace_id, connected - set(SEEDED_CHANNELS), storage)
+
+
+def runnable_actions(db: Session, workspace_id: Any, actions: Mapping[str, str]) -> Dict[str, Optional[str]]:
+    """PRD-251C (US-C402): for each toolkit, ``None`` when the workspace can run its ``actions``
+    entry now (the toolkit connected, the action synced, not deny-listed), else why not."""
+    connected = _connected_toolkits(db, workspace_id)
+    cached = _cached_actions(db, {toolkit: {slug: frozenset({READ})} for toolkit, slug in actions.items() if toolkit in connected})
+    why: Dict[str, Optional[str]] = {}
+    for toolkit, slug in actions.items():
+        if toolkit not in connected:
+            why[toolkit] = f"{toolkit} is not connected"
+        else:
+            why[toolkit] = composio_action_denial(slug) or (None if (toolkit, slug) in cached else MISSING_ACTION.format(slug=slug))
+    return why
 
 
 def _seeded_kind(

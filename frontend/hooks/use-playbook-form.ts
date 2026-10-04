@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { useCreatePlaybook, useUpdatePlaybook } from './use-playbook-api'
+import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 import type { PlaybookFormValues } from '@/components/workflows/create-playbook-modal'
 
@@ -101,6 +102,35 @@ function transformFormToApiPayload(data: PlaybookFormValues) {
   }
 }
 
+/** The stored settings an edit is laid over (GET /api/workflow-recipes/{id}). */
+interface StoredPlaybookConfigs {
+  execution_config?: Record<string, unknown> | null
+  schedule_config?: Record<string, unknown> | null
+}
+
+/**
+ * The body of an edit (PUT /api/workflow-recipes/{id}): only what the editor edits,
+ * laid over the playbook's stored settings (F242, night 7b). The editor rebuilt
+ * execution_config and schedule_config from its own fields, and the server keeps
+ * them as sent, so a save dropped the owner's "wait for me"
+ * (execution_config.wait_for_me), switched a timer that was off back on
+ * (schedule_config.enabled) and lost its timezone. It also sent a fresh
+ * template_id, emptied the tags and made the playbook public again.
+ */
+function editPayload(data: PlaybookFormValues, stored: StoredPlaybookConfigs | null) {
+  const made = transformFormToApiPayload(data)
+  return {
+    name: made.name,
+    description: made.description,
+    template_definition: made.template_definition,
+    steps: made.steps,
+    ...(made.inputs ? { inputs: made.inputs } : {}),
+    ...(made.outputs ? { outputs: made.outputs } : {}),
+    execution_config: { ...(stored?.execution_config ?? {}), ...made.execution_config },
+    schedule_config: { ...(stored?.schedule_config ?? {}), ...made.schedule_config },
+  }
+}
+
 /**
  * Validates form data before submission.
  * Returns null if valid, or an error message string if invalid.
@@ -153,6 +183,54 @@ export interface UsePlaybookFormReturn {
   updatePlaybook: (playbookId: string, data: PlaybookFormValues, onSuccess?: () => void) => Promise<void>
 }
 
+/** What a save says when it is done, or when it failed. */
+interface SaveWords {
+  done: string
+  doneText: (name: string) => string
+  failed: string
+  fallback: string
+}
+
+const CREATED: SaveWords = {
+  done: 'Playbook Created',
+  doneText: (name) => `"${name}" has been created successfully.`,
+  failed: 'Error Creating Playbook',
+  fallback: 'Failed to create playbook. Please try again.',
+}
+
+const UPDATED: SaveWords = {
+  done: 'Playbook Updated',
+  doneText: (name) => `"${name}" has been updated successfully.`,
+  failed: 'Error Updating Playbook',
+  fallback: 'Failed to update playbook. Please try again.',
+}
+
+/** A failed save's words: the server's, or the fallback. */
+function failureText(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null && 'detail' in err) return String((err as { detail: unknown }).detail)
+  return fallback
+}
+
+/** Sends one save and says how it went; keeps the webhook id the server gives back. */
+async function saveAndSay(
+  data: PlaybookFormValues,
+  send: () => Promise<unknown>,
+  words: SaveWords,
+  keepWebhookId: (id: string) => void,
+  onSuccess?: () => void,
+): Promise<void> {
+  try {
+    const result = (await send()) as { playbook?: { schedule_config?: { webhook_id?: string } } } | null
+    const webhookId = result?.playbook?.schedule_config?.webhook_id
+    if (webhookId) keepWebhookId(webhookId)
+    toast(words.done, { description: words.doneText(data.name) })
+    onSuccess?.()
+  } catch (err: unknown) {
+    toast.error(words.failed, { description: failureText(err, words.fallback) })
+  }
+}
+
 /**
  * Hook for managing playbook form submission.
  * Handles validation, API call, toast notifications, and query invalidation.
@@ -163,86 +241,37 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastSavedWebhookId, setLastSavedWebhookId] = useState<string | null>(null)
 
-  const submitPlaybook = useCallback(
-    async (data: PlaybookFormValues, onSuccess?: () => void) => {
-      // Validate form data
+  const save = useCallback(
+    async (data: PlaybookFormValues, send: () => Promise<unknown>, words: SaveWords, onSuccess?: () => void) => {
       const validationError = validateFormData(data)
       if (validationError) {
         toast.error('Validation Error', { description: validationError })
         return
       }
-
       setIsSubmitting(true)
-
       try {
-        const payload = transformFormToApiPayload(data)
-
-        const result = await createPlaybookMutation.mutateAsync(payload) as any
-
-        // Extract webhook_id from server response for display
-        const webhookId = result?.playbook?.schedule_config?.webhook_id
-        if (webhookId) {
-          setLastSavedWebhookId(webhookId)
-        }
-
-        toast('Playbook Created', { description: `"${data.name}" has been created successfully.` })
-
-        onSuccess?.()
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : typeof err === 'object' && err !== null && 'detail' in err
-              ? String((err as { detail: unknown }).detail)
-              : 'Failed to create playbook. Please try again.'
-
-        toast.error('Error Creating Playbook', { description: message })
+        await saveAndSay(data, send, words, setLastSavedWebhookId, onSuccess)
       } finally {
         setIsSubmitting(false)
       }
     },
-    [createPlaybookMutation]
+    []
   )
 
+  const submitPlaybook = useCallback(
+    (data: PlaybookFormValues, onSuccess?: () => void) =>
+      save(data, () => createPlaybookMutation.mutateAsync(transformFormToApiPayload(data)), CREATED, onSuccess),
+    [createPlaybookMutation, save]
+  )
+
+  // F242: an edit is laid over the playbook's settings as they are stored now.
   const updatePlaybook = useCallback(
-    async (playbookId: string, data: PlaybookFormValues, onSuccess?: () => void) => {
-      // Validate form data
-      const validationError = validateFormData(data)
-      if (validationError) {
-        toast.error('Validation Error', { description: validationError })
-        return
-      }
-
-      setIsSubmitting(true)
-
-      try {
-        const payload = transformFormToApiPayload(data)
-
-        const result = await updatePlaybookMutation.mutateAsync({ playbookId, playbookData: payload }) as any
-
-        // Extract webhook_id from server response for display
-        const webhookId = result?.playbook?.schedule_config?.webhook_id
-        if (webhookId) {
-          setLastSavedWebhookId(webhookId)
-        }
-
-        toast('Playbook Updated', { description: `"${data.name}" has been updated successfully.` })
-
-        onSuccess?.()
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : typeof err === 'object' && err !== null && 'detail' in err
-              ? String((err as { detail: unknown }).detail)
-              : 'Failed to update playbook. Please try again.'
-
-        toast.error('Error Updating Playbook', { description: message })
-      } finally {
-        setIsSubmitting(false)
-      }
-    },
-    [updatePlaybookMutation]
+    (playbookId: string, data: PlaybookFormValues, onSuccess?: () => void) =>
+      save(data, async () => {
+        const stored = (await apiClient.getWorkflowRecipeById(playbookId)) as StoredPlaybookConfigs | null
+        return updatePlaybookMutation.mutateAsync({ playbookId, playbookData: editPayload(data, stored) })
+      }, UPDATED, onSuccess),
+    [updatePlaybookMutation, save]
   )
 
   return {

@@ -192,6 +192,14 @@ describe('what the approver sees', () => {
     expect(within(channels).getByText(/text, image/)).toBeInTheDocument()
   })
 
+  it('names each channel as the rest of Socials does: X, not Twitter', () => {
+    show(post({ targets: [target('twitter', 'image'), target('linkedin', 'text')] }))
+    const channels = screen.getByRole('region', { name: 'Channels' })
+    expect(within(channels).getByText('X')).toBeInTheDocument()
+    expect(within(channels).getByText('LinkedIn')).toBeInTheDocument()
+    expect(within(channels).queryByText(/twitter/i)).toBeNull()
+  })
+
   it('request changes needs a comment; reject sends its optional reason', async () => {
     api.rejectSocialPost.mockResolvedValue(post({ status: 'archived' }))
     show(post())

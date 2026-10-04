@@ -1,11 +1,12 @@
 """Socials ActionDefinitions (PRD-251 US-116, S4.1): agents draft posts; people approve them.
 
 Five tools over the Socials post lifecycle: create, update, submit, get and
-list; and two over a plan's content bank (PRD-251B B8, US-B204): read a plan,
-and add researched topics to its bank. Their handlers (``handlers_socials.py``)
-run the flows the /api/socials routes run. None of them approves, schedules or
-publishes, and no parameter does (D6, D14): a person approves in the Socials
-tab, and the platform publishes (Wave 3).
+list; two over a plan's content bank (PRD-251B B8, US-B204): read a plan, and
+add researched topics to its bank; and one over the workspace's history
+(PRD-251C C5, US-C103): what it already posted, so research repeats nothing.
+Their handlers (``handlers_socials.py``) run the flows the /api/socials routes
+run. None of them approves, schedules or publishes, and no parameter does (D6,
+D14): a person approves in the Socials tab, and the platform publishes (Wave 3).
 
 The enums are the lifecycle's own vocabulary, spelled out here so the registry
 build stays stdlib-light (the utterance-corpus linter leaf-loads this module);
@@ -44,6 +45,9 @@ FACTS_MAX_PER_TOPIC = 12
 # platform_list_social_posts: how many posts one call returns.
 LIST_DEFAULT_LIMIT = 25
 LIST_MAX_LIMIT = 100
+# modules/socials/history.py MAX_DAYS and MAX_LIMIT: the most platform_get_social_history reads.
+HISTORY_MAX_DAYS = 365
+HISTORY_MAX_LIMIT = 200
 
 
 def _post_id() -> dict:
@@ -205,6 +209,7 @@ def register_socials_actions(registry: ActionRegistry) -> None:
     _register_get_social_post(registry)
     _register_list_social_posts(registry)
     _register_plan_actions(registry)
+    _register_history_action(registry)
 
 
 def _register_create_social_post(registry: ActionRegistry) -> None:
@@ -395,6 +400,11 @@ def _topic_schema() -> dict:
             "angle": {"type": "string", "description": "Why it matters to the plan's audience."},
             "facts": {"type": "array", "items": fact, "maxItems": FACTS_MAX_PER_TOPIC},
             "formats": {"type": "array", "items": {"type": "string", "enum": POST_FORMATS}},
+            # PRD-251C (C9): a dated topic, such as an event's countdown, posted on its day.
+            "pinned_on": {
+                "type": "string",
+                "description": "A day within the plan's dates (YYYY-MM-DD) to post it on: an event's countdown or its day.",
+            },
         },
         "required": ["title", "facts"],
     }
@@ -437,4 +447,45 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
         permission_level="write",
         tags=["socials", "plan", "content bank", "research", "topics"],
         examples=["add these topics to the content bank", "save the researched ideas to the Socials plan"],
+    ))
+
+
+def _register_history_action(registry: ActionRegistry) -> None:
+    """PRD-251C (C5, US-C103): what the workspace already posted, for research and the composer."""
+    registry.register(ActionDefinition(
+        name="platform_get_social_history",
+        description=(
+            "Read what this workspace already posted on social media, newest first: every post that "
+            "went out, is approved or scheduled, or waits for approval, across every plan and the posts "
+            "people made by hand. Each has its title, topic and angle, format, channels, opening line, "
+            "date and state, and its numbers and engagement once read. Read it before researching or "
+            "writing, so a topic or a hook the workspace already used is not used again, and more like "
+            "what did best is found."
+        ),
+        category="socials",
+        parameters={
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": HISTORY_MAX_DAYS,
+                    "description": "How many days back to read (the platform's default when left out).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": HISTORY_MAX_LIMIT,
+                    "description": "How many posts at most, newest first (the platform's default when left out).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["socials", "history", "posts", "research", "repeats"],
+        examples=[
+            "what have we already posted on social media?",
+            "show our social posting history",
+            "did we post about this before?",
+        ],
     ))

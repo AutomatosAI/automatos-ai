@@ -8,7 +8,7 @@
 # code. Iterations continue from the diary until the stop time.
 #
 # Usage: ./scripts/ralph/overnight-customer.sh            (launch is human-only)
-# Env:   RALPH_MODEL=claude-opus-5 · RALPH_MAX_ITERS=10 · RALPH_STOP_AT=06:30
+# Env:   RALPH_MODEL=claude-opus-5 · RALPH_MAX_ITERS=10 · RALPH_STOP_AT=06:30 · RALPH_START_ITER=1 (resume at N)
 #        CUSTOMER_PERSONA=harbourline · SIM_WORKSPACE_ID=<local workspace>
 # Night: ~/.automatos-sim/customer-night/<date>/{DIARY.md,MORNING-REPORT.md,logs/}
 
@@ -31,6 +31,7 @@ mkdir -p "$LOG_DIR"
 RALPH_MODEL="${RALPH_MODEL:-claude-opus-5}"
 # 10 ended night 1 on the cap, 2.5 h before STOP_AT.
 MAX_ITERS="${RALPH_MAX_ITERS:-14}"
+START_ITER="${RALPH_START_ITER:-1}"   # resume a stopped night in its own CUSTOMER_NIGHT_DIR: the first iteration to run
 STOP_AT="${RALPH_STOP_AT:-06:30}"
 THEME="${RALPH_THEME:-general}"   # nights/<theme>.md fills {{AGENDA}} in the brief
 # 4 of night 1's 10 iterations were killed at 50m mid-work.
@@ -57,6 +58,12 @@ stop_epoch() {
 }
 STOP_EPOCH=$(stop_epoch)
 past_stop() { [[ $(date +%s) -ge $STOP_EPOCH ]]; }
+# NIGHT_COMPLETE counts only as the last line of the persona's final reply. 3 Oct (night 7b): a tool
+# call's text said "so not NIGHT_COMPLETE", and a grep of the whole stream ended the night after 1 of 6.
+night_complete() {
+  grep '^{' <<<"$CLAUDE_OUTPUT" | jq -r 'select(.type == "result") | .result // empty' 2>/dev/null \
+    | sed '/^[[:space:]]*$/d' | tail -1 | grep -qxE '[[:space:]`*]*NIGHT_COMPLETE[[:space:]`*]*'
+}
 
 # --- usage-limit handling (the Ralph kit's) -------------------------------------
 seconds_until_next_hour() { local s=$((10#$(date +%M) * 60 + 10#$(date +%S))); echo $((3600 - s)); }
@@ -116,7 +123,7 @@ NIGHT_START="$(grep '^STARTED=' "$STATUS" 2>/dev/null | head -1 | cut -d= -f2)"
 
 # --- the night ----------------------------------------------------------------------
 consecutive_failures=0
-for ((iter = 1; iter <= MAX_ITERS; iter++)); do
+for ((iter = START_ITER; iter <= MAX_ITERS; iter++)); do
   if past_stop; then say "${YELLOW}stop time $STOP_AT reached before iteration $iter${NC}"; break; fi
   prompt="$NIGHT_DIR/prompt-iter$iter.md"; logfile="$LOG_DIR/iter$iter.log"
   # The night's theme (nights/<theme>.md) fills {{AGENDA}}. It is rendered FIRST with the same values,
@@ -140,7 +147,7 @@ for ((iter = 1; iter <= MAX_ITERS; iter++)); do
     # the iteration used its whole window — that is a full iteration, not a failure
     consecutive_failures=0; set_status "ITER$iter" TIMEOUT
     say "${YELLOW}iteration $iter ran to the ${ITER_TIMEOUT} limit; continuing from the diary${NC}"
-    if echo "$CLAUDE_OUTPUT" | grep -q "NIGHT_COMPLETE"; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
+    if night_complete; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
     continue
   fi
   if [[ $CLAUDE_EXIT -ne 0 ]]; then
@@ -150,7 +157,7 @@ for ((iter = 1; iter <= MAX_ITERS; iter++)); do
     countdown $((60 * consecutive_failures)) "Retrying..."; continue
   fi
   consecutive_failures=0; set_status "ITER$iter" DONE
-  if echo "$CLAUDE_OUTPUT" | grep -q "NIGHT_COMPLETE"; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
+  if night_complete; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
 done
 
 # --- morning ------------------------------------------------------------------------

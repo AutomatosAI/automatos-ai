@@ -34,6 +34,7 @@ from core.models.orchestration_enums import (
 from services.board_sla import PRIORITY_SLA_HOURS as _PRIORITY_SLA_HOURS  # noqa: E402
 from services.board_cancel import stop_mission_sessions
 from services.cli_ticket_lane import is_lane_owned, release_step_card
+from services.mission_card_result import carries_the_missions_result
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def create_mission_board_task(
         created_by_id="coordinator",
         source_type="orchestration",
         orchestration_run_id=run.id,
-        tags=["mission", "orchestration"],
+        tags=["mission", "orchestration", *_owner_tags(run)],
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get("medium", 24)),
     )
     db.add(board_task)
@@ -129,6 +130,13 @@ def create_mission_board_task(
         run.id,
     )
     return board_task
+
+
+def _owner_tags(run: OrchestrationRun) -> list:
+    """The tags the owner asked for on the mission's card (F262, night 7b:
+    ``config.card_tags``, from platform_create_mission's tags)."""
+    tags = (run.config or {}).get("card_tags") if isinstance(run.config, dict) else None
+    return [str(t) for t in tags if str(t).strip()] if isinstance(tags, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +352,7 @@ _RUN_STATE_TO_BOARD_STATUS: dict[str, str] = {
 }
 
 
+@carries_the_missions_result  # F268 (7b): a completed mission's card shows its result
 def sync_mission_board_status(
     db: Session,
     run: OrchestrationRun,

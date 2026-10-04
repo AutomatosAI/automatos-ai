@@ -21,6 +21,7 @@ from uuid import UUID
 
 from config import config
 from core.composio import lookup_cache
+from core.composio.auth_config_lookup import newest_enabled, toolkit_accounts, toolkit_auth_configs
 from core.composio.auth_schemes import custom_auth_fallback_scheme
 from core.composio.deny_list import composio_action_denial, denied_result
 
@@ -242,26 +243,11 @@ class ComposioClient:
 
         try:
             logger.debug(f"Fetching auth_configs from Composio API for {app_slug} scheme={scheme_norm}")
-            response = self.composio.auth_configs.list()
-            items = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-
-            for c in items:
-                c_slug = getattr(c.toolkit, 'slug', '') if hasattr(c, 'toolkit') else ''
-                c_status = getattr(c, 'status', 'ENABLED')
-                c_scheme = (getattr(c, 'auth_scheme', '') or getattr(c, 'authScheme', '') or '').upper()
-
-                if c_slug.lower() != app_slug.lower():
-                    continue
-                if c_status != 'ENABLED':
-                    continue
-                if preferred_scheme and c_scheme != scheme_norm:
-                    continue
-
-                self._auth_config_cache[cache_key] = (c.id, time.monotonic())
-                return c.id
-
-            self._auth_config_cache[cache_key] = (None, time.monotonic())
-            return None
+            # Every page of this toolkit's configs: the project's first page held 20 of
+            # 62, and X's own-app config was on page 3 (auth_config_lookup).
+            found = newest_enabled(toolkit_auth_configs(self.composio, app_slug), preferred_scheme)
+            self._auth_config_cache[cache_key] = (found, time.monotonic())
+            return found
         except Exception as e:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")
             return None
@@ -519,15 +505,8 @@ class ComposioClient:
             return None
 
         try:
-            auth_config_id = self._resolve_auth_config_id(app)
-            if not auth_config_id:
-                return None
-
-            response = self.composio.connected_accounts.list(
-                user_ids=[entity_id],
-                auth_config_ids=[auth_config_id]
-            )
-            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+            # The toolkit's own config first; an account made under an older one is the entity's too.
+            connections = toolkit_accounts(self.composio, entity_id, app, self._resolve_auth_config_id(app))
 
             for conn in connections:
                 if conn.status not in ('ACTIVE', 'INITIATED'):
@@ -543,15 +522,8 @@ class ComposioClient:
                     token = self._extract_token_from_connection(detail)
                     if token:
                         return token
-                    # Log what the detail object looks like for debugging
-                    cp = getattr(detail, 'connectionParams', None)
-                    cp_debug = {}
-                    if cp:
-                        for f in ('access_token', 'token', 'scope', 'token_type', 'base_url', 'refresh_token'):
-                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
-                            cp_debug[f] = f"<{len(v)} chars>" if isinstance(v, str) and v else repr(v)
                     logger.warning("get_app_access_token: conn %s status=%s connectionParams fields: %s",
-                                   conn.id, conn.status, cp_debug)
+                                   conn.id, conn.status, self._connection_params_shape(detail))
                 except Exception as detail_err:
                     logger.warning("get_app_access_token: .get(%s) failed: %s", conn.id, detail_err)
 
@@ -559,6 +531,17 @@ class ComposioClient:
         except Exception as e:
             logger.error(f"Failed to get access token for {app}: {e}")
             return None
+
+    @staticmethod
+    def _connection_params_shape(detail: Any) -> Dict[str, str]:
+        """What a connected account's connectionParams carry, for the log: each
+        field's length, never its value."""
+        cp = getattr(detail, 'connectionParams', None)
+        shape: Dict[str, str] = {}
+        for f in ('access_token', 'token', 'scope', 'token_type', 'base_url', 'refresh_token') if cp else ():
+            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
+            shape[f] = f"<{len(v)} chars>" if isinstance(v, str) and v else repr(v)
+        return shape
 
     def disconnect_app(self, entity_id: str, app: str) -> bool:
         """
@@ -575,25 +558,15 @@ class ComposioClient:
             raise ValueError("Composio client not initialized.")
         
         try:
-            # Resolve Auth Config ID
-            auth_config_id = self._resolve_auth_config_id(app)
-            if not auth_config_id:
-                logger.warning(f"No auth config found for {app}, cannot disconnect")
-                return False
-
-            # First find the connection ID
-            response = self.composio.connected_accounts.list(
-                user_ids=[entity_id],
-                auth_config_ids=[auth_config_id]
-            )
-            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-            
+            # The toolkit's own config first; an account made under an older one is the entity's too.
+            connections = toolkit_accounts(self.composio, entity_id, app, self._resolve_auth_config_id(app))
             if not connections:
                 logger.warning(f"No connection found for {app} to disconnect")
                 return False
-                
-            # Disconnect the first found connection
-            conn_id = connections[0].id
+
+            # The live connection when there is one, not an attempt that ended beside it
+            live = [c for c in connections if getattr(c, "status", None) in ("ACTIVE", "INITIATED")]
+            conn_id = (live or connections)[0].id
             self.composio.connected_accounts.delete(nanoid=conn_id)
             return True
             

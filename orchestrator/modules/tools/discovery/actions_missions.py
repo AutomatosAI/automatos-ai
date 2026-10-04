@@ -2,10 +2,31 @@
 
 from .action_registry import ActionDefinition, ActionRegistry
 
+# F241 (night 7b): a mission tool takes a card's number too (mission_refs.takes_card_numbers).
+MISSION_REF_TEXT = ("The mission: its id, or its card's number as the board shows it (#0188). "
+                    "A step's number (#0188.3) names its mission.")
+# PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
+# through its states from chat (approve/reject the plan, pause/resume/cancel
+# a run, replan a failure). Each maps to an existing CoordinatorService method.
+_MISSION_ID_PARAM = {
+    "mission_id": {"type": "string", "description": MISSION_REF_TEXT},
+}
+# F241 (night 7b): "Approve #0177" reached platform_approve_mission for a task card.
+NOT_FOR_A_CARD = (" A card in Review is approved or sent back on the board with "
+                  "platform_update_task_status, never here.")
+
 
 def register_mission_actions(registry: ActionRegistry) -> None:
-    """Register mission actions (PRD-82A)."""
+    """Register mission actions (PRD-82A), in this order."""
+    _register_list_missions(registry)
+    _register_get_mission(registry)
+    _register_approve_and_reject(registry)
+    _register_pause_and_cancel(registry)
+    _register_replan_mission(registry)
+    _register_update_mission_plan(registry)
 
+
+def _register_list_missions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_missions",
         description=(
@@ -39,6 +60,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_get_mission(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_mission",
         description=(
@@ -49,10 +72,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "mission_id": {
-                    "type": "string",
-                    "description": "The mission/run UUID to look up",
-                },
+                "mission_id": {"type": "string", "description": MISSION_REF_TEXT},
             },
             "required": ["mission_id"],
         },
@@ -65,18 +85,13 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
-    # through its states from chat (approve/reject the plan, pause/resume/cancel
-    # a run, replan a failure). Each maps to an existing CoordinatorService method.
-    _MISSION_ID_PARAM = {
-        "mission_id": {"type": "string", "description": "The mission/run UUID."},
-    }
 
+def _register_approve_and_reject(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_approve_mission",
         description=(
             "Approve an awaiting-approval mission plan and start execution. Use when "
-            "the user approves the plan you proposed (or says 'go ahead', 'run it')."
+            "the user approves the plan you proposed (or says 'go ahead', 'run it')." + NOT_FOR_A_CARD
         ),
         category="missions",
         parameters={
@@ -99,7 +114,7 @@ def register_mission_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_reject_mission",
         description=("Reject an awaiting-approval mission plan: it never runs and is closed as cancelled, "
-                     "with the reason. Use when the user declines the proposed plan."),
+                     "with the reason. Use when the user declines the proposed plan." + NOT_FOR_A_CARD),
         category="missions",
         parameters={
             "type": "object",
@@ -117,6 +132,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["reject that plan", "no, don't run that mission", "cancel the proposed plan"],
     ))
 
+
+def _register_pause_and_cancel(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_pause_mission",
         description="Pause a running mission. In-flight tasks finish; no new tasks dispatch until resumed.",
@@ -130,7 +147,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_cancel_mission",
-        description="Cancel a mission. Pending/queued tasks are skipped; in-flight tasks finish. Terminal.",
+        description=("Cancel a mission. Pending/queued tasks are skipped; in-flight tasks finish. Terminal. "
+                     "Any other card is cancelled with platform_update_task_status."),
         category="missions",
         parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
         permission_level="write",
@@ -139,6 +157,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["cancel that mission", "stop the mission"],
     ))
 
+
+def _register_replan_mission(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_replan_mission",
         description="Replan a failed mission — regenerate replacement tasks for the failed subtree while keeping completed work.",
@@ -174,6 +194,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         examples=["replan that failed mission", "try the mission again with a different approach"],
     ))
 
+
+def _register_update_mission_plan(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_mission_plan",
         description=(

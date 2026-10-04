@@ -10,8 +10,9 @@ before media-render (``modules/socials/render.py``):
    prompt is reused. Every other slot is routed to the first toolkit, in
    ``SOCIALS_FOOTAGE_TOOLKITS`` order, whose recipe makes its kind (footage or a
    still) with every action it calls on offer in the media capability registry
-   (``footage_toolkits.py``). With no such toolkit the slot plays the template's
-   own motion graphics, and the render's report says why.
+   (``footage_toolkits.py``; the routing is ``footage_routes.py``, where a slot whose
+   request names its toolkit, ``via``, is made by that one only). With no such toolkit the
+   slot plays the template's own motion graphics, and the render's report says why.
 2. **The money** (D13), inside the workspace's spend window across every
    worker process (a Postgres advisory lock, ``toolkit.spend_window``), which the
    render's voice takes after it, so two renders never spend the same headroom:
@@ -71,6 +72,7 @@ from modules.socials.media_caps import MediaCapExceeded, check_spend
 from modules.socials.media_ledger import Settlement
 from modules.socials.media_store import MediaNameError, MediaStore, media_key, media_route, valid_file_name
 from modules.socials.recipes.files import FileOutputError, ReturnedFile, fetch
+from modules.socials.recipes.footage_routes import preferred_toolkits, route_for, route_of
 from modules.socials.recipes.footage_toolkits import (
     CREDITS,
     FAILED,
@@ -148,33 +150,6 @@ class FootagePlan:
         return out
 
 
-def preferred_toolkits() -> Tuple[str, ...]:
-    """The generation toolkits a render tries, in order (``SOCIALS_FOOTAGE_TOOLKITS``)."""
-    names = (name.strip().lower() for name in (config.SOCIALS_FOOTAGE_TOOLKITS or "").split(","))
-    return tuple(dict.fromkeys(name for name in names if name in RECIPES))
-
-
-def route_for(kind: str, caps: MediaCapabilities, prefer: Optional[str] = None) -> Union[Route, str]:
-    """The first toolkit route that makes ``kind`` here, the workspace's default for it
-    first (``prefer``, PRD-251B US-B304); else why none does."""
-    if caps.problem:
-        return caps.problem
-    reasons = []
-    order = preferred_toolkits()
-    for toolkit in dict.fromkeys((prefer, *order) if prefer in order else order):
-        if toolkit not in caps.connected:
-            continue
-        route, why = RECIPES[toolkit].route(kind, caps)
-        if route is not None:
-            return route
-        reasons.append(why)
-    if reasons:
-        return "; ".join(reasons)
-    connectable = [RECIPES[t].label for t in preferred_toolkits() if t in caps.connectable(KIND_CAPABILITY[kind])]
-    hint = f": connect {' or '.join(connectable)} in Composio" if connectable else ""
-    return f"no generation toolkit that makes {KIND_WORDS[kind]} is connected{hint}"
-
-
 def _skip_reason(slot: str, spec: Any, record: Any) -> Optional[str]:
     """Why this render plays the slot's own motion graphics instead of making it, or ``None``."""
     if not isinstance(spec, Mapping):
@@ -200,7 +175,7 @@ def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, h
     shots: List[Tuple[Shot, Route]] = []
     kept: List[Kept] = []
     fallback: Dict[str, str] = {}
-    routes: Dict[str, Union[Route, str]] = {}
+    routes: Dict[Tuple[str, Any], Union[Route, str]] = {}
     for slot, record in asked.items():
         spec = specs.get(slot)
         why = _skip_reason(slot, spec, record)
@@ -211,10 +186,10 @@ def plan_for(footage: Any, slots: Any, caps: MediaCapabilities, *, width: int, h
         if record.get("status") == service.FOOTAGE_DONE and valid_file_name(record.get("name")):
             kept.append(Kept(slot=slot, path=spec["path"], name=record["name"]))
             continue
-        kind = spec["kind"]
-        if kind not in routes:
-            routes[kind] = route_for(kind, caps, (prefer or {}).get(kind))
-        route = routes[kind]
+        kind, via = spec["kind"], record.get("via")
+        if (kind, via) not in routes:
+            routes[kind, via] = route_of(kind, caps, via, prefer)
+        route = routes[kind, via]
         if isinstance(route, str):
             fallback[slot] = route
             continue

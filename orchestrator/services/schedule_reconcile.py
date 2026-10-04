@@ -91,4 +91,7 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
     from services.socials_plan_maker import register as register_plan_tick
 
     register_plan_tick(scheduler)  # PRD-251B (US-B205): plans make their posts on the leader
+    from services.socials_results import register as register_results
+
+    register_results(scheduler)  # PRD-251C (US-C402): posts' numbers are read on the leader
     return True

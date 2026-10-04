@@ -51,6 +51,7 @@ from modules.socials.capabilities import (  # noqa: E402
     parse_media_actions,
 )
 from modules.socials.recipes import footage as footage_recipes  # noqa: E402
+from modules.socials.recipes import footage_routes  # noqa: E402
 from modules.socials.recipes.footage_toolkits import RECIPES, SUBMIT, Shot, prompt_for  # noqa: E402
 from modules.socials.settings import media_post_cap_usd  # noqa: E402
 from tests.test_prd251_api import WS_A  # noqa: E402
@@ -151,10 +152,10 @@ def test_a_render_tries_the_default_toolkit_first():
         VIDEO_SLOT: "fal_ai", IMAGE_SLOT: "kieai",
     }
     assert media_tools.prefer_for({"media_tools": {"footage": "off", "ai_images": "ask"}}) == {}
-    assert footage_recipes.route_for(IMAGE_SLOT, BOTH).recipe.toolkit == "fal_ai"
-    assert footage_recipes.route_for(IMAGE_SLOT, BOTH, "kieai").recipe.toolkit == "kieai"
-    assert footage_recipes.route_for(VIDEO_SLOT, BOTH, "kieai").recipe.toolkit == "fal_ai"  # Kie makes no footage here
-    assert footage_recipes.route_for(IMAGE_SLOT, BOTH, "nonsense").recipe.toolkit == "fal_ai"
+    assert footage_routes.route_for(IMAGE_SLOT, BOTH).recipe.toolkit == "fal_ai"
+    assert footage_routes.route_for(IMAGE_SLOT, BOTH, "kieai").recipe.toolkit == "kieai"
+    assert footage_routes.route_for(VIDEO_SLOT, BOTH, "kieai").recipe.toolkit == "fal_ai"  # Kie makes no footage here
+    assert footage_routes.route_for(IMAGE_SLOT, BOTH, "nonsense").recipe.toolkit == "fal_ai"
 
 
 SLOTS = {
@@ -262,20 +263,20 @@ def _shot(kind=IMAGE_SLOT, references=("https://signed/ref.png",)):
 
 
 def test_a_reference_goes_only_to_a_flagged_action_that_makes_stills():
-    fal = footage_recipes.route_for(IMAGE_SLOT, BOTH)
+    fal = footage_routes.route_for(IMAGE_SLOT, BOTH)
     assert fal.recipe.with_reference({"prompt": "p"}, _shot(), fal) == {"prompt": "p", "image_url": "https://signed/ref.png"}
     assert fal.recipe.with_reference({"prompt": "p"}, _shot(references=()), fal) == {"prompt": "p"}
-    video = footage_recipes.route_for(VIDEO_SLOT, BOTH)
+    video = footage_routes.route_for(VIDEO_SLOT, BOTH)
     assert video.recipe.with_reference({"prompt": "p"}, _shot(kind=VIDEO_SLOT), video) == {"prompt": "p"}
-    kie = footage_recipes.route_for(IMAGE_SLOT, BOTH, "kieai")  # not flagged: Flux Kontext would edit the image
+    kie = footage_routes.route_for(IMAGE_SLOT, BOTH, "kieai")  # not flagged: Flux Kontext would edit the image
     assert kie.recipe.with_reference({"prompt": "p"}, _shot(), kie) == {"prompt": "p"}
-    flagged_kie = footage_recipes.route_for(IMAGE_SLOT, _caps(*FAL, *KIE_STILLS[1:], _action(
+    flagged_kie = footage_routes.route_for(IMAGE_SLOT, _caps(*FAL, *KIE_STILLS[1:], _action(
         "kieai", "KIEAI_GENERATE_FLUX_KONTEXT_IMAGE", GENERATE_IMAGE, REFERENCE_IMAGE)), "kieai")
     assert flagged_kie.recipe.with_reference({"prompt": "p"}, _shot(), flagged_kie)["input_image"] == "https://signed/ref.png"
 
 
 def test_fal_submits_the_styled_prompt_and_the_reference():
-    route = footage_recipes.route_for(IMAGE_SLOT, BOTH)
+    route = footage_routes.route_for(IMAGE_SLOT, BOTH)
     asked = []
 
     async def ask(role, params, required=()):

@@ -224,7 +224,7 @@ def test_a_png_media_render_cannot_convert_fails_the_target_saying_so(env):
     assert "must reach the platform as a JPEG" in error and "SOCIALS_RENDER_URL" in error
 
 
-@pytest.mark.parametrize("kind", ["image", "reel", "carousel"])
+@pytest.mark.parametrize("kind", ["image", "reel", "story", "carousel"])
 def test_no_deprecated_instagram_action_is_in_a_sequence(kind):
     actions = {step.action for step in SEEDED_CHANNELS["instagram"].kinds[kind]}
     assert not actions & {"INSTAGRAM_CREATE_MEDIA_CONTAINER", "INSTAGRAM_CREATE_POST", "INSTAGRAM_GET_POST_STATUS"}

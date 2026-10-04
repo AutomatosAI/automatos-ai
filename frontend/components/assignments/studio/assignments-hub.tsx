@@ -23,6 +23,7 @@ import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 import { EntryGrid, type EntryType } from './entry-grid'
 import { MissionsBody } from './missions-body'
 import { PlaybooksBody } from './playbooks-body'
+import { RunPlaybookDialog } from './run-playbook-dialog'
 
 const CreateMissionModal = dynamic(
   () => import('@/components/missions/create-mission-modal').then((m) => m.CreateMissionModal),
@@ -71,6 +72,16 @@ export function StudioAssignmentsHub() {
     },
     [pathname, router, searchParams],
   )
+
+  // F242: the library's Run lands here (/playbooks?id=… forwards to
+  // ?tab=playbooks&id=…), as does a link to a playbook. Its dialog runs it,
+  // with a "Wait for me" switch; closing it drops the id from the address.
+  const runAddress = tab === 'playbooks' ? searchParams?.get('id') ?? null : null
+  const closeRun = useCallback(() => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '')
+    params.delete('id')
+    router.replace(`${pathname}?${params.toString()}` as any, { scroll: false })
+  }, [pathname, router, searchParams])
 
   const handleEntry = useCallback(
     (type: EntryType) => {
@@ -157,6 +168,7 @@ export function StudioAssignmentsHub() {
         onClose={() => setPlaybookOpen(false)}
       />
       <CreateTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
+      {runAddress && <RunPlaybookDialog key={runAddress} address={runAddress} onClose={closeRun} />}
     </div>
   )
 }

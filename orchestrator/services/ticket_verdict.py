@@ -46,6 +46,12 @@ def record_approval(db: Session, task_id: int, *, workspace_id: Any, decided_at:
     return still_approved
 
 
+def keep_approval_note(db: Session, *, task_id: int, workspace_id: Any, note: str) -> None:
+    """An approval's note from outside the board's Approve (Auto approving in chat
+    on the owner's word, F259): the same words and the same "you" on the ticket."""
+    _keep_note(db, task_id=task_id, workspace_id=workspace_id, note=note)
+
+
 def _keep_note(db: Session, *, task_id: int, workspace_id: Any, note: str) -> None:
     """One jsonb append in the caller's transaction (append_session_note), never a
     whole-document write over a CLI host's concurrent event flush. The note is cut

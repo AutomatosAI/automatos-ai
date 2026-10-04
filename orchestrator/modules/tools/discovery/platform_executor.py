@@ -287,6 +287,7 @@ from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116; PRD-25
     create_social_post,
     update_social_post,
     submit_social_post,
+    get_social_history,
     get_social_post,
     get_social_plan,
     list_social_posts,
@@ -1363,6 +1364,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     # PRD-251B (US-B204): a plan's content bank, for the research playbook. Draft-only.
     "platform_get_social_plan": get_social_plan,
     "platform_add_social_topics": add_social_topics,
+    "platform_get_social_history": get_social_history,  # PRD-251C US-C103: what the workspace posted
     "platform_get_workspace_info": get_workspace_info,
     "platform_get_memory_stats": get_memory_stats,
     "platform_list_connected_apps": list_connected_apps,

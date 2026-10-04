@@ -68,6 +68,7 @@ WAVE1_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave1.py"
 WAVE2_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave2.py"
 WAVE1B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave1.py"
 WAVE2B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave2.py"
+WAVE2C_MIGRATION = _ORCH / "alembic" / "versions" / "prd251c_wave2.py"
 MODELS = _ORCH / "core" / "models" / "socials.py"
 TABLES = ("social_posts", "social_post_targets")
 
@@ -127,6 +128,10 @@ def _migration_engine():
         wave2b = _load_migration(WAVE2B_MIGRATION, "prd251b_wave2_migration_models")
         with Operations.context(MigrationContext.configure(conn)):
             wave2b.upgrade()
+        # PRD-251C Wave 2 (US-C201): batch_key, indexed with the plan.
+        wave2c = _load_migration(WAVE2C_MIGRATION, "prd251c_wave2_migration_models")
+        with Operations.context(MigrationContext.configure(conn)):
+            wave2c.upgrade()
     return engine
 
 
@@ -199,6 +204,8 @@ def test_social_posts_carries_every_d2_column():
         "planned_for", "length_seconds",
         # PRD-251B Wave 2 (US-B201): the plan slot a post was made for, and the music choice.
         "slot_key", "music",
+        # PRD-251C Wave 2 (US-C201): the batch a weekly or monthly plan made it in.
+        "batch_key",
     }
 
 
@@ -434,8 +441,9 @@ def test_the_migration_round_trips_on_postgres(pg_engine):
             conn.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
             insp = sa.inspect(conn)
             if all(insp.has_table(t) for t in TABLES):
-                # PRD-251B's content bank refers to the posts: a later wave's table goes first.
-                conn.execute(sa.text("DROP TABLE IF EXISTS social_topics"))
+                # Later waves' tables refer to the posts and their targets: they go first (PRD-251B's
+                # content bank; PRD-251C Wave 4's post stats and voice examples).
+                conn.execute(sa.text("DROP TABLE IF EXISTS social_post_stats, social_voice_examples, social_topics"))
                 _run_migration(conn, "downgrade")  # the create_all-built tables go first
             assert not any(sa.inspect(conn).has_table(t) for t in TABLES)
 

@@ -10,7 +10,10 @@ Socials is gated two ways (D1), on the Auto Live pattern
   default is ``config.SOCIALS_ENABLED_DEFAULT``: the ``prd251_socials``
   migration seeds the row with it, and it applies wherever no row exists.
 * the workspace switch, ``workspace.settings['socials'].enabled``, which a
-  workspace owner or admin sets through ``PUT /api/workspaces/current/socials``.
+  workspace owner or admin sets through ``PUT /api/workspaces/current/socials``
+  (the Socials card in the workspace's Settings). A workspace that never set it
+  takes ``config.SOCIALS_ENABLED_DEFAULT`` too: on, unless the install defaults
+  Socials off. Turned off, it stays off.
 
 The same object carries the workspace's monthly media cap (D13, S1.8),
 ``media_monthly_cap_usd``: the most the workspace's connected media tools may
@@ -135,17 +138,22 @@ class WorkspaceSocials:
 
 
 def parse_workspace_socials(settings: Optional[Dict[str, Any]]) -> WorkspaceSocials:
-    """Pure: ``workspace.settings`` → the workspace's Socials switch and its
-    series approval switch (D6, S2.4).
+    """``workspace.settings`` → the workspace's Socials switch and its series
+    approval switch (D6, S2.4).
 
-    Missing or malformed → off (fail-closed). Only a real ``True`` turns either
-    on, so a stray string such as ``"false"`` never reads as on.
+    A switch the workspace never set takes ``config.SOCIALS_ENABLED_DEFAULT``. A
+    malformed one is off (fail-closed): only a real ``True`` or ``False`` decides,
+    so a stray string such as ``"false"`` never reads as on. Series approval is
+    off unless it is a real ``True``.
     """
-    raw = (settings or {}).get(WORKSPACE_SOCIALS_SETTINGS_KEY) or {}
-    if not isinstance(raw, dict):
+    raw = (settings or {}).get(WORKSPACE_SOCIALS_SETTINGS_KEY)
+    if raw is None:
         raw = {}
+    if not isinstance(raw, dict):
+        return WorkspaceSocials(enabled=False, series_approval=False)
+    asked = raw.get(KEY_ENABLED)
     return WorkspaceSocials(
-        enabled=raw.get(KEY_ENABLED) is True,
+        enabled=bool(config.SOCIALS_ENABLED_DEFAULT) if asked is None else asked is True,
         series_approval=raw.get(KEY_SERIES_APPROVAL) is True,
     )
 

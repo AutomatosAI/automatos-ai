@@ -4,7 +4,10 @@ A plan is a campaign of kind ``plan`` (B6): dates, a timezone, a cadence, what t
 research, how and when its posts are made, and what a passed slot does. Series
 approval works on it as on any campaign.
 
-Nothing is generated ahead (B7). The cadence expands into slots on the fly
+Nothing is generated ahead (B7), unless the plan's rhythm says so (PRD-251C C1): a
+``daily`` plan makes each post on its day; a ``weekly`` one makes the coming week's posts
+on its batch day, a ``monthly`` one the next month's on its batch date
+(``modules/socials/batches.py``). The cadence expands into slots on the fly
 (:func:`expand_slots`, pure): a slot is one cadence row on one local day at its time,
 in the plan's timezone. Its key ``<row id>|<YYYY-MM-DD>|<HH:MM>`` is unique within the
 plan, and the post made for it carries the key (``social_posts.slot_key``).
@@ -34,16 +37,42 @@ CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 DEFAULT_MAKE_TIME = "07:00"
+# PRD-251C (C1): how a plan's posts are made. A plan saved before PRD-251C has no rhythm:
+# daily. A new plan makes its week on Sunday at 17:00 (O1, O3).
+DAILY, WEEKLY, MONTHLY = "daily", "weekly", "monthly"
+RHYTHMS = (DAILY, WEEKLY, MONTHLY)
+DEFAULT_BATCH_DAY = "sun"
+DEFAULT_BATCH_DATE = 25
+MAX_BATCH_DATE = 28
+NEW_PLAN_MAKE = {"rhythm": WEEKLY, "time": "17:00"}
+# PRD-251C (C3): the evening before, the plan reminds whoever approves of the next day's posts.
+DEFAULT_REMIND_AT = "20:00"
+# What the make tick records on the plan (notices sent, batches made): a save keeps it.
+MAKE_RECORD_KEYS = ("notified", "batches")
 DEFAULT_VIDEO_DAYS_EARLY = 1
 MAX_VIDEO_DAYS_EARLY = 3
 # A post is made at least this long before its slot, or a day earlier.
 MIN_MAKE_LEAD = timedelta(hours=2)
-DEFAULT_RESEARCH = {"enabled": True, "day": "mon", "time": "06:00"}
+# PRD-251C (C5, O5): research adds no topic close to a post of the last this-many days.
+DEFAULT_REPEAT_AFTER_DAYS = 60
+MAX_REPEAT_AFTER_DAYS = 365
+DEFAULT_RESEARCH = {"enabled": True, "day": "mon", "time": "06:00", "repeat_after_days": DEFAULT_REPEAT_AFTER_DAYS}
+# What a research run records on the plan (services/socials_plan_research.py): a save keeps it.
+RESEARCH_RUN_KEYS = ("last_run_at", "last_run_id")
 DEFAULT_SOURCES = {"knowledge": True, "deliverables": True, "website": True, "github": False, "notes": "", "never_say": []}
 SOURCE_SWITCHES = ("knowledge", "deliverables", "website", "github")
 VISUAL_MIX_KEYS = ("templates", "library", "ai_images", "ai_footage")
 
 MAX_CADENCE_ROWS = 20
+# PRD-251C (C6, US-C301): a row may post as a story instead of the format's own kind; a
+# story is a still or a video at 9:16 (Instagram's, through Composio).
+STORY = "story"
+ROW_KINDS = (STORY,)
+STORY_FORMATS = ("image", VIDEO)
+# PRD-251C (C6, US-C302): a row's own visual overrides the plan's mix for its posts; an AI one
+# may name the toolkit that makes it (connected and able to: checked at save, plan_row_visuals).
+AI_IMAGES, AI_FOOTAGE = VISUAL_MIX_KEYS[2], VISUAL_MIX_KEYS[3]
+ROW_VISUAL_KEYS = ("source", "toolkit")
 MAX_ROW_CHANNELS = 10
 MAX_PLAN_DAYS = 366
 MAX_WINDOW_DAYS = 62
@@ -114,6 +143,33 @@ def _row_length(row: Mapping[str, Any], where: str, template_id: Optional[str], 
     return length
 
 
+def _row_kind(row: Mapping[str, Any], where: str) -> Optional[str]:
+    """The kind the row's posts go out as (US-C301): a story, from an image or a video row;
+    None for the format's own kinds."""
+    kind = row.get("kind")
+    if kind is None:
+        return None
+    if kind not in ROW_KINDS or row.get("format") not in STORY_FORMATS:
+        raise InvalidPlan(f"{where}.kind may be {STORY}, on an image or a video row")
+    return kind
+
+
+def _row_visual(row: Mapping[str, Any], where: str) -> Optional[Dict[str, Any]]:
+    """The row's own visual (US-C302): one of the mix's sources, and for AI media the toolkit
+    that makes it (``None``: the workspace's default); ``None`` follows the plan's mix."""
+    visual = row.get("visual")
+    if visual is None:
+        return None
+    if not isinstance(visual, Mapping) or set(visual) - set(ROW_VISUAL_KEYS) or visual.get("source") not in VISUAL_MIX_KEYS:
+        raise InvalidPlan(f"{where}.visual must be {{source, toolkit}}, its source one of {', '.join(VISUAL_MIX_KEYS)}")
+    source, toolkit, fmt = visual["source"], visual.get("toolkit"), row.get("format")
+    if fmt == TEXT or (source == AI_FOOTAGE and fmt != VIDEO):
+        raise InvalidPlan(f"{where}.visual: {source} is not for {fmt} rows")
+    if toolkit is not None and (source not in (AI_IMAGES, AI_FOOTAGE) or not isinstance(toolkit, str) or not TOOLKIT_NAME.match(toolkit)):
+        raise InvalidPlan(f"{where}.visual.toolkit names the Composio toolkit that makes its AI images or footage")
+    return {"source": source, "toolkit": toolkit}
+
+
 def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) -> Dict[str, Any]:
     where = f"cadence[{index}]"
     if not isinstance(row, Mapping):
@@ -132,6 +188,8 @@ def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) ->
         "template_id": template_id,
         "days": _days(row.get("days"), f"{where}.days"),
         "time": _clock(row.get("time"), f"{where}.time"),
+        "kind": _row_kind(row, where),
+        "visual": _row_visual(row, where),
     }
 
 
@@ -198,25 +256,54 @@ def _days_early(raw: Mapping[str, Any], key: str, default: int) -> int:
     return early
 
 
+def _rhythm(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """PRD-251C (C1): the rhythm, a weekly plan's batch day and a monthly plan's batch date."""
+    rhythm, day, day_of_month = raw.get("rhythm", DAILY), raw.get("batch_day", DEFAULT_BATCH_DAY), raw.get("batch_date", DEFAULT_BATCH_DATE)
+    if rhythm not in RHYTHMS:
+        raise InvalidPlan(f"make.rhythm must be one of {', '.join(RHYTHMS)}")
+    if day not in WEEKDAYS:
+        raise InvalidPlan(f"make.batch_day must be one of {', '.join(WEEKDAYS)}")
+    if isinstance(day_of_month, bool) or not isinstance(day_of_month, int) or not 1 <= day_of_month <= MAX_BATCH_DATE:
+        raise InvalidPlan(f"make.batch_date must be a day of the month from 1 to {MAX_BATCH_DATE}")
+    remind_at = _clock(raw.get("remind_at", DEFAULT_REMIND_AT), "make.remind_at")
+    return {"rhythm": rhythm, "batch_day": day, "batch_date": day_of_month, "remind_at": remind_at}
+
+
 def validate_make(value: Any) -> Dict[str, Any]:
+    """How and when the plan's posts are made, checked, and what the make tick recorded."""
     raw = value if isinstance(value, Mapping) else {}
     per_day = raw.get("max_per_day")
     if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int) or not 0 < per_day <= MAX_PER_DAY):
         raise InvalidPlan(f"make.max_per_day must be 1 to {MAX_PER_DAY}")
-    return {
+    settings = {
         "time": _clock(raw.get("time", DEFAULT_MAKE_TIME), "make.time"),
         "video_days_early": _days_early(raw, "video_days_early", DEFAULT_VIDEO_DAYS_EARLY),
         "image_days_early": _days_early(raw, "image_days_early", 0),
         "max_per_day": per_day,
         "visual_mix": _visual_mix(raw.get("visual_mix")),
+        **_rhythm(raw),
     }
+    return {**settings, **{key: raw[key] for key in MAKE_RECORD_KEYS if raw.get(key)}}
+
+
+def day_before(weekday: str) -> str:
+    """The weekday before ``weekday``: a weekly plan researches the day before its batch (C4)."""
+    return WEEKDAYS[(WEEKDAYS.index(weekday) - 1) % len(WEEKDAYS)]
 
 
 def validate_research(value: Any) -> Dict[str, Any]:
+    """The research settings, checked, and the last run's record when the value carries one."""
     raw = {**DEFAULT_RESEARCH, **(value if isinstance(value, Mapping) else {})}
     if raw["day"] not in WEEKDAYS:
         raise InvalidPlan(f"research.day must be one of {', '.join(WEEKDAYS)}")
-    return {"enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time")}
+    repeat_days = raw["repeat_after_days"]
+    if isinstance(repeat_days, bool) or not isinstance(repeat_days, int) or not 1 <= repeat_days <= MAX_REPEAT_AFTER_DAYS:
+        raise InvalidPlan(f"research.repeat_after_days must be a whole number of days from 1 to {MAX_REPEAT_AFTER_DAYS}")
+    settings = {
+        "enabled": bool(raw["enabled"]), "day": raw["day"], "time": _clock(raw["time"], "research.time"),
+        "repeat_after_days": repeat_days,
+    }
+    return {**settings, **{key: raw[key] for key in RESEARCH_RUN_KEYS if raw.get(key)}}
 
 
 def validate_late_policy(value: Any) -> str:
@@ -259,13 +346,17 @@ class Slot:
     local_time: str
     at: datetime  # UTC
     moved: bool = False
+    kind: Optional[str] = None  # PRD-251C: STORY when the row posts stories
+    visual_source: Optional[str] = None  # PRD-251C (US-C302): the row's own visual, else the plan's mix
+    visual_toolkit: Optional[str] = None  # the toolkit that row names for its AI media
 
     def to_dict(self) -> Dict[str, Any]:
+        visual = {"source": self.visual_source, "toolkit": self.visual_toolkit} if self.visual_source else None
         return {
             "key": self.key, "row_id": self.row_id, "channels": list(self.channels), "format": self.format,
             "length_seconds": self.length_seconds, "template_id": self.template_id,
             "local_date": self.local_date.isoformat(), "local_time": self.local_time,
-            "at": self.at.isoformat(), "moved": self.moved,
+            "at": self.at.isoformat(), "moved": self.moved, "kind": self.kind, "visual": visual,
         }
 
 
@@ -312,10 +403,12 @@ def _slot(plan: Any, row: Mapping[str, Any], day: date, zone: ZoneInfo) -> Optio
     if override.get("skip"):
         return None
     moved_to = _parse_utc(override.get("to")) if override.get("to") else None
+    visual = row.get("visual") or {}
     return Slot(
         key=key, row_id=row["id"], channels=tuple(row.get("channels") or ()), format=row["format"],
         length_seconds=row.get("length_seconds"), template_id=row.get("template_id"),
         local_date=day, local_time=row["time"], at=moved_to or local_to_utc(day, row["time"], zone), moved=moved_to is not None,
+        kind=row.get("kind"), visual_source=visual.get("source"), visual_toolkit=visual.get("toolkit"),
     )
 
 
@@ -324,7 +417,8 @@ def _days_between(first: date, last: date) -> Iterable[date]:
         yield first + timedelta(days=offset)
 
 
-def _rows(plan: Any) -> List[Mapping[str, Any]]:
+def cadence_rows(plan: Any) -> List[Mapping[str, Any]]:
+    """The plan's saved cadence rows, each with its id."""
     return [row for row in (getattr(plan, "cadence", None) or []) if isinstance(row, Mapping) and row.get("id")]
 
 
@@ -338,7 +432,7 @@ def expand_slots(plan: Any, start: datetime, end: datetime, rows: Optional[Seque
     pad = timedelta(days=MAX_MOVE_DAYS + 1)
     first = max(starts_on, (start - pad).astimezone(zone).date())
     last = min(ends_on, (end + pad).astimezone(zone).date())
-    wanted = [row for row in _rows(plan) if rows is None or row["id"] in rows]
+    wanted = [row for row in cadence_rows(plan) if rows is None or row["id"] in rows]
     found = []
     for day in _days_between(first, last):
         weekday = WEEKDAYS[day.weekday()]
@@ -350,7 +444,7 @@ def slot_for_key(plan: Any, key: str) -> Optional[Slot]:
     """The plan's slot with ``key`` (moved as its override says), or ``None``: no such
     slot in the cadence and dates, or it is skipped."""
     parsed = parse_slot_key(key)
-    row = next((r for r in _rows(plan) if parsed and r["id"] == parsed[0]), None)
+    row = next((r for r in cadence_rows(plan) if parsed and r["id"] == parsed[0]), None)
     if parsed is None or row is None:
         return None
     _, day, clock = parsed
