@@ -705,14 +705,6 @@ def looks_like_narrated_action(text: str) -> bool:
     return cues >= 2 or (cues >= 1 and claims >= 1)
 
 
-# F108/F187: what a reply says was done, and the actions that would have done it,
-# are modules/tools/execution/action_claims.py.
-CLAIMED_ACTION_NOTICE = (
-    "This reply says something was {claim}, but no action that does that ran in this reply — "
-    "it has not happened. Tell me to do it and I will make the call."
-)
-
-
 # F196: the actions whose argument IS the deliverable (a long report, a document, a post).
 LONG_DELIVERABLE_ACTIONS = frozenset({"platform_submit_report", "platform_create_blog_post",
                                       "platform_update_blog_post", "platform_upload_document"})

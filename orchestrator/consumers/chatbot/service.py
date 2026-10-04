@@ -130,10 +130,12 @@ def unexecuted_claims_notice(
     "I've approved the mission. It's now running" — it wasn't). ``done`` is
     the actions that succeeded. None when the reply claims nothing it did not
     do. Both reply paths ask this: a turn whose first reply calls no tool never
-    enters the tool loop, and that is exactly where night 3's replayed answer was."""
+    enters the tool loop, and that is exactly where night 3's replayed answer was.
+    F314 (night 9): a claimed action is told in Auto's own plain words (``not_done``),
+    never "This reply says something was …"."""
+    from consumers.chatbot.claim_check import not_done
     from modules.tools.execution.tool_loop import (
-        CLAIMED_ACTION_NOTICE, UNRUN_SOURCE_NOTICE, cited_tool_not_run,
-        looks_like_narrated_action, offered_tool_names,
+        UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
     )
 
     if not use_tools or not reply:
@@ -145,7 +147,7 @@ def unexecuted_claims_notice(
         return NARRATED_ACTIONS_NOTICE
     claim = claimed_action_not_done(reply, done)
     if claim:
-        return CLAIMED_ACTION_NOTICE.format(claim=claim)
+        return not_done(claim)
     return None
 
 
