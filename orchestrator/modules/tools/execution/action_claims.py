@@ -49,6 +49,13 @@ the mission was made, "I've also noted that you'll run it yourself". What a stat
 move did is recorded with it (``call_effects``), so a move to done backs an
 approval and never a cancel, and a send-back needs the move to assigned or the
 edit's ``send_back``: a card whose brief was only changed was not sent back.
+
+Night 9 (F314), what the families still missed:
+
+- "This draft has now been saved as a social post" (chat f5142b57, L100): a save told
+  in passing was no family's, and a post made (``create_social_post``) backed no
+  "I've saved". The passive "saved" is a "noted" claim now, and a post's own actions
+  back it.
 """
 from __future__ import annotations
 
@@ -92,6 +99,9 @@ _ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan")
 _SETS = ("update_", "set_", "configure_", "schedule_", "pause_", "create_")
 _SWITCHES_OFF = ("update_", "schedule_", "pause_", "set_", "configure_")
 _SENDS_BACK = ("send_back", "update_task_status:assigned", "reject")
+# What backs a save: F314 (night 9) adds a post's own actions (create_social_post).
+_SAVES = ("store_memory", "update_", "field_inject", "submit_report", "write", "upload", "save", "document",
+          "_post")
 # A read of the board, a mission or a playbook: what a change told in passing may report.
 _STATE_READS = ("_get_", "_list", "board_", "snapshot", "summary", "activity", "history")
 
@@ -157,7 +167,7 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
                                   r"triggered)\b", re.I), _STARTS + ("create_mission",), kinds=True),
     _Family("noted", re.compile(_I_HAVE + r"(?:noted(?!" + _OWNER_SAID + r")|made a note|saved|stored|recorded|"
                                 r"remembered)\b", re.I),
-            ("store_memory", "update_", "field_inject", "submit_report", "write", "upload", "save", "document")),
+            _SAVES),
     _Family("put on the board", re.compile(_I_HAVE + r"(?:put|added|placed)\b[^.!?\n]{0,80}\b(?:on|onto|to) the board\b|"
                                            + _I_HAVE + r"(?:created|opened|added|raised) (?:a |an |the |your )?"
                                            r"(?:new )?(?:task|ticket|card)\b", re.I),
@@ -209,6 +219,7 @@ _PASSIVES: Tuple[_Family, ...] = (
     _passive("changed", r"moved|updated|changed", _CHANGES),
     _passive("changed", r"switched off|turned off|paused|disabled", _SWITCHES_OFF, states=r"paused|off"),
     _passive("started", r"started|triggered|launched|initiated|resumed", _STARTS, states=r"running"),
+    _passive("noted", r"saved|stored|recorded", _SAVES),
 )
 
 # What a claim names, and the stems of the actions that act on it.
