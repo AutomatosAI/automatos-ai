@@ -41,6 +41,7 @@ import psycopg2
 from botocore.exceptions import ClientError
 
 from core.storage import FAST_FAIL, ensure_bucket, get_s3_client
+from modules.rag.ingestion.section_chunks import sections_first  # F311 (night 9)
 
 # Use SemanticChunker from RAG module
 try:
@@ -377,6 +378,7 @@ class DocumentProcessor:
             for n, content in enumerate(contents)
         ]
 
+    @sections_first  # F311 (night 9): a Markdown document with headings is chunked by section
     def chunk_document(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
         """
         Split document into chunks using EXISTING SemanticChunker.

@@ -1690,6 +1690,12 @@ class Config:
     # F086: a document whose stored chunks hold less than this share of its
     # extracted text is shown to the owner as partial ("partial — 61% kept").
     RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
+    # F311 (night 9): a Markdown or text document with headings is chunked by its sections, each
+    # with its heading; a section under the minimum joins the next, one over the maximum
+    # is split at its paragraphs, each piece under its headings. Characters.
+    RAG_SECTION_CHUNKING_ENABLED: bool = os.getenv("RAG_SECTION_CHUNKING_ENABLED", "true").lower() == "true"
+    RAG_SECTION_MIN_CHARS: int = int(os.getenv("RAG_SECTION_MIN_CHARS", "200"))
+    RAG_SECTION_MAX_CHARS: int = int(os.getenv("RAG_SECTION_MAX_CHARS", "1500"))
 
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
