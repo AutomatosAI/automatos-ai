@@ -30,7 +30,7 @@ from config import Config
 from services.step_lessons import a_steps_prompt_carries_its_lessons  # F249/F269
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
-from modules.coordination.one_step_at_a_time import one_step_at_a_time
+from modules.coordination.one_step_at_a_time import one_step_at_a_time, waits_its_turn
 from core.models.orchestration_enums import (
     ActorType,
     BudgetStatus,
@@ -44,6 +44,7 @@ from core.models.orchestration_enums import (
 from modules.coordination.step_inputs import with_its_inputs
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from modules.coordination.credit_pause import pauses_when_credit_runs_out
+from modules.coordination.step_card_agent import runs_on_the_cards_agent
 from services.cli_ticket_lane import note_open_step_cards, stopped_waiting_note
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
 from services.orchestration_deps import DependencyResolver
@@ -294,6 +295,8 @@ class MissionDispatcher:
         return MissionDispatcher._dispatch_single(db, run, task, agents)
 
     @staticmethod
+    @waits_its_turn  # F267 (night 8): while a step is redone or waits for the owner, no other starts
+    @runs_on_the_cards_agent  # F287 (night 8): a step goes to the agent its card was given to
     def _dispatch_single(
         db: Session,
         run: OrchestrationRun,
@@ -490,28 +493,21 @@ class MissionDispatcher:
 
     @staticmethod
     def _budget_ceiling_usd(run: OrchestrationRun) -> float:
-        """PRD-163 S5: the run's DOLLAR budget ceiling — an explicit
-        ``config['cost_ceiling']`` when set, otherwise the plan's token estimate
-        priced through ``modules.policy.pricing`` (PRD-192 S3 — one pricing
-        source; a run aggregates several agents/models so no single model id
-        exists here and pricing's flat last-resort applies). 0 = unlimited."""
-        from modules.policy import pricing as _pricing
-
-        config = run.config or {}
-        ceiling = config.get("cost_ceiling")
+        """PRD-163 S5: the run's DOLLAR budget ceiling, the owner's ``config['cost_ceiling']``;
+        0 = unlimited. F285 (night 8): with none set, the plan's token estimate, priced, was the
+        ceiling, so #0356, #0383 (twice) and #0400 paused on a budget nobody set ("spent $0.16
+        of the $0.14 budget (the plan's 45,000-token estimate)"). The estimate is never a cap."""
+        ceiling = (run.config or {}).get("cost_ceiling")
         if isinstance(ceiling, (int, float)) and ceiling > 0:
             return float(ceiling)
-        return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
+        return 0.0
 
     @staticmethod
     def _budget_pause_detail(run: OrchestrationRun, db: Optional[Session] = None) -> str:
         """F153: what a budget pause tells the owner — the spend the gate
-        measured against the ceiling, in dollars."""
+        measured against the ceiling they set, in dollars."""
         spent = MissionDispatcher._cost_used_usd(run, db)
         detail = f"Paused: spent ${spent:,.2f} of the ${MissionDispatcher._budget_ceiling_usd(run):,.2f} budget"
-        ceiling = (run.config or {}).get("cost_ceiling")
-        if not (isinstance(ceiling, (int, float)) and ceiling > 0):
-            detail += f" (the plan's {run.token_budget_estimate or 0:,}-token estimate)"
         free = session_tokens(run)
         if free:
             detail += f"; {free:,} tokens ran in Claude Code sessions at no cost"

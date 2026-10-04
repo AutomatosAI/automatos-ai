@@ -3759,14 +3759,12 @@ class CoordinatorService:
     ) -> OrchestrationRun:
         """Resume a paused mission.
 
-        F153: a run at 80% or more of its budget resumes with the budget raised
-        to twice what it has spent, in the dollars the dispatcher pauses on
-        (MissionDispatcher._cost_used_usd), so it does not pause again at once:
-        an explicit cost_ceiling is raised in dollars, a plan's token estimate
-        to the tokens the flat rate prices at that figure.
+        F153: a run at 80% or more of the ceiling its owner set (cost_ceiling)
+        resumes with the ceiling raised to twice what it has spent, in the dollars
+        the dispatcher pauses on (MissionDispatcher._cost_used_usd), so it does not
+        pause again at once. F285 (night 8): the plan's token estimate is no
+        budget, so a mission without a ceiling resumes with none.
         """
-        from modules.policy.pricing import flat_rate_tokens
-
         run = self._get_run(db, run_id)
         refuse_resume_while_waiting(db, run)  # F242: a step waiting for the owner's check is let go by its Approve
 
@@ -3776,11 +3774,7 @@ class CoordinatorService:
         ceiling = MissionDispatcher._budget_ceiling_usd(run)
         extended = ceiling > 0 and spent >= ceiling * 0.8
         if extended:
-            config = run.config or {}
-            if isinstance(config.get("cost_ceiling"), (int, float)) and config["cost_ceiling"] > 0:
-                run.config = {**config, "cost_ceiling": round(2.0 * spent, 2)}
-            else:
-                run.token_budget_estimate = flat_rate_tokens(2.0 * spent)
+            run.config = {**(run.config or {}), "cost_ceiling": round(2.0 * spent, 2)}
             logger.info(
                 "Mission %s: budget $%.2f → $%.2f on resume ($%.2f spent)",
                 run_id, ceiling, MissionDispatcher._budget_ceiling_usd(run), spent,
