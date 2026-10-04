@@ -30,7 +30,8 @@ Now:
   (``says_an_agent_wrote_it``); the list of documents says which an agent wrote
   (``says_who_wrote_each``). The owner can still ask about what an agent wrote.
 
-Filing outputs as documents at all is F305, the owner's decision; nothing here changes it.
+Filing outputs as documents at all is F305: off unless the workspace opts in
+(services/agent_output_scope.py); past work is asked for by scope (services/past_work.py).
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ import functools
 from typing import Any, Awaitable, Callable, Dict, List
 
 from services.draft_guides import AGENTS_WRITING, _a_session, _agents_documents, _as_id
+from services.past_work import or_past_work  # F305: the one way to an agent's writing, asked for and labelled
 
 Handler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 WRITTEN_BY_AN_AGENT = "written_by_an_agent"
@@ -130,5 +132,5 @@ def says_who_wrote_each(handler: Handler) -> Handler:
     return wrapped
 
 
-__all__ = ["WRITTEN_BY_AN_AGENT", "owners_corpus", "owners_passages_only", "owners_search", "says_an_agent_wrote_it",
+__all__ = ["WRITTEN_BY_AN_AGENT", "or_past_work", "owners_corpus", "owners_passages_only", "owners_search", "says_an_agent_wrote_it",
            "says_who_wrote_each"]

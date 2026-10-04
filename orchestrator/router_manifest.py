@@ -70,6 +70,8 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.deliverables"),
     RouterSpec("api.board_tasks"),
     RouterSpec("api.board_task_rebrief"),  # PRD-252 R2 — Discuss: "Update ticket and re-queue"
+    RouterSpec("api.add_to_knowledge"),  # F305 — "Add to knowledge" on an approved card
+    RouterSpec("api.add_to_knowledge", attr="reports_router"),  # F305 — ... and on a report
     RouterSpec("api.missions"),
     RouterSpec("api.missions", attr="agent_telemetry_router"),
     RouterSpec("api.mission_settings"),  # F282 — PATCH .../settings: the one check_each_step switch

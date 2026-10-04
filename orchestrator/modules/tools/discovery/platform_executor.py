@@ -47,7 +47,7 @@ from modules.tools.discovery.handlers_analytics import (
     board_summary,
     board_snapshot,
 )
-from services.agents_writing import owners_passages_only, says_an_agent_wrote_it, says_who_wrote_each
+from services.agents_writing import or_past_work, owners_passages_only, says_an_agent_wrote_it, says_who_wrote_each
 from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
@@ -1351,7 +1351,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_list_documents": says_who_wrote_each(list_documents),  # F269 (night 9): an agent's writing
     "platform_read_document": says_an_agent_wrote_it(read_document),  # is never the owner's source
     "platform_grep_documents": owners_passages_only("matches")(grep_documents),
-    "platform_search_documents": owners_passages_only("results")(search_documents),
+    "platform_search_documents": or_past_work(owners_passages_only("results")(search_documents)),  # F305
     "platform_list_templates": list_templates,
     "platform_get_template_schema": get_template_schema,
     # PRD-251 US-115: the brand kit (the REST routes' functions)

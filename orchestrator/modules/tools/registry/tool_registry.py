@@ -31,6 +31,7 @@ from datetime import datetime
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 from config import config
+from services.past_work_schemas import core_search_takes_a_scope  # F305 (night 9)
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +417,7 @@ class ToolRegistry:
             "last_updated": datetime.now().isoformat()
         }
     
+    @core_search_takes_a_scope  # F305: search_knowledge's scope 'past_work'
     def _register_core_tools(self):
         """Register all core platform tools"""
         
