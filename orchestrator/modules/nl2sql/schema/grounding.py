@@ -173,13 +173,18 @@ def annotate(schema_metadata: Dict[str, Any], facts: Facts) -> None:
 def grounded(augment: Callable[..., None]) -> Callable[..., None]:
     """Hook for ``DatabaseKnowledgeService._augment_schema_with_samples``: after its
     value sampling, the source's cached facts are written into the schema the SQL
-    writer is about to see (F301). No database work here: the tool reads the facts
-    before the query (``agent_answer.ground_source``)."""
+    writer is about to see (F301), with each table's live-row rule (F323: an ended
+    account is left out unless asked for). No database work here: the tool reads the
+    facts before the query (``agent_answer.ground_source``)."""
 
     @functools.wraps(augment)
     def run(service: Any, source: Any, credentials: Dict[str, Any], schema_metadata: Dict[str, Any], *args: Any, **kwargs: Any) -> None:
+        from .live_rows import annotate_live_rows  # F323; live_rows builds on this module
+
         augment(service, source, credentials, schema_metadata, *args, **kwargs)
-        annotate(schema_metadata, cached_facts(getattr(source, "id", None)))
+        facts = cached_facts(getattr(source, "id", None))
+        annotate(schema_metadata, facts)
+        annotate_live_rows(schema_metadata, facts)
 
     return run
 

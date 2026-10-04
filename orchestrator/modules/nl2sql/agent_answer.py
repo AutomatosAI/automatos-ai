@@ -24,6 +24,7 @@ import logging
 import re
 from typing import Any, Dict, List, NamedTuple, Tuple
 
+from .schema.live_rows import agent_line, ended_rows_notes
 from .schema.grounding import (
     Facts,
     cached_facts,
@@ -80,9 +81,11 @@ def _tables(schema_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def table_line(table: Dict[str, Any], facts: Facts) -> str:
-    """One table and its columns on one line."""
+    """One table and its columns on one line, then which of its rows are live (F323)."""
     columns = [c for c in table.get("columns") or [] if c.get("name")]
-    return f"{table['name']}: " + ", ".join(_column_text(table["name"], c, facts) for c in columns)
+    line = f"{table['name']}: " + ", ".join(_column_text(table["name"], c, facts) for c in columns)
+    live = agent_line(table, facts)
+    return f"{line} — {live}" if live else line
 
 
 def schema_digest(schema_metadata: Dict[str, Any], facts: Facts) -> List[str]:
@@ -238,7 +241,8 @@ async def ground_source(service: Any, source_id: Any, workspace_id: str) -> Dict
 
 def shape_answer(result: Any, schema_metadata: Dict[str, Any], source_id: Any) -> Any:
     """The tool's answer for the agent: the schema beside it, the real columns in a
-    failure, notes on dates past the data and on top-N counts, all as plain JSON (F299)."""
+    failure, notes on dates past the data, on top-N counts and on ended rows a query let
+    in (F323), all as plain JSON (F299)."""
     if not isinstance(result, dict):
         return json_safe(result)
     shaped = dict(result)
@@ -250,6 +254,8 @@ def shape_answer(result: Any, schema_metadata: Dict[str, Any], source_id: Any) -
         if not result.get("success") and result.get("error"):
             shaped["error"] = f"{result['error']} {real_columns_note(sql, schema_metadata)}"
         notes = future_date_notes(sql, schema_metadata, facts) + notes
+        if result.get("success"):
+            notes += ended_rows_notes(sql, tables_in_sql(sql, schema_metadata), facts)
     if notes:
         shaped["notes"] = notes
     return json_safe(shaped)
