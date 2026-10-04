@@ -26,7 +26,7 @@ import functools
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from .nudges import announced_step, blank, nudge
+from .nudges import announced_step, blank, nudge, without_the_apology
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def answer_at_the_cap(llm: LLMCall, pending: Any, messages: Messages) -> O
     answer = await llm(messages, None)
     if blank(answer) or getattr(answer, "tool_calls", None):
         return None
-    return answer
+    return without_the_apology(answer)
 
 
 def answers_at_the_cap(run: Run) -> Run:
