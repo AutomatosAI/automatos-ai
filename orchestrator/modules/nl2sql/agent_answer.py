@@ -11,7 +11,10 @@
   date ranges, so the agent never has to ask the owner for a table or column name; a
   failed query's error names the real columns of the tables it used.
 * F301 — a query that asks about a date after a column's last recorded value says so:
-  0 there means "not recorded yet", not "none".
+  0 there means "not recorded yet", not "none". A grouped query cut to its top few
+  groups says its counts are those groups', not the total (B4: "how many cancelled, and
+  the most common reason?" came back as one row, "too much coffee: 4", and 4 was given
+  as the total; 11 cancelled).
 """
 from __future__ import annotations
 
@@ -43,6 +46,14 @@ FUTURE_DATE_NOTE = (
     "{table}.{column} has nothing recorded after {last}, and this query asks about {asked}. "
     "Rows for that date do not exist yet, so 0 or no rows here means 'not recorded yet', not 'none'. "
     "Answer from what is recorded now (for example, who is active) and say that is what you did."
+)
+
+# ``… GROUP BY cancel_reason ORDER BY n DESC LIMIT 1``: the query's last clause is a small LIMIT.
+GROUPED_TOP = re.compile(r"\bGROUP\s+BY\b.*\bLIMIT\s+(\d+)\s*$", re.IGNORECASE | re.DOTALL)
+TOP_GROUPS_MAX = 10           # a LIMIT this small on grouped rows keeps only the top groups
+TOP_GROUPS_NOTE = (
+    "This query keeps only the top {limit} group(s) (LIMIT {limit}), so each count here is that "
+    "group's own, not the total across all groups. Ask again for the total if the question needs one."
 )
 
 
@@ -144,6 +155,17 @@ def future_date_notes(sql: str, schema_metadata: Dict[str, Any], facts: Facts) -
     return notes
 
 
+def top_groups_notes(sql: str, row_count: Any) -> List[str]:
+    """The note for a grouped query cut to its top few groups that came back full
+    (F301 B4, audit rows 279 and 336: ``GROUP BY s.cancel_reason … LIMIT 1``)."""
+    match = GROUPED_TOP.search(sql or "")
+    if not match:
+        return []
+    limit = int(match.group(1))
+    full = isinstance(row_count, int) and row_count >= limit
+    return [TOP_GROUPS_NOTE.format(limit=limit)] if limit <= TOP_GROUPS_MAX and full else []
+
+
 def load_source(source_id: Any, workspace_id: str) -> Any:
     """The source row, only when it belongs to ``workspace_id`` (tenant isolation, as
     ``DatabaseKnowledgeService._get_source`` does), or None. Blocking: run it on a thread."""
@@ -201,17 +223,18 @@ async def ground_source(service: Any, source_id: Any, workspace_id: str) -> Dict
 
 def shape_answer(result: Any, schema_metadata: Dict[str, Any], source_id: Any) -> Any:
     """The tool's answer for the agent: the schema beside it, the real columns in a
-    failure, a note on dates past the data, all as plain JSON (F299)."""
+    failure, notes on dates past the data and on top-N counts, all as plain JSON (F299)."""
     if not isinstance(result, dict):
         return json_safe(result)
     shaped = dict(result)
+    sql = str(result.get("sql") or "")
+    notes = top_groups_notes(sql, result.get("row_count")) if result.get("success") else []
     if schema_metadata.get("tables"):
         facts = cached_facts(source_id)
-        sql = str(result.get("sql") or "")
         shaped["schema"] = schema_digest(schema_metadata, facts)
         if not result.get("success") and result.get("error"):
             shaped["error"] = f"{result['error']} {real_columns_note(sql, schema_metadata)}"
-        notes = future_date_notes(sql, schema_metadata, facts)
-        if notes:
-            shaped["notes"] = notes
+        notes = future_date_notes(sql, schema_metadata, facts) + notes
+    if notes:
+        shaped["notes"] = notes
     return json_safe(shaped)
