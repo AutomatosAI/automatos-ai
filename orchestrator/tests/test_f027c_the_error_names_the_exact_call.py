@@ -16,7 +16,9 @@ import pytest
 
 from modules.tools.execution.unified_executor import _fill_required_from_aliases
 
-ACTIONS = ["platform_read_document", "platform_query_graph", "platform_search_documents",
+# F327 (night 9b): platform_read_document has no required key any more (its
+# document_id or its filename); its own refusal says what to pass.
+ACTIONS = ["platform_query_graph", "platform_search_documents",
            "platform_ask_human", "platform_submit_report"]
 
 
