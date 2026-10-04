@@ -521,7 +521,6 @@ async def get_document_content_by_path(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-
 # PRD-164: rows the flywheel ingests from agent runs (mission synthesis, reports,
 # heartbeat digests) carry source_type='agent_output'. They live in the Deliverables
 # explorer; the knowledge base the Analytics page reports on is what the user
@@ -611,6 +610,7 @@ async def get_document_analytics(
         logger.error(f"Error getting document analytics: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.get("", response_model=List[DocumentResponse])  # F327 (night 9b): the plain path answered 307, empty body
 @router.get("/", response_model=List[DocumentResponse])
 async def list_documents(
     ctx: RequestContext = Depends(get_request_context_hybrid),
