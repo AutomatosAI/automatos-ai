@@ -4,7 +4,8 @@ Pinned:
 
 * ``make.rhythm`` (daily, weekly or monthly), ``make.batch_day`` and ``make.batch_date`` are
   checked; a plan saved before PRD-251C has no rhythm and stays daily;
-* a new plan makes its week on Sunday at 17:00 (O1, O3);
+* a new plan makes its week on Sunday at 17:00 (O1, O3); a new daily plan keeps PRD-251B's
+  07:00 unless it sends a time, and a save that changes the rhythm keeps the stored time;
 * a save changes what it sends: the rest of ``make``, and what the make tick recorded
   (notices sent, batches made), stay;
 * a batch's window, moment and key (weekly on any day, monthly on its date); the slots due:
@@ -12,7 +13,9 @@ Pinned:
   batch or added after it; across the clock change; the next batch; the records kept;
 * the tick, on the maker harness: a week made across ticks within the per-tick cap and
   announced once; a slot no channel posts skipped and recorded, the batch still announced;
-  a row added after its batch made at the next tick; a daily plan unchanged;
+  a slot whose time came before the tick made it (the leader was down) recorded as skipped
+  and named in the notice, once; a row added after its batch made at the next tick; a daily
+  plan unchanged;
 * US-C207: a weekly plan researches the day before its batch day, follows it when it moves,
   and keeps a day the owner chose; the bank shows when research last ran.
 """
@@ -61,8 +64,12 @@ def test_a_new_plan_makes_its_week_on_sunday_at_17(bank):  # noqa: F811
     assert {key: plan["make"][key] for key in ("rhythm", "batch_day", "batch_date", "time")} == {
         "rhythm": "weekly", "batch_day": "sun", "batch_date": 25, "time": "17:00",
     }
-    daily = _create_plan(bank, name="Every morning", make={"rhythm": "daily", "time": "07:00"})
-    assert (daily["make"]["rhythm"], daily["make"]["time"]) == ("daily", "07:00")
+    daily = _create_plan(bank, name="Every morning", make={"rhythm": "daily", "time": "06:30"})
+    assert (daily["make"]["rhythm"], daily["make"]["time"]) == ("daily", "06:30")
+    untimed = _create_plan(bank, name="Daily, no time", make={"rhythm": "daily"})
+    assert (untimed["make"]["rhythm"], untimed["make"]["time"]) == ("daily", "07:00")  # PRD-251B's, not the week's 17:00
+    weekly = bank.client.put(f"/api/socials/plans/{untimed['id']}", json={"make": {"rhythm": "weekly"}}).json()
+    assert (weekly["make"]["rhythm"], weekly["make"]["time"]) == ("weekly", "07:00")  # a save changes only what it sends
     refused = bank.client.put(f"/api/socials/plans/{plan['id']}", json={"make": {"rhythm": "hourly"}})
     assert refused.status_code == 422, refused.text
 
@@ -212,6 +219,21 @@ def test_a_slot_no_channel_posts_is_skipped_and_recorded_and_the_week_still_ends
     assert week.reviews == [("Your week is ready: ", "Countdown: 7 posts for the week of 19 Oct")]
     _tick(_at(2026, 10, 18, 17, 40))
     assert len(_posts(week, plan)) == 7  # the skipped slot is not tried again
+
+
+def test_a_slot_whose_time_came_before_the_tick_made_it_is_recorded_and_named_once(week):
+    plan = _weekly_plan(week)
+    row = week.session.get(SocialCampaign, uuid.UUID(plan["id"]))
+    row.created_at = _at(2026, 10, 1)  # long before the week
+    week.session.commit()
+    _tick(_at(2026, 10, 19, 10, 0))  # the leader was down from before Sunday 17:00 until Monday 10:00
+    made = _posts(week, plan)
+    assert [post.slot_key for post in made][0] == "r1|2026-10-20|09:00" and len(made) == 6  # Monday's 09:00 had passed
+    week.session.refresh(row)
+    assert row.make["batches"]["2026-W43"]["skipped"] == {"r1|2026-10-19|09:00": maker_mod.PASSED_UNMADE}
+    assert week.reviews == [("Your week is ready: ", "Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made")]
+    _tick(_at(2026, 10, 19, 10, 5))
+    assert len(_posts(week, plan)) == 6 and len(week.reviews) == 1
 
 
 def test_a_row_added_after_its_batch_is_made_at_the_next_tick(week):

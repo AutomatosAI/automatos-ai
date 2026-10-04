@@ -64,6 +64,8 @@ PLAN_TICK_JOB_ID = "socials_plan_tick"
 PLAN_AGENT = "the plan"
 MADE, TAKEN, GONE, NO_TOPIC, SKIPPED, FAILED = "made", "taken", "gone", "no_topic", "skipped", "failed"
 READY_NOTE = "Made from the plan's content bank: {topic}."
+# PRD-251C (C1): why a batch slot whose time came before the tick made it is recorded as skipped.
+PASSED_UNMADE = "its time came before it could be made"
 # The post kinds a post format publishes as, most fitting first (the composer's order).
 FORMAT_KINDS: Mapping[str, Tuple[str, ...]] = {
     "video": ("video", "reel", "short"),
@@ -373,17 +375,31 @@ def _batch_post_count(db: Any, plan: SocialCampaign, key: str) -> int:
     return db.query(SocialPost.id).filter(SocialPost.campaign_id == plan.id, SocialPost.batch_key == key).count()
 
 
+def _ready_title(plan: SocialCampaign, window: batches.Window, count: int, passed: int) -> str:
+    """"Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made"."""
+    title = f"{plan.name}: {count} post{'' if count == 1 else 's'} for {batches.label(plan, window)}"
+    if not passed:
+        return title
+    return f"{title}; {passed} passed before {'it' if passed == 1 else 'they'} could be made"
+
+
 def _announce_if_complete(db: Any, plan: SocialCampaign, window: batches.Window, now: datetime) -> None:
-    """"Your week is ready", once, when every slot of the batch is made or skipped."""
-    if batches.announced(plan, window.key) or batches.pending(plan, window.key, now, plan_store.taken_keys(db, plan)):
+    """"Your week is ready", once, when every slot of the batch is made or skipped. A slot whose
+    time came before the tick made it is recorded as skipped then, and the notice names it."""
+    taken = plan_store.taken_keys(db, plan)
+    if batches.announced(plan, window.key) or batches.pending(plan, window.key, now, taken):
         return
+    passed = [slot.key for slot in batches.passed_unmade(plan, window.key, now, taken)]
     count = _batch_post_count(db, plan, window.key)
-    if count == 0:
+    if count == 0 and not passed:
         return
-    plan.make = batches.with_record(plan, window.key, {batches.ANNOUNCED: now.isoformat()}, _local_today(plan, now))
+    today = _local_today(plan, now)
+    if passed:
+        plan.make = batches.with_skips(plan, window.key, passed, PASSED_UNMADE, today)
+    plan.make = batches.with_record(plan, window.key, {batches.ANNOUNCED: now.isoformat()}, today)
     db.commit()
     event = plan_notify.MONTH_READY if batches.rhythm_of(plan) == plans.MONTHLY else plan_notify.WEEK_READY
-    plan_notify.notify_review(plan.workspace_id, plan.id, event, f"{plan.name}: {count} posts for {batches.label(plan, window)}")
+    plan_notify.notify_review(plan.workspace_id, plan.id, event, _ready_title(plan, window, count, len(passed)))
 
 
 def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> None:

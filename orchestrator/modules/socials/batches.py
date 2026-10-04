@@ -18,13 +18,16 @@ large batch is made over several ticks.
 The plan records its batches in ``make.batches``: ``{key: {"skipped": {slot key: why},
 "announced": ISO}}``. A slot the tick could not make (no connected channel posts its format,
 no render minutes left) is skipped and recorded, never half-made; once every slot of a batch
-is made or skipped, "Your week is ready" goes out once. A record is dropped
-``KEEP_BATCH_DAYS`` after its batch began. All of it is pure: the tick reads and writes.
+is made or skipped, "Your week is ready" goes out once. A slot whose own time came while the
+tick had not made it (an outage, a backlog across every plan) is no longer made: when the
+batch is announced it is recorded as skipped and the notice names it (``passed_unmade``).
+A record is dropped ``KEEP_BATCH_DAYS`` after its batch began. All of it is pure: the tick
+reads and writes.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from modules.socials import plans
@@ -166,8 +169,13 @@ def with_record(plan: Any, key: str, change: Dict[str, Any], today: date) -> Dic
 
 
 def with_skip(plan: Any, key: str, slot_key: str, why: str, today: date) -> Dict[str, Any]:
+    return with_skips(plan, key, (slot_key,), why, today)
+
+
+def with_skips(plan: Any, key: str, slot_keys: Iterable[str], why: str, today: date) -> Dict[str, Any]:
+    """The plan's ``make`` with ``slot_keys`` recorded as skipped by batch ``key``, for ``why``."""
     skipped = dict((records(plan).get(key) or {}).get(SKIPPED) or {})
-    return with_record(plan, key, {SKIPPED: {**skipped, slot_key: why}}, today)
+    return with_record(plan, key, {SKIPPED: {**skipped, **{slot_key: why for slot_key in slot_keys}}}, today)
 
 
 def announced(plan: Any, key: str) -> bool:
@@ -189,6 +197,27 @@ def due_slots(plan: Any, now: datetime, taken: Iterable[str]) -> List[plans.Slot
         slot for slot in plans.expand_slots(plan, now, reach)
         if slot.key not in done and (slot.local_date < through.end or slot.at < horizon)
     ]
+
+
+def _utc(moment: Optional[datetime]) -> Optional[datetime]:
+    """A stored time as UTC (SQLite gives it back without a zone)."""
+    if moment is None:
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def passed_unmade(plan: Any, key: str, now: datetime, taken: Iterable[str]) -> List[plans.Slot]:
+    """The slots of batch ``key`` whose own time came while nothing held them and the batch had
+    not skipped them: due once (after the batch's moment, and after the plan was made), and the
+    tick fell behind. Never made now: the batch's notice names them."""
+    start = _start_of_key(key)
+    window = window_of(plan, start) if start is not None else None
+    if window is None:
+        return []
+    created = _utc(getattr(plan, "created_at", None))
+    since = max(window.moment, created) if created is not None else window.moment
+    done = {*taken, *skipped_keys(plan)}
+    return [slot for slot in plans.expand_slots(plan, since, now) if slot.key not in done and batch_key(plan, slot.local_date) == key]
 
 
 def pending(plan: Any, key: str, now: datetime, taken: Iterable[str]) -> List[plans.Slot]:

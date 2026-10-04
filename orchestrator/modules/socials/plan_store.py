@@ -84,7 +84,7 @@ def create_plan(db: Any, *, workspace_id: UUID, created_by: str, fields: Mapping
     plan = SocialCampaign(
         workspace_id=workspace_id, created_by=created_by, name="", kind=plans.PLAN, status=plans.ACTIVE,
         approval_mode=campaigns.PER_POST, approved_hash_set=[],
-        sources=plans.validate_sources(None), make=plans.validate_make(plans.NEW_PLAN_MAKE),
+        sources=plans.validate_sources(None), make=_new_make(fields),
         research=plans.validate_research(None),
         late_policy=plans.SKIP, slot_overrides={},
     )
@@ -100,6 +100,13 @@ def create_plan(db: Any, *, workspace_id: UUID, created_by: str, fields: Mapping
 def _sent(fields: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     value = fields.get(key)
     return value if isinstance(value, Mapping) else {}
+
+
+def _new_make(fields: Mapping[str, Any]) -> Dict[str, Any]:
+    """A new plan's ``make`` before what it sends: the week's batch on Sunday at 17:00 (O1, O3),
+    or PRD-251B's defaults (made each morning) when it asks to be daily."""
+    daily = _sent(fields, "make").get("rhythm") == plans.DAILY
+    return plans.validate_make({"rhythm": plans.DAILY} if daily else plans.NEW_PLAN_MAKE)
 
 
 def _research_follows(plan: SocialCampaign, fields: Mapping[str, Any], batch_day: str, research_day: str) -> None:

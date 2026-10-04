@@ -3219,9 +3219,6 @@ class ApiClient {
     return this.request<SocialPost>(`/api/socials/campaigns/${campaignId}/posts/${postId}`, { method: 'DELETE' })
   }
 
-  /** Approve the posts the approver was shown as one series (D6): each with the content_hash
-   * on screen. The answer reports the posts approved and each post left, with why; 409 when
-   * the workspace's series approval is off or the campaign approves post by post. */
   /** PRD-251C US-C205: approve a plan's week (or month) in one sitting, each post by the hash shown. */
   async approveSocialPlanBatch(planId: string, batchKey: string, posts: SocialSeriesShownPost[]): Promise<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }> {
     return this.request<{ approved: SocialPost[]; left: SocialSeriesLeftPost[] }>(
@@ -3229,6 +3226,9 @@ class ApiClient {
     )
   }
 
+  /** Approve the posts the approver was shown as one series (D6): each with the content_hash
+   * on screen. The answer reports the posts approved and each post left, with why; 409 when
+   * the workspace's series approval is off or the campaign approves post by post. */
   async approveSocialCampaignSeries(
     campaignId: string,
     posts: SocialSeriesShownPost[],
