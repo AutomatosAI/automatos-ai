@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 SESSION_STEP = "mission"   # a mission step a Claude Code session ran (services/cli_ticket_lane)
 LIVE_RUN_STATUSES = ("pending", "running")
+# F284: what the board's refusal to run a mission's ticket (api/board_tasks.mission_runs_it) tells
+# the owner to do with a step instead: #0250.1's Run now said "Retry … from the mission", which no
+# page has. (A mission's own card keeps its words: that refusal is F291's.)
+BOARD_REDO = {
+    MISSION_STEP: "Send it back with Reject (once it is in Review or Done) to have it redone by its mission",
+    SESSION_STEP: "Cancel the mission and use Re-run on its page to start it again as a new mission",
+}
 MISSION_GONE = "{label} belongs to a mission that can no longer be found, so it can't run again here."
 # F284: a step a Claude Code session ran stays its session's; the page's Re-run (on an
 # ended mission) is what runs it again.

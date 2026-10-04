@@ -135,6 +135,19 @@ def test_a_step_of_a_cancelled_mission_is_refused_naming_a_button_that_exists(db
     assert task.state == TaskState.VERIFIED.value
 
 
+def test_run_now_on_a_step_names_the_reject_that_redoes_it(db_session, seed_workspace):
+    """#0250.1: Run now answered "Retry or change it from the mission"; no page has Retry."""
+    from api.board_tasks import mission_runs_it
+
+    ws = UUID(seed_workspace())
+    run, _card, _task, step_card = _finished(db_session, ws)
+
+    refused = mission_runs_it(db_session, step_card)
+
+    assert "Send it back with Reject" in refused and f"/missions/{run.id}" in refused
+    assert "Retry" not in refused
+
+
 # --- #0250.1: the send-back and the mission's end, two transactions ---------------------
 
 
