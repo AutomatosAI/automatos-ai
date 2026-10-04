@@ -30,6 +30,12 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .action_claims import claimed_action_not_done
+from .nudges import CLAIMED_ACTION_RECOVERY_MSG as _CLAIMED_ACTION_RECOVERY_MSG, ask_for_the_answer
+from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG
+from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
+from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
+from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
+from .cap_answer import answers_at_the_cap  # F328
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 from .turn_account import said_or_accounted
@@ -157,15 +163,6 @@ class RoundState:
     tool_attempts: Dict[str, int] = field(default_factory=dict)
 
 
-_LENGTH_RECOVERY_MSG = (
-    "Your previous response was truncated (output token limit reached) "
-    "while writing tool call arguments. The JSON was incomplete and could "
-    "not be parsed. Please retry with SHORTER content — use concise text, "
-    "fewer sections, or summarise instead of writing full prose in the "
-    "tool arguments."
-)
-
-
 class ToolLoopExecutor:
     """Shared tool-execution loop for chat + agent paths.
 
@@ -211,6 +208,7 @@ class ToolLoopExecutor:
     # Public API
     # ------------------------------------------------------------------
 
+    @answers_at_the_cap  # F328: a run stopped by its round cap still ends on its answer
     async def run(
         self,
         *,
@@ -592,9 +590,7 @@ class ToolLoopExecutor:
             nudge = _NARRATION_RECOVERY_MSG
         else:
             return await self._recover_claimed_action(current, messages, tools) or current
-        messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "system", "content": nudge})
-        return await self._llm(messages, tools)
+        return await nudge_about(self._llm, current, messages, tools, nudge)
 
     async def _recover_claimed_action(
         self,
@@ -604,49 +600,30 @@ class ToolLoopExecutor:
     ) -> Optional[LLMResponse]:
         """F108: retry once when a reply without a tool call says an action was
         done and no action that does it succeeded this turn. The claim stays in
-        the history; the nudge says it has not happened. None when there is
-        nothing to recover."""
+        the history; the nudge says it has not happened. F297: an empty reply
+        straight after a round of tool calls is asked once for its answer. None
+        when there is nothing to recover."""
         if not tools or _has_tool_calls(current):
             return None
         text = getattr(current, "content", "") or ""
+        if not text.strip():  # F297: nothing in it straight after a round of tool calls
+            return await ask_for_the_answer(self._llm, messages, tools)
+        step = announced_step(text)
+        if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
+            logger.warning("[tool-loop] reply announced a step it never took — nudging once")
+            return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
         claim = claimed_action_not_done(text, self.tracker.succeeded, promises=self.promises)
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
-        messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "system", "content": _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)})
-        return await self._llm(messages, tools)
+        return await nudge_about(self._llm, current, messages, tools, _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim))
 
 
 # ---------------------------------------------------------------------------
 # Helpers — pure, stdlib only.
 # ---------------------------------------------------------------------------
 
-_NARRATION_RECOVERY_MSG = (
-    "Your previous reply described actions (\"let me create…\", \"now let me "
-    "assign…\", \"both created\") but made NO tool call, so nothing was executed "
-    "and nothing you reported exists. Either call the tools now, in this "
-    "response, or state plainly that you did not do it and what you need. "
-    "Never describe an action as done without a tool result, and never "
-    "invent ids, models or statuses."
-)
-
-# F099 (night 3): a reply that names a tool as its source when no tool ran in
-# this turn is repeating something from memory — an earlier conversation's
-# answer, labelled as if it were a fresh search.
-_UNRUN_SOURCE_RECOVERY_MSG = (
-    "Your previous reply gives {tool} as its source, but no tool ran in this "
-    "turn: what you wrote came from memory of an earlier conversation and may "
-    "be out of date. Call {tool} now, in this response, or say plainly that the "
-    "answer is from an earlier conversation and was not searched again."
-)
-# F108 (night 3): "I've approved the mission. It's now running" — it wasn't.
-_CLAIMED_ACTION_RECOVERY_MSG = (
-    "Your previous reply says something was {claim}, but no tool call in this turn "
-    "did that, so it has not happened. Make the call now, in this response, or say "
-    "plainly that it has not been done and what you need. Never report an action "
-    "as done without a tool result."
-)
+# The nudges themselves (F099, F108, the narration rule) are in nudges.py (F295).
 UNRUN_SOURCE_NOTICE = (
     "No search ran for this reply — it gives {tool} as its source, but repeats an "
     "earlier answer that may be out of date. Ask me to search again."
