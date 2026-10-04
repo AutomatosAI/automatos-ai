@@ -35,6 +35,7 @@ from modules.tools.execution.tool_loop import (
     ToolPostResult,
 )
 from modules.tools.execution.action_claims import claimed_action_not_done
+from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges are the user's turn
 from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
@@ -912,11 +913,9 @@ class StreamingChatService:
         return self.workspace_id
 
     def _extract_user_text(self, llm_messages: List[Dict[str, Any]]) -> str:
-        """Extract the latest user message text from LLM messages."""
-        for m in reversed(llm_messages):
-            if m.get("role") == "user":
-                return m.get("content") or ""
-        return ""
+        """The latest message the person wrote (F295: never a nudge of the tool loop's)."""
+        return next((m.get("content") or "" for m in reversed(llm_messages)
+                     if m.get("role") == "user" and not is_nudge(m)), "")
 
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
