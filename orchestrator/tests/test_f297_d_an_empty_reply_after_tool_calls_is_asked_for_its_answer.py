@@ -11,7 +11,7 @@ import asyncio
 import json
 
 from core.llm.clients.base import LLMResponse
-from modules.tools.execution.nudges import MISSING_ANSWER_MSG
+from modules.tools.execution.nudges import MISSING_ANSWER_MSG, as_a_check
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 
 TOOLS = [{"type": "function", "function": {"name": "workspace_write_file", "parameters": {}}}]
@@ -47,7 +47,7 @@ def test_0234_is_asked_once_and_the_card_gets_the_table():
     result, model = _run(LLMResponse(content="", tool_calls=None), LLMResponse(content=TABLE, tool_calls=None))
     assert result.response.content == TABLE
     asked = model.sent[1]
-    assert asked[-2]["role"] == "tool" and asked[-1] == {"role": "user", "content": MISSING_ANSWER_MSG}
+    assert asked[-2]["role"] == "tool" and asked[-1] == {"role": "user", "content": as_a_check(MISSING_ANSWER_MSG)}
 
 
 def test_an_answer_after_the_tool_calls_is_not_asked_again():

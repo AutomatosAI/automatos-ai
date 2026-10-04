@@ -26,6 +26,7 @@ Stdlib only, like the loop.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -105,6 +106,44 @@ def announced_step(text: str) -> Optional[str]:
     return None
 
 
+# Night 9b (6586c8bf, 8578eeaf): a nudge in the user's turn was read as the owner
+# speaking. Auto answered "You are absolutely right to call me out on that, Gerard. My
+# apologies…" to the platform's own claim check. Every nudge now says what it is, and
+# an apology a reply opens with anyway is taken off (``without_the_apology``).
+PLATFORM_CHECK = ("[An automatic check by the platform, not a message from the owner. Do not answer this "
+                  "note, thank anyone or apologise: do what it asks, then reply to the owner's last message "
+                  "as if the check had not been needed.]")
+_APOLOGY = re.compile(
+    r"^(?:you(?:'re| are) (?:absolutely |completely |quite |totally )?right\b|my apologies\b|apologies\b|"
+    r"i apologi[sz]e\b|(?:i'?m |i am )?(?:so |very )?sorry\b|thank you for (?:catching|pointing|calling)\b|"
+    r"good catch\b|you caught\b|it seems i made a mistake\b|i made a mistake\b|i (?:clearly )?missed\b|"
+    r"i will (?:ensure|make sure) (?:that )?(?:this|that|it) (?:doesn'?t|does not|won'?t)\b)",
+    re.IGNORECASE)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def as_a_check(text: str) -> str:
+    """A nudge's words, opened by the line that says the platform wrote them."""
+    return f"{PLATFORM_CHECK}\n\n{text}"
+
+
+def without_the_apology(response: Any) -> Any:
+    """``response`` with the apology sentences it opens with taken off (a copy; the
+    response itself is never changed). Anything else is left as it is."""
+    text = getattr(response, "content", None)
+    if not isinstance(text, str) or not text.strip():
+        return response
+    sentences = _SENTENCE.split(text.lstrip())
+    kept = 0
+    while kept < len(sentences) and _APOLOGY.match(sentences[kept].strip()):
+        kept += 1
+    if kept == 0 or kept == len(sentences):
+        return response
+    logger.info("[tool-loop] a nudged reply opened with an apology — %d sentence(s) taken off", kept)
+    return dataclasses.replace(response, content=" ".join(sentences[kept:])) \
+        if dataclasses.is_dataclass(response) else response
+
+
 class Nudge(dict):
     """A message the loop wrote in the user's turn. It is sent as any user message
     is; the chat reads past it when it looks for the owner's own words."""
@@ -112,7 +151,7 @@ class Nudge(dict):
 
 def nudge(text: str) -> Nudge:
     """A nudge, as the user's turn: the conversation ends on it, so the model answers it."""
-    return Nudge(role="user", content=text)
+    return Nudge(role="user", content=as_a_check(text))
 
 
 def is_nudge(message: Any) -> bool:
@@ -130,7 +169,7 @@ def kept_if_blank(nudged: Any, retry: Any) -> Any:
     if blank(retry) and not blank(nudged):
         logger.warning("[tool-loop] the nudge got an empty reply — keeping the reply it was about")
         return nudged
-    return retry
+    return without_the_apology(retry)
 
 
 async def nudge_about(llm: LLMCall, reply: Any, messages: Messages, tools: Optional[List[Dict[str, Any]]],
@@ -156,4 +195,4 @@ async def ask_for_the_answer(llm: LLMCall, messages: Messages, tools: Optional[L
     logger.warning("[tool-loop] the reply after the tool calls was empty — asking once for the answer")
     messages.append(nudge(MISSING_ANSWER_MSG))
     retry = await llm(messages, tools)
-    return None if blank(retry) else retry
+    return None if blank(retry) else without_the_apology(retry)
