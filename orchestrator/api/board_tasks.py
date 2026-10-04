@@ -386,76 +386,18 @@ async def create_task(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Create a new board task."""
-    body = await request.json()
+    """Create a new board task. F276: the answer is the ticket as the board lists
+    it, with its number (#0042); what a request may file is checked in
+    api/board_task_create.py."""
+    from api.board_task_create import created_ticket_answer, new_ticket_columns
 
-    title = _text_of(body.get("title"), "title")
-    if not title:
-        raise HTTPException(status_code=422, detail="title is required")
-
-    assigned_agent_id = _agent_id_of(body.get("assigned_agent_id"))
-    if assigned_agent_id is not None:
-        agent = db.query(Agent).filter(
-            Agent.id == assigned_agent_id,
-            Agent.workspace_id == ctx.workspace_id,
-        ).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Assigned agent not found in workspace")
-
-    priority = body.get("priority", "medium")
-    if not _one_of(priority, VALID_PRIORITIES):
-        raise HTTPException(status_code=422, detail=f"Invalid priority: {priority}")
-
-    review_mode = body.get("review_mode", "auto")
-    if not _one_of(review_mode, VALID_REVIEW_MODES):
-        raise HTTPException(status_code=422, detail=f"Invalid review_mode: {review_mode}")
-
-    planning_data = body.get("planning_data")
-    # Auto-set review status when approval_action is present
-    if planning_data and isinstance(planning_data, dict) and planning_data.get("approval_action"):
-        status = "review"
-    else:
-        status = "assigned" if assigned_agent_id else "inbox"
-
-    # PRD-127: ephemeral attachments
-    attachment_ids = body.get("attachment_ids", [])
-    if attachment_ids and not isinstance(attachment_ids, list):
-        raise HTTPException(status_code=422, detail="attachment_ids must be a list")
-
-    # PRD-221 S14: a caller (e.g. a Command Centre activity card) may attach
-    # the source it was created from, so the board card links back. Defaults
-    # to 'user' when absent — unchanged for every existing caller.
-    # F194: only a person's kinds. A mission's or playbook's step, a session or
-    # a lane's ticket is filed by the platform; a request claiming one made a
-    # ticket the dispatcher and the host treat as the platform's own.
-    source_type = body.get("source_type") or "user"
-    if not isinstance(source_type, str):
-        raise HTTPException(status_code=422, detail=(
-            f"source_type is one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or left out."))
-    if source_type not in USER_CREATABLE_SOURCE_TYPES:
-        raise HTTPException(status_code=422, detail=(
-            f"source_type '{source_type}' is filed by the platform, not by a request. "
-            f"Use one of {sorted(USER_CREATABLE_SOURCE_TYPES)}, or leave it out."))
-    source_id = body.get("source_id")
-
+    columns = new_ticket_columns(db, ctx.workspace_id, await request.json())
     task = BoardTask(
         workspace_id=ctx.workspace_id,
-        title=title,
-        description=body.get("description"),
-        raw_prompt=body.get("raw_prompt"),
-        status=status,
-        priority=priority,
-        review_mode=review_mode,
-        assigned_agent_id=assigned_agent_id,
         created_by_type="user",
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
-        parent_task_id=body.get("parent_task_id"),
-        source_type=source_type,
-        source_id=source_id,
-        tags=body.get("tags", []),
-        planning_data=planning_data,
-        attachment_ids=attachment_ids,  # PRD-127
-        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
+        **columns,
     )
     db.add(task)
     db.flush()  # the id the notice carries
@@ -485,7 +427,7 @@ async def create_task(
         db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return task.to_dict()
+    return created_ticket_answer(db, task)
 
 
 @router.get("")
