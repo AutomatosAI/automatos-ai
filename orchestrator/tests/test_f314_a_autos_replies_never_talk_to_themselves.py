@@ -15,8 +15,9 @@ import asyncio
 
 from consumers.chatbot.claim_check import NOT_DONE_SAID, Verdict, not_done
 from core.llm.turn_order import (
-    REPROMPT_FRAME, as_the_platforms_check, as_the_users_turn, reprompts_in_the_users_turn,
+    as_the_platforms_check, as_the_users_turn, reprompts_in_the_users_turn,
 )
+from modules.tools.execution.nudges import PLATFORM_CHECK
 
 OWNER = {"role": "user", "content": "Quick update for your records: Quay Coffee House moves to 30-day terms."}
 ANSWER = {"role": "assistant", "content": "I've noted that Quay Coffee House moves to 30-day terms."}
@@ -33,7 +34,7 @@ def test_a_reprompt_in_the_users_turn_says_it_is_the_platform_not_the_owner():
 
     turn = sent[-1]["content"]
     assert sent[-1]["role"] == "user"
-    assert turn.startswith(REPROMPT_FRAME) and "not a message from the owner" in turn
+    assert turn.startswith(PLATFORM_CHECK) and "not a message from the owner" in turn   # F295 (9b): FIXER's line
     assert NUDGE in turn
     assert "Don't apologise" in turn and "don't thank anyone for a correction" in turn
     assert "if they didn't ask for something, say plainly that it wasn't done instead of doing it now" in turn

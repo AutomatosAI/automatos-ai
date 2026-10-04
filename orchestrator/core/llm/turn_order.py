@@ -14,7 +14,7 @@ conversation ends on system messages that come straight after an assistant reply
 with no tool calls, they are sent as one user turn, so the model answers them on
 every route. The caller's list is never changed (the chat keeps reading its own),
 and any other conversation goes as it came: system messages after tool results, or
-before the reply, stay where they are. Stdlib only.
+before the reply, stay where they are.
 
 F314 (night 9): sent as the user's turn, a re-prompt read as the owner speaking.
 "Your previous reply says something was under way, but no tool call in this turn did
@@ -28,7 +28,14 @@ platform's check, not the owner, and asks for a reply that stands on its own, wi
 apology and nothing done that the owner did not ask for (``as_the_platforms_check``).
 That covers the trailing system messages turned into a user turn here, and a nudge
 the tool loop already writes in the user's turn (FIXER's ``nudges.Nudge``, a dict
-subclass recognised by its class name so this module stays stdlib-only).
+subclass recognised by its class name).
+
+F295 (night 9b): the frame wasn't enough. After a claim check Auto still answered "You
+are absolutely right to call me out on that, Gerard. My apologies…" (6586c8bf,
+8578eeaf). The chat's re-prompts now open with FIXER's own line (``nudges.PLATFORM_CHECK``,
+through ``as_a_check``), the one wording every re-prompt and nudge shares, and the reply
+to a re-prompt loses the apology it opens with: on the text that streams
+(``reprompt_reply.ApologyGate``) and on the reply that is saved (``without_the_apology``).
 """
 from __future__ import annotations
 
@@ -50,10 +57,21 @@ LOOP_NUDGE_CLASS = "Nudge"
 
 
 def as_the_platforms_check(text: str) -> str:
-    """``text``, a re-prompt, framed as the platform's check rather than the owner's words (F314)."""
-    if text.startswith(REPROMPT_FRAME):
+    """``text``, a re-prompt, framed as the platform's check rather than the owner's words
+    (F314), with FIXER's line (F295, night 9b). A text already framed is left as it is."""
+    from modules.tools.execution.nudges import PLATFORM_CHECK, as_a_check
+
+    if text.startswith((PLATFORM_CHECK, REPROMPT_FRAME)):
         return text
-    return f"{REPROMPT_FRAME}\n\n{text}\n\n{REPROMPT_RULES}"
+    return as_a_check(f"{text}\n\n{REPROMPT_RULES}")
+
+
+def is_a_reprompt(messages: Optional[Messages]) -> bool:
+    """Whether the conversation ends on the platform's check: the model's next reply answers it."""
+    from modules.tools.execution.nudges import PLATFORM_CHECK
+
+    last = messages[-1] if messages else None
+    return _role(last) == USER and str(last.get("content") or "").startswith((PLATFORM_CHECK, REPROMPT_FRAME))
 
 
 def as_the_users_turn(messages: Optional[Messages]) -> Optional[Messages]:
@@ -93,9 +111,28 @@ def reprompts_in_the_users_turn(generate: Callable[..., Awaitable[Any]]) -> Call
     """Wrap ``LLMManager.generate_response`` (see the module)."""
     @functools.wraps(generate)
     async def wrapped(self: Any, messages: Messages, *args: Any, **kwargs: Any) -> Any:
-        return await generate(self, with_the_loops_nudge_framed(as_the_users_turn(messages)), *args, **kwargs)
+        sent = with_the_loops_nudge_framed(as_the_users_turn(messages))
+        if not is_a_reprompt(sent):
+            return await generate(self, sent, *args, **kwargs)
+        return await _answered_without_an_apology(generate, self, sent, *args, **kwargs)
     return wrapped
 
 
-__all__ = ["as_the_platforms_check", "as_the_users_turn", "reprompts_in_the_users_turn",
+async def _answered_without_an_apology(generate: Callable[..., Awaitable[Any]], manager: Any, sent: Messages,
+                                       *args: Any, **kwargs: Any) -> Any:
+    """The model's reply to a re-prompt, with the apology it opens with taken off what
+    streams and what is saved (F295, night 9b)."""
+    from core.llm.reprompt_reply import gated
+    from modules.tools.execution.nudges import without_the_apology
+
+    gate = gated(kwargs.get("on_delta"))
+    if gate is not None:
+        kwargs = {**kwargs, "on_delta": gate}
+    response = await generate(manager, sent, *args, **kwargs)
+    if gate is not None:
+        await gate.close()
+    return without_the_apology(response)
+
+
+__all__ = ["as_the_platforms_check", "as_the_users_turn", "is_a_reprompt", "reprompts_in_the_users_turn",
            "with_the_loops_nudge_framed"]
