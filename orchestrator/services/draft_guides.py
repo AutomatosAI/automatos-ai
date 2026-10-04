@@ -15,13 +15,20 @@ right.
 - Done-claims: the finished draft goes through F187's claim check against its
   run's actions. The loop has already nudged it once (F108). A claim still
   standing gets a line for the owner: check before sending.
+- The owner's own (F269, night 7b; F269 and F287, night 8): what an agent wrote is
+  never handed over as the owner's facts. ``owners_own`` drops its passages from a
+  draft's guides and from Auto's retrieval-first passages, ``owners_own_chunks`` from
+  the mission planner's knowledge, and ``marked_as_agents_writing`` marks its passages
+  in a search the model asks for itself.
 """
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 from uuid import UUID
+
+from services.step_lessons import a_cards_run_carries_its_lessons
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,9 @@ GUIDES_HEADER = (
     "These passages are the owner's own rules for what a reply may say and promise. Follow them where they apply, "
     "and name the guide if the draft leans on it."
 )
+# F269 (night 8): what opens a passage an agent wrote, in a search the model asked for.
+AGENTS_WRITING = ("[Written by an agent, not by the owner: an earlier draft, report or document. It is not the "
+                  "owner's facts or rules: never answer from it as if it were; if asked, say an agent wrote it.]")
 CHECK_BEFORE_SENDING = ("\n\nCheck before sending: the draft says something was {claim}, but nothing in this run "
                         "did that. Do it first, or change the wording to what will happen.")
 
@@ -58,10 +68,20 @@ def is_customer_draft(brief: object) -> bool:
     return bool(_CUSTOMER_FACING.search(text) or (_DRAFT_ASK.search(text) and _FOR_A_CUSTOMER.search(text)))
 
 
+def _brief_only(prompt: str) -> str:
+    """The ticket's own words: its prompt before the board's "Where your answer goes"
+    (F297, night 8), which would otherwise fill most of a short brief's guide search."""
+    from services.step_lessons import ON_THE_CARD
+
+    return prompt.split(ON_THE_CARD, 1)[0].strip()
+
+
+@a_cards_run_carries_its_lessons  # F249 (night 8): a card Auto started carries its agent's lessons too
 async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
     """``brief`` with the workspace's guide passages for a customer draft; the
     brief as it was for anything else, or when nothing clears the floor."""
-    if not is_customer_draft(brief):
+    own = _brief_only(brief)
+    if not is_customer_draft(own):
         return brief
     from config import config
     from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, prefetch
@@ -70,13 +90,13 @@ async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str
     async def _search(args):
         return owners_own(db, await get_tool_router().execute_and_format(
             tool_name=PREFETCH_TOOL, tool_args=args, agent_id=agent_id,
-            workspace_id=UUID(str(workspace_id)), original_intent=brief,
+            workspace_id=UUID(str(workspace_id)), original_intent=own,
             caller_context={"retrieval_first": True, "draft_guides": True},
-        ))
+        ), workspace_id)
 
     try:
         found = await prefetch(
-            db, workspace_id, GUIDE_QUERY.format(brief=brief.strip()[:600]), search=_search,
+            db, workspace_id, GUIDE_QUERY.format(brief=own[:600]), search=_search,
             enabled=config.CHATBOT_KNOWLEDGE_PREFETCH, limit=config.KNOWLEDGE_PREFETCH_PASSAGES,
             min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE, question_only=False, header=GUIDES_HEADER,
         )
@@ -89,34 +109,122 @@ async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str
     return f"{brief}\n\n{found.message['content']}"
 
 
-def owners_own(db: Any, result: Any) -> Any:
+def owners_own(db: Any, result: Any, workspace_id: Any = None) -> Any:
     """The search result without the passages from documents an agent wrote.
 
     F269 (night 7b): #0188.2's redo was given an old draft from last night as a
     "guide": a 14 December cut-off, a handwritten card and January to March dates the
     owner had never decided, and it dropped "orders open 2 November". A guide is the
     owner's own rule; an agent's earlier draft, report or document is not, approved or
-    not, so it is never one."""
+    not, so it is never one.
+
+    F269 and F287 (night 8): Auto's retrieval-first passages go through here too
+    (consumers/chatbot/service.py). Only a database session can tell which documents
+    an agent wrote; without one the result is as it was."""
     found = ((result or {}).get("raw_result") or {}).get("results") if isinstance(result, dict) else None
-    if not isinstance(found, list) or db is None:
+    if not isinstance(found, list) or not _a_session(db):
         return result
-    drafts = _agents_documents(db, {r.get("document_id") for r in found if isinstance(r, dict)})
-    kept = [r for r in found if not (isinstance(r, dict) and r.get("document_id") in drafts)]
+    drafts = _agents_documents(db, [r.get("document_id") for r in found if isinstance(r, dict)], workspace_id)
+    kept = [r for r in found if not (isinstance(r, dict) and _as_id(r.get("document_id")) in drafts)]
     return {**result, "raw_result": {**result["raw_result"], "results": kept}}
 
 
-def _agents_documents(db: Any, ids: set) -> set:
-    """Which of these documents an agent wrote (``source_type`` agent_output)."""
-    from sqlalchemy import text
+def owners_own_chunks(db: Any, result: Any, workspace_id: Any) -> Any:
+    """A retrieval result (``modules.rag.service.RAGResult``) without the chunks from
+    documents an agent wrote, its numbered citations made again from the rest.
 
+    F287 (night 8): the mission planner took "Friday 27 November from [2]" from an old
+    agent document over the owner's 10 December, and the email step wrote it (#0352).
+    The planner's knowledge (modules/context/sections/planning_knowledge.py) is the
+    owner's documents only."""
+    from dataclasses import replace
+
+    chunks = list(getattr(result, "chunks", None) or [])
+    if not chunks or not _a_session(db):
+        return result
+    drafts = _agents_documents(db, [_chunk_document(c) for c in chunks], workspace_id)
+    kept = [c for c in chunks if _as_id(_chunk_document(c)) not in drafts]
+    if len(kept) == len(chunks):
+        return result
+    from modules.rag.budget import assemble_with_citations
+
+    context, sources_map = assemble_with_citations(kept, result.query)
+    return replace(result, chunks=kept, formatted_context=context, sources_map=sources_map,
+                   sources=sorted({str(c.get("source_file") or "") for c in kept}),
+                   total_tokens=sum(int(c.get("tokens") or 0) for c in kept))
+
+
+def marked_as_agents_writing(db: Any, result: Any, agent_id: Any) -> Any:
+    """A search_knowledge result (``AgentPlatformTools.execute_tool``'s) with every
+    passage from a document an agent wrote marked as such, in the searching agent's
+    workspace.
+
+    F269 (night 8): asked "Which day do we deliver to our wholesale cafes? … Where did
+    that come from?", Auto searched for itself (search_knowledge "wholesale cafe
+    delivery days") and answered "your internal documents indicate that you generally
+    avoid Thursday deliveries", quoting #0214.1's own welcome-email draft. A search the
+    model asks for still finds an agent's documents (the owner may ask about them), but
+    each such passage now opens with ``AGENTS_WRITING``."""
+    found = result.get("results") if isinstance(result, dict) else None
+    if not isinstance(found, list) or not _a_session(db):
+        return result
+    workspace_id = _agents_workspace(db, agent_id)
+    if workspace_id is None:
+        return result
+    drafts = _agents_documents(db, [r.get("document_id") for r in found if isinstance(r, dict)], workspace_id)
+    if not drafts:
+        return result
+    return {**result, "results": [_marked(r) if isinstance(r, dict) and _as_id(r.get("document_id")) in drafts
+                                  else r for r in found]}
+
+
+def _marked(passage: Dict[str, Any]) -> Dict[str, Any]:
+    """A passage whose text opens with AGENTS_WRITING."""
+    return {**passage, **{key: f"{AGENTS_WRITING}\n{passage[key]}" for key in ("content", "excerpt")
+                          if isinstance(passage.get(key), str)}}
+
+
+def _agents_workspace(db: Any, agent_id: Any) -> Any:
+    """The workspace of the agent that searched; None when it is not found."""
+    from core.models import Agent
+
+    return db.query(Agent.workspace_id).filter(Agent.id == agent_id).scalar() if agent_id else None
+
+
+def _a_session(db: Any) -> bool:
+    from sqlalchemy.orm import Session
+
+    return isinstance(db, Session)
+
+
+def _as_id(value: Any) -> Optional[int]:
+    """A document id, whether the search gave it as a number or as text."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return int(value) if isinstance(value, str) and value.strip().isdigit() else None
+
+
+def _chunk_document(chunk: Any) -> Any:
+    """The document a retrieved chunk came from (S3 Vectors keeps it in the chunk's metadata)."""
+    if not isinstance(chunk, dict):
+        return None
+    meta = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+    return chunk.get("document_id") or meta.get("document_id") or meta.get("doc_id") or meta.get("external_file_id")
+
+
+def _agents_documents(db: Any, ids: Iterable[Any], workspace_id: Any = None) -> set:
+    """Which of these documents an agent wrote (``source_type`` agent_output), in the
+    workspace when it is given."""
+    from core.models.core import Document
     from services.knowledge_flywheel import AGENT_OUTPUT_SOURCE_TYPE
 
-    wanted = sorted(i for i in ids if isinstance(i, int))
+    wanted = sorted({i for i in (_as_id(value) for value in ids) if i is not None})
     if not wanted:
         return set()
-    rows = db.execute(text("SELECT id FROM documents WHERE id = ANY(:ids) AND source_type = :kind"),
-                      {"ids": wanted, "kind": AGENT_OUTPUT_SOURCE_TYPE}).fetchall()
-    return {row[0] for row in rows}
+    query = db.query(Document.id).filter(Document.id.in_(wanted), Document.source_type == AGENT_OUTPUT_SOURCE_TYPE)
+    if workspace_id is not None:
+        query = query.filter(Document.workspace_id == UUID(str(workspace_id)))
+    return {row.id for row in query.all()}
 
 
 def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Optional[str]:

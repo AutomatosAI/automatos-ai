@@ -1581,14 +1581,14 @@ class StreamingChatService:
             return
 
         async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
-            result = await self.tool_router.execute_and_format(
-                tool_name=PREFETCH_TOOL,
-                tool_args=args,
+            from services.draft_guides import owners_own  # F269/F287 (night 8): never an agent's writing as facts
+            result = owners_own(self.db, await self.tool_router.execute_and_format(
+                tool_name=PREFETCH_TOOL, tool_args=args,
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=self.workspace_id,
                 original_intent=latest_text,
                 caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
-            )
+            ), self.workspace_id)
             self._collect_tool_retrieval(PREFETCH_TOOL, result)
             return result
 
