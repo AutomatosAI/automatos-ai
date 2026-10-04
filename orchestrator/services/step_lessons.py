@@ -173,9 +173,11 @@ def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any, *,
 
 def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     """A playbook step's prompt with what its agent is told besides: what the owner gave
-    for the run (F288), the lessons and standing notes (F249) and where its answer goes
-    (F269). A session agent's step gets the run's details and the playbook's notes."""
+    for the run (F288), the lessons and standing notes (F249), that the last agent
+    step's answer is the run's (F321) and where its answer goes (F269). A session
+    agent's step gets the run's details, the playbook's notes and the last-step rule."""
     from services.playbook_given import given_for_run
+    from services.playbook_last_step import last_step_rule
 
     db, workspace_id = step.get("db"), step.get("workspace_id")
     agent_id = getattr(step.get("agent"), "id", None)
@@ -183,7 +185,8 @@ def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     run = _run_of(db, workspace_id, step.get("recipe_execution_id"))
     prompt = _with(step["clean_prompt"], given_for_run(db, run, step.get("input_data")),
                    *_standing_notes(db, workspace_id, agent_id, run, in_a_session=in_a_session,
-                                    for_text=step["clean_prompt"]))
+                                    for_text=step["clean_prompt"]),
+                   last_step_rule(db, run, step))     # F321 (night 9b): the last step's answer is the run's
     return prompt if in_a_session else _with(prompt, ON_THE_CARD)
 
 
