@@ -32,14 +32,13 @@ from modules.tools.discovery.handlers_playbooks import (
     get_playbook,
     create_playbook,
     update_playbook,
-    add_playbook_step,
     update_playbook_step,
     delete_playbook_step,
     schedule_playbook,
-    execute_playbook,
     get_playbook_execution,
     delete_playbook,
 )
+from modules.tools.discovery.playbook_staffing import add_playbook_step, execute_playbook  # F321: an agent on each step
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
     get_cost_breakdown,
@@ -47,6 +46,7 @@ from modules.tools.discovery.handlers_analytics import (
     board_summary,
     board_snapshot,
 )
+from services.agents_writing import or_past_work, owners_passages_only, says_an_agent_wrote_it, says_who_wrote_each
 from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
@@ -141,13 +141,14 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
     set_skill_script_execution,
 )
 from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
+from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     list_board_tasks,
     get_board_task,
-    assign_board_task,
     update_board_task,
 )
+from modules.tools.discovery.handlers_board_task_assign import assign_board_task  # F309 (9): an answered card reruns
 from modules.tools.discovery.handlers_board_task_done import update_board_task_status  # F235: done files its report
 from modules.tools.discovery.handlers_scheduling import (
     schedule_task,
@@ -929,6 +930,7 @@ class PlatformActionExecutor:
 
         return Cleared(action_def, full_autonomy, approved_via_grant_id, human_directed)
 
+    @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
     async def execute(
         self,
         action_name: str,
@@ -1335,8 +1337,7 @@ class PlatformActionExecutor:
             return {"success": False, "error": f"Action '{action_name}' failed"}
 
 
-# Every platform action's handler, by action name. PlatformActionExecutor copies it per
-# instance. Kept at module level so a new tool adds one entry here.
+# Every platform action's handler, by name; PlatformActionExecutor copies it per instance. A new tool adds one entry.
 PLATFORM_HANDLERS: Dict[str, Callable] = {
     # Read actions
     "platform_list_agents": list_agents,
@@ -1346,10 +1347,10 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_get_playbook": get_playbook,
     "platform_get_llm_usage": get_llm_usage,
     "platform_get_cost_breakdown": get_cost_breakdown,
-    "platform_list_documents": list_documents,
-    "platform_read_document": read_document,
-    "platform_grep_documents": grep_documents,
-    "platform_search_documents": search_documents,
+    "platform_list_documents": says_who_wrote_each(list_documents),  # F269 (night 9): an agent's writing
+    "platform_read_document": says_an_agent_wrote_it(read_document),  # is never the owner's source
+    "platform_grep_documents": owners_passages_only("matches")(grep_documents),
+    "platform_search_documents": or_past_work(owners_passages_only("results")(search_documents)),  # F305
     "platform_list_templates": list_templates,
     "platform_get_template_schema": get_template_schema,
     # PRD-251 US-115: the brand kit (the REST routes' functions)

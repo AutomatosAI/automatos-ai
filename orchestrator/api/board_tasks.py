@@ -56,6 +56,7 @@ from api.board_mission_card import (  # F291: a mission's card waiting for its p
 )
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
+from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -983,10 +984,11 @@ def mission_runs_it(db: Session, task: Any) -> Optional[str]:
         run_id = None
     goal = (run.goal or "").strip()[:GOAL_ON_A_REFUSAL_CHARS] if run is not None else ""
     what = "the mission" if task.source_type == "orchestration" else "a step of the mission"
+    from services.run_redo import BOARD_REDO  # F284 (night 8): a step's redo names a button that exists
+    act = BOARD_REDO.get(task.source_type, "Retry or change it from the mission")
     return (
         f"{ticket_label(task, ticket_number(db, task), capital=True)} is {what}{f' “{goal}”' if goal else ''}: "
-        "the mission runs its steps, "
-        f"not the board. Retry or change it from the mission"
+        f"the mission runs its steps, not the board. {act}"
         f"{f' (/missions/{run_id})' if run_id is not None else ''}."
     )
 
@@ -1925,6 +1927,7 @@ def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
         db.rollback()
 
 
+@a_cards_answer_goes_on_the_card  # F297 (night 8): the answer goes on the card; a failed tool's error never does
 def _launch_task_execution(
     task_id: int,
     agent_id: int,

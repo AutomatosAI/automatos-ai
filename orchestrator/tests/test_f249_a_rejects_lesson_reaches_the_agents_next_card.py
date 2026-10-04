@@ -16,6 +16,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy import create_engine, text
 
+from services.ticket_redo import STANDING_HEADING   # F318 (night 9b): headed as the owner's rules now
+
 JUST_THE_EMAIL = "Just the email please - no subject line options, no notes to me."
 NO_PERFECT = "Leave off 'Perfect!' at the start."
 
@@ -114,7 +116,7 @@ def test_the_agents_next_card_carries_the_owners_corrections_newest_first_each_o
 
     for prompt in (_session_prompt(shop, nxt), _dispatch_prompt(shop, nxt)):
         assert prompt.startswith("Reply to the Lantern Hill café")
-        block = prompt.split("## The owner's corrections to your recent work\n", 1)[1]
+        block = prompt.split(f"{STANDING_HEADING}\n", 1)[1]
         assert block.splitlines()[1:] == ["- just the email please -  no subject line options, no notes to me.",
                                           f"- {NO_PERFECT}"]
 
@@ -123,7 +125,7 @@ def test_another_agent_never_gets_them(shop):
     _sent_back(shop, _ticket(shop, "Support Agent", "Reply to Theo Frost", status="review"), JUST_THE_EMAIL)
     theirs = _ticket(shop, "Content Creator", "Instagram caption for the Guji")
 
-    assert "The owner's corrections to your recent work" not in _session_prompt(shop, theirs)
+    assert STANDING_HEADING not in _session_prompt(shop, theirs)
 
 
 def test_a_redo_keeps_its_own_corrections_in_the_redo_and_adds_the_rest(shop):
@@ -135,7 +137,7 @@ def test_a_redo_keeps_its_own_corrections_in_the_redo_and_adds_the_rest(shop):
     prompt = _session_prompt(shop, mine)
 
     assert f"1. {JUST_THE_EMAIL}" in prompt                       # its own, in the redo part
-    standing = prompt.split("## The owner's corrections to your recent work\n", 1)[1]
+    standing = prompt.split(f"{STANDING_HEADING}\n", 1)[1]
     assert f"- {NO_PERFECT}" in standing and JUST_THE_EMAIL not in standing
 
 

@@ -28,7 +28,9 @@ _SCHEDULE_PARAMETERS = {
         },
         "cron_expression": {
             "type": "string",
-            "description": "5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every Monday at 09:00).",
+            "description": ("5-field cron expression, read in the schedule's timezone (e.g. '0 9 * * 1' = every "
+                            "Monday at 09:00). Write it from the owner's words; never ask them for one. Leave it "
+                            "out to switch a playbook's timer off or back on: its own time is kept."),
         },
         "timezone": {
             "type": "string",
@@ -41,7 +43,8 @@ _SCHEDULE_PARAMETERS = {
         },
         "enabled": {
             "type": "boolean",
-            "description": "Whether to activate the schedule immediately. Defaults to true.",
+            "description": ("false switches the playbook's timer off and keeps its time (no cron_expression "
+                            "needed); true, or left out, switches it on."),
         },
         "wait_for_me": {
             "type": "boolean",
@@ -49,7 +52,7 @@ _SCHEDULE_PARAMETERS = {
                             "Review: the playbook's own wait-for-me, set in the same call."),
         },
     },
-    "required": ["cron_expression"],
+    "required": [],  # F290 (night 8): switching a timer off needs no cron (timer_off.py)
 }
 
 
@@ -66,7 +69,9 @@ def register_playbook_schedule_action(registry: ActionRegistry) -> None:
             "timezone: pass the owner's own (UK time is 'Europe/London'), and ask "
             "them first when you do not know where they are — never assume UTC. "
             "The reply names the zone used. Provide playbook_id or playbook_name. "
-            "Calling it again on a playbook with a timer changes that timer."
+            "Calling it again on a playbook with a timer changes that timer. To switch a timer off, "
+            "send enabled: false with no cron_expression: its time is kept, and enabled: true switches it "
+            "back on. Each playbook's timer is in platform_get_playbook and platform_list_playbooks."
         ),
         category="playbooks",
         parameters=_SCHEDULE_PARAMETERS,
@@ -79,5 +84,6 @@ def register_playbook_schedule_action(registry: ActionRegistry) -> None:
             "set playbook 5 to run every Monday",
             "schedule this playbook on a cron",
             "automate the weekly review playbook",
+            "switch off the timer on my weekly posts playbook",   # F290 (night 8)
         ],
     ))

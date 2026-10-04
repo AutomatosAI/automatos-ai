@@ -17,6 +17,8 @@ This is the security boundary for agent code execution on the worker.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import re
@@ -24,6 +26,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from worker_config import max_binary_write_bytes
 from workspace_manager import SecurityError, WorkspaceManager
 
 logger = logging.getLogger(__name__)
@@ -259,8 +262,11 @@ class WorkspaceToolExecutor:
         except Exception as e:
             return {"error": f"Read error: {e}"}
 
-    async def write_file(self, path: str, content: str) -> Dict[str, Any]:
-        """Write a file to the workspace."""
+    async def write_file(self, path: str, content: Any) -> Dict[str, Any]:
+        """Write a file to the workspace: text as given, or a piece of a binary file
+        (``{"base64": ...}``, ``_write_chunk``) the platform sends a piece at a time."""
+        if isinstance(content, dict):
+            return self._write_chunk(path, content)
         try:
             safe_path = self.ws.resolve_safe_path(path)
         except SecurityError as e:
@@ -276,6 +282,46 @@ class WorkspaceToolExecutor:
             }
         except Exception as e:
             return {"error": f"Write error: {e}"}
+
+    def _write_chunk(self, path: str, chunk: Dict[str, Any]) -> Dict[str, Any]:
+        """One piece of a binary file (a Socials picture or video): written over ``path``,
+        or after what it holds when ``append`` is true, then moved to ``rename_to`` when
+        that is given (the last piece), so the file is never seen half-written. Both
+        paths stay inside the workspace; the file may not pass ``max_binary_write_bytes``."""
+        try:
+            target = self._inside(path)
+            final = self._inside(chunk["rename_to"]) if chunk.get("rename_to") else None
+            data = base64.b64decode(chunk.get("base64") or "", validate=True)
+        except SecurityError as e:
+            return {"error": str(e)}
+        except (binascii.Error, ValueError, TypeError) as e:
+            return {"error": f"Not a base64 piece: {e}"}
+        append = chunk.get("append") is True
+        size = (os.path.getsize(target) if append and os.path.exists(target) else 0) + len(data)
+        if size > max_binary_write_bytes():
+            return {"error": f"File too large (max {max_binary_write_bytes()} bytes)"}
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "ab" if append else "wb") as handle:
+                handle.write(data)
+            if final is not None:
+                os.makedirs(os.path.dirname(final), exist_ok=True)
+                os.replace(target, final)
+            done = final or target
+            return {"written": True, "path": os.path.relpath(done, os.path.realpath(self.ws.root)), "size_bytes": size}
+        except OSError as e:
+            return {"error": f"Write error: {e}"}
+
+    def _inside(self, relative: str) -> str:
+        """``relative`` as a real path inside the workspace: the workspace's own checks
+        (``resolve_safe_path``: null bytes, absolute paths, traversal, symlinks), then the
+        real path's prefix, the guard CodeQL's path-injection query recognises."""
+        self.ws.resolve_safe_path(relative)
+        root = os.path.realpath(self.ws.root)
+        target = os.path.realpath(os.path.join(root, relative))
+        if not target.startswith(root + os.sep):
+            raise SecurityError(f"Path traversal blocked: '{relative}' resolves outside the workspace")
+        return target
 
     async def list_directory(self, path: str = ".") -> Dict[str, Any]:
         """List directory contents within the workspace."""

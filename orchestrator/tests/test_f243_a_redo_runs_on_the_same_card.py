@@ -202,11 +202,13 @@ def test_a_step_that_left_no_text_still_carries_the_owners_words(db_session, see
     assert NOTE in task.input_context["verification_feedback"]["reasoning"]
 
 
-def test_a_rejected_step_of_an_ended_mission_is_refused_before_anything_changes(db_session, seed_workspace):
+def test_a_rejected_step_of_a_cancelled_mission_is_refused_before_anything_changes(db_session, seed_workspace):
+    """F284 (night 8): a step of a mission that completed or failed is redone, its mission
+    opened again (tests/test_f284_…); a cancelled mission's steps still never run again."""
     from api.board_tasks import reject_task
 
     ws = UUID(seed_workspace())
-    run, _mission_card, steps = _mission(db_session, ws, state=RunState.COMPLETED)
+    run, _mission_card, steps = _mission(db_session, ws, state=RunState.CANCELLED)
     task, card = _step(steps, TaskState.VERIFIED)
     db_session.flush()
 
@@ -214,7 +216,7 @@ def test_a_rejected_step_of_an_ended_mission_is_refused_before_anything_changes(
         asyncio.run(reject_task(card.id, _body({"feedback": NOTE}), ctx=_owner(ws), db=db_session))
 
     assert refused.value.status_code == 409 and f"/missions/{run.id}" in refused.value.detail
-    assert "finished" in refused.value.detail and "Re-run the mission" in refused.value.detail
+    assert "cancelled" in refused.value.detail and "Re-run on the mission's page" in refused.value.detail
     db_session.refresh(card)
     assert (card.status, task.state) == ("done", TaskState.VERIFIED.value)
 

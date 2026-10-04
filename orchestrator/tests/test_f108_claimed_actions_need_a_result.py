@@ -18,7 +18,8 @@ import pytest
 from core.llm.clients.base import LLMResponse
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 from modules.tools.execution.action_claims import claimed_action_not_done
-from modules.tools.execution.tool_loop import CLAIMED_ACTION_NOTICE, ToolLoopExecutor
+from consumers.chatbot.claim_check import not_done
+from modules.tools.execution.tool_loop import ToolLoopExecutor
 
 NIGHT_3 = [
     ("I've approved the mission. It's now running.", "approved", "platform_approve_mission"),
@@ -64,8 +65,8 @@ def test_a_write_that_failed_does_not_back_a_claim():
 
 
 def test_the_notice_says_what_did_not_happen():
-    assert CLAIMED_ACTION_NOTICE.format(claim="approved").startswith(
-        "This reply says something was approved, but no action that does that ran in this reply")
+    # F314 (night 9): in Auto's own plain words, never "This reply says something was approved …"
+    assert not_done("approved") == "Just to be clear: I didn't approve anything in this reply. Ask me again if you want it done."
 
 
 # ── the loop records what succeeded ─────────────────────────────────────────
@@ -106,7 +107,7 @@ def test_the_chat_notice_covers_a_claimed_action():
     tools = [{"type": "function", "function": {"name": "platform_execute"}}]
     reply = "I've approved the mission. It's now running."
     assert unexecuted_claims_notice(reply, tools, {"platform_get_mission"}, any_tool_ran=True,
-                                    done={"platform_get_mission"}) == CLAIMED_ACTION_NOTICE.format(claim="approved")
+                                    done={"platform_get_mission"}) == not_done("approved")
     assert unexecuted_claims_notice(reply, tools, {"platform_approve_mission"}, any_tool_ran=True,
                                     done={"platform_approve_mission"}) is None
     assert unexecuted_claims_notice(reply, None, set(), any_tool_ran=False, done=set()) is None   # no tools offered

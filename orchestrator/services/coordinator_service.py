@@ -53,7 +53,11 @@ from core.models.orchestration_enums import (
 from modules.coordination import progress_ledger
 from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation, resolve_named_agent
 from modules.coordination.dispatcher import MissionDispatcher
-from modules.coordination.mission_retry import retries_a_failed_mission
+from modules.coordination.mission_ends import says_what_it_completed
+from modules.coordination.mission_retry import replaces_what_the_failure_skipped, retries_a_failed_mission
+from modules.coordination.step_inputs import (  # F286 (night 8): a summary's inputs
+    a_summary_keeps_its_approved_inputs, with_the_missions_earlier_steps,
+)
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
@@ -70,6 +74,7 @@ from services.orchestration_board_bridge import (
     create_task_board_task,
     sync_board_status,
 )
+from services.agent_output_scope import ingests_only_when_opted_in  # F305 (night 9)
 from services.orchestration_deps import DependencyResolver
 from services.orchestration_state import (
     ConflictError,
@@ -1146,6 +1151,7 @@ class CoordinatorService:
             except Exception as e:
                 logger.warning("[PRD-108] Failed to seed doc %s into field: %r", doc_id, e, exc_info=True)
 
+    @ingests_only_when_opted_in  # F305: delivered always, filed as a document only on the owner's opt-in
     async def _save_mission_output_as_document(
         self,
         db: Session,
@@ -2124,6 +2130,7 @@ class CoordinatorService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    @with_the_missions_earlier_steps  # F286 (night 8): a summary step gets its mission's approved steps
     def _collect_upstream_outputs(
         db: Session,
         task: OrchestrationTask,
@@ -2294,6 +2301,7 @@ class CoordinatorService:
 
         return criteria
 
+    @a_summary_keeps_its_approved_inputs  # F286 (night 8): a summary's redo gets the approved steps again
     async def _prepare_task(
         self,
         db: Session,
@@ -3755,14 +3763,12 @@ class CoordinatorService:
     ) -> OrchestrationRun:
         """Resume a paused mission.
 
-        F153: a run at 80% or more of its budget resumes with the budget raised
-        to twice what it has spent, in the dollars the dispatcher pauses on
-        (MissionDispatcher._cost_used_usd), so it does not pause again at once:
-        an explicit cost_ceiling is raised in dollars, a plan's token estimate
-        to the tokens the flat rate prices at that figure.
+        F153: a run at 80% or more of the ceiling its owner set (cost_ceiling)
+        resumes with the ceiling raised to twice what it has spent, in the dollars
+        the dispatcher pauses on (MissionDispatcher._cost_used_usd), so it does not
+        pause again at once. F285 (night 8): the plan's token estimate is no
+        budget, so a mission without a ceiling resumes with none.
         """
-        from modules.policy.pricing import flat_rate_tokens
-
         run = self._get_run(db, run_id)
         refuse_resume_while_waiting(db, run)  # F242: a step waiting for the owner's check is let go by its Approve
 
@@ -3772,11 +3778,7 @@ class CoordinatorService:
         ceiling = MissionDispatcher._budget_ceiling_usd(run)
         extended = ceiling > 0 and spent >= ceiling * 0.8
         if extended:
-            config = run.config or {}
-            if isinstance(config.get("cost_ceiling"), (int, float)) and config["cost_ceiling"] > 0:
-                run.config = {**config, "cost_ceiling": round(2.0 * spent, 2)}
-            else:
-                run.token_budget_estimate = flat_rate_tokens(2.0 * spent)
+            run.config = {**(run.config or {}), "cost_ceiling": round(2.0 * spent, 2)}
             logger.info(
                 "Mission %s: budget $%.2f → $%.2f on resume ($%.2f spent)",
                 run_id, ceiling, MissionDispatcher._budget_ceiling_usd(run), spent,
@@ -3860,6 +3862,7 @@ class CoordinatorService:
     # Lifecycle: replan_mission (PRD-82B US-005)
     # ------------------------------------------------------------------
 
+    @replaces_what_the_failure_skipped  # F283 (night 8): what the failure skipped is replaced too
     async def replan_mission(
         self,
         db: Session,
@@ -4662,6 +4665,7 @@ class CoordinatorService:
 
         return archived_count
 
+    @says_what_it_completed  # F268 (night 8): the completed mission says what ran and what was replaced
     async def _complete_verified_run(
         self,
         db: Session,

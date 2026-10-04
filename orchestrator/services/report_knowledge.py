@@ -173,7 +173,13 @@ def ticket_rounds(db: Any, workspace_id: Any, task: Any) -> Dict[str, List[str]]
 
 async def file_ticket_report(db: Any, workspace_id: Any, task: Any) -> Optional[int]:
     """The ticket is done, approved or finished with review off: its current round's
-    newest report is filed, and every other round of it that was filed is removed."""
+    newest report is filed, and every other round of it that was filed is removed.
+    F305 (night 9): only in a workspace that opted in to filing; otherwise nothing is
+    filed and a round filed before is left as it is."""
+    from services.knowledge_flywheel import flywheel_enabled
+
+    if not flywheel_enabled(db, workspace_id):
+        return None
     rounds = ticket_rounds(db, workspace_id, task)
     keep = rounds["current"][:1]
     filed = filed_documents(db, workspace_id, rounds["current"] + rounds["earlier"])

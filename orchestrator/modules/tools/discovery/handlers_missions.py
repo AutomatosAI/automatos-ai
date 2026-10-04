@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.mission_asks import asks_as_the_owner_says
 from modules.tools.discovery.card_numbers import says_the_mission_cards
 from modules.tools.discovery.mission_refs import DECIDES, READS, RUNS, takes_card_numbers
+from modules.tools.discovery.mission_step_verdicts import APPROVES, REJECTS, decided_on_the_step, with_the_check_said
+from modules.tools.discovery.plan_edits import reads_the_plan_edits
 from services.chat_messenger import strip_caller_narration_origin
 
 logger = logging.getLogger(__name__)
@@ -464,12 +466,15 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
                 "request. The owner approves it from the mission card, or by saying so in chat."
             ),
         }
+    decided = await decided_on_the_step(db, workspace_id, run, params, APPROVES)  # F308: a started one's step
+    if decided is not None:
+        return decided
     from services.coordinator_service import CoordinatorService
 
     actor_id = _actor(params)
     try:
         updated = CoordinatorService().approve_plan(db, run.id, actor_id)
-        result = _ok(updated, "approved → running")
+        result = with_the_check_said(run, _ok(updated, "approved → running"))  # F308: whether steps wait
         # F170: the reply says what it waits for, when another mission's step holds it.
         from services.mission_wait import wait_note_of
 
@@ -492,6 +497,9 @@ async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
+    decided = await decided_on_the_step(db, workspace_id, run, params, REJECTS)  # F308: never cancels a started one
+    if decided is not None:
+        return decided
     reason = params.get("reason") or "Rejected by user"
     from services.coordinator_service import CoordinatorService
 
@@ -615,6 +623,7 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 @takes_card_numbers(RUNS)  # F241 (7b): a card's number is its mission
 @says_the_mission_cards  # F241: each mission's card, by number
+@reads_the_plan_edits  # F261/F282 (8): edits land on real steps; "each step waits" is check_each_step
 async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
     mission (e.g. reassign a task's agent) so they persist into execution."""

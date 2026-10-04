@@ -14,6 +14,17 @@ _MISSION_ID_PARAM = {
 # F241 (night 7b): "Approve #0177" reached platform_approve_mission for a task card.
 NOT_FOR_A_CARD = (" A card in Review is approved or sent back on the board with "
                   "platform_update_task_status, never here.")
+# F308 (night 9): "approve step 1" re-approved #0027's plan and left the step waiting;
+# "send step 1 back" cancelled #0035. Once a mission has started, these decide its step.
+_STEP_PARAM = {"step": {"type": "string", "description": (
+    "Once the mission has started: the step, by its card's number (#0027.1) or its place in the plan (1). "
+    "Left out, the one step waiting for the owner's check.")}}
+STARTED_APPROVE = (" Once the mission has started, this approves its step that waits for the owner's check, "
+                   "exactly as the board's Approve on that step's card: the owner's note stays on the card and the "
+                   "mission carries on.")
+STARTED_REJECT = (" Once the mission has started, this never cancels it: the step (step, or the one waiting for the "
+                  "owner's check) is sent back with the owner's words, as the board's Reject on its card, and the "
+                  "mission redoes it, opening again if it had finished.")
 
 
 def register_mission_actions(registry: ActionRegistry) -> None:
@@ -91,7 +102,8 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         name="platform_approve_mission",
         description=(
             "Approve an awaiting-approval mission plan and start execution. Use when "
-            "the user approves the plan you proposed (or says 'go ahead', 'run it')." + NOT_FOR_A_CARD
+            "the user approves the plan you proposed (or says 'go ahead', 'run it')." + STARTED_APPROVE
+            + NOT_FOR_A_CARD
         ),
         category="missions",
         parameters={
@@ -102,6 +114,9 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
                 # agent_overrides believed it had pinned staff when it had not.
                 # Plan edits go through platform_update_mission_plan.
                 **_MISSION_ID_PARAM,
+                **_STEP_PARAM,
+                "note": {"type": "string", "description": (
+                    "For a step: the owner's own words to keep on its card, word for word.")},
             },
             "required": ["mission_id"],
         },
@@ -109,20 +124,24 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "approve"],
         examples=["approve that mission", "go ahead and run the plan", "yes, start the mission"],
+        accepts=("reason",),  # F308 (9): a step's approval keeps the owner's words sent as reason too
     ))
 
     registry.register(ActionDefinition(
         name="platform_reject_mission",
         description=("Reject an awaiting-approval mission plan: it never runs and is closed as cancelled, "
-                     "with the reason. Use when the user declines the proposed plan." + NOT_FOR_A_CARD),
+                     "with the reason. Use when the user declines the proposed plan." + STARTED_REJECT
+                     + NOT_FOR_A_CARD),
         category="missions",
         parameters={
             "type": "object",
             "properties": {
                 **_MISSION_ID_PARAM,
+                **_STEP_PARAM,
                 "reason": {"type": "string", "description": (
-                    "Why the owner turned the plan down, in the owner's own words: quote what they "
-                    "asked to change, do not summarise it. The next plan for this conversation reads it.")},
+                    "Why the owner turned the plan down, or what the step must fix, in the owner's own words: "
+                    "quote what they asked to change, do not summarise it. The next plan for this conversation "
+                    "reads it; a step's redo works from it.")},
             },
             "required": ["mission_id"],
         },
@@ -130,6 +149,7 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "reject"],
         examples=["reject that plan", "no, don't run that mission", "cancel the proposed plan"],
+        accepts=("note",),  # F308 (9): a step sent back keeps the owner's words sent as note too
     ))
 
 
@@ -195,43 +215,67 @@ def _register_replan_mission(registry: ActionRegistry) -> None:
     ))
 
 
+# F282 (night 8): Auto said "switch on the check for each step" in keys the plan never
+# read (plan_updates, approval gates on each step); check_each_step is the setting.
+_PLAN_MISPLACED = {
+    key: ("the plan takes task_edits; to make every step wait in Review for the owner's check, send "
+          "check_each_step: true")
+    for key in ("plan_updates", "config", "settings", "approval_mode", "wait_for_me")
+}
+
+
+def _update_mission_plan_parameters() -> dict:
+    """platform_update_mission_plan's parameters: the step edits, and the check of each step (F282)."""
+    return {
+        "type": "object",
+        "properties": {
+            **_MISSION_ID_PARAM,
+            "task_edits": {
+                "type": "array",
+                "description": (
+                    "Per-step edits. Name each step by its card's number as the board shows it "
+                    "(#0352.2), by sequence_number, or by task_id; set any of agent_id, agent_role, "
+                    "title, description. To have a specific agent run the step, give its agent_id (or "
+                    "its name in agent_role when only one active agent has it)."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "temp_id": {"type": "string"},
+                        "sequence_number": {"type": "integer"},
+                        "agent_id": {"type": "integer"},
+                        "agent_role": {"type": "string"},
+                        "title": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                },
+            },
+            "check_each_step": {
+                "type": "boolean",
+                "description": ("True makes every step of the mission wait in Review for the owner's check "
+                                "before the next one starts. Works until the mission finishes; task_edits "
+                                "can be left out."),
+            },
+        },
+        "required": ["mission_id"],
+    }
+
+
 def _register_update_mission_plan(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_mission_plan",
         description=(
             "Edit an awaiting-approval mission's plan before it runs — reassign a "
-            "task's agent or revise a task title/description. Use when the user "
-            "tweaks the proposed plan ('have the researcher do step 2 instead')."
+            "task's agent or revise a task title/description — or make every step "
+            "wait for the owner's check (check_each_step). Use when the user tweaks "
+            "the proposed plan ('have the researcher do step 2 instead'). Once the mission "
+            "has started, a step that hasn't started yet takes a new title or description; a "
+            "step that has started is redone with the owner's words through platform_reject_mission."
         ),
         category="missions",
-        parameters={
-            "type": "object",
-            "properties": {
-                **_MISSION_ID_PARAM,
-                "task_edits": {
-                    "type": "array",
-                    "description": (
-                        "Per-task edits. Identify each task by task_id, temp_id, or "
-                        "sequence_number; set any of agent_id, agent_role, title, description. "
-                        "To have a specific agent run the task, give its agent_id (or its "
-                        "name when only one active agent has it)."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "task_id": {"type": "string"},
-                            "temp_id": {"type": "string"},
-                            "sequence_number": {"type": "integer"},
-                            "agent_id": {"type": "integer"},
-                            "agent_role": {"type": "string"},
-                            "title": {"type": "string"},
-                            "description": {"type": "string"},
-                        },
-                    },
-                },
-            },
-            "required": ["mission_id", "task_edits"],
-        },
+        parameters=_update_mission_plan_parameters(),
+        misplaced=_PLAN_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "plan", "edit"],
@@ -239,5 +283,6 @@ def _register_update_mission_plan(registry: ActionRegistry) -> None:
             "have the researcher handle step 2 instead",
             "reassign that first task to the writer agent",
             "rename task 3 to 'draft the summary'",
+            "make every step of this mission wait for my check",
         ],
     ))

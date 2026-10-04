@@ -20,6 +20,15 @@ F155: on a public widget turn the section names only what the widget key's
 scopes may read: the documents with documents:read (the key's team's and the
 shared ones, never the reports the agents saved), the databases with
 data:query; nothing without either.
+
+F302 (night 9): the sentence named smart_query_database, which the chat surface
+held only on a turn whose words looked like a data question; on the others Auto
+had no data tool, asked the owner for "the exact names of the fields", or tried
+a store connection the workspace does not have. Auto now holds
+platform_query_data first-class on every turn in a workspace with a database
+(modules/tools/data_routes.py), so the sentence names it, says what belongs to
+it (the business's own records, not only "numbers") and that the tool returns
+the database's tables and columns, so the owner is never asked for them.
 """
 from __future__ import annotations
 
@@ -37,6 +46,10 @@ _ASK_DOCUMENTS = ("For a question about the business, a document, or how the pro
                   "search them with search_knowledge first and name the file you used.")
 _ASK_DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, "
                               "search them with search_knowledge first and name the file you used.")
+# F302 (night 9): what the database answers, and that its tables are the tool's to read.
+_ASK_DATA = ("For the business's own records (counts, totals, stock, orders, members, sales, rankings), "
+             "call platform_query_data with the owner's question in their words: it returns the database's "
+             "tables and columns with its answer, so never ask the owner for table, column or schema names.")
 # F181 (night 6): #1115 totalled a club's orders from the first pages of the
 # export (47.06 kg; the file says about 100.3). A spreadsheet is counted in code.
 _COUNT_SPREADSHEETS = ("A spreadsheet (CSV or Excel) is counted or totalled with code, never searched: "
@@ -57,18 +70,16 @@ def connected_databases(db: Any, workspace_id: Any) -> List[str]:
 
 
 def databases_sentence(names: List[str]) -> str:
-    """Two sentences: what is connected, and how to ask it for a number. The tool
-    is smart_query_database, the one Auto holds first-class: the refresh-3 retest
-    named platform_query_data, reachable only through platform_execute, and Auto
-    called neither (0 of 7) while the graph action got params={} (F027)."""
+    """What is connected, and how to ask it. The tool is platform_query_data, which
+    Auto holds first-class beside a connected database (F302): the refresh-3 retest
+    found it reachable only through platform_execute, where flash sent params={}
+    (F027), and night 9 found smart_query_database on the surface only some turns."""
     if len(names) == 1:
-        return (f"This workspace has 1 connected database ({names[0]}). For numbers about the business "
-                "(counts, totals, rankings, trends), call smart_query_database with the question; with one "
-                "database no name is needed.")
+        return (f"This workspace has 1 connected database ({names[0]}). {_ASK_DATA} With one database "
+                "no name is needed.")
     listed = f" ({', '.join(names)})" if len(names) <= DATABASES_SHOWN else ""
-    return (f"This workspace has {len(names)} connected databases{listed}. For numbers about the business "
-            "(counts, totals, rankings, trends), call smart_query_database with the question and the "
-            "database's name (it lists them when none is named).")
+    return (f"This workspace has {len(names)} connected databases{listed}. {_ASK_DATA} Name the "
+            "database (database_id); it lists them when none is named.")
 
 
 def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
@@ -153,8 +164,9 @@ class DocumentsInventorySection(BaseSection):
     name: str = "documents_inventory"
     priority: int = 4
     # The budget truncates past this, from the end: the database sentences come last,
-    # so the cap holds ten long titles and five database names whole.
-    max_tokens: Optional[int] = 320
+    # so the cap holds ten long titles, the spreadsheet rule and five database names whole
+    # (F302 measured 350 tokens with all three; the longer data sentence needed the room).
+    max_tokens: Optional[int] = 380
 
     async def render(self, ctx: SectionContext) -> str:
         if ctx.db_session is None or not ctx.workspace_id:

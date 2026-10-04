@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, Iterable, List
 from uuid import UUID
 
@@ -32,6 +33,9 @@ Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 Numbering = Callable[[Session, Any, Dict[str, Any]], Dict[str, Any]]
 
 MISSION_CARD, STEP_CARD, RUN_CARD = "orchestration", "orchestration_task", "recipe"
+# F288 (night 8): Auto told the owner "Track with execution_id: exec-…", not the card's number.
+_EXECUTION_ID_LINE = re.compile(r"\s*Track with execution_id: \S+$")
+RUN_ON_CARD = " It runs on card {number}: give the owner that number, as the board shows it, not the execution_id."
 
 
 def says_the_mission_cards(handler: Handler) -> Handler:
@@ -112,6 +116,8 @@ def _run_numbers(db: Session, workspace_id: Any, result: Dict[str, Any], *, make
         out["execution"] = _numbered(execution, numbers, "execution_id")
     if listed:
         out["executions"] = [_numbered(e, numbers, "execution_id") for e in listed]
+    if make and out.get("number") and isinstance(out.get("message"), str):
+        out["message"] = _EXECUTION_ID_LINE.sub("", out["message"]) + RUN_ON_CARD.format(number=out["number"])
     return out
 
 

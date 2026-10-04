@@ -16,6 +16,13 @@ Source: PRD-103 Section 4 (deterministic checks)
 F248 (night 7): before any of them, an output that still holds a template's
 placeholders ("[Number]", "[Your Name/Company Name]") fails, whatever the step's
 criteria: #0126.3 was marked verified with both in it.
+
+F283 (night 8): unless the owner asked for them: #0433, "a reusable welcome template
+with gaps", failed for "[Owner first name]" (``what_was_asked``).
+
+F286 (night 8): before the placeholders, an answer that is not the work fails: a note
+the agent left itself, or an answer that says it could not do the work (#0400
+"completed" with "This information is still missing.", ``non_answers``).
 """
 
 import functools
@@ -63,17 +70,36 @@ CheckHandler = Callable[[str, Any, Dict[str, Any]], Optional[str]]
 
 def _placeholders_first(check: Callable[..., "DeterministicResult"]) -> Callable[..., "DeterministicResult"]:
     """F248: an output with a template's placeholders still in it fails before the
-    step's own criteria run, criteria or none: work with slots left in is not done."""
+    step's own criteria run, criteria or none: work with slots left in is not done.
+    F283: a placeholder the step's brief or its mission's goal asked for is not a
+    slot left in (``what_was_asked.slots_not_asked_for``)."""
     @functools.wraps(check)
     def wrapped(self: "DeterministicChecker", output: str,
                 criteria: Optional[List[Dict[str, Any]]]) -> "DeterministicResult":
         from core.services.placeholders import UNFINISHED, template_placeholders
+        from modules.coordination.what_was_asked import slots_not_asked_for
 
-        slots = template_placeholders(output)
+        slots = slots_not_asked_for(template_placeholders(output))
         if not slots:
             return check(self, output, criteria)
         failure = CheckFailure(check_type="placeholders", description=UNFINISHED + ", ".join(slots[:6]) + ".",
                                must_pass=True)
+        return DeterministicResult(passed=False, failures=[failure], short_circuited=True)
+    return wrapped
+
+
+def _answers_first(check: Callable[..., "DeterministicResult"]) -> Callable[..., "DeterministicResult"]:
+    """F286: an answer that is not the work (``non_answers.not_the_work``) fails before
+    anything else, quoting the sentence that says so."""
+    @functools.wraps(check)
+    def wrapped(self: "DeterministicChecker", output: str,
+                criteria: Optional[List[Dict[str, Any]]]) -> "DeterministicResult":
+        from modules.coordination.non_answers import not_the_work
+
+        why = not_the_work(output)
+        if why is None:
+            return check(self, output, criteria)
+        failure = CheckFailure(check_type="non_answer", description=why, must_pass=True)
         return DeterministicResult(passed=False, failures=[failure], short_circuited=True)
     return wrapped
 
@@ -103,6 +129,7 @@ class DeterministicChecker:
             "word_count_range": self._check_word_count_range,
         }
 
+    @_answers_first  # F286: an answer that is not the work fails first
     @_placeholders_first  # F248: slots left in fail first
     def check(
         self,

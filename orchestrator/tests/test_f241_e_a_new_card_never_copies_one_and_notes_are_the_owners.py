@@ -183,11 +183,13 @@ NEW_BRIEF = ("About 80 words, plain, first person plural: fresh coffee gives off
              "shots steadier. Mention Sam our head roaster. No line before the paragraph, no quote marks.")
 
 
-def test_a_new_brief_with_send_back_goes_back_to_its_agent_on_the_same_card(in_review, notes_in_this_session):
+def test_a_new_brief_goes_back_to_its_agent_on_the_same_card(in_review, notes_in_this_session):
+    """Night 8 (F279): a new brief on a card its agent worked on is the board's Re-brief,
+    without send_back (send_back is the board's Reject, which keeps the brief)."""
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
-        "task_id": in_review.number, "description": NEW_BRIEF, "send_back": True, "_user_id": "user_owner"}))
+        "task_id": in_review.number, "description": NEW_BRIEF, "_user_id": "user_owner"}))
 
-    assert out["success"] is True and out["updated"]["send_back"] is True
+    assert out["success"] is True and out["updated"]["back_to_its_agent"] is True
     card = in_review.card
     in_review.db.refresh(card)
     assert card.status == "assigned" and card.description == NEW_BRIEF and card.raw_prompt == NEW_BRIEF
@@ -197,10 +199,10 @@ def test_a_new_brief_with_send_back_goes_back_to_its_agent_on_the_same_card(in_r
     assert any("Gave this a new brief and sent it back" in n["note"] for n in _notes(in_review))
 
 
-def test_send_back_without_a_brief_says_where_the_brief_goes(in_review):
+def test_send_back_without_the_owners_words_says_where_they_go(in_review):
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
         "task_id": in_review.number, "send_back": True}))
-    assert out["success"] is False and "the brief goes in description" in out["error"]
+    assert out["success"] is False and "Put their words in note" in out["error"]
     in_review.db.refresh(in_review.card)
     assert in_review.card.status == "review"
 
@@ -209,26 +211,37 @@ def test_a_running_card_is_not_rebriefed_under_its_run(in_review):
     in_review.card.status = "in_progress"
     in_review.db.flush()
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
-        "task_id": in_review.number, "description": NEW_BRIEF, "send_back": True}))
+        "task_id": in_review.number, "description": NEW_BRIEF}))
     assert out["success"] is False and "re-brief it once it stops" in out["error"]
 
 
-def test_a_plain_edit_of_the_brief_loses_its_status_order_too(in_review):
-    asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, {
-        "task_id": in_review.number, "description": NIGHT_7B_BRIEF}))
-    in_review.db.refresh(in_review.card)
-    assert "platform_update_task_status" not in in_review.card.description
-    assert in_review.card.status == "review"                           # an edit never moves the card
+def test_a_plain_edit_of_the_brief_loses_its_status_order_too(shop):
+    """A card nobody has worked on yet takes a plain edit of its brief (F279: a worked
+    card's new brief is the board's Re-brief)."""
+    asyncio.run(shop.handlers.update_board_task(shop.db, shop.ws, {
+        "task_id": shop.number, "description": NIGHT_7B_BRIEF}))
+    shop.db.refresh(shop.card)
+    assert "platform_update_task_status" not in shop.card.description
+    assert shop.card.status == "inbox"                                 # an edit never moves the card
 
 
-def test_a_status_sent_to_the_edit_tool_is_told_about_send_back():
+def test_a_status_sent_with_a_new_brief_is_told_the_re_brief_sends_it_back(in_review):
+    """Night 7b's call {"status": "pending", "brief": …} for "Update #0199 with that brief and
+    send it back". F309 (night 9): the edit tool takes a status now (it moves the card with
+    its note: #1866's approval note was lost when the status was refused here), so the
+    params are not refused; a new brief on a worked card says the Re-brief sends it back
+    itself, and nothing changes."""
     from modules.tools.discovery import get_action_registry
+    from modules.tools.discovery.ticket_edit_moves import REBRIEF_MOVES_IT
     from modules.tools.execution.unified_executor import undeclared_params_refusal
 
+    params = {"task_id": in_review.number, "status": "pending", "description": NEW_BRIEF}
     action = get_action_registry().get("platform_update_task")
-    refused = undeclared_params_refusal("platform_update_task", action,
-                                        {"task_id": 199, "status": "pending", "description": NEW_BRIEF}, "t")
-    assert "send_back: true" in refused
+    assert undeclared_params_refusal("platform_update_task", action, params, "t") is None
+    out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, params))
+    assert out["success"] is False and out["error"] == REBRIEF_MOVES_IT
+    in_review.db.refresh(in_review.card)
+    assert (in_review.card.status, in_review.card.description) == ("review", "Write the blog intro on resting espresso.")
 
 
 def _cancel_with(note_written):

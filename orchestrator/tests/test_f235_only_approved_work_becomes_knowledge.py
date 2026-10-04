@@ -98,6 +98,7 @@ def test_a_report_for_no_ticket_waits_for_the_owner(db_session, seed_workspace, 
 def test_the_flywheel_never_files_a_report_that_waits(db_session, seed_workspace, reports, monkeypatch):
     from services import knowledge_flywheel as kf
 
+    monkeypatch.setattr(kf, "flywheel_enabled", lambda *args: True)   # F305: filing is the workspace's opt-in
     ws = UUID(seed_workspace())
     task = _task(db_session, ws, "review")
     report_id = reports(ws, tasks=[task.id])
@@ -127,6 +128,7 @@ def filing(monkeypatch):
         return 77
 
     monkeypatch.setattr(rk, "file_report", _file)
+    monkeypatch.setattr("services.knowledge_flywheel.flywheel_enabled", lambda *args: True)   # F305: opted in
     monkeypatch.setattr(rk, "remove_documents", lambda db, workspace_id, ids: removed.extend(ids) or list(ids))
     return filed, removed
 

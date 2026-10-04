@@ -12,6 +12,10 @@ a runtime (CLI session) task at nothing, its tokens kept on the run for
 visibility. Both of the dispatcher's budget pauses put the reason and the
 numbers on the run (stop_reason budget_exhausted) and on its board card;
 resuming clears them, raises the budget to twice the spend, and says so.
+
+F285 (night 8): the plan's token estimate is no budget any more, so these
+missions carry the owner's ceiling: the dollars 175,000 tokens cost at the flat
+rate.
 """
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ import pytest
 from sqlalchemy import text
 
 from core.models.orchestration_enums import RunState, TaskState
-from modules.policy.pricing import flat_rate_tokens, price_total_tokens_usd
+from modules.policy.pricing import price_total_tokens_usd
 
 BUDGET = 175_000
 NEWSROOM_TOKENS = 730_153
@@ -36,13 +40,15 @@ def _ceiling():
 
 @pytest.fixture
 def mission(db_session, seed_workspace):
-    """Run 3805978e's shape: running on a 175,000-token plan, with its card."""
+    """Run 3805978e's shape: running on a 175,000-token plan, with its card and
+    the owner's ceiling (F285: the plan's estimate alone pauses nothing)."""
     from core.models.core import BoardTask
     from core.models.orchestration import OrchestrationRun
 
     ws = UUID(seed_workspace())
     run = OrchestrationRun(workspace_id=ws, goal="Draft the offer letter", state=RunState.RUNNING.value,
-                           created_by="user_test", token_budget_estimate=BUDGET, tokens_used=0, config={})
+                           created_by="user_test", token_budget_estimate=BUDGET, tokens_used=0,
+                           config={"cost_ceiling": _ceiling()})
     db_session.add(run)
     db_session.flush()
     card = BoardTask(workspace_id=ws, title="Mission: Draft the offer letter", status="in_progress",
@@ -109,9 +115,8 @@ def test_a_budget_pause_names_the_spend_on_the_run_and_its_card(mission):
     _book(mission, _ceiling() + 1.25, 60_000)
     _record(mission, NEWSROOM_TOKENS, runtime="cli")
     assert [result.skipped_reason for result in _dispatch(mission)] == ["budget_exceeded"]
-    detail = (f"Paused: spent ${_ceiling() + 1.25:,.2f} of the ${_ceiling():,.2f} budget (the plan's "
-              f"175,000-token estimate); {NEWSROOM_TOKENS:,} tokens ran in Claude Code sessions at no cost "
-              "— raise the budget or resume")
+    detail = (f"Paused: spent ${_ceiling() + 1.25:,.2f} of the ${_ceiling():,.2f} budget; "
+              f"{NEWSROOM_TOKENS:,} tokens ran in Claude Code sessions at no cost — raise the budget or resume")
     assert (mission.run.state, mission.run.stop_reason, mission.run.stop_detail) == (
         "paused", "budget_exhausted", detail)
     assert (mission.card.status, mission.card.blocked_reason) == ("blocked", detail)
@@ -130,10 +135,10 @@ def test_resuming_clears_the_pause_and_raises_the_budget_to_twice_the_spend(miss
     _book(mission, spent, 60_000)
     _dispatch(mission)
     reply = asyncio.run(resume_mission(mission.db, mission.ws, {"mission_id": str(mission.run.id)}))
-    raised = price_total_tokens_usd(None, None, flat_rate_tokens(2 * spent))
+    raised = round(2 * spent, 2)
     assert reply["message"].endswith(
         f"Its budget was raised from ${_ceiling():,.2f} to ${raised:,.2f} (${spent:,.2f} spent so far).")
-    assert mission.run.token_budget_estimate == flat_rate_tokens(2 * spent)
+    assert (mission.run.config["cost_ceiling"], mission.run.token_budget_estimate) == (raised, BUDGET)
     assert (mission.run.state, mission.run.stop_reason, mission.run.stop_detail) == ("running", None, None)
     assert (mission.card.status, mission.card.blocked_reason) == ("in_progress", None)
     _dispatch(mission)
@@ -154,7 +159,7 @@ def test_a_dollar_ceiling_pause_and_resume_stay_in_dollars(mission):
 def test_no_config_key_switches_the_budget_pause_off(mission):
     """budget_pause_disabled was read by the budget gate and written by nothing:
     any creator could turn the pause off. It is inert now."""
-    mission.run.config = {"budget_pause_disabled": True}
+    mission.run.config = {**mission.run.config, "budget_pause_disabled": True}
     _book(mission, _ceiling() * 3, 30_000)
     _dispatch(mission)
     assert (mission.run.state, mission.run.stop_reason) == ("paused", "budget_exhausted")

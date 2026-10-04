@@ -14,51 +14,23 @@ still names one is logged.
 """
 from __future__ import annotations
 
-import logging
 import re
-from functools import lru_cache
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+from core.llm.owner_words_stream import offered_names
 
 _SNAKE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
-PLATFORM_PREFIX = "platform_"
 OWNER_WORDS_NUDGE = (
     "Your reply names {names}: the platform's own tool and parameter names, which the owner never sees and "
     "cannot use. Say what went wrong and what they can do, in their words, without those names."
 )
 
 
-def _schema_names(name: str, parameters: Any) -> Set[str]:
-    names = {name, name[len(PLATFORM_PREFIX):] if name.startswith(PLATFORM_PREFIX) else name}
-    properties = (parameters or {}).get("properties") if isinstance(parameters, dict) else None
-    names.update(p for p in (properties or {}) if "_" in p)
-    return {n for n in names if "_" in n}
-
-
-@lru_cache(maxsize=1)
-def _action_names() -> FrozenSet[str]:
-    try:
-        from modules.tools.discovery.action_registry import get_action_registry
-
-        names: Set[str] = set()
-        for action in get_action_registry().get_all():
-            names |= _schema_names(action.name, action.parameters)
-        return frozenset(names)
-    except Exception:  # noqa: BLE001 — without the registry, the offered tools still count
-        logger.debug("[F205] action registry unreadable", exc_info=True)
-        return frozenset()
-
-
 def internal_vocabulary(tools: Optional[Iterable[Dict[str, Any]]]) -> Set[str]:
     """The platform's own names: the offered tools, every registered action,
-    and their snake_case parameters."""
-    names: Set[str] = set(_action_names())
-    for tool in tools or ():
-        function = (tool or {}).get("function") if isinstance(tool, dict) else None
-        if function and function.get("name"):
-            names |= _schema_names(function["name"], function.get("parameters"))
-    return names
+    and their snake_case parameters (core.llm.owner_words_stream, which also
+    says them in plain words as Auto's reply streams, F264)."""
+    return offered_names(tools)
 
 
 def internal_names(answer: object, vocabulary: Set[str], owner_text: object = "") -> List[str]:

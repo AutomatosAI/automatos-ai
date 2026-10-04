@@ -38,6 +38,7 @@ from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
+from .turn_account import said_or_accounted
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,6 @@ class ToolLoopExecutor:
         tracker: Optional[ToolExecutionTracker] = None,
         promises: Optional[bool] = None,
     ) -> None:
-        self._llm = llm_callback
         self._tool = tool_callback
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
@@ -200,6 +200,7 @@ class ToolLoopExecutor:
         # F187: work said to be under way is a claim in Auto's own chat replies
         # (an agent's draft promises in its writer's voice). None: the turn's lane decides.
         self.promises = promises
+        self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
         # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
         self._stuck = StuckDetector()
 
@@ -558,7 +559,6 @@ class ToolLoopExecutor:
         messages.append({"role": "system", "content": _LENGTH_RECOVERY_MSG})
         return await self._llm(messages, tools)
 
-
     async def _recover_narrated_actions(
         self,
         current: LLMResponse,
@@ -680,14 +680,6 @@ def looks_like_narrated_action(text: str) -> bool:
     cues = len(_NARRATION_CUES.findall(text))
     claims = len(_NARRATION_CLAIMS.findall(text))
     return cues >= 2 or (cues >= 1 and claims >= 1)
-
-
-# F108/F187: what a reply says was done, and the actions that would have done it,
-# are modules/tools/execution/action_claims.py.
-CLAIMED_ACTION_NOTICE = (
-    "This reply says something was {claim}, but no action that does that ran in this reply — "
-    "it has not happened. Tell me to do it and I will make the call."
-)
 
 
 # F196: the actions whose argument IS the deliverable (a long report, a document, a post).

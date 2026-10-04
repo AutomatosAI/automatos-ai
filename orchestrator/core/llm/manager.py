@@ -13,11 +13,13 @@ from typing import Tuple, Dict, Any, List, Optional
 from functools import lru_cache
 
 from config import config
+from core.llm.owner_words_stream import in_owner_words
 
 from .clients.base import LLMProvider, LLMConfig
 from .clients.openai_client import OpenAIProvider
 from .clients.anthropic_client import AnthropicProvider
 from .clients.google_client import GoogleProvider
+from .turn_order import reprompts_in_the_users_turn
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider
@@ -649,6 +651,7 @@ class LLMManager:
 
     # No fallback helpers — errors surface directly to the user.
 
+    @reprompts_in_the_users_turn  # F295 (8): a re-prompt after the model's reply is the user's turn
     async def generate_response(
         self,
         messages: List[Dict[str, str]],
@@ -660,9 +663,8 @@ class LLMManager:
         No silent fallbacks — errors surface directly to the user with
         actionable messages so they can fix their configuration.
 
-        PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning
-        deltas live when the provider can stream; providers without a
-        ``stream_response`` answer whole, exactly as before.
+        PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning deltas live when the
+        provider can stream (F264: in Auto's words); providers without ``stream_response`` answer whole.
         """
         self._ensure_provider_initialized()
         start = time.monotonic()
@@ -671,7 +673,7 @@ class LLMManager:
             with output_budget.call_budget(budget):
                 stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
                 if stream is not None:
-                    response = await stream(messages, tools, on_delta=on_delta)
+                    response = await in_owner_words(stream, messages, tools, on_delta)
                 else:
                     response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start, status=usage_status.call_status(response))  # F295

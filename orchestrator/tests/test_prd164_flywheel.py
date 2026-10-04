@@ -163,11 +163,13 @@ def _mock_db_with_workspace(settings):
 
 
 class TestFlywheelOptOut:
-    def test_enabled_by_default_when_key_absent(self):
-        assert flywheel_enabled(_mock_db_with_workspace({}), uuid.uuid4()) is True
+    # F305 (night 9, Gerard): nothing goes into the knowledge base automatically, so
+    # the flywheel is OFF unless the workspace opted in (was: on by default, Q58).
+    def test_disabled_by_default_when_key_absent(self):
+        assert flywheel_enabled(_mock_db_with_workspace({}), uuid.uuid4()) is False
 
-    def test_enabled_when_settings_none(self):
-        assert flywheel_enabled(_mock_db_with_workspace(None), uuid.uuid4()) is True
+    def test_disabled_when_settings_none(self):
+        assert flywheel_enabled(_mock_db_with_workspace(None), uuid.uuid4()) is False
 
     def test_disabled_only_on_explicit_false(self):
         db = _mock_db_with_workspace({FLYWHEEL_SETTINGS_KEY: False})
@@ -177,10 +179,10 @@ class TestFlywheelOptOut:
         db = _mock_db_with_workspace({FLYWHEEL_SETTINGS_KEY: True})
         assert flywheel_enabled(db, uuid.uuid4()) is True
 
-    def test_missing_workspace_fails_open(self):
+    def test_missing_workspace_keeps_the_default_off(self):
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = None
-        assert flywheel_enabled(db, uuid.uuid4()) is True
+        assert flywheel_enabled(db, uuid.uuid4()) is False
 
     @pytest.mark.asyncio
     async def test_opt_out_ingests_nothing_unit(self):
@@ -223,7 +225,7 @@ class TestFlywheelIngestTagging:
     async def test_routes_through_manager_tagged_agent_output(self):
         """Q58: the EXISTING ingestion manager is the path; the document is
         tagged source_type='agent_output' + carries the source tag."""
-        db = _mock_db_with_workspace({})
+        db = _mock_db_with_workspace({FLYWHEEL_SETTINGS_KEY: True})  # F305: opted in
         manager = MagicMock()
         manager.upload_document = AsyncMock(return_value=42)
         graph_service = MagicMock()
@@ -260,7 +262,7 @@ class TestFlywheelIngestTagging:
 
     @pytest.mark.asyncio
     async def test_report_pending_carries_text_and_agent(self):
-        db = _mock_db_with_workspace({})
+        db = _mock_db_with_workspace({FLYWHEEL_SETTINGS_KEY: True})  # F305: opted in
         manager = MagicMock()
         manager.upload_document = AsyncMock(return_value=77)
         graph_service = MagicMock()
@@ -294,7 +296,7 @@ class TestFlywheelIngestTagging:
     @pytest.mark.asyncio
     async def test_ingest_failure_is_fail_soft(self):
         """Producing the output must never break on a knowledge-loop error."""
-        db = _mock_db_with_workspace({})
+        db = _mock_db_with_workspace({FLYWHEEL_SETTINGS_KEY: True})  # F305: opted in
         manager = MagicMock()
         manager.upload_document = AsyncMock(side_effect=RuntimeError("boom"))
         with patch("api.documents.get_document_manager", return_value=manager):
@@ -484,7 +486,7 @@ async def test_ac1_completed_mission_synthesis_retrievable_next_turn(
     from modules.tools.discovery.handlers_documents import grep_documents
     from services.coordinator_service import CoordinatorService
 
-    ws_id = _commit_workspace(test_engine)
+    ws_id = _commit_workspace(test_engine, settings={FLYWHEEL_SETTINGS_KEY: True})  # F305: opted in
     marker = f"flywheel-marker-{uuid.uuid4().hex[:8]}"
     try:
         # Seed a completed mission with one verified task (txn-local is fine —
@@ -693,7 +695,7 @@ async def test_ac2_seeded_report_entities_appear_in_kg():
         svc, "_write_build_report", AsyncMock()
     ), patch.object(
         svc, "_prune_history", AsyncMock()
-    ):
+    ), patch("services.agent_output_scope._opted_in", return_value=True):  # F305: the workspace opted in
         meta = await svc._incremental_build(str(uuid.uuid4()), existing, pending)
 
     # The previously-dropped source type reached the report extractor…
@@ -718,7 +720,8 @@ async def test_kg_synthesis_pending_resolves_to_document_collection():
 
     svc = GraphifyService()
     collect = AsyncMock(return_value=[])
-    with patch.object(svc, "_collect_sources", collect):
+    with patch.object(svc, "_collect_sources", collect), \
+            patch("services.agent_output_scope._opted_in", return_value=True):  # F305: the workspace opted in
         await svc._incremental_build(
             "ws-1",
             nx.Graph(),

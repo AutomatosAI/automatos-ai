@@ -8,10 +8,26 @@
   says "an agent".
 - The re-brief: "Update #0199 with that brief and send it back" was refused twice
   ("platform_update_task doesn't allow me to change the brief"), and once Auto moved
-  the card with no brief at all, so it re-ran the old one. With ``send_back``, the new
-  description is the ticket's agreed brief and the ticket goes back to its agent on
-  the same card, through the board's own "Update ticket and re-queue"
-  (``api.board_task_rebrief.rebrief``): the old brief and the last draft stay on record.
+  the card with no brief at all, so it re-ran the old one.
+
+Night 8 (F279): ``send_back`` replaced the card's brief with the owner's correction,
+7 times of 7 (twice after "keep its brief as it is"): #0347's "take out the line It
+starts with To:" became the whole brief, and the agent deleted the To: line; #0402's
+redo invented a shop notice; #0376, #0380 and #0449 asked for their own draft. The
+board's Reject keeps the brief and adds the owner's words. So now, as on the board:
+
+- ``send_back`` is the board's Reject (``ticket_moves``, through
+  platform_update_task_status): the brief stays, and the owner's words (``note``, or
+  the ``description`` the call put them in) are what the redo fixes;
+- a new ``description`` on a card its agent has worked on is the board's Re-brief
+  (``api.board_task_rebrief.rebrief``): the card goes back to its agent with it, and
+  the old brief and the last draft stay on record (night 8: Auto's "update" changed
+  #0377's description, kept no old brief and re-ran nothing);
+- any other edit is the handler's.
+
+Night 9 (F309): a status on this call is the card's move (``ticket_edit_moves``), its
+note kept as platform_update_task_status keeps one: #1866's approval note was lost when
+the edit tool refused ``status`` and Auto split the call in two.
 
 ``_user_id`` is the server-injected driver (platform executor, OPERATOR_CONSENT_ACTIONS),
 never a model argument.
@@ -38,9 +54,13 @@ DESCRIPTION = "description"
 # The fields update_board_task changes besides the description.
 OTHER_FIELDS = ("title", "priority", "review_mode", "tags", NOTE)
 BY_AN_AGENT = "platform_tool"
-NEEDS_A_BRIEF = ("send_back sends the ticket back with a new brief, so the brief goes in description. Nothing was "
-                 "done. To send it back with the owner's words instead, call platform_update_task_status with "
-                 "status \"assigned\" and the words in note.")
+NEEDS_THE_WORDS = ("send_back sends the card back the way the board's Reject does: its brief stays, and the owner's "
+                   "words are what the redo fixes. Put their words in note, as they wrote them. Nothing was done.")
+BOTH_GIVEN = ("send_back keeps the card's brief, so it takes no description. Put the owner's words in note to send "
+              "it back, or send a description without send_back to give it a new brief. Nothing was done.")
+# A card its agent has worked on (or is working on): a new brief there is the board's Re-brief.
+WORKED = ("review", "done", "failed", "blocked", "in_progress")
+SEND_BACK_STATUS = "assigned"
 SENT_BACK = "Gave this a new brief and sent it back"
 REBRIEFED = ("{label} has the new brief and is back with its agent, who redoes it on this card. The old brief and "
              "the last draft are kept on the card.")
@@ -72,31 +92,81 @@ def _write_note(db: Session, workspace_id: Any, task_id: Any, note: str) -> None
     db.commit()
 
 
-def rebriefs_on_send_back(handler: Handler) -> Handler:
-    """With ``send_back``: the other fields are the handler's, then the description is
-    the ticket's new brief and the ticket goes back to its agent. Without it, the call
-    is the handler's."""
+def briefs_like_the_board(handler: Handler) -> Handler:
+    """``send_back`` is the board's Reject, and a new description on a worked card the
+    board's Re-brief (see the module). Any other edit is the handler's."""
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from modules.tools.discovery.new_card_checks import without_status_orders
+        from modules.tools.discovery.ticket_edit_moves import edited_then_moved, moves_the_card
 
-        brief, _ = without_status_orders((params or {}).get(DESCRIPTION))   # F265: the board moves the card
-        if not (params or {}).get(SEND_BACK):
-            edit = {k: v for k, v in (params or {}).items() if k != SEND_BACK}
-            return await handler(db, workspace_id, {**edit, DESCRIPTION: brief} if DESCRIPTION in edit else edit)
-        if not isinstance(brief, str) or not brief.strip():
-            return {"success": False, "error": NEEDS_A_BRIEF}
-        rest = {k: v for k, v in params.items() if k not in (SEND_BACK, DESCRIPTION)}
+        params = params or {}
+        if moves_the_card(params) and not params.get(SEND_BACK):   # F309 (9): a status here is the card's move
+            return await edited_then_moved(wrapped, db, workspace_id, params)
+        if params.get(SEND_BACK):
+            return await _sent_back(handler, db, workspace_id, params)
+        brief, _ = without_status_orders(params.get(DESCRIPTION))   # F265: the board moves the card
+        edit = {k: v for k, v in params.items() if k != SEND_BACK}
+        edit = {**edit, DESCRIPTION: brief} if DESCRIPTION in edit else edit
+        worked = (_worked_ticket(db, workspace_id, params.get("task_id"))
+                  if isinstance(brief, str) and brief.strip() else None)
+        if worked is None:
+            return await handler(db, workspace_id, edit)
+        rest = {k: v for k, v in edit.items() if k != DESCRIPTION}
         out = await handler(db, workspace_id, rest) if any(rest.get(f) for f in OTHER_FIELDS) else {}
         if out and out.get("success") is not True:
             return out
-        return _send_back(db, workspace_id, params, brief.strip(), out.get("updated") or {})
+        return _rebrief(db, workspace_id, params, brief.strip(), out.get("updated") or {})
     return wrapped
 
 
-def _send_back(db: Session, workspace_id: Any, params: Dict[str, Any], brief: str,
-               updated: Dict[str, Any]) -> Dict[str, Any]:
-    """The board's re-brief (``rebrief``) of the ticket, or the refusal that left it as it was."""
+async def _sent_back(handler: Handler, db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The board's Reject: any other fields first, then the card goes back to its agent
+    with the owner's words, through platform_update_task_status as the board's own move."""
+    from modules.tools.discovery.handlers_board_task_done import update_board_task_status
+    from services.ticket_numbers import ticket_number
+
+    note, brief = str(params.get(NOTE) or "").strip(), str(params.get(DESCRIPTION) or "").strip()
+    if note and brief:
+        return {"success": False, "error": BOTH_GIVEN}
+    if not (note or brief):
+        return {"success": False, "error": NEEDS_THE_WORDS}
+    task = _ticket(db, workspace_id, params.get("task_id"))
+    if task is None:
+        return {"success": False, "error": f"Task {params.get('task_id')} not found in this workspace"}
+    rest = {k: v for k, v in params.items() if k not in (SEND_BACK, DESCRIPTION, NOTE)}
+    out = await handler(db, workspace_id, rest) if any(rest.get(f) for f in OTHER_FIELDS) else {}
+    if out and out.get("success") is not True:
+        return out
+    move = {"task_id": ticket_number(db, task) or task.id, "status": SEND_BACK_STATUS, NOTE: note or brief}
+    if params.get("_user_id"):
+        move["_user_id"] = params["_user_id"]
+    return await update_board_task_status(db, workspace_id, move)
+
+
+def _ticket(db: Session, workspace_id: Any, task_id: Any) -> Any:
+    from core.models.core import BoardTask
+
+    said = str(task_id).strip()
+    if not said.isdigit():
+        return None
+    return db.query(BoardTask).filter(BoardTask.id == int(said), BoardTask.workspace_id == workspace_id).first()
+
+
+def _worked_ticket(db: Session, workspace_id: Any, task_id: Any) -> Any:
+    """The card when its agent has worked on it and it is not a mission's own card
+    (whose plan changes on the mission's page), else None."""
+    from api.board_tasks import MISSION_CARD_SOURCE
+
+    task = _ticket(db, workspace_id, task_id)
+    if task is None or task.status not in WORKED or task.source_type == MISSION_CARD_SOURCE:
+        return None
+    return task
+
+
+def _rebrief(db: Session, workspace_id: Any, params: Dict[str, Any], brief: str,
+             updated: Dict[str, Any]) -> Dict[str, Any]:
+    """The board's Re-brief (``rebrief``) of the ticket, or the refusal that left it as it was."""
     from fastapi import HTTPException
 
     from api.board_task_rebrief import rebrief
@@ -116,7 +186,7 @@ def _send_back(db: Session, workspace_id: Any, params: Dict[str, Any], brief: st
         return {"success": False, "error": str(refused.detail)}
     _note_it(db, workspace_id, task.id)
     return {"success": True, "task_id": task.id, "status": task.status,
-            "updated": {**updated, DESCRIPTION: "the new brief", SEND_BACK: True},
+            "updated": {**updated, DESCRIPTION: "the new brief", "back_to_its_agent": True},
             "message": REBRIEFED.format(label=ticket_label(task, capital=True))}
 
 
@@ -147,4 +217,4 @@ def _note_it(db: Session, workspace_id: Any, task_id: int) -> None:
     note_change(db, workspace_id, task_id, SENT_BACK)
 
 
-__all__ = ["BY_THE_PERSON", "notes_say_who_asked", "rebriefs_on_send_back"]
+__all__ = ["BY_THE_PERSON", "briefs_like_the_board", "notes_say_who_asked"]
