@@ -49,7 +49,8 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
     assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
                      "ask_human", "composio_execute", "search_knowledge",
                      "search_documents", "record_memory",       # night-1 95f261a1f: document + memory parity
-                     "read_step_file")                          # F161: a later step reads an earlier step's file
+                     "read_step_file",                          # F161: a later step reads an earlier step's file
+                     "query_database", "query_graph")           # F329: the owner's database and the graph
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)
