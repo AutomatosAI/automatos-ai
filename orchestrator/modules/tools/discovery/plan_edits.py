@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 CHECK_EACH_STEP = "check_each_step"
+TASK_INDEX = "task_index"
 STEP_KEYS = ("task_id", "temp_id", "sequence_number", "step", "step_number", "step_id", "id", "ref")
 WRAPPERS = ("changes", "updates", "fields", "edits")
 AGENT_KEYS = ("assigned_agent_name", "agent_name", "agent", "assignee")
@@ -51,6 +52,8 @@ def reads_the_plan_edits(handler: Handler) -> Handler:
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         params = params or {}
+        if _a_visitors_turn():   # the handler refuses a widget visitor; nothing is read for one
+            return await handler(db, workspace_id, params)
         run = _run(db, workspace_id, params.get("mission_id"))
         if run is None:
             return await handler(db, workspace_id, params)
@@ -125,6 +128,9 @@ def _named(edits: List[Dict[str, Any]], steps: List[Tuple[Any, Optional[str]]]) 
     named: List[Dict[str, Any]] = []
     unknown: List[str] = []
     for edit in edits:
+        if _by_its_index(edit):   # the plan's own form, which the coordinator reads as it is
+            named.append(dict(edit))
+            continue
         said = next((edit[key] for key in STEP_KEYS if edit.get(key) not in (None, "")), None)
         task = _step_named(said, steps)
         if task is None:
@@ -133,6 +139,19 @@ def _named(edits: List[Dict[str, Any]], steps: List[Tuple[Any, Optional[str]]]) 
         fields = {k: v for k, v in edit.items() if k in FIELDS and v not in (None, "")}
         named.append({"task_id": str(task.id), **fields})
     return named, unknown
+
+
+def _by_its_index(edit: Dict[str, Any]) -> bool:
+    """An edit naming its step by the plan's own ``task_index`` (0, 1, …), the form the
+    coordinator's update_mission_plan reads; passed on as it is."""
+    index = edit.get(TASK_INDEX)
+    return isinstance(index, int) and not isinstance(index, bool) and index >= 0
+
+
+def _a_visitors_turn() -> bool:
+    from core.security.surface import widget_turn
+
+    return widget_turn()
 
 
 def _step_named(said: Any, steps: List[Tuple[Any, Optional[str]]]) -> Any:
