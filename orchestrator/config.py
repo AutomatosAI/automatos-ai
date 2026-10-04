@@ -1963,6 +1963,13 @@ class Config:
     SOCIALS_REPEAT_OVERLAP: float = float(os.getenv("SOCIALS_REPEAT_OVERLAP", "0.75"))
     # PRD-251C US-C105: the composer is given how this many of the workspace's last posts began.
     SOCIALS_COMPOSE_RECENT_OPENINGS: int = int(os.getenv("SOCIALS_COMPOSE_RECENT_OPENINGS", "10"))
+    # PRD-251C US-C402 (C7): the leader reads published posts' numbers this often, at most this
+    # many reads a tick, each reading (1 and 7 days after a post went out) for this many days.
+    SOCIALS_RESULTS_TICK_SECONDS: int = int(os.getenv("SOCIALS_RESULTS_TICK_SECONDS", "3600"))
+    SOCIALS_RESULTS_MAX_READS_PER_TICK: int = int(os.getenv("SOCIALS_RESULTS_MAX_READS_PER_TICK", "50"))
+    SOCIALS_RESULTS_READ_WINDOW_DAYS: int = int(os.getenv("SOCIALS_RESULTS_READ_WINDOW_DAYS", "2"))
+    # PRD-251C US-C406 (C8): the workspace keeps this many voice examples, newest first.
+    SOCIALS_VOICE_EXAMPLES: int = int(os.getenv("SOCIALS_VOICE_EXAMPLES", "10"))
     # PRD-251B US-B303: the vision read of the brand kit's style references (empty model: the
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")

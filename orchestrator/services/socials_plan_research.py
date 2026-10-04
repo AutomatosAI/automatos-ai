@@ -124,8 +124,9 @@ def launch(db: Any, plan: SocialCampaign, *, triggered_by: str, now: datetime) -
     return execution_id
 
 
-def _weekly_allowed(workspace: Optional[Workspace]) -> bool:
-    """Socials on, and no trial workspace's background burn on the hosted edition (PRD-222)."""
+def background_allowed(workspace: Optional[Workspace]) -> bool:
+    """Socials on, and no trial workspace's background burn on the hosted edition (PRD-222):
+    the weekly research run, and the results' reads (PRD-251C US-C402)."""
     if workspace is None or socials_off_reason(workspace) is not None:
         return False
     if (config.AUTH_EDITION or "").strip().lower() == "local":
@@ -154,7 +155,7 @@ def launch_due(now: datetime) -> int:
     started = 0
     try:
         for plan in plan_store.active_plans(db):
-            if not research_due(plan, now) or not _weekly_allowed(db.get(Workspace, plan.workspace_id)):
+            if not research_due(plan, now) or not background_allowed(db.get(Workspace, plan.workspace_id)):
                 continue
             try:
                 launch(db, plan, triggered_by=WEEKLY_TRIGGER, now=now)

@@ -89,7 +89,7 @@ def _default_session_factory() -> Callable[[], Any]:
     return SessionLocal
 
 
-class _SessionPerCall:
+class SessionPerCall:
     """The Composio executor with its own session for each call, closed when the call
     ends: a publish talks to the platforms for minutes, and no session (or open
     transaction) is held across the whole run."""
@@ -141,7 +141,7 @@ async def run_publish(
         return None
     with tempfile.TemporaryDirectory(prefix="socials-publish-") as workdir:
         stager = Stager(Path(workdir))
-        chosen = executor or _SessionPerCall(factory)
+        chosen = executor or SessionPerCall(factory)
         rt = runtime(chosen, stager) if runtime else Runtime(executor=chosen, stager=stager)
         ended = await _run(job, work, rt, factory)
     if ended is not None:
