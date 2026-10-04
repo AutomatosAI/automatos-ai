@@ -6,12 +6,15 @@ minted at claim (``Authorization: Bearer`` / ``X-Session-Token``), which resolve
 to exactly one running ticket, its agent and its workspace — never to a user. A
 call names a tool; the ticket names the scope.
 
-Three things this route owns, and nothing else:
+Four things this route owns, and nothing else:
 
 * **auth** — the token → ``SessionContext``; a token whose ticket has ended
   resolves to nothing (401);
 * **the allowance** — a bound on how many tool calls one ticket may make, so a
   looping session cannot hammer the board (``SESSION_TOOLS_MAX_CALLS_PER_TICKET``);
+* **the slots** — F330: how many tool calls this process runs at once
+  (``SESSION_TOOL_CONCURRENCY``), so a burst of sessions queues for a slot
+  holding no pool connection, rather than for the pool;
 * **transport** — JSON in, JSON out; a notification is a 202 with no body.
 
 The protocol is ``services/session_tools_rpc.py``; execution is
@@ -24,8 +27,9 @@ never be reachable in the hosted one.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import text as sa_text
@@ -33,8 +37,10 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.database.database import get_db
+from core.database.read_release import release_if_read_only
 from services import cli_host_service as svc
 from services import session_tool_groups, session_tools, session_tools_rpc
+from services.session_tool_slots import session_tool_slot
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +75,17 @@ def bearer_token(request: Request) -> str:
 async def require_session(
     request: Request, db: Session = Depends(get_db)
 ) -> tuple[Any, session_tools.SessionContext]:
-    """The running ticket this token belongs to, as the call's whole identity."""
+    """The running ticket this token belongs to, as the call's whole identity.
+
+    F330 (night 9c): the lookups run on a worker thread, and the read-only
+    transaction they opened is ended before this returns. They used to run on
+    the event loop and keep their connection "idle in transaction" for the
+    whole request, through the tool's model calls and its own sessions: 26
+    sessions at once held the pool, and a pool wait on the loop froze the
+    process (``pool._do_get``, /health timing out).
+    """
     _require_cli_runtime()
-    resolved = svc.resolve_session_token(db, bearer_token(request))
+    resolved = await asyncio.to_thread(_identity, db, bearer_token(request))
     if resolved is None:
         # 401 with NO ``WWW-Authenticate``: that header is exactly what starts a
         # client's OAuth discovery, and this endpoint has none — the ticket's
@@ -79,16 +93,40 @@ async def require_session(
         # header, a client reports the server as failed and attempts no browser
         # flow, which is what we want the operator to see.
         raise HTTPException(status_code=401, detail="invalid or expired session token")
-    task, agent = resolved
-    ctx = session_tools.SessionContext(
-        task_id=int(task.id),
-        agent_id=int(task.assigned_agent_id) if task.assigned_agent_id else None,
-        agent_name=getattr(agent, "name", None),
-        workspace_id=task.workspace_id,
-        mission_field_id=mission_field_id(db, task),
-        offered=session_tool_groups.agent_tool_names(agent),   # #942: the agent's own groups
-    )
-    return task, ctx
+    return resolved
+
+
+def _identity(db: Session, token: str) -> Optional[Tuple[Any, session_tools.SessionContext]]:
+    """The ticket and its ``SessionContext``, read in one go and then given back
+    to the pool. Everything the context needs is read here, before the release,
+    because the release expires the loaded rows; the ticket is detached first,
+    so the counter reads its id without loading it again."""
+    try:
+        resolved = svc.resolve_session_token(db, token)
+        if resolved is None:
+            return None
+        task, agent = resolved
+        ctx = session_tools.SessionContext(
+            task_id=int(task.id),
+            agent_id=int(task.assigned_agent_id) if task.assigned_agent_id else None,
+            agent_name=getattr(agent, "name", None),
+            workspace_id=task.workspace_id,
+            mission_field_id=mission_field_id(db, task),
+            offered=session_tool_groups.agent_tool_names(agent),   # #942: the agent's own groups
+        )
+        _detach(db, task)
+        return task, ctx
+    finally:
+        release_if_read_only(db)
+
+
+def _detach(db: Session, row: Any) -> None:
+    """Keep ``row`` as loaded through the release. A test double, or a row this
+    session does not hold, stays as it is: it was never going to be expired."""
+    try:
+        db.expunge(row)
+    except Exception:  # noqa: BLE001 — not this session's row: nothing to keep
+        logger.debug("[session-tools] ticket row not detached", exc_info=True)
 
 
 def mission_field_id(db: Session, task: Any) -> Optional[str]:
@@ -224,21 +262,42 @@ async def session_tools_mcp(
                       "error": {"code": session_tools_rpc.PARSE_ERROR, "message": "invalid JSON"}})
 
     if _opens_the_session(payload):
-        _stamp_connected(db, task)
+        await asyncio.to_thread(_stamp_connected, db, task)
 
     async def _call(tool, scoped_params, context):
         # The wire scoped these (services/session_tools_rpc.py); we only run them.
-        return await session_tools.call_tool(db, tool, scoped_params, context)
+        return await _run_in_a_slot(db, tool, scoped_params, context)
 
     reply = await session_tools_rpc.handle_payload(
         payload, ctx,
         server_version=SERVER_VERSION,
         call=_call,
-        on_call=lambda _name: call_allowance(db, task),
+        # F330: the counter's UPDATE and commit wait for the pool on a worker
+        # thread, never on the event loop.
+        on_call=lambda _name: asyncio.to_thread(call_allowance, db, task),
     )
     if reply is None:
         return Response(status_code=202)
     return _json(reply)
+
+
+async def _run_in_a_slot(db: Session, tool: Any, params: Dict[str, Any],
+                         ctx: session_tools.SessionContext) -> Dict[str, Any]:
+    """F330 (night 9c): one session tool call, run inside one of
+    ``SESSION_TOOL_CONCURRENCY`` slots (``services/session_tool_slots.py``).
+
+    A burst waits for a slot holding no pool connection: the request's reads
+    were given back by ``require_session`` and the counter committed. Whatever
+    the tool only read is given back again as it ends, so a batch's next
+    message, and the reply, hold nothing either. A transaction that wrote is
+    left for the tool's own commit, exactly as before.
+    """
+    async with session_tool_slot():
+        release_if_read_only(db)
+        try:
+            return await session_tools.call_tool(db, tool, params, ctx)
+        finally:
+            release_if_read_only(db)
 
 
 def _opens_the_session(payload: Any) -> bool:
