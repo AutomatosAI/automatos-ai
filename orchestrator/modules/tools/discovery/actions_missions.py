@@ -195,43 +195,65 @@ def _register_replan_mission(registry: ActionRegistry) -> None:
     ))
 
 
+# F282 (night 8): Auto said "switch on the check for each step" in keys the plan never
+# read (plan_updates, approval gates on each step); check_each_step is the setting.
+_PLAN_MISPLACED = {
+    key: ("the plan takes task_edits; to make every step wait in Review for the owner's check, send "
+          "check_each_step: true")
+    for key in ("plan_updates", "config", "settings", "approval_mode", "wait_for_me")
+}
+
+
+def _update_mission_plan_parameters() -> dict:
+    """platform_update_mission_plan's parameters: the step edits, and the check of each step (F282)."""
+    return {
+        "type": "object",
+        "properties": {
+            **_MISSION_ID_PARAM,
+            "task_edits": {
+                "type": "array",
+                "description": (
+                    "Per-step edits. Name each step by its card's number as the board shows it "
+                    "(#0352.2), by sequence_number, or by task_id; set any of agent_id, agent_role, "
+                    "title, description. To have a specific agent run the step, give its agent_id (or "
+                    "its name in agent_role when only one active agent has it)."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "temp_id": {"type": "string"},
+                        "sequence_number": {"type": "integer"},
+                        "agent_id": {"type": "integer"},
+                        "agent_role": {"type": "string"},
+                        "title": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                },
+            },
+            "check_each_step": {
+                "type": "boolean",
+                "description": ("True makes every step of the mission wait in Review for the owner's check "
+                                "before the next one starts. Works until the mission finishes; task_edits "
+                                "can be left out."),
+            },
+        },
+        "required": ["mission_id"],
+    }
+
+
 def _register_update_mission_plan(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_mission_plan",
         description=(
             "Edit an awaiting-approval mission's plan before it runs — reassign a "
-            "task's agent or revise a task title/description. Use when the user "
-            "tweaks the proposed plan ('have the researcher do step 2 instead')."
+            "task's agent or revise a task title/description — or make every step "
+            "wait for the owner's check (check_each_step). Use when the user tweaks "
+            "the proposed plan ('have the researcher do step 2 instead')."
         ),
         category="missions",
-        parameters={
-            "type": "object",
-            "properties": {
-                **_MISSION_ID_PARAM,
-                "task_edits": {
-                    "type": "array",
-                    "description": (
-                        "Per-task edits. Identify each task by task_id, temp_id, or "
-                        "sequence_number; set any of agent_id, agent_role, title, description. "
-                        "To have a specific agent run the task, give its agent_id (or its "
-                        "name when only one active agent has it)."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "task_id": {"type": "string"},
-                            "temp_id": {"type": "string"},
-                            "sequence_number": {"type": "integer"},
-                            "agent_id": {"type": "integer"},
-                            "agent_role": {"type": "string"},
-                            "title": {"type": "string"},
-                            "description": {"type": "string"},
-                        },
-                    },
-                },
-            },
-            "required": ["mission_id", "task_edits"],
-        },
+        parameters=_update_mission_plan_parameters(),
+        misplaced=_PLAN_MISPLACED,
         permission_level="write",
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "plan", "edit"],
@@ -239,5 +261,6 @@ def _register_update_mission_plan(registry: ActionRegistry) -> None:
             "have the researcher handle step 2 instead",
             "reassign that first task to the writer agent",
             "rename task 3 to 'draft the summary'",
+            "make every step of this mission wait for my check",
         ],
     ))

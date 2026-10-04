@@ -141,6 +141,7 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
     set_skill_script_execution,
 )
 from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
+from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     list_board_tasks,
@@ -929,6 +930,7 @@ class PlatformActionExecutor:
 
         return Cleared(action_def, full_autonomy, approved_via_grant_id, human_directed)
 
+    @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
     async def execute(
         self,
         action_name: str,
