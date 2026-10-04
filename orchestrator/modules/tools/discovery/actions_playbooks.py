@@ -85,7 +85,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         name="platform_add_playbook_step",
         description=(
             "Append a new step to an existing playbook. Each step has a prompt "
-            "template and optional agent assignment. Steps execute sequentially."
+            "template and the agent that does it: a step with no agent can't run, so "
+            "the step is not added without one. Steps execute sequentially."
         ),
         category="playbooks",
         parameters={
@@ -101,7 +102,14 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
                 },
                 "agent_id": {
                     "type": "integer",
-                    "description": "ID of the agent to execute this step (optional — uses default agent if not set).",
+                    "description": ("ID of the agent that does this step (from platform_list_agents). Give it, "
+                                    "or agent_name. There is no default agent (F321)."),
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": ("The agent's name or job title as the owner said it (e.g. 'Inventory "
+                                    "Watchdog'), when agent_id isn't given. One agent must answer to it; "
+                                    "if none or several do, nothing is added and the agents are listed."),
                 },
                 "order": {
                     "type": "integer",

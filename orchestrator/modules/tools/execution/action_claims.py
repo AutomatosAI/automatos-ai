@@ -94,10 +94,11 @@ _COUNTS = ("workspace_exec", "query", "sql", "run_skill_script", "execute_code",
 # What backs each kind of change. F261 (night 8): approving a card is its move to done,
 # cancelling it its move to cancelled, sending it back its move to assigned or an edit
 # with send_back (``call_effects`` records what a move did); a mission made backs
-# "I've started a mission"; a timer is switched off by its schedule.
+# "I've started a mission"; a timer is switched off by its schedule. F321 (night 9b): a
+# timer set is no run started: chat 5247a359's schedule call backed "I've also started it
+# for you right now" for "Monday green stock", whose run never could.
 _APPROVES = ("approve", "update_task_status:done")
-_STARTS = ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "schedule_",
-           "update_task_status:in_progress")
+_STARTS = ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "update_task_status:in_progress")
 _REMOVES = ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_", "update_task_status:cancelled")
 _CHANGES = ("update_", "assign_", "set_", "configure_", "rename", "move")
 _ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan")
