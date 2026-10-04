@@ -63,7 +63,7 @@ describe('the draft', () => {
     expect(mixOf({ templates: 50, ai_images: 50 })).toBe('mixed')
   })
 
-  it('carries the repeat window: the plan's, else the server's default of 60 days (PRD-251C)', () => {
+  it("carries the repeat window: the plan's, else the server's default of 60 days (PRD-251C)", () => {
     expect(inputFromDraft(draftFromPlan(plan())).research?.repeat_after_days).toBe(60)
     const kept = plan({ research: { enabled: true, day: 'mon', time: '06:00', repeat_after_days: 45 } })
     expect(inputFromDraft(draftFromPlan(kept)).research?.repeat_after_days).toBe(45)
