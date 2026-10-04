@@ -195,5 +195,77 @@ class PgVectorLocalBackend:
             })
         return results
 
+    def search_in_documents(
+        self,
+        query_embedding: List[float],
+        document_ids: List[int],
+        limit: int = 10,
+        min_score: float = 0.5,
+    ) -> List[Dict[str, Any]]:
+        """``search`` within these documents of this workspace only, same result shape.
+
+        F311 (night 9): forty agents' reports filled the 15 hits of every search, and
+        importers-and-green-buying.md (document 1520) was not among them when the owner
+        asked who to call about Kirinyaga (ledger L99). The RAG service now searches
+        the owner's own documents on their own too (``modules.rag.owner_leg``).
+        A failed search is logged and gives ``[]``, as ``search`` does.
+        """
+        ids = sorted({int(doc_id) for doc_id in document_ids})
+        if not ids:
+            return []
+        from core.database.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(text(_scoped_sql(*_column_types(db))), {
+                "emb": _vector_literal(query_embedding), "ws": self.workspace_id, "ids": ids,
+                "min_score": float(min_score), "limit": int(limit),
+            }).fetchall()
+        except Exception:  # noqa: BLE001 — same posture as search(): logged, no hits
+            logger.error("pgvector-local search within documents failed", exc_info=True)
+            return []
+        finally:
+            db.close()
+        return [_hit(row, self.workspace_id) for row in rows]
+
     async def close(self) -> None:
         """No-op — sessions are opened and closed per call."""
+
+
+def _vector_literal(query_embedding: List[float]) -> str:
+    """The query embedding as a pgvector text literal."""
+    return "[" + ",".join(f"{float(x):.8f}" for x in query_embedding) + "]"
+
+
+def _scoped_sql(embedding_type: str, workspace_type: str) -> str:
+    """``search``'s query, held to the documents bound as ``:ids`` (F311)."""
+    emb_col = embedding_expr(embedding_type)
+    return f"""
+        SELECT dc.document_id, dc.chunk_index, dc.content,
+               d.filename AS file_name, d.file_path AS file_path,
+               1 - ({emb_col} <=> CAST(:emb AS vector)) AS similarity
+        FROM document_chunks dc
+        JOIN documents d ON d.id = dc.document_id
+        WHERE {workspace_predicate(workspace_type)}
+          AND d.workspace_id = CAST(:ws AS uuid)
+          AND dc.document_id = ANY(:ids)
+          AND dc.embedding IS NOT NULL
+          AND 1 - ({emb_col} <=> CAST(:emb AS vector)) >= :min_score
+        ORDER BY {emb_col} <=> CAST(:emb AS vector)
+        LIMIT :limit
+    """  # noqa: S608 — only the column expressions above are formatted in; every value is bound
+
+
+def _hit(row: Any, workspace_id: str) -> Dict[str, Any]:
+    """One row in ``search``'s result shape."""
+    metadata = {
+        "external_file_id": str(row.document_id), "document_id": str(row.document_id),
+        "chunk_index": row.chunk_index, "workspace_id": workspace_id,
+        "file_name": row.file_name or "", "file_path": row.file_path or "",
+    }
+    return {
+        "key": f"doc_{row.document_id}_chunk_{row.chunk_index}", "score": float(row.similarity),
+        "metadata": metadata, "content": row.content or "", "source": "pgvector_local",
+        "file_name": row.file_name or "", "file_path": row.file_path or "",
+        "external_file_id": str(row.document_id), "chunk_index": row.chunk_index,
+    }
