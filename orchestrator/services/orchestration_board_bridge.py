@@ -34,6 +34,7 @@ from core.models.orchestration_enums import (
 from services.board_sla import PRIORITY_SLA_HOURS as _PRIORITY_SLA_HOURS  # noqa: E402
 from services.board_cancel import stop_mission_sessions
 from services.cli_ticket_lane import is_lane_owned, release_step_card
+from services.mission_card_result import carries_the_missions_result
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +352,7 @@ _RUN_STATE_TO_BOARD_STATUS: dict[str, str] = {
 }
 
 
+@carries_the_missions_result  # F268 (7b): a completed mission's card shows its result
 def sync_mission_board_status(
     db: Session,
     run: OrchestrationRun,
