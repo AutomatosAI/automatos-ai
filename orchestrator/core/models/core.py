@@ -12,6 +12,8 @@ from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 from core.database.base import Base
 # PRD-251 S1.2: the social template formats live with their contract, which is pure.
 from core.social_templates import SOCIAL_TEMPLATE_FORMATS
+# F271: so do a playbook schedule's types.
+from core.playbook_schedule import schedule_problem
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -1438,30 +1440,9 @@ class WorkflowTemplate(Base):
         return True, None
 
     def validate_schedule_config(self):
-        """Validate schedule_config structure"""
-        if not self.schedule_config:
-            return True, None
-
-        if not isinstance(self.schedule_config, dict):
-            return False, "schedule_config must be an object"
-
-        # Validate type
-        if 'type' not in self.schedule_config:
-            return False, "schedule_config must have 'type' field"
-
-        schedule_type = self.schedule_config['type']
-        if schedule_type not in ['manual', 'cron', 'trigger']:
-            return False, "type must be 'manual', 'cron', or 'trigger'"
-
-        # Validate cron expression if type is cron
-        if schedule_type == 'cron' and 'cron_expression' not in self.schedule_config:
-            return False, "cron type requires cron_expression field"
-
-        # Validate trigger config if type is trigger
-        if schedule_type == 'trigger' and 'trigger_config' not in self.schedule_config:
-            return False, "trigger type requires trigger_config field"
-
-        return True, None
+        """Validate schedule_config structure (the rules: core/playbook_schedule.py)."""
+        problem = schedule_problem(self.schedule_config)
+        return problem is None, problem
 
     # Relationship to executions
     recipe_executions = relationship('RecipeExecution', back_populates='recipe', cascade='all, delete-orphan')
