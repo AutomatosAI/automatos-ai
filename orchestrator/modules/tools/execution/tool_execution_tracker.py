@@ -92,6 +92,9 @@ class ToolExecutionTracker:
         # F264: each call's action, parameters and result, in order: what the owner is
         # told was done when the answer comes back empty (turn_account).
         self.outcomes: List[Tuple[str, Dict[str, Any], Any]] = []
+        # F310 (night 9): what each call that failed answered, by tool and arguments, so
+        # the same call sent again is told it failed, not only that it already ran.
+        self.failed_calls: Dict[Tuple[str, str], str] = {}
         # F120: how many queries per search tool came from EARLIER model responses;
         # None until a caller marks rounds (then every earlier query counts).
         self._round_start: Optional[Dict[str, int]] = None
@@ -156,7 +159,7 @@ class ToolExecutionTracker:
         if exec_key in self.exact_executions:
             if query:
                 return True, f'Not searched again: "{query}" — the same search already ran in this reply; use its result.'
-            return True, f"Tool '{tool_name}' was already executed with identical parameters"
+            return True, self._already_ran(tool_name, exec_key)
 
         if query:
             earlier = self.search_queries.get(tool_name, [])
@@ -170,6 +173,17 @@ class ToolExecutionTracker:
                     )
 
         return False, ""
+
+    def _already_ran(self, tool_name: str, exec_key: Tuple[str, str]) -> str:
+        """Why an identical call is skipped. F310 (night 9): "already executed with
+        identical parameters" after a call that failed read to Auto as done but not
+        applied; it says the call failed, and with what, now."""
+        failure = self.failed_calls.get(exec_key)
+        if failure is None:
+            return f"Tool '{tool_name}' was already executed with identical parameters"
+        return (f"Tool '{tool_name}' was already executed with identical parameters in this reply, and it "
+                f"failed: {failure.rstrip('.')}. Sent again unchanged it fails the same way, so it was not "
+                "sent. Tell the owner it was not done and why, or change the call.")
 
     def record_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
         """Record that a tool was executed (updates dedup + count + query state)."""
@@ -194,12 +208,23 @@ class ToolExecutionTracker:
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
             self.failed.add(action)
+            self.failed_calls[(tool_name, self._hash_args(tool_args))] = _failure_text(result)
             return
         self.succeeded.add(action)
         self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)
+
+
+# F310: how much of a failed call's error a skipped repeat repeats.
+FAILURE_SHOWN_CHARS = 300
+
+
+def _failure_text(result: Dict[str, Any]) -> str:
+    """A failed call's error in one line, cut to ``FAILURE_SHOWN_CHARS``."""
+    said = " ".join(str(result.get("error") or result.get("message") or "no reason given").split())
+    return said if len(said) <= FAILURE_SHOWN_CHARS else said[:FAILURE_SHOWN_CHARS].rstrip() + "…"
 
 
 __all__ = [

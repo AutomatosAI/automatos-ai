@@ -13,6 +13,13 @@ the playbook the same way:
 - by id: switching off a playbook whose timer is not on, while a namesake's is,
   is refused naming that one; a timer on an empty playbook, while a namesake has
   steps, is refused naming that one. Nothing is written to the wrong playbook.
+
+Night 9 (F310): a name only one playbook has came back as that playbook alone, not
+(playbook, None, None). platform_schedule_playbook raised unpacking it, the executor
+answered "Action 'platform_schedule_playbook' failed" and rolled back, so "put my
+Monday Stock Check on a timer" failed three times in two chats, and switching it off
+by name failed too. Only an id worked (platform_update_playbook). Every answer is
+the three now.
 """
 from __future__ import annotations
 
@@ -89,7 +96,7 @@ def target(db: Session, workspace_id: Any, params: Dict[str, Any], off: bool) ->
     found = playbooks_called(db, workspace_id, name)
     if not found:
         return None, failed(NOT_FOUND.format(said=f"called '{name}'")), None
-    return found[0] if len(found) == 1 else _of_several(found, str(name).strip(), off)
+    return (found[0], None, None) if len(found) == 1 else _of_several(found, str(name).strip(), off)
 
 
 def _of_several(found: List[Any], name: str, off: bool) -> Target:
