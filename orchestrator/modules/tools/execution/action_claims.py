@@ -152,8 +152,8 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
     _Family("approved", re.compile(_I_HAVE + _TO_COLUMN + r"done\b", re.I), _APPROVES),
     # kinds: "I've started a mission" is backed by the mission made, "I've initiated the
     # playbook" only by a run of a playbook.
-    _Family("started", re.compile(r"\b(?:is|it's|it is) now running\b|" + _I_HAVE
-                                  + r"(?:started(?!" + _READING + r")|launched|kicked off|resumed|initiated|"
+    _Family("started", re.compile(r"\b(?:is|it's|it is) now running\b", re.I), _STARTS),
+    _Family("started", re.compile(_I_HAVE + r"(?:started(?!" + _READING + r")|launched|kicked off|resumed|initiated|"
                                   r"triggered)\b", re.I), _STARTS + ("create_mission",), kinds=True),
     _Family("noted", re.compile(_I_HAVE + r"(?:noted(?!" + _OWNER_SAID + r")|made a note|saved|stored|recorded|"
                                 r"remembered)\b", re.I),
