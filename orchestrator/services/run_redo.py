@@ -16,6 +16,13 @@ goes back to it for revision with the owner's words. Everything else (a step
 of a mission that has ended, a step a Claude Code session ran) is refused
 before anything changes, saying why and what to do. (The mission's own card
 is the mission's to decide: PRD-252 D6 refuses it before any of this.)
+
+F284 (night 8): a step of a mission that completed or failed is redone too: its
+mission opens again (services/mission_reopen). The redo decides under the
+mission's row lock, which the mission's end takes as well, so a send-back that
+lands as the mission completes (#0250.1, 2 s after) waits for the end and opens
+it again, instead of sticking "in progress" in a mission that never runs it.
+Every refusal that stays names a button that exists.
 """
 from __future__ import annotations
 
@@ -29,8 +36,12 @@ logger = logging.getLogger(__name__)
 
 SESSION_STEP = "mission"   # a mission step a Claude Code session ran (services/cli_ticket_lane)
 LIVE_RUN_STATUSES = ("pending", "running")
-# A mission that redoes a step it is sent back: one still running its steps (or paused, to resume).
-REDOING_MISSION_STATES = ("running", "paused")
+MISSION_GONE = "{label} belongs to a mission that can no longer be found, so it can't run again here."
+# F284: a step a Claude Code session ran stays its session's; the page's Re-run (on an
+# ended mission) is what runs it again.
+SESSION_STEP_REFUSAL = ("{label} is a step of the mission \"{goal}\" that a Claude Code session ran, so the "
+                        "board can't redo it. Cancel the mission on its page ({where}) and use Re-run there to "
+                        "start it again as a new mission.")
 # The step states a revision can start from: checked or being checked (VERIFYING, VERIFIED),
 # or finished and about to be checked (COMPLETED goes through VERIFYING).
 REDOABLE_STEP_STATES = ("completed", "verifying", "verified")
@@ -42,6 +53,12 @@ NO_LAST_ATTEMPT = "(Your last attempt left no text.)"
 class RedoTaken(Exception):
     """Another redo of the same card started first (a second click, a drag racing a
     button): this one changed nothing."""
+
+
+class RedoRefused(RedoTaken):
+    """F284: read under its mission's lock, the redo can't run after all (the mission
+    was cancelled meanwhile, the step moved on, or the mission is still being written):
+    nothing changed. A RedoTaken, so the board answers 409 with its words."""
 
 
 def takes_its_own_redo(task: Any) -> bool:
@@ -76,21 +93,19 @@ def _playbook_refusal(db: Any, task: Any) -> Optional[str]:
 
 
 def _mission_refusal(db: Any, task: Any) -> Optional[str]:
+    from services.mission_reopen import refusal_for
     from services.ticket_numbers import ticket_label
 
     run = mission_run_of(db, task)
     label = ticket_label(task, capital=True)
     if run is None:
-        return f"{label} belongs to a mission that can no longer be found, so it can't run again here."
+        return MISSION_GONE.format(label=label)
     goal = (run.goal or "")[:GOAL_SHOWN_CHARS]
     where = f"/missions/{run.id}"
     if task.source_type == SESSION_STEP:
-        return (f"{label} is a step of the mission \"{goal}\" that a Claude Code session ran; the board "
-                f"can't redo it. Re-run the mission from its page ({where}).")
-    if run.state not in REDOING_MISSION_STATES:
-        return (f"{label} is a step of the mission \"{goal}\", which has {_ended(run.state)}: a mission "
-                f"only runs its steps while it runs. Re-run the mission from its page ({where}).")
-    return _step_refusal(db, task, label)
+        return SESSION_STEP_REFUSAL.format(label=label, goal=goal, where=where)
+    # F284: a mission that completed or failed opens again for the redo
+    return refusal_for(run, label) or _step_refusal(db, task, label)
 
 
 def _step_refusal(db: Any, task: Any, label: str) -> Optional[str]:
@@ -101,10 +116,6 @@ def _step_refusal(db: Any, task: Any, label: str) -> Optional[str]:
         state = step.state if step is not None else "unknown"
         return f"{label} is still being worked by its mission (step {state}); send it back once it is done."
     return None
-
-
-def _ended(state: str) -> str:
-    return {"completed": "finished", "failed": "failed", "cancelled": "been cancelled"}.get(state, f"stopped ({state})")
 
 
 def start_redo(db: Any, task: Any, *, by: str) -> str:
@@ -205,16 +216,69 @@ def _starts_clean(card: Any) -> None:
 
 def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     """The step goes back to its mission for revision, with the owner's words and
-    the output they sent back (the dispatcher's revision prompt reads both)."""
+    the output they sent back (the dispatcher's revision prompt reads both). F284:
+    decided under the mission's row lock; a mission that ended opens again. A lock
+    not had in time refuses the redo with nothing changed (RedoRefused)."""
+    from sqlalchemy.exc import OperationalError
+
+    from services.mission_reopen import busy_refusal, lost_the_lock
+    from services.ticket_numbers import ticket_label
+
+    label = ticket_label(card, capital=True)
+    run = mission_run_of(db, card)
+    try:
+        _redo_under_the_lock(db, card, run, by=by, label=label)
+    except OperationalError as exc:
+        if not lost_the_lock(exc):
+            raise
+        db.rollback()
+        logger.info("[F284] %s not sent back: its mission %s was being written", label, getattr(run, "id", None))
+        raise RedoRefused(busy_refusal(run, label)) from exc
+    return f"{label} went back to its mission to be redone."
+
+
+def _redo_under_the_lock(db: Any, card: Any, run: Any, *, by: str, label: str) -> None:
+    """The redo, its step and its mission locked (at most ``LOCK_WAIT`` each); the
+    mission opens again when it ended. Commits."""
+    from services.mission_reopen import reopen, touched
+
+    step, run = _held_for_the_redo(db, card, run, label)
+    reopen(db, run, by=by, label=label)
+    _back_for_revision(db, card, step, by=by)
+    touched(run)  # a tick that read the mission before this redo can't end it on what it read
+    db.commit()
+
+
+def _held_for_the_redo(db: Any, card: Any, run: Any, label: str) -> tuple:
+    """The step and its mission, locked and read again, in that order (the coordinator
+    writes a step before it ends its mission). Refused (RedoRefused, nothing changed)
+    when, read under the lock, the redo can't run after all."""
     from core.models.orchestration import OrchestrationTask
+    from services.mission_reopen import locked_run, refusal_for, waits_briefly
+
+    if run is None:
+        raise RedoRefused(MISSION_GONE.format(label=label))
+    waits_briefly(db)
+    step = db.get(OrchestrationTask, card.orchestration_task_id, populate_existing=True, with_for_update=True)
+    locked = locked_run(db, run)
+    if locked is None:
+        refused = MISSION_GONE.format(label=label)
+    else:
+        refused = refusal_for(locked, label) or _step_refusal(db, card, label)
+    if refused:
+        db.rollback()
+        raise RedoRefused(refused)
+    return step, locked
+
+
+def _back_for_revision(db: Any, card: Any, step: Any, *, by: str) -> None:
+    """The step to RETRYING with the owner's words and the output they sent back."""
     from core.models.orchestration_enums import ActorType, FailureReasonCode, TaskState
     from services.orchestration_board_bridge import sync_board_status
     from services.orchestration_state import transition_task
-    from services.ticket_numbers import ticket_label
 
     from modules.coordination.owner_checks import sent_back
 
-    step = db.get(OrchestrationTask, card.orchestration_task_id)
     sent_back(db, step, by=by)  # F242: a step held for the owner's check; its mission carries on
     attempt = (step.attempt_number or 0) + 1
     step.failure_reason_code = FailureReasonCode.VERIFICATION_REJECT.value
@@ -231,5 +295,3 @@ def _redo_mission_step(db: Any, card: Any, *, by: str) -> str:
     card.review_feedback = None  # the step carries the owner's words now
     _starts_clean(card)
     sync_board_status(db, step)
-    db.commit()
-    return f"{ticket_label(card, capital=True)} went back to its mission to be redone."
