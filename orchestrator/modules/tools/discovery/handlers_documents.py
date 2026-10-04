@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from modules.tools.discovery.read_document_lookup import reads_exactly_the_named_document
 
 logger = logging.getLogger(__name__)
 
@@ -519,9 +520,7 @@ async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any
         return {"success": False, "error": str(exc)}
 
 
-# ---------------------------------------------------------------------------
-# PRD-157 S2: document-reading tools (read_document, grep_documents)
-# ---------------------------------------------------------------------------
+# PRD-157 S2: document-reading tools (read_document, grep_documents) ---------
 
 _READ_PAGE_TOKEN_BUDGET = 2000   # D11: token-budgeted page per read_document call
 _GREP_MAX_SCAN_CHUNKS = 5000     # bound the literal scan
@@ -553,6 +552,7 @@ def _resolve_agent_team(db: Session, agent_id: Any) -> Optional[str]:
         return retrieval_team(None)
 
 
+@reads_exactly_the_named_document  # F327 (night 9b): exactly the document asked for, never another
 async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Paged full-content reading of a document, workspace+team scoped (S1),
     token-budgeted per page (D11). Lets an agent read past the short search snippet.

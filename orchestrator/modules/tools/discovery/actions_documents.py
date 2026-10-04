@@ -1,8 +1,10 @@
 """Document ActionDefinitions (list, upload, read, search, delete, reprocess, templates, brand kit)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_read_document import with_read_document
 
 
+@with_read_document  # F327 (night 9b): platform_read_document left this past-length function
 def register_documents_actions(registry: ActionRegistry) -> None:
     """Register document-related platform actions."""
 
@@ -88,43 +90,6 @@ def register_documents_actions(registry: ActionRegistry) -> None:
 
     # PRD-157 S2: document-reading tools (Letta pattern). Both read-only and
     # workspace/team-scoped via the centralized retrieval filters.
-    registry.register(ActionDefinition(
-        name="platform_read_document",
-        description=(
-            "Read the full text of a knowledge-base document, one page at a time. "
-            "Use this to read PAST the short snippet returned by search — pass the "
-            "document_id from a search result, then request successive pages to read "
-            "the whole document. Each page is a token-budgeted slice; the response "
-            "reports total_pages, has_more and next_page so you can keep reading."
-        ),
-        category="documents",
-        parameters={
-            "type": "object",
-            "properties": {
-                "document_id": {
-                    "type": "integer",
-                    "description": "ID of the document to read (from a search result or list_documents).",
-                },
-                "page": {
-                    "type": "integer",
-                    "description": "Zero-based page number to read. Defaults to 0 (the first page).",
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Optional chunk-index to start from; the page containing it is returned.",
-                },
-            },
-            "required": ["document_id"],
-        },
-        permission_level="read",
-        tags=["documents", "read", "knowledge", "rag"],
-        examples=[
-            "read the rest of that document",
-            "show me page 2 of document 12",
-            "read document 7 in full",
-        ],
-    ))
-
     registry.register(ActionDefinition(
         name="platform_search_documents",
         description=(
