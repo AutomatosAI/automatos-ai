@@ -13,6 +13,9 @@ things by their arguments:
   only with ``send_back``. Night 8: Auto changed #0451's brief, said it had sent
   it back, and #0451 stayed in Review.
 
+Night 9 (F309): platform_update_task with a status moves the card the way
+platform_update_task_status does (``ticket_edit_moves``), and is recorded as that move.
+
 So a successful call of either is recorded with what it did too, as
 ``<action>:<status>`` or ``<action>:send_back``. The families back a claim with
 those (``platform_update_task_status:done`` approves a card).
@@ -46,7 +49,8 @@ def call_effects(action: str, params: Any) -> Tuple[str, ...]:
         return (f"{action}:{status}",) if status else ()
     if action.endswith(CARD_EDIT) and _is_set(params.get(SENT_BACK)):
         return (f"{action}:{SENT_BACK}",)
-    return ()
+    status = str(params.get("status") or "").strip().lower() if action.endswith(CARD_EDIT) else ""
+    return (f"{action}_status:{status}",) if status else ()   # F309 (9): its status is the card's move
 
 
 def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
