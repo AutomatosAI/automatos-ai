@@ -8,8 +8,9 @@ first line is the topic a plan made it from.
 Each item says what research and the content bank compare a new idea with: the post's title;
 its topic and angle (the bank's topic it was made from, while its plan lives; else the
 brief's first line, with no angle); its format and channels; the first line of its copy; its
-date (when it went out, else when it is scheduled or planned, else when it was made) and its
-state. Newest first, ``days`` back (a post scheduled ahead counts too) and at most ``limit``:
+date (when it went out, else when it is scheduled or planned, else when it was made), its
+state, and its numbers and engagement once read (PRD-251C US-C405: research prefers topics like
+the best performers). Newest first, ``days`` back (a post scheduled ahead counts too) and at most ``limit``:
 ``SOCIALS_HISTORY_DAYS`` and ``SOCIALS_HISTORY_LIMIT`` unless the caller asks for others,
 never more than ``MAX_DAYS`` and ``MAX_LIMIT``.
 
@@ -29,6 +30,7 @@ from sqlalchemy import func
 
 from config import config
 from core.models.socials import SocialPost, SocialTopic
+from modules.socials import results
 
 HISTORY_STATUSES = (
     "rendering", "needs_approval", "changes_requested",  # waiting for a person
@@ -75,7 +77,7 @@ def topics_by_post(db: Any, workspace_id: UUID, post_ids: Iterable[UUID]) -> Dic
     return {row.used_post_id: row for row in rows}
 
 
-def _item(post: SocialPost, topic: Optional[SocialTopic]) -> Dict[str, Any]:
+def _item(post: SocialPost, topic: Optional[SocialTopic], numbers: Optional[Any] = None) -> Dict[str, Any]:
     moment = post_date(post)
     return {
         "id": str(post.id),
@@ -88,6 +90,9 @@ def _item(post: SocialPost, topic: Optional[SocialTopic]) -> Dict[str, Any]:
         "date": moment.isoformat() if moment is not None else None,
         "state": post.status,
         "plan_id": str(post.campaign_id) if post.campaign_id else None,
+        # PRD-251C (US-C405): what the post did, once read: research prefers topics like the best.
+        "numbers": dict(numbers.numbers) if numbers is not None else None,
+        "engagement": numbers.engagement if numbers is not None else None,
     }
 
 
@@ -111,7 +116,8 @@ def history(
     since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
     posts = _posts(db, workspace_id, limit, since)
     topics = topics_by_post(db, workspace_id, [post.id for post in posts])
-    return [_item(post, topics.get(post.id)) for post in posts]
+    numbers = results.post_numbers(db, workspace_id, [post.id for post in posts])
+    return [_item(post, topics.get(post.id), numbers.get(post.id)) for post in posts]
 
 
 def recent_openings(db: Any, workspace_id: UUID, limit: Optional[int] = None) -> List[str]:

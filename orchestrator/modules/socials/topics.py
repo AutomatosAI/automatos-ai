@@ -19,7 +19,7 @@ to the slot's day first, and records the post that used it. Nothing here commits
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
@@ -39,6 +39,10 @@ LABEL_MAX_CHARS = 200
 MAX_FACTS = 12
 MAX_ADDED_AT_ONCE = 30
 MAX_BANK = 500
+# PRD-251C (C7, US-C405): the next topic is the one most like the plan's best performers: its
+# posts read in the last BEST_LOOKBACK_DAYS, the BEST_COUNT with the most engagement.
+BEST_LOOKBACK_DAYS = 90
+BEST_COUNT = 3
 
 
 class InvalidTopic(InvalidPost):
@@ -135,11 +139,26 @@ def add_topic(db: Any, plan: SocialCampaign, fields: Mapping[str, Any], *, creat
     topic = SocialTopic(
         workspace_id=plan.workspace_id, campaign_id=plan.id, created_by=created_by, origin=origin,
         created_at=datetime.now(timezone.utc),
-        pinned_on=fields.get("pinned_on") if isinstance(fields.get("pinned_on"), date) else None, **clean,
+        pinned_on=_pinned_on(fields.get("pinned_on"), plan), **clean,
     )
     db.add(topic)
     db.flush()
     return topic
+
+
+def _pinned_on(value: Any, plan: SocialCampaign) -> Optional[date]:
+    """The day a topic is pinned to (PRD-251C C9: research's dated topics, a countdown's days):
+    a date, or one as text, within the plan's dates."""
+    if value in (None, ""):
+        return None
+    try:
+        day = value if isinstance(value, date) else date.fromisoformat(str(value))
+    except ValueError:
+        raise InvalidTopic("pinned_on must be a day, such as 2026-11-05") from None
+    starts_on, ends_on = getattr(plan, "starts_on", None), getattr(plan, "ends_on", None)
+    if starts_on is not None and ends_on is not None and not starts_on <= day <= ends_on:
+        raise InvalidTopic("pinned_on must fall within the plan's dates")
+    return day
 
 
 def _refuse_a_repeat(title: Any, earlier: Sequence[repeats.Earlier]) -> None:
@@ -204,9 +223,29 @@ def list_topics(db: Any, plan: SocialCampaign) -> List[SocialTopic]:
     return unused + used
 
 
+def best_performers(db: Any, plan: SocialCampaign, now: Optional[datetime] = None) -> List[frozenset]:
+    """The content words of the plan's best performers (US-C405): its posts read in the last
+    ``BEST_LOOKBACK_DAYS``, the ``BEST_COUNT`` with the most engagement (none without any)."""
+    from modules.socials import results
+
+    since = (now or datetime.now(timezone.utc)) - timedelta(days=BEST_LOOKBACK_DAYS)
+    posts = db.query(SocialPost).filter(SocialPost.campaign_id == plan.id, SocialPost.created_at >= since).all()
+    numbers = results.post_numbers(db, plan.workspace_id, [post.id for post in posts])
+    read = sorted((p for p in posts if p.id in numbers and numbers[p.id].engagement > 0), key=lambda p: -numbers[p.id].engagement)
+    used = {topic.used_post_id: topic for topic in db.query(SocialTopic).filter(SocialTopic.used_post_id.in_([p.id for p in read]))}
+    return [repeats.words(f"{post.title} {used[post.id].title if post.id in used else ''}") for post in read[:BEST_COUNT]]
+
+
+def _likeness(topic: SocialTopic, best: Sequence[frozenset]) -> Tuple[float, ...]:
+    """How like each best performer the topic is, the best first: the most like the top one wins."""
+    mine = repeats.words(f"{topic.title} {topic.angle or ''}")
+    return tuple(repeats.overlap(mine, theirs) for theirs in best)
+
+
 def next_topic(db: Any, plan: SocialCampaign, post_format: str, day: date) -> Optional[SocialTopic]:
     """The topic a slot of ``post_format`` on ``day`` is made from: an unused one pinned to
-    that day first, then the oldest unused one not pinned to another day; either must suit
+    that day first; then the unused one not pinned to another day most like the plan's best
+    performers (US-C405), the oldest of equals (the oldest, without results). Either must suit
     the format (no formats suits any)."""
     candidates = (
         db.query(SocialTopic)
@@ -215,7 +254,11 @@ def next_topic(db: Any, plan: SocialCampaign, post_format: str, day: date) -> Op
         .order_by(SocialTopic.pinned_on.is_(None), SocialTopic.created_at)
         .all()
     )
-    return next((t for t in candidates if not t.formats or post_format in t.formats), None)
+    fitting = [t for t in candidates if not t.formats or post_format in t.formats]
+    if not fitting or fitting[0].pinned_on == day:
+        return fitting[0] if fitting else None
+    best = best_performers(db, plan)
+    return max(enumerate(fitting), key=lambda item: (_likeness(item[1], best), -item[0]))[1] if best else fitting[0]
 
 
 def mark_used(topic: SocialTopic, post: SocialPost, now: datetime) -> None:

@@ -66,7 +66,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.core import DocumentTemplate, WorkflowTemplate  # noqa: E402
-from core.models.socials import SocialCampaign, SocialPost, SocialPostTarget  # noqa: E402
+from core.models.socials import SocialCampaign, SocialPost, SocialPostStat, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
 
@@ -118,8 +118,8 @@ def api(monkeypatch):
     for table in (Workspace.__table__, DocumentTemplate.__table__, WorkflowTemplate.__table__):  # playbooks: PRD-251C
         _sqlite_copy(table, copies)
     copies.create_all(engine)
-    SocialPost.metadata.create_all(
-        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__]
+    SocialPost.metadata.create_all(  # PRD-251C: the results' table too (history and the bank read it)
+        engine, tables=[SocialCampaign.__table__, SocialPost.__table__, SocialPostTarget.__table__, SocialPostStat.__table__]
     )
 
     session = sessionmaker(bind=engine)()

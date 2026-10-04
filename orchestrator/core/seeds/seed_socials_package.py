@@ -275,13 +275,13 @@ You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
 # PRD-251C (C5, US-C105): research reads the history first and adds only what is new.
 _RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
 
-1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan. For further back, read platform_get_social_history.
+1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan, with each post's numbers and engagement once read. For further back, read platform_get_social_history.
 2. Research only the sources the plan switches on:
    - knowledge: search_knowledge for the plan's goal and audience;
    - deliverables: platform_list_deliverables with exclude_source_types ["social_post"], for recent reports, blog posts and files: a Socials post's own images and videos are history, not new material;
    - website: platform_web_fetch on the brand kit's website (platform_get_brand_kit names it): its product, news and about pages;
    - github: when the workspace has GitHub connected, its README, docs, latest releases and merged pull requests, through the GitHub tools.
-3. Pick 5 to 15 topics that neither the history nor any bank covers yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's). A new angle on an idea already posted is still that idea.
+3. Pick 5 to 15 topics that neither the history nor any bank covers yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's). A new angle on an idea already posted is still that idea. Lean towards what did best: topics of the kind the history's posts with the most engagement were on. When the goal, the notes or the knowledge name a dated event (a launch, a conference, a deadline), add dated topics pinned to days before it within the plan's dates (pinned_on), such as a countdown, and one on its day.
 4. Every fact names its source: kind knowledge (the document's id), deliverable (its id), web (the page's address), github (the page's address) or note; its ref; and a short label. Leave out a fact you cannot source, and anything on the plan's never-say list.
 5. Add them with platform_add_social_topics, in one call. Its answer lists what was added and what was refused, with why: a topic too close to an earlier post or topic is a repeat, so leave it out; fix and resend any other refused topic once, or leave it out.
 6. Answer with how many topics were added, and their titles.

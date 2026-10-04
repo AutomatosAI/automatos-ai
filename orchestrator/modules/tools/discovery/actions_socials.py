@@ -400,6 +400,11 @@ def _topic_schema() -> dict:
             "angle": {"type": "string", "description": "Why it matters to the plan's audience."},
             "facts": {"type": "array", "items": fact, "maxItems": FACTS_MAX_PER_TOPIC},
             "formats": {"type": "array", "items": {"type": "string", "enum": POST_FORMATS}},
+            # PRD-251C (C9): a dated topic, such as an event's countdown, posted on its day.
+            "pinned_on": {
+                "type": "string",
+                "description": "A day within the plan's dates (YYYY-MM-DD) to post it on: an event's countdown or its day.",
+            },
         },
         "required": ["title", "facts"],
     }
@@ -453,8 +458,9 @@ def _register_history_action(registry: ActionRegistry) -> None:
             "Read what this workspace already posted on social media, newest first: every post that "
             "went out, is approved or scheduled, or waits for approval, across every plan and the posts "
             "people made by hand. Each has its title, topic and angle, format, channels, opening line, "
-            "date and state. Read it before researching or writing, so a topic or a hook the workspace "
-            "already used is not used again."
+            "date and state, and its numbers and engagement once read. Read it before researching or "
+            "writing, so a topic or a hook the workspace already used is not used again, and more like "
+            "what did best is found."
         ),
         category="socials",
         parameters={
