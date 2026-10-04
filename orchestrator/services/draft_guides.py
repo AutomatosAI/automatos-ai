@@ -18,14 +18,14 @@ right.
 - The owner's own (F269, night 7b; F269 and F287, night 8): what an agent wrote is
   never handed over as the owner's facts. ``owners_own`` drops its passages from a
   draft's guides and from Auto's retrieval-first passages, ``owners_own_chunks`` from
-  the mission planner's knowledge, and ``marked_as_agents_writing`` marks its passages
-  in a search the model asks for itself.
+  the mission planner's knowledge. A search the model asks for itself, a document read
+  and the document list are services/agents_writing.py's (night 9).
 """
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from services.step_lessons import a_cards_run_carries_its_lessons
@@ -160,43 +160,6 @@ def owners_own_chunks(db: Any, result: Any, workspace_id: Any) -> Any:
     return replace(result, chunks=kept, formatted_context=context, sources_map=sources_map,
                    sources=sorted({str(c.get("source_file") or "") for c in kept}),
                    total_tokens=sum(int(c.get("tokens") or 0) for c in kept))
-
-
-def marked_as_agents_writing(db: Any, result: Any, agent_id: Any) -> Any:
-    """A search_knowledge result (``AgentPlatformTools.execute_tool``'s) with every
-    passage from a document an agent wrote marked as such, in the searching agent's
-    workspace.
-
-    F269 (night 8): asked "Which day do we deliver to our wholesale cafes? … Where did
-    that come from?", Auto searched for itself (search_knowledge "wholesale cafe
-    delivery days") and answered "your internal documents indicate that you generally
-    avoid Thursday deliveries", quoting #0214.1's own welcome-email draft. A search the
-    model asks for still finds an agent's documents (the owner may ask about them), but
-    each such passage now opens with ``AGENTS_WRITING``."""
-    found = result.get("results") if isinstance(result, dict) else None
-    if not isinstance(found, list) or not _a_session(db):
-        return result
-    workspace_id = _agents_workspace(db, agent_id)
-    if workspace_id is None:
-        return result
-    drafts = _agents_documents(db, [r.get("document_id") for r in found if isinstance(r, dict)], workspace_id)
-    if not drafts:
-        return result
-    return {**result, "results": [_marked(r) if isinstance(r, dict) and _as_id(r.get("document_id")) in drafts
-                                  else r for r in found]}
-
-
-def _marked(passage: Dict[str, Any]) -> Dict[str, Any]:
-    """A passage whose text opens with AGENTS_WRITING."""
-    return {**passage, **{key: f"{AGENTS_WRITING}\n{passage[key]}" for key in ("content", "excerpt")
-                          if isinstance(passage.get(key), str)}}
-
-
-def _agents_workspace(db: Any, agent_id: Any) -> Any:
-    """The workspace of the agent that searched; None when it is not found."""
-    from core.models import Agent
-
-    return db.query(Agent.workspace_id).filter(Agent.id == agent_id).scalar() if agent_id else None
 
 
 def _a_session(db: Any) -> bool:

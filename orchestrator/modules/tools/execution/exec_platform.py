@@ -18,8 +18,8 @@ async def execute_platform_tool(
     parameters: Dict[str, Any],
     agent_id: int,
 ) -> Dict[str, Any]:
-    """Execute research tools via AgentPlatformTools. F269 (night 8): a search's
-    passages from documents an agent wrote say so (services/draft_guides)."""
+    """Execute research tools via AgentPlatformTools. F269 (night 8, night 9): a
+    search returns the owner's documents only, never an agent's (services/agents_writing)."""
     result = await executor.platform_tools.execute_tool(
         tool_name=tool_name,
         parameters=parameters,
@@ -27,9 +27,9 @@ async def execute_platform_tool(
     )
     if tool_name != SEARCH_KNOWLEDGE:
         return result
-    from services.draft_guides import marked_as_agents_writing
+    from services.agents_writing import owners_search
 
-    return marked_as_agents_writing(getattr(executor.platform_tools, "db", None), result, agent_id)
+    return owners_search(getattr(executor.platform_tools, "db", None), result, agent_id)
 
 
 async def execute_platform_action(

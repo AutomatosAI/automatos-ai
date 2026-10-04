@@ -27,6 +27,11 @@ Night 8:
   with a saved file beside it, never instead of it, and says what to do when a tool
   fails. (Lifting an answer out of a tool's result is the tool loop's job: FIXER's.)
 
+Night 9 (F300, F304 and F313, services/answer_sources.py): "Where your answer goes" is
+followed by "Where your facts come from": a "now" question is answered from the live
+system before a dated document, a database's tables and columns are read through its
+tool and never asked of the owner, and only what a tool returned in the run is cited.
+
 Three wrappers, for the three ways the platform runs an agent's work through the API
 (a Claude Code session's ticket has its own prompt, which already carries the lessons):
 - ``a_steps_prompt_carries_its_lessons``: a mission step (``build_task_prompt``);
@@ -43,6 +48,8 @@ import functools
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from services.answer_sources import FACTS_RULES
+
 logger = logging.getLogger(__name__)
 
 ON_THE_CARD = (
@@ -53,7 +60,8 @@ ON_THE_CARD = (
     "A file, a PDF or a report you save goes alongside the answer, never instead of it: never end with only "
     "\"saved to …\", a description of what you saved, \"see the report\", \"task completed\" or a tool's output.\n"
     "If a tool fails, leave its error and what you tried out of the answer: do the work another way, or say "
-    "plainly what is missing."
+    "plainly what is missing.\n\n"
+    f"{FACTS_RULES}"     # F300, F304 and F313 (night 9): the live system first, its schema read, sources read
 )
 
 

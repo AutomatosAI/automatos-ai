@@ -133,11 +133,12 @@ def _searcher(documents):
     return agent
 
 
-def test_autos_own_search_marks_what_an_agent_wrote(documents):
+def test_autos_own_search_leaves_out_what_an_agent_wrote(documents):
     """Night 8: the #0214 answer came from Auto's own search_knowledge call, not the
-    automatic one, so the draft read as the owner's 'internal documents'."""
+    automatic one, so the draft read as the owner's 'internal documents'. Night 8 marked
+    the passage; night 9's #1547 was marked too and still cited as "a document in our
+    knowledge base" (chat 9a128fe3), so it is now left out (services/agents_writing)."""
     from modules.tools.execution import exec_platform
-    from services.draft_guides import AGENTS_WRITING
 
     found = {"success": True, "results": [
         {"document_id": documents.draft.id, "content": OLD_DRAFT, "excerpt": OLD_DRAFT, "similarity": 0.91},
@@ -155,17 +156,15 @@ def test_autos_own_search_marks_what_an_agent_wrote(documents):
     result = asyncio.run(exec_platform.execute_platform_tool(executor, "search_knowledge",
                                                              {"query": "wholesale cafe delivery days"}, agent.id))
 
-    draft, sheet = result["results"]
-    assert draft["content"] == f"{AGENTS_WRITING}\n{OLD_DRAFT}" and draft["excerpt"].startswith(AGENTS_WRITING)
-    assert sheet["content"] == DELIVERY_DAYS                                     # the owner's own, as it was
-    assert found["results"][0]["content"] == OLD_DRAFT                           # a new result, not changed in place
+    assert [r["content"] for r in result["results"]] == [DELIVERY_DAYS]       # the owner's own, as it was
+    assert len(found["results"]) == 2                                          # a new result, not changed in place
     other = asyncio.run(exec_platform.execute_platform_tool(executor, "semantic_search", {"query": "x"}, agent.id))
     assert other is found and calls == ["search_knowledge", "semantic_search"]
 
 
-def test_another_workspaces_search_marks_nothing(documents, seed_workspace):
+def test_another_workspaces_search_leaves_out_nothing(documents, seed_workspace):
     from core.models import Agent
-    from services.draft_guides import marked_as_agents_writing
+    from services.agents_writing import owners_search
 
     elsewhere = UUID(seed_workspace())
     stranger = Agent(name="Auto", agent_type="custom", description="", status="active", configuration={},
@@ -174,5 +173,5 @@ def test_another_workspaces_search_marks_nothing(documents, seed_workspace):
     documents.db.flush()
     found = {"results": [{"document_id": documents.draft.id, "content": OLD_DRAFT}]}
 
-    assert marked_as_agents_writing(documents.db, found, stranger.id) is found
-    assert marked_as_agents_writing(None, found, _searcher(documents).id) is found
+    assert owners_search(documents.db, found, stranger.id) is found
+    assert owners_search(None, found, _searcher(documents).id) is found
