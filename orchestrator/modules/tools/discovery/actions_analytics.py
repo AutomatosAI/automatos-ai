@@ -1,8 +1,10 @@
 """Analytics/usage ActionDefinitions (LLM usage, costs, workspace stats, activity feed, NL2SQL)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_data_routes import register_query_data_action, registers_with
 
 
+@registers_with(after=[register_query_data_action])  # F301/F302: the data route moved there
 def register_analytics_actions(registry: ActionRegistry) -> None:
     """Register analytics and usage platform actions."""
 
@@ -129,55 +131,5 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
             "show recent activity",
             "activity feed for the last week",
             "what has been running?",
-        ],
-    ))
-
-    # ── NL2SQL / Query Data ──────────────────────────────────────────
-
-    registry.register(ActionDefinition(
-        name="platform_query_data",
-        description=(
-            "Query business data using natural language. Converts your question "
-            "into SQL and executes it against a connected database. Use this when "
-            "the user asks about metrics, counts, trends, revenue, users, or any "
-            "data that lives in their connected databases. Returns results as a "
-            "formatted table with row count and the generated SQL. With one "
-            "database connected, pass only the question: that one is used. Name a "
-            "database (database_id) only when several are connected."
-        ),
-        category="database",
-        parameters={
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": (
-                        "Natural language question about business data "
-                        "(e.g. 'How many active users this month?', "
-                        "'Top 10 customers by revenue')."
-                    ),
-                },
-                "database_id": {
-                    "type": "string",
-                    "description": (
-                        "The database source to query: its name (e.g. 'sales_db') "
-                        "or its numeric id. Omit it when the workspace has one "
-                        "database — that one is used. With several, name one; "
-                        "the error lists them."
-                    ),
-                },
-            },
-            "required": ["question"],
-        },
-        permission_level="read",
-        requires_confirmation=False,
-        tags=["database", "query", "analytics", "metrics", "nl2sql", "data"],
-        examples=[
-            "how many active users do we have",
-            "what's our current MRR",
-            "show revenue trend for last 6 months",
-            "top 5 products by sales",
-            "how many users signed up last week",
-            "query the database for average order value",
         ],
     ))

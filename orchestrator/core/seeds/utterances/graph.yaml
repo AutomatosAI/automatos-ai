@@ -76,6 +76,8 @@ actions:
     source: example
   - text: what would break if we removed the notification system?
     source: example
+  - text: which customers are affected if this delivery is late?
+    source: example
   - text: what if we change
     source: phrase_map
   - text: impact of
@@ -243,6 +245,12 @@ actions:
   - text: how are authentication and user management connected?
     source: example
   - text: what processes depend on the payment system?
+    source: example
+  - text: which customers are affected if a supplier's delivery is late?
+    source: example
+  - text: who supplies the products in this gift box?
+    source: example
+  - text: which of our products use this ingredient?
     source: example
   - text: how does
     source: phrase_map

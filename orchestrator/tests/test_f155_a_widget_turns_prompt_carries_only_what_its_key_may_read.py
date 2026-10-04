@@ -87,9 +87,10 @@ def test_the_inventory_names_only_what_the_widget_key_may_read(db):
     with _widget("data:query", team="Franchise-A"):
         assert documents_summary(db, ws) == (
             "## Documents and data in this workspace\n"
-            "This workspace has 1 connected database (Shop orders). For numbers about the business (counts, "
-            "totals, rankings, trends), call smart_query_database with the question; with one database no name "
-            "is needed.")
+            "This workspace has 1 connected database (Shop orders). For the business's own records (counts, "
+            "totals, stock, orders, members, sales, rankings), call platform_query_data with the owner's question "
+            "in their words: it returns the database's tables and columns with its answer, so never ask the owner "
+            "for table, column or schema names. With one database no name is needed.")
     with _widget():
         assert documents_summary(db, ws) is None
 
