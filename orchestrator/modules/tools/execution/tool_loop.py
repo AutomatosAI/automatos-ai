@@ -768,14 +768,14 @@ def _nested_params_decoded(name: str, args: Any) -> Any:
     string, and workspace_exec failed three times on "'str' object has no
     attribute 'get'", so Auto counted a 501-row spreadsheet by eye and called
     313 exact. A ``params`` string that holds a JSON object is decoded; anything
-    else stays as it came (the executor refuses a ``params`` that is no object)."""
+    else stays as it came (the executor refuses a ``params`` that is no object).
+    F321: one decoder, the executor's (``params_text.params_object``)."""
+    from modules.tools.execution.params_text import params_object
+
     raw = args.get("params") if isinstance(args, dict) else None
     if name not in NESTED_PARAMS_TOOLS or not isinstance(raw, str):
         return args
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError:
-        return args
+    decoded = params_object(raw)
     return {**args, "params": decoded} if isinstance(decoded, dict) else args
 
 
