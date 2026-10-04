@@ -23,6 +23,7 @@ rules on the session's claim path, so the step's own prompt does not repeat them
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 from typing import Any, Awaitable, Callable, Dict
@@ -91,23 +92,25 @@ def a_mission_steps_answer_is_on_brand(record: Callable[..., None]) -> Callable[
 
 def a_playbook_step_is_on_brand(execute: Async) -> Async:
     """Wrap ``api.recipe_executor._execute_step`` (called with keywords): the brand's rules
-    after the step's prompt, and its answer on brand."""
+    after the step's prompt, and its answer on brand. Its reads run off the event loop."""
     @functools.wraps(execute)
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
         db, workspace_id = kwargs.get("db"), kwargs.get("workspace_id")
-        if "clean_prompt" in kwargs and not _runs_in_a_session(db, getattr(kwargs.get("agent"), "id", None)):
-            kwargs = {**kwargs, "clean_prompt": br.with_brand_rules(kwargs["clean_prompt"], db, workspace_id)}
-        return br.on_brand_result(db, workspace_id, await execute(*args, **kwargs))
+        agent_id = getattr(kwargs.get("agent"), "id", None)
+        if "clean_prompt" in kwargs and not await asyncio.to_thread(_runs_in_a_session, db, agent_id):
+            prompt = await br.with_brand_rules_off_loop(kwargs["clean_prompt"], db, workspace_id)
+            kwargs = {**kwargs, "clean_prompt": prompt}
+        return await br.on_brand_result_off_loop(db, workspace_id, await execute(*args, **kwargs))
     return wrapped
 
 
 def a_cards_answer_is_on_brand(finalize: Async) -> Async:
     """Wrap ``api.board_tasks.finalize_board_task_run`` (keywords after ``db``): the answer
-    it writes is on brand before any of its own checks read it."""
+    it writes is on brand before any of its own checks read it. The kit is read off the loop."""
     @functools.wraps(finalize)
     async def wrapped(db: Any, *args: Any, **kwargs: Any) -> Any:
         if "exec_result" in kwargs:
-            result = br.on_brand_result(db, kwargs.get("workspace_id"), kwargs["exec_result"])
+            result = await br.on_brand_result_off_loop(db, kwargs.get("workspace_id"), kwargs["exec_result"])
             kwargs = {**kwargs, "exec_result": result}
         return await finalize(db, *args, **kwargs)
     return wrapped

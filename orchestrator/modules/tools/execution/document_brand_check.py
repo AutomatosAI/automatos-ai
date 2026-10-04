@@ -13,6 +13,7 @@ them. The placeholder signature is filled before the render, by
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
 
@@ -62,7 +63,9 @@ def a_documents_banned_words_are_said(execute: Async) -> Async:
 
         result = await execute(executor, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id)
         db = getattr(executor, "db", None)
-        kit = br.stored_kit(db, workspace_id or _agent_workspace(db, agent_id))
+        # Both reads off the event loop (F105, F330): a pool wait never stops it.
+        workspace = workspace_id or await asyncio.to_thread(_agent_workspace, db, agent_id)
+        kit = await br.kit_off_loop(db, workspace)
         phrases = ((kit or {}).get("voice") or {}).get("banned_phrases") or []
         return with_document_note(result, br.banned_note(br.banned_found(document_text(parameters), phrases)))
     return wrapped

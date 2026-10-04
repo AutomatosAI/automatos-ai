@@ -28,6 +28,7 @@ document), and an owner's edit reaches the next run within that time.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -63,14 +64,18 @@ def forget_cached_kits() -> None:
     _cache.clear()
 
 
+def _fresh(workspace_id: Any) -> Optional[Tuple[float, Any]]:
+    """The cached read for ``workspace_id`` while it is fresh, else None."""
+    hit = _cache.get(str(workspace_id))
+    return hit if hit is not None and hit[0] > time.monotonic() else None
+
+
 def _cached(workspace_id: Any, read: Callable[[], Any]) -> Any:
-    key = str(workspace_id)
-    hit = _cache.get(key)
-    now = time.monotonic()
-    if hit is not None and hit[0] > now:
+    hit = _fresh(workspace_id)
+    if hit is not None:
         return hit[1]
     value = read()
-    _cache[key] = (now + KIT_CACHE_SECONDS, value)
+    _cache[str(workspace_id)] = (time.monotonic() + KIT_CACHE_SECONDS, value)
     return value
 
 
@@ -113,6 +118,16 @@ def stored_kit(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
     return _cached(key, lambda: _read_kit(db, key))
 
 
+async def kit_off_loop(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
+    """:func:`stored_kit` for async code: a fresh cached read at once, else the read on a
+    worker thread, so a pool wait never stops the event loop (F105, F330)."""
+    key = _workspace_uuid(workspace_id) if workspace_id else None
+    hit = _fresh(key) if key is not None else None
+    if hit is not None:
+        return hit[1]
+    return await asyncio.to_thread(stored_kit, db, workspace_id)
+
+
 def sign_off_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
     """Who signs: the voice's sign-off, else the company contact's name, else the brand's."""
     if not kit:
@@ -149,12 +164,26 @@ def brand_rules_block(db: Any, workspace_id: Any) -> Optional[str]:
     return rules_for_kit(stored_kit(db, workspace_id))
 
 
-def with_brand_rules(prompt: str, db: Any, workspace_id: Any) -> str:
-    """``prompt`` with the rules after it, once: a prompt that has them already is left."""
+def prompt_with_rules(prompt: str, kit: Optional[Dict[str, Any]]) -> str:
+    """``prompt`` with ``kit``'s rules after it, once: a prompt that has them already is left."""
     if RULES_HEADING in (prompt or ""):
         return prompt
-    block = brand_rules_block(db, workspace_id)
+    block = rules_for_kit(kit)
     return f"{prompt}\n\n{block}" if block else prompt
+
+
+def with_brand_rules(prompt: str, db: Any, workspace_id: Any) -> str:
+    """``prompt`` with the workspace's rules after it, once."""
+    if RULES_HEADING in (prompt or ""):
+        return prompt
+    return prompt_with_rules(prompt, stored_kit(db, workspace_id))
+
+
+async def with_brand_rules_off_loop(prompt: str, db: Any, workspace_id: Any) -> str:
+    """:func:`with_brand_rules` for async code: the kit read never waits on the loop."""
+    if RULES_HEADING in (prompt or ""):
+        return prompt
+    return prompt_with_rules(prompt, await kit_off_loop(db, workspace_id))
 
 
 def _first_family(stack: str) -> str:
@@ -220,13 +249,29 @@ def on_brand_text(text: str, kit: Optional[Dict[str, Any]]) -> str:
     return f"{filled.rstrip()}\n\n{note}" if note else filled
 
 
+def _text_key(result: Any) -> Optional[str]:
+    """Which of a finished run's result keys holds its answer; None for a failed run or none."""
+    if not isinstance(result, dict) or result.get("status") in ("error", "cancelled"):
+        return None
+    return next((k for k in TEXT_KEYS if isinstance(result.get(k), str) and result.get(k).strip()), None)
+
+
 def on_brand_result(db: Any, workspace_id: Any, result: Any) -> Any:
     """A run's result dict with its text :func:`on_brand_text`; any other result as it was."""
-    if not isinstance(result, dict) or result.get("status") in ("error", "cancelled"):
-        return result
-    key = next((k for k in TEXT_KEYS if isinstance(result.get(k), str) and result.get(k).strip()), None)
-    kit = stored_kit(db, workspace_id) if key else None
-    if kit is None:
+    kit = stored_kit(db, workspace_id) if _text_key(result) else None
+    return result_on_brand(result, kit, workspace_id)
+
+
+async def on_brand_result_off_loop(db: Any, workspace_id: Any, result: Any) -> Any:
+    """:func:`on_brand_result` for async code: the kit read never waits on the loop."""
+    kit = await kit_off_loop(db, workspace_id) if _text_key(result) else None
+    return result_on_brand(result, kit, workspace_id)
+
+
+def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: Any = None) -> Any:
+    """``result`` with its answer :func:`on_brand_text` by ``kit``: a new dict when it changed."""
+    key = _text_key(result)
+    if kit is None or key is None:
         return result
     text = on_brand_text(result[key], kit)
     if text != result[key]:
@@ -237,6 +282,7 @@ def on_brand_result(db: Any, workspace_id: Any, result: Any) -> Any:
 
 __all__ = [
     "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "RULES_HEADING", "banned_found", "banned_note", "brand_assets",
-    "brand_rules_block", "fill_sign_off", "forget_cached_kits", "on_brand_result", "on_brand_text",
-    "rules_for_kit", "sign_off_name", "stored_kit", "with_brand_rules",
+    "brand_rules_block", "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result",
+    "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
+    "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop",
 ]

@@ -40,7 +40,8 @@ def a_document_is_signed(generate: Async) -> Async:
 
         data = kwargs.get("data")
         workspace_id = kwargs.get("workspace_id") or getattr(self, "workspace_id", None)
-        kit = br.stored_kit(getattr(self, "db", None), workspace_id) if isinstance(data, dict) and data else None
+        has_data = isinstance(data, dict) and bool(data)
+        kit = await br.kit_off_loop(getattr(self, "db", None), workspace_id) if has_data else None
         name = br.sign_off_name(kit)
         if name:
             kwargs = {**kwargs, "data": signed(data, name, br.fill_sign_off)}
