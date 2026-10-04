@@ -82,53 +82,6 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     # ── Write ────────────────────────────────────────────────────────
 
     registry.register(ActionDefinition(
-        name="platform_add_playbook_step",
-        description=(
-            "Append a new step to an existing playbook. Each step has a prompt "
-            "template and optional agent assignment. Steps execute sequentially."
-        ),
-        category="playbooks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "playbook_id": {
-                    "type": "integer",
-                    "description": "ID of the playbook to add the step to.",
-                },
-                "prompt_template": {
-                    "type": "string",
-                    "description": "The prompt template for this step. Supports {input.*} and {steps[N].*} variable substitution.",
-                },
-                "agent_id": {
-                    "type": "integer",
-                    "description": "ID of the agent to execute this step (optional — uses default agent if not set).",
-                },
-                "order": {
-                    "type": "integer",
-                    "description": "Position in the step list (0-based). Defaults to end of list.",
-                },
-                "error_handling": {
-                    "type": "string",
-                    "enum": ["stop", "skip", "retry"],
-                    "description": "What to do if this step fails. Defaults to 'stop'.",
-                },
-                "output_key": {
-                    "type": "string",
-                    "description": "Key name to store this step's output under (for referencing in later steps).",
-                },
-            },
-            "required": ["playbook_id", "prompt_template"],
-        },
-        permission_level="write",
-        requires_confirmation=False,
-        tags=["playbooks", "steps", "add", "write"],
-        examples=[
-            "add a step to playbook 3 that summarizes the results",
-            "add a code review step to the bug triage playbook",
-        ],
-    ))
-
-    registry.register(ActionDefinition(
         name="platform_update_playbook_step",
         description=(
             "Modify an existing playbook step by its 0-based index. Can change "
