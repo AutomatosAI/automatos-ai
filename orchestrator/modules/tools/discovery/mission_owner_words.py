@@ -152,7 +152,7 @@ def _roster(db: Session, workspace_id: Any) -> List[Any]:
     from core.models.core import Agent
 
     agents = db.query(Agent).filter(Agent.workspace_id == workspace_id, Agent.status == "active").all()
-    names = [str(agent.name or "").strip().lower() for agent in agents]
+    names = [str(getattr(agent, "name", None) or "").strip().lower() for agent in agents]
     return [agent for agent, name in zip(agents, names) if name and names.count(name) == 1]
 
 
