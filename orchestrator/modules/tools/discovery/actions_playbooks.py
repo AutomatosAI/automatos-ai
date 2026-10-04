@@ -220,39 +220,6 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # ── Execution ────────────────────────────────────────────────────
-
-    registry.register(ActionDefinition(
-        name="platform_get_playbook_execution",
-        description=(
-            "Check status and results of a running or completed playbook execution. "
-            "Returns step-by-step results and timing. "
-            "Provide execution_id or playbook_id."
-        ),
-        category="playbooks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "execution_id": {
-                    "type": "string",
-                    "description": "The execution_id returned from platform_execute_playbook.",
-                },
-                "playbook_id": {
-                    "type": "integer",
-                    "description": "Playbook ID to list recent executions for (if no execution_id).",
-                },
-            },
-            "required": [],
-        },
-        permission_level="read",
-        tags=["playbooks", "execution", "status", "results"],
-        examples=[
-            "what's the status of that playbook run?",
-            "check playbook execution abc123",
-            "did the playbook run successfully?",
-        ],
-    ))
-
     # ── Destructive ──────────────────────────────────────────────────
 
     registry.register(ActionDefinition(

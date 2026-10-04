@@ -1132,20 +1132,10 @@ def get_step_full_logs(
                 detail=f"No S3 log found for step {step_order}"
             )
 
-        # Fetch from S3
-        import json as json_mod
-        from core.storage import get_s3_client
+        # Fetch from S3 (F321: the reader Auto's platform_get_playbook_execution uses too)
+        from services.playbook_run_result import read_step_log
 
-        # Parse s3://bucket/key from log_url
-        s3_path = log_url.replace("s3://", "")
-        bucket = s3_path.split("/", 1)[0]
-        key = s3_path.split("/", 1)[1]
-
-        s3 = get_s3_client()
-
-        response = s3.get_object(Bucket=bucket, Key=key)
-        body = response["Body"].read().decode("utf-8")
-        log_data = json_mod.loads(body)
+        log_data = read_step_log(log_url)
 
         return {
             "step_order": step_order,
