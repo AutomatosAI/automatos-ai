@@ -6,17 +6,23 @@ from .action_registry import ActionDefinition, ActionRegistry
 def register_graph_actions(registry: ActionRegistry) -> None:
     """Register knowledge-graph platform actions."""
 
+    # F312 (night 9): never called all night; "Brazil Cerrado is late: which cafés?" was
+    # answered from one document and missed a café another document names. The description
+    # now says which questions are the graph's, beside the documents and the database.
     registry.register(ActionDefinition(
         name="platform_query_graph",
         description=(
             "Query the business knowledge graph to find connections between concepts, "
             "trace dependencies, and discover relationships across documents. The graph "
             "contains the entities, processes, named metrics and rules the workspace's "
-            "documents describe, and how they connect. It holds no live figures: counts, "
-            "money, totals, averages and rankings come from the workspace's databases, so "
-            "use smart_query_database for those. Returns a traversal-based answer with "
-            "source nodes and edges. "
-            "Use 'bfs' mode (default) for broad context or 'dfs' to trace a specific chain."
+            "documents describe, and how they connect. Use it for a question that spans "
+            "documents or asks how things relate: which customers, orders or products are "
+            "affected if something is late or changes, who supplies or buys what, what goes "
+            "into what; and search_knowledge for what one document says. It holds no live "
+            "figures: counts, money, totals, averages and rankings come from the workspace's "
+            "databases, so use platform_query_data for those (and for the live orders a "
+            "graph answer points to). Returns a traversal-based answer with source nodes and "
+            "edges. Use 'bfs' mode (default) for broad context or 'dfs' to trace a specific chain."
         ),
         category="graph",
         parameters={
@@ -59,6 +65,9 @@ def register_graph_actions(registry: ActionRegistry) -> None:
             "search graph for marketing dependencies",
             "how are authentication and user management connected?",
             "what processes depend on the payment system?",
+            "which customers are affected if a supplier's delivery is late?",
+            "who supplies the products in this gift box?",
+            "which of our products use this ingredient?",
         ],
     ))
 

@@ -244,6 +244,12 @@ actions:
     source: example
   - text: what processes depend on the payment system?
     source: example
+  - text: which customers are affected if a supplier's delivery is late?
+    source: example
+  - text: who supplies the products in this gift box?
+    source: example
+  - text: which of our products use this ingredient?
+    source: example
   - text: how does
     source: phrase_map
   - text: connected to
