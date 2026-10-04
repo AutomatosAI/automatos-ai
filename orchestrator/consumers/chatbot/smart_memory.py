@@ -34,6 +34,7 @@ from modules.memory.write_contract import (  # noqa: F401  (re-export)
     build_memory_metadata,
     violates_exclusions,
 )
+from modules.context.remembered_figures import leaves_counted_figures_out  # F316 (night 9b)
 
 
 @dataclass
@@ -671,6 +672,7 @@ class SmartMemoryManager:
         return self._parse_distilled_facts(content)
 
     @staticmethod
+    @leaves_counted_figures_out  # F316 (night 9b): a counted figure is not a durable fact
     def _build_distill_prompt(user_message: str, assistant_response: str) -> str:
         """Prompt for typed operational memory (PRD-159 S1).
 
