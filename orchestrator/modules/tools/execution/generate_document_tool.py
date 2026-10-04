@@ -26,6 +26,7 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -41,6 +42,8 @@ logger = logging.getLogger(__name__)
 TOOL_NAME = "generate_document"
 DEFAULT_TITLE = "Document"
 DEFAULT_FORMAT = "pdf"
+# The query parameter frontend/components/deliverables/deliverable-deep-link.tsx opens.
+DELIVERABLE_PARAM = "deliverable"
 # The one format whose no-template render takes free text and a list of sections.
 BODY_FORMAT = "pdf"
 
@@ -165,6 +168,22 @@ def document_request(parameters: Dict[str, Any]) -> DocumentRequest:
     return DocumentRequest(title, fmt, data, template_name, template_id)
 
 
+def deliverable_open_url(deliverable_id: Optional[str]) -> str:
+    """The owner's link to one Deliverable: the Deliverables page opened on it (F298).
+
+    Short, unsigned and lasting, so an agent can copy it onto a card. The page
+    fetches the file through the app's own document route as the signed-in
+    owner (anonymously in the local edition). Without an id, the page itself.
+    """
+    from modules.documents.generation_service import deliverables_app_url
+
+    page = deliverables_app_url()
+    if not deliverable_id:
+        return page
+    joiner = "&" if "?" in page else "?"
+    return f"{page}{joiner}{urlencode({DELIVERABLE_PARAM: str(deliverable_id)})}"
+
+
 def failure(message: str) -> Dict[str, Any]:
     """The tool's answer when no document was made."""
     return ToolResultFormatter.standardize_result({"success": False, "error": message}, TOOL_NAME)
@@ -239,6 +258,7 @@ def _answer(service: Any, result: Any, registration: Dict[str, Any]) -> Dict[str
         "content": result.content,
         "deliverable_id": registration.get("deliverable_id"),
         "app_url": deliverables_app_url(),
+        "open_url": deliverable_open_url(registration.get("deliverable_id")),
         "share_url": service.share_link(result),
         "template_id": result.template_id,
         "template_name": result.template_name,
