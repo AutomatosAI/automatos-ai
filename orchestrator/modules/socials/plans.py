@@ -64,6 +64,11 @@ SOURCE_SWITCHES = ("knowledge", "deliverables", "website", "github")
 VISUAL_MIX_KEYS = ("templates", "library", "ai_images", "ai_footage")
 
 MAX_CADENCE_ROWS = 20
+# PRD-251C (C6, US-C301): a row may post as a story instead of the format's own kind; a
+# story is a still or a video at 9:16 (Instagram's, through Composio).
+STORY = "story"
+ROW_KINDS = (STORY,)
+STORY_FORMATS = ("image", VIDEO)
 MAX_ROW_CHANNELS = 10
 MAX_PLAN_DAYS = 366
 MAX_WINDOW_DAYS = 62
@@ -134,6 +139,17 @@ def _row_length(row: Mapping[str, Any], where: str, template_id: Optional[str], 
     return length
 
 
+def _row_kind(row: Mapping[str, Any], where: str) -> Optional[str]:
+    """The kind the row's posts go out as (US-C301): a story, from an image or a video row;
+    None for the format's own kinds."""
+    kind = row.get("kind")
+    if kind is None:
+        return None
+    if kind not in ROW_KINDS or row.get("format") not in STORY_FORMATS:
+        raise InvalidPlan(f"{where}.kind may be {STORY}, on an image or a video row")
+    return kind
+
+
 def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) -> Dict[str, Any]:
     where = f"cadence[{index}]"
     if not isinstance(row, Mapping):
@@ -152,6 +168,7 @@ def _cadence_row(row: Any, index: int, templates: Mapping[str, TemplateInfo]) ->
         "template_id": template_id,
         "days": _days(row.get("days"), f"{where}.days"),
         "time": _clock(row.get("time"), f"{where}.time"),
+        "kind": _row_kind(row, where),
     }
 
 
@@ -308,13 +325,14 @@ class Slot:
     local_time: str
     at: datetime  # UTC
     moved: bool = False
+    kind: Optional[str] = None  # PRD-251C: STORY when the row posts stories
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "key": self.key, "row_id": self.row_id, "channels": list(self.channels), "format": self.format,
             "length_seconds": self.length_seconds, "template_id": self.template_id,
             "local_date": self.local_date.isoformat(), "local_time": self.local_time,
-            "at": self.at.isoformat(), "moved": self.moved,
+            "at": self.at.isoformat(), "moved": self.moved, "kind": self.kind,
         }
 
 
@@ -365,6 +383,7 @@ def _slot(plan: Any, row: Mapping[str, Any], day: date, zone: ZoneInfo) -> Optio
         key=key, row_id=row["id"], channels=tuple(row.get("channels") or ()), format=row["format"],
         length_seconds=row.get("length_seconds"), template_id=row.get("template_id"),
         local_date=day, local_time=row["time"], at=moved_to or local_to_utc(day, row["time"], zone), moved=moved_to is not None,
+        kind=row.get("kind"),
     )
 
 

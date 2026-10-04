@@ -11,6 +11,8 @@
  *   choices and replaces the copy, the variables and the sources only; Submit submits.
  * * F254: a try that fails after creating the post opens that post, and the next try edits
  *   it: one post, never a new row per Save, Render or Submit.
+ * * PRD-251C (US-C301): a ticked channel that posts stories offers "As a story" for an image or
+ *   a video; the story is 9:16, stays a story across those formats and saves as the story kind.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -36,7 +38,8 @@ import { IMAGE_TEMPLATE, api, post, renderWith, resetApi } from './socials-edito
 const go = vi.fn()
 const card = (name: string) => screen.getByRole('region', { name })
 const channelRow = (label: string) => within(card('Channels and sizes')).getByRole('listitem', { name: label })
-const tick = (label: string) => fireEvent.click(within(channelRow(label)).getByRole('checkbox'))
+const tick = (label: string) => fireEvent.click(within(channelRow(label)).getAllByRole('checkbox')[0])
+const storySwitch = (label: string) => within(channelRow(label)).queryByRole('checkbox', { name: 'As a story' })
 
 function renderEditor(p = null as ReturnType<typeof post> | null) {
   return renderWith(<SocialsEditor role="owner" post={p} go={go} />)
@@ -119,6 +122,29 @@ describe('the post editor', () => {
     expect(channelRow('X')).toHaveTextContent('1920 × 1080')
     expect(channelRow('LinkedIn')).toHaveTextContent('1080 × 1080')
     expect(card('Channels and sizes')).toHaveTextContent('Renders 16:9 · 1:1')
+  })
+
+  it('a ticked channel that posts stories offers As a story; the story is 9:16 and saves as one (PRD-251C)', async () => {
+    renderEditor()
+    await screen.findByText('TikTok')
+    tick('X')
+    tick('Instagram')
+    expect(storySwitch('X')).toBeNull()  // X posts no stories
+    fireEvent.click(storySwitch('Instagram') as HTMLElement)
+    expect(channelRow('Instagram')).toHaveTextContent('9:16')
+    await chooseFormat('Video')
+    expect(storySwitch('Instagram')).toBeChecked()  // a video story stays one
+    await chooseFormat('Carousel')
+    expect(storySwitch('Instagram')).toBeNull()  // a carousel is no story
+    await chooseFormat('Image')
+    expect(storySwitch('Instagram')).not.toBeChecked()
+    fireEvent.click(storySwitch('Instagram') as HTMLElement)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Stand reminder' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(api.setSocialPostTargets).toHaveBeenCalled())
+    expect(api.setSocialPostTargets).toHaveBeenCalledWith('post-new', [
+      { toolkit: 'twitter', post_kind: 'image' }, { toolkit: 'instagram', post_kind: 'story' },
+    ])
   })
 
   it('Save draft creates the post, then sets its channels and its slot', async () => {

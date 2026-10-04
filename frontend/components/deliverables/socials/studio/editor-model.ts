@@ -3,6 +3,7 @@
  * fields, channels and slot it saves as, and what each card derives from it (the format's
  * channels and why one cannot take it, the size each channel gets, the ratios the post
  * renders in, the spoken words a length fits). The server checks all of it again.
+ * PRD-251C (US-C301): a ticked channel that posts stories may take an image or a video as one.
  */
 import { closestShape, sizeAspect } from './channel-shape'
 import type {
@@ -200,13 +201,33 @@ export function channelBlock(channel: SocialChannel, format: string): string | n
   return kinds.some((k) => VISUAL_KINDS.includes(k)) ? null : 'Takes video only'
 }
 
+const STORY_FORMATS: ReadonlyArray<string> = ['image', 'video']
+const STORY_KIND: SocialPostKind = 'story'
+
+/** Whether `channel` can post a post of `format` as a story (PRD-251C, US-C301). */
+export function canStory(channel: SocialChannel, format: string): boolean {
+  return STORY_FORMATS.includes(format) && availableKinds(channel).includes(STORY_KIND)
+}
+
+/** The draft with a ticked channel posting as a story, or back as the format's own kind. */
+export function withStory(draft: EditorDraft, channel: SocialChannel, on: boolean): EditorDraft {
+  if (!(channel.toolkit in draft.kinds)) return draft
+  const kind = on && canStory(channel, draft.format) ? STORY_KIND : defaultKind(channel, draft.format)
+  return kind ? { ...draft, kinds: { ...draft.kinds, [channel.toolkit]: kind } } : draft
+}
+
+/** A ticked channel's kind in `format`: a story stays one where the format can be a story. */
+function kindIn(channel: SocialChannel, format: string, current: SocialPostKind | undefined): SocialPostKind | null {
+  return current === STORY_KIND && canStory(channel, format) ? STORY_KIND : defaultKind(channel, format)
+}
+
 /** The draft in `format`: a new kind of visual drops the template and the length, and
- * each ticked channel takes the format's kind, or is left out when it cannot. */
+ * each ticked channel takes the format's kind (a story stays one), or is left out when it cannot. */
 export function withFormat(draft: EditorDraft, format: string, channels: ReadonlyArray<SocialChannel>): EditorDraft {
   const kinds: Record<string, SocialPostKind> = {}
   for (const toolkit of Object.keys(draft.kinds)) {
     const channel = channels.find((c) => c.toolkit === toolkit)
-    const kind = channel && !channelBlock(channel, format) ? defaultKind(channel, format) : null
+    const kind = channel && !channelBlock(channel, format) ? kindIn(channel, format, draft.kinds[toolkit]) : null
     if (kind) kinds[toolkit] = kind
   }
   const sameKind = (format === 'video') === (draft.format === 'video')

@@ -272,7 +272,7 @@ def test_linkedin_x_and_instagram_connected_are_listed_with_their_post_kinds(cha
     assert {toolkit: list(_kinds(channel)) for toolkit, channel in listed.items()} == {
         "linkedin": ["text", "image", "video"],
         "twitter": ["text", "image", "video"],
-        "instagram": ["image", "reel", "carousel"],
+        "instagram": ["image", "reel", "story", "carousel"],  # PRD-251C US-C301: stories
     }
     for channel in listed.values():
         assert channel["verified"] is True

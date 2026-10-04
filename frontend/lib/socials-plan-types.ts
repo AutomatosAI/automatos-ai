@@ -22,7 +22,12 @@ export interface SocialPlanCadenceRow {
   days: SocialWeekday[]
   /** HH:MM in the plan's timezone. */
   time: string
+  /** PRD-251C (US-C301): 'story' posts the row's image or video as an Instagram story; absent for the format's own kind. */
+  kind?: SocialPlanRowKind | null
 }
+
+/** PRD-251C (C6): what a cadence row may post as instead of its format's own kind. */
+export type SocialPlanRowKind = 'story'
 
 export interface SocialPlanSources {
   knowledge: boolean

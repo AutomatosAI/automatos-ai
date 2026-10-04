@@ -30,7 +30,7 @@ import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
   editorTargets, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal,
-  withSlides,
+  withSlides, withStory,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
 import { DeletePostButton } from './delete-post-button'
@@ -125,6 +125,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
           <EditorChannelsCard
             channels={channels} loading={channelsLoading} draft={draft} templateSizes={chosen?.sizes ?? []}
             onTick={(channel, on) => setDraft((d) => withChannelTicked(d, channel, on))}
+            onStory={(channel, on) => setDraft((d) => withStory(d, channel, on))}
             onOptions={(toolkit, options) => setDraft((d) => ({ ...d, options: { ...d.options, [toolkit]: options } }))}
           />
           {draft.format !== 'text' && (

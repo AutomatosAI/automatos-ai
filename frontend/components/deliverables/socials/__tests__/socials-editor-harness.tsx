@@ -15,7 +15,7 @@ const kind = (k: string, available = true) => ({ kind: k, available, reason: ava
 export const CHANNELS: SocialChannel[] = [
   { toolkit: 'twitter', label: 'X', post_kinds: [kind('text'), kind('image'), kind('video')] as any, verified: true, setup_note: null, copy_limits: { text: 280 } },
   { toolkit: 'linkedin', label: 'LinkedIn', post_kinds: [kind('text'), kind('image'), kind('video')] as any, verified: true, setup_note: null, copy_limits: { text: 3000 } },
-  { toolkit: 'instagram', label: 'Instagram', post_kinds: [kind('image'), kind('carousel'), kind('reel')] as any, verified: true, setup_note: null, copy_limits: { text: 2200 } },
+  { toolkit: 'instagram', label: 'Instagram', post_kinds: [kind('image'), kind('carousel'), kind('reel'), kind('story')] as any, verified: true, setup_note: null, copy_limits: { text: 2200 } },
   { toolkit: 'tiktok', label: 'TikTok', post_kinds: [kind('video')] as any, verified: true, setup_note: null, copy_limits: { text: 2200 } },
   { toolkit: 'reddit', label: 'Reddit (unverified channel)', post_kinds: [kind('image')] as any, verified: false, setup_note: null, copy_limits: { text: 300 } },
 ]

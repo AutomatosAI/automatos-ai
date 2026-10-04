@@ -5,7 +5,8 @@
  * format (a video with a length its templates offer, and the template or "Let Auto pick"),
  * how often and at what time. Nothing is made now: the plan only books the slots. The box
  * below sums the posts per channel over the plan's days and the render minutes its videos
- * need (images and text need none).
+ * need (images and text need none). PRD-251C (US-C301): a row may post its image or video
+ * as an Instagram story.
  */
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +17,7 @@ import { useSocialTemplates } from '@/hooks/use-socials-editor'
 import { channelLabel } from '../socials-status'
 import { lengthLabel } from '../studio/socials-calendar-model'
 import {
-  OFTEN_LABELS, WEEKDAY_LABELS, WEEKDAYS, cadenceSummary, daysFor, newRow, oftenOf,
+  OFTEN_LABELS, WEEKDAY_LABELS, WEEKDAYS, cadenceSummary, daysFor, formatChoiceOf, newRow, oftenOf, storyless, withFormatChoice,
   type DraftRow, type Often, type PlanDraft,
 } from './plan-model'
 import { PlanStepHeading, PlanSummaryBox } from './plan-ui'
@@ -31,7 +32,19 @@ export const FORMAT_CHOICES = [
   { value: 'fact_card', label: 'Fact card' },
   { value: 'text', label: 'Text only' },
 ] as const
+/** PRD-251C (US-C301): a row's format choices, the formats and a story of an image or a video (a topic's formats are only the first). */
+export const ROW_FORMAT_CHOICES = [
+  ...FORMAT_CHOICES,
+  { value: 'story_image', label: 'Story (image)' },
+  { value: 'story_video', label: 'Story (video)' },
+] as const
 export const NO_CHANNELS = 'Connect a channel in Composio first: the plan posts only to connected channels.'
+
+/** PRD-251C (US-C301): a story row's channels that take no stories are left out of it. */
+export function storyNote(left: ReadonlyArray<string>): string | null {
+  if (!left.length) return null
+  return `Stories go only to channels that post them: ${left.map(channelLabel).join(', ')} will get no posts from this row.`
+}
 
 interface RowProps {
   row: DraftRow
@@ -68,6 +81,7 @@ function VideoChoices({ row, index, videoTemplates, onChange }: Omit<RowProps, '
 
 function CadenceRowEditor({ row, index, channels, videoTemplates, onChange, onRemove }: RowProps) {
   const often = oftenOf(row.days)
+  const note = storyNote(storyless(row, channels))
   const toggle = (toolkit: string) =>
     onChange({ ...row, channels: row.channels.includes(toolkit) ? row.channels.filter((c) => c !== toolkit) : [...row.channels, toolkit] })
   return (
@@ -81,9 +95,9 @@ function CadenceRowEditor({ row, index, channels, videoTemplates, onChange, onRe
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <select aria-label={`Row ${index + 1} format`} className={SELECT} value={row.format}
-          onChange={(e) => onChange({ ...row, format: e.target.value, templateId: null, lengthSeconds: null })}>
-          {FORMAT_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+        <select aria-label={`Row ${index + 1} format`} className={SELECT} value={formatChoiceOf(row)}
+          onChange={(e) => onChange(withFormatChoice(row, e.target.value))}>
+          {ROW_FORMAT_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
         </select>
         {row.format === 'video' && <VideoChoices row={row} index={index} videoTemplates={videoTemplates} onChange={onChange} />}
         <select aria-label={`Row ${index + 1} how often`} className={SELECT} value={often}
@@ -100,6 +114,7 @@ function CadenceRowEditor({ row, index, channels, videoTemplates, onChange, onRe
           onChange={(e) => onChange({ ...row, time: e.target.value })} />
         {onRemove && <Button type="button" variant="ghost" size="sm" onClick={onRemove}>Remove</Button>}
       </div>
+      {note && <p role="note" className="m-0 text-[13px] text-muted-foreground">{note}</p>}
     </div>
   )
 }

@@ -112,6 +112,7 @@ MAX_REPORTED_FINDINGS = 20
 FINDING_KEYS = ("section", "severity", "code", "message", "selector", "containerSelector", "time", "fixHint", "source", "line")
 FINDING_TEXT_CHARS = 300
 DEFAULT_ASPECT = "original"
+STORY_KIND = "story"  # PRD-251C (US-C301): a target posted as an Instagram story
 # US-208: a preview's files never share a name with the post's rendered media.
 PREVIEW_FILE_PREFIX = "preview-"
 
@@ -229,7 +230,14 @@ def bundle_for(
         keep_slots=footage_slots,
         fmt=template.format,
         size=size,
+        story_safe=is_story(post),
     )
+
+
+def is_story(post: Any) -> bool:
+    """PRD-251C (US-C301): a post with a story among its channels renders its 9:16 size
+    inside the story's safe zone (``core.media_render_bundle.story_safe_css``)."""
+    return any(getattr(target, "post_kind", None) == STORY_KIND for target in getattr(post, "targets", None) or ())
 
 
 def template_sizes(template: Any) -> List[str]:

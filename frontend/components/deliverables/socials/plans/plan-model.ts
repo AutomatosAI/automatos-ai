@@ -2,13 +2,16 @@
  * PRD-251B US-B207 — the Plan page's model (pure): the five steps (Plan.dc.html), the form's
  * draft and how it maps to and from a plan, the cadence's "how often" presets, the visual
  * mix and late-approval choices, the cadence summary (posts per channel over the plan's
- * days and the render minutes its videos need) and the plan's status line.
+ * days and the render minutes its videos need) and the plan's status line. PRD-251C: a
+ * row's story choice (US-C301).
  */
+import type { SocialChannel } from '@/lib/api-client'
 import type {
   SocialLatePolicy,
   SocialPlan,
   SocialPlanInput,
   SocialPlanRhythm,
+  SocialPlanRowKind,
   SocialPlanSources,
   SocialWeekday,
 } from '@/lib/socials-plan-types'
@@ -61,6 +64,36 @@ export interface DraftRow {
   templateId: string | null
   days: SocialWeekday[]
   time: string
+  /** PRD-251C (US-C301): 'story' when the row posts its image or video as a story. */
+  kind?: SocialPlanRowKind | null
+}
+
+/** PRD-251C (US-C301): the formats a story row may post, and the format select's story choices. */
+export const STORY_FORMATS: ReadonlyArray<string> = ['image', 'video']
+const STORY_CHOICE_PREFIX = 'story_'
+
+/** The format select's value for a row: its format, or "story_image" / "story_video" for a story row. */
+export function formatChoiceOf(row: Pick<DraftRow, 'format' | 'kind'>): string {
+  return row.kind === 'story' ? `${STORY_CHOICE_PREFIX}${row.format}` : row.format
+}
+
+/** The row after the format select changed: a story choice sets the kind; another clears it. */
+export function withFormatChoice(row: DraftRow, choice: string): DraftRow {
+  const story = choice.startsWith(STORY_CHOICE_PREFIX)
+  const format = story ? choice.slice(STORY_CHOICE_PREFIX.length) : choice
+  const sameFormat = format === row.format
+  return {
+    ...row, format, kind: story ? 'story' : null,
+    templateId: sameFormat ? row.templateId : null, lengthSeconds: sameFormat ? row.lengthSeconds : null,
+  }
+}
+
+/** The channels of a story row that take no stories: the plan leaves them out of its stories. */
+export function storyless(row: Pick<DraftRow, 'channels' | 'kind'>, channels: ReadonlyArray<SocialChannel>): string[] {
+  if (row.kind !== 'story') return []
+  const takesStories = (toolkit: string) =>
+    channels.some((channel) => channel.toolkit === toolkit && channel.post_kinds.some((kind) => kind.kind === 'story'))
+  return row.channels.filter((toolkit) => !takesStories(toolkit))
 }
 
 export type MixKey = 'templates' | 'mixed' | 'ai'
@@ -153,7 +186,7 @@ export function draftFromPlan(plan: SocialPlan): PlanDraft {
     startsOn: plan.starts_on ?? base.startsOn, endsOn: plan.ends_on ?? base.endsOn,
     cadence: plan.cadence.map((row) => ({
       id: row.id, channels: [...row.channels], format: row.format, lengthSeconds: row.length_seconds,
-      templateId: row.template_id, days: [...row.days], time: row.time,
+      templateId: row.template_id, days: [...row.days], time: row.time, kind: row.kind ?? null,
     })),
     sources: { knowledge: plan.sources.knowledge, deliverables: plan.sources.deliverables, website: plan.sources.website, github: plan.sources.github, notes: plan.sources.notes ?? '' },
     neverSay: (plan.sources.never_say ?? []).join(', '),
@@ -177,6 +210,7 @@ export function inputFromDraft(draft: PlanDraft): SocialPlanInput {
     cadence: draft.cadence.map((row) => ({
       ...(row.id ? { id: row.id } : {}), channels: row.channels, format: row.format,
       length_seconds: row.format === 'video' ? row.lengthSeconds : null, template_id: row.templateId, days: row.days, time: row.time,
+      ...(row.kind === 'story' && STORY_FORMATS.includes(row.format) ? { kind: row.kind } : {}),
     })),
     sources: { ...draft.sources, never_say: phrases(draft.neverSay) },
     make: {

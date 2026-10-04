@@ -5,13 +5,15 @@
  * (GET /api/socials/channels) with its badge, its name and the size the format gives on
  * its post kind; a channel the format excludes is disabled with why. "Renders" lists the
  * ratios of the ticked channels. YouTube's privacy and category show once it is ticked.
+ * PRD-251C (US-C301): a ticked channel that posts stories offers "As a story" for an image
+ * or a video, rendered 9:16 inside the story's safe zone.
  */
 import { cn } from '@/lib/utils'
 import type { SocialChannel, SocialPostTargetOptions } from '@/lib/api-client'
 import { YOUTUBE_TOOLKIT, YoutubeOptions } from '../socials-channel-row'
 import { CHANNEL_BADGE } from './socials-calendar-chip'
 import { channelBadge } from './socials-calendar-model'
-import { channelBlock, renderRatios, sizeFor, type EditorDraft } from './editor-model'
+import { canStory, channelBlock, renderRatios, sizeFor, type EditorDraft } from './editor-model'
 import { EditorCard, Hint } from './editor-ui'
 
 interface ChannelLineProps {
@@ -19,10 +21,11 @@ interface ChannelLineProps {
   draft: EditorDraft
   templateSizes: ReadonlyArray<string>
   onTick: (channel: SocialChannel, on: boolean) => void
+  onStory: (channel: SocialChannel, on: boolean) => void
   onOptions: (toolkit: string, options: SocialPostTargetOptions) => void
 }
 
-function ChannelLine({ channel, draft, templateSizes, onTick, onOptions }: ChannelLineProps) {
+function ChannelLine({ channel, draft, templateSizes, onTick, onStory, onOptions }: ChannelLineProps) {
   const blocked = channelBlock(channel, draft.format)
   const kind = draft.kinds[channel.toolkit] ?? null
   const id = `socials-editor-channel-${channel.toolkit}`
@@ -36,6 +39,12 @@ function ChannelLine({ channel, draft, templateSizes, onTick, onOptions }: Chann
           {blocked ?? (kind ? sizeFor(channel.toolkit, kind, templateSizes) : '')}
         </span>
       </label>
+      {kind !== null && canStory(channel, draft.format) && (
+        <label className="flex items-center gap-2 pb-1 pl-7 text-[13px] text-muted-foreground">
+          <input type="checkbox" checked={kind === 'story'} onChange={(e) => onStory(channel, e.target.checked)} />
+          As a story
+        </label>
+      )}
       {kind !== null && channel.toolkit === YOUTUBE_TOOLKIT && (
         <YoutubeOptions options={draft.options[channel.toolkit] ?? {}} onChange={(o) => onOptions(channel.toolkit, o)} />
       )}

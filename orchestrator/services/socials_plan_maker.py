@@ -156,15 +156,18 @@ def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
 # ── one slot ───────────────────────────────────────────────────────────────
 
 
-def _kind_for(channel: Any, post_format: str) -> Optional[str]:
+def _kind_for(channel: Any, post_format: str, row_kind: Optional[str] = None) -> Optional[str]:
+    """The kind a channel posts the slot as: a story row's story (PRD-251C), else the
+    format's most fitting kind the channel offers now."""
     available = [kind.kind for kind in channel.post_kinds if kind.available]
-    return next((kind for kind in FORMAT_KINDS.get(post_format, ()) if kind in available), None)
+    wanted = (row_kind,) if row_kind else FORMAT_KINDS.get(post_format, ())
+    return next((kind for kind in wanted if kind in available), None)
 
 
 def slot_targets(db: Any, workspace_id: UUID, slot: plans.Slot) -> List[Dict[str, Any]]:
-    """The slot's channels that are connected and post its format, each with its kind."""
+    """The slot's channels that are connected and post its format (or its row's kind), each with its kind."""
     channels = {channel.toolkit: channel for channel in social_channels(db, workspace_id)}
-    found = [(toolkit, _kind_for(channels[toolkit], slot.format)) for toolkit in slot.channels if toolkit in channels]
+    found = [(toolkit, _kind_for(channels[toolkit], slot.format, slot.kind)) for toolkit in slot.channels if toolkit in channels]
     return [{"toolkit": toolkit, "post_kind": kind, "options": {}} for toolkit, kind in found if kind]
 
 
@@ -191,7 +194,7 @@ def fits_quota(db: Any, workspace: Workspace, seconds: int) -> bool:
 
 def _refusal(db: Any, workspace: Workspace, slot: plans.Slot) -> Optional[str]:
     if not slot_targets(db, workspace.id, slot):
-        return f"no connected channel posts a {slot.format} for {', '.join(slot.channels)}"
+        return f"no connected channel posts a {slot.kind or slot.format} for {', '.join(slot.channels)}"
     if not fits_quota(db, workspace, render_seconds(db, workspace.id, slot)):
         return "this month's render minutes are used up"
     return None

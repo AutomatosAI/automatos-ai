@@ -9,14 +9,19 @@
  * * The music picker's three choices map to the post's music and back.
  * * PRD-251C: the repeat window round-trips, and the form keeps it within what the server takes;
  *   a new plan makes its week on Sunday at 17:00 and researches on Saturday; a plan saved
- *   before PRD-251C is daily; the batch day pulls the research day while it was the day before.
+ *   before PRD-251C is daily; the batch day pulls the research day while it was the day before;
+ *   a story row reads and sets through the format select, goes out as `kind`, and names the
+ *   channels that post no stories (US-C301).
  */
 import { describe, expect, it } from 'vitest'
 
+import type { SocialChannel } from '@/lib/api-client'
 import type { SocialPlan } from '@/lib/socials-plan-types'
 import {
-  cadenceSummary, daysFor, draftFromPlan, emptyDraft, inputFromDraft, missingFields, mixOf, oftenOf, repeatDays, statusLine,
+  cadenceSummary, daysFor, draftFromPlan, emptyDraft, formatChoiceOf, inputFromDraft, missingFields, mixOf, oftenOf, repeatDays,
+  statusLine, storyless, withFormatChoice,
 } from '@/components/deliverables/socials/plans/plan-model'
+import { storyNote } from '@/components/deliverables/socials/plans/plan-step-cadence'
 import { batchDayChange, nextBatchLine, ordinal, rhythmSummary } from '@/components/deliverables/socials/plans/plan-rhythm'
 import {
   parsePlannedId, plannedEvents, plannedId, plannedSlots, planRailLine,
@@ -85,6 +90,28 @@ describe('the draft', () => {
     expect([ordinal(2), ordinal(3), ordinal(11), ordinal(22), ordinal(25)]).toEqual(['2nd', '3rd', '11th', '22nd', '25th'])
     expect(nextBatchLine('2026-10-18T16:00:00Z', 'Europe/London')).toMatch(/^The next batch is made Sun,? 18 Oct,? 17:00\.$/)
     expect(nextBatchLine(null, 'UTC')).toBeNull()
+  })
+
+  it('a story row: the format select reads and sets it, the input carries it, and channels without stories are named (PRD-251C)', () => {
+    const draft = draftFromPlan(plan({
+      cadence: [{ id: 'r1', channels: ['instagram', 'twitter'], format: 'image', length_seconds: null, template_id: null, days: ['mon'], time: '09:00', kind: 'story' }],
+    }))
+    expect(formatChoiceOf(draft.cadence[0])).toBe('story_image')
+    expect(inputFromDraft(draft).cadence?.[0]).toMatchObject({ format: 'image', kind: 'story' })
+    const video = withFormatChoice(draft.cadence[0], 'story_video')
+    expect([video.format, video.kind, formatChoiceOf(video)]).toEqual(['video', 'story', 'story_video'])
+    const reel = withFormatChoice({ ...video, lengthSeconds: 30 }, 'video')
+    expect([reel.format, reel.kind, reel.lengthSeconds]).toEqual(['video', null, 30])  // the same format keeps its length
+    expect(inputFromDraft({ ...draft, cadence: [reel] }).cadence?.[0]).not.toHaveProperty('kind')
+    const kind = (k: string) => ({ kind: k, available: true, reason: null, needs_public_storage: false })
+    const channels = [
+      { toolkit: 'instagram', label: 'Instagram', post_kinds: [kind('image'), kind('story')], verified: true, setup_note: null },
+      { toolkit: 'twitter', label: 'X', post_kinds: [kind('image')], verified: true, setup_note: null },
+    ] as SocialChannel[]
+    expect(storyless(draft.cadence[0], channels)).toEqual(['twitter'])
+    expect(storyless(reel, channels)).toEqual([])
+    expect(storyNote(['twitter'])).toBe('Stories go only to channels that post them: X will get no posts from this row.')
+    expect(storyNote([])).toBeNull()
   })
 
   it('a new plan runs 35 days from today and needs a name and a channel', () => {

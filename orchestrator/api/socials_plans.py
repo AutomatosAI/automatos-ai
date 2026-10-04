@@ -81,6 +81,8 @@ class CadenceRow(_Strict):
     template_id: Optional[UUID] = None
     days: List[str] = Field(..., min_length=1, max_length=7)
     time: str
+    # PRD-251C (US-C301): "story" posts the row's image or video as a story.
+    kind: Optional[str] = None
 
 
 class PlanSources(_Strict):

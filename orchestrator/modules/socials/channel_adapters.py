@@ -47,6 +47,7 @@ empty, so the documented parameters are carried here.
 
 A source is ``$copy`` (the channel's copy), ``$title`` (the post's title),
 ``$media`` (the post's media file), ``$media[]`` (all its media files),
+``$media.image`` / ``$media.video`` (its first file of that kind: a story, PRD-251C),
 ``$media.content_type`` and ``$media.bytes`` (facts of that file), ``$thumbnail``
 (the post's still), ``$option.<name>`` (the target's option, chosen in the composer
 or at publish), ``$steps.<id>`` (the ``id`` an earlier step returned: the
@@ -282,6 +283,56 @@ CHANNEL_ADAPTERS = {
                     "returns": {"id": "id|media_id"},
                 },
                 # The published media's link, for the receipt.
+                {
+                    "id": "link",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "read",
+                    "params": {"ig_media_id": "$steps.publish", "fields": "permalink"},
+                    "returns": {"permalink": "permalink"},
+                    "optional": True,
+                },
+            ],
+            # PRD-251C (US-C301): a story, a still or a video at 9:16. Composio's media
+            # container takes media_type STORIES (docs.composio.dev/toolkits/instagram,
+            # checked 2026-10-04); a story carries no caption. The step names both files:
+            # the post has one or the other, and only that one is sent.
+            "story": [
+                {"id": "account", "action": "INSTAGRAM_GET_USER_INFO", "class": "read", "returns": {"id": "id|user_id"}},
+                {
+                    "id": "container",
+                    "action": "INSTAGRAM_POST_IG_USER_MEDIA",
+                    "class": "upload",
+                    "params": {
+                        "ig_user_id": "$steps.account",
+                        "image_file": "$media.image",
+                        "video_file": "$media.video",
+                        "media_type": "STORIES",
+                    },
+                    "files": ["image_file", "video_file"],
+                    "jpeg": ["image_file"],
+                    "returns": {"id": "id|creation_id"},
+                },
+                # The container is ready once Instagram has processed it (FINISHED).
+                {
+                    "id": "ready",
+                    "action": "INSTAGRAM_GET_IG_MEDIA",
+                    "class": "status",
+                    "params": {"ig_media_id": "$steps.container", "fields": "status_code,status"},
+                    "until": {
+                        "path": "status_code",
+                        "done": ["FINISHED", "PUBLISHED"],
+                        "failed": ["ERROR", "EXPIRED"],
+                        "error": "status",
+                    },
+                },
+                {
+                    "id": "publish",
+                    "action": "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH",
+                    "class": "publish",
+                    "params": {"ig_user_id": "$steps.account", "creation_id": "$steps.container"},
+                    "returns": {"id": "id|media_id"},
+                },
+                # A story's link, for the receipt, when Instagram gives one.
                 {
                     "id": "link",
                     "action": "INSTAGRAM_GET_IG_MEDIA",
