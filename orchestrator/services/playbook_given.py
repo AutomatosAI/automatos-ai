@@ -1,19 +1,23 @@
 """F288 (night 8, part): a playbook run's details reach its steps.
 
 Auto ran New Cafe Onboarding (playbook 102) for Larder & Loaf with input_data
-{cafe_name, owner_name, owner_email, first_order, delivery_day}. A run's details reach a
-step only through a placeholder in its prompt ({input.<name>}, {{name}} or a bare
+{cafe_name, owner_name, owner_email, first_order, delivery_day}. A step's own words
+read a run's details only through a placeholder ({input.<name>}, {{name}} or a bare
 {input}: api.recipe_executor.fill_step_placeholders), and no step of playbook 102 has
-one. Step 1 asks "Please provide the following details for the new cafe: cafe_name,
-contact_person, contact_email, usual_harbour_blend_kg…" and step 2 fills
-{{cafe_details.…}} from step 1's answer. So the run asked the owner for what Auto had
-passed, then wrote the template's Thursday and "the crew" (#0366; #0440 asked again as
-#1411; #0284 wrote "0 kg" and #0303 wrote about another coffee).
+one. The details sat only at the foot of the step's system prompt, as "trigger data"
+metadata, while step 1's own words said "Please provide the following details for the
+new cafe: cafe_name, contact_person, contact_email, usual_harbour_blend_kg (e.g., 6)…"
+and step 2 filled {{cafe_details.…}} from step 1's answer. So the run asked the owner
+for what Auto had passed, then wrote the template's Thursday and "the crew" (#0366;
+#0440 asked again as #1411; #0284 wrote "0 kg" and #0303 wrote about another coffee).
 
 When a run carries details that no step's prompt names, every agent step's prompt now
-ends with them, under "What the owner gave for this run". A run that a trigger or a
-webhook started is left as it was: its details are not the owner's words, and the run
-already shows a trigger's content to its steps ("Trigger Context").
+ends with them, under "What the owner gave for this run", saying they win over the
+step's own examples and defaults and are never asked for again. A run that a trigger or
+a webhook started, or a rerun of one, is left as it was: its details are not the
+owner's words, and the run already shows a trigger's content to its steps ("Trigger
+Context"). Whether Auto's input names match the playbook's is checked where Auto starts
+the run (another branch), not here.
 """
 from __future__ import annotations
 
@@ -24,7 +28,8 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.services.playbook_inputs import INPUT_KEY, derived_inputs
 
 GIVEN_HEADING = "## What the owner gave for this run"
-GIVEN_ASK = ("Use these wherever this step needs them. Where the step's own wording says otherwise (an example, "
+GIVEN_ASK = ("The owner gave these for this run. Use them wherever this step needs them, whatever names the step "
+             "uses for them (a contact, an email, an order). Where the step's own wording says otherwise (an example, "
              "a default day, a name or an amount), these win. Never ask the owner for any of them.")
 # A bare {input}: substitute_playbook_input gives the step every detail of the run.
 BARE_INPUT = "{" + INPUT_KEY + "}"
@@ -38,11 +43,32 @@ TRIGGER_STARTS = ("composio_trigger", "workspace_webhook", "webhook")
 # Each detail is cut to this many characters.
 DETAIL_CHARS = 500
 STEP_OVERRIDES_KEY = "step_overrides"   # PRD-204 S7: a rerun's own wording for some steps
+# How far back a rerun's chain (retry_of) is followed to the run that started it.
+RERUN_HOPS = 5
 
 
-def started_by_a_trigger(run: Any, input_data: Dict[str, Any]) -> bool:
-    """A run a trigger or a webhook started: its details are a payload, not the owner's."""
-    return getattr(run, "triggered_by", None) in TRIGGER_STARTS or "content" in input_data
+def _first_run(db: Any, run: Any) -> Any:
+    """The run a rerun (a redo, an answer's rerun, a credit-back) goes back to."""
+    from core.models.core import RecipeExecution
+
+    for _ in range(RERUN_HOPS):
+        earlier = getattr(run, "retry_of", None)
+        if not earlier:
+            break
+        found = db.query(RecipeExecution).filter(RecipeExecution.execution_id == earlier,
+                                                 RecipeExecution.workspace_id == run.workspace_id).first()
+        if found is None:
+            break
+        run = found
+    return run
+
+
+def started_by_a_trigger(db: Any, run: Any, input_data: Dict[str, Any]) -> bool:
+    """A run a trigger or a webhook started, or a rerun of one: its details are a
+    payload, not the owner's."""
+    if "content" in input_data:
+        return True
+    return getattr(_first_run(db, run), "triggered_by", None) in TRIGGER_STARTS
 
 
 def _absent(value: Any) -> bool:
@@ -100,7 +126,7 @@ def given_for_run(db: Any, run: Any, input_data: Any) -> Optional[str]:
     details, and for a run that a trigger or a webhook started."""
     if run is None or not isinstance(input_data, dict) or not input_data:
         return None
-    if started_by_a_trigger(run, input_data):
+    if started_by_a_trigger(db, run, input_data):
         return None
     return given_block(input_data, run_prompts(db, run))
 

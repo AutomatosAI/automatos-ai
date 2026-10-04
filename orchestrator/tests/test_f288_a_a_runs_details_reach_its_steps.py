@@ -106,6 +106,25 @@ def test_a_trigger_or_a_webhook_run_is_left_as_it_was(onboarding):
     assert GIVEN_HEADING not in _step_prompt(onboarding, WELCOME, {})
 
 
+def test_a_rerun_of_a_webhooks_run_is_left_as_it_was_too(onboarding):
+    """A redo copies the run's input and is started by a person (triggered_by "rerun")."""
+    from core.models.core import RecipeExecution
+    from services.playbook_given import GIVEN_HEADING, given_for_run
+
+    payload = {"cafe_name": "Tidewater", "order_ref": "WH-7781"}
+    hook = onboarding.run(payload, "webhook")
+    original = onboarding.db.query(RecipeExecution).filter(RecipeExecution.execution_id == hook).one()
+    rerun = RecipeExecution(execution_id=f"{hook}-redo", recipe_id=original.recipe_id, workspace_id=onboarding.ws,
+                            status="running", input_data=payload, triggered_by="rerun", retry_of=hook)
+    onboarding.db.add(rerun)
+    onboarding.db.flush()
+
+    assert given_for_run(onboarding.db, rerun, payload) is None
+    owners = onboarding.run(payload, "rerun")
+    assert GIVEN_HEADING in given_for_run(onboarding.db, onboarding.db.query(RecipeExecution).filter(
+        RecipeExecution.execution_id == owners).one(), payload)
+
+
 def test_a_detail_a_step_names_reaches_it_there_and_not_again():
     from services.playbook_given import unnamed_details
 

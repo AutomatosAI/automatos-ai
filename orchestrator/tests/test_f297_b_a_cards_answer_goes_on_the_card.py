@@ -1,7 +1,7 @@
 """F297 (night 8, the agents' prompts): a plain board card's answer goes on the card.
 
 Mission and playbook steps were told where their answer goes (F269, night 7b); a plain
-card's prompt never was. Night 8's cards got a description of a saved file instead of
+card's prompt never was, and the steps' wording asked for "the working" with every answer. Night 8's cards got a description of a saved file instead of
 the work (#0256, #0412), a tool's error as the answer's first line ("I am unable to
 write the file, as there seems to be an issue with the `file_path` parameter.", #0346;
 "I seem to have made a mistake in calling the `run_code` tool…", #0360) and a raw
@@ -24,7 +24,17 @@ def test_where_the_answer_goes_says_what_to_do_when_a_tool_fails():
     from services.step_lessons import ON_THE_CARD
 
     assert ON_THE_CARD.startswith("## Where your answer goes\n")
-    assert "If a tool fails, never put its error" in ON_THE_CARD and "say plainly what is missing" in ON_THE_CARD
+    assert "If a tool fails, leave its error" in ON_THE_CARD and "say plainly what is missing" in ON_THE_CARD
+
+
+def test_where_the_answer_goes_asks_for_the_work_in_the_form_asked_never_the_working():
+    """It asked for "the email, the table, the working, the figures" with every answer,
+    against the owner's "just the table, no working under it" (#0352.1, #0374.1)."""
+    from services.step_lessons import ON_THE_CARD
+
+    assert "the working" not in ON_THE_CARD
+    assert "in the form the brief and the owner's notes ask for" in ON_THE_CARD
+    assert "alongside the answer, never instead of it" in ON_THE_CARD and "a tool's output" in ON_THE_CARD
 
 
 def test_a_plain_cards_launch_ends_its_prompt_with_where_the_answer_goes():

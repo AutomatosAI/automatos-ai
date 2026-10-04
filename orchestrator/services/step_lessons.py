@@ -18,19 +18,24 @@ Night 8:
   delivery_day) reached no step, because no step's prompt names them. Every agent
   step of a run now gets them (services/playbook_given.py).
 - F297: a plain board card's prompt never said where its answer goes. Cards got a
-  description of a saved file (#0256, #0412), a tool's error as the answer's first
-  line (#0346, #0360) and a raw Composio error as the whole answer (#0254). The
-  card's launch now adds "Where your answer goes", which also says what to do when a
-  tool fails.
+  description of a saved file (#0256, #0412, #0414, #0415), a tool's output as the
+  answer (#0309, #0379, #0391, #0399, #0408.3, #0430), a tool's error as the answer's
+  first line (#0346, #0360) and a raw Composio error as the whole answer (#0254). The
+  card's launch now adds "Where your answer goes". Its wording asked for "the
+  working" with every answer, against the owner's "just the table, no working": it
+  now asks for the work itself, in the form the brief and the owner's notes ask for,
+  with a saved file beside it, never instead of it, and says what to do when a tool
+  fails. (Lifting an answer out of a tool's result is the tool loop's job: FIXER's.)
 
 Three wrappers, for the three ways the platform runs an agent's work through the API
 (a Claude Code session's ticket has its own prompt, which already carries the lessons):
 - ``a_steps_prompt_carries_its_lessons``: a mission step (``build_task_prompt``);
 - ``a_playbook_step_carries_its_lessons``: a playbook step, a timer's included
-  (``_execute_step``). A session agent's step gets the run's details only: its ticket
-  shows the session nothing else of the run;
+  (``_execute_step``). A session agent's step gets the run's details and the
+  playbook's notes; its ticket brings the agent's lessons;
 - ``a_cards_answer_goes_on_the_card``: a plain board card
-  (``api.board_tasks._launch_task_execution``).
+  (``api.board_tasks._launch_task_execution``), and ``a_cards_run_carries_its_lessons``
+  for a card launched without its lessons (Auto's move to In progress).
 """
 from __future__ import annotations
 
@@ -42,11 +47,13 @@ logger = logging.getLogger(__name__)
 
 ON_THE_CARD = (
     "## Where your answer goes\n"
-    "Your reply is what the owner reads on the card. Put the whole answer in it: the email, the table, "
-    "the working, the figures. A file, a PDF or a report may go with it, never instead of it: never end "
-    "with only \"saved to …\", \"see the report\" or \"task completed\".\n"
-    "If a tool fails, never put its error, or notes about what you tried, in the answer: do the work another "
-    "way, or say plainly what is missing."
+    "Your reply is the card's answer: the owner reads it on the card as it is. Put the work itself in it (the "
+    "email, the table, the figures, the post), in the form the brief and the owner's notes ask for, starting with "
+    "the work: no line before it about what you did, a tool or a skill.\n"
+    "A file, a PDF or a report you save goes alongside the answer, never instead of it: never end with only "
+    "\"saved to …\", a description of what you saved, \"see the report\", \"task completed\" or a tool's output.\n"
+    "If a tool fails, leave its error and what you tried out of the answer: do the work another way, or say "
+    "plainly what is missing."
 )
 
 
@@ -75,14 +82,15 @@ def _mission_step_lessons(task: Any) -> Optional[str]:
     """The lessons for a mission step's agent, from its other cards."""
     from core.models.core import BoardTask
     from core.models.orchestration import OrchestrationRun
-    from services.ticket_redo import lessons_block
+    from services.ticket_redo import MISSION_STEP_ASK, lessons_block
 
     db, agent_id = _session_of(task), getattr(task, "assigned_agent_id", None)
     if db is None or not agent_id:
         return None
     run = db.get(OrchestrationRun, task.run_id) if getattr(task, "run_id", None) else None
     own = db.query(BoardTask.id).filter(BoardTask.orchestration_task_id == task.id).first()
-    return lessons_block(db, getattr(run, "workspace_id", None), agent_id, but_not=own.id if own else None)
+    return lessons_block(db, getattr(run, "workspace_id", None), agent_id, but_not=own.id if own else None,
+                         ask=MISSION_STEP_ASK)
 
 
 def a_steps_prompt_carries_its_lessons(build: Callable[..., str]) -> Callable[..., str]:
@@ -123,31 +131,34 @@ def _card_of(db: Any, run: Any) -> Optional[int]:
     return card.id if card else None
 
 
-def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any) -> List[Optional[str]]:
+def _standing_notes(db: Any, workspace_id: Any, agent_id: Any, run: Any, *,
+                    in_a_session: bool) -> List[Optional[str]]:
     """The agent's lessons, then the playbook's own standing notes (F249, night 8), each
-    note once. The run's own card is in neither: a redo carries its notes already."""
+    note once. The run's own card is in neither: a redo carries its notes already. A
+    session agent's ticket brings its own lessons (the CLI host's ``_ticket_prompt``),
+    so its step gets the playbook's notes only."""
     from services.ticket_redo import lessons_block, playbook_block, playbook_lessons
 
     card = _card_of(db, run)
     notes = playbook_lessons(db, workspace_id, getattr(run, "recipe_id", None), but_not=card)
+    if in_a_session:
+        return [playbook_block(notes)]
     return [lessons_block(db, workspace_id, agent_id, but_not=card, besides=notes), playbook_block(notes)]
 
 
 def _playbook_step_prompt(step: Dict[str, Any]) -> str:
     """A playbook step's prompt with what its agent is told besides: what the owner gave
     for the run (F288), the lessons and standing notes (F249) and where its answer goes
-    (F269). A session agent's step gets the run's details only."""
+    (F269). A session agent's step gets the run's details and the playbook's notes."""
     from services.playbook_given import given_for_run
 
     db, workspace_id = step.get("db"), step.get("workspace_id")
     agent_id = getattr(step.get("agent"), "id", None)
     in_a_session = _runs_in_a_session(db, agent_id)
-    given = step.get("input_data")
-    run = _run_of(db, workspace_id, step.get("recipe_execution_id")) if given or not in_a_session else None
-    prompt = _with(step["clean_prompt"], given_for_run(db, run, given))
-    if in_a_session:
-        return prompt
-    return _with(prompt, *_standing_notes(db, workspace_id, agent_id, run), ON_THE_CARD)
+    run = _run_of(db, workspace_id, step.get("recipe_execution_id"))
+    prompt = _with(step["clean_prompt"], given_for_run(db, run, step.get("input_data")),
+                   *_standing_notes(db, workspace_id, agent_id, run, in_a_session=in_a_session))
+    return prompt if in_a_session else _with(prompt, ON_THE_CARD)
 
 
 def a_playbook_step_carries_its_lessons(execute: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
@@ -175,5 +186,40 @@ def a_cards_answer_goes_on_the_card(launch: Callable[..., None]) -> Callable[...
     return wrapped
 
 
-__all__ = ["ON_THE_CARD", "a_cards_answer_goes_on_the_card", "a_playbook_step_carries_its_lessons",
+def a_cards_run_carries_its_lessons(read: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    """Wrap ``services.draft_guides.guides_for_draft``, which every API run of a plain
+    card calls with its database session before its first model call
+    (``api.board_tasks._launch_task_execution``): a prompt that came without the
+    agent's lessons gets them, before where its answer goes.
+
+    F249 (night 8): Auto's move of a card to In progress launches its bare brief
+    (modules/tools/discovery/handlers_board_tasks.py), without the lessons the board's
+    claim folds in (services/ticket_redo.redo_block): #0346 ran again that way."""
+    @functools.wraps(read)
+    async def wrapped(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
+        prompt = await read(db, workspace_id, agent_id, brief)
+        return _with_lessons(db, workspace_id, agent_id, prompt)
+    return wrapped
+
+
+def _with_lessons(db: Any, workspace_id: Any, agent_id: Any, prompt: str) -> str:
+    """``prompt`` with the agent's lessons before "Where your answer goes", unless it
+    carries them already or there is no database session to read them from."""
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+    from services.ticket_redo import STANDING_HEADING, lessons_block
+
+    if STANDING_HEADING in prompt or not isinstance(db, Session) or not workspace_id or not agent_id:
+        return prompt
+    lessons = lessons_block(db, UUID(str(workspace_id)), agent_id)
+    if not lessons:
+        return prompt
+    if ON_THE_CARD in prompt:
+        return prompt.replace(ON_THE_CARD, f"{lessons}\n\n{ON_THE_CARD}", 1)
+    return _with(prompt, lessons)
+
+
+__all__ = ["ON_THE_CARD", "a_cards_answer_goes_on_the_card", "a_cards_run_carries_its_lessons", "a_playbook_step_carries_its_lessons",
            "a_steps_prompt_carries_its_lessons"]

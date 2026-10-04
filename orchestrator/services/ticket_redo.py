@@ -43,6 +43,13 @@ runs' cards (``playbook_lessons``), an Approve note that says how every run shou
 a lesson, and every block of notes says that a note's figures belong to the card it was
 written on: #0271 charged card fees on the Rwanda's £10.75 for an £11.25 coffee, and
 #0273 answered "12 kg" from the owner's approval of #0265, a different coffee.
+
+Each note goes where it was meant: an agent's lessons come from its own cards, never
+from a playbook run's card (playbook 102's prices and sign-off had become the Analyst's
+"corrections" on its margin cards); a playbook's notes go to its runs only. A playbook
+card's or a mission step's redo no longer carries the agent's lessons in its redo
+words, because its steps carry them already. A mission step is told that its text is
+the planner's, so the owner's notes win over it (``MISSION_STEP_ASK``).
 """
 from __future__ import annotations
 
@@ -94,6 +101,12 @@ FIGURES_STAY = ("Numbers, names and dates in these notes belong to the card they
 # F249 (night 8): a playbook's own standing notes, read from its last runs' cards.
 PLAYBOOK_NOTES_KEPT = 8
 PLAYBOOK_HEADING = "## Standing notes for this playbook"
+# F249 (night 8): a mission step's brief is the planner's words, not the owner's: the Analyst's
+# "just the table" broke on six mission steps (#0352.1, #0374.1, #0383.1, #0394.1, …).
+MISSION_STEP_ASK = ("On your other work the owner sent drafts back with these notes, or said what to do next time; "
+                    "newest first. This step's text was written by the mission's planner, not the owner: where a "
+                    "note and the step's text differ (the layout, what goes before or after the answer, the words), "
+                    "follow the note. Only the mission's goal, in the owner's own words, can say otherwise.")
 PLAYBOOK_ASK = ("On earlier runs of this playbook the owner sent the work back with these notes, or said how every "
                 "run should be; newest first. Follow each one on this run too, whoever started it, over the step's "
                 "own wording where they differ.")
@@ -216,19 +229,31 @@ def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> 
 
 def standing_corrections(task: Any) -> Optional[str]:
     """The owner's notes on this ticket's agent's other tickets, newest first and
-    each once: what one Reject taught applies to the agent's next card."""
+    each once: what one Reject taught applies to the agent's next card. None for a
+    playbook's card and a mission's step: their redo goes to steps whose prompts
+    carry the lessons already (services/step_lessons.py), so they were given twice."""
+    if _runs_its_own_lessons(task):
+        return None
     return lessons_block(_session_of(task), getattr(task, "workspace_id", None),
                          getattr(task, "assigned_agent_id", None), but_not=getattr(task, "id", None))
 
 
+def _runs_its_own_lessons(task: Any) -> bool:
+    """A playbook run's own card, or a mission's step (not a session's ticket)."""
+    from services.run_cancel import MISSION_STEP, is_playbook_card
+
+    return is_playbook_card(task) or getattr(task, "source_type", None) == MISSION_STEP
+
+
 def lessons_block(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None,
-                  besides: Iterable[str] = ()) -> Optional[str]:
+                  besides: Iterable[str] = (), ask: str = STANDING_ASK) -> Optional[str]:
     """The block a run of ``agent_id``'s work is given: its lessons, newest first, but
-    those already given in ``besides``; None without."""
+    those already given in ``besides``; None without. ``ask`` says how they weigh
+    against the brief (a mission step's is the planner's: MISSION_STEP_ASK)."""
     notes = agent_lessons(db, workspace_id, agent_id, but_not=but_not, besides=besides)
     if not notes:
         return None
-    return "\n".join([STANDING_HEADING, f"{STANDING_ASK} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
+    return "\n".join([STANDING_HEADING, f"{ask} {FIGURES_STAY}", *(f"- {note}" for note in notes)])
 
 
 def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = None,
@@ -236,13 +261,18 @@ def agent_lessons(db: Any, workspace_id: Any, agent_id: Any, *, but_not: Any = N
     """The owner's lessons for an agent from its recent cards (but ``but_not``), newest
     first and each once: the notes they sent its work back with, and the Approve notes
     that say what to do next time (F249). A note in ``besides`` is left for the block
-    that already gives it."""
+    that already gives it. A playbook run's own card is not the agent's: its notes are
+    the playbook's (``playbook_lessons``), given only to that playbook's runs."""
     if not agent_id or db is None or workspace_id is None:
         return []
+    from sqlalchemy import or_
+
     from core.models.core import BoardTask
+    from services.run_cancel import PLAYBOOK_CARD, PLAYBOOK_STEP_PREFIX
 
     query = db.query(BoardTask.planning_data, BoardTask.runtime_ref).filter(
-        BoardTask.workspace_id == workspace_id, BoardTask.assigned_agent_id == agent_id)
+        BoardTask.workspace_id == workspace_id, BoardTask.assigned_agent_id == agent_id,
+        or_(BoardTask.source_type != PLAYBOOK_CARD, BoardTask.source_id.like(f"{PLAYBOOK_STEP_PREFIX}%")))
     return _newest_lessons(query, but_not, STANDING_KEPT, besides)
 
 

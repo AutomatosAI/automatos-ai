@@ -27,6 +27,8 @@ import re
 from typing import Any, Iterable, Optional
 from uuid import UUID
 
+from services.step_lessons import a_cards_run_carries_its_lessons
+
 logger = logging.getLogger(__name__)
 
 _DRAFT_ASK = re.compile(
@@ -70,6 +72,7 @@ def _brief_only(prompt: str) -> str:
     return prompt.split(ON_THE_CARD, 1)[0].strip()
 
 
+@a_cards_run_carries_its_lessons  # F249 (night 8): a card Auto started carries its agent's lessons too
 async def guides_for_draft(db: Any, workspace_id: Any, agent_id: int, brief: str) -> str:
     """``brief`` with the workspace's guide passages for a customer draft; the
     brief as it was for anything else, or when nothing clears the floor."""

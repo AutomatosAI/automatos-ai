@@ -135,11 +135,15 @@ def test_a_playbooks_notes_are_read_by_its_id_in_its_workspace(harbourline):
     assert playbook_lessons(harbourline.db, uuid.uuid4(), harbourline.onboarding.id) == []
 
 
-def test_a_session_agents_step_is_left_to_its_ticket(harbourline):
-    from services.ticket_redo import PLAYBOOK_HEADING
+def test_a_session_agents_step_gets_the_playbooks_notes_and_leaves_its_lessons_to_its_ticket(harbourline):
+    from services.step_lessons import ON_THE_CARD
+    from services.ticket_redo import PLAYBOOK_HEADING, STANDING_HEADING
 
     session = harbourline.agent("Numbers (on my Mac)", {"runtime": "cli"})
-    assert PLAYBOOK_HEADING not in _step_prompt(harbourline, session)
+    prompt = _step_prompt(harbourline, session)
+
+    assert PLAYBOOK_HEADING in prompt and f"- {WHOEVER}" in prompt          # the playbook's, whoever runs the step
+    assert STANDING_HEADING not in prompt and ON_THE_CARD not in prompt     # its ticket's prompt brings those
 
 
 @pytest.mark.parametrize("note, teaches", [
