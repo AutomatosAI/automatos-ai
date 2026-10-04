@@ -18,6 +18,13 @@ done), and #0254's whole answer a raw Composio error ("'GMAIL' is assigned to ag
 (``plain_no_answer``): no answer was written, what each call did, and an app that is
 not connected by its name and what to do. A board card goes to review with it, a
 mission step is a failed attempt (``as_step_failure``), never done.
+
+F306 (night 9): F297 caught tool output, not a run that stopped mid-thought: "Let me
+try a more specific query:" was #1879's answer twice, "Now let me get the total
+kilograms per account …:" #1881's, "I'll attempt a query to list all tables in"
+#1888's. A result whose last line announces a step it never took
+(``modules.tools.execution.nudges.announced_step``) is said plainly the same way
+(``stopped_mid_step``): it goes to review, or is a failed attempt for a mission step.
 """
 from __future__ import annotations
 
@@ -37,6 +44,10 @@ NOTHING_DONE_NOTE = (NOTHING_DONE_NOTE_PREFIX + " every tool call in the run's l
 NO_ANSWER_HEADER = "No answer: the agent's run ended after its tool calls without writing one."
 NO_ANSWER_NOTE = (NOTHING_DONE_NOTE_PREFIX + " the agent wrote no answer, only what its tools did. "
                   "Sent to review instead of done.")
+STOPPED_HEADER = "No answer: the agent's run stopped at a step it announced and never took."
+STOPPED_NOTE = (NOTHING_DONE_NOTE_PREFIX + " the agent stopped at a step it announced, with no answer. "
+                "Sent to review instead of done.")
+WHAT_IT_WROTE = "What it wrote before it stopped:"
 _DUMP_LINE = re.compile(r"^\*\*(?P<tool>[\w.\-]+)\*\*\s*:\s*(?P<body>.*)$")
 _NOT_CONNECTED = re.compile(r"'(?P<app>[A-Za-z0-9_]+)' is assigned to agent \d+ but is not connected")
 _NAMED_FILE = re.compile(r'"(?:path|file_path|filename)"\s*:\s*"(?P<name>[^"]{1,200})"')
@@ -58,6 +69,8 @@ def nothing_done_note(result: str) -> Optional[str]:
     lines: List[str] = [ln.strip() for ln in (result or "").splitlines() if ln.strip()]
     if lines and lines[0] == NO_ANSWER_HEADER:
         return NO_ANSWER_NOTE
+    if lines and lines[0] == STOPPED_HEADER:
+        return STOPPED_NOTE
     if lines and lines[0] in (TOOL_RESULTS_HEADER, NOTHING_DONE_HEADER):
         lines = lines[1:]
     if not lines:
@@ -97,12 +110,23 @@ def plain_no_answer(result: str) -> Optional[str]:
     return "\n".join([NO_ANSWER_HEADER, *(f"- {line}" for line in outcomes)])
 
 
+def stopped_mid_step(result: str) -> Optional[str]:
+    """F306: a result whose last line announces a step the run never took, said
+    plainly, with what the agent wrote kept below; None for any other result."""
+    from modules.tools.execution.nudges import announced_step
+
+    text = (result or "").strip()
+    if not text or text.startswith((NO_ANSWER_HEADER, STOPPED_HEADER)) or not announced_step(text):
+        return None
+    return f"{STOPPED_HEADER}\n\n{WHAT_IT_WROTE}\n{text}"
+
+
 def as_step_failure(result: Dict[str, Any]) -> Dict[str, Any]:
     """F297: a mission step whose run wrote no answer is a failed attempt, retried
     while it has attempts and failed after, never a completed step (#0408.3 was
     marked done on a line of tool output). Any other result is returned as it is."""
     text = str((result or {}).get("result") or "")
-    if (result or {}).get("status") != "success" or not text.startswith(NO_ANSWER_HEADER):
+    if (result or {}).get("status") != "success" or not text.startswith((NO_ANSWER_HEADER, STOPPED_HEADER)):
         return result
     return {**result, "status": "error", "error": text}
 

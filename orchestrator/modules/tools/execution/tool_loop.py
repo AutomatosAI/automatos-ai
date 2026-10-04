@@ -31,8 +31,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .action_claims import claimed_action_not_done
 from .nudges import CLAIMED_ACTION_RECOVERY_MSG as _CLAIMED_ACTION_RECOVERY_MSG, ask_for_the_answer
-from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, kept_if_blank as _kept_if_blank
-from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG, nudge as _nudge
+from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG
+from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
+from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 
@@ -595,9 +596,7 @@ class ToolLoopExecutor:
             nudge = _NARRATION_RECOVERY_MSG
         else:
             return await self._recover_claimed_action(current, messages, tools) or current
-        messages.append({"role": "assistant", "content": text})
-        messages.append(_nudge(nudge))
-        return _kept_if_blank(current, await self._llm(messages, tools))
+        return await nudge_about(self._llm, current, messages, tools, nudge)
 
     async def _recover_claimed_action(
         self,
@@ -615,13 +614,15 @@ class ToolLoopExecutor:
         text = getattr(current, "content", "") or ""
         if not text.strip():  # F297: nothing in it straight after a round of tool calls
             return await ask_for_the_answer(self._llm, messages, tools)
+        step = announced_step(text)
+        if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
+            logger.warning("[tool-loop] reply announced a step it never took — nudging once")
+            return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
         claim = claimed_action_not_done(text, self.tracker.succeeded, promises=self.promises)
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
-        messages.append({"role": "assistant", "content": text})
-        messages.append(_nudge(_CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)))
-        return _kept_if_blank(current, await self._llm(messages, tools))
+        return await nudge_about(self._llm, current, messages, tools, _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim))
 
 
 # ---------------------------------------------------------------------------
