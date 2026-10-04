@@ -144,3 +144,27 @@ def test_the_route_tells_the_model_how_to_ask_and_never_to_ask_for_fields(db, gr
     assert "never ask the user for table, column or field names" in description
     assert "one figure per call" in description and "a group's count is never the total" in description
     assert route["function"]["parameters"]["required"] == ["question"]
+
+
+def test_the_lightweight_lane_holds_the_routes_too(db, graph, monkeypatch):
+    """Night 9's 5b284d48 ran in the ATOM lane with the dispatcher alone: ten calls over 55 s,
+    platform_field_query three times and an invented platform_smart_query_database first."""
+    import consumers.chatbot.service as svc
+
+    ws = str(uuid4())
+    _connect(db, ws)
+
+    async def _no_memory(*_args, **_kwargs):
+        return ""
+
+    monkeypatch.setattr(svc, "atom_memory_block", _no_memory)
+    monkeypatch.setattr(svc, "atom_system_prompt", lambda *_args, **_kwargs: "atom prompt")
+    monkeypatch.setattr("modules.context.sections.product_facts.product_facts", lambda _db, _ws: "")
+    lane = NS(workspace_id=ws, db=db, widget_mode=False,
+              prompt_analyzer=NS(convert_to_llm_messages=lambda messages, **_kwargs: list(messages)))
+    question = [{"role": "user", "content": "Have we got enough Guji for October's club boxes?"}]
+    _messages, tools, _none = asyncio.run(svc.StreamingChatService._prepare_atom_path(
+        lane, question, NS(agent_id=7, metadata={}), NS(orchestrator=None, get_user_name=lambda: "Gerard"),
+        atom_tools=[_dispatcher()],
+    ))
+    assert [t["function"]["name"] for t in tools] == ["platform_execute", "platform_query_data", "platform_query_graph"]

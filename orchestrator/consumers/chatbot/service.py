@@ -1158,10 +1158,14 @@ class StreamingChatService:
         F232: the prompt carries the product facts the full path's section does.
         """
         from modules.context.sections.product_facts import product_facts
+        from modules.tools.data_routes import with_data_routes
 
+        # F302 (night 9): "Have we got enough Guji?" ran in this lane with the dispatcher alone,
+        # tried 10 calls over 55 s; the database and Knowledge Graph routes are held here too.
+        tools = await with_data_routes(atom_tools, self.workspace_id, self.db) if atom_tools else atom_tools
         logger.info(
             "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
-            len(atom_tools or []),
+            len(tools or []),
             "skipped" if force_text_only else "on",
         )
         memory_block = "" if force_text_only else await atom_memory_block(
@@ -1178,13 +1182,13 @@ class StreamingChatService:
             facts=product_facts(self.db, self.workspace_id),
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-            messages, system_prompt=_atom_prompt, available_tools=atom_tools,
+            messages, system_prompt=_atom_prompt, available_tools=tools,
             resolved_attachment_ids=attachment_ids,
         )
         if attachment_ids:
             await resolve_atom_attachments(self.db, llm_messages, attachment_ids,
                                            workspace_id=self.workspace_id, model_id=model_id)
-        return llm_messages, atom_tools, None
+        return llm_messages, tools, None
 
     async def _prepare_full_path(
         self,
