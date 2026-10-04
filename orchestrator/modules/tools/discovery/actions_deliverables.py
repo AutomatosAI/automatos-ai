@@ -15,6 +15,34 @@ def register_deliverables_actions(registry: ActionRegistry) -> None:
     registry.register(_get_deliverable_action())
 
 
+def _origin_filters() -> dict:
+    """Where a deliverable came from: its origin, the run that made it, and origins to leave out."""
+    return {
+        "source_type": {
+            "type": "string",
+            "description": (
+                "Filter by origin: chat, task, mission, heartbeat, "
+                "playbook, trigger (optional)."
+            ),
+        },
+        "source_id": {
+            "type": "string",
+            "description": (
+                "Filter by the originating mission/task/heartbeat id "
+                "(e.g. a mission id to list that mission's deliverables)."
+            ),
+        },
+        "exclude_source_types": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Leave out deliverables of these origins (optional): "
+                "social_post leaves out a Socials post's own images and videos."
+            ),
+        },
+    }
+
+
 def _list_parameters() -> dict:
     """platform_list_deliverables' filters."""
     return {
@@ -28,22 +56,7 @@ def _list_parameters() -> dict:
                 ],
                 "description": "Filter by artifact type (optional).",
             },
-            "source_type": {
-                "type": "string",
-                "description": (
-                    "Filter by origin: chat, task, mission, heartbeat, "
-                    "playbook, trigger (optional). A Socials post's own "
-                    "images and videos (social_post) are left out unless "
-                    "asked for by this filter."
-                ),
-            },
-            "source_id": {
-                "type": "string",
-                "description": (
-                    "Filter by the originating mission/task/heartbeat id "
-                    "(e.g. a mission id to list that mission's deliverables)."
-                ),
-            },
+            **_origin_filters(),
             "agent_id": {
                 "type": "integer",
                 "description": "Filter by producing agent id (optional).",

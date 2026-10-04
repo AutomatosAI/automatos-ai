@@ -6,8 +6,9 @@ Pinned:
   nor any bank covers;
 * a marketplace research row still holding PRD-251B's prompt takes the new one at boot; a
   curated one stays as it is, and another Playbook's row is never touched;
-* research's Deliverables leave out a Socials post's own files, unless asked for by their
-  source type;
+* research asks the Deliverables tool to leave out a Socials post's own files
+  (``exclude_source_types``); the tool's default for every other caller is unchanged, and a
+  value it cannot use is refused with why;
 * the composer gets the opening lines of the workspace's last posts (their count is config),
   never another workspace's, and is told to open differently.
 """
@@ -45,7 +46,7 @@ def test_the_seeded_research_prompt_reads_the_history_first_and_adds_only_what_i
     prompt = step["prompt_template"]
     assert prompt.index("history") < prompt.index("Research only the sources")
     assert "platform_get_social_history" in prompt and "neither the history nor any bank" in prompt
-    assert "a Socials post's own images and videos are history" in prompt
+    assert f'platform_list_deliverables with exclude_source_types ["{render.DELIVERABLE_SOURCE_TYPE}"]' in prompt
 
 
 class _OneRow:
@@ -99,13 +100,17 @@ class _Deliverables:
         return {"success": True, "deliverables": [], "total": 0}
 
 
-def test_research_deliverables_leave_out_a_socials_posts_own_files_unless_asked(monkeypatch):
+def test_research_leaves_a_socials_posts_own_files_out_and_every_other_caller_is_unchanged(monkeypatch):
     monkeypatch.setattr("services.deliverable_service.DeliverableService", _Deliverables)
     _Deliverables.asked = []
-    asyncio.run(handlers_deliverables.list_deliverables(None, WS_A, {}))
-    asyncio.run(handlers_deliverables.list_deliverables(None, WS_A, {"source_type": "social_post"}))
-    assert [ask["source_type_exclude"] for ask in _Deliverables.asked] == ["social_post", None]
-    assert handlers_deliverables.SOCIAL_POST_SOURCE_TYPE == render.DELIVERABLE_SOURCE_TYPE
+    for params in ({}, {"exclude_source_types": ["social_post"]}, {"exclude_source_types": "social_post"},
+                   {"exclude_source_types": ["social_post", "heartbeat"]}):
+        assert asyncio.run(handlers_deliverables.list_deliverables(None, WS_A, params))["success"] is True
+    assert [ask["source_type_exclude"] for ask in _Deliverables.asked] == [None, "social_post", "social_post", "social_post,heartbeat"]
+    for unusable in ([1], ["social_post,chat"], [""], {"kind": "social_post"}):
+        refused = asyncio.run(handlers_deliverables.list_deliverables(None, WS_A, {"exclude_source_types": unusable}))
+        assert refused == {"success": False, "error": handlers_deliverables.EXCLUDED_ORIGINS_REFUSED}
+    assert len(_Deliverables.asked) == 4  # a refused call reads nothing
 
 
 def _posted(api, workspace_id, opening, days_ago):

@@ -278,7 +278,7 @@ _RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({
 1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan. For further back, read platform_get_social_history.
 2. Research only the sources the plan switches on:
    - knowledge: search_knowledge for the plan's goal and audience;
-   - deliverables: platform_list_deliverables for recent reports, blog posts and files (a Socials post's own images and videos are history, not new material, and are left out);
+   - deliverables: platform_list_deliverables with exclude_source_types ["social_post"], for recent reports, blog posts and files: a Socials post's own images and videos are history, not new material;
    - website: platform_web_fetch on the brand kit's website (platform_get_brand_kit names it): its product, news and about pages;
    - github: when the workspace has GitHub connected, its README, docs, latest releases and merged pull requests, through the GitHub tools.
 3. Pick 5 to 15 topics that neither the history nor any bank covers yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's). A new angle on an idea already posted is still that idea.

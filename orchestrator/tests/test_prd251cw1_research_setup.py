@@ -18,7 +18,9 @@ workspace as the installer does. Pinned:
   with why, only when it cannot: no marketplace playbook, a plan full of agents, another
   install under way;
 * the weekly run never installs: it says why research is off, once a day; a trial
-  workspace on the hosted edition gets no weekly run.
+  workspace on the hosted edition gets no weekly run;
+* whoever may save a plan may also add the agent and playbook its save installs: the role
+  matrix keeps the two together, so a role that splits them fails here first.
 """
 from __future__ import annotations
 
@@ -42,6 +44,7 @@ if str(_ORCH) not in sys.path:
 import modules.tools.discovery.cascade_installer as ci  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
 from config import config  # noqa: E402
+from modules.policy.roles import WorkspaceRole, workspace_has_permission  # noqa: E402
 from core.models.core import RecipeExecution, WorkflowTemplate  # noqa: E402
 from core.models.socials import SocialPost, SocialTopic  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
@@ -305,3 +308,14 @@ def test_a_hosted_trial_gets_no_weekly_run(research, monkeypatch):
     assert _weekly() == 0 and research.launched == [] and research.told == []
     monkeypatch.setattr("services.trial_ledger.is_trial_active_workspace", lambda workspace: False)
     assert _weekly() == 1 and len(research.launched) == 1  # a paid workspace's research comes round
+
+
+def test_every_role_that_saves_a_plan_may_add_what_its_save_installs():
+    """A plan's save installs a marketplace playbook and its agent (US-C101) behind the plan
+    routes' documents:create and documents:update. That is safe only while every role holding
+    those also holds agents:create and playbooks:create."""
+    for role in WorkspaceRole:
+        if workspace_has_permission(role.value, "documents:create") or workspace_has_permission(role.value, "documents:update"):
+            assert workspace_has_permission(role.value, "agents:create"), role
+            assert workspace_has_permission(role.value, "playbooks:create"), role
+
