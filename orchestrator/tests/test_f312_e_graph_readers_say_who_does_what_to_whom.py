@@ -85,7 +85,9 @@ def test_the_impact_tool_reads_each_hop_as_extracted(monkeypatch):
 
     res = asyncio.run(handlers_graph.handle_graph_impact(None, "ws", {"concept": "Harbour Blend"}))
 
-    hop = res["impact_layers"][0]["nodes"][0]
+    # COPILOT's F312 (night 9) also walks buys/supplies, so the first layer holds the buyer
+    # too ("Crane Kitchen buys Harbour Blend"): find the Cerrado hop, wherever it sits.
+    hop = next(n for n in res["impact_layers"][0]["nodes"] if n["source"] == "brazil_cerrado")
     assert hop["statement"] == "Brazil Cerrado depends_on Harbour Blend"
     assert (hop["source"], hop["target"]) == ("brazil_cerrado", "harbour_blend")
 
