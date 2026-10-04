@@ -45,6 +45,8 @@ DEFAULT_BATCH_DAY = "sun"
 DEFAULT_BATCH_DATE = 25
 MAX_BATCH_DATE = 28
 NEW_PLAN_MAKE = {"rhythm": WEEKLY, "time": "17:00"}
+# PRD-251C (C3): the evening before, the plan reminds whoever approves of the next day's posts.
+DEFAULT_REMIND_AT = "20:00"
 # What the make tick records on the plan (notices sent, batches made): a save keeps it.
 MAKE_RECORD_KEYS = ("notified", "batches")
 DEFAULT_VIDEO_DAYS_EARLY = 1
@@ -225,7 +227,8 @@ def _rhythm(raw: Mapping[str, Any]) -> Dict[str, Any]:
         raise InvalidPlan(f"make.batch_day must be one of {', '.join(WEEKDAYS)}")
     if isinstance(day_of_month, bool) or not isinstance(day_of_month, int) or not 1 <= day_of_month <= MAX_BATCH_DATE:
         raise InvalidPlan(f"make.batch_date must be a day of the month from 1 to {MAX_BATCH_DATE}")
-    return {"rhythm": rhythm, "batch_day": day, "batch_date": day_of_month}
+    remind_at = _clock(raw.get("remind_at", DEFAULT_REMIND_AT), "make.remind_at")
+    return {"rhythm": rhythm, "batch_day": day, "batch_date": day_of_month, "remind_at": remind_at}
 
 
 def validate_make(value: Any) -> Dict[str, Any]:

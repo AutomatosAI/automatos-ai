@@ -406,8 +406,9 @@ def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> No
 
 
 async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
-    """One pass over every active plan's due slots, then due research (US-B204)."""
-    from services import socials_plan_research
+    """One pass over every active plan's due slots, the batches' and the evening reminders
+    (PRD-251C), then due research (US-B204)."""
+    from services import socials_plan_reminders, socials_plan_research
 
     now = now or datetime.now(timezone.utc)
     outcomes: Dict[str, int] = {}
@@ -429,6 +430,7 @@ async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
         await anyio.to_thread.run_sync(tell_ready, made, now)
     if touched:
         await anyio.to_thread.run_sync(announce_batches, touched, now)
+    outcomes["reminded"] = await anyio.to_thread.run_sync(socials_plan_reminders.remind_due, _session, now)
     outcomes["research"] = await anyio.to_thread.run_sync(socials_plan_research.launch_due, now)
     return outcomes
 

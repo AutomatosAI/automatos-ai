@@ -102,6 +102,7 @@ class PlanMake(_Strict):
     rhythm: str = plans.DAILY
     batch_day: str = plans.DEFAULT_BATCH_DAY
     batch_date: int = plans.DEFAULT_BATCH_DATE
+    remind_at: str = plans.DEFAULT_REMIND_AT  # the evening before (C3), in the plan's timezone
 
 
 class PlanResearch(_Strict):
