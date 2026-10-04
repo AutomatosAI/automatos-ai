@@ -29,11 +29,12 @@ def said_plainly(run: Run) -> Run:
         out = await run(*args, **kwargs)
         if not isinstance(out, dict) or out.get("status") != "success":
             return out
-        from services.result_substance import plain_no_answer
+        from services.result_substance import plain_no_answer, stopped_mid_step
 
-        plain = plain_no_answer(str(out.get("result") or ""))
+        text = str(out.get("result") or "")
+        plain = plain_no_answer(text) or stopped_mid_step(text)  # F306: a run that stopped mid-step too
         if plain is None:
             return out
-        logger.warning("[F297] the run wrote no answer after its tool calls; its result says so plainly")
+        logger.warning("[F297/F306] the run wrote no answer; its result says so plainly")
         return {**out, "result": plain}
     return wrapped
