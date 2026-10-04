@@ -563,8 +563,6 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
     from modules.rag.budget import count_tokens
 
     document_id = params.get("document_id")
-    if not document_id:
-        return {"success": False, "error": "Missing required parameter: document_id"}
     try:
         document_id = int(document_id)
     except (TypeError, ValueError):
