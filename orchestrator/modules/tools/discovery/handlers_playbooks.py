@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.wait_for_me import keeps_wait_for_me, updates_wait_for_me
 from modules.tools.discovery.playbook_lookup import CHANGES, READS, RUNS, finds_the_playbook
 from modules.tools.discovery.timer_zones import keeps_the_owners_zone
+from modules.tools.discovery.playbook_input_names import checks_the_input_names
 from modules.tools.discovery.playbook_schedule_view import adds_each_timer
 from modules.tools.discovery.schedule_merge import merges_the_schedule
 from modules.tools.discovery.timer_off import switches_the_timer
@@ -706,6 +707,7 @@ def _sync_schedule(playbook) -> tuple:
 
 @finds_the_playbook(RUNS)  # F261 (7b): of two namesakes, the one whose steps all have an agent
 @keeps_wait_for_me  # F242: the owner's "wait for me"
+@checks_the_input_names  # F288 (night 8): details under the playbook's own names
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution
