@@ -84,7 +84,11 @@ def test_autos_retrieval_first_leaves_out_what_an_agent_wrote(monkeypatch, docum
 
 def test_the_planners_knowledge_leaves_out_what_an_agent_wrote(monkeypatch, documents):
     from modules.context.sections.base import SectionContext
-    from modules.context.sections.planning_knowledge import PlanningKnowledgeSection
+    from modules.context.sections.planning_knowledge import (
+        KNOWLEDGE_HEADING,
+        OWNERS_WORDS_WIN,
+        PlanningKnowledgeSection,
+    )
     from modules.rag import service as rag_service
     from modules.rag.budget import assemble_with_citations
 
@@ -108,6 +112,8 @@ def test_the_planners_knowledge_leaves_out_what_an_agent_wrote(monkeypatch, docu
 
     assert LAST_ORDERS in knowledge and "[1] (source: christmas-orders.md)" in knowledge
     assert OLD_PLAN not in knowledge and "gift-box-plan.md" not in knowledge and "[2]" not in knowledge
+    assert knowledge.startswith(f"{KNOWLEDGE_HEADING}\n{OWNERS_WORDS_WIN}")      # the owner's date wins over any
+    assert "the owner's words win" in OWNERS_WORDS_WIN
 
 
 def test_without_a_database_session_the_passages_are_as_they_were():
@@ -115,3 +121,58 @@ def test_without_a_database_session_the_passages_are_as_they_were():
 
     result = {"raw_result": {"results": [{"document_id": 7, "content": OLD_DRAFT}]}}
     assert owners_own(object(), result, "ws") is result and owners_own(None, result) is result
+
+
+def _searcher(documents):
+    from core.models import Agent
+
+    agent = Agent(name="Auto", agent_type="custom", description="", status="active", configuration={},
+                  workspace_id=documents.ws, created_by="test", owner_type="workspace", owner_id=str(documents.ws))
+    documents.db.add(agent)
+    documents.db.flush()
+    return agent
+
+
+def test_autos_own_search_marks_what_an_agent_wrote(documents):
+    """Night 8: the #0214 answer came from Auto's own search_knowledge call, not the
+    automatic one, so the draft read as the owner's 'internal documents'."""
+    from modules.tools.execution import exec_platform
+    from services.draft_guides import AGENTS_WRITING
+
+    found = {"success": True, "results": [
+        {"document_id": documents.draft.id, "content": OLD_DRAFT, "excerpt": OLD_DRAFT, "similarity": 0.91},
+        {"document_id": str(documents.sheet.id), "content": DELIVERY_DAYS, "excerpt": DELIVERY_DAYS,
+         "similarity": 0.74}]}
+    calls = []
+
+    async def execute_tool(**kwargs):
+        calls.append(kwargs["tool_name"])
+        return found
+
+    executor = NS(platform_tools=NS(db=documents.db, execute_tool=execute_tool))
+    agent = _searcher(documents)
+
+    result = asyncio.run(exec_platform.execute_platform_tool(executor, "search_knowledge",
+                                                             {"query": "wholesale cafe delivery days"}, agent.id))
+
+    draft, sheet = result["results"]
+    assert draft["content"] == f"{AGENTS_WRITING}\n{OLD_DRAFT}" and draft["excerpt"].startswith(AGENTS_WRITING)
+    assert sheet["content"] == DELIVERY_DAYS                                     # the owner's own, as it was
+    assert found["results"][0]["content"] == OLD_DRAFT                           # a new result, not changed in place
+    other = asyncio.run(exec_platform.execute_platform_tool(executor, "semantic_search", {"query": "x"}, agent.id))
+    assert other is found and calls == ["search_knowledge", "semantic_search"]
+
+
+def test_another_workspaces_search_marks_nothing(documents, seed_workspace):
+    from core.models import Agent
+    from services.draft_guides import marked_as_agents_writing
+
+    elsewhere = UUID(seed_workspace())
+    stranger = Agent(name="Auto", agent_type="custom", description="", status="active", configuration={},
+                     workspace_id=elsewhere, created_by="test", owner_type="workspace", owner_id=str(elsewhere))
+    documents.db.add(stranger)
+    documents.db.flush()
+    found = {"results": [{"document_id": documents.draft.id, "content": OLD_DRAFT}]}
+
+    assert marked_as_agents_writing(documents.db, found, stranger.id) is found
+    assert marked_as_agents_writing(None, found, _searcher(documents).id) is found
