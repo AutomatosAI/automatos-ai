@@ -381,6 +381,56 @@ class S3VectorsBackend:
         )
         return deleted
 
+    def search_in_documents(
+        self,
+        query_embedding: List[float],
+        document_ids: List[int],
+        limit: int = 10,
+        min_score: float = 0.5,
+    ) -> List[Dict[str, Any]]:
+        """``search`` within these documents only, through the query's metadata filter.
+
+        F311 (night 9): agents' reports filled every search's hits and the owner's own
+        documents were not among them (ledger L85, L99); the RAG service now searches
+        the owner's documents on their own too (``modules.rag.owner_leg``). The filter
+        names this workspace and the documents' ids (``external_file_id``, stored as
+        text); every hit is still checked against the workspace, as in ``search``.
+        A failed query is logged and gives ``[]``, as ``search`` does.
+        """
+        ids = sorted({str(doc_id) for doc_id in document_ids})
+        if not ids:
+            return []
+        self._ensure_setup()
+        required_ws = str(self.workspace_id)
+        try:
+            response = self.client.query_vectors(
+                vectorBucketName=self.bucket_name, indexName=self.index_name,
+                queryVector={"float32": query_embedding}, topK=limit,
+                filter={"$and": [{"workspace_id": {"$eq": required_ws}}, {"external_file_id": {"$in": ids}}]},
+                returnMetadata=True, returnDistance=True,
+            )
+        except Exception:  # noqa: BLE001 — same posture as search(): logged, no hits
+            logger.error("S3 Vectors search within documents failed", exc_info=True)
+            return []
+        hits = (_hit_from_match(match, required_ws, min_score) for match in response.get("vectors", []))
+        return [hit for hit in hits if hit is not None]
+
     async def close(self) -> None:
         """No-op — boto3 clients don't need explicit cleanup."""
         pass
+
+
+def _hit_from_match(match: Dict[str, Any], required_ws: str, min_score: float) -> Optional[Dict[str, Any]]:
+    """One query match in ``search``'s result shape; None below ``min_score`` or when
+    it is not proven to be this workspace's (F311, the same checks as ``search``)."""
+    distance = match.get("distance", 0.0)
+    similarity = 1.0 - distance if distance <= 1.0 else 0.0
+    metadata = match.get("metadata", {}) or {}
+    if similarity < min_score or str(metadata.get("workspace_id")) != required_ws:
+        return None
+    return {
+        "key": match.get("key", ""), "score": similarity, "metadata": metadata,
+        "content": metadata.get("chunk_text", ""), "source": metadata.get("app_name", ""),
+        "file_name": metadata.get("file_name", ""), "file_path": metadata.get("file_path", ""),
+        "external_file_id": metadata.get("external_file_id", ""), "chunk_index": metadata.get("chunk_index", 0),
+    }

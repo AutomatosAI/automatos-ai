@@ -55,6 +55,11 @@ from core.observability.substrate_metrics import (
     record_substrate_search_nowait,
 )
 
+# F311 (night 9): the owner's documents searched on their own beside agents' reports,
+# and the owner's passages kept and first.
+from modules.rag.owner_leg import owners_documents_searched
+from modules.rag.owner_passages import owners_passages_kept
+
 
 @dataclass
 class RAGResult:
@@ -953,6 +958,7 @@ class RAGService:
         )
     
     
+    @owners_passages_kept  # F311: the owner's passages kept and first beside agents' reports
     async def _optimize_with_context_optimizer(
         self,
         query: str,
@@ -1175,6 +1181,7 @@ class RAGService:
             self._doc_backends[key] = backend
         return backend
 
+    @owners_documents_searched  # F311: the owner's documents searched on their own beside reports
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
         Get candidate chunks from the workspace's document-vector backend

@@ -1733,6 +1733,14 @@ class Config:
     # Only feedback from the last N days shapes ranking (stale opinions decay out).
     RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
 
+    # F311 (night 9): agents' reports crowded the owner's documents out of the search.
+    # When a search finds an agent's report, the owner's own documents are searched on
+    # their own too (the newest RAG_OWNER_LEG_MAX_DOCUMENTS of them), and up to
+    # RAG_OWNER_PASSAGES_RESERVED of the passages handed over are the owner's, placed first.
+    RAG_OWNER_LEG_ENABLED: bool = os.getenv("RAG_OWNER_LEG_ENABLED", "true").lower() == "true"
+    RAG_OWNER_LEG_MAX_DOCUMENTS: int = int(os.getenv("RAG_OWNER_LEG_MAX_DOCUMENTS", "200"))
+    RAG_OWNER_PASSAGES_RESERVED: int = int(os.getenv("RAG_OWNER_PASSAGES_RESERVED", "3"))
+
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
     # =============================================================================
