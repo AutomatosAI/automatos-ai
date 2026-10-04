@@ -28,6 +28,7 @@ import type {
   SocialTopicInput,
   SocialTopicsResponse,
 } from './socials-plan-types'
+import type { SocialPostedFilters, SocialPostedResponse } from './socials-results-types'
 
 interface ApiResponse<T = any> {
   data: T
@@ -3238,6 +3239,16 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ posts, comment: comment || null }),
     })
+  }
+
+  /** PRD-251C US-C408: Posted, what went out, newest first, filtered by plan, channel and format. */
+  async listSocialPosted(filters: SocialPostedFilters = {}): Promise<SocialPostedResponse> {
+    const query = new URLSearchParams()
+    if (filters.planId) query.set('plan_id', filters.planId)
+    if (filters.channel) query.set('channel', filters.channel)
+    if (filters.format) query.set('format', filters.format)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return this.request<SocialPostedResponse>(`/api/socials/posted${suffix}`)
   }
 
   // PRD-251B Wave 2: plans (a campaign of kind plan), their slots and their content bank.

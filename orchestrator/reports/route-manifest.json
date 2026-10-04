@@ -1,5 +1,5 @@
 {
-  "route_count": 890,
+  "route_count": 891,
   "routes": [
     {
       "method": "GET",
@@ -2220,6 +2220,10 @@
     {
       "method": "PUT",
       "path": "/api/socials/plans/{plan_id}/topics/{topic_id}/pin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posted"
     },
     {
       "method": "GET",

@@ -67,7 +67,7 @@ def _bounded(asked: Optional[int], default: int, most: int) -> int:
     return max(1, min(asked if asked is not None else default, most))
 
 
-def _topics_by_post(db: Any, workspace_id: UUID, post_ids: Iterable[UUID]) -> Dict[UUID, SocialTopic]:
+def topics_by_post(db: Any, workspace_id: UUID, post_ids: Iterable[UUID]) -> Dict[UUID, SocialTopic]:
     ids = list(post_ids)
     if not ids:
         return {}
@@ -110,7 +110,7 @@ def history(
     limit = _bounded(limit, config.SOCIALS_HISTORY_LIMIT, MAX_LIMIT)
     since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
     posts = _posts(db, workspace_id, limit, since)
-    topics = _topics_by_post(db, workspace_id, [post.id for post in posts])
+    topics = topics_by_post(db, workspace_id, [post.id for post in posts])
     return [_item(post, topics.get(post.id)) for post in posts]
 
 

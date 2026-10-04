@@ -1,6 +1,6 @@
 /**
  * PRD-251B US-B107 — the Socials Studio shell: the sub-navigation Calendar · Queue (its
- * count) · Plans with New plan and New post (F250: the brand kit is its own Deliverables
+ * count) · Plans · Posted (PRD-251C US-C408) with New plan and New post (F250: the brand kit is its own Deliverables
  * tab, with no second entry here), and the view held in the URL
  * (/deliverables?tab=socials&view=…&post=…&plan=…). A view change is a router.push, so
  * back returns to it; an unknown view is the calendar; ?post=<id> opens that post.
@@ -84,10 +84,10 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the Socials Studio shell', () => {
-  it('has Calendar, Queue with its count and Plans, and New plan and New post', async () => {
+  it('has Calendar, Queue with its count, Plans and Posted, and New plan and New post', async () => {
     renderStudio()
     const items = within(nav()).getAllByRole('button').map((b) => b.textContent)
-    expect(items).toEqual(['Calendar', 'Queue', 'Plans'])
+    expect(items).toEqual(['Calendar', 'Queue', 'Plans', 'Posted'])  // PRD-251C US-C408: Posted
     expect(await within(nav()).findByText('2 posts need you')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /New post/ })).toBeInTheDocument()
@@ -167,7 +167,7 @@ describe('the Socials Studio shell', () => {
   it('a viewer sees the views but neither action nor the brand kit', () => {
     state.role = 'viewer'
     renderStudio()
-    expect(within(nav()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Calendar', 'Queue', 'Plans'])
+    expect(within(nav()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Calendar', 'Queue', 'Plans', 'Posted'])
     expect(screen.queryByRole('button', { name: 'New plan' })).toBeNull()
     expect(screen.queryByRole('button', { name: /New post/ })).toBeNull()
   })

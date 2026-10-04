@@ -12,7 +12,8 @@
  * ?view=plans&plan=new, and ?view=plans&plan=<id> a plan's own page (US-B207).
  * US-B108: the calendar view is the Socials calendar (Month · Week · List).
  * US-B109: ?post=<id> opens the post editor (studio/socials-post-page.tsx), and the old
- * ?view=brand link goes to the Brand kit tab.
+ * ?view=brand link goes to the Brand kit tab. PRD-251C US-C408: ?view=posted is what went out,
+ * with its numbers (socials-posted.tsx).
  */
 import { useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -24,6 +25,7 @@ import { useSocialPosts } from '@/hooks/use-socials-api'
 import { SocialsPlansView } from '../plans/socials-plans-view'
 import { canAuthorPosts } from '../socials-status'
 import { SocialsCalendar } from './socials-calendar'
+import { SocialsPosted } from './socials-posted'
 import { SocialsPostPage } from './socials-post-page'
 import { queuedPosts } from './queue-model'
 import { SocialsQueue } from './socials-queue'
@@ -47,6 +49,7 @@ function StudioBody({ route, go, role, posts, loading }: StudioBodyProps) {
     )
   }
   if (route.view === 'plans') return <SocialsPlansView role={role} posts={posts} planId={route.plan} go={go} />
+  if (route.view === 'posted') return <SocialsPosted planId={route.plan} go={go} />
   if (route.post) return <SocialsPostPage role={role} posts={posts} postId={route.post} loading={loading} go={go} />
   return <SocialsCalendar role={role} posts={posts} route={route} go={go} />
 }
