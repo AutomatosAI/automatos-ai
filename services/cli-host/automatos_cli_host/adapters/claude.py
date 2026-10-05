@@ -17,7 +17,6 @@ moved, not rewritten:
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import shutil
@@ -27,6 +26,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Mapping, Optional
 
+from ..filelock import lock_exclusive
 from ..permission_modes import plan_text
 from ..presets import CliPreset
 from ..sandbox import claude_settings, unavailable_reason
@@ -182,7 +182,7 @@ def is_directory_trusted(cwd: Path, home: Optional[Path] = None) -> bool:
 # the old file, the last replace won, and the other folder's trust was gone —
 # its ``claude --worktree`` refused to start ("Workspace trust not yet
 # accepted"). One writer at a time: a lock for this process's threads, and an
-# flock on a file beside it for any other process that follows the protocol.
+# lock on a file beside it for any other process that follows the protocol.
 _TRUST_LOCK = threading.Lock()
 TRUST_WRITE_ATTEMPTS = 3
 
@@ -193,10 +193,10 @@ def _trust_write_lock(path: Path) -> Iterator[None]:
     with _TRUST_LOCK:
         fd = os.open(str(path.with_name(path.name + ".automatos-lock")), os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            lock_exclusive(fd)
             yield
         finally:
-            os.close(fd)  # closing the descriptor releases the flock
+            os.close(fd)  # closing the descriptor releases the lock
 
 
 def record_directory_trust(cwd: Path, home: Optional[Path] = None) -> bool:
