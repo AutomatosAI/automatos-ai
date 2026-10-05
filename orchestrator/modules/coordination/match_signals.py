@@ -19,7 +19,8 @@ Everything is best-effort and fail-open: any backend failure yields absent
 signals and the matcher degrades to lexical-only scoring — never to a failed
 dispatch. The dispatch path bridges sync→async via a helper-thread event loop
 (tool_router's ``_run_coroutine_blocking`` idiom), so backend clients are
-created FRESH per call and never outlive their loop.
+created FRESH per call and never outlive their loop: the embedding clients made
+during a call are closed on its loop when it ends (#837, ``closes_its_clients``).
 """
 
 import asyncio
@@ -30,6 +31,7 @@ from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
 from config import Config
+from core.loop_scoped_clients import closes_its_clients
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationTask
 
@@ -53,6 +55,7 @@ class SemanticSignals:
     field_by_agent: Dict[int, float]
 
 
+@closes_its_clients  # #837: no embedding client outlives the loop it was made on
 async def compute_signals_for_tasks(
     tasks: Sequence[OrchestrationTask],
     agents: Sequence[Agent],
