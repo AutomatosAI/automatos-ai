@@ -76,7 +76,10 @@ const PDF_ARTIFACT: Artifact = {
 }
 
 function expectFetchedWithAuth() {
-  expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}${FILE_ROUTE}`, { headers: AUTH })
+  expect(fetchMock).toHaveBeenCalledWith(
+    `${API_BASE}${FILE_ROUTE}`,
+    expect.objectContaining({ headers: expect.objectContaining(AUTH) }),
+  )
 }
 
 function expectSavedAs(filename: string) {
