@@ -306,7 +306,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.11.0"  # 2026-10-02: GitHub Copilot CLI is a session CLI (PRD-253) — an older host announces no `copilot` and never claims its tickets; the terminal launch carries `agent_id` (a per-agent CLI home). 0.10.0: 2026-10-02: Plan runs on every CLI (PRD-253 Wave P) — the claim's ``permission_mode`` is THIS turn's mode (``edits`` once the ticket's plan is approved) and it carries ``plan_approved``; a plan turn reports its plan as a ``PlanReady`` event before its result — an older host runs Plan on Claude Code only. 0.9.0: 2026-09-29: the claim carries ``permission_mode`` (manual | edits | plan | auto), the agent's or the workspace's — an older host ignores it and runs every session as Edit automatically. 0.8.0: 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
+EXPECTED_CLI_HOST_VERSION = "0.12.0"  # 2026-10-05: the claim carries ``brand_files``, the ticket's workspace's uploaded logo and logo mark (F332) — an older host ignores them and the session has no logo file. 0.11.0: 2026-10-02: GitHub Copilot CLI is a session CLI (PRD-253) — an older host announces no `copilot` and never claims its tickets; the terminal launch carries `agent_id` (a per-agent CLI home). 0.10.0: 2026-10-02: Plan runs on every CLI (PRD-253 Wave P) — the claim's ``permission_mode`` is THIS turn's mode (``edits`` once the ticket's plan is approved) and it carries ``plan_approved``; a plan turn reports its plan as a ``PlanReady`` event before its result — an older host runs Plan on Claude Code only. 0.9.0: 2026-09-29: the claim carries ``permission_mode`` (manual | edits | plan | auto), the agent's or the workspace's — an older host ignores it and runs every session as Edit automatically. 0.8.0: 2026-09-17: the claim carries the ticket's Automatos tools (``session_tools``, ``session_tools_path``, ``session_token``) — a host that predates them writes no MCP config and the session sees no platform tools, silently (PRD-245 W1). 0.7.0: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py", "core/cli_presets.py")
 
@@ -1066,6 +1066,7 @@ def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any],
 def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str) -> Dict[str, Any]:
     """Stamp one claimed ticket's ``runtime_ref`` and build what the host runs it from."""
     from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
+    from services.session_brand_files import session_brand_files
     from services.session_plans import PLANS_KEY, STATE_APPROVED, plan_state
 
     if task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason):
@@ -1088,15 +1089,15 @@ def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str)
     # PRD-253 Wave P: a Plan ticket plans until its plan is approved, then works.
     approved = plan_state(ref) == STATE_APPROVED
     mode = claim_permission_mode(ticket_permission_mode(cfg, workspace_mode), approved)
-    return _claim_payload(task, agent, cfg, ref, prompt, session_token, (mode, approved))
+    return _claim_payload(task, agent, cfg, ref, prompt, session_token, (mode, approved), session_brand_files(db, task.workspace_id))
 
 
 def _claim_payload(
     task: BoardTask, agent: Optional[Agent], cfg: Dict[str, Any], ref: Dict[str, Any], prompt: str,
-    session_token: str, permission: Tuple[str, bool],
+    session_token: str, permission: Tuple[str, bool], brand_files: Sequence[Dict[str, str]] = (),
 ) -> Dict[str, Any]:
     """The claim entry the host starts the session from (host contract ``EXPECTED_CLI_HOST_VERSION``).
-    ``permission`` is this turn's mode and whether the ticket's plan is approved."""
+    ``permission`` is this turn's mode and whether the ticket's plan is approved; ``brand_files`` the kit's logos."""
     permission_mode, plan_approved = permission
     return {
         "task_id": task.id,
@@ -1137,6 +1138,7 @@ def _claim_payload(
         "permission_mode": permission_mode,
         # …and a host whose own ``--permission-mode`` is Plan carries on too.
         "plan_approved": plan_approved,
+        "brand_files": list(brand_files),  # F332 (0.12.0): the kit's logos {name, mime, data}, for the ticket folder
     }
 
 def _session_system_prompt(agent: Optional[Agent], *, ticket_session: bool = True) -> str:
