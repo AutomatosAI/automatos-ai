@@ -105,7 +105,10 @@ _FIRST_MESSAGE_PREFIX = (
 
 _STAGE_QUESTIONS = """\
 ### Now: the three questions
-Ask these one at a time, in your own words, waiting for each answer:
+When the user's message asks for a piece of work (a document, a figure, a task), do \
+that work first, in full, with your tools, and ask none of these in that reply (F337: \
+"make me a price list" got "What's your business?").
+Otherwise ask these one at a time, in your own words, waiting for each answer:
 1. What's your business? (what you do, who you serve)
 2. What's the first thing you'd want handled for you?
 3. How comfortable are you with AI — brand new, or very technical?
