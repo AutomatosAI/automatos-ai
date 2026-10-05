@@ -98,6 +98,16 @@ describe('helpers', () => {
     expect(keyPlaceholder(registryFromBackend, 'unknown')).toBe('Paste your API key')
   })
 
+  it('surfaces a setup note: Azure says the model field is the deployment name (#873)', () => {
+    const setup = 'The model field is your deployment name in Microsoft Foundry.'
+    const registry = {
+      edition: 'saas' as const,
+      providers: [{ ...STATIC_PROVIDER_FALLBACK.providers[5], setup_note: setup }],
+    }
+    expect(registry.providers[0].slug).toBe('azure')
+    expect(providerNotes(registry, 'azure')).toEqual([setup])
+  })
+
   it('chat providers exclude key-only ones', () => {
     expect(chatProviders(STATIC_PROVIDER_FALLBACK).map((p) => p.slug)).not.toContain('cohere')
   })

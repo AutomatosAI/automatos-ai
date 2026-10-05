@@ -78,6 +78,7 @@ class ProviderSpec:
     docs_url: Optional[str] = None
     terms_note: Optional[str] = None
     rate_limit_note: Optional[str] = None
+    setup_note: Optional[str] = None       # how to fill in the provider's fields (#873)
 
     @property
     def chat(self) -> bool:
@@ -94,6 +95,14 @@ _NVIDIA_RATE_LIMIT = (
     "model can be at capacity (429 within a second even on your first call). The "
     "call fails; it is never rerouted to a paid provider. Wait a minute or pick "
     "another NVIDIA route — the smaller Nemotron models usually answer at once."
+)
+
+# #873: Azure OpenAI is part of Microsoft Foundry; the client calls its v1 route.
+_AZURE_DOCS = "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle"
+_AZURE_SETUP = (
+    "The model field is your deployment name in Microsoft Foundry, not the model's "
+    "name. The endpoint is your resource URL (https://<resource>.openai.azure.com); "
+    "it comes from AZURE_OPENAI_ENDPOINT on the API service, not from this key."
 )
 
 _SPECS: Tuple[ProviderSpec, ...] = (
@@ -137,9 +146,9 @@ _SPECS: Tuple[ProviderSpec, ...] = (
         docs_url="https://platform.deepseek.com/api_keys",
     ),
     ProviderSpec(
-        slug="azure", label="Azure OpenAI", kind=KIND_DIRECT, adapter=ADAPTER_AZURE,
+        slug="azure", label="Azure OpenAI (Microsoft Foundry)", kind=KIND_DIRECT, adapter=ADAPTER_AZURE,
         enum_value="azure", env_key="AZURE_OPENAI_API_KEY", aliases=("azure_openai",),
-        docs_url="https://portal.azure.com",
+        docs_url=_AZURE_DOCS, setup_note=_AZURE_SETUP,
     ),
     ProviderSpec(
         slug="bedrock", label="AWS Bedrock", kind=KIND_DIRECT, adapter=ADAPTER_BEDROCK,
@@ -304,6 +313,7 @@ def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[st
         "docs_url": spec.docs_url,
         "terms_note": spec.terms_note,
         "rate_limit_note": spec.rate_limit_note,
+        "setup_note": spec.setup_note,
     }
 
 

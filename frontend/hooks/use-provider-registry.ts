@@ -37,6 +37,8 @@ export interface ProviderSpec {
   docs_url: string | null
   terms_note: string | null
   rate_limit_note: string | null
+  /** How to fill in the provider's fields (Azure: the model is the deployment name, #873). */
+  setup_note?: string | null
 }
 
 export interface ProviderRegistry {
@@ -82,7 +84,7 @@ export const STATIC_PROVIDER_FALLBACK: ProviderRegistry = {
       key_placeholder: 'sk-or-…',
     }),
     staticSpec('deepseek', 'DeepSeek'),
-    staticSpec('azure', 'Azure OpenAI'),
+    staticSpec('azure', 'Azure OpenAI (Microsoft Foundry)'),
     staticSpec('bedrock', 'AWS Bedrock'),
     staticSpec('grok', 'Grok / xAI'),
     staticSpec('cohere', 'Cohere', { chat: false }),
@@ -172,9 +174,9 @@ export function keyPlaceholder(registry: ProviderRegistry, slug: string | null |
   return findProvider(registry, slug)?.key_placeholder ?? 'Paste your API key'
 }
 
-/** The trial / rate-limit text a user must see before saving a key for this provider. */
+/** The trial / rate-limit / setup text a user must see before saving a key for this provider. */
 export function providerNotes(registry: ProviderRegistry, slug: string | null | undefined): string[] {
   const spec = findProvider(registry, slug)
   if (!spec) return []
-  return [spec.terms_note, spec.rate_limit_note].filter((n): n is string => !!n)
+  return [spec.terms_note, spec.rate_limit_note, spec.setup_note].filter((n): n is string => !!n)
 }
