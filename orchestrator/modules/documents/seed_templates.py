@@ -89,10 +89,12 @@ STARTER_TEMPLATES = [
                 "company": {
                     "type": "object",
                     "properties": {"name": {"type": "string"}, "address": {"type": "string"}, "email": {"type": "string"}},
+                    "required": ["name"],
                 },
                 "client": {
                     "type": "object",
                     "properties": {"name": {"type": "string"}, "address": {"type": "string"}, "email": {"type": "string"}},
+                    "required": ["name"],
                 },
                 "invoice_number": {"type": "string"},
                 "date": {"type": "string"},
@@ -107,6 +109,7 @@ STARTER_TEMPLATES = [
                             "unit_price": {"type": "number"},
                             "total": {"type": "number"},
                         },
+                        "required": ["description", "quantity", "unit_price", "total"],
                     },
                 },
                 "subtotal": {"type": "number"},
@@ -114,7 +117,11 @@ STARTER_TEMPLATES = [
                 "total": {"type": "number"},
                 "payment_terms": {"type": "string"},
             },
-            "required": ["company", "client", "line_items", "total"],
+            # F345: the client, the invoice number, the figures and the payment terms are
+            # asked for, never defaulted ("Client Name", "INV-001", "Net 30").
+            "required": [
+                "company", "client", "invoice_number", "line_items", "subtotal", "tax", "total", "payment_terms",
+            ],
         },
         "sample_data": {
             "company": {"name": "Acme Corp", "address": "123 Main St", "email": "billing@acme.com"},

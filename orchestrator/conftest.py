@@ -17,9 +17,15 @@ CI job installs only pytest — can be COLLECTED without SQLAlchemy present. Onl
 tests that actually request ``test_engine`` / ``db_session`` pull it in.
 """
 
+import os
 from typing import TYPE_CHECKING, Generator
 
 import pytest
+
+# F353: registering a document queues its first-page picture on a background
+# thread. The suite runs with that off (set before ``config`` is first imported),
+# so no test's Deliverable is drawn behind its back; the F353 tests turn it on.
+os.environ.setdefault("DOCUMENT_THUMBNAILS_ENABLED", "false")
 
 if TYPE_CHECKING:  # for type checkers only; never imported at runtime collection
     from sqlalchemy.orm import Session

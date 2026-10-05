@@ -12,7 +12,7 @@ Components:
 Usage:
     # Upload documents
     from modules.rag import DocumentManager, DocumentStatus
-    doc_manager = DocumentManager(db_config)
+    doc_manager = DocumentManager(db_config, workspace_id=workspace_id)
     doc_id = await doc_manager.upload_document("/path/to/doc.pdf")
     
     # Search/retrieve

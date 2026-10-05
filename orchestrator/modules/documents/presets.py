@@ -17,6 +17,12 @@ document. Optional contact details carry ``fallback=""`` so a workspace without 
 phone number is not blocked; the fields a document is *about* have no fallback —
 an empty one is a blocked document, by design (P2-09 S3).
 
+F345: business and legal terms (payment terms, tax and VAT, how long a price holds,
+the terms of business, the governing law) have no fallback either. A default there
+printed "Net 30", "0.00" or "the laws of Ireland" for a business that never said
+so; now the guard asks for them. A cosmetic line ("Thank you for your business")
+keeps its default. A table column that may stay empty is marked ``optional``.
+
 Pure data + pure helpers; no DB, no IO.
 """
 
@@ -63,12 +69,20 @@ def _section(bid: str, title: str, *children: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "section", "id": bid, "title": title, "children": list(children)}
 
 
+def _column(key: str, label: str, align: str, optional: bool = False) -> Dict[str, Any]:
+    column: Dict[str, Any] = {"key": key, "label": label, "align": align}
+    if optional:
+        column["optional"] = True
+    return column
+
+
 def _data_table(bid: str, path: str, columns: List[tuple], empty_text: Optional[str] = None) -> Dict[str, Any]:
+    """``columns``: ``(key, label, align)``, with ``True`` fourth for a column that may stay empty."""
     block: Dict[str, Any] = {
         "type": "data_table",
         "id": bid,
         "path": path,
-        "columns": [{"key": k, "label": label, "align": align} for k, label, align in columns],
+        "columns": [_column(*column) for column in columns],
     }
     if empty_text is not None:
         block["empty_text"] = empty_text
@@ -159,11 +173,11 @@ INVOICE = {
             "totals",
             [
                 [[_t("Subtotal")], [_v("data.subtotal")]],
-                [[_t("Tax")], [_v("data.tax", "0.00")]],
+                [[_t("Tax")], [_v("data.tax")]],
                 [[_t("Total due", "bold")], [_v("data.total")]],
             ],
         ),
-        _para("terms", _t("Payment terms: ", "bold"), _v("data.payment_terms", "Net 30")),
+        _para("terms", _t("Payment terms: ", "bold"), _v("data.payment_terms")),
         _para("thanks", _t("Thank you for your business.")),
     ),
     "sample_data": {
@@ -199,7 +213,7 @@ REPORT = {
         _section("s-findings", "Key findings", _para("findings", _v("data.findings"))),
         _section(
             "s-metrics", "Key metrics",
-            _data_table("metrics", "data.metrics", [("metric", "Metric", "left"), ("value", "Value", "right"), ("change", "Change", "right")], empty_text="No metrics reported for this period."),
+            _data_table("metrics", "data.metrics", [("metric", "Metric", "left"), ("value", "Value", "right"), ("change", "Change", "right", True)], empty_text="No metrics reported for this period."),
         ),
         _section("s-recs", "Recommendations", _para("recs", _v("data.recommendations"))),
         _section("s-next", "Next steps", _para("next", _v("data.next_steps", ""))),
@@ -237,9 +251,9 @@ PROPOSAL = {
         _section(
             "s-pricing", "Pricing",
             _data_table("pricing", "data.pricing", [("item", "Item", "left"), ("description", "Description", "left"), ("price", "Price", "right")]),
-            _para("pricing-note", _v("data.pricing_note", "Prices exclude VAT. Valid for 30 days.")),
+            _para("pricing-note", _v("data.pricing_note")),
         ),
-        _section("s-terms", "Terms", _para("terms", _v("data.terms", "Standard terms of business apply; a signed proposal and a purchase order start the work."))),
+        _section("s-terms", "Terms", _para("terms", _v("data.terms"))),
         _section("s-next", "Next steps", _para("next", _v("data.next_steps"))),
         _para("sig", _v("user.name"), _t(" · "), _v("user.email", ""), _t(" · "), _v("company.name")),
     ),
@@ -255,6 +269,8 @@ PROPOSAL = {
                 {"item": "Design and build", "description": "Design system, templates, CMS", "price": "€14,000"},
                 {"item": "Launch support", "description": "Two weeks post-launch", "price": "€1,500"},
             ],
+            "pricing_note": "Prices exclude VAT. Valid for 30 days.",
+            "terms": "Standard terms of business apply; a signed proposal and a purchase order start the work.",
             "next_steps": "Confirm scope by 20 September; kick-off the following Monday.",
         }
     },
@@ -285,7 +301,7 @@ CONTRACT = {
             "c5", "5. Termination",
             _para("termination", _t("Either party may terminate on thirty days' written notice, or immediately if the other party materially breaches this agreement and does not remedy the breach within fourteen days of notice.")),
         ),
-        _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law", "Ireland"), _t("."))),
+        _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law"), _t("."))),
         _heading("sig-title", 2, _t("Signed")),
         _table(
             "signatures",
@@ -322,7 +338,7 @@ DATA = {
         _logo(),
         _heading("title", 1, _v("data.title")),
         _para("desc", _v("data.description", "")),
-        _data_table("rows", "data.rows", [("name", "Name", "left"), ("value", "Value", "right"), ("notes", "Notes", "left")]),
+        _data_table("rows", "data.rows", [("name", "Name", "left"), ("value", "Value", "right"), ("notes", "Notes", "left", True)]),
         _para("footer", _t("Generated "), _v("date.long"), _t(" by "), _v("user.name"), _t(" · "), _v("company.name")),
     ),
     "sample_data": {

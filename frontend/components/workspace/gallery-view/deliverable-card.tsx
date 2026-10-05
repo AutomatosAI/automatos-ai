@@ -3,8 +3,9 @@
  * =================================================
  *
  * Visual card for a single agent deliverable in the Gallery grid.
- * Renders an image preview (for artifact_type='image') or a colored icon chip
- * (for every other type), with a source badge, title, agent/time, and size.
+ * Renders an image preview (for artifact_type='image'), a document's first page
+ * (F353: documents, sheets and reports with a `thumbnail_url`) or the type's
+ * artwork, with a source badge, title, agent/time, and size.
  */
 
 import { memo } from 'react'
@@ -23,8 +24,8 @@ import {
 
 import { cn } from '@/lib/utils'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
+import { DocumentThumbnail } from './document-thumbnail'
 import { madeBy } from './made-by'
 
 // ============= STYLE MAPS =============
@@ -118,7 +119,7 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : (
-          <DeliverableArtwork type={artifact_type} className="absolute inset-0" />
+          <DocumentThumbnail type={artifact_type} thumbnailUrl={deliverable.thumbnail_url} title={title} />
         )}
 
         {/* Source badge */}

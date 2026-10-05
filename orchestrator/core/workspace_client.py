@@ -161,6 +161,26 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("download_file", err)
 
+    def download_file_sync(self, path: str, max_bytes: int, timeout_s: float = 30.0) -> Optional[bytes]:
+        """``download_file`` for a thread with no event loop (F353's thumbnail thread).
+
+        Its own short-lived client: the shared async one belongs to the server's
+        loop. None, logged, when the worker is unreachable, the file is missing or
+        it is over ``max_bytes``.
+        """
+        headers = {"X-Internal-Token": config.WORKER_INTERNAL_TOKEN} if config.WORKER_INTERNAL_TOKEN else {}
+        url = self._read_url(path, "/files/download")
+        try:
+            with httpx.Client(timeout=timeout_s, headers=headers) as client:
+                resp = client.get(url, params={"path": path})
+        except httpx.HTTPError as err:
+            logger.warning("WorkspaceClient download_file_sync %s failed: %s", path, err)
+            return None
+        if resp.status_code != 200:
+            logger.info("WorkspaceClient download_file_sync %s: %s", path, _parse_error(resp))
+            return None
+        return resp.content if len(resp.content) <= max_bytes else None
+
     # ── Search ─────────────────────────────────────────────────────
 
     async def grep(

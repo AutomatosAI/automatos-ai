@@ -4,10 +4,12 @@ from services.past_work_schemas import documents_search_takes_a_scope
 
 from .action_registry import ActionDefinition, ActionRegistry
 from .actions_read_document import with_read_document
+from .actions_templates import with_template_actions
 
 
 @documents_search_takes_a_scope  # F305 (night 9): scope 'past_work'
 @with_read_document  # F327 (night 9b): platform_read_document left this past-length function
+@with_template_actions  # F346 (night 10b): the template tools left it too
 def register_documents_actions(registry: ActionRegistry) -> None:
     """Register document-related platform actions."""
 
@@ -223,67 +225,6 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "re-embed document 7",
             "reindex that document",
             "regenerate chunks for document 10",
-        ],
-    ))
-
-    # PRD-167 S6: document-template tools. Let agents discover the workspace's
-    # templates and the data each one expects, then fill one via generate_document.
-    registry.register(ActionDefinition(
-        name="platform_list_templates",
-        description=(
-            "List the document templates available in this workspace (branded letters, "
-            "reports, invoices, etc.). Returns each template's id, name, description, "
-            "format and category. Use before generate_document to pick a template, then "
-            "call platform_get_template_schema to learn what data it needs."
-        ),
-        category="documents",
-        parameters={
-            "type": "object",
-            "properties": {
-                "format": {
-                    "type": "string",
-                    "description": "Optional filter — pdf, docx, xlsx, social_image or social_video.",
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Optional category filter (e.g. 'report', 'invoice', 'letter').",
-                },
-            },
-            "required": [],
-        },
-        permission_level="read",
-        tags=["documents", "templates", "generate"],
-        examples=[
-            "what document templates do we have?",
-            "list invoice templates",
-            "show me the branded report templates",
-        ],
-    ))
-
-    registry.register(ActionDefinition(
-        name="platform_get_template_schema",
-        description=(
-            "Get the data a document template expects: its variable chips "
-            "(user/company/brand/date) and the data.* fields you must supply, plus "
-            "sample data. Use this after platform_list_templates and before "
-            "generate_document so you fill the template correctly."
-        ),
-        category="documents",
-        parameters={
-            "type": "object",
-            "properties": {
-                "template_id": {
-                    "type": "string",
-                    "description": "UUID of the template (from platform_list_templates).",
-                },
-            },
-            "required": ["template_id"],
-        },
-        permission_level="read",
-        tags=["documents", "templates", "schema", "generate"],
-        examples=[
-            "what fields does the Branded Letter template need?",
-            "show the schema for that template",
         ],
     ))
 

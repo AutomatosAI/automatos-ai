@@ -28,7 +28,6 @@ from urllib.parse import urlparse
 
 import jinja2
 from jinja2.sandbox import SandboxedEnvironment
-import jsonschema
 from sqlalchemy.orm import Session
 
 
@@ -93,6 +92,7 @@ from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
 from modules.documents.deliverable_extra import deliverable_extra, the_parties_are_remembered
 from modules.documents.data_coverage import template_for, unused_data_keys
+from modules.documents.legacy_guard import legacy_fields_are_required
 from modules.documents.letterhead import fallback_blocks
 from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
@@ -339,6 +339,7 @@ class DocumentGenerationService:
     # PDF Generation (Jinja2 + WeasyPrint)
     # ------------------------------------------------------------------
 
+    @legacy_fields_are_required(page=True)  # F345: a legacy template's required fields block, never backfilled
     async def generate_pdf(
         self,
         template: Optional[DocumentTemplate],
@@ -380,8 +381,6 @@ class DocumentGenerationService:
         elif template and template.template_content:
             # Path 2: legacy user-authored Jinja HTML (kept until per-workspace
             # templates are migrated to blocks — see PRD-167 sunset note).
-            if hasattr(template, "data_schema"):
-                self._validate_and_backfill(data, template.data_schema)
             # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
             # they pick up workspace palette instead of hardcoded Automatos colours.
             template_lane = "legacy"
@@ -415,6 +414,7 @@ class DocumentGenerationService:
     # DOCX Generation (python-docx-template)
     # ------------------------------------------------------------------
 
+    @legacy_fields_are_required(page=False)  # F345: an uploaded .docx's required fields block too
     async def generate_docx(
         self,
         template: Optional[DocumentTemplate],
@@ -650,41 +650,6 @@ class DocumentGenerationService:
                     "[DocGen] Section '%s' has empty content. Keys present: %s",
                     section.get("title", "?"), list(section.keys()),
                 )
-
-    def _validate_and_backfill(self, data: dict, schema: dict) -> None:
-        """Validate data against the template's JSON Schema.
-
-        Non-fatal: missing required fields are backfilled with sensible
-        defaults so Jinja2 rendering doesn't crash on {% for %} loops.
-        """
-        if not schema:
-            return
-
-        # Backfill missing required fields with type-appropriate defaults
-        # so templates render gracefully even with partial LLM output.
-        props = schema.get("properties", {})
-        for field in schema.get("required", []):
-            if field not in data:
-                field_type = props.get(field, {}).get("type", "string")
-                default = {
-                    "string": "",
-                    "array": [],
-                    "object": {},
-                    "number": 0,
-                    "integer": 0,
-                    "boolean": False,
-                }.get(field_type, "")
-                data[field] = default
-                logger.warning(
-                    f"[DocGen] Backfilled missing required field '{field}' "
-                    f"with default {type(default).__name__}"
-                )
-
-        try:
-            jsonschema.validate(instance=data, schema=schema)
-        except jsonschema.ValidationError as e:
-            # Log but don't raise — let Jinja2 try rendering.
-            logger.warning(f"[DocGen] Schema validation warning: {e.message}")
 
     def _embed_charts(self, html: str, data: dict) -> str:
         """Replace {{ chart:field_name }} tags with base64 PNG images."""

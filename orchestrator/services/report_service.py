@@ -18,6 +18,7 @@ from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
 from core.workspace_client import WorkspaceClient
+from modules.documents.thumbnails.schedule import thumbnail_after_report
 # F321: one rollup and one wording for every report's numbers; re-exported here,
 # where the report writers and the rerun estimate import it from.
 from services.report_metrics import compute_execution_metrics as compute_execution_metrics
@@ -91,6 +92,7 @@ class ReportService:
         self.db = db
         self.workspace_id = workspace_id
 
+    @thumbnail_after_report  # F353: a report's card shows its first page
     async def create_report(
         self,
         agent_id: Optional[int],

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Tuple
 
 from ..amounts import field_text
+from ..variables.catalog import is_blank
 from .markdown_body import blocks_from_markdown, section_text
 from .schema import HeadingBlock, TableBlock, TextRun
 
@@ -40,13 +41,7 @@ Ids = Callable[[str], str]
 
 def is_carried(value: Any) -> bool:
     """A value that holds something to print: not None, not empty or blank text."""
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, tuple, dict)):
-        return bool(value)
-    return True
+    return not is_blank(value)
 
 
 def carried_keys(data: Dict[str, Any], skip: Iterable[str] = ()) -> List[str]:

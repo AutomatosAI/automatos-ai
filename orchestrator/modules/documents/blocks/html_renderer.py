@@ -28,6 +28,7 @@ from ..variables.catalog import walk_dynamic
 from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
+from .table_cells import unfilled_cells
 from .text_body import MARK_TAGS, block_groups, body_html, unresolved_html
 
 
@@ -115,6 +116,7 @@ def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[s
             f'<p><span class="unresolved-var" data-path="{_esc(block.path)}">'
             f"[[{_esc(block.path)}]]</span></p>"
         )
+    unresolved.extend(unfilled_cells(block, rows))  # F345: every row fills every required column
     head = "".join(
         f'<th style="text-align:{c.align}">{_esc(c.label or c.key)}</th>' for c in block.columns
     )
