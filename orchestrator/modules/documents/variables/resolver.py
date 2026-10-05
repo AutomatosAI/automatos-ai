@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
-from .catalog import is_dynamic_path, is_known_path, walk_dynamic
+from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
     for path in sorted(set(paths)):
         if is_dynamic_path(path):
             value = walk_dynamic(context.get("data", {}), path)
-            if value is None or value == "":
+            if is_blank(value):  # F345: whitespace fills nothing
                 out.unresolved.append(path)
             else:
                 out.values[path] = str(value)
@@ -129,7 +129,7 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
             continue
         category, _, key = path.partition(".")
         value = context.get(category, {}).get(key)
-        if value is None or value == "":
+        if is_blank(value):  # F345: whitespace fills nothing
             out.unresolved.append(path)
         else:
             out.values[path] = str(value)
