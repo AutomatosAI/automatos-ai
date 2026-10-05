@@ -22,7 +22,7 @@ id, served by Anthropic:
 - the API publishes no prices. An existing row keeps its price, description,
   tags and flags. A new row borrows price, description and tool support from the
   OpenRouter cache row for the same model (``anthropic/claude-opus-4.8`` for
-  ``claude-opus-4-8``), as the NVIDIA sync borrows its metadata; with no such row
+  ``claude-opus-4-8``, ``core.llm.anthropic_ids``), as the NVIDIA sync borrows its metadata; with no such row
   it starts unpriced;
 - ids Anthropic no longer lists are marked ``deprecated`` (installs keep their
   row), as the OpenRouter and NVIDIA syncs do. An empty answer retires nothing.
@@ -38,13 +38,13 @@ which the sync endpoint returns as it does for the other syncs.
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
 from sqlalchemy.orm import Session
 
+from core.llm.anthropic_ids import DATE_SUFFIX, openrouter_twin_ids
 from core.models.core import LLMModel
 from core.models.openrouter_cache import OpenRouterModelCache, OpenRouterSyncJob
 
@@ -72,9 +72,7 @@ UNREACHABLE_MESSAGE = "Could not reach Anthropic's Models API ({error})."
 ENDLESS_PAGES_MESSAGE = "Anthropic's Models API kept paging past {pages} pages; nothing was synced."
 NEW_ROW_DESCRIPTION = "{name}, served directly by Anthropic with your Anthropic key."
 
-_DATE_SUFFIX = re.compile(r"-\d{8}$")
 _LATEST_SUFFIX = "-latest"
-_VERSION_HYPHEN = re.compile(r"(?<=\d)-(?=\d)")
 _REJECTED_STATUSES = (401, 403)
 
 
@@ -176,7 +174,7 @@ def is_alias_of_listed(model_id: str, listed: List[str]) -> bool:
         stem = model_id[: -len(_LATEST_SUFFIX)] + "-"
         return any(listed_id.startswith(stem) for listed_id in listed)
     return any(
-        listed_id.startswith(model_id + "-") and _DATE_SUFFIX.fullmatch(listed_id[len(model_id):])
+        listed_id.startswith(model_id + "-") and DATE_SUFFIX.fullmatch(listed_id[len(model_id):])
         for listed_id in listed
     )
 
@@ -303,21 +301,10 @@ def new_row_defaults(model: Dict[str, Any], twin: Optional[OpenRouterModelCache]
     )
 
 
-def openrouter_twin_id(model_id: str) -> str:
-    """Anthropic's id → OpenRouter's id for the same model.
-
-    ``claude-sonnet-4-5-20250929`` → ``anthropic/claude-sonnet-4.5``;
-    ``claude-3-5-sonnet-20241022`` → ``anthropic/claude-3.5-sonnet``;
-    ``claude-opus-5`` → ``anthropic/claude-opus-5``.
-    """
-    undated = _DATE_SUFFIX.sub("", model_id)
-    return f"{ANTHROPIC_TAG}/{_VERSION_HYPHEN.sub('.', undated)}"
-
-
 def openrouter_twin(db: Session, model_id: str) -> Optional[OpenRouterModelCache]:
-    """The OpenRouter cache row for the same model, if the cache has one."""
+    """The OpenRouter cache row for the same model (``openrouter_twin_ids``), if the cache has one."""
     q = db.query(OpenRouterModelCache)
-    for candidate in (openrouter_twin_id(model_id), f"{ANTHROPIC_TAG}/{model_id}"):
+    for candidate in openrouter_twin_ids(model_id):
         row = q.filter(OpenRouterModelCache.model_id == candidate).first()
         if row is not None:
             return row
@@ -343,5 +330,5 @@ def _supported(capabilities: Any, name: str) -> Optional[bool]:
 
 __all__ = [
     "AnthropicCatalogError", "fetch_anthropic_models", "is_alias_of_listed", "new_row_defaults", "openrouter_twin",
-    "openrouter_twin_id", "run_anthropic_sync", "synced_values", "workspace_key",
+    "run_anthropic_sync", "synced_values", "workspace_key",
 ]

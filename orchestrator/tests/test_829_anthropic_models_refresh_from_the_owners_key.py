@@ -19,7 +19,8 @@ resolver is stubbed. What is pinned:
   listed id (``claude-sonnet-4-5`` of ``claude-sonnet-4-5-20250929``) stays
   active: Anthropic still answers it, and a deprecated route stops routing;
 - a call on an unpriced route (NULL input and output price) is priced from the
-  fallbacks, never booked at $0 from the row; an explicit 0 stays 0;
+  fallbacks, never booked at $0 from the row; an explicit 0 stays 0; the
+  OpenRouter-cache fallback also tries a direct Anthropic id's OpenRouter twin;
 - no key, a refused key or no answer is a clear message through the sync
   endpoint (502), never the key itself; the job is recorded failed (on a
   recording session: a failed sync rolls back, which would end ``db_session``).
@@ -285,6 +286,36 @@ def test_an_unpriced_route_falls_through_to_the_estimate_and_an_explicit_zero_st
     assert (price["source"], price["input_per_1k"], price["output_per_1k"]) == ("route", 0.0, 0.0)
 
 
+def test_an_unpriced_anthropic_route_is_priced_from_its_openrouter_twin(catalog):
+    from core.llm.usage_tracker import resolve_price
+    from core.models.openrouter_cache import OpenRouterModelCache
+
+    unpriced = "claude-opus-829-x"                  # no static-map key matches it
+    _priced_route(catalog, "anthropic", unpriced, None, None)
+    catalog.add(OpenRouterModelCache(
+        model_id="anthropic/claude-opus-829-x", display_name="Anthropic: Claude Opus 829 X", provider="anthropic",
+        prompt_cost=0.000004, completion_cost=0.00002, status="active",
+    ))
+    catalog.flush()
+
+    price = resolve_price(catalog, unpriced, "anthropic")
+
+    assert price["source"] == "catalogue"
+    assert price["input_per_1k"] == pytest.approx(0.004) and price["output_per_1k"] == pytest.approx(0.02)
+
+
+@pytest.mark.parametrize("model_id, twins", [
+    ("claude-opus-5", ["anthropic/claude-opus-5"]),
+    ("claude-sonnet-4-5-20250929", ["anthropic/claude-sonnet-4.5", "anthropic/claude-sonnet-4-5-20250929"]),
+    ("anthropic/claude-opus-5", []),                 # already an OpenRouter id
+    ("gpt-4o", []),                                  # not an Anthropic id
+])
+def test_the_openrouter_ids_tried_for_a_direct_anthropic_id(model_id, twins):
+    from core.llm.anthropic_ids import openrouter_twin_ids
+
+    assert openrouter_twin_ids(model_id) == twins
+
+
 # ── an undated alias is not a retired model ─────────────────────────────────
 
 @pytest.mark.parametrize("model_id, listed, alias", [
@@ -312,6 +343,6 @@ def test_an_alias_of_a_listed_id(model_id, listed, alias):
     ("claude-opus-5", "anthropic/claude-opus-5"),
 ])
 def test_the_openrouter_twin_id(anthropic_id, openrouter_id):
-    from core.services.anthropic_catalog_sync import openrouter_twin_id
+    from core.llm.anthropic_ids import openrouter_twin_id
 
     assert openrouter_twin_id(anthropic_id) == openrouter_id

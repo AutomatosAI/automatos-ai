@@ -97,7 +97,7 @@ def _rate_from_openrouter_cache(db, model_id: str) -> Optional[Tuple[float, floa
     try:
         from core.models.openrouter_cache import OpenRouterModelCache
 
-        row = db.query(OpenRouterModelCache).filter(OpenRouterModelCache.model_id == model_id).first()
+        row = _cache_row(db, OpenRouterModelCache, model_id)
     except Exception:
         return None
     if row is None:
@@ -110,6 +110,19 @@ def _has_price(row: Any) -> bool:
     Anthropic route the Models API listed without prices), not free. A row with an
     explicit 0 is priced: free and local routes are 0 on purpose."""
     return row.input_cost_per_1k_tokens is not None or row.output_cost_per_1k_tokens is not None
+
+
+def _cache_row(db, cache_model: Any, model_id: str) -> Any:
+    """The cache row for ``model_id``; failing that (#829), for the OpenRouter twin of a
+    direct Anthropic id (``claude-opus-5`` → ``anthropic/claude-opus-5``), which is how
+    a model the Anthropic sync added without a price gets OpenRouter's."""
+    from core.llm.anthropic_ids import openrouter_twin_ids
+
+    for candidate in [model_id, *openrouter_twin_ids(model_id)]:
+        row = db.query(cache_model).filter(cache_model.model_id == candidate).first()
+        if row is not None:
+            return row
+    return None
 
 
 def resolve_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
