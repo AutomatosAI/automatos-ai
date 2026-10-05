@@ -100,12 +100,14 @@ def test_chrome_is_preinstalled_at_build_not_fetched_per_render():
     assert "ENV HYPERFRAMES_BROWSER_PATH=/opt/chrome/chrome-headless-shell" in DOCKERFILE
 
 
-def test_the_media_render_job_is_a_top_level_sibling_with_no_needs():
+def test_the_media_render_job_is_a_top_level_sibling_that_waits_only_on_its_path_filter():
+    """#993: it runs when its paths change, read by the small ``changes`` job; it never waits on the tests."""
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
     job = workflow["jobs"].get("media-render")
     assert job is not None, "the media-render job is missing from test.yml"
     assert job["name"] == "media-render — image builds and renders the fixture"
-    assert "needs" not in job
+    assert job.get("needs") in ("changes", ["changes"])
+    assert "needs.changes.outputs.media_render == 'true'" in job["if"]
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "docker build -t \"$IMAGE\" services/media-render/" in commands
     assert "assert_output.py" in commands and "--fps 30" in commands and "--audio-codec aac" in commands

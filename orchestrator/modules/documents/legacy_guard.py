@@ -48,6 +48,7 @@ BRAND_KEY = "brand"
 NOT_THE_CALLERS = frozenset({TITLE_KEY, BRAND_KEY})
 _HIDDEN = re.compile(r"(?is)<(head|style|script)\b.*?</\1\s*>")
 _TAG = re.compile(r"(?s)<[^>]+>")
+SECTIONS_KEY = "sections"
 # The column each legacy lane renders from.
 LEGACY_PDF_SOURCE = "template_content"
 LEGACY_DOCX_SOURCE = "template_file_path"
@@ -128,6 +129,16 @@ def renders_legacy(template: Any, page: bool) -> bool:
     return bool(getattr(template, LEGACY_PDF_SOURCE if page else LEGACY_DOCX_SOURCE, None))
 
 
+def _as_checked(lane: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+    """The fields the caller is held to. F298: a body sent as ``content`` alone prints as one
+    untitled section the platform made, so its blank title is not a field left unfilled; it
+    is checked as the document's own title, which is required in its own right."""
+    if data.get(SECTIONS_KEY) or not lane.get(SECTIONS_KEY):
+        return lane
+    titled = [{**row, TITLE_KEY: lane.get(TITLE_KEY)} for row in lane[SECTIONS_KEY]]
+    return {**lane, SECTIONS_KEY: titled}
+
+
 def check_legacy_template(env: Any, template: Any, data: Dict[str, Any], title: str, page: bool) -> None:
     """Refuse a legacy (non-block) template's render that would leave a field unfilled."""
     if not renders_legacy(template, page):
@@ -136,7 +147,7 @@ def check_legacy_template(env: Any, template: Any, data: Dict[str, Any], title: 
     # As generate() hands it to the template: the title argument, and the prose as the page prints it.
     lane = {TITLE_KEY: title, **(legacy_render_data(data) if page else data)}
     schema = getattr(template, "data_schema", None)
-    missing = missing_required(lane, schema)
+    missing = missing_required(_as_checked(lane, data), schema)
     if missing:
         raise UnresolvedDeliverableError(unresolved=missing)
     _log_schema_drift(lane, schema)
