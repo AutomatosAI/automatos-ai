@@ -53,13 +53,10 @@ AGENTS_INVOICE = {
     "total": 311.0,
 }
 INVOICE_SEED = next(t for t in STARTER_TEMPLATES if t["name"] == "Invoice")
-# What the retired source printed where the current one prints ``| amount``.
-RETIRED_AMOUNTS = {f"{{{{ {name} | amount }}}}": f'${{{{ "%.2f" | format({name}) }}}}'
-                   for name in ("item.unit_price", "item.total", "subtotal", "tax", "total")}
-# F345 then dropped the placeholders a missing field printed as.
-RETIRED_PLACEHOLDERS = {f"{{{{ {name} }}}}": f"{{{{ {name} | default('{shown}') }}}}"
-                        for name, shown in (("company.name", "Company Name"), ("client.name", "Client Name"),
-                                            ("invoice_number", "INV-001"))}
+# The invoice.html sources workspaces were seeded with, byte for byte, as each shipped:
+# PRD-167's ("$" before every amount) and F347's (before F345 took out its placeholders).
+# Kept as files so a later change to invoice.html cannot change what they are.
+RETIRED_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "retired_seeds")
 
 
 def _invoice_source() -> str:
@@ -67,21 +64,17 @@ def _invoice_source() -> str:
         return handle.read()
 
 
-def _reverted(source: str, changes: dict) -> str:
-    for current, retired in changes.items():
-        assert current in source, current
-        source = source.replace(current, retired)
-    return source
+def _retired(name: str) -> str:
+    with open(os.path.join(RETIRED_DIR, name), encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 def _f347_source() -> str:
-    """The source F347 shipped, before F345 took out its placeholders."""
-    return _reverted(_invoice_source(), RETIRED_PLACEHOLDERS)
+    return _retired("invoice_f347.html")
 
 
 def _retired_source() -> str:
-    """PRD-167's source: F347's with its "$" amounts back."""
-    return _reverted(_f347_source(), RETIRED_AMOUNTS)
+    return _retired("invoice_prd167.html")
 
 
 def _branded_invoice_html(data: dict) -> str:
