@@ -154,6 +154,14 @@ def test_meeting_notes_with_only_its_required_fields_prints_no_empty_sections():
         assert f"<h2>{heading}</h2>" not in rendered.html
 
 
+def test_an_action_without_an_owner_or_due_date_is_not_blocked_but_one_without_a_task_is():
+    base = {"title": "Stand-up", "date": "2026-10-05", "attendees": ["Alice"]}
+    _, _, loose = _block_render({**base, "action_items": [{"task": "Book the venue"}]})
+    assert loose.unresolved == [] and "Book the venue" in loose.html
+    _, _, untasked = _block_render({**base, "action_items": [{"owner": "Bob"}]})
+    assert untasked.unresolved and all("task" in path for path in untasked.unresolved)
+
+
 def test_meeting_notes_renders_its_own_format():
     doc, values, _ = _block_render(_sample("Meeting Notes"))
     rendered = render_document_docx(doc, values, KIT, data=_sample("Meeting Notes"))

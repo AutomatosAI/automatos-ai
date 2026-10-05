@@ -419,7 +419,7 @@ MEETING_NOTES_BLOCKS = _doc(
     _section("s-decisions", "Decisions", _para("decisions", _v("data.decisions", ""))),
     _section(
         "s-actions", "Actions",
-        _data_table("actions", "data.action_items", [("task", "Action", "left"), ("owner", "Owner", "left"), ("due_date", "Due", "right")], empty_text=""),
+        _data_table("actions", "data.action_items", [("task", "Action", "left"), ("owner", "Owner", "left", True), ("due_date", "Due", "right", True)], empty_text=""),
     ),
 )
 
