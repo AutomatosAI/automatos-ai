@@ -67,6 +67,7 @@ from modules.coordination.primitive_heartbeat import _emit_missions_primitive
 from modules.coordination.step_inputs import builds_on_whole_results
 from modules.coordination.owner_note import a_steps_prompt_carries_the_owners_note
 from modules.coordination.reconciler import MissionReconciler
+from modules.coordination.session_step_origin import a_session_step_carries_its_origin
 from modules.coordination.owner_checks import refuse_resume_while_waiting
 from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
@@ -2301,6 +2302,7 @@ class CoordinatorService:
 
         return criteria
 
+    @a_session_step_carries_its_origin  # F339: F155's widget check sees where the mission started
     @a_summary_keeps_its_approved_inputs  # F286 (night 8): a summary's redo gets the approved steps again
     async def _prepare_task(
         self,
