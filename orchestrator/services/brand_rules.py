@@ -140,16 +140,28 @@ async def kit_off_loop(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
     return await asyncio.to_thread(stored_kit, db, workspace_id)
 
 
+def _first_text(*values: Any) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def sign_off_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
     """Who signs: the voice's sign-off, else the company contact's name, else the brand's."""
     if not kit:
         return None
     voice = kit.get("voice") or {}
     company = kit.get("company") or {}
-    for value in (voice.get("sign_off"), company.get("name"), kit.get("name")):
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    return _first_text(voice.get("sign_off"), company.get("name"), kit.get("name"))
+
+
+def document_author(kit: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Whom a document is by, in its PDF metadata (F331): the company contact's name,
+    else the brand's. None without a kit, and the render keeps its own default."""
+    if not kit:
+        return None
+    return _first_text((kit.get("company") or {}).get("name"), kit.get("name"))
 
 
 def _quoted(words: Sequence[str]) -> str:
@@ -314,5 +326,5 @@ __all__ = [
     "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "RULES_HEADING", "banned_found", "banned_note", "brand_assets",
     "brand_rules_block", "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result",
     "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
-    "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
+    "document_author", "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
 ]

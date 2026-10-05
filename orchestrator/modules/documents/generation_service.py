@@ -91,6 +91,8 @@ from modules.documents.blocks import (
 from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
+from modules.documents.data_coverage import template_for, unused_data_keys
+from modules.documents.pdf_writer import write_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -167,16 +169,8 @@ class DocumentGenerationService:
         if not ws:
             raise ValueError("workspace_id is required")
 
-        # Resolve template
-        template = None
-        if template_id:
-            template = self.template_service.get_template(template_id, ws)
-        elif template_name:
-            template = self.template_service.get_template_by_name(ws, template_name)
-
-        # Default to Basic Report for PDF if no template specified
-        if not template and format == "pdf":
-            template = self.template_service.get_template_by_name(ws, "Basic Report")
+        # The named template; else, for a PDF, Basic Report only where it prints every key (F331).
+        template = template_for(self.template_service, ws, format, data, template_id, template_name)
 
         # Inject top-level title into data so templates can reference {{ title }}.
         # The tool schema separates title from data, but templates expect it inside data.
@@ -217,6 +211,7 @@ class DocumentGenerationService:
                 unresolved=result.unresolved, unknown=result.unknown
             )
 
+        result.unused_keys = unused_data_keys(template, data, format)  # F331: the tool says them to the agent
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
         credit = (result.music or {}).get("credit")
@@ -416,10 +411,8 @@ class DocumentGenerationService:
 
         # Generate PDF
         output_path = self._output_path(workspace_id, title, "pdf")
-        try:
-            HTML(string=rendered_html, url_fetcher=_safe_url_fetcher).write_pdf(output_path)
-        except Exception as e:
-            raise RuntimeError(f"PDF generation failed: {e}")
+        page = HTML(string=rendered_html, url_fetcher=_safe_url_fetcher)
+        await write_pdf(page, output_path, self.db, workspace_id)  # F331: by the brand kit's name
 
         return self._build_result(
             output_path, "pdf", title, workspace_id,
