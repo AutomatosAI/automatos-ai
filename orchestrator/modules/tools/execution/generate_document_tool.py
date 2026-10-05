@@ -46,6 +46,16 @@ DEFAULT_FORMAT = "pdf"
 DELIVERABLE_PARAM = "deliverable"
 # The one format whose no-template render takes free text and a list of sections.
 BODY_FORMAT = "pdf"
+# F341 (night 10): a document made while working a card is that card's Deliverable,
+# attributed as a session's files are (cli_host_service: source_type 'task', the card's
+# id). With no card (a chat turn) it stays the agent's own output, as before.
+CARD_SOURCE_TYPE = "task"
+AGENT_OUTPUT_SOURCE_TYPE = "agent_output"
+# The server-built caller-context keys that name the card a call works, never a tool
+# argument: a board run's (agent_factory) and a Claude Code session's ticket (session_tools).
+BOARD_CARD_KEY = "board_task_id"
+SESSION_CARD_KEY = "session_task_id"
+CARD_CONTEXT_KEYS = (BOARD_CARD_KEY, SESSION_CARD_KEY)
 
 DATA_NOT_AN_OBJECT = (
     "The document was not made: 'data' must be an object, for example "
@@ -196,8 +206,24 @@ def _agent_row(db: Session, agent_id: int) -> Any:
     return db.query(Agent).filter(Agent.id == agent_id).first()
 
 
-async def run_generate_document(db: Session, parameters: Dict[str, Any], agent_id: int) -> Dict[str, Any]:
-    """Make the document one generate_document call asks for, or say in plain words why not."""
+def card_of(caller_context: Any) -> Optional[int]:
+    """The id of the card the call works, from its server-built context; ``None`` when none."""
+    context = caller_context if isinstance(caller_context, dict) else {}
+    for key in CARD_CONTEXT_KEYS:
+        raw = context.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            logger.warning("[generate_document] %s %r is not a card id: not attributed to a card", key, raw)
+    return None
+
+
+async def run_generate_document(db: Session, parameters: Dict[str, Any], agent_id: int,
+                                card_id: Optional[int] = None) -> Dict[str, Any]:
+    """Make the document one generate_document call asks for, or say in plain words why not.
+    ``card_id``: the card the call works, whose Deliverable the document becomes (F341)."""
     try:
         request = document_request(parameters if isinstance(parameters, dict) else {})
     except DocumentArgsRefused as refused:
@@ -207,7 +233,7 @@ async def run_generate_document(db: Session, parameters: Dict[str, Any], agent_i
     if not workspace_id:
         return failure(NO_WORKSPACE)
     try:
-        return await make_document(db, request, agent, workspace_id)
+        return await make_document(db, request, agent, workspace_id, card_id=card_id)
     except AUTHORED_FAILURES as exc:
         logger.warning("[generate_document] agent %s: %s", agent_id, exc)
         return failure(str(exc))
@@ -216,8 +242,10 @@ async def run_generate_document(db: Session, parameters: Dict[str, Any], agent_i
         return failure(NOT_MADE)
 
 
-async def make_document(db: Session, request: DocumentRequest, agent: Any, workspace_id: UUID) -> Dict[str, Any]:
-    """Render the document, register it as a Deliverable and answer with its links."""
+async def make_document(db: Session, request: DocumentRequest, agent: Any, workspace_id: UUID,
+                        card_id: Optional[int] = None) -> Dict[str, Any]:
+    """Render the document, register it as a Deliverable (the card's, when it works one)
+    and answer with its links."""
     from modules.documents.generation_service import DocumentGenerationService
 
     logger.info("[generate_document] %s document: %r", request.fmt.upper(), request.title)
@@ -235,7 +263,8 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
     registration = service.register_as_deliverable(
         result,
         title=request.title,
-        source_type="agent_output",
+        source_type=CARD_SOURCE_TYPE if card_id is not None else AGENT_OUTPUT_SOURCE_TYPE,
+        source_id=str(card_id) if card_id is not None else None,
         agent_id=getattr(agent, "id", None),
         agent_name=getattr(agent, "name", None),
         template_id=request.template_id,
