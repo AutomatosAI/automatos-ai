@@ -21,6 +21,15 @@ applied by the platform:
   (:data:`BANNED_NOTE_LEAD`). With no sign-off the placeholder stays, so the card's
   leftover-placeholder note still warns.
 
+Night 10 (F332): session agents had the voice and not the look: three different navies
+were guessed in one night, and no agent had the logo, the address or the phone. The
+rules block now also carries the kit's colours (hex), its fonts, the company's contact
+details and where the logo is, each only when the kit sets it, and says the kit wins
+over any document that says otherwise (a brand-voice document kept an old sign-off).
+F336: "Sincerely, [Your Company Name]" shipped in two documents. A company placeholder
+becomes the company's name (:func:`company_name`), a different fill from the person who
+signs; a bare "[Company Name]" only where a signature goes, as with "[Name]".
+
 Who signs (:func:`sign_off_name`): the voice's own sign-off, else the company
 contact's name, else the brand's name. Reads are cached per workspace for
 :data:`KIT_CACHE_SECONDS`: a run reads the kit several times (prompt, answer,
@@ -45,6 +54,11 @@ RULES_HEADING = "## The brand's rules"
 RULES_LEAD = ("From the owner's brand kit. Everything you write for the owner to send or publish "
               "(an email, a letter, a post, a document) keeps to them:")
 BANNED_NOTE_LEAD = "Check before using this answer: it uses words the brand kit bans"
+KIT_WINS_LINE = "- The brand kit wins over any document that says otherwise."
+COLOUR_KEYS = ("primary", "secondary", "accent", "text")
+CONTACT_FIELDS = (("address", "Address"), ("phone", "Phone"), ("email", "Email"), ("website", "Website"))
+UPLOADED_LOGO_LINE = ("- Logo: the one uploaded to the brand kit. generate_document puts it on the document "
+                      "for you; in a session, your ticket file lists its copy.")
 TEXT_KEYS = ("result", "response", "output", "content")
 
 # The sender's name left as a placeholder: anywhere in the text.
@@ -53,9 +67,16 @@ SENDER_PLACEHOLDER = re.compile(
 # A bare "[Name]" is the sender's only where a signature goes: on a line of its own,
 # or after a closing ("Best, [Name]"). "Dear [Name]," is the reader's and stays.
 BARE_NAME_LINE = re.compile(r"(?im)^([ \t]*)\[\s*name\s*\]([ \t]*)$")
-BARE_NAME_AFTER_CLOSING = re.compile(
-    r"(?i)\b(best|regards|thanks|thank you|cheers|sincerely|warmly|best wishes|all the best|yours)"
-    r"([ \t]*[,.]?[ \t]*)\[\s*name\s*\]")
+CLOSINGS = r"(best|regards|thanks|thank you|cheers|sincerely|warmly|best wishes|all the best|yours)"
+BARE_NAME_AFTER_CLOSING = re.compile(rf"(?i)\b{CLOSINGS}([ \t]*[,.]?[ \t]*)\[\s*name\s*\]")
+# F336: the sender's company left as a placeholder ("Sincerely, [Your Company Name]"):
+# anywhere when it says "your"; a bare "[Company Name]" or "[Company]" only where a
+# signature goes, since "Dear [Company Name] team" is the reader's.
+YOUR_COMPANY_PLACEHOLDER = re.compile(
+    r"\[\s*(?:your|my|sender'?s?)\s+company(?:'s)?(?:\s+name)?\s*\]", re.IGNORECASE)
+BARE_COMPANY = r"\[\s*company(?:\s+name)?\s*\]"
+BARE_COMPANY_LINE = re.compile(rf"(?im)^([ \t]*){BARE_COMPANY}([ \t]*)$")
+BARE_COMPANY_AFTER_CLOSING = re.compile(rf"(?i)\b{CLOSINGS}([ \t]*[,.]?[ \t]*){BARE_COMPANY}")
 
 _cache: Dict[str, Tuple[float, Any]] = {}
 
@@ -168,19 +189,93 @@ def _quoted(words: Sequence[str]) -> str:
     return ", ".join(f'"{word}"' for word in words)
 
 
-def rules_for_kit(kit: Optional[Dict[str, Any]]) -> Optional[str]:
-    """The rules block for ``kit``; None when it says nothing about how to write."""
+def company_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The company a draft is from (F336): the company contact's name, else the brand's."""
     if not kit:
         return None
+    for value in ((kit.get("company") or {}).get("name"), kit.get("name")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _voice_lines(kit: Dict[str, Any]) -> List[str]:
+    """Who the brand writes as, its tone, who signs and the words it never uses."""
     voice = kit.get("voice") or {}
     name, signer = (kit.get("name") or "").strip(), sign_off_name(kit)
-    lines = [f"- Write as {name}." if name else "",
-             f"- Tone: {', '.join(voice.get('tone') or [])}." if voice.get("tone") else "",
-             (f'- Sign it "{signer}". Never leave a placeholder such as [Your name].' if signer else ""),
-             (f"- Never use these words or phrases: {_quoted(voice['banned_phrases'])}."
-              if voice.get("banned_phrases") else "")]
-    kept = [line for line in lines if line]
-    return "\n".join([RULES_HEADING, RULES_LEAD, *kept]) if kept else None
+    return [f"- Write as {name}." if name else "",
+            f"- Tone: {', '.join(voice.get('tone') or [])}." if voice.get("tone") else "",
+            (f'- Sign it "{signer}". Never leave a placeholder such as [Your name].' if signer else ""),
+            (f"- Never use these words or phrases: {_quoted(voice['banned_phrases'])}."
+             if voice.get("banned_phrases") else "")]
+
+
+def _set(value: Any, default: str = "") -> str:
+    """``value`` trimmed when the owner set it: empty for a blank or the platform's default."""
+    text = value.strip() if isinstance(value, str) else ""
+    return "" if text.lower() == default.lower() else text
+
+
+def _one_line(text: str) -> str:
+    """A multi-line value (an address) on one line, its lines joined by commas."""
+    return ", ".join(line.strip().rstrip(",") for line in text.splitlines() if line.strip())
+
+
+def _colours_line(kit: Dict[str, Any]) -> str:
+    """The kit's colours as hex (F332); the neutral defaults are not the brand's."""
+    from modules.documents import brand_kit as bk
+
+    defaults = {"primary": bk.DEFAULT_PRIMARY, "secondary": bk.DEFAULT_SECONDARY,
+                "accent": bk.DEFAULT_ACCENT, "text": bk.DEFAULT_TEXT}
+    values = {key: _set(kit.get(f"{key}_color"), defaults[key]) for key in COLOUR_KEYS}
+    colours = [f"{key} {value}" for key, value in values.items() if value]
+    return f"- Colours (hex): {', '.join(colours)}." if colours else ""
+
+
+def _fonts_line(kit: Dict[str, Any]) -> str:
+    """The body and heading fonts (F332), by their first family."""
+    from modules.documents.brand_kit import DEFAULT_FONT
+
+    body = _first_family(_set(kit.get("font_family"), DEFAULT_FONT))
+    heading = _first_family(_set(kit.get("heading_font")))
+    if heading and body:
+        return f"- Fonts: {heading} for headings, {body} for body text."
+    if heading:
+        return f"- Fonts: {heading} for headings."
+    return f"- Font: {body}, for headings and body text." if body else ""
+
+
+def _contact_line(kit: Dict[str, Any]) -> str:
+    """The company's contact details (F332): only the ones the kit sets."""
+    company = kit.get("company") or {}
+    parts = [f"{label}: {_one_line(_set(company.get(key)))}" for key, label in CONTACT_FIELDS
+             if _set(company.get(key))]
+    name = _set(company.get("name"))
+    if not parts:
+        return f"- Company: {name}." if name else ""
+    return f"- Company: {name}. {'. '.join(parts)}." if name else f"- Company details: {'. '.join(parts)}."
+
+
+def _logo_line(kit: Dict[str, Any]) -> str:
+    """Where the logo is (F332): uploaded to the kit, or the URL the kit names."""
+    if _set(kit.get("logo_path")) or _set(kit.get("logo_mark_path")):
+        return UPLOADED_LOGO_LINE
+    url = _set(kit.get("logo_url")) or _set(kit.get("logo_mark_url"))
+    return f"- Logo: {url}" if url else ""
+
+
+def _look_lines(kit: Dict[str, Any]) -> List[str]:
+    """How the brand looks and who it is (F332): colours, fonts, contact details, logo."""
+    return [_colours_line(kit), _fonts_line(kit), _contact_line(kit), _logo_line(kit)]
+
+
+def rules_for_kit(kit: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The rules block for ``kit``; None when it says nothing about how to write or look.
+    Every rule is a "- " line, so a block an answer repeats reads as one block."""
+    if not kit:
+        return None
+    kept = [line for line in [*_voice_lines(kit), *_look_lines(kit)] if line]
+    return "\n".join([RULES_HEADING, RULES_LEAD, *kept, KIT_WINS_LINE]) if kept else None
 
 
 def brand_rules_block(db: Any, workspace_id: Any) -> Optional[str]:
@@ -241,6 +336,21 @@ def fill_sign_off(text: str, name: Optional[str]) -> str:
     filled = SENDER_PLACEHOLDER.sub(lambda _m: name, text)
     filled = BARE_NAME_LINE.sub(lambda m: f"{m.group(1)}{name}{m.group(2)}", filled)
     return BARE_NAME_AFTER_CLOSING.sub(lambda m: f"{m.group(1)}{m.group(2)}{name}", filled)
+
+
+def fill_company(text: str, company: Optional[str]) -> str:
+    """``text`` with a company placeholder replaced by ``company`` (F336); unchanged without one.
+    "Dear [Name]," and "Dear [Company Name] team" are the reader's and stay."""
+    if not company or not text or "[" not in text:
+        return text
+    filled = YOUR_COMPANY_PLACEHOLDER.sub(lambda _m: company, text)
+    filled = BARE_COMPANY_LINE.sub(lambda m: f"{m.group(1)}{company}{m.group(2)}", filled)
+    return BARE_COMPANY_AFTER_CLOSING.sub(lambda m: f"{m.group(1)}{m.group(2)}{company}", filled)
+
+
+def fill_placeholders(text: str, kit: Optional[Dict[str, Any]]) -> str:
+    """``text`` with its placeholder signature and company filled from ``kit`` (a document's data)."""
+    return fill_company(fill_sign_off(text, sign_off_name(kit)), company_name(kit))
 
 
 def banned_found(text: str, phrases: Sequence[str]) -> List[str]:
@@ -315,7 +425,7 @@ def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: An
     key = _text_key(result)
     if kit is None or key is None:
         return result
-    text = on_brand_text(result[key], kit)
+    text = on_brand_text(fill_company(result[key], company_name(kit)), kit)
     if text != result[key]:
         logger.info("[BrandRules] a run's answer was brought to the brand kit in workspace %s", workspace_id)
         return {**result, key: text}
@@ -323,8 +433,9 @@ def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: An
 
 
 __all__ = [
-    "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "RULES_HEADING", "banned_found", "banned_note", "brand_assets",
-    "brand_rules_block", "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result",
+    "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "KIT_WINS_LINE", "RULES_HEADING", "banned_found", "banned_note",
+    "brand_assets", "brand_rules_block", "company_name", "fill_company", "fill_placeholders", "fill_sign_off",
+    "forget_cached_kits", "kit_off_loop", "on_brand_result",
     "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
     "document_author", "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
 ]
