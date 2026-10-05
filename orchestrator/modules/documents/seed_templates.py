@@ -29,11 +29,13 @@ TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 # F347: the sha-256 of each source a legacy seed file shipped before its current one.
 # A platform-owned row still holding one of them, byte for byte, takes the current
 # file; a row anyone edited holds something else and is left alone. invoice.html:
-# PRD-63's (the Automatos orange) and PRD-167's, both printing a hardcoded "$".
+# PRD-63's (the Automatos orange) and PRD-167's, both printing a hardcoded "$", and
+# F347's, which still printed "Company Name" and "INV-001" for a missing field (F345).
 RETIRED_SEED_SOURCES = {
     "invoice.html": frozenset({
         "46617dfe5eb1ea2a8d1f939a02d2a1813f426374b0f495d492a4cda48a5c8103",
         "5e2edf70209917bead0b13fdfa5b2245bb38989c3f5c4a158673a327992b78d7",
+        "84897050f72fd72b891f8a91b31399a4a9fbfbf95299a997333ede86c999783e",
     }),
 }
 

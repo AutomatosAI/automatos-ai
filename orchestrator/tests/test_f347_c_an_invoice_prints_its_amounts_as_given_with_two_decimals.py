@@ -56,6 +56,10 @@ INVOICE_SEED = next(t for t in STARTER_TEMPLATES if t["name"] == "Invoice")
 # What the retired source printed where the current one prints ``| amount``.
 RETIRED_AMOUNTS = {f"{{{{ {name} | amount }}}}": f'${{{{ "%.2f" | format({name}) }}}}'
                    for name in ("item.unit_price", "item.total", "subtotal", "tax", "total")}
+# F345 then dropped the placeholders a missing field printed as.
+RETIRED_PLACEHOLDERS = {f"{{{{ {name} }}}}": f"{{{{ {name} | default('{shown}') }}}}"
+                        for name, shown in (("company.name", "Company Name"), ("client.name", "Client Name"),
+                                            ("invoice_number", "INV-001"))}
 
 
 def _invoice_source() -> str:
@@ -63,11 +67,21 @@ def _invoice_source() -> str:
         return handle.read()
 
 
-def _retired_source() -> str:
-    source = _invoice_source()
-    for current, retired in RETIRED_AMOUNTS.items():
+def _reverted(source: str, changes: dict) -> str:
+    for current, retired in changes.items():
+        assert current in source, current
         source = source.replace(current, retired)
     return source
+
+
+def _f347_source() -> str:
+    """The source F347 shipped, before F345 took out its placeholders."""
+    return _reverted(_invoice_source(), RETIRED_PLACEHOLDERS)
+
+
+def _retired_source() -> str:
+    """PRD-167's source: F347's with its "$" amounts back."""
+    return _reverted(_f347_source(), RETIRED_AMOUNTS)
 
 
 def _branded_invoice_html(data: dict) -> str:
@@ -138,8 +152,14 @@ def test_the_retired_source_is_the_one_a_workspace_was_seeded_with():
     assert hashlib.sha256(retired.encode("utf-8")).hexdigest() in RETIRED_SEED_SOURCES["invoice.html"]
 
 
-def test_a_seeded_invoice_nobody_edited_takes_the_new_source():
-    row = SimpleNamespace(template_content=_retired_source(), created_by="system", is_active=True, updated_at=None)
+def test_a_workspace_seeded_while_f347_was_current_holds_a_retired_source_too():
+    assert hashlib.sha256(_f347_source().encode("utf-8")).hexdigest() in RETIRED_SEED_SOURCES["invoice.html"]
+    assert "| amount" in _f347_source() and "default('Company Name')" in _f347_source()
+
+
+@pytest.mark.parametrize("retired", [_retired_source, _f347_source])
+def test_a_seeded_invoice_nobody_edited_takes_the_new_source(retired):
+    row = SimpleNamespace(template_content=retired(), created_by="system", is_active=True, updated_at=None)
 
     assert refresh_retired_source(row, INVOICE_SEED) == 1
     assert row.template_content == _invoice_source() and "$" not in row.template_content
