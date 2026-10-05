@@ -278,5 +278,6 @@ def test_the_agents_template_list_says_what_each_template_makes(monkeypatch):
     monkeypatch.setattr(ts, "DocumentTemplateService", _Templates)
     answer = asyncio.run(handlers_documents.list_templates(_Db(), WS, {}))
 
-    assert [(t["name"], t["supported_formats"]) for t in answer["templates"]] == [
-        ("Basic Report", ["pdf"]), ("Branded Letter", ["pdf", "docx"]), ("Meeting Notes", ["pdf", "docx"])]
+    # F346: one line per template, "name | format | category | makes … | id".
+    assert [tuple(row.split(" | ")[i] for i in (0, 3)) for row in answer["templates"]] == [
+        ("Basic Report", "makes pdf"), ("Branded Letter", "makes pdf, docx"), ("Meeting Notes", "makes pdf, docx")]

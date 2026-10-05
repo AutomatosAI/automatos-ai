@@ -2,24 +2,40 @@
 
 import { useMemo } from 'react'
 import { toast } from 'sonner'
-import { ExternalLink, Copy } from 'lucide-react'
+import { Download, Copy, Loader2 } from 'lucide-react'
+import type { PandasAIChart } from '@/types/chat'
 import { MarkdownView } from '@/components/shared/markdown-view'
+import { downloadFilename, useApiFileDownload } from '@/hooks/use-api-file-download'
+import { PandasAICharts } from './pandas-ai-charts'
 
 export interface TextArtifactProps {
   content: string
   metadata?: Record<string, any>
 }
 
-interface PandasAIChart {
-  filename: string
-  mime_type: string
-  base64: string
-}
-
 interface PandasAIInsight {
   summary?: string
   charts?: PandasAIChart[]
   error?: string
+}
+
+/**
+ * The file behind an API route (F358): an <a href> to the relative path went to the
+ * frontend's own origin without the Authorization header, so it fetches with auth.
+ */
+function DownloadChip({ url, filename }: { url: string; filename?: string }) {
+  const { download, downloading } = useApiFileDownload()
+  return (
+    <button
+      type="button"
+      onClick={() => download(url, downloadFilename(url, filename))}
+      disabled={downloading}
+      className="inline-flex items-center gap-1 rounded-full border border-info/30 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info/70 hover:bg-info/20"
+    >
+      {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+      Download
+    </button>
+  )
 }
 
 export function TextArtifact({ content, metadata }: TextArtifactProps) {
@@ -60,17 +76,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 {metadata.model}
               </span>
             )}
-            {downloadUrl && (
-              <a
-                href={downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-info/30 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info/70 hover:bg-info/20"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                Download
-              </a>
-            )}
+            {downloadUrl && <DownloadChip url={downloadUrl} filename={metadata.filename} />}
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
@@ -152,62 +158,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
 
       {content && renderMarkdown(content)}
 
-      {pandasAI?.charts && pandasAI.charts.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-foreground/90 uppercase tracking-wide">
-            PandasAI Charts
-          </h4>
-          <div className="grid gap-4 md:grid-cols-2">
-            {pandasAI.charts.map((chart, idx) => (
-              <div
-                key={`${chart.filename}-${idx}`}
-                className="rounded-lg border border-gray-800/60 bg-background/40 p-4 flex flex-col items-center gap-3"
-              >
-                <img
-                  src={`data:${chart.mime_type};base64,${chart.base64}`}
-                  alt={chart.filename}
-                  className="rounded-md border border-gray-800/40 max-h-72 w-full object-contain"
-                />
-                <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
-                  <span className="truncate">{chart.filename}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-primary/60 hover:text-primary/80"
-                      onClick={() => {
-                        const link = document.createElement('a')
-                        link.href = `data:${chart.mime_type};base64,${chart.base64}`
-                        link.download = chart.filename
-                        document.body.appendChild(link)
-                        link.click()
-                        document.body.removeChild(link)
-                      }}
-                    >
-                      Download
-                    </button>
-                    <button
-                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-primary/60 hover:text-primary/80"
-                      onClick={async () => {
-                        if (!navigator.clipboard) {
-                          toast.error('Clipboard API is not available')
-                          return
-                        }
-                        try {
-                          await navigator.clipboard.writeText(`data:${chart.mime_type};base64,${chart.base64}`)
-                          toast.success('Copied to clipboard')
-                        } catch (error) {
-                          toast.error('Failed to copy to clipboard')
-                        }
-                      }}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {pandasAI?.charts && pandasAI.charts.length > 0 && <PandasAICharts charts={pandasAI.charts} />}
 
       {pandasAI?.error && (
         <div className="text-sm text-destructive">

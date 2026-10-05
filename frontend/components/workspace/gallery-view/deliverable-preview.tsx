@@ -11,7 +11,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import { Download, FileWarning, Loader2 } from 'lucide-react'
@@ -32,7 +32,7 @@ import {
   useDeleteDeliverable,
   type Deliverable,
 } from '@/hooks/use-deliverables-api'
-import { apiClient } from '@/lib/api-client'
+import { useApiFileDownload } from '@/hooks/use-api-file-download'
 import { DeliverablePreviewActions } from './deliverable-preview-actions'
 
 interface DeliverablePreviewProps {
@@ -58,26 +58,6 @@ function getPreviewTypeForDeliverable(d: Deliverable) {
   )
 }
 
-/**
- * Download a file through the API client (with auth headers) by fetching as
- * blob and triggering a browser download via object URL.
- */
-async function downloadViaApi(url: string, filename: string): Promise<void> {
-  const headers = await apiClient.getAuthHeaders()
-  const fullUrl = `${apiClient.getBaseUrl()}${url}`
-  const res = await fetch(fullUrl, { headers })
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
-  const blob = await res.blob()
-  const objectUrl = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = objectUrl
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(objectUrl)
-}
-
 // ============= FALLBACK =============
 
 function ContentUnavailable({
@@ -89,18 +69,10 @@ function ContentUnavailable({
   downloadUrl: string | null
   filename: string
 }) {
-  const [downloading, setDownloading] = useState(false)
-
-  const handleDownload = async () => {
-    if (!downloadUrl) return
-    setDownloading(true)
-    try {
-      await downloadViaApi(downloadUrl, filename)
-    } catch {
-      window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
-    } finally {
-      setDownloading(false)
-    }
+  // F358: the authenticated download; a failed fetch says so (no unauthenticated fallback).
+  const { download, downloading } = useApiFileDownload()
+  const handleDownload = () => {
+    if (downloadUrl) void download(downloadUrl, filename)
   }
 
   return (
@@ -121,6 +93,39 @@ function ContentUnavailable({
   )
 }
 
+// ============= HEADER PIECES =============
+
+function DeliverableMeta({ deliverable }: { deliverable: Deliverable }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      {deliverable.agent_name && (
+        <>
+          <span>{deliverable.agent_name}</span>
+          <span>·</span>
+        </>
+      )}
+      <span>
+        {formatDistanceToNow(new Date(deliverable.created_at), {
+          addSuffix: true,
+        })}
+      </span>
+      <span>·</span>
+      <span className="capitalize">{deliverable.artifact_type}</span>
+    </div>
+  )
+}
+
+function DeliverableSummary({ summary }: { summary: string }) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/10 p-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Summary
+      </h3>
+      <p className="text-sm text-foreground/90">{summary}</p>
+    </div>
+  )
+}
+
 // ============= MAIN COMPONENT =============
 
 export function DeliverablePreview({
@@ -134,7 +139,7 @@ export function DeliverablePreview({
     true,
   )
   const deleteMutation = useDeleteDeliverable()
-  const [downloading, setDownloading] = useState(false)
+  const { download, downloading } = useApiFileDownload()
 
   const deliverable = data?.deliverable ?? null
 
@@ -154,17 +159,10 @@ export function DeliverablePreview({
     deliverable?.file_path?.split('/').pop() ||
     'download'
 
-  const handleDownload = useCallback(async () => {
-    if (!downloadUrl) return
-    setDownloading(true)
-    try {
-      await downloadViaApi(downloadUrl, filename)
-    } catch {
-      window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
-    } finally {
-      setDownloading(false)
-    }
-  }, [downloadUrl, filename])
+  // F358: the authenticated download; a failed fetch shows the error toast.
+  const handleDownload = useCallback(() => {
+    if (downloadUrl) void download(downloadUrl, filename)
+  }, [downloadUrl, filename, download])
 
   const handleDelete = useCallback(() => {
     if (!deliverable) return
@@ -204,21 +202,7 @@ export function DeliverablePreview({
               <SheetTitle className="pr-8 text-left text-lg leading-tight">
                 {deliverable.title}
               </SheetTitle>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                {deliverable.agent_name && (
-                  <>
-                    <span>{deliverable.agent_name}</span>
-                    <span>·</span>
-                  </>
-                )}
-                <span>
-                  {formatDistanceToNow(new Date(deliverable.created_at), {
-                    addSuffix: true,
-                  })}
-                </span>
-                <span>·</span>
-                <span className="capitalize">{deliverable.artifact_type}</span>
-              </div>
+              <DeliverableMeta deliverable={deliverable} />
               <DeliverablePreviewActions
                 deliverable={deliverable}
                 downloadUrl={downloadUrl}
@@ -253,15 +237,7 @@ export function DeliverablePreview({
               )}
             </div>
 
-            {/* Summary card */}
-            {deliverable.summary && (
-              <div className="rounded-lg border border-border/50 bg-muted/10 p-4">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Summary
-                </h3>
-                <p className="text-sm text-foreground/90">{deliverable.summary}</p>
-              </div>
-            )}
+            {deliverable.summary && <DeliverableSummary summary={deliverable.summary} />}
           </div>
         )}
       </SheetContent>

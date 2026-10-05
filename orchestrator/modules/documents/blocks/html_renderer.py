@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 
 from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
+from .letterhead_run import company_of, logo_of, split_letterhead
+from .optional_parts import block_is_blank, row_is_blank
 from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
@@ -86,11 +88,15 @@ def _render_image(block, brand_kit: Dict, unresolved: List[str]) -> str:
 def _render_table(block, values: Dict[str, str], unresolved: List[str]) -> str:
     rows_html: List[str] = []
     for r_idx, row in enumerate(block.rows):
+        if row_is_blank(row, values):  # F356: an optional row (a total not sent) is left out
+            continue
         cell_tag = "th" if (block.header and r_idx == 0) else "td"
         cells = "".join(
             f"<{cell_tag}>{_render_inline(cell, values, unresolved)}</{cell_tag}>" for cell in row
         )
         rows_html.append(f"<tr>{cells}</tr>")
+    if block.rows and not rows_html:
+        return ""  # every row was an empty optional one: no table at all
     return f'<table class="doc-table"{_tag(block)}>{"".join(rows_html)}</table>'
 
 
@@ -153,11 +159,24 @@ def _render_block(
 
 
 def _render_section(block, values: Dict[str, str], brand_kit: Dict, unresolved: List[str], data) -> str:
-    """A titled group; a short one (F350) is kept on one page rather than split over two."""
+    """A titled group; a short one (F350) is kept on one page rather than split over two.
+    F356: one with nothing to print (every child an empty optional part) is left out."""
+    if block_is_blank(block, values, data):
+        return ""
     title = f"<h2>{_esc(block.title)}</h2>" if block.title else ""
     inner = title + "".join(_render_block(child, values, brand_kit, unresolved, data) for child in block.children)
     classes = "doc-section" if len(inner) > KEEP_TOGETHER_MAX_HTML_CHARS else f"doc-section {KEEP_CLASS}"
     return f'<section class="{classes}"{_tag(block)}>{inner}</section>'
+
+
+def _render_letterhead(head, values: Dict[str, str], brand_kit: Dict, unresolved: List[str]) -> str:
+    """F356: the letterhead as one row: the logo, and the company block beside it."""
+    if not head:
+        return ""
+    logo = logo_of(head)
+    mark = _render_image(logo, brand_kit, unresolved) if logo is not None else ""
+    company = "".join(_render_block(block, values, brand_kit, unresolved) for block in company_of(head))
+    return f'<div class="letterhead"><div class="lh-mark">{mark}</div><div class="lh-company">{company}</div></div>'
 
 
 def render_document_html(
@@ -174,7 +193,10 @@ def render_document_html(
     ``data`` is the raw per-generation object; ``data_table`` blocks read their rows
     from it (scalar chips still come pre-resolved in ``values``)."""
     unresolved: List[str] = []
-    body = "".join(_render_block(b, values, brand_kit, unresolved, data) for b in doc.blocks)
+    head, rest = split_letterhead(doc.blocks)
+    body = _render_letterhead(head, values, brand_kit, unresolved) + "".join(
+        _render_block(b, values, brand_kit, unresolved, data) for b in rest
+    )
     page = f"""<!DOCTYPE html>
 <html>
 <head>

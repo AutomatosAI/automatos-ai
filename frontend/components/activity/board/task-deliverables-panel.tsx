@@ -16,10 +16,10 @@ import {
   Image as ImageIcon,
   Package,
   Presentation,
-  ExternalLink,
   FolderOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DeliverableOpenButton } from '@/components/deliverables/deliverable-open-button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { DEFAULT_FILTERS, useDeliverables, type Deliverable } from '@/hooks/use-deliverables-api'
@@ -45,9 +45,6 @@ function artifactIcon(type: string | null | undefined) {
 
 function DeliverableRow({ deliverable }: { deliverable: Deliverable }) {
   const Icon = artifactIcon(deliverable.artifact_type)
-  const openHref = (deliverable as { preview_url?: string | null }).preview_url
-    ?? (deliverable as { content_url?: string | null }).content_url
-    ?? null
   return (
     <li
       data-testid="task-deliverable-row"
@@ -65,17 +62,7 @@ function DeliverableRow({ deliverable }: { deliverable: Deliverable }) {
           </div>
         )}
       </div>
-      {openHref && (
-        <a
-          href={openHref}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Open ${deliverable.title}`}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
-      )}
+      <DeliverableOpenButton deliverable={deliverable} />
     </li>
   )
 }

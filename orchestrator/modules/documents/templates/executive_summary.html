@@ -1,48 +1,35 @@
 <!DOCTYPE html>
 <html>
 <head>
-<style>
-  @page {
-    size: A4; margin: 2cm;
-    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #999; }
-  }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: {{ brand.text_color }}; line-height: 1.6; }
-  .header { text-align: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 3px solid {{ brand.accent_color }}; }
-  .header h1 { margin: 0; font-size: 28pt; color: {{ brand.primary_color }}; }
-  .header .meta { color: #666; font-size: 10pt; margin-top: 0.5rem; }
-  h2 { color: {{ brand.accent_color }}; margin-top: 2rem; }
-  .highlights { list-style: none; padding: 0; }
-  .highlights li {
-    padding: 0.75rem 1rem; margin: 0.5rem 0; background: #f8f9fa;
-    border-left: 4px solid {{ brand.accent_color }}; border-radius: 0 4px 4px 0;
-  }
-  .metrics-grid { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.5rem 0; }
-  .metric-card {
-    flex: 1; min-width: 120px; background: {{ brand.primary_color }}; color: white;
-    border-radius: 8px; padding: 1rem; text-align: center;
-  }
-  .metric-card .label { font-size: 9pt; opacity: 0.85; text-transform: uppercase; }
+<meta charset="utf-8" />
+<style>{{ brand | document_style }}
+  [data-block="logo"] { width: 14mm; }
+  .highlights { list-style: none; padding: 0; margin: 0 0 8pt 0; }
+  .highlights li { padding: 8pt 12pt; margin: 0 0 4pt 0; background: {{ brand.accent_color }}10; border-left: 3pt solid {{ brand.accent_color }}; }
+  .metrics-grid { display: flex; flex-wrap: wrap; margin: 4pt 0 8pt 0; }
+  .metric-card { flex: 1 1 18%; margin: 0 8pt 8pt 0; padding: 8pt 12pt; background: {{ brand.primary_color }}; color: white; }
+  .metric-card .label { font-size: 8.5pt; }
   .metric-card .value { font-size: 22pt; font-weight: 700; color: white; } /* F350: the accent (navy) on the primary (orange) card was unreadable */
-  .recommendations { counter-reset: rec; }
-  .recommendations li {
-    counter-increment: rec; list-style: none; padding: 0.5rem 0;
-    border-bottom: 1px solid #eee; position: relative; padding-left: 2rem;
-  }
-  .recommendations li::before {
-    content: counter(rec); position: absolute; left: 0; top: 0.5rem;
-    background: {{ brand.accent_color }}; color: white; width: 1.5rem; height: 1.5rem;
-    border-radius: 50%; text-align: center; line-height: 1.5rem; font-size: 9pt; font-weight: 700;
-  }
+  .recommendations { padding-left: 16pt; }
+  .recommendations li { padding: 4pt 0; border-bottom: 0.5pt solid {{ brand.accent_color }}40; }
 </style>
 </head>
 <body>
-  <div class="header">
-    <h1>{{ title }}</h1>
-    <div class="meta">{{ date | default('') }} | Prepared by {{ author | default('Automatos AI') }}</div>
+  {% set co = brand.company or {} %}
+  <div class="letterhead">
+    <div class="lh-mark">{% if brand.logo_url %}<img class="doc-image" data-block="logo" src="{{ brand.logo_url }}" alt="Logo" />{% endif %}</div>
+    <div class="lh-company">
+      <h3 data-block="lh-name">{{ co.name or brand.name }}</h3>
+      <p data-block="lh-address">{{ co.address | default('', true) }}</p>
+      <p data-block="lh-contact">{{ [co.email, co.phone, co.website] | select | join('  ·  ') }}</p>
+    </div>
   </div>
 
+  <h1>{{ title }}</h1>
+  <p data-block="byline">{{ [date, 'Prepared by ' ~ author if author else ''] | select | join('  ·  ') }}</p>
+
   {% if highlights %}
-  <h2>Key Highlights</h2>
+  <h2>Key highlights</h2>
   <ul class="highlights">
     {% for item in highlights %}
     <li>{{ item }}</li>
@@ -51,7 +38,7 @@
   {% endif %}
 
   {% if metrics %}
-  <h2>Key Metrics</h2>
+  <h2>Key metrics</h2>
   <div class="metrics-grid">
     {% for key, value in metrics.items() %}
     <div class="metric-card">

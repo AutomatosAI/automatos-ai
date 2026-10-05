@@ -18,7 +18,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.core import DocumentTemplate
-from modules.documents.presets import PRESETS
+from modules.documents.presets import MEETING_NOTES_BLOCKS, PRESETS
 from modules.documents.social_starters import social_starters
 from modules.documents.template_summary import STARTER_CREATOR
 
@@ -29,13 +29,26 @@ TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 # F347: the sha-256 of each source a legacy seed file shipped before its current one.
 # A platform-owned row still holding one of them, byte for byte, takes the current
 # file; a row anyone edited holds something else and is left alone. invoice.html:
-# PRD-63's (the Automatos orange) and PRD-167's, both printing a hardcoded "$", and
-# F347's, which still printed "Company Name" and "INV-001" for a missing field (F345).
+# PRD-63's (the Automatos orange) and PRD-167's, both printing a hardcoded "$".
+# F356: every earlier version of the three Jinja starters, which now print with the
+# block documents' design system: invoice.html as F347 shipped it and as F345
+# (#985) changes it, basic_report.html and executive_summary.html as PRD-63,
+# PRD-167 and F350 shipped them.
 RETIRED_SEED_SOURCES = {
     "invoice.html": frozenset({
         "46617dfe5eb1ea2a8d1f939a02d2a1813f426374b0f495d492a4cda48a5c8103",
         "5e2edf70209917bead0b13fdfa5b2245bb38989c3f5c4a158673a327992b78d7",
         "84897050f72fd72b891f8a91b31399a4a9fbfbf95299a997333ede86c999783e",
+        "b5cb41b9095579bae26c8550b882f748e3313c8872a670a1dabf63a5d6df4362",
+    }),
+    "basic_report.html": frozenset({
+        "d11f47dba1eccdc3b230e9e55c13b16b8b9da6d485f4f5be1c87092143bf38f3",
+        "8286f472960ff9f21f947a4610f128a1bee996ed6c24eb46687ba7b95eb43865",
+    }),
+    "executive_summary.html": frozenset({
+        "1681d85f5eb12a76256d8a5c4e58c266a55012297e6b19cd0d1b5c84a7d92995",
+        "a54919317214125ea2100283c72f918fcb5fc9a253651c5f2ac22c493738abe4",
+        "0c95d70e370598d16d4d47ac2a73c2726c6fc5f859edd19f8dc22350066ba4cc",
     }),
 }
 
@@ -173,10 +186,15 @@ STARTER_TEMPLATES = [
     },
     {
         "name": "Meeting Notes",
-        "description": "Structured meeting notes with attendees, agenda, and action items.",
+        "description": (
+            "Meeting notes under your letterhead: date, attendees, agenda, discussion, decisions "
+            "and an actions table (action, owner, due)."
+        ),
         "format": "docx",
         "category": "report",
         "template_file": None,
+        # F356: a block layout (presets.MEETING_NOTES_BLOCKS); it had none, so its docx could not render.
+        "blocks": MEETING_NOTES_BLOCKS,
         "data_schema": {
             "type": "object",
             "properties": {
@@ -185,6 +203,7 @@ STARTER_TEMPLATES = [
                 "attendees": {"type": "array", "items": {"type": "string"}},
                 "agenda": {"type": "array", "items": {"type": "string"}},
                 "notes": {"type": "string"},
+                "decisions": {"type": "array", "items": {"type": "string"}},
                 "action_items": {
                     "type": "array",
                     "items": {
@@ -204,8 +223,11 @@ STARTER_TEMPLATES = [
             "date": "2026-02-18",
             "attendees": ["Alice", "Bob", "Carol"],
             "agenda": ["Review last sprint", "Plan next sprint", "Assign stories"],
+            "notes": "Last sprint closed 18 of 21 stories; the three carried over are blocked on the payments API.",
+            "decisions": ["Two-week sprints stay", "Payments API work moves to the top of the backlog"],
             "action_items": [
                 {"task": "Complete API integration", "owner": "Bob", "due_date": "2026-02-25"},
+                {"task": "Draft the release notes", "owner": "Carol", "due_date": "2026-02-27"},
             ],
         },
     },
@@ -266,6 +288,7 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
             format=tmpl["format"],
             category=tmpl["category"],
             template_content=template_content,
+            blocks=tmpl.get("blocks"),
             data_schema=tmpl["data_schema"],
             sample_data=tmpl["sample_data"],
             is_active=True,
@@ -312,8 +335,23 @@ def holds_retired_source(existing, tmpl: dict) -> bool:
     return owned and hashlib.sha256(content.encode("utf-8")).hexdigest() in retired
 
 
+def takes_starter_blocks(existing, tmpl: dict) -> bool:
+    """Whether ``existing`` is a platform-owned, active row of a block seed that has no body
+    at all (no blocks, no source, no uploaded file): the old Meeting Notes row (F356). Pure."""
+    if not tmpl.get("blocks"):
+        return False
+    owned = (getattr(existing, "created_by", None) or "") == STARTER_CREATOR and getattr(existing, "is_active", True) is not False
+    bodies = (getattr(existing, name, None) for name in ("blocks", "template_content", "template_file_path"))
+    return owned and not any(bodies)
+
+
 def refresh_retired_source(existing, tmpl: dict) -> int:
-    """Give a row :func:`holds_retired_source` finds the seed's current source (F347); 1 when it did."""
+    """Give a row :func:`holds_retired_source` finds the seed's current source (F347), or a
+    row :func:`takes_starter_blocks` finds the seed's blocks (F356); 1 when it did."""
+    if takes_starter_blocks(existing, tmpl):
+        existing.blocks = tmpl["blocks"]
+        existing.updated_at = datetime.utcnow()
+        return 1
     source = seed_source(tmpl)
     if source is None or not holds_retired_source(existing, tmpl):
         return 0

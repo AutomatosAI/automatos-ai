@@ -16,6 +16,13 @@ describe('madeBy', () => {
     expect(madeBy('', 'mission')).toBe('Mission')
   })
 
+  it('names the generated, template and trigger sources too (issue #947)', () => {
+    expect(madeBy(null, 'agent_output')).toBe('Generated')
+    expect(madeBy(null, 'document')).toBe('Templates')
+    expect(madeBy(null, 'trigger')).toBe('Trigger')
+    expect(madeBy('ATLAS', 'agent_output')).toBe('ATLAS')
+  })
+
   it('falls back only when neither is known', () => {
     expect(madeBy(null, 'something_new')).toBe(MADE_BY_FALLBACK)
     expect(madeBy(null, null)).toBe(MADE_BY_FALLBACK)
