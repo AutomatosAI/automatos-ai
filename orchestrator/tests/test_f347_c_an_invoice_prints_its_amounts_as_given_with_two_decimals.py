@@ -53,9 +53,10 @@ AGENTS_INVOICE = {
     "total": 311.0,
 }
 INVOICE_SEED = next(t for t in STARTER_TEMPLATES if t["name"] == "Invoice")
-# What the retired source printed where the current one prints ``| amount``.
-RETIRED_AMOUNTS = {f"{{{{ {name} | amount }}}}": f'${{{{ "%.2f" | format({name}) }}}}'
-                   for name in ("item.unit_price", "item.total", "subtotal", "tax", "total")}
+# The invoice.html sources workspaces were seeded with, byte for byte, as each shipped:
+# PRD-167's ("$" before every amount) and F347's (before F345 took out its placeholders).
+# Kept as files so a later change to invoice.html cannot change what they are.
+RETIRED_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "retired_seeds")
 
 
 def _invoice_source() -> str:
@@ -63,11 +64,17 @@ def _invoice_source() -> str:
         return handle.read()
 
 
+def _retired(name: str) -> str:
+    with open(os.path.join(RETIRED_DIR, name), encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _f347_source() -> str:
+    return _retired("invoice_f347.html")
+
+
 def _retired_source() -> str:
-    source = _invoice_source()
-    for current, retired in RETIRED_AMOUNTS.items():
-        source = source.replace(current, retired)
-    return source
+    return _retired("invoice_prd167.html")
 
 
 def _branded_invoice_html(data: dict) -> str:
@@ -138,8 +145,14 @@ def test_the_retired_source_is_the_one_a_workspace_was_seeded_with():
     assert hashlib.sha256(retired.encode("utf-8")).hexdigest() in RETIRED_SEED_SOURCES["invoice.html"]
 
 
-def test_a_seeded_invoice_nobody_edited_takes_the_new_source():
-    row = SimpleNamespace(template_content=_retired_source(), created_by="system", is_active=True, updated_at=None)
+def test_a_workspace_seeded_while_f347_was_current_holds_a_retired_source_too():
+    assert hashlib.sha256(_f347_source().encode("utf-8")).hexdigest() in RETIRED_SEED_SOURCES["invoice.html"]
+    assert "| amount" in _f347_source() and "default('Company Name')" in _f347_source()
+
+
+@pytest.mark.parametrize("retired", [_retired_source, _f347_source])
+def test_a_seeded_invoice_nobody_edited_takes_the_new_source(retired):
+    row = SimpleNamespace(template_content=retired(), created_by="system", is_active=True, updated_at=None)
 
     assert refresh_retired_source(row, INVOICE_SEED) == 1
     assert row.template_content == _invoice_source() and "$" not in row.template_content
