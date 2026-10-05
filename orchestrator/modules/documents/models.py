@@ -62,3 +62,6 @@ class GeneratedDocument:
     # licence, credit}), recorded on its Deliverable's ``extra.music``; ``credit``
     # is the line a post that uses the video must carry (None for CC0).
     music: Optional[Dict[str, Any]] = None
+    # F331: the data keys the template had no place for, so the page does not
+    # show them; the generate_document tool tells the agent (never a silent blank).
+    unused_keys: List[str] = field(default_factory=list)

@@ -263,6 +263,8 @@ def _answer(service: Any, result: Any, registration: Dict[str, Any]) -> Dict[str
         "share_url": service.share_link(result),
         "template_id": result.template_id,
         "template_name": result.template_name,
+        # F331: the data keys the page does not show; an agent cannot see the page.
+        "unused_data_keys": list(getattr(result, "unused_keys", None) or []),
     }
 
 

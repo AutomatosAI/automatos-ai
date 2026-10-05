@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .data_details import extra_blocks
 from .markdown_body import blocks_from_markdown, section_text
 from .schema import (
     BlockDocument,
@@ -26,6 +27,8 @@ from .schema import (
 )
 
 _counter = {"n": 0}
+# The byline prints these two; every other key the report shape leaves out prints as a detail.
+BYLINE_KEYS = ("author", "date")
 
 
 def _bid(prefix: str) -> str:
@@ -62,13 +65,13 @@ def _section_blocks(section: Any) -> List[Any]:
 
 
 def _body(data: Dict[str, Any]) -> List[Any]:
-    """The sections, or the body sent as ``content`` alone."""
+    """The body sent as ``content``, then the sections (F331: one no longer hides the other)."""
     sections = data.get("sections") or []
-    if isinstance(sections, str):
+    if not isinstance(sections, list):
         sections = [sections]
-    if not sections and section_text(data.get("content")):
-        sections = [section_text(data.get("content"))]
-    return [block for section in sections for block in _section_blocks(section)]
+    body = section_text(data.get("content"))
+    texts = ([body] if body and body.strip() else []) + sections
+    return [block for section in texts for block in _section_blocks(section)]
 
 
 def _metrics(data: Dict[str, Any]) -> List[Any]:
@@ -80,25 +83,31 @@ def _metrics(data: Dict[str, Any]) -> List[Any]:
     return [_heading("Key Metrics", 2), TableBlock(id=_bid("tbl"), header=True, rows=rows)]
 
 
-def blocks_from_legacy(data: Dict[str, Any]) -> BlockDocument:
-    """Build a BlockDocument from the common legacy report-data shape."""
-    blocks: List[Any] = []
-
-    if data.get("title"):
-        blocks.append(_heading(str(data["title"]), 1))
-
+def _byline(data: Dict[str, Any]) -> List[Any]:
     meta_bits = []
     if data.get("author"):
         meta_bits.append(f"Author: {data['author']}")
     if data.get("date"):
         meta_bits.append(f"Date: {data['date']}")
-    if meta_bits:
-        blocks.append(_text_block(" · ".join(meta_bits)))
+    return [_text_block(" · ".join(meta_bits))] if meta_bits else []
 
-    blocks += _list_section("Highlights", data.get("highlights"))
-    blocks += _metrics(data)
-    blocks += _body(data)
-    blocks += _list_section("Recommendations", data.get("recommendations"))
+
+def blocks_from_legacy(data: Dict[str, Any]) -> BlockDocument:
+    """Build a BlockDocument from the common legacy report-data shape, and every other key it carries.
+
+    F331: a key the report shape has no place for (an invoice's number, customer
+    and line items) is printed too (``data_details``), never dropped.
+    """
+    head = [_heading(str(data["title"]), 1)] if data.get("title") else []
+    highlights = _list_section("Highlights", data.get("highlights"))
+    metrics = _metrics(data)
+    body = _body(data)
+    recommendations = _list_section("Recommendations", data.get("recommendations"))
+    parts = {"highlights": highlights, "metrics": metrics, "sections": body, "content": body,
+             "recommendations": recommendations}
+    printed = frozenset({"title", *BYLINE_KEYS} | {key for key, blocks in parts.items() if blocks})
+    details, structured = extra_blocks(data, printed, _bid)
+    blocks = [*head, *_byline(data), *details, *highlights, *metrics, *body, *structured, *recommendations]
     return BlockDocument(blocks=blocks)
 
 
