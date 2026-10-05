@@ -20,6 +20,11 @@ A marker table (INCOMPLETE_MARKER) exists from the build's first statement to it
 last, so an interrupted build is told apart from a finished one and resumed
 (scripts/init_fresh_db.py) instead of being served half-built.
 
+The model layer's own unique=True indexes and the forest's UNNAMED unique
+constraints on the same columns (e.g. users.email) both replay, so the repair
+stages end with a parity pass (#832) that drops the Postgres-auto-named
+duplicates (_key, _key1, _key2...) and keeps the canonical one.
+
 There is deliberately NO committed schema dump: this generator IS the fresh path —
 scripts/init_fresh_db.py (boot) and the CI from-zero gate both run build_schema(), so
 there is no snapshot artifact that can rot. First boot pays ~2-3 minutes once.
@@ -273,6 +278,96 @@ def _replay_idempotent_raw_sql(engine, script: ScriptDirectory) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# #832: create_all builds users with unique=True (its own index), and the
+# creator migrations (128a785a7681, 208275450a15, ...) ALSO declare UNNAMED
+# unique constraints on the same columns. Each replay of one of those — the
+# tolerant forest pass, then a residual pass's _rerun_upgrade — adds another
+# constraint, and Postgres auto-names each extra copy _key, _key1, _key2...
+# Harmless (the indexes are identical) but wasted write/storage cost, and it
+# defeats #824's CI, which compares a resumed build against a clean one BY
+# INDEX DEFINITION. This pass keeps the lowest-numbered/canonical index per
+# (table, definition) and drops the rest: DROP CONSTRAINT when the duplicate
+# is backed by a unique constraint (DROP INDEX on those leaves the constraint
+# behind, pointing at nothing), DROP INDEX for a bare duplicate index. Never
+# drops an index a foreign key still depends on (pg_constraint.conindid is the
+# index Postgres recorded the FK against). Idempotent: nothing is left to drop
+# on a second pass.
+# --------------------------------------------------------------------------- #
+_DUPLICATE_UNIQUE_INDEXES_SQL = text(r"""
+    SELECT
+        t.relname AS table_name,
+        i.relname AS index_name,
+        regexp_replace(pg_get_indexdef(ix.indexrelid), 'INDEX \S+ ON', 'INDEX ON') AS normdef,
+        con.contype AS constraint_type,
+        con.conname AS constraint_name,
+        EXISTS (
+            SELECT 1 FROM pg_constraint fk
+            WHERE fk.contype = 'f' AND fk.conindid = ix.indexrelid
+        ) AS fk_dependent
+    FROM pg_index ix
+    JOIN pg_class i ON i.oid = ix.indexrelid
+    JOIN pg_class t ON t.oid = ix.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    LEFT JOIN pg_constraint con ON con.conindid = ix.indexrelid AND con.contype IN ('u', 'p')
+    WHERE n.nspname = 'public' AND ix.indisunique AND NOT ix.indisprimary
+    ORDER BY t.relname, normdef, i.relname
+""")
+
+
+def _unique_index_rows(engine) -> list[dict]:
+    """Every non-primary unique index in the public schema, with its index-name
+    masked out of the definition, whether it's backed by a unique constraint,
+    and whether a foreign key depends on it (pg_constraint.conindid)."""
+    with engine.connect() as conn:
+        rows = conn.execute(_DUPLICATE_UNIQUE_INDEXES_SQL).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _duplicate_groups(rows: list[dict]) -> list[list[dict]]:
+    """Rows grouped by (table, name-masked definition); only groups with more
+    than one member (actual duplicates), each sorted so the canonical index is
+    first: a constraint-backed one before a bare index (``ON CONFLICT ON
+    CONSTRAINT`` names it), then the lowest-numbered — ``_key`` before ``_key1``
+    before ``_key10``."""
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        groups.setdefault((row["table_name"], row["normdef"]), []).append(row)
+    return [sorted(g, key=_canonical_order) for g in groups.values() if len(g) > 1]
+
+
+def _canonical_order(row: dict) -> tuple[bool, int, str]:
+    """Sort key for a duplicate group: constraint-backed first, then shortest name, then name."""
+    return (row["constraint_type"] != "u", len(row["index_name"]), row["index_name"])
+
+
+def _drop_duplicate_index(engine, row: dict) -> None:
+    """DROP CONSTRAINT for a constraint-backed duplicate (cascades to its index
+    — DROP INDEX on it would fail or orphan the constraint); DROP INDEX for a
+    bare duplicate index."""
+    table, index, constraint = row["table_name"], row["index_name"], row["constraint_name"]
+    with engine.begin() as conn:
+        if row["constraint_type"] == "u":
+            conn.execute(text(f'ALTER TABLE "{table}" DROP CONSTRAINT "{constraint}"'))
+        else:
+            conn.execute(text(f'DROP INDEX "{index}"'))
+
+
+def _dedupe_unique_indexes(engine) -> list[str]:
+    """Post-replay parity pass (#832): drop every unique index/constraint whose
+    definition duplicates another on the same table, keeping the canonical one.
+    Returns the ``table.index`` names dropped, for logging."""
+    dropped: list[str] = []
+    for group in _duplicate_groups(_unique_index_rows(engine)):
+        for row in group[1:]:
+            if row["fk_dependent"]:
+                print(f"   keeping {row['table_name']}.{row['index_name']}: a foreign key depends on it")
+                continue
+            _drop_duplicate_index(engine, row)
+            dropped.append(f"{row['table_name']}.{row['index_name']}")
+    return dropped
+
+
+# --------------------------------------------------------------------------- #
 # An interrupted build must never pass for a finished one. alembic_version
 # exists from the first statement below and stage 2 stamps as it goes, so once a
 # build dies partway (Postgres restarting, the host stopping) the database looks
@@ -371,18 +466,20 @@ def _residual_passes(engine, script: ScriptDirectory, creators: dict) -> None:
 
 
 def _repair_passes(engine, script: ScriptDirectory) -> None:
-    """Stages 3-6, the repairs only the END of a build can make."""
+    """Stages 3-7, the repairs only the END of a build can make."""
     # Re-assert the model layer + raw-DDL extras: a migration's raw
     # `conn.execute(text("DROP ..."))` bypasses alembic ops and can remove an extra;
     # create_all is checkfirst and the extras are IF NOT EXISTS, so this is idempotent.
-    print("== 3/6 re-asserting the model layer + raw-DDL extras")
+    print("== 3/7 re-asserting the model layer + raw-DDL extras")
     init_db()
     added = _reconcile_model_columns(engine)
-    print(f"== 4/6 model-column reconciliation: added {len(added)} column(s) create_all could not: {added}")
+    print(f"== 4/7 model-column reconciliation: added {len(added)} column(s) create_all could not: {added}")
     raw = _replay_idempotent_raw_sql(engine, script)
-    print(f"== 5/6 idempotent raw-SQL re-run (indexes, column adds, views last): {raw} statement(s) applied")
+    print(f"== 5/7 idempotent raw-SQL re-run (indexes, column adds, views last): {raw} statement(s) applied")
     relics = _drop_relics(engine, script)
-    print(f"== 6/6 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
+    print(f"== 6/7 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
+    deduped = _dedupe_unique_indexes(engine)
+    print(f"== 7/7 duplicate-unique-index parity pass: dropped {len(deduped)} redundant index(es): {deduped}")
 
 
 def main() -> int:

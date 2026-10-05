@@ -5,18 +5,23 @@ fire-and-forget from ``main.py`` whose failures were only ``logger.warning``-ed.
 Extracted here they are importable + unit-testable, and on failure they now also
 fire ``record_error(subsystem="startup")`` so a failed boot seed surfaces on the
 ERRORS-by-subsystem dashboard tile instead of dying silently. The action-index
-warm-up (#927) follows the same contract.
+warm-up (#927) and the output-budget load (#836) follow the same contract.
 
 Every function here is *self-guarding*: it never raises, so launching it with a
 bare ``create_task`` cannot leave an unretrieved task exception.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Set
 
 from core.utils.exception_telemetry import record_error
 
 logger = logging.getLogger(__name__)
+
+# Long-lived refresh tasks, held so the loop does not drop them.
+_refreshers: Set["asyncio.Task[None]"] = set()
 
 
 async def embed_all_agents_on_startup() -> None:
@@ -86,6 +91,31 @@ async def warm_action_index_on_startup() -> None:
     except Exception as exc:
         logger.warning("#927: warming the action index failed (non-fatal): %s", exc, exc_info=True)
         record_error(subsystem="startup", operation="warm_action_index", error=exc)
+
+
+async def warm_output_budgets_on_startup() -> None:
+    """Load the output budgets' snapshot before the worker serves, then keep it
+    fresh in the background (#836, core/llm/budget_snapshot.py).
+
+    A manager built on the event loop reads budgets from memory only. Without
+    this load the first managers after a restart used the table's budgets, and
+    an llm_output_budget row looked ignored. Every worker runs it. Non-fatal: a
+    failed database read is logged by refresh() and the table's budgets answer;
+    any other failure is logged + recorded.
+    """
+    try:
+        from core.llm import budget_snapshot
+
+        snapshot = await budget_snapshot.warm()
+    except Exception as exc:
+        logger.warning("#836: loading the output budgets failed (non-fatal): %s", exc, exc_info=True)
+        record_error(subsystem="startup", operation="warm_output_budgets", error=exc)
+        return
+    logger.info("#836: output budgets loaded (%d override(s), %d thinking model(s))",
+                len(snapshot.budgets), len(snapshot.models))
+    refresher = asyncio.create_task(budget_snapshot.keep_fresh())
+    _refreshers.add(refresher)
+    refresher.add_done_callback(_refreshers.discard)
 
 
 async def ensure_field_memory_collection() -> None:

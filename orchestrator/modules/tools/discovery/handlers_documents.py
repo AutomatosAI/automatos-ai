@@ -18,10 +18,30 @@ SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS = 1200
 
 
 async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-167 S6 / F346: every document template of the workspace, one line each (social with ``format``)."""
-    from modules.tools.discovery.template_tools import list_templates_answer
-
-    return list_templates_answer(db, workspace_id, params)
+    """PRD-167 S6: the workspace's templates for an agent (a social one is never block-editable, PRD-251 S1.2)."""
+    from core.social_templates import is_social_format
+    from modules.documents.template_formats import supported_formats
+    from modules.documents.template_service import DocumentTemplateService
+    service = DocumentTemplateService(db)
+    templates = service.list_templates(
+        workspace_id, format=params.get("format"), category=params.get("category")
+    )
+    return {
+        "success": True,
+        "templates": [
+            {
+                "id": str(t.id),
+                "name": t.name,
+                "description": t.description,
+                "format": t.format,
+                "category": t.category,
+                "has_blocks": bool(t.blocks) and not is_social_format(t.format),
+                "supported_formats": supported_formats(t),  # F348: what generate_document may ask of it
+            }
+            for t in templates
+        ],
+        "count": len(templates),
+    }
 
 
 async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

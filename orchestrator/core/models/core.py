@@ -570,7 +570,10 @@ class Workflow(Base):
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     owner = Column(String(255), nullable=True)
-    tags = Column(JSON, nullable=True)
+    # JSONB (#840): the only type Postgres gives a default GIN opclass to, so
+    # ix_workflows_tags_gin can exist and Workflow.tags.contains([tag]) (api/workflows.py)
+    # compiles to the native @> operator instead of falling back to a text-cast ILIKE scan.
+    tags = Column(JSONB, nullable=True)
     default_policy_id = Column(String(128), nullable=True)
     last_execution = Column(JSON, nullable=True)  # Latest execution summary (9-stage enhancement)
     created_at = Column(DateTime, default=func.now())

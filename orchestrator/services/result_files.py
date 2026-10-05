@@ -31,6 +31,21 @@ MAX_NAMED_FILES = 10
 LIST_TIMEOUT_SECONDS = 5.0
 CHECK_TIMEOUT_SECONDS = 10.0
 NOTE_NAMES_SHOWN = 3
+# #839: a name relative to a subfolder ("api/src/index.ts" for "packages/api/src/index.ts")
+# is still looked for, by walking the session's folder. Bounded so a very wide or deep
+# tree — the worker lists one folder per call, never recursively — can't stall the check.
+MAX_WALK_DIRS = 150
+WALK_CONCURRENCY = 8           # folders listed at once within one BFS level
+# Comfortably under CHECK_TIMEOUT_SECONDS: its own budget, so a walk that runs long
+# cannot burn the whole check (the exact-match pass runs first and needs room too).
+WALK_TIMEOUT_SECONDS = 6.0
+# Folders the walk never descends into: dependency and build caches hold no
+# deliverables, and one `node_modules` alone can exhaust the whole walk budget
+# before it reaches a real subfolder. A dot-folder is skipped too — nothing in
+# this module expects a deliverable to be saved under one.
+SKIPPED_WALK_FOLDERS = frozenset({
+    "node_modules", ".git", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".cache",
+})
 
 # What a deliverable is saved as. A name with any other ending is not taken for a file.
 FILE_EXTENSIONS = frozenset({
@@ -71,6 +86,19 @@ def named_files(text: str) -> List[str]:
     return out[:MAX_NAMED_FILES]
 
 
+def _session_base(runtime_ref: Optional[Dict[str, Any]], workspace_id: str,
+                  projects_dir: Optional[str]) -> Optional[str]:
+    """The folder a session ran in, mapped into the workspace — ``None`` when the
+    run did not come from a session, or its folder does not map into the workspace."""
+    from services.cli_host_service import workspace_relative_path
+
+    ref = runtime_ref or {}
+    cwd = ref.get("cwd")
+    if not ref.get("host_id") or not cwd:
+        return None
+    return workspace_relative_path(str(cwd), workspace_id, projects_dir)
+
+
 def _session_places(name: str, base: str) -> List[str]:
     """Where a session's named file can be. Relative to the folder it ran in,
     and, when the name is written from the deliverables root, from that root:
@@ -106,8 +134,7 @@ def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Option
 
     ref = runtime_ref or {}
     session = bool(ref.get("host_id"))
-    cwd = ref.get("cwd")
-    base = workspace_relative_path(str(cwd), workspace_id, projects_dir) if cwd else None
+    base = _session_base(runtime_ref, workspace_id, projects_dir)
     out: List[Tuple[str, str]] = []
     for name in named:
         if name.startswith("/"):
@@ -122,9 +149,9 @@ def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Option
     return out
 
 
-async def _names_in(client: Any, folder: str) -> Optional[Set[str]]:
-    """The names in a workspace folder; ``None`` when the worker cannot say
-    (unreachable, refused, or a listing cut short)."""
+async def _entries_in(client: Any, folder: str) -> Optional[List[Dict[str, Any]]]:
+    """The entries (name and type) in a workspace folder; ``None`` when the
+    worker cannot say (unreachable, refused, or a listing cut short)."""
     try:
         listing = await asyncio.wait_for(client.list_dir(folder), timeout=LIST_TIMEOUT_SECONDS)
     except Exception:  # noqa: BLE001 — an unanswered lookup is not a verdict
@@ -132,12 +159,92 @@ async def _names_in(client: Any, folder: str) -> Optional[Set[str]]:
         return None
     if not isinstance(listing, dict) or listing.get("success") is False or listing.get("truncated"):
         return None
-    return {str(entry.get("name")) for entry in listing.get("entries") or [] if isinstance(entry, dict)}
+    return [entry for entry in listing.get("entries") or [] if isinstance(entry, dict)]
 
 
-async def _missing(pairs: Sequence[Tuple[str, str]], client: Any) -> List[str]:
+async def _names_in(client: Any, folder: str) -> Optional[Set[str]]:
+    """The names in a workspace folder; ``None`` when the worker cannot say."""
+    entries = await _entries_in(client, folder)
+    return None if entries is None else {str(entry.get("name")) for entry in entries}
+
+
+def _suffix_matches(name: str, tree: Set[str]) -> List[str]:
+    """The paths in ``tree`` whose trailing path components are exactly
+    ``name``'s — ``src/index.ts`` matches ``packages/api/src/index.ts`` but not
+    ``xsrc/index.ts``: a path-component boundary, not a string suffix."""
+    parts = tuple(name.split("/"))
+    return [path for path in tree if tuple(path.split("/"))[-len(parts):] == parts]
+
+
+def _skip_walk_folder(name: str) -> bool:
+    """A folder the walk never lists: a dependency or build cache, or a
+    dot-folder — never where a deliverable is saved."""
+    return name in SKIPPED_WALK_FOLDERS or name.startswith(".")
+
+
+async def _list_limited(client: Any, folder: str, semaphore: asyncio.Semaphore) -> Optional[List[Dict[str, Any]]]:
+    """``_entries_in``, but never more than ``WALK_CONCURRENCY`` calls in flight
+    at once — a BFS level can be many folders wide."""
+    async with semaphore:
+        return await _entries_in(client, folder)
+
+
+def _next_level(base: str, folders: Sequence[str], listings: Sequence[Optional[List[Dict[str, Any]]]],
+                found: Set[str]) -> List[str]:
+    """The subfolders to list next, having added every file this level turned
+    up to ``found``."""
+    next_level: List[str] = []
+    for folder, entries in zip(folders, listings):
+        for entry in entries or []:
+            name = str(entry.get("name", ""))
+            path = posixpath.join(folder, name)
+            is_dir = entry.get("type") == "dir"
+            if is_dir and not _skip_walk_folder(name):
+                next_level.append(path)
+            elif not is_dir:
+                found.add(posixpath.relpath(path, base))
+    return next_level
+
+
+async def _walk(client: Any, base: str, found: Set[str]) -> None:
+    """Every file under ``base``, added to ``found`` as each BFS level
+    finishes — a walk cut short by its own timeout (``WALK_TIMEOUT_SECONDS``,
+    ``_suffix_resolved``) still keeps whichever levels it completed before
+    the cutoff. The worker has no recursive listing, so each level is one
+    call per folder, up to ``WALK_CONCURRENCY`` at once; a folder the worker
+    cannot list just leaves that branch unexplored. Bounded overall by
+    ``MAX_WALK_DIRS``."""
+    semaphore = asyncio.Semaphore(WALK_CONCURRENCY)
+    level, budget = [base], MAX_WALK_DIRS
+    while level and budget > 0:
+        level = level[:budget]
+        budget -= len(level)
+        listings = await asyncio.gather(*(_list_limited(client, folder, semaphore) for folder in level))
+        level = _next_level(base, level, listings, found)
+
+
+async def _suffix_resolved(names: Sequence[str], client: Any, base: str) -> Set[str]:
+    """Which of ``names`` is a *unique* suffix match under ``base`` (#839): a
+    monorepo result may name a file relative to a subfolder, e.g.
+    ``api/src/index.ts`` for the real ``packages/api/src/index.ts``. A name
+    that matches two or more real paths stays missing — too ambiguous to pick
+    one. The walk runs on its own clock, separate from the exact pass: cut
+    off partway through, it matches against whatever it found so far, so a
+    name that is genuinely missing stays missing rather than the whole check
+    giving up and letting it through."""
+    found: Set[str] = set()
+    try:
+        await asyncio.wait_for(_walk(client, base, found), timeout=WALK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning("[result-files] the subfolder walk under %s ran out of time", base)
+    return {name for name in names if len(_suffix_matches(name, found)) == 1}
+
+
+async def _missing(pairs: Sequence[Tuple[str, str]], client: Any, base: Optional[str] = None) -> List[str]:
     """The names found in none of their places. A place the worker cannot list
-    is not a verdict, so its name is not missing."""
+    is not a verdict, so its name is not missing. A name still not found that
+    way, but that uniquely matches a real path's trailing components under a
+    session's ``base`` folder, is not missing either (#839)."""
     listings: Dict[str, Optional[Set[str]]] = {}
     unsettled: Dict[str, bool] = {}          # name -> still looked for (in order)
     for named, rel in pairs:
@@ -148,6 +255,10 @@ async def _missing(pairs: Sequence[Tuple[str, str]], client: Any) -> List[str]:
             listings[folder] = await _names_in(client, folder)
         names = listings[folder]
         if names is None or name in names:
+            unsettled[named] = False
+    still_looking = [named for named, looking in unsettled.items() if looking]
+    if still_looking and base is not None:
+        for named in await _suffix_resolved(still_looking, client, base):
             unsettled[named] = False
     return [named for named, looking in unsettled.items() if looking]
 
@@ -193,16 +304,18 @@ async def check_named_files(task: Any, text: str, workspace_id: Any, *, db: Any 
     """What to say about the files a result names: nothing when every
     checkable name is in the workspace; where it went when it was saved to the
     knowledge base instead; a review when a name is nowhere at all."""
+    runtime_ref = getattr(task, "runtime_ref", None)
     pairs = worker_paths(named_files(text or ""), workspace_id=str(workspace_id),
-                         runtime_ref=getattr(task, "runtime_ref", None), projects_dir=projects_dir)
+                         runtime_ref=runtime_ref, projects_dir=projects_dir)
     if not pairs:
         return None
     if client is None:
         from core.workspace_client import WorkspaceClient
 
         client = WorkspaceClient(str(workspace_id))
+    base = _session_base(runtime_ref, str(workspace_id), projects_dir)
     try:
-        missing = await asyncio.wait_for(_missing(pairs, client), timeout=CHECK_TIMEOUT_SECONDS)
+        missing = await asyncio.wait_for(_missing(pairs, client, base), timeout=CHECK_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         logger.warning("[result-files] ticket %s: the file check ran out of time", getattr(task, "id", "?"))
         return None
