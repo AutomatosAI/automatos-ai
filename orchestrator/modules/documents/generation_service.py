@@ -80,7 +80,7 @@ from modules.documents.models import GeneratedDocument, UnresolvedDeliverableErr
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.documents.brand_logo import brand_kit_for_render
+from modules.documents.legacy_jinja import with_document_filters
 from modules.documents.blocks import (
     legacy_render_data,
     collect_variable_paths,
@@ -143,8 +143,8 @@ class DocumentGenerationService:
         self.workspace_id = workspace_id
         self.template_service = DocumentTemplateService(db)
         # PRD-156 S4: SandboxedEnvironment blocks SSTI (e.g. accessing __globals__
-        # via cycler/class chains) in user-authored template content.
-        self._jinja_env = SandboxedEnvironment(autoescape=True)
+        # via cycler/class chains) in user-authored template content. F347: ``| amount``.
+        self._jinja_env = with_document_filters(SandboxedEnvironment(autoescape=True))
 
     # ------------------------------------------------------------------
     # Public dispatch
@@ -231,10 +231,10 @@ class DocumentGenerationService:
     # ------------------------------------------------------------------
 
     def _brand_kit_for(self, workspace_id: UUID) -> dict:
-        """The workspace brand kit, render-ready: an uploaded logo is inlined as a
-        ``data:`` URI so neither renderer needs to reach the object store (PRD-242 S3)."""
+        """The workspace brand kit, render-ready: an uploaded logo (PRD-242 S3) and the uploaded
+        font files (F347: the PDF's ``@font-face``) inlined as ``data:`` URIs, so no renderer reaches the store."""
         ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        return brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
+        return brand_kit_for_media_render(get_brand_kit(getattr(ws, "settings", None)))
 
     def _render_block_html(self, block_doc, data, workspace_id, user_id, title, brand_kit=None):
         """Resolve a block document's variables and render it to a full HTML page.
