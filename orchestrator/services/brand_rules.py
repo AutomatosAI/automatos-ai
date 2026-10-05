@@ -26,6 +26,9 @@ were guessed in one night, and no agent had the logo, the address or the phone. 
 rules block now also carries the kit's colours (hex), its fonts, the company's contact
 details and where the logo is, each only when the kit sets it, and says the kit wins
 over any document that says otherwise (a brand-voice document kept an old sign-off).
+F336: "Sincerely, [Your Company Name]" shipped in two documents. A company placeholder
+becomes the company's name (:func:`company_name`), a different fill from the person who
+signs; a bare "[Company Name]" only where a signature goes, as with "[Name]".
 
 Who signs (:func:`sign_off_name`): the voice's own sign-off, else the company
 contact's name, else the brand's name. Reads are cached per workspace for
@@ -64,9 +67,16 @@ SENDER_PLACEHOLDER = re.compile(
 # A bare "[Name]" is the sender's only where a signature goes: on a line of its own,
 # or after a closing ("Best, [Name]"). "Dear [Name]," is the reader's and stays.
 BARE_NAME_LINE = re.compile(r"(?im)^([ \t]*)\[\s*name\s*\]([ \t]*)$")
-BARE_NAME_AFTER_CLOSING = re.compile(
-    r"(?i)\b(best|regards|thanks|thank you|cheers|sincerely|warmly|best wishes|all the best|yours)"
-    r"([ \t]*[,.]?[ \t]*)\[\s*name\s*\]")
+CLOSINGS = r"(best|regards|thanks|thank you|cheers|sincerely|warmly|best wishes|all the best|yours)"
+BARE_NAME_AFTER_CLOSING = re.compile(rf"(?i)\b{CLOSINGS}([ \t]*[,.]?[ \t]*)\[\s*name\s*\]")
+# F336: the sender's company left as a placeholder ("Sincerely, [Your Company Name]"):
+# anywhere when it says "your"; a bare "[Company Name]" or "[Company]" only where a
+# signature goes, since "Dear [Company Name] team" is the reader's.
+YOUR_COMPANY_PLACEHOLDER = re.compile(
+    r"\[\s*(?:your|my|sender'?s?)\s+company(?:'s)?(?:\s+name)?\s*\]", re.IGNORECASE)
+BARE_COMPANY = r"\[\s*company(?:\s+name)?\s*\]"
+BARE_COMPANY_LINE = re.compile(rf"(?im)^([ \t]*){BARE_COMPANY}([ \t]*)$")
+BARE_COMPANY_AFTER_CLOSING = re.compile(rf"(?i)\b{CLOSINGS}([ \t]*[,.]?[ \t]*){BARE_COMPANY}")
 
 _cache: Dict[str, Tuple[float, Any]] = {}
 
@@ -165,6 +175,16 @@ def sign_off_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
 
 def _quoted(words: Sequence[str]) -> str:
     return ", ".join(f'"{word}"' for word in words)
+
+
+def company_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The company a draft is from (F336): the company contact's name, else the brand's."""
+    if not kit:
+        return None
+    for value in ((kit.get("company") or {}).get("name"), kit.get("name")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _voice_lines(kit: Dict[str, Any]) -> List[str]:
@@ -306,6 +326,21 @@ def fill_sign_off(text: str, name: Optional[str]) -> str:
     return BARE_NAME_AFTER_CLOSING.sub(lambda m: f"{m.group(1)}{m.group(2)}{name}", filled)
 
 
+def fill_company(text: str, company: Optional[str]) -> str:
+    """``text`` with a company placeholder replaced by ``company`` (F336); unchanged without one.
+    "Dear [Name]," and "Dear [Company Name] team" are the reader's and stay."""
+    if not company or not text or "[" not in text:
+        return text
+    filled = YOUR_COMPANY_PLACEHOLDER.sub(lambda _m: company, text)
+    filled = BARE_COMPANY_LINE.sub(lambda m: f"{m.group(1)}{company}{m.group(2)}", filled)
+    return BARE_COMPANY_AFTER_CLOSING.sub(lambda m: f"{m.group(1)}{m.group(2)}{company}", filled)
+
+
+def fill_placeholders(text: str, kit: Optional[Dict[str, Any]]) -> str:
+    """``text`` with its placeholder signature and company filled from ``kit`` (a document's data)."""
+    return fill_company(fill_sign_off(text, sign_off_name(kit)), company_name(kit))
+
+
 def banned_found(text: str, phrases: Sequence[str]) -> List[str]:
     """The banned phrases ``text`` uses, as the kit spells them, whole words, any case."""
     if not text:
@@ -360,7 +395,7 @@ def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: An
     key = _text_key(result)
     if kit is None or key is None:
         return result
-    text = on_brand_text(result[key], kit)
+    text = on_brand_text(fill_company(result[key], company_name(kit)), kit)
     if text != result[key]:
         logger.info("[BrandRules] a run's answer was brought to the brand kit in workspace %s", workspace_id)
         return {**result, key: text}
@@ -369,7 +404,8 @@ def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: An
 
 __all__ = [
     "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "KIT_WINS_LINE", "RULES_HEADING", "banned_found", "banned_note",
-    "brand_assets", "brand_rules_block", "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result",
+    "brand_assets", "brand_rules_block", "company_name", "fill_company", "fill_placeholders", "fill_sign_off",
+    "forget_cached_kits", "kit_off_loop", "on_brand_result",
     "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
     "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
 ]
