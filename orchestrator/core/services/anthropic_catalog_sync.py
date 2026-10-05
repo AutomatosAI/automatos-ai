@@ -26,6 +26,10 @@ id, served by Anthropic:
   it starts unpriced;
 - ids Anthropic no longer lists are marked ``deprecated`` (installs keep their
   row), as the OpenRouter and NVIDIA syncs do. An empty answer retires nothing.
+  An alias Anthropic still answers but does not list is kept: the API lists
+  ``claude-sonnet-4-5-20250929``, not ``claude-sonnet-4-5`` or
+  ``claude-3-5-sonnet-latest`` (``is_alias_of_listed``), and a deprecated route
+  stops routing every agent on it (``model_refusals._route_is_retired``).
 
 The key is sent in the ``x-api-key`` header only; it is never logged or put in a
 message. Failures raise ``AnthropicCatalogError`` with a message for the owner,
@@ -69,6 +73,7 @@ ENDLESS_PAGES_MESSAGE = "Anthropic's Models API kept paging past {pages} pages; 
 NEW_ROW_DESCRIPTION = "{name}, served directly by Anthropic with your Anthropic key."
 
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
+_LATEST_SUFFIX = "-latest"
 _VERSION_HYPHEN = re.compile(r"(?<=\d)-(?=\d)")
 _REJECTED_STATUSES = (401, 403)
 
@@ -136,19 +141,44 @@ def _sync_listed(catalog: Any, api_key: str) -> Dict[str, Any]:
 
 
 def _deprecate_unlisted(db: Session, kept: List[str]) -> int:
-    """Active Anthropic routes the API no longer lists stop being offered."""
+    """Active Anthropic routes the API no longer lists stop being offered,
+    unless the route is an alias of a listed id (Anthropic still answers it)."""
     if not kept:
         return 0
-    deprecated = (
-        db.query(LLMModel)
+    unlisted = (
+        db.query(LLMModel.model_id)
         .filter(
             LLMModel.serving_provider == PROVIDER,
             LLMModel.status == "active",
             ~LLMModel.model_id.in_(kept),
         )
+        .all()
+    )
+    retired = [model_id for (model_id,) in unlisted if not is_alias_of_listed(model_id, kept)]
+    if not retired:
+        return 0
+    deprecated = (
+        db.query(LLMModel)
+        .filter(LLMModel.serving_provider == PROVIDER, LLMModel.model_id.in_(retired))
         .update({"status": "deprecated"}, synchronize_session=False)
     )
     return int(deprecated or 0)
+
+
+def is_alias_of_listed(model_id: str, listed: List[str]) -> bool:
+    """True when ``model_id`` is an undated alias of an id the Models API listed.
+
+    ``claude-sonnet-4-5`` is an alias of ``claude-sonnet-4-5-20250929`` (the id
+    plus ``-`` and 8 digits); ``claude-3-5-sonnet-latest`` is an alias of any
+    listed ``claude-3-5-sonnet-…``.
+    """
+    if model_id.endswith(_LATEST_SUFFIX):
+        stem = model_id[: -len(_LATEST_SUFFIX)] + "-"
+        return any(listed_id.startswith(stem) for listed_id in listed)
+    return any(
+        listed_id.startswith(model_id + "-") and _DATE_SUFFIX.fullmatch(listed_id[len(model_id):])
+        for listed_id in listed
+    )
 
 
 def _record_success(db: Session, job: OpenRouterSyncJob, started: datetime, result: Dict[str, Any]) -> None:
@@ -312,6 +342,6 @@ def _supported(capabilities: Any, name: str) -> Optional[bool]:
 
 
 __all__ = [
-    "AnthropicCatalogError", "fetch_anthropic_models", "new_row_defaults", "openrouter_twin",
+    "AnthropicCatalogError", "fetch_anthropic_models", "is_alias_of_listed", "new_row_defaults", "openrouter_twin",
     "openrouter_twin_id", "run_anthropic_sync", "synced_values", "workspace_key",
 ]

@@ -15,7 +15,11 @@ resolver is stubbed. What is pinned:
   and vision flag refresh an existing row, whose price and description stay;
 - a new row borrows price and description from the OpenRouter twin, and with no
   twin and no API numbers starts at 0 tokens and no price;
-- an id Anthropic no longer lists goes ``deprecated``;
+- an id Anthropic no longer lists goes ``deprecated``, but an undated alias of a
+  listed id (``claude-sonnet-4-5`` of ``claude-sonnet-4-5-20250929``) stays
+  active: Anthropic still answers it, and a deprecated route stops routing;
+- a call on an unpriced route (NULL input and output price) is priced from the
+  fallbacks, never booked at $0 from the row; an explicit 0 stays 0;
 - no key, a refused key or no answer is a clear message through the sync
   endpoint (502), never the key itself; the job is recorded failed (on a
   recording session: a failed sync rolls back, which would end ``db_session``).
@@ -36,6 +40,7 @@ EXISTING = "claude-sonnet-829-1-20250101"
 NEW_WITH_TWIN = "claude-opus-829-2"
 NEW_BARE = "claude-haiku-829-3"
 GONE = "claude-instant-829-0"
+ALIAS = "claude-sonnet-829-1"  # EXISTING without its date: Anthropic answers it, the API doesn't list it
 
 
 @pytest.fixture
@@ -105,6 +110,9 @@ def _seed(db):
     db.execute(text(
         "INSERT INTO llm_models (provider, serving_provider, model_id, display_name, context_window, "
         "max_output_tokens, status) VALUES ('anthropic', 'anthropic', :m, :m, 100000, 4096, 'active')"), {"m": GONE})
+    db.execute(text(
+        "INSERT INTO llm_models (provider, serving_provider, model_id, display_name, context_window, "
+        "max_output_tokens, status) VALUES ('anthropic', 'anthropic', :m, :m, 200000, 8192, 'active')"), {"m": ALIAS})
     from core.models.openrouter_cache import OpenRouterModelCache
 
     db.add(OpenRouterModelCache(
@@ -170,6 +178,8 @@ def test_the_owners_key_reads_every_page_and_the_models_land_in_the_catalogue(ca
     assert bare["input_cost_per_1k_tokens"] is None and bare["output_cost_per_1k_tokens"] is None
 
     assert _row(catalog, GONE)["status"] == "deprecated"
+    assert _row(catalog, ALIAS)["status"] == "active"
+    assert result["deprecated"] >= 1
     assert _last_job(catalog)["status"] == "completed"
 
 
@@ -247,6 +257,49 @@ def test_no_answer_from_anthropic_is_worded(owners_key, monkeypatch):
     with pytest.raises(HTTPException) as failed:
         _sync_endpoint(_Recorded(), uuid4())
     assert "Could not reach Anthropic's Models API (ConnectError)" in failed.value.detail
+
+
+# ── an unpriced route is never booked at $0 from its row ────────────────────
+
+def _priced_route(db, provider, model_id, price_in, price_out):
+    db.execute(text(
+        "INSERT INTO llm_models (provider, serving_provider, model_id, display_name, context_window, "
+        "max_output_tokens, input_cost_per_1k_tokens, output_cost_per_1k_tokens, status) "
+        "VALUES ('anthropic', :p, :m, :m, 200000, 8192, :i, :o, 'active')"),
+        {"p": provider, "m": model_id, "i": price_in, "o": price_out})
+
+
+def test_an_unpriced_route_falls_through_to_the_estimate_and_an_explicit_zero_stays(catalog):
+    from core.llm.usage_tracker import resolve_price
+
+    unpriced = "claude-sonnet-4-829-unpriced"            # the static map knows "claude-sonnet-4"
+    _priced_route(catalog, "anthropic", unpriced, None, None)
+    _priced_route(catalog, "openrouter", unpriced, None, None)   # the any-model stage skips it too
+    price = resolve_price(catalog, unpriced, "anthropic")
+    assert price["source"] not in ("route", "model")
+    assert price["input_per_1k"] > 0 and price["output_per_1k"] > 0
+
+    free = "claude-sonnet-4-829-free"
+    _priced_route(catalog, "anthropic", free, 0.0, 0.0)
+    price = resolve_price(catalog, free, "anthropic")
+    assert (price["source"], price["input_per_1k"], price["output_per_1k"]) == ("route", 0.0, 0.0)
+
+
+# ── an undated alias is not a retired model ─────────────────────────────────
+
+@pytest.mark.parametrize("model_id, listed, alias", [
+    ("claude-sonnet-4-5", ["claude-sonnet-4-5-20250929"], True),
+    ("claude-3-5-sonnet-latest", ["claude-3-5-sonnet-20241022"], True),
+    ("claude-opus-4-1", ["claude-opus-4-1-20250805", "claude-opus-5"], True),
+    ("claude-3-opus-20240229", ["claude-opus-4-1-20250805"], False),     # retired: no listed id is its alias
+    ("claude-opus-4", ["claude-opus-4-1-20250805"], False),              # 4-1 is not 4 + a date
+    ("claude-3-5-sonnet-latest", ["claude-3-5-haiku-20241022"], False),
+    ("claude-sonnet-4-5", ["claude-sonnet-4-5-2025"], False),            # not 8 digits
+])
+def test_an_alias_of_a_listed_id(model_id, listed, alias):
+    from core.services.anthropic_catalog_sync import is_alias_of_listed
+
+    assert is_alias_of_listed(model_id, listed) is alias
 
 
 # ── Anthropic's id → OpenRouter's id for the same model ─────────────────────
