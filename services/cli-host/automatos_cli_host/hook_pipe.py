@@ -15,6 +15,11 @@ host over a named pipe, through ``multiprocessing.connection`` (stdlib):
   process check, F234's on Unix, keeps it from answering the policy gate.
 - A pipe's default security lets only the same user, LocalSystem and the
   administrators open it for writing.
+- The handshake runs on each connection's own thread, never in the accept loop.
+  A caller that connects and stalls holds only its own thread, so it cannot hold
+  up the next hook call until the CLI gives up waiting and lets the tool run.
+  (The shim has its own deadline for the same reason; see ``hook_shim``.) The
+  stalled connection is also closed after ``HANDSHAKE_SECONDS``.
 
 Each connection carries one payload and one answer, as on the Unix socket.
 ``family="AF_UNIX"`` runs the same server over a Unix socket, which is how the
@@ -36,6 +41,7 @@ log = logging.getLogger("automatos.cli_host.hooks")
 PIPE_PREFIX = "\\\\.\\pipe\\"
 KEY_BYTES = 32
 PAYLOAD_WAIT_SECONDS = 10.0
+HANDSHAKE_SECONDS = 5.0
 MAX_PAYLOAD_BYTES = 64 * 1024 * 1024      # a Write tool call carries the whole file
 _RETRY_AFTER_ERROR_SECONDS = 0.5
 _WAKE_TIMEOUT_SECONDS = 2.0
@@ -57,7 +63,8 @@ class PipeHookServer(HookRegistry):
         from multiprocessing.connection import Listener
 
         self._stopping.clear()
-        self._listener = Listener(self.address, family=self.family, backlog=64, authkey=self.key)
+        # No authkey here: Listener.accept() would run the handshake inline (see above).
+        self._listener = Listener(self.address, family=self.family, backlog=64)
         threading.Thread(target=self._serve, args=(self._listener,), name="automatos-hook-pipe", daemon=True).start()
 
     def ensure_listening(self) -> bool:
@@ -70,7 +77,7 @@ class PipeHookServer(HookRegistry):
         if listener is None:
             return
         # accept() has no timeout: a throwaway caller wakes it. On its own thread,
-        # because a caller would wait forever if nothing were accepting any more.
+        # in case nothing is accepting any more.
         waker = threading.Thread(target=self._wake, daemon=True, name="automatos-hook-pipe-wake")
         waker.start()
         waker.join(_WAKE_TIMEOUT_SECONDS)
@@ -80,19 +87,14 @@ class PipeHookServer(HookRegistry):
         from multiprocessing.connection import Client
 
         try:
-            Client(self.address, family=self.family, authkey=self.key).close()
+            Client(self.address, family=self.family).close()
         except (OSError, EOFError):
             pass
 
     def _serve(self, listener: Any) -> None:
-        from multiprocessing import AuthenticationError
-
         while not self._stopping.is_set():
             try:
                 conn = listener.accept()
-            except AuthenticationError:
-                log.warning("refused a hook caller that does not hold the host's key")
-                continue
             except (OSError, EOFError):
                 if self._stopping.is_set():
                     break
@@ -104,7 +106,31 @@ class PipeHookServer(HookRegistry):
                 break
             threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
 
+    def _authenticated(self, conn: Any) -> bool:
+        """Both ends prove they hold the key, as Listener.accept() would, but here, on
+        this connection's thread, and cut off if the caller stalls."""
+        from multiprocessing import AuthenticationError
+        from multiprocessing.connection import answer_challenge, deliver_challenge
+
+        cutoff = threading.Timer(HANDSHAKE_SECONDS, conn.close)
+        cutoff.daemon = True
+        cutoff.start()
+        try:
+            deliver_challenge(conn, self.key)
+            answer_challenge(conn, self.key)
+            return True
+        except AuthenticationError:
+            log.warning("refused a hook caller that does not hold the host's key")
+        except (OSError, EOFError, ValueError):
+            log.warning("a hook caller's handshake did not complete")
+        finally:
+            cutoff.cancel()
+        return False
+
     def _handle(self, conn: Any) -> None:
+        if not self._authenticated(conn):
+            conn.close()
+            return
         answer: dict = {}
         try:
             if conn.poll(PAYLOAD_WAIT_SECONDS):

@@ -29,6 +29,9 @@ import sys
 
 _GATED_EVENTS = ("PreToolUse", "PermissionRequest")
 _CONNECT_TIMEOUT = 3.0
+# The keyed channel's connect, host check, handshake and send must finish in this
+# long, or the call is denied: a hook the CLI times out lets the tool run.
+_HANDSHAKE_SECONDS = 5.0
 NOT_CONFIGURED = "Automatos CLI host socket is not configured"
 UNREACHABLE_MARK = "Automatos CLI host is unreachable"
 NOT_THE_HOST_MARK = "Automatos hook socket is not the host's"
@@ -144,23 +147,44 @@ def _keyed_peer_is_the_host(conn, family: str) -> bool:
         return _is_the_host(s)
 
 
+def _give_up(event: str) -> None:
+    """The keyed channel stalled before the payload went: deny now, never let the CLI time out."""
+    if event in _GATED_EVENTS:
+        sys.stdout.write(_deny(event, UNREACHABLE))
+        sys.stdout.flush()
+    os._exit(0)
+
+
 def _ask_keyed(address: str, key_hex: str, payload: dict, wait: float) -> str:
-    """One payload over the keyed channel: Windows' named pipe (a Unix socket in tests)."""
+    """One payload over the keyed channel: Windows' named pipe (a Unix socket in tests).
+
+    The host's process is checked before the handshake, so nothing, not even a
+    challenge answer, goes to anything else."""
+    import threading
     from multiprocessing import AuthenticationError
-    from multiprocessing.connection import Client
+    from multiprocessing.connection import Client, answer_challenge, deliver_challenge
 
     family = "AF_PIPE" if address.startswith(_PIPE_PREFIX) else "AF_UNIX"
+    key = bytes.fromhex(key_hex)
+    deadline = threading.Timer(_HANDSHAKE_SECONDS, _give_up, args=(payload.get("hook_event_name") or "",))
+    deadline.daemon = True
+    deadline.start()
     try:
-        conn = Client(address, family=family, authkey=bytes.fromhex(key_hex))
-    except AuthenticationError as exc:            # it does not hold the host's key
-        raise _NotTheHost() from exc
-    with conn:
-        if not _keyed_peer_is_the_host(conn, family):
-            raise _NotTheHost()
-        conn.send_bytes(json.dumps(payload).encode("utf-8"))
-        if not conn.poll(wait):
-            raise TimeoutError("the host did not answer")
-        return conn.recv_bytes().decode("utf-8", "replace").strip()
+        with Client(address, family=family) as conn:
+            if not _keyed_peer_is_the_host(conn, family):
+                raise _NotTheHost()
+            try:
+                answer_challenge(conn, key)
+                deliver_challenge(conn, key)
+            except AuthenticationError as exc:    # it does not hold the host's key
+                raise _NotTheHost() from exc
+            conn.send_bytes(json.dumps(payload).encode("utf-8"))
+            deadline.cancel()                     # the hold for the operator's answer has its own wait
+            if not conn.poll(wait):
+                raise TimeoutError("the host did not answer")
+            return conn.recv_bytes().decode("utf-8", "replace").strip()
+    finally:
+        deadline.cancel()
 
 
 def _ask_unix(sock_path: str, payload: dict, wait: float) -> str:

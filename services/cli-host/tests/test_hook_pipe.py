@@ -11,6 +11,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -128,3 +130,41 @@ def test_windows_gets_the_pipe_and_everything_else_the_unix_socket(monkeypatch, 
     monkeypatch.setattr(sys, "platform", "linux")
     unix = hook_server_for(tmp_path / "hooks.sock")
     assert isinstance(unix, HookServer) and unix.session_env() == {"AUTOMATOS_HOST_SOCK": str(tmp_path / "hooks.sock")}
+
+
+def test_a_caller_that_stalls_the_handshake_does_not_hold_up_the_next_call(make_server):
+    # The handshake used to run in the accept loop: one silent caller blocked every
+    # hook call after it until the CLI timed them out and let the tools run.
+    from multiprocessing.connection import Client
+
+    server = make_server()
+    _recording(server, ALLOW)
+    staller = Client(server.address, family=server.family)      # connects, never answers the challenge
+    try:
+        started = time.monotonic()
+        assert json.loads(_run_shim(GATED, _session_env(server))) == ALLOW
+        assert time.monotonic() - started < 15
+    finally:
+        staller.close()
+
+
+def test_the_shim_denies_rather_than_waits_on_a_host_that_never_completes_the_handshake(tmp_path):
+    # A hook the CLI times out lets the tool run, so the shim gives up first.
+    from multiprocessing.connection import Listener
+
+    if sys.platform == "win32":
+        address, family = f"{PIPE_PREFIX}automatos-test-{os.getpid()}-stall", "AF_PIPE"
+    else:
+        address, family = os.path.join(tempfile.mkdtemp(prefix="acli-", dir="/tmp"), "s.sock"), "AF_UNIX"
+    listener = Listener(address, family=family)                 # accepts, then says nothing
+    held = []
+    threading.Thread(target=lambda: held.append(listener.accept()), daemon=True).start()
+    env = {"AUTOMATOS_HOST_SOCK": address, "AUTOMATOS_HOST_KEY": "11" * 32,
+           "AUTOMATOS_TASK_ID": "42", "AUTOMATOS_HOST_PID": str(os.getpid())}
+    try:
+        started = time.monotonic()
+        out = json.loads(_run_shim(GATED, env))["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and "unreachable" in out["permissionDecisionReason"]
+        assert time.monotonic() - started < 15
+    finally:
+        listener.close()
