@@ -20,6 +20,7 @@ const REVIEW: Record<string, StageReason> = {
   mission_plan: { stage: 'Plan to approve', chip: 'Plan to approve', says: "Its mission waits for you to approve its plan. Approve or reject it here, or change it on the mission's page." },
   file_missing: { chip: 'File missing', says: 'The file it named is not in the workspace. Check the result before you approve it.' },
   nothing_done: { chip: 'Did nothing', says: 'It finished without doing anything: its tool calls were skipped, or the result is empty.' },
+  says_not_done: { chip: 'Says not done', says: 'Its own answer says the work is not done. Read why on the ticket before you approve it.' },
   held_command: { chip: 'Command refused', says: 'A held command was refused, so the result was not checked end to end.' },
   retries_used_up: { chip: 'Out of retries', says: 'It ran out of attempts. Whatever it produced is on the ticket.' },
   approval_action: { chip: 'Your OK', says: 'It is ready and waits for your OK to run its action.' },
