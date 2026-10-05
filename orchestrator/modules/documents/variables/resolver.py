@@ -39,8 +39,9 @@ class ResolvedVariables:
 
 
 def _long_date(now: datetime) -> str:
+    # Day month year, "5 October 2026" (F350: it printed US-style, "October 5, 2026").
     # Avoid %-d (not portable to Windows); build the long form manually.
-    return f"{now.strftime('%B')} {now.day}, {now.year}"
+    return f"{now.day} {now.strftime('%B')} {now.year}"
 
 
 def build_context(

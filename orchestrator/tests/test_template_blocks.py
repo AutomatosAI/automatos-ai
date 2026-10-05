@@ -106,7 +106,7 @@ def test_build_context_splits_name_and_dates():
     assert ctx["user"]["last_name"] == "Doe"
     assert ctx["company"]["name"] == "Acme Corp"
     assert ctx["date"]["today"] == "2026-06-12"
-    assert ctx["date"]["long"] == "June 12, 2026"
+    assert ctx["date"]["long"] == "12 June 2026"  # F350: day month year
     assert ctx["date"]["year"] == "2026"
 
 
