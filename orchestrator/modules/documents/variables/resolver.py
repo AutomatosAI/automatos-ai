@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from ..amounts import field_text
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
-from .catalog import is_dynamic_path, is_known_path, walk_dynamic
+from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
 from .document_user import document_user
 
 logger = logging.getLogger(__name__)
