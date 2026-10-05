@@ -451,7 +451,7 @@ def test_sync_nvidia_upserts_routes_and_records_a_job(monkeypatch):
 def test_sync_dispatch_refuses_unsyncable_providers():
     from core.services.provider_catalog_sync import ProviderCatalogSync, SYNCABLE_PROVIDERS
 
-    assert SYNCABLE_PROVIDERS == ("openrouter", "nvidia")
+    assert SYNCABLE_PROVIDERS == ("openrouter", "nvidia", "anthropic")  # #829 added Anthropic
     with pytest.raises(ValueError):
         ProviderCatalogSync(_Session()).sync("cohere")
 

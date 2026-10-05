@@ -176,7 +176,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
     refetchOnWindowFocus: false,
   })
 
-  // Sync one provider's catalogue (admin). OpenRouter and NVIDIA are syncable.
+  // Sync one provider's catalogue (admin). OpenRouter, NVIDIA and Anthropic are syncable.
   const syncMutation = useMutation({
     mutationFn: (slug: string) => apiClient.post(`/api/marketplace/llm/sync/${encodeURIComponent(slug)}`),
     onSuccess: (_data, slug) => {
@@ -193,7 +193,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const providerCounts = response?.providers ?? {}
   const providerLabels = response?.provider_labels ?? {}
   const vendorCounts = response?.vendors ?? {}
-  const syncable = response?.syncable ?? ['openrouter', 'nvidia']
+  const syncable = response?.syncable ?? ['openrouter', 'nvidia', 'anthropic']
   const lastSyncedByProvider = response?.last_synced ?? {}
   const totalCount = response?.total ?? 0
   const catalogTotal = useMemo(
