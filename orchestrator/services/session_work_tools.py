@@ -115,15 +115,17 @@ LIST_TEMPLATES_SPEC: Dict[str, Any] = {
     "name": "list_templates",
     "action": "platform_list_templates",
     "description": (
-        "List this workspace's document templates (branded letters, reports, invoices, social "
-        "images): each one's id, name, format and category. Use it before generate_document to "
-        "pick the owner's own template, then get_template_schema for the data it needs."
+        "List every document template in this workspace (branded letters, reports, invoices, the "
+        "owner's own), one line each: name | format | category | id; social images and videos with "
+        "their format. Use it before generate_document to pick the owner's own template, then "
+        "get_template_schema for the data it needs."
     ),
     "input_schema": _schema({
         "format": {"type": "string", "enum": list(TEMPLATE_FORMATS), "description": "Only templates of this format."},
         "category": _string("Only this category, e.g. 'report', 'invoice' or 'letter'."),
+        "name": _string("Only templates whose name contains this text (any case)."),
     }),
-    "scope": forward({"format": "format", "category": "category"}),
+    "scope": forward({"format": "format", "category": "category", "name": "name"}),
     "project": project_answer,
     "tags": ("documents",),
 }
@@ -133,11 +135,16 @@ GET_TEMPLATE_SCHEMA_SPEC: Dict[str, Any] = {
     "action": "platform_get_template_schema",
     "description": (
         "Read what one document template needs: the data fields you fill in generate_document's "
-        "data, the values the platform fills itself (the brand, the company, the date), and sample data."
+        "data, each table's columns, which fields are required and which fill themselves (fallbacks, "
+        "the brand, the company, the date), and sample data."
     ),
-    "input_schema": _schema({"template_id": _string("The template's id, from list_templates.")}, ("template_id",)),
-    "scope": forward({"template_id": "template_id"}, ("template_id",),
-                     "get_template_schema needs the template: its template_id from list_templates."),
+    "input_schema": _schema({
+        "template_id": _string("The template's id, from list_templates."),
+        "template_name": _string("The template's name, instead of its id."),
+    }),
+    "scope": forward({"template_id": "template_id", "template_name": "template_name"},
+                     needs="get_template_schema needs the template: its template_id or template_name from list_templates.",
+                     one_of=("template_id", "template_name")),
     "project": project_answer,
     "tags": ("documents",),
 }

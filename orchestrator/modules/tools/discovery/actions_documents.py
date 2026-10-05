@@ -231,10 +231,11 @@ def register_documents_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_templates",
         description=(
-            "List the document templates available in this workspace (branded letters, "
-            "reports, invoices, etc.). Returns each template's id, name, description, "
-            "format and category. Use before generate_document to pick a template, then "
-            "call platform_get_template_schema to learn what data it needs."
+            "List every document template in this workspace (branded letters, reports, "
+            "invoices, the owner's own), one line each: name | format | category | id. "
+            "Social image and video templates are listed with format social_image or "
+            "social_video. Use before generate_document to pick a template, then call "
+            "platform_get_template_schema to learn what data it needs."
         ),
         category="documents",
         parameters={
@@ -247,6 +248,10 @@ def register_documents_actions(registry: ActionRegistry) -> None:
                 "category": {
                     "type": "string",
                     "description": "Optional category filter (e.g. 'report', 'invoice', 'letter').",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional: only templates whose name contains this text (any case).",
                 },
             },
             "required": [],
@@ -264,9 +269,10 @@ def register_documents_actions(registry: ActionRegistry) -> None:
         name="platform_get_template_schema",
         description=(
             "Get the data a document template expects: its variable chips "
-            "(user/company/brand/date) and the data.* fields you must supply, plus "
-            "sample data. Use this after platform_list_templates and before "
-            "generate_document so you fill the template correctly."
+            "(user/company/brand/date), the data.* fields you must supply, each table's "
+            "columns, which fields are required and which fill themselves (fallbacks), "
+            "plus sample data. Name the template by id or by name. Use this after "
+            "platform_list_templates and before generate_document so you fill it correctly."
         ),
         category="documents",
         parameters={
@@ -276,8 +282,12 @@ def register_documents_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "UUID of the template (from platform_list_templates).",
                 },
+                "template_name": {
+                    "type": "string",
+                    "description": "The template's name, instead of its id (e.g. 'Branded Invoice').",
+                },
             },
-            "required": ["template_id"],
+            "required": [],
         },
         permission_level="read",
         tags=["documents", "templates", "schema", "generate"],
