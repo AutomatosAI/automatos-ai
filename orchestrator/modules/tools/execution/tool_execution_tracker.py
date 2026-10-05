@@ -204,8 +204,9 @@ class ToolExecutionTracker:
         platform_execute dispatcher. A result that says it failed
         (``success: False``, Composio's ``successful: False``) is not recorded.
         F261 (night 8): a call whose name does not say what it did is recorded
-        with what it did too (``call_effects``: a card moved to done approves it)."""
-        from .call_effects import call_effects, call_params, result_effects
+        with what it did too (``call_effects``: a card moved to done approves it).
+        F351 (night 10b): a refused document call leaves only ``MAKE_REFUSED``."""
+        from .call_effects import call_effects, call_params, refused_effects, result_effects
 
         action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
@@ -213,6 +214,7 @@ class ToolExecutionTracker:
             self.failed.add(action)
             said = str(result.get("error") or result.get("message") or "it reported a failure").strip()
             self.refused[(tool_name, self._hash_args(tool_args))] = said[:REFUSAL_CHARS]
+            self.succeeded.update(refused_effects(action))
             return
         self.succeeded.add(action)
         self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))

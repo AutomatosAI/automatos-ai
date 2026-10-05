@@ -94,6 +94,12 @@ def _sets_an_agent(action: str, params: Dict[str, Any]) -> bool:
 STEPS_CHECKED, STEPS_UNCHECKED = "mission_steps_checked", "mission_steps_unchecked"
 # F319 (night 9b): the answer of a call that sent a card back says so.
 SENT_BACK_SAID = "sent_back"
+# F351 (night 10b): the calls that make a document the owner finds in Deliverables, and what a
+# refused one leaves: "I've generated the letter" after generate_document answered DATA_BAD_JSON
+# (chat 8ac5cf3a) is told as tried and refused, never as made. No family's stem is in its name.
+DOCUMENT_MAKES = ("generate_document", "create_pdf", "create_docx", "create_xlsx", "create_pptx", "write_file",
+                  "html_to_png")
+MAKE_REFUSED = "make_refused"
 
 
 def _answers(result: Any) -> List[Dict[str, Any]]:
@@ -122,6 +128,13 @@ def result_effects(result: Any) -> Tuple[str, ...]:
     return effects
 
 
+def refused_effects(action: str) -> Tuple[str, ...]:
+    """What a refused call leaves for a reply to claim: that a document was tried and not made
+    (F351), so "I've tried again" is backed and "I've generated it" is told as refused; ()
+    for any other call."""
+    return (MAKE_REFUSED,) if any(stem in action for stem in DOCUMENT_MAKES) else ()
+
+
 def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     """The parameters the action itself received: platform_execute's ``params``
     (or the keys beside ``action`` when it sent none), else the call's own."""
@@ -133,5 +146,5 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED", "call_effects", "call_params",
-           "result_effects"]
+__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
+           "call_effects", "call_params", "refused_effects", "result_effects"]
