@@ -404,6 +404,25 @@ GENERAL = {
     },
 }
 
+# F356: the seeded "Meeting Notes" starter (seed_templates.STARTER_TEMPLATES) had no
+# template at all, so its own format (docx) could not render and its PDF was the
+# no-template fallback. It is now this block layout, on its data fields as they were
+# (title, date, attendees, agenda, notes, action_items) plus an optional decisions.
+# Not a category preset: Branded Page stays the "general" starting point.
+MEETING_NOTES_BLOCKS = _doc(
+    *letterhead(),
+    _heading("title", 1, _v("data.title")),
+    _para("meta", _t("Date: ", "bold"), _v("data.date")),
+    _section("s-attendees", "Attendees", _para("attendees", _v("data.attendees"))),
+    _section("s-agenda", "Agenda", _para("agenda", _v("data.agenda", ""))),
+    _section("s-notes", "Discussion", _para("notes", _v("data.notes", ""))),
+    _section("s-decisions", "Decisions", _para("decisions", _v("data.decisions", ""))),
+    _section(
+        "s-actions", "Actions",
+        _data_table("actions", "data.action_items", [("task", "Action", "left"), ("owner", "Owner", "left"), ("due_date", "Due", "right")], empty_text=""),
+    ),
+)
+
 PRESETS: List[Dict[str, Any]] = [LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT, DATA, GENERAL]
 PRESET_BY_CATEGORY: Dict[str, Dict[str, Any]] = {p["category"]: p for p in PRESETS}
 CATEGORIES: List[str] = [p["category"] for p in PRESETS]
@@ -432,4 +451,6 @@ def preset_payload(preset: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-__all__ = ["PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload"]
+__all__ = [
+    "MEETING_NOTES_BLOCKS", "PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload",
+]

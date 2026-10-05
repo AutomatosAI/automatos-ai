@@ -55,10 +55,10 @@ INVOICE = Template("""
 REPORT = Template("""
   [data-block="s-summary"] { border-left: 3pt solid $rule; background: $panel; padding: ${s1}pt ${s3}pt ${s1}pt ${s3}pt; }
   [data-block="s-summary"] h2 { margin-top: ${s2}pt; }
-  table[data-block="kpis"] { display: block; width: 100%; margin: ${s1}pt 0 ${s4}pt 0; }
+  table[data-block="kpis"] { display: block; width: 100%; margin: ${s1}pt 0 ${s2}pt 0; }
   [data-block="kpis"] thead { display: none; }
-  [data-block="kpis"] tbody { display: flex; }
-  [data-block="kpis"] tr { display: block; flex: 1 1 0; margin: 0 ${s2}pt 0 0; padding: ${s2}pt ${s3}pt;
+  [data-block="kpis"] tbody { display: flex; flex-wrap: wrap; }
+  [data-block="kpis"] tr { display: block; flex: 1 1 20%; margin: 0 ${s2}pt ${s2}pt 0; padding: ${s2}pt ${s3}pt;
     background: $panel; border-top: 2pt solid $title; }
   [data-block="kpis"] tr:last-child { margin-right: 0; }
   [data-block="kpis"] td { display: block; border: none; padding: 0; background: none !important; }
@@ -92,6 +92,13 @@ CONTRACT = Template("""
   [data-block="desc"] { color: $muted; }
 """)
 
-STARTER_RULES = (LETTERHEAD, LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT)
+MEETING_NOTES = Template("""
+  [data-block="attendees"] ul { list-style: none; padding: 0; margin: 0; }
+  [data-block="attendees"] li { display: inline; margin: 0; }
+  [data-block="attendees"] li + li::before { content: ", "; }
+  [data-block="actions"] td:nth-child(2) { white-space: nowrap; }
+""")
+
+STARTER_RULES = (LETTERHEAD, LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT, MEETING_NOTES)
 
 __all__ = ["STARTER_RULES"]
