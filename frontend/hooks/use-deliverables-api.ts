@@ -75,6 +75,8 @@ export interface Deliverable {
   content?: string | null
   content_url?: string | null
   content_error?: string
+  /** F354: the owner's document this Deliverable was added to knowledge as, or null. */
+  knowledge_document_id?: number | null
 }
 
 export interface DeliverableListResponse {

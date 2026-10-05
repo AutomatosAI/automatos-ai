@@ -83,3 +83,6 @@ class GeneratedDocument:
     # F331: the data keys the template had no place for, so the page does not
     # show them; the generate_document tool tells the agent (never a silent blank).
     unused_keys: List[str] = field(default_factory=list)
+    # F354: who the document is for, from its data (``{"client_name": "Northwind"}``),
+    # recorded on its Deliverable's ``extra.parties`` (modules/documents/deliverable_extra.py).
+    parties: Dict[str, str] = field(default_factory=dict)

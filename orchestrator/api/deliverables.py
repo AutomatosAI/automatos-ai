@@ -10,6 +10,8 @@ Routes
 - GET    /api/deliverables/stats           Aggregate counts (by_type, by_agent)
 - GET    /api/deliverables/{id}            Fetch one (optional ?include_content=)
 - DELETE /api/deliverables/{id}            Soft delete
+- POST/DELETE /api/deliverables/{id}/knowledge  Add to / remove from knowledge (F354,
+  api/deliverable_knowledge.py)
 
 Auth / tenancy
 --------------
@@ -54,9 +56,12 @@ async def list_deliverables(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """List deliverables for the current workspace."""
+    """List deliverables for the current workspace, each saying whether the owner added
+    it to knowledge (F354: ``knowledge_document_id``)."""
+    from services.owner_knowledge import with_knowledge_state
+
     svc = DeliverableService(db, ctx.workspace_id)
-    return svc.list_deliverables(
+    listed = svc.list_deliverables(
         artifact_type=artifact_type,
         source_type=source_type,
         source_type_exclude=source_type_exclude,
@@ -68,6 +73,7 @@ async def list_deliverables(
         limit=limit,
         offset=offset,
     )
+    return with_knowledge_state(db, ctx.workspace_id, listed)
 
 
 # ── Stats ────────────────────────────────────────────────────────────
@@ -104,7 +110,10 @@ async def get_deliverable(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Fetch a single deliverable (404 if missing / not in workspace)."""
+    """Fetch a single deliverable (404 if missing / not in workspace), saying whether the
+    owner added it to knowledge (F354: ``knowledge_document_id``)."""
+    from services.owner_knowledge import with_knowledge_state
+
     svc = DeliverableService(db, ctx.workspace_id)
     result = await svc.get_deliverable(deliverable_id, include_content=include_content)
 
@@ -113,7 +122,7 @@ async def get_deliverable(
             status_code=404,
             detail=result.get("error", "Deliverable not found"),
         )
-    return result
+    return with_knowledge_state(db, ctx.workspace_id, result)
 
 
 # ── Soft Delete ──────────────────────────────────────────────────────

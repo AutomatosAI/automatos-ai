@@ -68,7 +68,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.voice_retell"),  # PRD-203 V·S4 — Retell streaming custom-LLM webhook
     RouterSpec("api.reports"),
     RouterSpec("api.deliverables"),
-    RouterSpec("api.deliverable_thumbnails"),  # F353 — a document card's first-page picture
+    RouterSpec("api.deliverable_knowledge"),  # F354 — "Add to Knowledge" on a Deliverable, and remove
     RouterSpec("api.board_tasks"),
     RouterSpec("api.board_task_rebrief"),  # PRD-252 R2 — Discuss: "Update ticket and re-queue"
     RouterSpec("api.add_to_knowledge"),  # F305 — "Add to knowledge" on an approved card
