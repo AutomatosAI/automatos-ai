@@ -1812,6 +1812,88 @@ class CoordinatorService:
         """
         workspace_id = run.workspace_id
 
+        await self._ensure_mission_field(db, run)
+
+        # Load roster agents for this workspace
+        agents: List[Agent] = (
+            db.query(Agent)
+            .filter(
+                and_(
+                    Agent.workspace_id == workspace_id,
+                    Agent.status == "active",
+                )
+            )
+            .all()
+        )
+
+        # --- Dispatch phase (parallel via dispatch_ready) ---
+        # #837: the dispatcher is synchronous, and matching a step's agent waits on
+        # an embedding call (up to AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS), so it runs on
+        # a worker thread and the event loop keeps serving meanwhile. to_thread runs
+        # it in a copy of this context (F196: run_in_executor would drop it).
+        dispatch_results = await asyncio.to_thread(MissionDispatcher.dispatch_ready, db, run, agents)
+
+        # PRD-204 S4: the dispatcher's budget gate pauses silently (sync
+        # code cannot await the dispatcher). This is that transition's
+        # async seam: the run entered dispatch RUNNING and came out PAUSED
+        # with a budget skip reason -- tell the user, once (the tick will
+        # not re-process a PAUSED run, so this cannot repeat).
+        if (
+            RunState(run.state) == RunState.PAUSED
+            and any(
+                r.skipped_reason in ("budget_exceeded", "budget_critical_deferred")
+                for r in dispatch_results
+            )
+        ):
+            await notify_mission_budget_paused(db, run)
+
+        await self._execute_dispatched(db, run, dispatch_results)
+
+        # --- Reconcile phase ---
+        await MissionReconciler.reconcile(db, run)
+
+        db.refresh(run)
+
+        if RunState(run.state) == RunState.VERIFYING:
+            await self._complete_verified_run(db, run)
+            db.refresh(run)
+
+        # --- PRD-164 S4: joiner checkpoint (bounded replanning) ---
+        # After dispatch + reconcile, the progress ledger decides whether the
+        # run is looping without forward progress; the joiner replans within
+        # COORDINATOR_MAX_REPLANS or halts. Best-effort: a joiner error never
+        # breaks the tick.
+        if RunState(run.state) == RunState.RUNNING:
+            try:
+                await self._joiner_checkpoint(db, run)
+            except Exception:
+                logger.error(
+                    "Joiner checkpoint failed for run %s", run.id, exc_info=True,
+                )
+
+        # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
+        # tick() only picks RunState.RUNNING runs, so a terminal state here is
+        # always a fresh transition this tick — emit exactly once. COMPLETED →
+        # green; FAILED / CANCELLED → down (the tile reflects the user-visible
+        # outcome). Best-effort: the helper swallows any emit error so a
+        # broken heartbeat writer cannot fail mission completion.
+        if RunState(run.state) in TERMINAL_RUN_STATES:
+            _emit_missions_primitive(
+                run.workspace_id,
+                success=RunState(run.state) == RunState.COMPLETED,
+                detail=(
+                    f"run={run.id} state={run.state} "
+                    f"stop_reason={run.stop_reason or 'unspecified'}"
+                ),
+            )
+            # PRD-227 US-002: narrate the run's terminal outcome into the launching
+            # thread (run-level). Same once-per-run guarantee as the heartbeat above.
+            _narrate_run_terminal(db, run)
+
+    async def _ensure_mission_field(self, db: Session, run: OrchestrationRun) -> None:
+        """PRD-108: the run has a live field before its tasks are dispatched (lazy
+        create for the manual-approve path), seeded with the run's uploaded documents.
+        """
         # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
         # Validates the underlying Qdrant collection still exists — a stale
         # field_id can survive in run.config if it was inherited from a parent
@@ -1834,8 +1916,8 @@ class CoordinatorService:
                         run.config = updated_config
                         db.flush()
                         needs_field = True
-                except Exception as e:
-                    logger.debug("[PRD-108] field exists-check raised: %s", e)
+                except Exception:
+                    logger.debug("[PRD-108] field exists-check raised for mission %s", run.id, exc_info=True)
 
         if needs_field:
             field_id = await self._create_mission_field(db, run)
@@ -1849,35 +1931,15 @@ class CoordinatorService:
                             db, field, field_id, attachments, run.workspace_id,
                         )
 
-        # Load roster agents for this workspace
-        agents: List[Agent] = (
-            db.query(Agent)
-            .filter(
-                and_(
-                    Agent.workspace_id == workspace_id,
-                    Agent.status == "active",
-                )
-            )
-            .all()
-        )
-
-        # --- Dispatch phase (parallel via dispatch_ready) ---
-        dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
-
-        # PRD-204 S4: the dispatcher's budget gate pauses silently (sync
-        # code cannot await the dispatcher). This is that transition's
-        # async seam: the run entered dispatch RUNNING and came out PAUSED
-        # with a budget skip reason -- tell the user, once (the tick will
-        # not re-process a PAUSED run, so this cannot repeat).
-        if (
-            RunState(run.state) == RunState.PAUSED
-            and any(
-                r.skipped_reason in ("budget_exceeded", "budget_critical_deferred")
-                for r in dispatch_results
-            )
-        ):
-            await notify_mission_budget_paused(db, run)
-
+    async def _execute_dispatched(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        dispatch_results: List[Any],
+    ) -> None:
+        """Run the tasks the dispatcher assigned this tick: prepare them serially on
+        the shared session, run their agents concurrently, record each result.
+        """
         # Collect successfully dispatched tasks for concurrent execution
         dispatched = [r for r in dispatch_results if r.dispatched]
 
@@ -1937,47 +1999,6 @@ class CoordinatorService:
                         )
                         result = {"status": "error", "error": str(result)}
                     await self._record_task_result(db, run, task, agent_id, result)
-
-        # --- Reconcile phase ---
-        await MissionReconciler.reconcile(db, run)
-
-        db.refresh(run)
-
-        if RunState(run.state) == RunState.VERIFYING:
-            await self._complete_verified_run(db, run)
-            db.refresh(run)
-
-        # --- PRD-164 S4: joiner checkpoint (bounded replanning) ---
-        # After dispatch + reconcile, the progress ledger decides whether the
-        # run is looping without forward progress; the joiner replans within
-        # COORDINATOR_MAX_REPLANS or halts. Best-effort: a joiner error never
-        # breaks the tick.
-        if RunState(run.state) == RunState.RUNNING:
-            try:
-                await self._joiner_checkpoint(db, run)
-            except Exception:
-                logger.error(
-                    "Joiner checkpoint failed for run %s", run.id, exc_info=True,
-                )
-
-        # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
-        # tick() only picks RunState.RUNNING runs, so a terminal state here is
-        # always a fresh transition this tick — emit exactly once. COMPLETED →
-        # green; FAILED / CANCELLED → down (the tile reflects the user-visible
-        # outcome). Best-effort: the helper swallows any emit error so a
-        # broken heartbeat writer cannot fail mission completion.
-        if RunState(run.state) in TERMINAL_RUN_STATES:
-            _emit_missions_primitive(
-                run.workspace_id,
-                success=RunState(run.state) == RunState.COMPLETED,
-                detail=(
-                    f"run={run.id} state={run.state} "
-                    f"stop_reason={run.stop_reason or 'unspecified'}"
-                ),
-            )
-            # PRD-227 US-002: narrate the run's terminal outcome into the launching
-            # thread (run-level). Same once-per-run guarantee as the heartbeat above.
-            _narrate_run_terminal(db, run)
 
     # ------------------------------------------------------------------
     # Joiner checkpoint — bounded replanning (PRD-164 S4)

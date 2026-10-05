@@ -6,10 +6,12 @@ Centralized manager for all embedding operations.
 Reads configuration from General Settings and provides unified interface.
 """
 
+import inspect
 import logging
 import threading
 from typing import Optional, List
 
+from core.loop_scoped_clients import adopt
 from .clients.base import (
     BaseEmbeddingProvider,
     EmbeddingConfig,
@@ -62,6 +64,21 @@ class EmbeddingManager:
     def __init__(self):
         self.provider: Optional[BaseEmbeddingProvider] = None
         self._provider_loaded = False
+        adopt(self)  # #837: made inside a closes_its_clients call, it is closed on that call's loop
+
+    async def aclose(self) -> None:
+        """Close the provider's async HTTP client on the running loop (#837).
+
+        Left open, the OpenAI SDK's client closes itself when it is garbage-collected,
+        with a task on whatever loop runs then, which for a client made on a worker
+        thread's loop is one it never ran on. The shared manager
+        (``get_embedding_manager``) serves every loop and is never closed here.
+        """
+        if self is _embedding_manager:
+            return
+        close = getattr(getattr(self.provider, "client", None), "close", None)
+        if close is not None and inspect.iscoroutinefunction(close):
+            await close()
     
     def _load_provider(self):
         """Load embedding provider from system settings"""

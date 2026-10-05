@@ -370,7 +370,12 @@ class AgentMatcher:
         agents: Sequence[Agent],
         workspace_id: Optional[UUID],
     ) -> Optional[SemanticSignals]:
-        """See :func:`modules.coordination.match_signals.compute_semantic_signals_sync`."""
+        """See :func:`modules.coordination.match_signals.compute_semantic_signals_sync`.
+        #837: a step pinned to an active agent (as ``rank`` reads the pin) is not
+        scored, its pin picks the agent, so it costs no embedding call."""
+        context = task.input_context if isinstance(task.input_context, dict) else {}
+        if _pinned_agent_id(context.get("pinned_agent_id"), agents) is not None:
+            return None
         return compute_semantic_signals_sync(
             task=task, agents=agents, workspace_id=workspace_id,
         )
