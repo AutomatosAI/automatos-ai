@@ -9,10 +9,16 @@ name: test
 # is the safety net: any future hang fails fast instead of burning the whole
 # job.
 #
-# Triggers on push to ANY branch so a red suite surfaces on the feature
-# branch — before a PR is opened — not only at PR time. The pull_request
-# trigger is kept so the gate also evaluates the merged result. Concurrency
-# cancels superseded runs on the same ref so rapid pushes don't queue.
+# Triggers on pull_request (the merged result) and on push to main only. A
+# push to every branch ran the whole net twice per PR commit (the push run and
+# the PR run sit on different refs, so neither cancelled the other), and with
+# the account's 20 concurrent jobs PRs queued 30-45 minutes before a job
+# started. A branch gets the net by opening a (draft) PR; the Ralph runner
+# opens one right after seeding a wave. workflow_dispatch runs it by hand.
+# Concurrency cancels superseded runs on the same ref so rapid pushes don't queue.
+#
+# The two image lanes (media-render, prod-image-parity) run on a PR only when
+# it touches what they build — the `changes` job decides — and always on main.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -23,17 +29,57 @@ name: test
 on:
   push:
     branches:
-      - "**"
-  pull_request:
-    branches:
       - main
-      - studio
+  # Any base branch, so a PR stacked on another PR (a Ralph wave) is checked too.
+  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Which path-gated lanes this run needs. On a PR it lists the PR's files
+  # (renames count by both names) and matches each lane's paths; on push to main
+  # and on a manual run every lane runs. If the file list can't be read, or the
+  # API truncates it (3000 files), every lane runs: a gap here only costs time.
+  changes:
+    name: Which image lanes this change needs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      media_render: ${{ steps.match.outputs.media_render }}
+      prod_images: ${{ steps.match.outputs.prod_images }}
+    steps:
+      - id: match
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # The renderer, the seeded social templates, and every orchestrator
+          # module scripts/ci/social_template_previews.py imports.
+          MEDIA_RENDER_PATHS: >-
+            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|ci_block_font)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
+          # What the three default-args builds bake: Dockerfiles, dependency
+          # manifests, the frontend edition literal, the worker image.
+          PROD_IMAGE_PATHS: >-
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
+        run: |
+          set -euo pipefail
+          all() { echo "media_render=true" >> "$GITHUB_OUTPUT"; echo "prod_images=true" >> "$GITHUB_OUTPUT"; echo "every lane runs: $1"; }
+          if [ "$EVENT" != "pull_request" ]; then all "$EVENT"; exit 0; fi
+          if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
+            all "the PR's file list could not be read"; exit 0
+          fi
+          if [ "$(wc -l <<< "$files")" -ge 3000 ]; then all "the PR lists 3000+ files"; exit 0; fi
+          # A here-string, not a pipe: under pipefail grep -q closing a pipe early reads as no match.
+          lane() { if grep -qE "$2" <<< "$files"; then echo "$1=true"; else echo "$1=false"; fi; }
+          lane media_render "$MEDIA_RENDER_PATHS" | tee -a "$GITHUB_OUTPUT"
+          lane prod_images "$PROD_IMAGE_PATHS" | tee -a "$GITHUB_OUTPUT"
+
   orchestrator-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -697,6 +743,8 @@ jobs:
   # admin's call.
   prod-image-parity:
     name: Prod images built with default args carry production behaviour (non-required)
+    needs: changes
+    if: needs.changes.outputs.prod_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -734,6 +782,8 @@ jobs:
   # (scripts/ralph/acceptance-prd251w1.sh).
   media-render:
     name: media-render — image builds and renders the fixture
+    needs: changes
+    if: needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
