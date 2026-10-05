@@ -48,6 +48,23 @@ def test_duplicate_groups_keeps_only_the_lowest_numbered_canonical_first():
     ]
 
 
+def test_duplicate_groups_keeps_a_constraint_over_a_bare_index_that_sorts_first():
+    rows = [
+        _row("users", "ix_users_email", _EMAIL_DEF),  # bare, sorts first by name
+        _row("users", "users_email_key", _EMAIL_DEF, "u", "users_email_key"),
+    ]
+    assert [r["index_name"] for r in gsb._duplicate_groups(rows)[0]] == [
+        "users_email_key", "ix_users_email",
+    ]
+
+
+def test_duplicate_groups_orders_key_suffixes_numerically():
+    rows = [_row("users", f"users_email_key{n}", _EMAIL_DEF) for n in ("10", "2", "")]
+    assert [r["index_name"] for r in gsb._duplicate_groups(rows)[0]] == [
+        "users_email_key", "users_email_key2", "users_email_key10",
+    ]
+
+
 def test_duplicate_groups_ignores_a_table_with_no_duplicate():
     assert gsb._duplicate_groups([_row("users", "users_email_key", _EMAIL_DEF)]) == []
 

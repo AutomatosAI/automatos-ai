@@ -325,12 +325,19 @@ def _unique_index_rows(engine) -> list[dict]:
 
 def _duplicate_groups(rows: list[dict]) -> list[list[dict]]:
     """Rows grouped by (table, name-masked definition); only groups with more
-    than one member (actual duplicates), each sorted so the canonical
-    (lowest-numbered) index is first — ``_key`` before ``_key1`` before ``_key2``."""
+    than one member (actual duplicates), each sorted so the canonical index is
+    first: a constraint-backed one before a bare index (``ON CONFLICT ON
+    CONSTRAINT`` names it), then the lowest-numbered — ``_key`` before ``_key1``
+    before ``_key10``."""
     groups: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
         groups.setdefault((row["table_name"], row["normdef"]), []).append(row)
-    return [sorted(g, key=lambda r: r["index_name"]) for g in groups.values() if len(g) > 1]
+    return [sorted(g, key=_canonical_order) for g in groups.values() if len(g) > 1]
+
+
+def _canonical_order(row: dict) -> tuple[bool, int, str]:
+    """Sort key for a duplicate group: constraint-backed first, then shortest name, then name."""
+    return (row["constraint_type"] != "u", len(row["index_name"]), row["index_name"])
 
 
 def _drop_duplicate_index(engine, row: dict) -> None:
