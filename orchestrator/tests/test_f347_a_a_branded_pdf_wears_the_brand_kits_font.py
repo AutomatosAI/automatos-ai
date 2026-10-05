@@ -124,11 +124,17 @@ def pdf_lines(path: Path) -> List[str]:
     return [" ".join(line.split()) for line in text.splitlines() if line.strip()]
 
 
+def flat(fontname: str) -> str:
+    """A PDF font name without its subset prefix, spaces or hyphens: CI's renderer names
+    them "IKCJUC+DejaVu-Sans-Mono" and "CI-Block", others "DejaVu Sans Mono"."""
+    return fontname.split("+")[-1].replace(" ", "").replace("-", "")
+
+
 def pdf_fonts(path: Path) -> Set[str]:
-    """The fonts the PDF's text is set in, by name, without spaces or the subset prefix."""
+    """The fonts the PDF's text is set in, by name (``flat``)."""
     with pdfplumber.open(path) as pdf:
         names = {char["fontname"] for page in pdf.pages for char in page.chars}
-    return {name.split("+")[-1].replace(" ", "") for name in names}
+    return {flat(name) for name in names}
 
 
 def _style(html: str) -> str:
@@ -160,7 +166,7 @@ def test_the_pdfs_headings_are_set_in_the_kits_heading_font(monkeypatch, tmp_pat
         words = [word for page in document.pages for word in page.extract_words(extra_attrs=["fontname"])]
     fonts_of: Dict[str, Set[str]] = {}
     for word in words:
-        fonts_of.setdefault(word["text"], set()).add(word["fontname"].replace(" ", ""))
+        fonts_of.setdefault(word["text"], set()).add(flat(word["fontname"]))
     # The heading is in the heading font (the footer repeats the title in the body font).
     assert any("DejaVuSerif" in name for name in fonts_of["Harbourline"]), fonts_of
     assert all("DejaVuSansMono" in name for name in fonts_of["Friday."]), fonts_of
