@@ -130,7 +130,7 @@ composio-openai==0.12.0
 boto3>=1.39.5
 
 # PRD-63: Document Generation Module
-weasyprint>=62.0
+weasyprint>=62.0,<70  # F343: 70.0 (8 Sep 2026) dropped default_url_fetcher; every PDF render 500s
 docxtpl>=0.18.0
 xlsxwriter>=3.2.0
 gotenberg-client>=0.8.0
