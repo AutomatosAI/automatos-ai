@@ -21,9 +21,175 @@ disagree, the file wins — open an issue.
 | Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
-| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: on a fresh install, `docker compose up -d --build` does what `make up` does. The smooth path is everything inside WSL2: [SETUP.md](../../SETUP.md) walks through it. Session mode needs WSL2 (see *Session mode → Before you start*). |
+| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode needs WSL2. |
 
 Nothing else. No cloud account, no identity provider, no AWS.
+
+## 1a. Windows
+
+There are two ways to run the local edition on Windows. The WSL2 recipe below
+is the one [R-Capone](https://github.com/R-Capone) worked out and reported in
+[issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818), tested
+on Windows 11 with WSL 2.7.8.
+
+**Docker Desktop on Windows: the stack only.** Clone with Git for Windows as
+usual. The repository's `.gitattributes` keeps every file the containers run
+at LF line endings, even with Git's default `core.autocrlf=true`, and the
+*Checkout line endings* CI lane checks that whenever one of them changes.
+`make` is not installed, so run the commands in §1b from PowerShell. Session
+mode does not run on native Windows: the host needs a Unix pty and launchd or
+`systemd --user`, and it exits with a message saying so.
+
+**Everything inside WSL2: the stack and session mode.**
+
+1. **Give Automatos a distro of its own.** In PowerShell:
+
+   ```powershell
+   wsl --install Ubuntu-24.04 --name automatos
+   ```
+
+   `--name` needs a recent WSL (`wsl --update`). Without it the distro is
+   called `Ubuntu-24.04`: use that name wherever this section says
+   `automatos`. A separate distro keeps systemd, Docker and the keep-alive
+   task (step 7) away from any distro you already use.
+2. **Turn on systemd.** Inside the distro, add this to `/etc/wsl.conf`:
+
+   ```ini
+   [boot]
+   systemd=true
+   ```
+
+   Then run `wsl --shutdown` in PowerShell and reopen the distro with
+   `wsl -d automatos`. *Check:* `systemctl --user status` prints a status, not
+   an error.
+3. **Install Docker Engine inside the distro.** Follow Docker's *Install
+   Docker Engine on Ubuntu* guide in the distro, then:
+
+   ```bash
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker $USER     # then close the distro and open it again
+   ```
+
+   Docker Desktop with *Settings → Resources → WSL integration* turned on for
+   this distro works too. With Docker Engine inside the distro, the containers
+   stop whenever the distro stops (step 7).
+4. **Clone inside the distro,** in your Linux home: `cd ~` and then
+   `git clone https://github.com/AutomatosAI/automatos-ai.git`. Not under
+   `/mnt/c`: file access across the Windows drive is slow, and session file
+   paths stop lining up with Deliverables → Explorer.
+5. **Create `.env`** with the three secrets (§2), then set the paths and ports
+   below.
+6. **Start it:** `sudo apt install -y make`, then `make up` (or the commands
+   in §1b). Open http://localhost:3000 in your Windows browser: WSL forwards
+   the ports.
+7. **Keep the distro running.** WSL shuts a distro down a few seconds after its
+   last `wsl.exe` session exits. That stops the stack (with Docker Engine in
+   the distro) and the session host. A Windows Task Scheduler task that starts
+   at logon and holds a session open keeps it up. Task Scheduler stops a task
+   after 72 hours by default, so turn that limit off. In PowerShell:
+
+   ```powershell
+   $action   = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d automatos -u root -- sleep infinity"
+   $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+   $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+   Register-ScheduledTask -TaskName "Automatos WSL keep-alive" -Action $action -Trigger $trigger -Settings $settings
+   ```
+
+   Or in the Task Scheduler app: trigger *At log on*, action `conhost.exe`
+   with the arguments `--headless wsl.exe -d automatos -u root -- sleep infinity`,
+   and on the *Settings* tab clear *Stop the task if it runs longer than*. In
+   the reporter's setup, the stack and the host were back and healthy about
+   105 seconds after a Windows restart.
+8. **Session mode** (optional): follow *Session mode* below, inside the
+   distro. Two WSL details. Claude Code has no browser in WSL, so open the
+   login link it prints in your Windows browser. And run
+   `sudo loginctl enable-linger $USER` before `make cli-host-install`: without
+   it, the `systemd --user` service (and so the host) runs only while you are
+   logged in to the distro.
+
+**Paths in `.env`.** `AUTOMATOS_WORKSPACE_DIR` (the deliverables root, §5) and
+`LOCAL_PROJECTS_DIR` (your own projects, read-only) take an absolute path on
+the machine that runs Docker:
+
+| Where Docker runs | `AUTOMATOS_WORKSPACE_DIR` | `LOCAL_PROJECTS_DIR` |
+|---|---|---|
+| Inside the WSL2 distro | `/home/you/automatos-deliverables` | `/home/you/code` |
+| Inside the WSL2 distro, projects on the Windows drive | `/home/you/automatos-deliverables` | `/mnt/c/Users/you/source` (works, but slower) |
+| Docker Desktop, native Windows | `C:/Users/you/automatos-deliverables` | `C:/Users/you/source` |
+
+On native Windows, write the paths with forward slashes. Under WSL2, keep
+`AUTOMATOS_WORKSPACE_DIR` inside the distro, never under `/mnt/c`.
+
+**Ports.** If something on the machine already holds a port (often a local
+Postgres on 5432), `docker compose up` fails with `port is already allocated`.
+Set the matching variable in `.env`, for example `POSTGRES_PORT=5433`. Only the
+port on your machine changes; inside the compose network the containers still
+reach Postgres on 5432. The other `*_PORT` variables are in §3.
+
+## 1b. The commands behind `make`
+
+`make` is a convenience; plain `docker compose` does the same work. Here is
+what each target runs, from the repository root. On native Windows, run the
+`docker` commands in PowerShell. `<deliverables>` is the absolute path in
+`AUTOMATOS_WORKSPACE_DIR`, or the absolute path of the `workspaces` folder in
+the repository when it is not set.
+
+```bash
+# make up: build if needed, start, then tidy up
+mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory -Force <deliverables>\projects
+docker compose up -d --build --remove-orphans
+docker image prune -f
+docker builder prune -f
+
+# make up-images: the published images, no build
+docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
+docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build --remove-orphans
+
+# make dev: hot reload from your source
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
+
+# make down: stop, keep your data
+docker compose down --remove-orphans
+
+# make clean: dangling images and unused build cache, never your data
+docker image prune -f
+docker builder prune -f
+
+# make status: what is running, and the disk it uses
+docker compose ps
+docker system df
+
+# make reset: DESTRUCTIVE, deletes the database and every named volume.
+# make asks you to type 'reset' first; this command does not ask.
+docker compose down -v --remove-orphans
+```
+
+`make up` and `make up-images` do three more things. They move a
+deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
+does this too); a fresh install never needs it. They print `make status`. And
+they tell a running session host to pick up the new code
+(`make cli-host-nudge`, below).
+
+The session-host targets run Python 3.9 or later, with nothing to install, on
+macOS, Linux or WSL2. Run them from `services/cli-host`. Add
+`--allow <your projects>` when `LOCAL_PROJECTS_DIR` is set:
+
+```bash
+cd services/cli-host
+
+# make cli-host PAIR=XXXX-XXXX: pair once, then serve (Ctrl-C to stop)
+python3 -m automatos_cli_host --allow <deliverables> --default-root <deliverables> --pair XXXX-XXXX
+
+# make cli-host-install: the host as a login service
+python3 -m automatos_cli_host --install --allow <deliverables> --default-root <deliverables>
+
+python3 -m automatos_cli_host --service-status     # make cli-host-status
+python3 -m automatos_cli_host --restart-service    # make cli-host-restart
+python3 -m automatos_cli_host --uninstall          # make cli-host-uninstall
+
+# make cli-host-nudge: a running host reloads on the new code
+python3 -m automatos_cli_host --nudge
+```
 
 ## 2. The three secrets and the one key
 
@@ -741,8 +907,8 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   native Windows; started there, it exits with a message saying so. On Windows,
   run the stack and the host inside a WSL2 distro with systemd enabled, and run
   `loginctl enable-linger <user>` so the host keeps running without a login.
-  The step-by-step recipe, including keeping the distro alive, is in
-  [SETUP.md](../../SETUP.md) (tested in
+  The recipe, including keeping the distro alive, is in §1a, and
+  [SETUP.md](../../SETUP.md) walks through it step by step (tested in
   [issue #818](https://github.com/AutomatosAI/automatos-ai/issues/818)).
 - On Linux and WSL2: `bubblewrap` and `socat` (`sudo apt-get install bubblewrap
   socat`), for the session sandbox below. macOS needs nothing. Without them the
