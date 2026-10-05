@@ -488,7 +488,8 @@ class Session:
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
-        brand = brand_files_note(write_brand_files(self.ticket, session_dir))  # F332: the kit's logo files
+        brand_root = session_deliverables_dir(self.default_root, self.task_id) or session_dir  # F332: where it saves
+        brand = brand_files_note(write_brand_files(self.ticket, brand_root))
         ticket_path.write_text(build_ticket_file(self.ticket, self.default_root, self.plan_turn) + brand, encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label), encoding="utf-8")

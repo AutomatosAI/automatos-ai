@@ -1,11 +1,17 @@
-"""F332 (night 10): the brand kit's logo, as files in the session's ticket folder.
+"""F332 (night 10): the brand kit's logo, as files in the folder the session saves into.
 
 A session runs here, on the operator's machine, where the platform's document store
 is out of reach: night 10's agents had no logo file and guessed. The claim carries the
 ticket's workspace's uploaded logo and logo mark (``brand_files``: name, mime, base64
 data, from ``orchestrator/services/session_brand_files.py``). They are written under
-``brand/`` in the ticket folder, which the session may read (the gate grants it), and
-the ticket file names them. They are the host's files, never the session's deliverables.
+``brand/`` in the ticket's deliverables folder (``<root>/sessions/<ticket>``, the folder
+the ticket file tells the session to save into, which the gate grants), else, on a host
+with no default root, in the ticket folder. The ticket file names them.
+
+The retest of #961 put them in the host's own ticket folder first: the session could
+read them there, but copying one into its deliverables folder was a Bash command the
+gate held for the operator, so the logo never reached the work. Where the session saves,
+it needs no copy: it links or embeds the file as it is.
 
 Only the names the backend sends are accepted (``logo.png``, ``logo-mark.jpg`` …), so a
 claim can never write outside that folder, and a file is at most the upload limit.
@@ -25,6 +31,8 @@ BRAND_FOLDER = "brand"
 BRAND_FILE_NAME = re.compile(r"^logo(?:-mark)?\.(?:png|jpg)$")
 # The backend's own upload limit for a logo (modules/documents/brand_logo.py).
 MAX_BRAND_FILE_BYTES = 2 * 1024 * 1024
+# As the deliverables folder itself (session.py): the Deliverables explorer reads it.
+BRAND_FOLDER_MODE = 0o755
 
 
 def _decoded(entry: Any) -> Optional[bytes]:
@@ -48,10 +56,10 @@ def _clear(folder: Path) -> None:
             old.unlink(missing_ok=True)
 
 
-def write_brand_files(ticket: Dict[str, Any], session_dir: Path) -> List[Path]:
-    """Write the claim's brand files under ``<session_dir>/brand/``; the paths written.
-    A file that cannot be written is a warning, never a failed session."""
-    folder = session_dir / BRAND_FOLDER
+def write_brand_files(ticket: Dict[str, Any], root: Path) -> List[Path]:
+    """Write the claim's brand files under ``<root>/brand/`` (the folder the session saves
+    into); the paths written. A file that cannot be written is a warning, never a failed session."""
+    folder = root / BRAND_FOLDER
     entries = ticket.get("brand_files")
     written: List[Path] = []
     try:
@@ -59,7 +67,7 @@ def write_brand_files(ticket: Dict[str, Any], session_dir: Path) -> List[Path]:
         for entry in entries if isinstance(entries, list) else []:
             data = _decoded(entry)
             if data is not None:
-                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                folder.mkdir(parents=True, exist_ok=True, mode=BRAND_FOLDER_MODE)
                 (folder / entry["name"]).write_bytes(data)
                 written = [*written, folder / entry["name"]]
     except OSError as exc:
@@ -72,8 +80,12 @@ def brand_files_note(paths: Sequence[Path]) -> str:
     if not paths:
         return ""
     listed = "\n".join(f"- {path}" for path in paths)
-    return ("\nBrand files: the brand kit's own logo, ready to use. Copy it into what you make; "
-            f"never draw, fetch or guess a logo.\n{listed}\n")
+    return ("\nBrand files: the brand kit's own logo, already in the folder you save into. Use these "
+            "files as they are (link or embed them in what you make); never draw, fetch or guess a logo.\n"
+            f"{listed}\n")
 
 
-__all__ = ["BRAND_FILE_NAME", "BRAND_FOLDER", "MAX_BRAND_FILE_BYTES", "brand_files_note", "write_brand_files"]
+__all__ = [
+    "BRAND_FILE_NAME", "BRAND_FOLDER", "BRAND_FOLDER_MODE", "MAX_BRAND_FILE_BYTES", "brand_files_note",
+    "write_brand_files",
+]

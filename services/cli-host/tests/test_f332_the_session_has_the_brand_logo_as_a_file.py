@@ -1,11 +1,14 @@
-"""F332 (night 10): a session has the brand kit's logo as a file in its ticket folder.
+"""F332 (night 10): a session has the brand kit's logo as a file where it saves its work.
 
 Night 10: "None of the tools I have here can read an uploaded image from the Brand kit
 page" (BA); "no logo file" (Support). The claim now carries the workspace's uploaded
 logo and logo mark (``brand_files``). The host writes them under ``brand/`` in the
-ticket folder, names them in the ticket file, and the gate lets the session read them.
-A name the host does not write, bad data or an oversize file is refused, and nothing is
-ever written outside that folder.
+ticket's deliverables folder (``<root>/sessions/<ticket>``), names them in the ticket
+file, and the gate lets the session read them there without asking anyone. The retest
+of #961 had them in the host's own ticket folder, and copying one into the deliverables
+folder was held for approval (ticket 2099). A host with no default root keeps them in
+the ticket folder. A name the host does not write, bad data or an oversize file is
+refused, and nothing is ever written outside that folder.
 """
 from __future__ import annotations
 
@@ -26,37 +29,62 @@ def _file(name, data):
     return {"name": name, "mime": "image/png", "data": base64.b64encode(data).decode("ascii")}
 
 
-def _session(tmp_path, ticket):
-    cfg = type("Cfg", (), {"ask_timeout": 1.0, "sessions_dir": tmp_path / "sessions",
-                           "socket_path": tmp_path / "s.sock"})()
+def _session(tmp_path, ticket, default_root="ws"):
+    cfg = type("Cfg", (), {"ask_timeout": 1.0, "sessions_dir": tmp_path / "host" / "sessions",
+                           "socket_path": tmp_path / "s.sock", "state_dir": tmp_path / "host"})()
     return Session({"task_id": 332, "attempt": 1, "session_id": "sid", "title": "Letter to Tidewater", **ticket},
-                   cfg, [str(tmp_path)], tmp_path / "s.sock", default_root=str(tmp_path / "ws"))
+                   cfg, [str(tmp_path / "ws")], tmp_path / "s.sock",
+                   default_root=str(tmp_path / default_root) if default_root else None)
 
 
-def test_the_ticket_folder_has_the_logo_and_the_ticket_file_names_it(tmp_path):
+def _deliverables(tmp_path):
+    return tmp_path / "ws" / "sessions" / "332"
+
+
+def test_the_folder_the_session_saves_into_has_the_logo_and_the_ticket_file_names_it(tmp_path):
     s = _session(tmp_path, {"brand_files": [_file("logo.png", LOGO), _file("logo-mark.jpg", MARK)]})
     ticket_path, _ = s._write_session_files("Claude Code")
-    brand = tmp_path / "sessions" / "332" / "brand"
+    brand = _deliverables(tmp_path) / "brand"
     assert (brand / "logo.png").read_bytes() == LOGO
     assert (brand / "logo-mark.jpg").read_bytes() == MARK
+    assert not (s.session_dir / "brand").exists()      # not in the host's own state, where a copy out is held
     ticket = ticket_path.read_text(encoding="utf-8")
-    assert "Brand files:" in ticket
+    assert "Brand files:" in ticket and f"save any file you produce under {_deliverables(tmp_path)}/" in ticket
     assert str(brand / "logo.png") in ticket and str(brand / "logo-mark.jpg") in ticket
 
 
-def test_the_session_may_read_its_logo(tmp_path):
-    s = _session(tmp_path, {"brand_files": [_file("logo.png", LOGO)]})
+def test_the_session_reads_its_logo_without_asking_anyone(tmp_path):
+    s = _session(tmp_path, {"brand_files": [_file("logo.png", LOGO)], "cwd": ""})
     s._write_session_files("Claude Code")
-    ctx = policy.PolicyContext(cwd=tmp_path / "ws", extra_dirs=(s.session_dir,), off_limits=(tmp_path / "sessions",))
-    read = policy.decide(_CLAUDE.tool_intent("Read", {"file_path": str(s.session_dir / "brand" / "logo.png")}), ctx)
-    assert read.behavior == "allow"
+    cwd = s._working_dir()                     # a ticket with no folder of its own runs in its deliverables folder
+    assert cwd == _deliverables(tmp_path).resolve()
+    s._set_policy(cwd, CLAUDE, None)
+    logo = cwd / "brand" / "logo.png"
+    for tool, tool_input in (("Read", {"file_path": str(logo)}), ("Bash", {"command": "ls brand"})):
+        assert policy.decide(_CLAUDE.tool_intent(tool, tool_input), s._policy).behavior == "allow", tool
+
+
+def test_a_ticket_with_its_own_folder_may_read_the_logo_where_it_saves(tmp_path):
+    (tmp_path / "ws" / "repo").mkdir(parents=True)
+    s = _session(tmp_path, {"brand_files": [_file("logo.png", LOGO)], "cwd": str(tmp_path / "ws" / "repo")})
+    s._write_session_files("Claude Code")
+    s._set_policy(s._working_dir(), CLAUDE, None)
+    logo = _deliverables(tmp_path) / "brand" / "logo.png"
+    assert policy.decide(_CLAUDE.tool_intent("Read", {"file_path": str(logo)}), s._policy).behavior == "allow"
+
+
+def test_a_host_without_a_default_root_keeps_them_in_the_ticket_folder(tmp_path):
+    s = _session(tmp_path, {"brand_files": [_file("logo.png", LOGO)]}, default_root=None)
+    ticket_path, _ = s._write_session_files("Claude Code")
+    assert (s.session_dir / "brand" / "logo.png").read_bytes() == LOGO
+    assert str(s.session_dir / "brand" / "logo.png") in ticket_path.read_text(encoding="utf-8")
 
 
 def test_a_claim_without_brand_files_says_nothing_of_them(tmp_path):
     s = _session(tmp_path, {})
     ticket_path, _ = s._write_session_files("Claude Code")
     assert "Brand files" not in ticket_path.read_text(encoding="utf-8")
-    assert not (tmp_path / "sessions" / "332" / "brand").exists()
+    assert not (_deliverables(tmp_path) / "brand").exists()
 
 
 def test_only_a_logo_name_is_written_and_never_outside_the_folder(tmp_path):
