@@ -1,5 +1,5 @@
 {
-  "route_count": 899,
+  "route_count": 901,
   "routes": [
     {
       "method": "GET",
@@ -1016,6 +1016,14 @@
     {
       "method": "GET",
       "path": "/api/deliverables/{deliverable_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/deliverables/{deliverable_id}/knowledge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/deliverables/{deliverable_id}/knowledge"
     },
     {
       "method": "GET",
