@@ -84,6 +84,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
+from .document_claims import also_checks_documents  # F351 (night 10b)
 from .shop_and_team_claims import also_checks_the_shop_and_the_team  # F316/F324 (night 9b)
 
 # F201: "I have also updated your subscription" (#1146's draft) is a claim too.
@@ -351,6 +352,7 @@ def _auto_speaks() -> bool:
     return current_usage_scope().get("request_type") == LANE_CHAT
 
 
+@also_checks_documents  # F351 (night 10b): a document said to be made, kept or coming; a retry; a template
 @also_checks_the_shop_and_the_team  # F316/F324 (night 9b): a shop figure, or "the team knows"
 def claimed_action_not_done(text: str, done: Optional[set] = None, *,
                             promises: Optional[bool] = None) -> Optional[str]:

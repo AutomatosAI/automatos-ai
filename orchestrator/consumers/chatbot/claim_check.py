@@ -46,6 +46,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
+from modules.tools.execution import document_claims as documents
 from modules.tools.execution.shop_and_team_claims import says_it_for_the_shop_and_the_team  # F316/F324
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,16 @@ NOT_DONE_SAID = {
     "counted exactly": "I didn't count those figures exactly in this reply",
     "re-checked": "I didn't re-check that figure in this reply, so I can't yet say which one is right",
     "under way": "nothing is still running from this reply, and I won't come back to this on my own",
+    # F351 (night 10b): a document said to be made, kept or coming, a retry, a template.
+    documents.DOCUMENT_MADE: "I didn't make that document in this reply, so there's nothing new in your Deliverables",
+    documents.DOCUMENT_REFUSED: ("I tried to make that document in this reply, but it didn't go through, so "
+                                 "there's nothing new in your Deliverables"),
+    documents.DOCUMENT_THERE: ("I didn't make or look up that document in this reply, so I can't say it's in your "
+                               "Deliverables"),
+    documents.DOCUMENT_COMING: ("I didn't make that document in this reply and nothing is making it now, so it won't "
+                                "turn up in your Deliverables on its own"),
+    documents.TRIED_AGAIN: "I didn't try it again in this reply",
+    documents.TEMPLATE_MADE: "I didn't set up a template in this reply",
 }
 NO_SUCH_ID = "Just to be clear: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
