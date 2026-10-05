@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, attributes
-from sqlalchemy import and_, or_, func, desc, String
+from sqlalchemy import and_, or_, func, desc
 from datetime import datetime, timedelta
 import logging
 import json
@@ -200,12 +200,8 @@ async def list_workflows(
         if owner:
             query = query.filter(Workflow.owner == owner)
         if tag:
-            # For JSON array column 'tags', check if provided tag is contained
-            try:
-                query = query.filter(Workflow.tags.contains([tag]))
-            except Exception:
-                # Fallback: simple text match on serialized JSON
-                query = query.filter(func.cast(Workflow.tags, String).ilike(f"%\"{tag}\"%"))
+            # JSONB containment (@>), served by ix_workflows_tags_gin (#840)
+            query = query.filter(Workflow.tags.contains([tag]))
         total = query.count()
         rows = query.order_by(desc(Workflow.updated_at)).offset(skip).limit(limit).all()
         items = [

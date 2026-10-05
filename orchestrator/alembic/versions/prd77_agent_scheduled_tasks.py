@@ -51,14 +51,28 @@ def upgrade() -> None:
             WHERE status = 'active';
 
         -- Constraint: task_type must be valid
-        ALTER TABLE agent_scheduled_tasks
-            ADD CONSTRAINT ck_scheduled_task_type
-            CHECK (task_type IN ('one_shot', 'recurring'));
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_scheduled_task_type'
+            ) THEN
+                ALTER TABLE agent_scheduled_tasks
+                    ADD CONSTRAINT ck_scheduled_task_type
+                    CHECK (task_type IN ('one_shot', 'recurring'));
+            END IF;
+        END $$;
 
         -- Constraint: status must be valid
-        ALTER TABLE agent_scheduled_tasks
-            ADD CONSTRAINT ck_scheduled_task_status
-            CHECK (status IN ('active', 'paused', 'completed', 'cancelled', 'failed'));
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_scheduled_task_status'
+            ) THEN
+                ALTER TABLE agent_scheduled_tasks
+                    ADD CONSTRAINT ck_scheduled_task_status
+                    CHECK (status IN ('active', 'paused', 'completed', 'cancelled', 'failed'));
+            END IF;
+        END $$;
     """)
 
 
