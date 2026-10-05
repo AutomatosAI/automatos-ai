@@ -2468,6 +2468,8 @@ class CoordinatorService:
                 "cli_agent": True,
                 "workspace_id": run.workspace_id,
                 "run_id": run.id,
+                # F155/F339: _task_io refuses a widget-born mission's step on a session.
+                "origin": dict(run.config or {}),
             }
 
         force_tier = mode_caps.get("force_llm_tier")
