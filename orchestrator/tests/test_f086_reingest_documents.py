@@ -91,7 +91,6 @@ def test_clear_chunks_keeps_the_document_and_drops_what_ingestion_stored(monkeyp
 
     manager = mgr.DocumentManager.__new__(mgr.DocumentManager)
     manager.db_config, manager.use_s3_vectors, manager._s3_backend = {}, False, None
-    monkeypatch.setattr(manager, "_ensure_database_initialized", lambda: None)
     monkeypatch.setattr(mgr.psycopg2, "connect", lambda **_kw: Conn())
     assert manager.clear_chunks(720) == 4
     statements = [sql for sql, _ in log]

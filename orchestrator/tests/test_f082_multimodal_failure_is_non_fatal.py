@@ -118,7 +118,6 @@ def _process(monkeypatch, db, text):
             DocumentChunk(document_id=7, chunk_index=0, content="Margins are thin this quarter across both regions.")
         ],
     )
-    monkeypatch.setattr(manager, "_ensure_database_initialized", lambda: None)
     monkeypatch.setattr(manager, "_emit_ingest_heartbeat", lambda **_kw: None)
 
     async def embed(texts):
