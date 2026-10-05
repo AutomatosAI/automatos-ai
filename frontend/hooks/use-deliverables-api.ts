@@ -65,6 +65,8 @@ export interface Deliverable {
   file_size_bytes: number | null
   preview_url: string | null
   preview_type: string | null
+  /** F353: the first-page picture of a document, sheet or report; null when it has none. */
+  thumbnail_url?: string | null
   extra: Record<string, any>
   status: string
   created_at: string

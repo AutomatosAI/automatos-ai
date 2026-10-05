@@ -1,5 +1,5 @@
 {
-  "route_count": 899,
+  "route_count": 900,
   "routes": [
     {
       "method": "GET",
@@ -1016,6 +1016,10 @@
     {
       "method": "GET",
       "path": "/api/deliverables/{deliverable_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deliverables/{deliverable_id}/thumbnail"
     },
     {
       "method": "GET",
