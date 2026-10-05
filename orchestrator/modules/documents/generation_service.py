@@ -82,7 +82,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.brand_logo import brand_kit_for_render
 from modules.documents.blocks import (
-    blocks_from_legacy, legacy_render_data,
+    legacy_render_data,
     collect_variable_paths,
     render_document_docx,
     render_document_html,
@@ -92,6 +92,7 @@ from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
 from modules.documents.data_coverage import template_for, unused_data_keys
+from modules.documents.letterhead import fallback_blocks
 from modules.documents.pdf_writer import write_pdf
 
 logger = logging.getLogger(__name__)
@@ -235,19 +236,20 @@ class DocumentGenerationService:
         ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
         return brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
 
-    def _render_block_html(self, block_doc, data, workspace_id, user_id, title):
+    def _render_block_html(self, block_doc, data, workspace_id, user_id, title, brand_kit=None):
         """Resolve a block document's variables and render it to a full HTML page.
 
         Returns ``(html, unresolved, unknown)`` — the render-honesty lists are
         captured for the finalisation gate in :meth:`generate` (P2-09 S3), not
         discarded behind a log line. The renderer marks BOTH empty-known and
         unknown paths as visible ``[[markers]]``; the authoring errors (unknown)
-        are split out so each list stays honest.
+        are split out so each list stays honest. ``brand_kit``: the render-ready kit, when
+        the caller has read it already.
         """
         paths = collect_variable_paths(block_doc)
         resolver = VariableResolver(self.db)
         resolved = resolver.resolve(workspace_id, user_id, paths, extra_data=data)
-        brand_kit = self._brand_kit_for(workspace_id)
+        brand_kit = self._brand_kit_for(workspace_id) if brand_kit is None else brand_kit
         rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title, data=data)
         unknown = list(resolved.unknown)
         unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
@@ -404,9 +406,10 @@ class DocumentGenerationService:
         else:
             # Path 3: no template — brand-aware block render of the legacy data shape.
             logger.info("No template found — rendering data via brand-aware block fallback")
-            block_doc = blocks_from_legacy(data)
+            brand_kit = self._brand_kit_for(workspace_id)
+            block_doc = await fallback_blocks(data, self.db, workspace_id, brand_kit)  # F331: under the kit's letterhead
             rendered_html, unresolved, unknown = self._render_block_html(
-                block_doc, data, workspace_id, user_id, title
+                block_doc, data, workspace_id, user_id, title, brand_kit=brand_kit
             )
 
         # Generate PDF
