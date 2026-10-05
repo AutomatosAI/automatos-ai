@@ -17,12 +17,28 @@ with a text-cast ``ILIKE`` fallback, because the generic SQLAlchemy ``JSON``
 comparator doesn't implement containment — only ``postgresql.JSONB``'s comparator
 maps ``.contains()`` to the native ``@>`` operator, which this index now serves.
 
-``ALTER COLUMN ... TYPE jsonb USING tags::jsonb`` is idempotent on either
-starting type: ``json::jsonb`` converts it, and ``jsonb::jsonb`` (a database a
-create_all-with-the-updated-model already built) is a harmless no-op cast.
-``CREATE INDEX IF NOT EXISTS`` is idempotent by construction.
+The column is altered only while it is still ``json``: a database that
+create_all built from the updated model already has ``jsonb``, and an
+``ALTER ... TYPE ... USING`` would rewrite the table under an exclusive lock for
+nothing. Both steps are skipped when the table is absent.
 """
 from alembic import op
+
+_TAGS_TO_JSONB = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'workflows'
+          AND column_name = 'tags' AND data_type = 'json'
+    ) THEN
+        ALTER TABLE workflows ALTER COLUMN tags TYPE JSONB USING tags::jsonb;
+    END IF;
+    IF to_regclass('public.workflows') IS NOT NULL THEN
+        CREATE INDEX IF NOT EXISTS ix_workflows_tags_gin ON workflows USING GIN (tags);
+    END IF;
+END $$;
+"""
 
 revision = "workflows_tags_jsonb"
 down_revision = "outputs_heartbeat_reports"
@@ -31,8 +47,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE workflows ALTER COLUMN tags TYPE JSONB USING tags::jsonb")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_workflows_tags_gin ON workflows USING GIN (tags)")
+    op.execute(_TAGS_TO_JSONB)
 
 
 def downgrade() -> None:

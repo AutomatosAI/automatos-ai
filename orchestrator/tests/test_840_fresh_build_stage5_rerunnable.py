@@ -101,6 +101,21 @@ def test_workflows_tags_jsonb_migration_chains_onto_the_prior_head_and_is_the_ne
     assert "CREATE INDEX IF NOT EXISTS ix_workflows_tags_gin ON workflows USING GIN (tags)" in src
 
 
+def test_workflows_tags_jsonb_rewrites_only_a_json_column_of_a_present_table():
+    """An ALTER ... TYPE ... USING rewrites the table under an exclusive lock even
+    when the type is already jsonb, so the migration alters only a json column,
+    and touches nothing when the table is absent."""
+    src = (_VERSIONS / "workflows_tags_jsonb.py").read_text()
+    assert "data_type = 'json'" in src
+    assert "to_regclass('public.workflows') IS NOT NULL" in src
+
+
+def test_the_tag_filter_has_no_text_scan_fallback():
+    src = (pathlib.Path(__file__).resolve().parents[1] / "api" / "workflows.py").read_text()
+    assert "Workflow.tags.contains([tag])" in src
+    assert "cast(Workflow.tags, String)" not in src
+
+
 # ---------------------------------------------------------------------------
 # Behavioural: the real stage-5 scraper + replay, against the real forest
 # ---------------------------------------------------------------------------
