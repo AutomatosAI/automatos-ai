@@ -85,6 +85,7 @@ class LLMConfig:
     stop: Optional[list] = None  # Stop sequences
     timeout: Optional[int] = None  # Request timeout in seconds
     output_ceiling: Optional[int] = None  # The model's own output maximum, when known (F196)
+    endpoint_from_key: bool = False  # base_url is a workspace key's own endpoint: user input (#873)
 
 
 def request_max_tokens(config: Any) -> int:

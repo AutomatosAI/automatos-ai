@@ -77,6 +77,13 @@ def test_a_provider_with_a_fixed_address_takes_no_endpoint():
         be.clean_endpoint("openai", RESOURCE)
 
 
+@pytest.mark.parametrize("raw", ["https://user:secret@contoso.openai.azure.com", "me@contoso.openai.azure.com"])
+def test_a_credential_in_the_endpoint_url_is_refused(raw):
+    # It would be stored and logged in clear; only the key field is encrypted.
+    with pytest.raises(be.EndpointRefused, match="key field"):
+        be.clean_endpoint("azure", raw)
+
+
 # ── what the hosted edition refuses ────────────────────────────────────────
 
 
@@ -258,6 +265,25 @@ def test_a_request_whose_name_now_resolves_privately_never_leaves(monkeypatch, r
         PinnedTransport().handle_request(httpx.Request("GET", f"{V1}models"))
 
 
+def test_the_openai_sdk_sends_through_our_client_and_never_follows_a_redirect():
+    # The pin only holds while the SDK uses the http_client it is given, retries
+    # included, and leaves a 3xx alone: checked against the installed SDK.
+    import httpx
+    import openai
+
+    seen = []
+
+    def _redirect_to_metadata(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_redirect_to_metadata), follow_redirects=False)
+    sdk = openai.OpenAI(api_key="k", base_url=V1, http_client=client, max_retries=0)
+    with pytest.raises(openai.APIError):
+        sdk.models.list()
+    assert seen == [f"{V1}models"]
+
+
 def test_the_saas_key_check_uses_the_pinned_client(monkeypatch, saas):
     calls = _fake_openai(monkeypatch)
     asyncio.run(_validate_provider_key("azure", "azure-key-0001", V1))
@@ -270,8 +296,20 @@ def test_the_saas_azure_client_uses_the_pinned_client(monkeypatch, saas):
 
     built = {}
     monkeypatch.setattr(azure_client, "OpenAI", lambda **kw: built.update(kw) or SimpleNamespace())
-    azure_client.AzureProvider(LLMConfig(provider=LLMProvider.AZURE, model="prod-chat", api_key="k", base_url=V1))
+    azure_client.AzureProvider(LLMConfig(
+        provider=LLMProvider.AZURE, model="prod-chat", api_key="k", base_url=V1, endpoint_from_key=True))
     assert built["base_url"] == V1 and built["http_client"].follow_redirects is False
+
+
+def test_an_operator_endpoint_keeps_the_sdk_client_on_saas(monkeypatch, saas):
+    # The env's or the credential store's endpoint is the operator's, not user input.
+    from core.llm.clients import azure_client
+    from core.llm.clients.base import LLMConfig, LLMProvider
+
+    built = {}
+    monkeypatch.setattr(azure_client, "OpenAI", lambda **kw: built.update(kw) or SimpleNamespace())
+    azure_client.AzureProvider(LLMConfig(provider=LLMProvider.AZURE, model="prod-chat", api_key="k", base_url=V1))
+    assert "http_client" not in built
 
 
 # ── the key takes it to the client ─────────────────────────────────────────
@@ -331,7 +369,8 @@ def test_a_byok_azure_manager_gets_the_endpoint_saved_with_the_key(monkeypatch):
 
     asked = []
     monkeypatch.setattr(kr, "byok_endpoint", lambda provider, ws: asked.append((provider, ws)) or V1)
-    assert _manager(LLMProvider.AZURE, is_byok=True).config.base_url == V1
+    config = _manager(LLMProvider.AZURE, is_byok=True).config
+    assert config.base_url == V1 and config.endpoint_from_key is True
     assert asked == [("azure", "ws-1")]
 
 

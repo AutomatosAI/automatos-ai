@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from config import config
 from core.llm import providers
@@ -65,6 +66,9 @@ def clean_endpoint(provider: Optional[str], raw: Optional[str], edition: Optiona
         return None
     if not takes_endpoint(provider):
         raise EndpointRefused(f"A {provider} key takes no endpoint.")
+    if "@" in urlsplit(text if "://" in text else f"https://{text}").netloc:
+        # A credential in the URL would be stored and logged in clear; the key field is encrypted.
+        raise EndpointRefused("Put the key in the key field, not in the endpoint URL.")
     try:
         url = v1_base_url(text)
     except ValueError as exc:
@@ -107,7 +111,7 @@ def with_key_endpoint(llm_config: Any, workspace_id: Any) -> Any:
     from core.llm.key_resolver import byok_endpoint
 
     endpoint = byok_endpoint(llm_config.provider.value, workspace_id)
-    return replace(llm_config, base_url=endpoint) if endpoint else llm_config
+    return replace(llm_config, base_url=endpoint, endpoint_from_key=True) if endpoint else llm_config
 
 
 __all__ = [
