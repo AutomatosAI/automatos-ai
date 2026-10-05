@@ -50,6 +50,7 @@ from . import turn_end, usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
+from .brand_files import brand_files_note, write_brand_files
 from .config import HostConfig
 from .env import build_session_env, hook_pythonpath
 from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERATOR, plan_text, save_plan, session_mode
@@ -487,7 +488,9 @@ class Session:
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
-        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root, self.plan_turn), encoding="utf-8")
+        brand_root = session_deliverables_dir(self.default_root, self.task_id) or session_dir  # F332: where it saves
+        brand = brand_files_note(write_brand_files(self.ticket, brand_root))
+        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root, self.plan_turn) + brand, encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
