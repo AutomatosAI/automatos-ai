@@ -70,7 +70,7 @@ def _page(tmp_path, blocks: Dict[str, Any], data: Dict[str, Any]) -> Any:
     with pdfplumber.open(str(path)) as pdf:
         page = pdf.pages[0]
         return SimpleNamespace(words=page.extract_words(), images=[dict(i) for i in page.images],
-                               lines=[dict(line) for line in page.lines] + [dict(r) for r in page.rects])
+                               lines=[dict(shape) for shape in (*page.lines, *page.rects, *page.curves)])
 
 
 def _word(page: Any, text: str) -> Dict[str, Any]:
@@ -116,8 +116,9 @@ def test_the_letterhead_logo_sits_beside_the_company_block(tmp_path):
     assert logo["top"] <= name["top"] <= logo["bottom"], (name, logo)
     title = _word(page, "INV-0042")
     assert title["top"] > logo["bottom"]  # the document starts under the letterhead
-    rules = [line for line in page.lines if logo["bottom"] <= line["top"] <= title["top"] and line["width"] > 300]
-    assert rules, page.lines  # one rule under the letterhead, across the page
+    # A border is drawn as the box's outline (an even-odd fill), so the rule is where the box ends.
+    rules = [line for line in page.lines if logo["bottom"] <= line["bottom"] <= title["top"] and line["width"] > 300]
+    assert rules, [(round(line["top"]), round(line["bottom"]), round(line["width"])) for line in page.lines]
 
 
 def test_a_logo_without_a_company_block_stays_where_it_was():

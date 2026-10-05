@@ -45,8 +45,9 @@ def _set_on(parent: Any, tag: str, attrs: Optional[Mapping[str, str]] = None) ->
 
 
 def shade(cell: Any, fill: str) -> None:
-    """Fill a cell (after its borders, as Word's schema orders them)."""
-    _set_on(cell._tc.get_or_add_tcPr(), "w:shd", {"w:val": "clear", "w:color": "auto", "w:fill": fill.lstrip("#")})
+    """Fill a cell (after its borders, as Word's schema orders them), in upper-case hex as Word writes it."""
+    _set_on(cell._tc.get_or_add_tcPr(), "w:shd",
+            {"w:val": "clear", "w:color": "auto", "w:fill": fill.lstrip("#").upper()})
 
 
 def _row_props(row: Any, header: bool) -> None:

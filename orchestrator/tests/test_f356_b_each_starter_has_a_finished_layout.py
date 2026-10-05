@@ -115,7 +115,7 @@ def test_a_proposal_without_a_subtitle_or_total_prints_neither():
     data = {key: value for key, value in _sample("proposal").items() if key not in ("subtitle", "pricing_total")}
     rendered = _rendered(preset_for("proposal"), data)
     assert rendered.unresolved == []
-    assert 'data-block="pricing-total"' not in rendered.html
+    assert '<table class="doc-table" data-block="pricing-total"' not in rendered.html  # its CSS rule stays
     assert '<p data-block="subtitle"></p>' in rendered.html  # an empty line, which the sheet hides
 
 
