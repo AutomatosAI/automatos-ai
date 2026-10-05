@@ -50,6 +50,9 @@ def test_a_widget_born_missions_session_step_is_refused_and_files_no_ticket():
 def test_an_owners_missions_session_step_still_runs():
     service, prepared = _prepared({})
     service._run_cli_ticket = AsyncMock(return_value={"status": "success"})
-    with patch("modules.coordination.mission_cancel.until_mission_cancelled", side_effect=lambda work, _run: work):
+    async def as_it_is(work, _run_id):
+        return await work
+
+    with patch("modules.coordination.mission_cancel.until_mission_cancelled", new=as_it_is):
         assert asyncio.run(service._task_io(prepared)) == {"status": "success"}
     service._run_cli_ticket.assert_awaited_once()
