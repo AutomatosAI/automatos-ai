@@ -62,10 +62,14 @@ def a_documents_banned_words_are_said(execute: Async) -> Async:
     """Wrap ``exec_document.execute_generate_document``: the result names the banned words."""
     @functools.wraps(execute)
     async def wrapped(executor: Any, tool_name: str, parameters: Dict[str, Any], agent_id: int,
-                      workspace_id: Any = None, trace_id: Optional[str] = None) -> Any:
+                      workspace_id: Any = None, trace_id: Optional[str] = None,
+                      caller_context: Optional[Dict[str, Any]] = None) -> Any:
         from services import brand_rules as br
 
-        result = await execute(executor, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id)
+        # F341: the card the call works travels on to the render (only when there is a context).
+        context = {"caller_context": caller_context} if caller_context is not None else {}
+        result = await execute(executor, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id,
+                               **context)
         db = getattr(executor, "db", None)
         # Both reads off the event loop (F105, F330): a pool wait never stops it.
         workspace = workspace_id or await asyncio.to_thread(_agent_workspace, db, agent_id)
