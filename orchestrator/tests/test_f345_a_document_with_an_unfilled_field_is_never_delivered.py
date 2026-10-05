@@ -195,6 +195,34 @@ def test_a_legacy_page_that_shows_none_of_the_data_is_refused(monkeypatch, tmp_p
     assert "came out empty" in str(blocked.value) and "data.summary" in str(blocked.value)
 
 
+def _check_basic_report(data: Dict[str, Any], title: str = "Monday dispatch checklist") -> None:
+    from jinja2.sandbox import SandboxedEnvironment
+
+    from modules.documents.legacy_guard import check_legacy_template
+    from modules.documents.legacy_jinja import with_document_filters
+
+    env = with_document_filters(SandboxedEnvironment(autoescape=True))
+    check_legacy_template(env, _legacy("Basic Report"), data, title, True)
+
+
+def test_a_body_sent_alone_prints_as_the_platforms_untitled_section_and_is_not_blocked():
+    _check_basic_report({"content": "- [ ] Weigh the Harbour Blend bags"})  # F298: Auto's usual call
+
+
+def test_a_section_the_caller_sent_without_its_title_is_still_blocked():
+    with pytest.raises(UnresolvedDeliverableError) as blocked:
+        _check_basic_report({"sections": [{"title": " ", "content": "Weigh the bags"}]})
+
+    assert blocked.value.unresolved == ["data.sections[row 1].title"]
+
+
+def test_a_body_sent_alone_without_a_document_title_is_blocked_on_the_title():
+    with pytest.raises(UnresolvedDeliverableError) as blocked:
+        _check_basic_report({"content": "Weigh the bags"}, title="")
+
+    assert "data.title" in blocked.value.unresolved
+
+
 # --------------------------------------------------------------------------- #
 # Business and legal terms are asked for, never defaulted
 # --------------------------------------------------------------------------- #

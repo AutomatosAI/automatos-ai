@@ -32,6 +32,7 @@ from config import config  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from modules.documents.thumbnails import store  # noqa: E402
+from router_manifest import MANIFEST_ROUTERS  # noqa: E402
 
 OWNER = "00000000-0000-0000-0000-0000000000c1"
 STRANGER = "00000000-0000-0000-0000-0000000000c2"
@@ -108,3 +109,9 @@ def test_the_route_uses_the_same_workspace_dependency_as_the_document():
     route = next(r for r in thumbnails_api.router.routes if r.path.endswith("/thumbnail"))
     deps = [d.call for d in route.dependant.dependencies]
     assert get_request_context_hybrid in deps
+
+
+def test_the_app_mounts_the_thumbnail_route():
+    """5 Oct: merging main into F354 swapped this router's line for F354's, and prod served no thumbnail."""
+    mounted = {spec.module for spec in MANIFEST_ROUTERS}
+    assert {"api.deliverable_thumbnails", "api.deliverable_knowledge"} <= mounted
