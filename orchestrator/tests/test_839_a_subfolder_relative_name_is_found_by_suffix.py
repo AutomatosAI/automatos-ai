@@ -12,6 +12,13 @@ against the session's folder, walked once, for a path whose trailing
 components match the name exactly (a path-component boundary, not a string
 suffix — ``src/index.ts`` must not match ``xsrc/index.ts``). A name that
 matches two or more real paths is too ambiguous to pick, and stays missing.
+
+The walk has its own time budget, separate from the exact pass (a review
+note said: a slow walk that burns the whole check's budget must not let a
+genuinely missing name through), and never descends into a dependency or
+build folder (``node_modules`` and the like), which could otherwise exhaust
+the whole walk before it reaches a real subfolder — or turn a unique match
+into an ambiguous one.
 """
 from __future__ import annotations
 
@@ -30,11 +37,14 @@ RESULT = "Done — I wrote `api/src/index.ts` and `commercial/README.md`, both r
 class _Worker:
     """The workspace worker's directory listing, one level at a time (as the
     real worker does), from a set of real file paths. Intermediate folders are
-    implied by the paths, not listed separately."""
+    implied by the paths, not listed separately. ``hang_for`` makes a listing
+    sleep past its caller's timeout instead of answering."""
 
-    def __init__(self, files=(), *, down_for=()):
+    def __init__(self, files=(), *, down_for=(), hang_for=(), hang_seconds=1.0):
         self.files = set(files)
         self.down_for = set(down_for)
+        self.hang_for = set(hang_for)
+        self.hang_seconds = hang_seconds
         self.listed = []
 
     def _children(self, path):
@@ -51,6 +61,8 @@ class _Worker:
 
     async def list_dir(self, path="."):
         self.listed.append(path)
+        if path in self.hang_for:
+            await asyncio.sleep(self.hang_seconds)
         if path in self.down_for:
             raise ConnectionError("worker unreachable")
         entries = [{"name": name, "type": "dir" if is_dir else "file"}
@@ -107,3 +119,30 @@ def test_the_walk_is_bounded_so_a_worker_that_cannot_answer_a_folder_is_not_a_ve
     worker = _Worker({"sessions/501/packages/api/src/index.ts"}, down_for={"sessions/501/packages"})
     note = _note("Done — I wrote `api/src/index.ts`.", worker)
     assert note is not None and "`api/src/index.ts`" in note
+
+
+def test_a_timed_out_walk_keeps_what_it_found_and_a_genuinely_missing_name_stays_missing(monkeypatch):
+    """The walk has its own clock (``WALK_TIMEOUT_SECONDS``), separate from the
+    exact pass. ``docs/found.md`` resolves from a level the walk finishes
+    before the cutoff (``extra`` → ``extra/docs``); ``extra/docs/deeper``
+    never answers, so the walk is cut off there — without a regression where
+    the whole check gives up and a genuinely missing name is let through."""
+    monkeypatch.setattr(result_files, "WALK_TIMEOUT_SECONDS", 0.1)
+    worker = _Worker({"sessions/501/extra/docs/found.md",
+                      "sessions/501/extra/docs/deeper/buried.md"},
+                     hang_for={"sessions/501/extra/docs/deeper"}, hang_seconds=2.0)
+    note = _note("Done — I wrote `docs/found.md` and `nowhere/missing.md`.", worker)
+    assert note is not None
+    assert "`docs/found.md`" not in note
+    assert "`nowhere/missing.md`" in note and "Sent to review instead of done" in note
+
+
+def test_a_node_modules_copy_does_not_make_a_unique_suffix_ambiguous_and_is_not_walked():
+    """``node_modules`` sits right next to the real subfolder at the top of the
+    session's folder. A copy of the same file in there would, if walked, turn
+    a unique suffix match into an ambiguous one — the walk must skip it
+    outright, not just prefer the other match."""
+    worker = _Worker({"sessions/501/packages/api/src/index.ts",
+                      "sessions/501/node_modules/some-pkg/api/src/index.ts"})
+    assert _note("Done — I wrote `api/src/index.ts`.", worker) is None
+    assert not any("node_modules" in path for path in worker.listed)

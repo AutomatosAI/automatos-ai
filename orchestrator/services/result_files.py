@@ -35,6 +35,17 @@ NOTE_NAMES_SHOWN = 3
 # is still looked for, by walking the session's folder. Bounded so a very wide or deep
 # tree — the worker lists one folder per call, never recursively — can't stall the check.
 MAX_WALK_DIRS = 150
+WALK_CONCURRENCY = 8           # folders listed at once within one BFS level
+# Comfortably under CHECK_TIMEOUT_SECONDS: its own budget, so a walk that runs long
+# cannot burn the whole check (the exact-match pass runs first and needs room too).
+WALK_TIMEOUT_SECONDS = 6.0
+# Folders the walk never descends into: dependency and build caches hold no
+# deliverables, and one `node_modules` alone can exhaust the whole walk budget
+# before it reaches a real subfolder. A dot-folder is skipped too — nothing in
+# this module expects a deliverable to be saved under one.
+SKIPPED_WALK_FOLDERS = frozenset({
+    "node_modules", ".git", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".cache",
+})
 
 # What a deliverable is saved as. A name with any other ending is not taken for a file.
 FILE_EXTENSIONS = frozenset({
@@ -165,24 +176,51 @@ def _suffix_matches(name: str, tree: Set[str]) -> List[str]:
     return [path for path in tree if tuple(path.split("/"))[-len(parts):] == parts]
 
 
-async def _walk(client: Any, base: str) -> Set[str]:
-    """Every file under ``base``, found by listing its folders breadth-first —
-    the worker has no recursive listing, so this is one call per folder.
-    Bounded by ``MAX_WALK_DIRS``; a folder the worker cannot list just leaves
-    that branch unexplored, same as elsewhere in this module."""
-    files: Set[str] = set()
-    folders = [base]
-    visited = 0
-    while folders and visited < MAX_WALK_DIRS:
-        folder = folders.pop(0)
-        visited += 1
-        for entry in await _entries_in(client, folder) or []:
-            path = posixpath.join(folder, str(entry.get("name", "")))
-            if entry.get("type") == "dir":
-                folders.append(path)
-            else:
-                files.add(posixpath.relpath(path, base))
-    return files
+def _skip_walk_folder(name: str) -> bool:
+    """A folder the walk never lists: a dependency or build cache, or a
+    dot-folder — never where a deliverable is saved."""
+    return name in SKIPPED_WALK_FOLDERS or name.startswith(".")
+
+
+async def _list_limited(client: Any, folder: str, semaphore: asyncio.Semaphore) -> Optional[List[Dict[str, Any]]]:
+    """``_entries_in``, but never more than ``WALK_CONCURRENCY`` calls in flight
+    at once — a BFS level can be many folders wide."""
+    async with semaphore:
+        return await _entries_in(client, folder)
+
+
+def _next_level(base: str, folders: Sequence[str], listings: Sequence[Optional[List[Dict[str, Any]]]],
+                found: Set[str]) -> List[str]:
+    """The subfolders to list next, having added every file this level turned
+    up to ``found``."""
+    next_level: List[str] = []
+    for folder, entries in zip(folders, listings):
+        for entry in entries or []:
+            name = str(entry.get("name", ""))
+            path = posixpath.join(folder, name)
+            is_dir = entry.get("type") == "dir"
+            if is_dir and not _skip_walk_folder(name):
+                next_level.append(path)
+            elif not is_dir:
+                found.add(posixpath.relpath(path, base))
+    return next_level
+
+
+async def _walk(client: Any, base: str, found: Set[str]) -> None:
+    """Every file under ``base``, added to ``found`` as each BFS level
+    finishes — a walk cut short by its own timeout (``WALK_TIMEOUT_SECONDS``,
+    ``_suffix_resolved``) still keeps whichever levels it completed before
+    the cutoff. The worker has no recursive listing, so each level is one
+    call per folder, up to ``WALK_CONCURRENCY`` at once; a folder the worker
+    cannot list just leaves that branch unexplored. Bounded overall by
+    ``MAX_WALK_DIRS``."""
+    semaphore = asyncio.Semaphore(WALK_CONCURRENCY)
+    level, budget = [base], MAX_WALK_DIRS
+    while level and budget > 0:
+        level = level[:budget]
+        budget -= len(level)
+        listings = await asyncio.gather(*(_list_limited(client, folder, semaphore) for folder in level))
+        level = _next_level(base, level, listings, found)
 
 
 async def _suffix_resolved(names: Sequence[str], client: Any, base: str) -> Set[str]:
@@ -190,9 +228,16 @@ async def _suffix_resolved(names: Sequence[str], client: Any, base: str) -> Set[
     monorepo result may name a file relative to a subfolder, e.g.
     ``api/src/index.ts`` for the real ``packages/api/src/index.ts``. A name
     that matches two or more real paths stays missing — too ambiguous to pick
-    one."""
-    tree = await _walk(client, base)
-    return {name for name in names if len(_suffix_matches(name, tree)) == 1}
+    one. The walk runs on its own clock, separate from the exact pass: cut
+    off partway through, it matches against whatever it found so far, so a
+    name that is genuinely missing stays missing rather than the whole check
+    giving up and letting it through."""
+    found: Set[str] = set()
+    try:
+        await asyncio.wait_for(_walk(client, base, found), timeout=WALK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning("[result-files] the subfolder walk under %s ran out of time", base)
+    return {name for name in names if len(_suffix_matches(name, found)) == 1}
 
 
 async def _missing(pairs: Sequence[Tuple[str, str]], client: Any, base: Optional[str] = None) -> List[str]:
