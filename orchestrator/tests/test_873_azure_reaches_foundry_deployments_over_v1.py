@@ -112,8 +112,14 @@ def test_a_foundry_project_endpoint_is_cut_back_to_its_resource():
     assert v1_base_url(saved) == "https://contoso.services.ai.azure.com/openai/v1/"
 
 
-def test_a_gateway_path_before_openai_v1_is_kept():
-    assert v1_base_url("https://apim.bank.example/azure/openai/v1") == "https://apim.bank.example/azure/openai/v1/"
+@pytest.mark.parametrize("saved", [
+    "https://apim.bank.example/azure/openai/v1",
+    "https://apim.bank.example/azure",
+    "https://apim.bank.example/azure/",
+    "https://apim.bank.example/azure/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21",
+])
+def test_a_gateway_prefix_in_front_of_the_azure_path_is_kept(saved):
+    assert v1_base_url(saved) == "https://apim.bank.example/azure/openai/v1/"
 
 
 @pytest.mark.parametrize("saved", ["", "   ", "https://"])

@@ -30,6 +30,10 @@ from .base import accepts_sampling_params
 from .openai_chat_request import COMPLETION_TOKENS, SAMPLING_PARAMS
 
 V1_PATH = "/openai/v1"
+# Where a pasted Azure URL stops being the resource and becomes an API path.
+# Anything before these is kept: an API Management gateway serves Azure under
+# its own prefix (https://apim.bank.example/azure/openai/v1/).
+_AZURE_API_PATHS = ("/openai/", "/api/projects/")
 _HTTP_BAD_REQUEST = 400
 _REFUSAL_WORDS = ("unsupported", "not supported")
 # "Unsupported parameter: 'temperature' …", "Unsupported value: 'temperature' does
@@ -46,9 +50,10 @@ def v1_base_url(endpoint: str) -> str:
     """The v1 base URL for a saved Azure endpoint.
 
     Accepts the bare resource URL (with or without a trailing slash), one that
-    already ends in ``/openai/v1``, and a pasted deployment URL or one carrying
-    a query string, which is cut back to the resource origin. Raises
-    ``ValueError`` when no host can be read from it.
+    already ends in ``/openai/v1``, and a pasted deployment, Foundry project or
+    query-string URL, which is cut back to the resource. A gateway prefix in
+    front of the Azure path is kept. Raises ``ValueError`` when no host can be
+    read from it.
     """
     raw = (endpoint or "").strip()
     if raw and "://" not in raw:
@@ -56,9 +61,14 @@ def v1_base_url(endpoint: str) -> str:
     parts = urlsplit(raw)
     if not parts.netloc:
         raise ValueError("The Azure endpoint must be a URL such as https://<resource>.openai.azure.com")
-    path = parts.path.rstrip("/")
-    prefix = path[: path.find(V1_PATH)] if V1_PATH in path else ""
-    return f"{parts.scheme}://{parts.netloc}{prefix}{V1_PATH}/"
+    return f"{parts.scheme}://{parts.netloc}{_gateway_prefix(parts.path)}{V1_PATH}/"
+
+
+def _gateway_prefix(path: str) -> str:
+    """The part of ``path`` in front of the Azure API path; all of it when it has none."""
+    slashed = f"{path.rstrip('/')}/"
+    cuts = [slashed.find(marker) for marker in _AZURE_API_PATHS if marker in slashed]
+    return slashed[: min(cuts)] if cuts else slashed.rstrip("/")
 
 
 @dataclass(frozen=True)
